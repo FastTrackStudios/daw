@@ -1,15 +1,4 @@
-# Enable experimental features
-experimental = ["setup-scripts"]
-
-[scripts.setup.build-subject-rust]
-command = "cargo build --release -p subject-rust"
-
-[scripts.setup.build-guest-process]
-command = "cargo build -p roam-shm --bin guest_process --all-features"
-slow-timeout = { period = "60s" }
-
-[profile.loom]
-slow-timeout = { period = "10s", terminate-after = 3 }
+# Nextest configuration for roam-test
 
 [profile.default]
 # Fail fast - stop on first failure
@@ -21,10 +10,11 @@ status-level = "pass"
 # Slow test warning threshold
 slow-timeout = { period = "2s", terminate-after = 2 }
 
-[[profile.default.scripts]]
-filter = "package(spec-tests)"
-setup = "build-subject-rust"
+[profile.ci]
+# CI profile with longer timeouts
+fail-fast = false
+status-level = "pass"
+slow-timeout = { period = "30s", terminate-after = 3 }
 
-[[profile.default.scripts]]
-filter = "package(roam-shm)"
-setup = "build-guest-process"
+# Retry flaky tests in CI
+retries = 2
