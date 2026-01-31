@@ -1,0 +1,20 @@
+@schema {id crate:tracey-config@1, cli tracey}
+
+specs (
+    {
+        name daw
+        prefix r
+        include (cells/daw/daw-proto/spec/**/*.md)
+        impls (
+            {
+                name daw-proto
+                include (cells/daw/daw-proto/src/**/*.rs)
+            }
+            {
+                name daw-standalone
+                include (cells/daw/daw-standalone/src/**/*.rs)
+                test_include (cells/daw/daw-standalone/tests/**/*.rs)
+            }
+        )
+    }
+)

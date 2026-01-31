@@ -1,0 +1,13 @@
+content: cells/daw/daw-proto/spec
+output: site/daw-specs
+
+link_check: {}
+
+stable_assets: []
+
+templates:
+  - templates/
+
+markdown:
+  smart_punctuation: true
+  syntax_highlighting: true
