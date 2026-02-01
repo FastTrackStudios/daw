@@ -1,4 +1,4 @@
-# Nextest configuration for roam-test
+# Nextest configuration for FastTrackStudio
 
 [profile.default]
 # Fail fast - stop on first failure
