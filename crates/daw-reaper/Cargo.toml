@@ -1,0 +1,12 @@
+[package]
+name = "daw-reaper"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+daw-proto = { path = "../daw-proto" }
+roam = { workspace = true }
+facet = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

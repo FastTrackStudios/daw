@@ -4,12 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+cell-runtime = { workspace = true }
 daw-proto = { path = "../daw-proto" }
 roam = { workspace = true }
-facet = { workspace = true }
+roam-telemetry = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 integration-tests = { workspace = true }

@@ -1,10 +1,12 @@
 [package]
-name = "daw-proto"
+name = "daw-control"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+daw-proto = { path = "../daw-proto" }
 roam = { workspace = true }
 facet = { workspace = true }
-thiserror = { workspace = true }
+eyre = { workspace = true }
+futures = { workspace = true }
 # Note: No tokio - this crate is WASM-compatible for use in web apps
