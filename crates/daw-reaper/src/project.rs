@@ -1,36 +1,16 @@
 //! REAPER Project Implementation
 //!
-//! Implements ProjectService by queuing commands for main thread execution.
-//! REAPER APIs can only be called from the main thread, so we use a callback
-//! mechanism to dispatch commands.
+//! Implements ProjectService by dispatching REAPER API calls to the main thread
+//! using TaskSupport from reaper-high.
 
 use daw_proto::{ProjectInfo, ProjectService};
+use reaper_high::Reaper;
 use roam::Context;
-use std::sync::OnceLock;
-use tracing::info;
+use tracing::debug;
 
-/// Callback type for getting current project info from the main thread
-pub type GetCurrentProjectCallback =
-    Box<dyn Fn() -> tokio::sync::oneshot::Receiver<Option<ProjectInfo>> + Send + Sync>;
+use crate::transport::task_support;
 
-/// Global callback for getting current project
-static GET_CURRENT_PROJECT_CALLBACK: OnceLock<GetCurrentProjectCallback> = OnceLock::new();
-
-/// Set the callback for getting current project info from the main thread.
-/// This should be called once during extension initialization.
-pub fn set_get_current_project_callback<F>(callback: F)
-where
-    F: Fn() -> tokio::sync::oneshot::Receiver<Option<ProjectInfo>> + Send + Sync + 'static,
-{
-    if GET_CURRENT_PROJECT_CALLBACK
-        .set(Box::new(callback))
-        .is_err()
-    {
-        tracing::warn!("GetCurrentProject callback already set");
-    }
-}
-
-/// REAPER project implementation that queues commands for main thread execution.
+/// REAPER project implementation that dispatches to the main thread via TaskSupport.
 #[derive(Clone)]
 pub struct ReaperProject;
 
@@ -48,25 +28,38 @@ impl Default for ReaperProject {
 
 impl ProjectService for ReaperProject {
     async fn get_current(&self, _cx: &Context) -> Option<ProjectInfo> {
-        info!("REAPER Project: Queuing get_current command");
+        debug!("ReaperProject: get_current");
 
-        if let Some(callback) = GET_CURRENT_PROJECT_CALLBACK.get() {
-            let rx = callback();
-            match rx.await {
-                Ok(result) => result,
-                Err(_) => {
-                    tracing::error!("Failed to receive project info from main thread");
-                    None
-                }
-            }
+        if let Some(ts) = task_support() {
+            ts.main_thread_future(|| {
+                let reaper = Reaper::get();
+                let project = reaper.current_project();
+
+                let path = project.file().map(|p| p.to_string()).unwrap_or_default();
+                let name = if path.is_empty() {
+                    "Untitled".to_string()
+                } else {
+                    std::path::Path::new(&path)
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "Untitled".to_string())
+                };
+
+                // Generate a stable GUID from the path
+                let guid = format!("{:x}", hash_string(&path));
+
+                Some(ProjectInfo { guid, name, path })
+            })
+            .await
+            .unwrap_or(None)
         } else {
-            tracing::error!("GetCurrentProject callback not set");
+            tracing::error!("TaskSupport not set");
             None
         }
     }
 
     async fn get(&self, cx: &Context, project_id: String) -> Option<ProjectInfo> {
-        info!("REAPER Project: Getting project by ID: {}", project_id);
+        debug!("ReaperProject: get({})", project_id);
 
         // For now, just return current project if ID matches
         let current = self.get_current(cx).await?;
@@ -78,7 +71,7 @@ impl ProjectService for ReaperProject {
     }
 
     async fn list(&self, cx: &Context) -> Vec<ProjectInfo> {
-        info!("REAPER Project: Listing projects");
+        debug!("ReaperProject: list");
 
         // For now, just return the current project
         if let Some(current) = self.get_current(cx).await {
@@ -87,4 +80,12 @@ impl ProjectService for ReaperProject {
             vec![]
         }
     }
+}
+
+fn hash_string(input: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    input.hash(&mut hasher);
+    hasher.finish()
 }

@@ -1,6 +1,7 @@
 //! Transport module
 //!
-//! This module provides transport state management.
+//! This module provides transport state management and the TransportService trait
+//! for controlling DAW playback, recording, and navigation.
 
 pub mod error;
 pub mod transport;
