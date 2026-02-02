@@ -3,10 +3,18 @@ name = "daw-reaper"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+path = "src/lib.rs"
+
+# This is a library crate, not a cell binary.
+# The REAPER implementation runs in-process within the reaper-extension.
+
 [dependencies]
-daw-proto = { path = "../daw-proto" }
-roam = { workspace = true }
-facet = { workspace = true }
-tokio = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+daw-proto.workspace = true
+roam.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+# REAPER bindings for actual DAW control
+reaper-high.workspace = true
+reaper-medium.workspace = true
