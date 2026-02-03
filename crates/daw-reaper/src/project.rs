@@ -322,12 +322,12 @@ impl ReaperProject {
             return;
         }
 
-        // Poll for changes at 10Hz
+        // Poll for changes at 60Hz
         let mut last_guid = current_guid;
         let mut last_projects = projects;
 
         loop {
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_micros(16667)).await;
 
             // Check for project list changes
             let current_projects = self.get_project_list().await;

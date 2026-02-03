@@ -330,11 +330,11 @@ impl MarkerService for ReaperMarker {
                 return;
             }
 
-            // Poll for changes at 10Hz
+            // Poll for changes at 60Hz
             let mut last_markers = markers;
 
             loop {
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::time::sleep(Duration::from_micros(16667)).await;
 
                 let current_markers = this.get_markers(&cx, project.clone()).await;
                 if current_markers != last_markers {

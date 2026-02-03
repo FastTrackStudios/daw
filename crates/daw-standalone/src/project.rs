@@ -1,5 +1,6 @@
 //! Standalone project implementation
 
+use crate::transport::SharedProjectState;
 use daw_proto::{ProjectEvent, ProjectInfo, ProjectService};
 use roam::{Context, Tx};
 use std::sync::Arc;
@@ -27,8 +28,8 @@ pub mod project_guids {
 #[derive(Clone)]
 pub struct StandaloneProject {
     projects: Arc<Vec<ProjectInfo>>,
-    /// Index of the currently selected project (0-indexed)
-    current_index: Arc<RwLock<usize>>,
+    /// Shared state with transport service
+    shared_state: SharedProjectState,
 }
 
 impl Default for StandaloneProject {
@@ -57,18 +58,35 @@ impl StandaloneProject {
             },
         ];
 
+        let project_guids: Vec<String> = projects.iter().map(|p| p.guid.clone()).collect();
+        let shared_state = SharedProjectState {
+            project_guids: Arc::new(project_guids),
+            current_index: Arc::new(RwLock::new(0)),
+        };
+
         Self {
             projects: Arc::new(projects),
-            current_index: Arc::new(RwLock::new(0)),
+            shared_state,
         }
     }
 
     /// Create with specific projects (useful for tests)
     pub fn with_projects(projects: Vec<ProjectInfo>) -> Self {
+        let project_guids: Vec<String> = projects.iter().map(|p| p.guid.clone()).collect();
+        let shared_state = SharedProjectState {
+            project_guids: Arc::new(project_guids),
+            current_index: Arc::new(RwLock::new(0)),
+        };
+
         Self {
             projects: Arc::new(projects),
-            current_index: Arc::new(RwLock::new(0)),
+            shared_state,
         }
+    }
+
+    /// Get the shared project state for use by the transport service
+    pub fn shared_state(&self) -> SharedProjectState {
+        self.shared_state.clone()
     }
 
     /// Get a project by index (for testing assertions)
@@ -78,13 +96,13 @@ impl StandaloneProject {
 
     /// Get the current project index (for testing)
     pub async fn current_index(&self) -> usize {
-        *self.current_index.read().await
+        *self.shared_state.current_index.read().await
     }
 }
 
 impl ProjectService for StandaloneProject {
     async fn get_current(&self, _cx: &Context) -> Option<ProjectInfo> {
-        let index = *self.current_index.read().await;
+        let index = *self.shared_state.current_index.read().await;
         info!(
             "ProjectService::get_current() called - returning project at index {}",
             index
@@ -116,8 +134,8 @@ impl ProjectService for StandaloneProject {
 
         // Find the project index by GUID
         if let Some(index) = self.projects.iter().position(|p| p.guid == project_id) {
-            let prev_index = *self.current_index.read().await;
-            let mut current = self.current_index.write().await;
+            let prev_index = *self.shared_state.current_index.read().await;
+            let mut current = self.shared_state.current_index.write().await;
             *current = index;
             info!(
                 "ProjectService::select() - switched from project {} to project {} (index {})",
@@ -156,7 +174,7 @@ impl ProjectService for StandaloneProject {
 
             // Send current project
             let current_guid = {
-                let index = *this.current_index.read().await;
+                let index = *this.shared_state.current_index.read().await;
                 this.projects.get(index).map(|p| p.guid.clone())
             };
             if tx
@@ -168,15 +186,14 @@ impl ProjectService for StandaloneProject {
                 return;
             }
 
-            // Poll for changes (in a real DAW, this would use callbacks)
-            // Poll at 10Hz since project changes are infrequent
-            let mut last_index = *this.current_index.read().await;
+            // Poll for changes at 60Hz
+            let mut last_index = *this.shared_state.current_index.read().await;
 
             loop {
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::time::sleep(Duration::from_micros(16667)).await;
 
                 // Check for current project change
-                let current_index = *this.current_index.read().await;
+                let current_index = *this.shared_state.current_index.read().await;
                 if current_index != last_index {
                     last_index = current_index;
                     let new_guid = this.projects.get(current_index).map(|p| p.guid.clone());

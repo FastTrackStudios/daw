@@ -447,11 +447,11 @@ impl RegionService for StandaloneRegion {
                 return;
             }
 
-            // Poll for changes at 10Hz (regions don't change frequently)
+            // Poll for changes at 60Hz
             let mut last_regions = regions;
 
             loop {
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::time::sleep(Duration::from_micros(16667)).await;
 
                 // Check for region changes
                 let current_regions = {

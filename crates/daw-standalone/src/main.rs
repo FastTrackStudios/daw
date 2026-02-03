@@ -71,8 +71,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let telemetry = create_telemetry();
 
         // Create service implementations
-        let transport = StandaloneTransport::new();
+        // Project must be created first so we can share its state with transport
         let project = StandaloneProject::new();
+        let transport = StandaloneTransport::new(project.shared_state());
         let marker = StandaloneMarker::new();
         let region = StandaloneRegion::new();
         let tempo_map = StandaloneTempoMap::new();

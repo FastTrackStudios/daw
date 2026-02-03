@@ -316,11 +316,11 @@ impl RegionService for ReaperRegion {
                 return;
             }
 
-            // Poll for changes at 10Hz
+            // Poll for changes at 60Hz
             let mut last_regions = regions;
 
             loop {
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                tokio::time::sleep(Duration::from_micros(16667)).await;
 
                 let current_regions = this.get_regions(&cx, project.clone()).await;
                 if current_regions != last_regions {

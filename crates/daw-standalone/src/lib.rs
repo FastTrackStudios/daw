@@ -43,4 +43,4 @@ pub use region::StandaloneRegion;
 pub use routing::StandaloneRouting;
 pub use tempo_map::StandaloneTempoMap;
 pub use track::StandaloneTrack;
-pub use transport::StandaloneTransport;
+pub use transport::{SharedProjectState, StandaloneTransport};
