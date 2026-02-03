@@ -3,13 +3,16 @@
 use std::sync::Arc;
 
 use crate::DawClients;
-use daw_proto::{PlayState, TimeSignature, Transport as TransportState};
+use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport as TransportState};
 use eyre::Result;
+use roam::{Rx, Tx};
 
 /// Transport handle for a specific project
 ///
 /// This handle provides access to transport control (play, stop, record, etc.)
 /// for a specific project. Like reaper-rs, it's lightweight and cheap to clone.
+///
+/// All methods return `Result` so callers can use `?` for clean error propagation.
 ///
 /// # Example
 ///
@@ -21,26 +24,15 @@ use eyre::Result;
 /// let project = daw.current_project().await?;
 /// let transport = project.transport();
 ///
-/// // Playback control
+/// // All methods use ? for error propagation
 /// transport.play().await?;
 /// transport.pause().await?;
 /// transport.stop().await?;
+/// transport.set_position(10.5).await?;
 ///
-/// // Recording
-/// transport.record().await?;
-/// transport.toggle_recording().await?;
-///
-/// // Position control
-/// transport.set_position(10.5).await?;  // Jump to 10.5 seconds
 /// let pos = transport.get_position().await?;
-///
-/// // Tempo control
 /// let bpm = transport.get_tempo().await?;
 /// transport.set_tempo(140.0).await?;
-///
-/// // Loop control
-/// transport.toggle_loop().await?;
-/// let looping = transport.is_looping().await?;
 /// # Ok(())
 /// # }
 /// ```
@@ -59,6 +51,11 @@ impl Transport {
         }
     }
 
+    /// Helper to create project context
+    fn context(&self) -> ProjectContext {
+        ProjectContext::Project(self.project_id.clone())
+    }
+
     // =========================================================================
     // Playback Control
     // =========================================================================
@@ -67,10 +64,7 @@ impl Transport {
     ///
     /// Starts playback from the current playhead position.
     pub async fn play(&self) -> Result<()> {
-        self.clients
-            .transport
-            .play(Some(self.project_id.clone()))
-            .await?;
+        self.clients.transport.play(self.context()).await?;
         Ok(())
     }
 
@@ -78,10 +72,7 @@ impl Transport {
     ///
     /// Maintains the playhead position so playback can be resumed.
     pub async fn pause(&self) -> Result<()> {
-        self.clients
-            .transport
-            .pause(Some(self.project_id.clone()))
-            .await?;
+        self.clients.transport.pause(self.context()).await?;
         Ok(())
     }
 
@@ -89,28 +80,19 @@ impl Transport {
     ///
     /// Stops playback and typically resets to the edit cursor or start position.
     pub async fn stop(&self) -> Result<()> {
-        self.clients
-            .transport
-            .stop(Some(self.project_id.clone()))
-            .await?;
+        self.clients.transport.stop(self.context()).await?;
         Ok(())
     }
 
     /// Toggle between play and pause
     pub async fn play_pause(&self) -> Result<()> {
-        self.clients
-            .transport
-            .play_pause(Some(self.project_id.clone()))
-            .await?;
+        self.clients.transport.play_pause(self.context()).await?;
         Ok(())
     }
 
     /// Toggle between play and stop
     pub async fn play_stop(&self) -> Result<()> {
-        self.clients
-            .transport
-            .play_stop(Some(self.project_id.clone()))
-            .await?;
+        self.clients.transport.play_stop(self.context()).await?;
         Ok(())
     }
 
@@ -120,10 +102,7 @@ impl Transport {
 
     /// Start recording
     pub async fn record(&self) -> Result<()> {
-        self.clients
-            .transport
-            .record(Some(self.project_id.clone()))
-            .await?;
+        self.clients.transport.record(self.context()).await?;
         Ok(())
     }
 
@@ -131,7 +110,7 @@ impl Transport {
     pub async fn stop_recording(&self) -> Result<()> {
         self.clients
             .transport
-            .stop_recording(Some(self.project_id.clone()))
+            .stop_recording(self.context())
             .await?;
         Ok(())
     }
@@ -140,7 +119,7 @@ impl Transport {
     pub async fn toggle_recording(&self) -> Result<()> {
         self.clients
             .transport
-            .toggle_recording(Some(self.project_id.clone()))
+            .toggle_recording(self.context())
             .await?;
         Ok(())
     }
@@ -153,36 +132,26 @@ impl Transport {
     pub async fn set_position(&self, seconds: f64) -> Result<()> {
         self.clients
             .transport
-            .set_position(Some(self.project_id.clone()), seconds)
+            .set_position(self.context(), seconds)
             .await?;
         Ok(())
     }
 
     /// Get current playhead position in seconds
     pub async fn get_position(&self) -> Result<f64> {
-        let pos = self
-            .clients
-            .transport
-            .get_position(Some(self.project_id.clone()))
-            .await?;
+        let pos = self.clients.transport.get_position(self.context()).await?;
         Ok(pos)
     }
 
     /// Go to the start of the project (position 0)
     pub async fn goto_start(&self) -> Result<()> {
-        self.clients
-            .transport
-            .goto_start(Some(self.project_id.clone()))
-            .await?;
+        self.clients.transport.goto_start(self.context()).await?;
         Ok(())
     }
 
     /// Go to the end of the project
     pub async fn goto_end(&self) -> Result<()> {
-        self.clients
-            .transport
-            .goto_end(Some(self.project_id.clone()))
-            .await?;
+        self.clients.transport.goto_end(self.context()).await?;
         Ok(())
     }
 
@@ -192,11 +161,7 @@ impl Transport {
 
     /// Get complete transport state
     pub async fn get_state(&self) -> Result<TransportState> {
-        let state = self
-            .clients
-            .transport
-            .get_state(Some(self.project_id.clone()))
-            .await?;
+        let state = self.clients.transport.get_state(self.context()).await?;
         Ok(state)
     }
 
@@ -205,28 +170,20 @@ impl Transport {
         let state = self
             .clients
             .transport
-            .get_play_state(Some(self.project_id.clone()))
+            .get_play_state(self.context())
             .await?;
         Ok(state)
     }
 
     /// Check if currently playing (includes recording)
     pub async fn is_playing(&self) -> Result<bool> {
-        let playing = self
-            .clients
-            .transport
-            .is_playing(Some(self.project_id.clone()))
-            .await?;
+        let playing = self.clients.transport.is_playing(self.context()).await?;
         Ok(playing)
     }
 
     /// Check if currently recording
     pub async fn is_recording(&self) -> Result<bool> {
-        let recording = self
-            .clients
-            .transport
-            .is_recording(Some(self.project_id.clone()))
-            .await?;
+        let recording = self.clients.transport.is_recording(self.context()).await?;
         Ok(recording)
     }
 
@@ -236,11 +193,7 @@ impl Transport {
 
     /// Get current tempo in BPM
     pub async fn get_tempo(&self) -> Result<f64> {
-        let tempo = self
-            .clients
-            .transport
-            .get_tempo(Some(self.project_id.clone()))
-            .await?;
+        let tempo = self.clients.transport.get_tempo(self.context()).await?;
         Ok(tempo)
     }
 
@@ -248,7 +201,7 @@ impl Transport {
     pub async fn set_tempo(&self, bpm: f64) -> Result<()> {
         self.clients
             .transport
-            .set_tempo(Some(self.project_id.clone()), bpm)
+            .set_tempo(self.context(), bpm)
             .await?;
         Ok(())
     }
@@ -259,20 +212,13 @@ impl Transport {
 
     /// Toggle loop mode on/off
     pub async fn toggle_loop(&self) -> Result<()> {
-        self.clients
-            .transport
-            .toggle_loop(Some(self.project_id.clone()))
-            .await?;
+        self.clients.transport.toggle_loop(self.context()).await?;
         Ok(())
     }
 
     /// Get loop enabled state
     pub async fn is_looping(&self) -> Result<bool> {
-        let looping = self
-            .clients
-            .transport
-            .is_looping(Some(self.project_id.clone()))
-            .await?;
+        let looping = self.clients.transport.is_looping(self.context()).await?;
         Ok(looping)
     }
 
@@ -280,7 +226,7 @@ impl Transport {
     pub async fn set_loop(&self, enabled: bool) -> Result<()> {
         self.clients
             .transport
-            .set_loop(Some(self.project_id.clone()), enabled)
+            .set_loop(self.context(), enabled)
             .await?;
         Ok(())
     }
@@ -291,11 +237,7 @@ impl Transport {
 
     /// Get current playback rate (1.0 = normal speed)
     pub async fn get_playrate(&self) -> Result<f64> {
-        let rate = self
-            .clients
-            .transport
-            .get_playrate(Some(self.project_id.clone()))
-            .await?;
+        let rate = self.clients.transport.get_playrate(self.context()).await?;
         Ok(rate)
     }
 
@@ -303,7 +245,7 @@ impl Transport {
     pub async fn set_playrate(&self, rate: f64) -> Result<()> {
         self.clients
             .transport
-            .set_playrate(Some(self.project_id.clone()), rate)
+            .set_playrate(self.context(), rate)
             .await?;
         Ok(())
     }
@@ -317,9 +259,124 @@ impl Transport {
         let ts = self
             .clients
             .transport
-            .get_time_signature(Some(self.project_id.clone()))
+            .get_time_signature(self.context())
             .await?;
         Ok(ts)
+    }
+
+    // =========================================================================
+    // Musical Position Control
+    // =========================================================================
+
+    /// Set playhead position using musical position (measure, beat, subdivision)
+    ///
+    /// The musical position is converted to time using the project's tempo map.
+    /// - measure: 0-indexed measure number
+    /// - beat: 0-indexed beat within the measure
+    /// - subdivision: 0-999 representing fractional beat (0.000 to 0.999)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example(transport: daw_control::Transport) -> eyre::Result<()> {
+    /// // Go to measure 5, beat 1 (0-indexed: measure 4, beat 0)
+    /// transport.set_position_musical(4, 0, 0).await?;
+    ///
+    /// // Go to measure 1, beat 3, half-beat subdivision
+    /// transport.set_position_musical(0, 2, 500).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn set_position_musical(
+        &self,
+        measure: i32,
+        beat: i32,
+        subdivision: i32,
+    ) -> Result<()> {
+        self.clients
+            .transport
+            .set_position_musical(self.context(), measure, beat, subdivision)
+            .await?;
+        Ok(())
+    }
+
+    /// Go to a specific measure
+    ///
+    /// Seeks to the start of the specified measure (0-indexed).
+    /// This uses the project's tempo map to convert measure number to time.
+    ///
+    /// # Arguments
+    ///
+    /// * `measure` - The measure number to seek to (0-indexed, so measure 0 is the first measure)
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use daw_control::Daw;
+    ///
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// let daw = Daw::new(handle);
+    /// let project = daw.current_project().await?;
+    /// let transport = project.transport();
+    ///
+    /// // Go to measure 8 (9th measure, since 0-indexed)
+    /// transport.goto_measure(8).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn goto_measure(&self, measure: i32) -> Result<()> {
+        self.clients
+            .transport
+            .goto_measure(self.context(), measure)
+            .await?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Streaming
+    // =========================================================================
+
+    /// Subscribe to transport state changes at 60Hz
+    ///
+    /// Returns a receiver that streams transport state updates at high frequency.
+    /// Updates are sent:
+    /// - Immediately when play/pause/stop state changes
+    /// - At ~60Hz intervals during playback
+    /// - When tempo, time signature, or loop state changes
+    ///
+    /// The stream continues until the returned `Rx` is dropped.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use daw_control::Daw;
+    ///
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// let daw = Daw::new(handle);
+    /// let project = daw.current_project().await?;
+    /// let transport = project.transport();
+    ///
+    /// // Subscribe to transport state updates
+    /// let mut rx = transport.subscribe_state().await?;
+    ///
+    /// // Receive updates
+    /// while let Some(state) = rx.recv().await? {
+    ///     println!("Position: {:?}", state.playhead_position);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn subscribe_state(&self) -> Result<Rx<TransportState>> {
+        // Create a channel pair
+        let (tx, rx) = roam::channel::<TransportState>();
+
+        // Call the service method to start the stream
+        self.clients
+            .transport
+            .subscribe_state(self.context(), tx)
+            .await?;
+
+        Ok(rx)
     }
 }
 

@@ -18,3 +18,4 @@ tokio.workspace = true
 # REAPER bindings for actual DAW control
 reaper-high.workspace = true
 reaper-medium.workspace = true
+reaper-low.workspace = true

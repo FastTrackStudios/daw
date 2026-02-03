@@ -2,11 +2,24 @@
 //!
 //! This is the entry point for running daw-standalone as a cell.
 //! The actual implementations are in lib.rs for reuse in tests.
+//!
+//! ## Services Provided
+//!
+//! - **TransportService**: Play/pause/stop, position, tempo, looping
+//! - **ProjectService**: Project and track management
+//! - **MarkerService**: SONGSTART/SONGEND markers for song boundaries
+//! - **RegionService**: Section regions (Intro, Verse, Chorus, etc.)
+//! - **TempoMapService**: Tempo and time signature changes
 
 use cell_runtime::run_cell;
+use daw_proto::marker::MarkerServiceDispatcher;
 use daw_proto::project::ProjectServiceDispatcher;
+use daw_proto::region::RegionServiceDispatcher;
+use daw_proto::tempo_map::TempoMapServiceDispatcher;
 use daw_proto::transport::transport::TransportServiceDispatcher;
-use daw_standalone::{StandaloneProject, StandaloneTransport};
+use daw_standalone::{
+    StandaloneMarker, StandaloneProject, StandaloneRegion, StandaloneTempoMap, StandaloneTransport,
+};
 use roam_telemetry::{
     ExporterConfig, LoggingExporter, OtlpExporter, SpanExporter, TelemetryMiddleware,
 };
@@ -57,11 +70,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     run_cell!("daw-standalone", |_handle| {
         let telemetry = create_telemetry();
 
-        let transport_dispatcher = TransportServiceDispatcher::new(StandaloneTransport::new())
-            .with_middleware(telemetry.clone());
-        let project_dispatcher =
-            ProjectServiceDispatcher::new(StandaloneProject::new()).with_middleware(telemetry);
+        // Create service implementations
+        let transport = StandaloneTransport::new();
+        let project = StandaloneProject::new();
+        let marker = StandaloneMarker::new();
+        let region = StandaloneRegion::new();
+        let tempo_map = StandaloneTempoMap::new();
 
-        RoutedDispatcher::new(project_dispatcher, transport_dispatcher)
+        // Create dispatchers with telemetry middleware
+        let transport_dispatcher =
+            TransportServiceDispatcher::new(transport).with_middleware(telemetry.clone());
+        let project_dispatcher =
+            ProjectServiceDispatcher::new(project).with_middleware(telemetry.clone());
+        let marker_dispatcher =
+            MarkerServiceDispatcher::new(marker).with_middleware(telemetry.clone());
+        let region_dispatcher =
+            RegionServiceDispatcher::new(region).with_middleware(telemetry.clone());
+        let tempo_map_dispatcher =
+            TempoMapServiceDispatcher::new(tempo_map).with_middleware(telemetry);
+
+        // Compose all dispatchers together
+        // The RoutedDispatcher chains dispatchers: first tries left, falls through to right
+        let transport_project = RoutedDispatcher::new(project_dispatcher, transport_dispatcher);
+        let with_marker = RoutedDispatcher::new(transport_project, marker_dispatcher);
+        let with_region = RoutedDispatcher::new(with_marker, region_dispatcher);
+        RoutedDispatcher::new(with_region, tempo_map_dispatcher)
     })
 }

@@ -15,3 +15,5 @@ uuid = { version = "1", features = ["v4"] }
 [dev-dependencies]
 integration-tests = { workspace = true }
 daw-proto = { path = "../daw-proto" }
+daw-control = { workspace = true }
+eyre = { workspace = true }

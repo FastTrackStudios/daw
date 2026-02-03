@@ -50,16 +50,102 @@
 //! }
 //! ```
 
+// Re-export daw-proto types for convenience
+// Note: We selectively re-export to avoid shadowing our local modules (fx, tracks, transport, etc.)
+pub use daw_proto::{
+    // FX types
+    AddFxAtRequest,
+    // Primitives
+    Duration,
+    Fx,
+    FxChainContext,
+    FxError,
+    FxEvent,
+    FxLatency,
+    FxParamModulation,
+    FxParameter,
+    FxRef,
+    FxTarget,
+    FxType,
+    // Marker types
+    Marker,
+    MarkerError,
+    MarkerEvent,
+    MidiPosition,
+    MusicalPosition,
+    // Transport types
+    PlayState,
+    Position,
+    // Project types
+    ProjectContext,
+    ProjectEvent,
+    ProjectInfo,
+    RecordMode,
+    // Region types
+    Region,
+    RegionError,
+    RegionEvent,
+    SetNamedConfigRequest,
+    SetParameterByNameRequest,
+    SetParameterRequest,
+    Tempo,
+    // Tempo map types
+    TempoMapError,
+    TempoMapEvent,
+    TempoPoint,
+    TimePosition,
+    TimeRange,
+    TimeSignature,
+    // Track types
+    Track,
+    TrackError,
+    TrackEvent,
+    TrackRef,
+    TransportError,
+};
+// Re-export Transport struct with a different name to avoid conflict with our Transport handle
+pub use daw_proto::transport::transport::Transport as TransportState;
+
 use std::sync::Arc;
 
-use daw_proto::ProjectServiceClient;
-use daw_proto::transport::transport::TransportServiceClient;
+pub use daw_proto::AutomationServiceClient;
+pub use daw_proto::FxServiceClient;
+pub use daw_proto::ItemServiceClient;
+pub use daw_proto::LiveMidiServiceClient;
+pub use daw_proto::MarkerServiceClient;
+pub use daw_proto::MidiServiceClient;
+pub use daw_proto::PositionConversionServiceClient;
+pub use daw_proto::ProjectServiceClient;
+pub use daw_proto::RegionServiceClient;
+pub use daw_proto::RoutingServiceClient;
+pub use daw_proto::TakeServiceClient;
+pub use daw_proto::TempoMapServiceClient;
+pub use daw_proto::TrackServiceClient;
+pub use daw_proto::transport::transport::TransportServiceClient;
 use roam::session::ConnectionHandle;
 
+mod automation;
+mod fx;
+mod items;
+mod markers;
+mod midi_editor;
 mod project;
+mod regions;
+mod routing;
+mod tempo_map;
+mod tracks;
 mod transport;
 
+pub use self::automation::{EnvelopeHandle, Envelopes};
+pub use self::fx::{FxChain, FxHandle, FxParamHandle};
+pub use self::items::{ItemHandle, Items, ProjectItems, TakeHandle, Takes};
+pub use self::markers::Markers;
+pub use self::midi_editor::MidiEditor;
 pub use self::project::Project;
+pub use self::regions::Regions;
+pub use self::routing::{HardwareOutputs, Receives, RouteHandle, Sends};
+pub use self::tempo_map::TempoMap;
+pub use self::tracks::{TrackHandle, Tracks};
 pub use self::transport::Transport;
 
 /// Service clients for a DAW connection
@@ -67,6 +153,18 @@ pub use self::transport::Transport;
 pub struct DawClients {
     pub(crate) transport: TransportServiceClient,
     pub(crate) project: ProjectServiceClient,
+    pub(crate) marker: MarkerServiceClient,
+    pub(crate) region: RegionServiceClient,
+    pub(crate) tempo_map: TempoMapServiceClient,
+    pub(crate) track: TrackServiceClient,
+    pub(crate) fx: FxServiceClient,
+    pub(crate) position_conversion: PositionConversionServiceClient,
+    pub(crate) item: ItemServiceClient,
+    pub(crate) take: TakeServiceClient,
+    pub(crate) routing: RoutingServiceClient,
+    pub(crate) automation: AutomationServiceClient,
+    pub(crate) live_midi: LiveMidiServiceClient,
+    pub(crate) midi: MidiServiceClient,
 }
 
 impl DawClients {
@@ -74,7 +172,19 @@ impl DawClients {
     pub fn new(handle: ConnectionHandle) -> Self {
         Self {
             transport: TransportServiceClient::new(handle.clone()),
-            project: ProjectServiceClient::new(handle),
+            project: ProjectServiceClient::new(handle.clone()),
+            marker: MarkerServiceClient::new(handle.clone()),
+            region: RegionServiceClient::new(handle.clone()),
+            tempo_map: TempoMapServiceClient::new(handle.clone()),
+            track: TrackServiceClient::new(handle.clone()),
+            fx: FxServiceClient::new(handle.clone()),
+            position_conversion: PositionConversionServiceClient::new(handle.clone()),
+            item: ItemServiceClient::new(handle.clone()),
+            take: TakeServiceClient::new(handle.clone()),
+            routing: RoutingServiceClient::new(handle.clone()),
+            automation: AutomationServiceClient::new(handle.clone()),
+            live_midi: LiveMidiServiceClient::new(handle.clone()),
+            midi: MidiServiceClient::new(handle),
         }
     }
 }
@@ -171,6 +281,83 @@ impl Daw {
             .map(|info| Project::new(info.guid, self.clients.clone()))
             .collect())
     }
+
+    /// Select/switch to a specific project by GUID
+    ///
+    /// Makes the specified project the currently active/focused project.
+    /// This is equivalent to switching tabs in a DAW that supports multiple
+    /// open projects.
+    ///
+    /// # Arguments
+    ///
+    /// * `guid` - The GUID of the project to switch to
+    ///
+    /// # Returns
+    ///
+    /// Returns the selected project on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the project doesn't exist or the switch fails.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use daw_control::Daw;
+    ///
+    /// # async fn example(daw: &Daw) -> eyre::Result<()> {
+    /// // Switch to a specific project
+    /// let project = daw.select_project("project-guid-123").await?;
+    /// println!("Now on project: {}", project.guid());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn select_project(&self, guid: impl Into<String>) -> eyre::Result<Project> {
+        let guid = guid.into();
+
+        let success = self.clients.project.select(guid.clone()).await?;
+
+        if success {
+            Ok(Project::new(guid, self.clients.clone()))
+        } else {
+            Err(eyre::eyre!("Failed to select project: {}", guid))
+        }
+    }
+
+    /// Subscribe to project changes (open, close, switch)
+    ///
+    /// Returns a receiver that streams project events:
+    /// - `ProjectsChanged`: Full list of open projects
+    /// - `CurrentChanged`: Active project changed
+    /// - `Opened`: A project was opened
+    /// - `Closed`: A project was closed
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use daw_control::Daw;
+    ///
+    /// # async fn example(daw: &Daw) -> eyre::Result<()> {
+    /// let mut rx = daw.subscribe_projects().await?;
+    /// while let Ok(Some(event)) = rx.recv().await {
+    ///     match event {
+    ///         daw_control::ProjectEvent::CurrentChanged(guid) => {
+    ///             println!("Current project: {:?}", guid);
+    ///         }
+    ///         daw_control::ProjectEvent::ProjectsChanged(projects) => {
+    ///             println!("Projects: {} open", projects.len());
+    ///         }
+    ///         _ => {}
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn subscribe_projects(&self) -> eyre::Result<roam::Rx<ProjectEvent>> {
+        let (tx, rx) = roam::channel::<ProjectEvent>();
+        self.clients.project.subscribe(tx).await?;
+        Ok(rx)
+    }
 }
 
 // ============================================================================
@@ -204,5 +391,18 @@ impl Daw {
         GLOBAL_DAW
             .get()
             .expect("DAW not initialized. Call Daw::init() first.")
+    }
+
+    /// Try to get the global DAW instance without panicking.
+    ///
+    /// Returns `None` if `init()` has not been called yet.
+    /// Useful for gracefully handling the case where DAW is not yet initialized.
+    pub fn try_get() -> Option<&'static Daw> {
+        GLOBAL_DAW.get()
+    }
+
+    /// Check if the DAW has been initialized.
+    pub fn is_initialized() -> bool {
+        GLOBAL_DAW.get().is_some()
     }
 }

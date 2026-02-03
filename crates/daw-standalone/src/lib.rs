@@ -5,124 +5,42 @@
 //!
 //! The implementations in this module (`StandaloneTransport`, `StandaloneProject`) can be
 //! used directly in tests without spawning a separate cell process.
+//!
+//! ## Mock Data
+//!
+//! The standalone implementation includes mock data for testing:
+//! - **3 songs** with markers (SONGSTART/SONGEND)
+//! - **Sections** as regions (Intro, Verse, Chorus, Bridge, Outro, Solo)
+//! - **Tempo/time signature changes** throughout the timeline
+//!
+//! This allows testing the full fts-control-web experience without a real DAW.
 
 #![deny(unsafe_code)]
 
-use daw_proto::{PlayState, ProjectInfo, ProjectService, TransportService};
-use roam::Context;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use tracing::info;
-use uuid::Uuid;
+mod automation;
+mod fx;
+mod item;
+mod live_midi;
+mod marker;
+mod midi;
+mod position_conversion;
+mod project;
+mod region;
+mod routing;
+mod tempo_map;
+mod track;
+mod transport;
 
-/// Standalone DAW transport implementation.
-///
-/// This is a minimal in-memory transport that tracks play/stop state.
-/// It implements `TransportService` and can be used in tests or as a reference.
-#[derive(Clone)]
-pub struct StandaloneTransport {
-    state: Arc<RwLock<PlayState>>,
-}
-
-impl Default for StandaloneTransport {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StandaloneTransport {
-    pub fn new() -> Self {
-        Self {
-            state: Arc::new(RwLock::new(PlayState::Stopped)),
-        }
-    }
-
-    /// Get the current play state (for testing assertions)
-    pub async fn get_state(&self) -> PlayState {
-        *self.state.read().await
-    }
-
-    /// Check if currently playing (convenience method for tests)
-    pub async fn is_playing(&self) -> bool {
-        *self.state.read().await == PlayState::Playing
-    }
-}
-
-impl TransportService for StandaloneTransport {
-    async fn play(&self, _cx: &Context, _project_id: Option<String>) {
-        info!("Starting playback");
-        let mut state = self.state.write().await;
-        *state = PlayState::Playing;
-    }
-
-    async fn stop(&self, _cx: &Context, _project_id: Option<String>) {
-        let mut state = self.state.write().await;
-        *state = PlayState::Stopped;
-        info!("Stopping playback");
-    }
-}
-
-/// Standalone DAW project implementation.
-///
-/// This is a minimal in-memory project manager that provides a default project.
-/// It implements `ProjectService` and can be used in tests or as a reference.
-#[derive(Clone)]
-pub struct StandaloneProject {
-    default_project: Arc<ProjectInfo>,
-}
-
-impl Default for StandaloneProject {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StandaloneProject {
-    pub fn new() -> Self {
-        let default_project = ProjectInfo {
-            guid: Uuid::new_v4().to_string(),
-            name: "Untitled Project".to_string(),
-            path: "/tmp/untitled.daw".to_string(),
-        };
-
-        Self {
-            default_project: Arc::new(default_project),
-        }
-    }
-
-    /// Create with a specific project (useful for tests that need predictable GUIDs)
-    pub fn with_project(project: ProjectInfo) -> Self {
-        Self {
-            default_project: Arc::new(project),
-        }
-    }
-
-    /// Get the default project info (for testing assertions)
-    pub fn project_info(&self) -> &ProjectInfo {
-        &self.default_project
-    }
-}
-
-impl ProjectService for StandaloneProject {
-    async fn get_current(&self, _cx: &Context) -> Option<ProjectInfo> {
-        info!("ProjectService::get_current() called");
-        Some(self.default_project.as_ref().clone())
-    }
-
-    async fn get(&self, _cx: &Context, project_id: String) -> Option<ProjectInfo> {
-        info!(
-            "ProjectService::get() called with project_id: {}",
-            project_id
-        );
-        if project_id == self.default_project.guid {
-            Some(self.default_project.as_ref().clone())
-        } else {
-            None
-        }
-    }
-
-    async fn list(&self, _cx: &Context) -> Vec<ProjectInfo> {
-        info!("ProjectService::list() called");
-        vec![self.default_project.as_ref().clone()]
-    }
-}
+pub use automation::StandaloneAutomation;
+pub use fx::StandaloneFx;
+pub use item::{StandaloneItem, StandaloneTake};
+pub use live_midi::StandaloneLiveMidi;
+pub use marker::StandaloneMarker;
+pub use midi::StandaloneMidi;
+pub use position_conversion::StandalonePositionConversion;
+pub use project::StandaloneProject;
+pub use region::StandaloneRegion;
+pub use routing::StandaloneRouting;
+pub use tempo_map::StandaloneTempoMap;
+pub use track::StandaloneTrack;
+pub use transport::StandaloneTransport;
