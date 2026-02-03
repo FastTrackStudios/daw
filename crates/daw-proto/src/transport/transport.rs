@@ -3,9 +3,11 @@
 //! This module defines the transport state representation and the TransportService trait
 //! for controlling DAW playback, recording, and navigation.
 
+use crate::ProjectContext;
 use crate::primitives::{Position, Tempo, TimeSignature};
 use crate::transport::error::TransportError;
 use facet::Facet;
+use roam::Tx;
 use roam::service;
 
 /// Current playback state
@@ -79,14 +81,13 @@ impl Transport {
 
     /// Get effective BPM (tempo * playrate)
     pub fn effective_bpm(&self) -> f64 {
-        self.tempo.bpm * self.playrate
+        self.tempo.bpm() * self.playrate
     }
 
-    /// Set the tempo, validating it is within valid range
+    /// Set the tempo
+    ///
+    /// Note: Tempo validation happens at construction via `Tempo::from_bpm()` or `Tempo::try_from_bpm()`
     pub fn set_tempo(&mut self, tempo: Tempo) -> Result<(), TransportError> {
-        if !tempo.is_valid() {
-            return Err(TransportError::InvalidTempo(format!("{} BPM", tempo.bpm)));
-        }
         self.tempo = tempo;
         Ok(())
     }
@@ -120,102 +121,140 @@ pub trait TransportService {
     // =========================================================================
 
     /// Start playback from current position
-    async fn play(&self, project_id: Option<String>);
+    async fn play(&self, project: ProjectContext);
 
     /// Pause playback (maintain position, can resume)
-    async fn pause(&self, project_id: Option<String>);
+    async fn pause(&self, project: ProjectContext);
 
     /// Stop playback (reset to edit cursor or start)
-    async fn stop(&self, project_id: Option<String>);
+    async fn stop(&self, project: ProjectContext);
 
     /// Toggle between play and pause
-    async fn play_pause(&self, project_id: Option<String>);
+    async fn play_pause(&self, project: ProjectContext);
 
     /// Toggle between play and stop
-    async fn play_stop(&self, project_id: Option<String>);
+    async fn play_stop(&self, project: ProjectContext);
 
     // =========================================================================
     // Recording Control (Priority 1)
     // =========================================================================
 
     /// Start recording
-    async fn record(&self, project_id: Option<String>);
+    async fn record(&self, project: ProjectContext);
 
     /// Stop recording (stops transport)
-    async fn stop_recording(&self, project_id: Option<String>);
+    async fn stop_recording(&self, project: ProjectContext);
 
     /// Toggle recording on/off
-    async fn toggle_recording(&self, project_id: Option<String>);
+    async fn toggle_recording(&self, project: ProjectContext);
 
     // =========================================================================
     // Position Control (Priority 1)
     // =========================================================================
 
     /// Set playhead position in seconds
-    async fn set_position(&self, project_id: Option<String>, seconds: f64);
+    async fn set_position(&self, project: ProjectContext, seconds: f64);
 
     /// Get current playhead position in seconds
-    async fn get_position(&self, project_id: Option<String>) -> f64;
+    async fn get_position(&self, project: ProjectContext) -> f64;
 
     /// Go to the start of the project (position 0)
-    async fn goto_start(&self, project_id: Option<String>);
+    async fn goto_start(&self, project: ProjectContext);
 
     /// Go to the end of the project
-    async fn goto_end(&self, project_id: Option<String>);
+    async fn goto_end(&self, project: ProjectContext);
 
     // =========================================================================
     // State Queries (Priority 1)
     // =========================================================================
 
     /// Get complete transport state
-    async fn get_state(&self, project_id: Option<String>) -> Transport;
+    async fn get_state(&self, project: ProjectContext) -> Transport;
 
     /// Get current play state
-    async fn get_play_state(&self, project_id: Option<String>) -> PlayState;
+    async fn get_play_state(&self, project: ProjectContext) -> PlayState;
 
     /// Check if currently playing (includes recording)
-    async fn is_playing(&self, project_id: Option<String>) -> bool;
+    async fn is_playing(&self, project: ProjectContext) -> bool;
 
     /// Check if currently recording
-    async fn is_recording(&self, project_id: Option<String>) -> bool;
+    async fn is_recording(&self, project: ProjectContext) -> bool;
 
     // =========================================================================
     // Tempo Control (Priority 2)
     // =========================================================================
 
     /// Get current tempo in BPM
-    async fn get_tempo(&self, project_id: Option<String>) -> f64;
+    async fn get_tempo(&self, project: ProjectContext) -> f64;
 
     /// Set tempo in BPM
-    async fn set_tempo(&self, project_id: Option<String>, bpm: f64);
+    async fn set_tempo(&self, project: ProjectContext, bpm: f64);
 
     // =========================================================================
     // Loop Control (Priority 2)
     // =========================================================================
 
     /// Toggle loop mode on/off
-    async fn toggle_loop(&self, project_id: Option<String>);
+    async fn toggle_loop(&self, project: ProjectContext);
 
     /// Get loop enabled state
-    async fn is_looping(&self, project_id: Option<String>) -> bool;
+    async fn is_looping(&self, project: ProjectContext) -> bool;
 
     /// Set loop enabled state
-    async fn set_loop(&self, project_id: Option<String>, enabled: bool);
+    async fn set_loop(&self, project: ProjectContext, enabled: bool);
 
     // =========================================================================
     // Playrate Control (Priority 3)
     // =========================================================================
 
     /// Get current playback rate (1.0 = normal speed)
-    async fn get_playrate(&self, project_id: Option<String>) -> f64;
+    async fn get_playrate(&self, project: ProjectContext) -> f64;
 
     /// Set playback rate (0.25 to 4.0, where 1.0 = normal speed)
-    async fn set_playrate(&self, project_id: Option<String>, rate: f64);
+    async fn set_playrate(&self, project: ProjectContext, rate: f64);
 
     // =========================================================================
     // Time Signature (Priority 3)
     // =========================================================================
 
     /// Get current time signature
-    async fn get_time_signature(&self, project_id: Option<String>) -> TimeSignature;
+    async fn get_time_signature(&self, project: ProjectContext) -> TimeSignature;
+
+    // =========================================================================
+    // Musical Position Control (Priority 2)
+    // =========================================================================
+
+    /// Set playhead position using musical position (measure, beat, subdivision)
+    ///
+    /// This converts the musical position to time using the project's tempo map
+    /// and then sets the playhead position.
+    async fn set_position_musical(
+        &self,
+        project: ProjectContext,
+        measure: i32,
+        beat: i32,
+        subdivision: i32,
+    );
+
+    /// Go to a specific measure (0-indexed)
+    ///
+    /// This is a convenience method that seeks to the start of the specified measure.
+    /// Equivalent to `set_position_musical(project, measure, 0, 0)`.
+    async fn goto_measure(&self, project: ProjectContext, measure: i32);
+
+    // =========================================================================
+    // Streaming (Priority 1)
+    // =========================================================================
+
+    /// Subscribe to transport state changes
+    ///
+    /// Streams transport state updates at high frequency (up to 60Hz) when playing.
+    /// The stream sends the complete Transport state on each update.
+    ///
+    /// The stream continues until the sender is dropped or the connection closes.
+    /// Updates are sent:
+    /// - Immediately when play/pause/stop state changes
+    /// - At regular intervals (e.g., 60Hz) during playback
+    /// - When tempo, time signature, or loop state changes
+    async fn subscribe_state(&self, project: ProjectContext, tx: Tx<Transport>);
 }
