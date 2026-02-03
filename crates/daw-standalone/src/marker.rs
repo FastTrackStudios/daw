@@ -470,11 +470,11 @@ impl MarkerService for StandaloneMarker {
                 return;
             }
 
-            // Poll for changes at 60Hz
+            // Poll for changes at 2Hz (markers rarely change, no need for 60Hz)
             let mut last_markers = markers;
 
             loop {
-                tokio::time::sleep(Duration::from_micros(16667)).await;
+                tokio::time::sleep(Duration::from_millis(500)).await;
 
                 // Check for marker changes
                 let current_markers = {

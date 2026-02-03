@@ -186,11 +186,11 @@ impl ProjectService for StandaloneProject {
                 return;
             }
 
-            // Poll for changes at 60Hz
+            // Poll for changes at 2Hz (current project rarely changes, no need for 60Hz)
             let mut last_index = *this.shared_state.current_index.read().await;
 
             loop {
-                tokio::time::sleep(Duration::from_micros(16667)).await;
+                tokio::time::sleep(Duration::from_millis(500)).await;
 
                 // Check for current project change
                 let current_index = *this.shared_state.current_index.read().await;
