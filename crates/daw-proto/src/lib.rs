@@ -4,6 +4,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod audio_engine;
 pub mod automation;
 pub mod fx;
 pub mod item;
@@ -19,6 +20,7 @@ pub mod tempo_map;
 pub mod track;
 pub mod transport;
 
+pub use audio_engine::*;
 pub use automation::*;
 pub use fx::*;
 pub use item::*;

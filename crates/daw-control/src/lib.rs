@@ -108,6 +108,7 @@ pub use daw_proto::transport::transport::Transport as TransportState;
 
 use std::sync::Arc;
 
+pub use daw_proto::AudioEngineServiceClient;
 pub use daw_proto::AutomationServiceClient;
 pub use daw_proto::FxServiceClient;
 pub use daw_proto::ItemServiceClient;
@@ -165,6 +166,7 @@ pub struct DawClients {
     pub(crate) automation: AutomationServiceClient,
     pub(crate) live_midi: LiveMidiServiceClient,
     pub(crate) midi: MidiServiceClient,
+    pub(crate) audio_engine: AudioEngineServiceClient,
 }
 
 impl DawClients {
@@ -184,7 +186,8 @@ impl DawClients {
             routing: RoutingServiceClient::new(handle.clone()),
             automation: AutomationServiceClient::new(handle.clone()),
             live_midi: LiveMidiServiceClient::new(handle.clone()),
-            midi: MidiServiceClient::new(handle),
+            midi: MidiServiceClient::new(handle.clone()),
+            audio_engine: AudioEngineServiceClient::new(handle),
         }
     }
 }
@@ -357,6 +360,26 @@ impl Daw {
         let (tx, rx) = roam::channel::<ProjectEvent>();
         self.clients.project.subscribe(tx).await?;
         Ok(rx)
+    }
+
+    /// Get a handle to the audio engine service
+    ///
+    /// The audio engine provides access to global audio device state
+    /// including latency information useful for synchronization.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use daw_control::Daw;
+    ///
+    /// # async fn example(daw: &Daw) -> eyre::Result<()> {
+    /// let latency = daw.audio_engine().get_output_latency_seconds().await?;
+    /// println!("Audio output latency: {}ms", latency * 1000.0);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn audio_engine(&self) -> &AudioEngineServiceClient {
+        &self.clients.audio_engine
     }
 }
 

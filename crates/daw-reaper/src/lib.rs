@@ -30,18 +30,21 @@
 //! );
 //! ```
 
+pub mod audio_engine;
 pub mod automation;
 pub mod item;
 pub mod live_midi;
 pub mod marker;
 pub mod midi;
 pub mod project;
+pub mod project_context;
 pub mod region;
 pub mod routing;
 pub mod tempo_map;
 pub mod transport;
 
 // Re-export the main types
+pub use audio_engine::ReaperAudioEngine;
 pub use automation::ReaperAutomation;
 pub use item::{ReaperItem, ReaperTake};
 pub use live_midi::ReaperLiveMidi;
@@ -53,5 +56,5 @@ pub use routing::ReaperRouting;
 pub use tempo_map::ReaperTempoMap;
 pub use transport::ReaperTransport;
 
-// Re-export the TaskSupport setter
-pub use transport::set_task_support;
+// Re-export the TaskSupport setter and transport broadcaster functions
+pub use transport::{init_transport_broadcaster, poll_and_broadcast, set_task_support};
