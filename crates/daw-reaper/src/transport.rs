@@ -12,37 +12,64 @@
 //! 2. **Query operations** (get_tempo, is_playing, etc.): Use `main_thread_future()` which
 //!    returns a Future that resolves with the result
 //!
-//! # Architecture
+//! # Per-Project Transport State Broadcasting
+//!
+//! For low-latency state streaming with multiple projects, the transport uses a
+//! reactive push-based architecture:
 //!
 //! ```text
-//! RPC Handler (async, any thread)
-//!     ↓
-//!     TransportService method
-//!     ↓
-//!     TaskSupport::main_thread_future() or do_later_in_main_thread_asap()
-//!     ↓
-//!     Closure queued to crossbeam channel
-//!     ↓
 //! Timer Callback (main thread, ~30Hz)
 //!     ↓
-//!     MainTaskMiddleware::run() executes closure
+//!     poll_and_broadcast() called directly
 //!     ↓
-//!     REAPER API called, result sent via oneshot channel
+//!     For each open project:
+//!       - Read transport state from REAPER
+//!       - Compare with cached state
+//!       - Only broadcast if changed (reactive)
+//!     ↓
+//! Subscribers receive (project_guid, Transport) updates
 //! ```
+//!
+//! This avoids:
+//! - Round-trip latency of `main_thread_future()` for streaming
+//! - Flooding with updates for projects that aren't playing
+//! - SHM slot exhaustion from constant polling
 
+use crate::project_context::find_project_by_guid;
 use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport, TransportService};
-use reaper_high::{PlayRate, Reaper, TaskSupport, Tempo as ReaperTempo};
+use reaper_high::{PlayRate, Project, Reaper, TaskSupport, Tempo as ReaperTempo};
 use reaper_medium::{
-    CommandId, PositionInSeconds, ProjectContext as ReaperProjectContext, SetEditCurPosOptions,
-    UndoBehavior,
+    CommandId, PositionInSeconds, ProjectContext as ReaperProjectContext, ProjectRef,
+    SetEditCurPosOptions, UndoBehavior,
 };
 use roam::{Context, Tx};
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use tokio::sync::broadcast;
 use tracing::{debug, info};
 
 /// Global TaskSupport instance - set by the extension during initialization
 static TASK_SUPPORT: OnceLock<&'static TaskSupport> = OnceLock::new();
+
+/// Per-project transport update - includes project GUID so subscribers know which project changed
+#[derive(Clone, Debug)]
+pub struct ProjectTransportUpdate {
+    /// Project GUID (hash of file path)
+    pub project_guid: String,
+    /// Transport state for this project
+    pub transport: Transport,
+}
+
+/// Global transport state broadcaster - sends per-project state updates
+static TRANSPORT_BROADCASTER: OnceLock<broadcast::Sender<ProjectTransportUpdate>> = OnceLock::new();
+
+/// Legacy broadcaster for single-project compatibility (current project only)
+static LEGACY_TRANSPORT_BROADCASTER: OnceLock<broadcast::Sender<Transport>> = OnceLock::new();
+
+/// Cached per-project transport states for change detection
+/// Key is project GUID, value is last known transport state
+/// Only broadcasts when state actually changes (reactive pattern)
+static PROJECT_TRANSPORT_CACHE: OnceLock<Mutex<HashMap<String, Transport>>> = OnceLock::new();
 
 /// Set the global TaskSupport reference.
 /// Called by the extension during initialization.
@@ -53,6 +80,298 @@ pub fn set_task_support(task_support: &'static TaskSupport) {
 /// Get the global TaskSupport reference.
 pub(crate) fn task_support() -> Option<&'static TaskSupport> {
     TASK_SUPPORT.get().copied()
+}
+
+/// Initialize the transport broadcaster.
+/// Called by the extension during initialization.
+/// Returns the legacy broadcast sender for backward compatibility.
+pub fn init_transport_broadcaster() -> broadcast::Sender<Transport> {
+    // Create per-project broadcast channel with enough capacity to handle bursts
+    // 32 slots for ~1s of buffering at 30Hz with multiple projects
+    let (tx, _rx) = broadcast::channel::<ProjectTransportUpdate>(32);
+    let _ = TRANSPORT_BROADCASTER.set(tx);
+
+    // Create legacy broadcast channel for backward compatibility
+    let (legacy_tx, _rx) = broadcast::channel::<Transport>(16);
+    let legacy_tx_clone = legacy_tx.clone();
+    let _ = LEGACY_TRANSPORT_BROADCASTER.set(legacy_tx);
+
+    // Initialize the per-project state cache for change detection
+    let _ = PROJECT_TRANSPORT_CACHE.set(Mutex::new(HashMap::new()));
+
+    legacy_tx_clone
+}
+
+/// Get a receiver for per-project transport state updates.
+/// Returns updates for ALL projects, only when their state changes.
+pub fn project_transport_receiver() -> Option<broadcast::Receiver<ProjectTransportUpdate>> {
+    TRANSPORT_BROADCASTER.get().map(|tx| tx.subscribe())
+}
+
+/// Get a receiver for legacy transport state updates (current project only).
+/// Used by subscribe_state for backward compatibility.
+fn transport_receiver() -> Option<broadcast::Receiver<Transport>> {
+    LEGACY_TRANSPORT_BROADCASTER.get().map(|tx| tx.subscribe())
+}
+
+/// Hash a string to create a deterministic GUID (same algorithm used in project.rs)
+fn hash_string(s: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    s.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Get project GUID from a REAPER project
+fn project_guid(project: &Project) -> String {
+    let path = project.file().map(|p| p.to_string()).unwrap_or_default();
+    format!("{:x}", hash_string(&path))
+}
+
+/// Threshold for position change detection (in seconds)
+/// Only emit position changes larger than this to avoid flooding with micro-updates
+const POSITION_CHANGE_THRESHOLD: f64 = 0.001; // 1ms
+
+/// Poll REAPER transport state for ALL open projects and broadcast changes.
+/// **MUST be called from the main thread** (e.g., from timer callback).
+///
+/// This function reads REAPER state directly without async overhead,
+/// enabling low-latency state streaming.
+///
+/// **Reactive Pattern**: Only broadcasts when a project's state actually changes.
+/// Projects that are stopped/idle won't generate any updates, preventing
+/// SHM slot exhaustion from constant polling.
+pub fn poll_and_broadcast() {
+    let tx = TRANSPORT_BROADCASTER.get();
+    let legacy_tx = LEGACY_TRANSPORT_BROADCASTER.get();
+
+    // Skip if no subscribers on either channel
+    let has_project_subscribers = tx.map(|t| t.receiver_count() > 0).unwrap_or(false);
+    let has_legacy_subscribers = legacy_tx.map(|t| t.receiver_count() > 0).unwrap_or(false);
+
+    if !has_project_subscribers && !has_legacy_subscribers {
+        return;
+    }
+
+    let reaper = Reaper::get();
+    let medium = reaper.medium_reaper();
+
+    // Get current project for legacy broadcaster
+    let current_project = reaper.current_project();
+    let current_guid = project_guid(&current_project);
+
+    // Get cache for change detection
+    let Some(cache) = PROJECT_TRANSPORT_CACHE.get() else {
+        return;
+    };
+    let mut cache_guard = cache.lock().unwrap();
+
+    // Track which projects we've seen this poll (for cleanup of closed projects)
+    let mut seen_guids = Vec::new();
+
+    // Iterate through all open projects
+    for tab_index in 0..128u32 {
+        let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
+            // No more projects
+            break;
+        };
+
+        let project = Project::new(result.project);
+        let guid = project_guid(&project);
+        seen_guids.push(guid.clone());
+
+        // Read transport state for this specific project
+        let reaper_ctx = ReaperProjectContext::Proj(result.project);
+        let state = read_transport_state_for_project(&project, reaper_ctx, medium);
+
+        // Check if state has changed for this project (reactive pattern)
+        let should_broadcast = match cache_guard.get(&guid) {
+            None => {
+                // First time seeing this project - always broadcast
+                cache_guard.insert(guid.clone(), state.clone());
+                true
+            }
+            Some(prev) => {
+                if transport_changed(prev, &state) {
+                    cache_guard.insert(guid.clone(), state.clone());
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+
+        if should_broadcast {
+            // Broadcast per-project update
+            if let Some(tx) = tx {
+                let _ = tx.send(ProjectTransportUpdate {
+                    project_guid: guid.clone(),
+                    transport: state.clone(),
+                });
+            }
+
+            // Also broadcast to legacy channel if this is the current project
+            if guid == current_guid {
+                if let Some(legacy_tx) = legacy_tx {
+                    let _ = legacy_tx.send(state);
+                }
+            }
+        }
+    }
+
+    // Clean up cache entries for projects that are no longer open
+    cache_guard.retain(|guid, _| seen_guids.contains(guid));
+}
+
+/// Check if transport state has changed meaningfully.
+/// Uses threshold for position to avoid flooding with playhead micro-updates.
+fn transport_changed(prev: &Transport, curr: &Transport) -> bool {
+    // Check discrete state changes first (these should always trigger)
+    if prev.play_state != curr.play_state {
+        return true;
+    }
+    if prev.record_mode != curr.record_mode {
+        return true;
+    }
+    if prev.looping != curr.looping {
+        return true;
+    }
+    if prev.time_signature != curr.time_signature {
+        return true;
+    }
+
+    // Check tempo change (use small threshold for floating point comparison)
+    let prev_tempo = prev.tempo.bpm();
+    let curr_tempo = curr.tempo.bpm();
+    if (prev_tempo - curr_tempo).abs() > 0.01 {
+        return true;
+    }
+
+    // Check playrate change
+    if (prev.playrate - curr.playrate).abs() > 0.001 {
+        return true;
+    }
+
+    // Check playhead position change with threshold
+    // Only send position updates if changed by more than threshold
+    // This is the main source of flooding - playhead moves constantly during playback
+    let prev_pos = prev
+        .playhead_position
+        .time
+        .map(|t| t.as_seconds())
+        .unwrap_or(0.0);
+    let curr_pos = curr
+        .playhead_position
+        .time
+        .map(|t| t.as_seconds())
+        .unwrap_or(0.0);
+    if (prev_pos - curr_pos).abs() > POSITION_CHANGE_THRESHOLD {
+        return true;
+    }
+
+    // Check edit position change with threshold
+    let prev_edit = prev
+        .edit_position
+        .time
+        .map(|t| t.as_seconds())
+        .unwrap_or(0.0);
+    let curr_edit = curr
+        .edit_position
+        .time
+        .map(|t| t.as_seconds())
+        .unwrap_or(0.0);
+    if (prev_edit - curr_edit).abs() > POSITION_CHANGE_THRESHOLD {
+        return true;
+    }
+
+    false
+}
+
+/// Read transport state from REAPER for a specific project.
+/// **MUST be called from the main thread.**
+fn read_transport_state_for_project(
+    project: &Project,
+    reaper_ctx: ReaperProjectContext,
+    medium: &reaper_medium::Reaper,
+) -> Transport {
+    let play_state = get_play_state_for_project(medium, reaper_ctx);
+    let looping = medium.get_set_repeat_ex_get(reaper_ctx);
+    let tempo_bpm = project.tempo().bpm().get();
+    let playrate = project.play_rate().playback_speed_factor().get();
+
+    // Use the project-specific position APIs
+    let pos_seconds = medium.get_play_position_ex(reaper_ctx).get();
+    let edit_pos = medium
+        .get_cursor_position_ex(reaper_ctx)
+        .map(|p| p.get())
+        .unwrap_or(0.0);
+
+    let (ts_num, ts_denom) = get_time_signature_for_project(medium, reaper_ctx);
+
+    // Convert time positions to musical positions using REAPER's tempo map
+    // This properly handles tempo changes throughout the project
+    // Also applies project measure offset for correct display
+    let playhead_musical = time_to_musical_position(project, medium, reaper_ctx, pos_seconds);
+    let edit_musical = time_to_musical_position(project, medium, reaper_ctx, edit_pos);
+
+    Transport {
+        play_state,
+        record_mode: daw_proto::RecordMode::Normal,
+        looping,
+        tempo: daw_proto::primitives::Tempo::from_bpm(tempo_bpm),
+        playrate,
+        time_signature: TimeSignature::new(ts_num as u32, ts_denom as u32),
+        playhead_position: daw_proto::primitives::Position::new(
+            Some(playhead_musical),
+            Some(daw_proto::primitives::TimePosition::from_seconds(
+                pos_seconds,
+            )),
+            None,
+        ),
+        edit_position: daw_proto::primitives::Position::new(
+            Some(edit_musical),
+            Some(daw_proto::primitives::TimePosition::from_seconds(edit_pos)),
+            None,
+        ),
+    }
+}
+
+/// Convert a time position to a musical position using REAPER's TimeMap2_timeToBeats.
+/// This properly handles tempo and time signature changes throughout the project.
+/// Also applies the project measure offset (projmeasoffs) for display.
+/// **MUST be called from the main thread.**
+fn time_to_musical_position(
+    project: &Project,
+    medium: &reaper_medium::Reaper,
+    reaper_ctx: ReaperProjectContext,
+    time_seconds: f64,
+) -> daw_proto::primitives::MusicalPosition {
+    use reaper_medium::PositionInSeconds;
+
+    // PositionInSeconds::new returns a Result, handle the error case
+    let Some(pos) = PositionInSeconds::new(time_seconds).ok() else {
+        return daw_proto::primitives::MusicalPosition::new(1, 1, 0);
+    };
+
+    let result = medium.time_map_2_time_to_beats(reaper_ctx, pos);
+
+    // Get project measure offset - this is the "projmeasoffs" setting that affects
+    // how measure numbers are displayed (e.g., if project starts at measure 5)
+    let measure_offset = project.measure_offset();
+
+    // REAPER returns 0-based measure index, apply offset and convert to 1-based for display
+    // The measure_offset is already the adjustment value (can be positive or negative)
+    let measure = result.measure_index + measure_offset + 1;
+
+    // beats_since_measure is fractional beats since the start of the measure
+    let beats_since = result.beats_since_measure.get();
+    let beat = beats_since.floor() as i32 + 1; // 1-based beat within measure
+
+    // Subdivision is the fractional part of the beat (0-999)
+    let subdivision = ((beats_since.fract()) * 1000.0).round() as i32;
+
+    daw_proto::primitives::MusicalPosition::new(measure, beat, subdivision.clamp(0, 999))
 }
 
 /// REAPER transport implementation.
@@ -275,41 +594,32 @@ impl TransportService for ReaperTransport {
     // State Queries
     // =========================================================================
 
-    async fn get_state(&self, _cx: &Context, _project: ProjectContext) -> Transport {
+    async fn get_state(&self, _cx: &Context, project: ProjectContext) -> Transport {
         if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
+            ts.main_thread_future(move || {
                 let reaper = Reaper::get();
-                let project = reaper.current_project();
                 let medium = reaper.medium_reaper();
 
-                let play_state = get_play_state_internal(medium);
-                let looping = medium.get_set_repeat_ex_get(ReaperProjectContext::CurrentProject);
-                let tempo_bpm = project.tempo().bpm().get();
-                let playrate = project.play_rate().playback_speed_factor().get();
-                let pos_seconds = project
-                    .play_or_edit_cursor_position()
-                    .map(|p| p.get())
-                    .unwrap_or(0.0);
-                let edit_pos = project
-                    .edit_cursor_position()
-                    .map(|p| p.get())
-                    .unwrap_or(0.0);
-                let (ts_num, ts_denom) = get_time_signature_internal(medium);
+                // Resolve the project context to find the correct REAPER project
+                let (rea_project, reaper_ctx) = match &project {
+                    ProjectContext::Current => {
+                        let proj = reaper.current_project();
+                        (proj, ReaperProjectContext::CurrentProject)
+                    }
+                    ProjectContext::Project(guid) => {
+                        // Find project by GUID
+                        if let Some(proj) = find_project_by_guid(guid) {
+                            let ctx = ReaperProjectContext::Proj(proj.raw());
+                            (proj, ctx)
+                        } else {
+                            // Fallback to current project if not found
+                            let proj = reaper.current_project();
+                            (proj, ReaperProjectContext::CurrentProject)
+                        }
+                    }
+                };
 
-                Transport {
-                    play_state,
-                    record_mode: daw_proto::RecordMode::Normal,
-                    looping,
-                    tempo: daw_proto::primitives::Tempo::from_bpm(tempo_bpm),
-                    playrate,
-                    time_signature: TimeSignature::new(ts_num as u32, ts_denom as u32),
-                    playhead_position: daw_proto::primitives::Position::from_time(
-                        daw_proto::primitives::TimePosition::from_seconds(pos_seconds),
-                    ),
-                    edit_position: daw_proto::primitives::Position::from_time(
-                        daw_proto::primitives::TimePosition::from_seconds(edit_pos),
-                    ),
-                }
+                read_transport_state_for_project(&rea_project, reaper_ctx, medium)
             })
             .await
             .unwrap_or_else(|_| Transport::new())
@@ -579,68 +889,114 @@ impl TransportService for ReaperTransport {
     // =========================================================================
 
     async fn subscribe_state(&self, _cx: &Context, _project: ProjectContext, tx: Tx<Transport>) {
-        info!("ReaperTransport: subscribe_state - starting 60Hz stream");
+        info!("ReaperTransport: subscribe_state - subscribing to broadcast channel");
+
+        // Get a receiver for the broadcast channel
+        let Some(mut rx) = transport_receiver() else {
+            info!(
+                "ReaperTransport: broadcast channel not initialized, subscriber will not receive updates"
+            );
+            return;
+        };
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
         tokio::spawn(async move {
-            // ~16ms for 60Hz
-            let interval = Duration::from_micros(16667);
-
             loop {
-                tokio::time::sleep(interval).await;
-
-                // Get transport state from main thread
-                let state = if let Some(ts) = task_support() {
-                    ts.main_thread_future(|| {
-                        let reaper = Reaper::get();
-                        let project = reaper.current_project();
-                        let medium = reaper.medium_reaper();
-
-                        let play_state = get_play_state_internal(medium);
-                        let looping =
-                            medium.get_set_repeat_ex_get(ReaperProjectContext::CurrentProject);
-                        let tempo_bpm = project.tempo().bpm().get();
-                        let playrate = project.play_rate().playback_speed_factor().get();
-                        let pos_seconds = project
-                            .play_or_edit_cursor_position()
-                            .map(|p| p.get())
-                            .unwrap_or(0.0);
-                        let edit_pos = project
-                            .edit_cursor_position()
-                            .map(|p| p.get())
-                            .unwrap_or(0.0);
-                        let (ts_num, ts_denom) = get_time_signature_internal(medium);
-
-                        Transport {
-                            play_state,
-                            record_mode: daw_proto::RecordMode::Normal,
-                            looping,
-                            tempo: daw_proto::primitives::Tempo::from_bpm(tempo_bpm),
-                            playrate,
-                            time_signature: TimeSignature::new(ts_num as u32, ts_denom as u32),
-                            playhead_position: daw_proto::primitives::Position::from_time(
-                                daw_proto::primitives::TimePosition::from_seconds(pos_seconds),
-                            ),
-                            edit_position: daw_proto::primitives::Position::from_time(
-                                daw_proto::primitives::TimePosition::from_seconds(edit_pos),
-                            ),
+                // Wait for the next state update from the broadcaster
+                match rx.recv().await {
+                    Ok(state) => {
+                        // Forward state to the RPC stream
+                        if let Err(e) = tx.send(&state).await {
+                            debug!("ReaperTransport: subscribe_state stream closed: {}", e);
+                            break;
                         }
-                    })
-                    .await
-                    .unwrap_or_else(|_| Transport::new())
-                } else {
-                    Transport::new()
-                };
-
-                // Send the state - exit loop when client disconnects
-                if let Err(e) = tx.send(&state).await {
-                    debug!("ReaperTransport: subscribe_state stream closed: {}", e);
-                    break;
+                    }
+                    Err(broadcast::error::RecvError::Lagged(count)) => {
+                        // We missed some messages due to slow consumption - that's fine,
+                        // just continue with the next one
+                        debug!(
+                            "ReaperTransport: subscribe_state lagged by {} messages",
+                            count
+                        );
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        // Broadcaster was dropped - this shouldn't happen during normal operation
+                        info!("ReaperTransport: broadcast channel closed");
+                        break;
+                    }
                 }
             }
 
             info!("ReaperTransport: subscribe_state stream ended");
+        });
+    }
+
+    async fn subscribe_all_projects(&self, _cx: &Context, tx: Tx<daw_proto::AllProjectsTransport>) {
+        info!(
+            "ReaperTransport: subscribe_all_projects - subscribing to per-project broadcast channel"
+        );
+
+        // Get a receiver for the per-project broadcast channel
+        let Some(mut rx) = project_transport_receiver() else {
+            info!(
+                "ReaperTransport: per-project broadcast channel not initialized, subscriber will not receive updates"
+            );
+            return;
+        };
+
+        // Spawn the streaming loop so this method returns immediately
+        tokio::spawn(async move {
+            // Buffer to collect updates within a small window
+            // This batches multiple project updates into a single message
+            let mut pending_updates: HashMap<String, Transport> = HashMap::new();
+            let batch_interval = tokio::time::Duration::from_millis(16); // ~60Hz output
+            let mut batch_timer = tokio::time::interval(batch_interval);
+
+            loop {
+                tokio::select! {
+                    // Receive updates from the broadcast channel
+                    result = rx.recv() => {
+                        match result {
+                            Ok(update) => {
+                                // Buffer the update (overwrites previous for same project)
+                                pending_updates.insert(update.project_guid, update.transport);
+                            }
+                            Err(broadcast::error::RecvError::Lagged(count)) => {
+                                debug!(
+                                    "ReaperTransport: subscribe_all_projects lagged by {} messages",
+                                    count
+                                );
+                            }
+                            Err(broadcast::error::RecvError::Closed) => {
+                                info!("ReaperTransport: per-project broadcast channel closed");
+                                break;
+                            }
+                        }
+                    }
+                    // Send batched updates at regular intervals
+                    _ = batch_timer.tick() => {
+                        if !pending_updates.is_empty() {
+                            let projects: Vec<daw_proto::ProjectTransportState> = pending_updates
+                                .drain()
+                                .map(|(guid, transport)| daw_proto::ProjectTransportState {
+                                    project_guid: guid,
+                                    transport,
+                                })
+                                .collect();
+
+                            let update = daw_proto::AllProjectsTransport { projects };
+
+                            if let Err(e) = tx.send(&update).await {
+                                debug!("ReaperTransport: subscribe_all_projects stream closed: {}", e);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            info!("ReaperTransport: subscribe_all_projects stream ended");
         });
     }
 }
@@ -650,7 +1006,14 @@ impl TransportService for ReaperTransport {
 // ============================================================================
 
 fn get_play_state_internal(medium: &reaper_medium::Reaper) -> PlayState {
-    let state = medium.get_play_state_ex(ReaperProjectContext::CurrentProject);
+    get_play_state_for_project(medium, ReaperProjectContext::CurrentProject)
+}
+
+fn get_play_state_for_project(
+    medium: &reaper_medium::Reaper,
+    reaper_ctx: ReaperProjectContext,
+) -> PlayState {
+    let state = medium.get_play_state_ex(reaper_ctx);
     if state.is_recording {
         PlayState::Recording
     } else if state.is_playing {
@@ -663,6 +1026,13 @@ fn get_play_state_internal(medium: &reaper_medium::Reaper) -> PlayState {
 }
 
 fn get_time_signature_internal(_medium: &reaper_medium::Reaper) -> (i32, i32) {
+    get_time_signature_for_project(_medium, ReaperProjectContext::CurrentProject)
+}
+
+fn get_time_signature_for_project(
+    _medium: &reaper_medium::Reaper,
+    _reaper_ctx: ReaperProjectContext,
+) -> (i32, i32) {
     // Default to 4/4 for now
     // A more complete implementation would query the tempo map at the current position
     // using GetTempoTimeSigMarker or similar APIs

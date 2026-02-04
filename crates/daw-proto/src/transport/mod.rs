@@ -7,5 +7,7 @@ pub mod error;
 pub mod transport;
 
 pub use error::TransportError;
-pub use transport::{PlayState, RecordMode, Transport, TransportService};
+pub use transport::{
+    AllProjectsTransport, PlayState, ProjectTransportState, RecordMode, Transport, TransportService,
+};
 pub use transport::{TransportServiceClient, TransportServiceDispatcher};

@@ -616,4 +616,51 @@ impl TransportService for StandaloneTransport {
             );
         });
     }
+
+    async fn subscribe_all_projects(&self, _cx: &Context, tx: Tx<daw_proto::AllProjectsTransport>) {
+        info!("StandaloneTransport: subscribe_all_projects - starting stream for all projects");
+
+        // Clone states for the spawned task
+        let states = self.states.clone();
+
+        // Spawn the streaming loop so this method returns immediately
+        tokio::spawn(async move {
+            // ~16ms for 60Hz batched updates
+            let interval = Duration::from_millis(16);
+            let mut ticker = tokio::time::interval(interval);
+
+            loop {
+                ticker.tick().await;
+
+                // Get transport snapshots for all projects
+                let projects: Vec<daw_proto::ProjectTransportState> = {
+                    let states = states.read().await;
+                    states
+                        .iter()
+                        .map(|(guid, state)| daw_proto::ProjectTransportState {
+                            project_guid: guid.clone(),
+                            transport: state.snapshot(),
+                        })
+                        .collect()
+                };
+
+                if projects.is_empty() {
+                    continue;
+                }
+
+                let update = daw_proto::AllProjectsTransport { projects };
+
+                // Send the state - exit loop when client disconnects
+                if let Err(e) = tx.send(&update).await {
+                    debug!(
+                        "StandaloneTransport: subscribe_all_projects stream closed: {}",
+                        e
+                    );
+                    break;
+                }
+            }
+
+            info!("StandaloneTransport: subscribe_all_projects stream ended");
+        });
+    }
 }

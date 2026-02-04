@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::DawClients;
 use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport as TransportState};
 use eyre::Result;
-use roam::{Rx, Tx};
+use roam::Rx;
 
 /// Transport handle for a specific project
 ///
@@ -375,6 +375,47 @@ impl Transport {
             .transport
             .subscribe_state(self.context(), tx)
             .await?;
+
+        Ok(rx)
+    }
+
+    /// Subscribe to transport state changes for ALL open projects at ~30Hz
+    ///
+    /// Returns a receiver that streams transport state updates for every open project.
+    /// This is much more efficient than subscribing to each project individually.
+    ///
+    /// Updates are only sent when a project's state actually changes (reactive).
+    ///
+    /// The stream continues until the returned `Rx` is dropped.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use daw_control::Daw;
+    ///
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// let daw = Daw::new(handle);
+    /// let project = daw.current_project().await?;
+    /// let transport = project.transport();
+    ///
+    /// // Subscribe to all projects' transport state updates
+    /// let mut rx = transport.subscribe_all_projects().await?;
+    ///
+    /// // Receive updates
+    /// while let Some(update) = rx.recv().await? {
+    ///     for proj in update.projects {
+    ///         println!("Project {}: {:?}", proj.project_guid, proj.transport.play_state);
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn subscribe_all_projects(&self) -> Result<Rx<daw_proto::AllProjectsTransport>> {
+        // Create a channel pair
+        let (tx, rx) = roam::channel::<daw_proto::AllProjectsTransport>();
+
+        // Call the service method to start the stream
+        self.clients.transport.subscribe_all_projects(tx).await?;
 
         Ok(rx)
     }

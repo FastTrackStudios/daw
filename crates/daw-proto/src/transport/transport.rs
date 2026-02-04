@@ -32,7 +32,7 @@ pub enum RecordMode {
 }
 
 /// Complete transport state
-#[derive(Clone, Facet)]
+#[derive(Clone, Debug, Facet)]
 pub struct Transport {
     pub play_state: PlayState,
     pub record_mode: RecordMode,
@@ -257,4 +257,35 @@ pub trait TransportService {
     /// - At regular intervals (e.g., 60Hz) during playback
     /// - When tempo, time signature, or loop state changes
     async fn subscribe_state(&self, project: ProjectContext, tx: Tx<Transport>);
+
+    /// Subscribe to transport state changes for ALL open projects
+    ///
+    /// Streams transport state updates for every open project at ~30Hz.
+    /// Each update contains the project GUID and its transport state.
+    ///
+    /// This is much more efficient than subscribing to each project individually
+    /// because it uses a single broadcast channel that's already being polled
+    /// on the main thread.
+    ///
+    /// Updates are only sent when a project's state actually changes (reactive).
+    async fn subscribe_all_projects(&self, tx: Tx<AllProjectsTransport>);
+}
+
+/// Transport state update for all projects
+///
+/// Contains a list of (project_guid, transport_state) pairs for all projects
+/// whose state changed since the last update.
+#[derive(Clone, Debug, Facet)]
+pub struct AllProjectsTransport {
+    /// List of project transport updates
+    pub projects: Vec<ProjectTransportState>,
+}
+
+/// Transport state for a specific project
+#[derive(Clone, Debug, Facet)]
+pub struct ProjectTransportState {
+    /// Project GUID (hash of file path)
+    pub project_guid: String,
+    /// Transport state for this project
+    pub transport: Transport,
 }

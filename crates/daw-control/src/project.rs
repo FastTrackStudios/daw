@@ -44,6 +44,17 @@ impl Project {
         &self.guid
     }
 
+    /// Get the project info (name, path, etc.)
+    ///
+    /// Fetches the full project information from the DAW.
+    pub async fn info(&self) -> eyre::Result<daw_proto::ProjectInfo> {
+        self.clients
+            .project
+            .get(self.guid.clone())
+            .await?
+            .ok_or_else(|| eyre::eyre!("Project not found: {}", self.guid))
+    }
+
     /// Get transport accessor for this project
     ///
     /// Returns a handle to control and monitor the transport (playback, recording, etc.)

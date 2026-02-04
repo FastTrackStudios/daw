@@ -46,7 +46,7 @@ impl ProjectContext {
 /// Human-readable project name
 ///
 /// Filesystem path to the project file
-#[derive(Clone, Debug, Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, Facet)]
 pub struct ProjectInfo {
     pub guid: String,
     pub name: String,
