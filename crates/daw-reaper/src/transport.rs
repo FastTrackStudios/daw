@@ -40,7 +40,7 @@ use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport, TransportSe
 use reaper_high::{PlayRate, Project, Reaper, TaskSupport, Tempo as ReaperTempo};
 use reaper_medium::{
     CommandId, PositionInSeconds, ProjectContext as ReaperProjectContext, ProjectRef,
-    SetEditCurPosOptions, UndoBehavior,
+    SetEditCurPosOptions, TimeRangeType, UndoBehavior,
 };
 use roam::{Context, Tx};
 use std::collections::HashMap;
@@ -237,6 +237,9 @@ fn transport_changed(prev: &Transport, curr: &Transport) -> bool {
     if prev.looping != curr.looping {
         return true;
     }
+    if prev.loop_region != curr.loop_region {
+        return true;
+    }
     if prev.time_signature != curr.time_signature {
         return true;
     }
@@ -309,6 +312,11 @@ fn read_transport_state_for_project(
 
     let (ts_num, ts_denom) = get_time_signature_for_project(medium, reaper_ctx);
 
+    // Read loop region (loop points, not time selection)
+    let loop_region = medium
+        .get_set_loop_time_range_2_get(reaper_ctx, TimeRangeType::LoopPoints)
+        .map(|range| daw_proto::LoopRegion::new(range.start.get(), range.end.get()));
+
     // Convert time positions to musical positions using REAPER's tempo map
     // This properly handles tempo changes throughout the project
     // Also applies project measure offset for correct display
@@ -319,6 +327,7 @@ fn read_transport_state_for_project(
         play_state,
         record_mode: daw_proto::RecordMode::Normal,
         looping,
+        loop_region,
         tempo: daw_proto::primitives::Tempo::from_bpm(tempo_bpm),
         playrate,
         time_signature: TimeSignature::new(ts_num as u32, ts_denom as u32),

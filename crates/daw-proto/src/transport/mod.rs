@@ -8,6 +8,7 @@ pub mod transport;
 
 pub use error::TransportError;
 pub use transport::{
-    AllProjectsTransport, PlayState, ProjectTransportState, RecordMode, Transport, TransportService,
+    AllProjectsTransport, LoopRegion, PlayState, ProjectTransportState, RecordMode, Transport,
+    TransportService,
 };
 pub use transport::{TransportServiceClient, TransportServiceDispatcher};

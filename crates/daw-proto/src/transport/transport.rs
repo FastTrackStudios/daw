@@ -31,12 +31,43 @@ pub enum RecordMode {
     Item,
 }
 
+/// Loop region (start and end positions in seconds)
+#[derive(Clone, Debug, Default, Facet, PartialEq)]
+pub struct LoopRegion {
+    /// Loop start position in seconds
+    pub start_seconds: f64,
+    /// Loop end position in seconds
+    pub end_seconds: f64,
+}
+
+impl LoopRegion {
+    /// Create a new loop region
+    pub fn new(start_seconds: f64, end_seconds: f64) -> Self {
+        Self {
+            start_seconds,
+            end_seconds,
+        }
+    }
+
+    /// Get loop duration in seconds
+    pub fn duration(&self) -> f64 {
+        self.end_seconds - self.start_seconds
+    }
+
+    /// Check if the loop region is valid (end > start)
+    pub fn is_valid(&self) -> bool {
+        self.end_seconds > self.start_seconds
+    }
+}
+
 /// Complete transport state
 #[derive(Clone, Debug, Facet)]
 pub struct Transport {
     pub play_state: PlayState,
     pub record_mode: RecordMode,
     pub looping: bool,
+    /// Loop region (start/end positions). Only meaningful when looping is true.
+    pub loop_region: Option<LoopRegion>,
     pub tempo: Tempo,
     pub playrate: f64,
     pub time_signature: TimeSignature,
@@ -51,6 +82,7 @@ impl Transport {
             play_state: PlayState::default(),
             record_mode: RecordMode::default(),
             looping: false,
+            loop_region: None,
             tempo: Tempo::default(),
             playrate: 1.0,
             time_signature: TimeSignature::default(),
