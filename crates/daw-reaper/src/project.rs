@@ -5,7 +5,7 @@
 
 use daw_proto::{ProjectEvent, ProjectInfo, ProjectService};
 use reaper_high::{Project, Reaper};
-use reaper_medium::ProjectRef;
+use reaper_medium::{CommandId, ProjectContext, ProjectRef};
 use roam::{Context, Tx};
 use std::time::Duration;
 use tracing::{debug, info};
@@ -26,6 +26,14 @@ impl Default for ReaperProject {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Get a project by tab index using medium_reaper's enum_projects
+fn project_by_tab(reaper: &Reaper, tab_index: u32) -> Option<Project> {
+    reaper
+        .medium_reaper()
+        .enum_projects(ProjectRef::Tab(tab_index), 0)
+        .map(|result| Project::new(result.project))
 }
 
 /// Extract project info from a REAPER project
@@ -73,7 +81,7 @@ impl ProjectService for ReaperProject {
 
                 // Iterate through all open project tabs
                 for i in 0..128 {
-                    if let Some(project) = reaper.project_by_ref(ProjectRef::Tab(i)) {
+                    if let Some(project) = project_by_tab(reaper, i) {
                         let info = project_to_info(&project);
                         if info.guid == project_id {
                             return Some(info);
@@ -103,7 +111,7 @@ impl ProjectService for ReaperProject {
 
                 // Iterate through all open project tabs (max 128)
                 for i in 0..128 {
-                    if let Some(project) = reaper.project_by_ref(ProjectRef::Tab(i)) {
+                    if let Some(project) = project_by_tab(reaper, i) {
                         let info = project_to_info(&project);
                         // Skip routing/utility projects
                         if !info.name.to_uppercase().contains("FTS-ROUTING") {
@@ -136,7 +144,7 @@ impl ProjectService for ReaperProject {
                 // Find the tab index for the project with matching GUID
                 let mut target_tab: Option<u32> = None;
                 for i in 0..128u32 {
-                    if let Some(project) = reaper.project_by_ref(ProjectRef::Tab(i)) {
+                    if let Some(project) = project_by_tab(reaper, i) {
                         let info = project_to_info(&project);
                         if info.guid == project_id {
                             target_tab = Some(i);
@@ -156,7 +164,7 @@ impl ProjectService for ReaperProject {
                 let current_project = reaper.current_project();
                 let mut current_tab: Option<u32> = None;
                 for i in 0..128u32 {
-                    if let Some(project) = reaper.project_by_ref(ProjectRef::Tab(i)) {
+                    if let Some(project) = project_by_tab(reaper, i) {
                         if project == current_project {
                             current_tab = Some(i);
                             break;
@@ -179,7 +187,7 @@ impl ProjectService for ReaperProject {
                 // Count total tabs first
                 let mut total_tabs = 0u32;
                 for i in 0..128u32 {
-                    if reaper.project_by_ref(ProjectRef::Tab(i)).is_some() {
+                    if project_by_tab(reaper, i).is_some() {
                         total_tabs = i + 1;
                     } else {
                         break;
@@ -199,22 +207,26 @@ impl ProjectService for ReaperProject {
                 };
 
                 // REAPER actions for tab switching
-                const ACTION_NEXT_TAB: u32 = 40861;
-                const ACTION_PREV_TAB: u32 = 40862;
+                let action_next_tab = CommandId::new(40861);
+                let action_prev_tab = CommandId::new(40862);
 
                 if forward_distance <= backward_distance {
                     // Go forward
                     for _ in 0..forward_distance {
-                        reaper
-                            .medium_reaper()
-                            .main_on_command_ex(ACTION_NEXT_TAB.into(), 0, None);
+                        reaper.medium_reaper().main_on_command_ex(
+                            action_next_tab,
+                            0,
+                            ProjectContext::CurrentProject,
+                        );
                     }
                 } else {
                     // Go backward
                     for _ in 0..backward_distance {
-                        reaper
-                            .medium_reaper()
-                            .main_on_command_ex(ACTION_PREV_TAB.into(), 0, None);
+                        reaper.medium_reaper().main_on_command_ex(
+                            action_prev_tab,
+                            0,
+                            ProjectContext::CurrentProject,
+                        );
                     }
                 }
 
@@ -264,7 +276,7 @@ impl ReaperProject {
                 let mut projects = Vec::new();
 
                 for i in 0..128 {
-                    if let Some(project) = reaper.project_by_ref(ProjectRef::Tab(i)) {
+                    if let Some(project) = project_by_tab(reaper, i) {
                         let info = project_to_info(&project);
                         if !info.name.to_uppercase().contains("FTS-ROUTING") {
                             projects.push(info);

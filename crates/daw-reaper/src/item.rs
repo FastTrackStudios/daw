@@ -10,7 +10,7 @@ use daw_proto::{
 };
 use reaper_high::Reaper;
 use reaper_medium::{
-    DurationInSeconds, ItemAttributeKey, MediaItem, MediaItemTake, MediaTrack, PitchShiftMode,
+    DurationInSeconds, ItemAttributeKey, MediaItem, MediaItemTake, MediaTrack,
     ProjectContext as ReaperProjectContext, Semitones, TakeAttributeKey, UiRefreshBehavior,
 };
 use roam::Context;
@@ -98,7 +98,7 @@ impl ReaperItem {
             }
             ItemRef::ProjectIndex(idx) => {
                 // Get item by global project index
-                unsafe { medium.get_media_item(project, *idx) }
+                medium.get_media_item(project, *idx)
             }
         }
     }
@@ -283,7 +283,7 @@ impl ItemService for ReaperItem {
                 let count = medium.count_media_items(ReaperProjectContext::CurrentProject);
                 for i in 0..count {
                     if let Some(item) =
-                        unsafe { medium.get_media_item(ReaperProjectContext::CurrentProject, i) }
+                        medium.get_media_item(ReaperProjectContext::CurrentProject, i)
                     {
                         if let Some(mut item_data) = Self::media_item_to_item(item) {
                             item_data.index = i as u32;
@@ -310,9 +310,9 @@ impl ItemService for ReaperItem {
 
                 let count = medium.count_selected_media_items(ReaperProjectContext::CurrentProject);
                 for i in 0..count {
-                    if let Some(item) = unsafe {
+                    if let Some(item) =
                         medium.get_selected_media_item(ReaperProjectContext::CurrentProject, i)
-                    } {
+                    {
                         if let Some(item_data) = Self::media_item_to_item(item) {
                             items.push(item_data);
                         }
@@ -1432,8 +1432,8 @@ impl TakeService for ReaperTake {
         &self,
         _cx: &Context,
         _project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
+        _item: ItemRef,
+        _take: TakeRef,
         color: Option<u32>,
     ) {
         debug!("ReaperTake: set_color to {:?}", color);
@@ -1571,14 +1571,11 @@ impl TakeService for ReaperTake {
                     return;
                 };
 
-                let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
+                let _take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
                     ptr
                 } else {
                     return;
                 };
-
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
 
                 // PitchMode values:
                 // TODO: Implement proper pitch mode setting
@@ -1649,14 +1646,11 @@ impl TakeService for ReaperTake {
                     return;
                 };
 
-                let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
+                let _take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
                     ptr
                 } else {
                     return;
                 };
-
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
 
                 // TODO: Create a new PCM source from file
                 // Need to use pcm_source_create_from_file_ex or low-level API

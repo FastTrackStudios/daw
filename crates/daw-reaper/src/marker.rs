@@ -3,6 +3,7 @@
 //! Implements MarkerService by dispatching REAPER API calls to the main thread
 //! using TaskSupport from reaper-high.
 
+use crate::project_context::resolve_project_context;
 use crate::transport::task_support;
 use daw_proto::{Marker, MarkerEvent, MarkerService, Position, ProjectContext, TimePosition};
 use reaper_medium::{BookmarkRef, MarkerOrRegionPosition, ProjectContext as ReaperProjectContext};
@@ -34,43 +35,41 @@ impl MarkerService for ReaperMarker {
     // Query Methods
     // =========================================================================
 
-    async fn get_markers(&self, _cx: &Context, _project: ProjectContext) -> Vec<Marker> {
+    async fn get_markers(&self, _cx: &Context, project: ProjectContext) -> Vec<Marker> {
         if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
+            ts.main_thread_future(move || {
                 let reaper = reaper_high::Reaper::get();
                 let medium = reaper.medium_reaper();
                 let mut markers = Vec::new();
 
+                // Resolve the project context to a REAPER project context
+                let reaper_ctx = resolve_project_context(&project);
+
                 // Get total count of markers and regions
-                let count_result =
-                    medium.count_project_markers(ReaperProjectContext::CurrentProject);
+                let count_result = medium.count_project_markers(reaper_ctx);
                 let total_count = count_result.total_count;
 
                 // Enumerate all markers/regions
                 for idx in 0..total_count {
-                    medium.enum_project_markers_3(
-                        ReaperProjectContext::CurrentProject,
-                        idx,
-                        |result| {
-                            if let Some(info) = result {
-                                // region_end_position is None for markers, Some for regions
-                                if info.region_end_position.is_none() {
-                                    markers.push(Marker {
-                                        id: Some(info.id.get() as u32),
-                                        position: Position::from_time(TimePosition::from_seconds(
-                                            info.position.get(),
-                                        )),
-                                        name: info.name.to_string(),
-                                        color: {
-                                            let c = info.color.to_raw();
-                                            if c != 0 { Some(c as u32) } else { None }
-                                        },
-                                        guid: None,
-                                    });
-                                }
+                    medium.enum_project_markers_3(reaper_ctx, idx, |result| {
+                        if let Some(info) = result {
+                            // region_end_position is None for markers, Some for regions
+                            if info.region_end_position.is_none() {
+                                markers.push(Marker {
+                                    id: Some(info.id.get() as u32),
+                                    position: Position::from_time(TimePosition::from_seconds(
+                                        info.position.get(),
+                                    )),
+                                    name: info.name.to_string(),
+                                    color: {
+                                        let c = info.color.to_raw();
+                                        if c != 0 { Some(c as u32) } else { None }
+                                    },
+                                    guid: None,
+                                });
                             }
-                        },
-                    );
+                        }
+                    });
                 }
 
                 // Sort by position
