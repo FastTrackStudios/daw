@@ -14,6 +14,7 @@ daw-proto.workspace = true
 roam.workspace = true
 tracing.workspace = true
 tokio.workspace = true
+keyflow = { path = "../../keyflow/keyflow", features = ["engraver", "midi-import"] }
 
 # REAPER bindings for actual DAW control
 reaper-high.workspace = true

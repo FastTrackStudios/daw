@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use crate::{DawClients, FxChain, Markers, ProjectItems, Regions, TempoMap, Tracks, Transport};
+use crate::{
+    DawClients, FxChain, Markers, MidiAnalysis, ProjectItems, Regions, TempoMap, Tracks,
+    Transport,
+};
 use daw_proto::FxChainContext;
 
 /// Project handle - lightweight wrapper around project GUID
@@ -181,6 +184,11 @@ impl Project {
     /// ```
     pub fn tracks(&self) -> Tracks {
         Tracks::new(self.guid.clone(), self.clients.clone())
+    }
+
+    /// Get project-level MIDI analysis accessor.
+    pub fn midi_analysis(&self) -> MidiAnalysis {
+        MidiAnalysis::new(self.guid.clone(), self.clients.clone())
     }
 
     /// Get monitoring FX chain (global, not per-track)

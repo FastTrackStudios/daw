@@ -12,14 +12,20 @@
 //! - **TempoMapService**: Tempo and time signature changes
 
 use cell_runtime::run_cell;
+use daw_proto::item::{ItemServiceDispatcher, TakeServiceDispatcher};
 use daw_proto::marker::MarkerServiceDispatcher;
+use daw_proto::midi::MidiServiceDispatcher;
+use daw_proto::track::TrackServiceDispatcher;
 use daw_proto::project::ProjectServiceDispatcher;
 use daw_proto::region::RegionServiceDispatcher;
 use daw_proto::tempo_map::TempoMapServiceDispatcher;
 use daw_proto::transport::transport::TransportServiceDispatcher;
+use daw_proto::MidiAnalysisServiceDispatcher;
 use daw_standalone::{
-    StandaloneMarker, StandaloneProject, StandaloneRegion, StandaloneTempoMap, StandaloneTransport,
+    StandaloneItem, StandaloneMarker, StandaloneMidi, StandaloneMidiAnalysis, StandaloneProject,
+    StandaloneRegion, StandaloneTake, StandaloneTempoMap, StandaloneTrack, StandaloneTransport,
 };
+use roam::session::RoutedDispatcher;
 use roam_telemetry::{
     ExporterConfig, LoggingExporter, OtlpExporter, SpanExporter, TelemetryMiddleware,
 };
@@ -77,6 +83,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let marker = StandaloneMarker::new();
         let region = StandaloneRegion::new();
         let tempo_map = StandaloneTempoMap::new();
+        let track = StandaloneTrack::new();
+        let item = StandaloneItem::new();
+        let take = StandaloneTake::from_item_service(&item);
+        let midi = StandaloneMidi::new();
+        let midi_analysis = StandaloneMidiAnalysis::from_midi(&midi);
 
         // Create dispatchers with telemetry middleware
         let transport_dispatcher =
@@ -88,13 +99,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let region_dispatcher =
             RegionServiceDispatcher::new(region).with_middleware(telemetry.clone());
         let tempo_map_dispatcher =
-            TempoMapServiceDispatcher::new(tempo_map).with_middleware(telemetry);
+            TempoMapServiceDispatcher::new(tempo_map).with_middleware(telemetry.clone());
+        let track_dispatcher = TrackServiceDispatcher::new(track).with_middleware(telemetry.clone());
+        let item_dispatcher = ItemServiceDispatcher::new(item).with_middleware(telemetry.clone());
+        let take_dispatcher = TakeServiceDispatcher::new(take).with_middleware(telemetry.clone());
+        let midi_dispatcher = MidiServiceDispatcher::new(midi).with_middleware(telemetry.clone());
+        let midi_analysis_dispatcher =
+            MidiAnalysisServiceDispatcher::new(midi_analysis).with_middleware(telemetry);
 
         // Compose all dispatchers together
         // The RoutedDispatcher chains dispatchers: first tries left, falls through to right
         let transport_project = RoutedDispatcher::new(project_dispatcher, transport_dispatcher);
         let with_marker = RoutedDispatcher::new(transport_project, marker_dispatcher);
         let with_region = RoutedDispatcher::new(with_marker, region_dispatcher);
-        RoutedDispatcher::new(with_region, tempo_map_dispatcher)
+        let with_tempo_map = RoutedDispatcher::new(with_region, tempo_map_dispatcher);
+        let with_track = RoutedDispatcher::new(with_tempo_map, track_dispatcher);
+        let with_item = RoutedDispatcher::new(with_track, item_dispatcher);
+        let with_take = RoutedDispatcher::new(with_item, take_dispatcher);
+        let with_midi = RoutedDispatcher::new(with_take, midi_dispatcher);
+        RoutedDispatcher::new(with_midi, midi_analysis_dispatcher)
     })
 }

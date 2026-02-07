@@ -5,26 +5,26 @@ use daw_proto::midi::{
     MidiPitchBendCreate, MidiProgramChange, MidiService, MidiSysEx, MidiTakeLocation, PpqRange,
     QuantizeParams,
 };
+use daw_proto::{ItemRef, ProjectContext, TakeRef};
 use roam::Context;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 /// Internal note state
 #[derive(Clone)]
-struct NoteState {
-    index: u32,
-    channel: u8,
-    pitch: u8,
-    velocity: u8,
-    start_ppq: f64,
-    length_ppq: f64,
-    selected: bool,
-    muted: bool,
+pub(crate) struct NoteState {
+    pub(crate) index: u32,
+    pub(crate) channel: u8,
+    pub(crate) pitch: u8,
+    pub(crate) velocity: u8,
+    pub(crate) start_ppq: f64,
+    pub(crate) length_ppq: f64,
+    pub(crate) selected: bool,
+    pub(crate) muted: bool,
 }
 
 impl NoteState {
-    fn to_note(&self) -> MidiNote {
+    pub(crate) fn to_note(&self) -> MidiNote {
         MidiNote {
             index: self.index,
             channel: self.channel,
@@ -40,7 +40,7 @@ impl NoteState {
 
 /// Internal CC state
 #[derive(Clone)]
-struct CcState {
+pub(crate) struct CcState {
     index: u32,
     channel: u8,
     controller: u8,
@@ -50,7 +50,7 @@ struct CcState {
 }
 
 impl CcState {
-    fn to_cc(&self) -> MidiCC {
+    pub(crate) fn to_cc(&self) -> MidiCC {
         MidiCC {
             index: self.index,
             channel: self.channel,
@@ -64,7 +64,7 @@ impl CcState {
 
 /// Internal pitch bend state
 #[derive(Clone)]
-struct PitchBendState {
+pub(crate) struct PitchBendState {
     index: u32,
     channel: u8,
     value: i16,
@@ -73,7 +73,7 @@ struct PitchBendState {
 }
 
 impl PitchBendState {
-    fn to_pitch_bend(&self) -> MidiPitchBend {
+    pub(crate) fn to_pitch_bend(&self) -> MidiPitchBend {
         MidiPitchBend {
             index: self.index,
             channel: self.channel,
@@ -86,11 +86,11 @@ impl PitchBendState {
 
 /// MIDI data for a take
 #[derive(Clone, Default)]
-struct TakeMidiData {
-    take_guid: String,
-    notes: Vec<NoteState>,
-    ccs: Vec<CcState>,
-    pitch_bends: Vec<PitchBendState>,
+pub(crate) struct TakeMidiData {
+    pub(crate) take_guid: String,
+    pub(crate) notes: Vec<NoteState>,
+    pub(crate) ccs: Vec<CcState>,
+    pub(crate) pitch_bends: Vec<PitchBendState>,
 }
 
 /// Standalone MIDI editing service implementation
@@ -106,10 +106,40 @@ impl StandaloneMidi {
         }
     }
 
+    pub(crate) fn shared_takes(&self) -> Arc<RwLock<Vec<TakeMidiData>>> {
+        self.takes.clone()
+    }
+
+    fn project_key(project: &ProjectContext) -> String {
+        match project {
+            ProjectContext::Current => "current".to_string(),
+            ProjectContext::Project(guid) => guid.clone(),
+        }
+    }
+
+    fn item_key(item: &ItemRef) -> String {
+        match item {
+            ItemRef::Guid(guid) => format!("guid:{guid}"),
+            ItemRef::Index(index) => format!("index:{index}"),
+            ItemRef::ProjectIndex(index) => format!("project-index:{index}"),
+        }
+    }
+
+    fn take_key(take: &TakeRef) -> String {
+        match take {
+            TakeRef::Guid(guid) => format!("guid:{guid}"),
+            TakeRef::Index(index) => format!("index:{index}"),
+            TakeRef::Active => "active".to_string(),
+        }
+    }
+
     fn get_take_guid(_location: &MidiTakeLocation) -> String {
-        // In a real implementation, we'd look up the take GUID from the item
-        // For the stub, we just use a placeholder
-        Uuid::new_v4().to_string()
+        format!(
+            "{}::{}::{}",
+            Self::project_key(&_location.project),
+            Self::item_key(&_location.item),
+            Self::take_key(&_location.take)
+        )
     }
 
     async fn get_or_create_take(&self, location: &MidiTakeLocation) -> String {

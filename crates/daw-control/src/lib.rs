@@ -113,6 +113,7 @@ pub use daw_proto::AutomationServiceClient;
 pub use daw_proto::FxServiceClient;
 pub use daw_proto::ItemServiceClient;
 pub use daw_proto::LiveMidiServiceClient;
+pub use daw_proto::MidiAnalysisServiceClient;
 pub use daw_proto::MarkerServiceClient;
 pub use daw_proto::MidiServiceClient;
 pub use daw_proto::PositionConversionServiceClient;
@@ -130,6 +131,7 @@ mod fx;
 mod items;
 mod markers;
 mod midi_editor;
+mod midi_analysis;
 mod project;
 mod regions;
 mod routing;
@@ -142,6 +144,7 @@ pub use self::fx::{FxChain, FxHandle, FxParamHandle};
 pub use self::items::{ItemHandle, Items, ProjectItems, TakeHandle, Takes};
 pub use self::markers::Markers;
 pub use self::midi_editor::MidiEditor;
+pub use self::midi_analysis::MidiAnalysis;
 pub use self::project::Project;
 pub use self::regions::Regions;
 pub use self::routing::{HardwareOutputs, Receives, RouteHandle, Sends};
@@ -166,6 +169,7 @@ pub struct DawClients {
     pub(crate) automation: AutomationServiceClient,
     pub(crate) live_midi: LiveMidiServiceClient,
     pub(crate) midi: MidiServiceClient,
+    pub(crate) midi_analysis: MidiAnalysisServiceClient,
     pub(crate) audio_engine: AudioEngineServiceClient,
 }
 
@@ -187,6 +191,7 @@ impl DawClients {
             automation: AutomationServiceClient::new(handle.clone()),
             live_midi: LiveMidiServiceClient::new(handle.clone()),
             midi: MidiServiceClient::new(handle.clone()),
+            midi_analysis: MidiAnalysisServiceClient::new(handle.clone()),
             audio_engine: AudioEngineServiceClient::new(handle),
         }
     }
