@@ -58,9 +58,46 @@ impl StandaloneMidiAnalysis {
         }
         format!("{:x}", hasher.finish())
     }
+
+    fn import_notes_from_take(source_take: &TakeMidiData) -> Vec<ImportMidiNote> {
+        source_take
+            .notes
+            .iter()
+            .map(|note| ImportMidiNote {
+                pitch: note.pitch,
+                velocity: note.velocity,
+                start_tick: note.start_ppq.max(0.0).round() as u32,
+                duration_ticks: note.length_ppq.max(1.0).round() as u32,
+                channel: note.channel,
+            })
+            .collect()
+    }
 }
 
 impl MidiAnalysisService for StandaloneMidiAnalysis {
+    async fn source_fingerprint(
+        &self,
+        _cx: &Context,
+        request: MidiChartRequest,
+    ) -> Result<String, String> {
+        if !Self::track_tag_matches(request.track_tag.as_deref()) {
+            return Err(format!(
+                "No track matched tag '{}'",
+                request.track_tag.as_deref().unwrap_or_default()
+            ));
+        }
+
+        let takes = self.takes.read().await;
+        let Some(source_take) = takes.iter().find(|take| !take.notes.is_empty()) else {
+            return Err("No MIDI notes available".to_string());
+        };
+        let import_notes = Self::import_notes_from_take(source_take);
+        if import_notes.is_empty() {
+            return Err("No MIDI notes available".to_string());
+        }
+        Ok(Self::make_fingerprint(&request.project, &import_notes))
+    }
+
     async fn generate_chart_data(
         &self,
         _cx: &Context,
@@ -78,17 +115,7 @@ impl MidiAnalysisService for StandaloneMidiAnalysis {
             return Err("No MIDI notes available".to_string());
         };
 
-        let import_notes: Vec<ImportMidiNote> = source_take
-            .notes
-            .iter()
-            .map(|note| ImportMidiNote {
-                pitch: note.pitch,
-                velocity: note.velocity,
-                start_tick: note.start_ppq.max(0.0).round() as u32,
-                duration_ticks: note.length_ppq.max(1.0).round() as u32,
-                channel: note.channel,
-            })
-            .collect();
+        let import_notes = Self::import_notes_from_take(source_take);
 
         if import_notes.is_empty() {
             return Err("No MIDI notes available".to_string());

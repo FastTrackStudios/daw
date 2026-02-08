@@ -1,0 +1,19 @@
+[package]
+name = "dawfile-reaper"
+version = "0.1.0"
+edition = "2021"
+description = "REAPER file parser for DawFile built on the RPP/RPPXML format"
+license = "MIT"
+
+
+[dependencies]
+# Parser dependencies
+nom = "8"
+
+# Common workspace dependencies
+serde = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+[lints]
+workspace = true

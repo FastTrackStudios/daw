@@ -54,6 +54,12 @@ pub struct MidiChartData {
 /// Read-only MIDI analysis service.
 #[service]
 pub trait MidiAnalysisService {
+    /// Return a lightweight source fingerprint for change detection.
+    ///
+    /// Implementations should derive this from MIDI + marker/region source data,
+    /// without generating chart text or chords.
+    async fn source_fingerprint(&self, request: MidiChartRequest) -> Result<String, String>;
+
     /// Analyze MIDI for the given request and return chart/chord data.
     async fn generate_chart_data(&self, request: MidiChartRequest) -> Result<MidiChartData, String>;
 }

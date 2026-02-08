@@ -187,18 +187,8 @@ impl ReaperMidiAnalysis {
         markers
     }
 
-    fn build_chart_data(
-        project: Project,
-        source_track_name: String,
-        notes: Vec<KeyflowMidiNote>,
-        item_start_time: f64,
-    ) -> Result<MidiChartData, String> {
-        if notes.is_empty() {
-            return Err("No MIDI notes found".to_string());
-        }
-
-        let item_start_tick = Self::time_to_tick(project, item_start_time);
-        let import_notes: Vec<ImportMidiNote> = notes
+    fn import_notes(notes: &[KeyflowMidiNote], item_start_tick: u32) -> Vec<ImportMidiNote> {
+        notes
             .iter()
             .map(|note| {
                 let abs_start = item_start_tick + (note.start_ppq.max(0) as u32);
@@ -211,9 +201,48 @@ impl ReaperMidiAnalysis {
                     channel: note.channel,
                 }
             })
-            .collect();
+            .collect()
+    }
+
+    fn make_source_fingerprint(
+        source_track_name: &str,
+        import_notes: &[ImportMidiNote],
+        markers: &[MarkerEvent],
+    ) -> String {
+        let mut hasher = DefaultHasher::new();
+        source_track_name.hash(&mut hasher);
+        import_notes.len().hash(&mut hasher);
+        for note in import_notes {
+            note.pitch.hash(&mut hasher);
+            note.velocity.hash(&mut hasher);
+            note.start_tick.hash(&mut hasher);
+            note.duration_ticks.hash(&mut hasher);
+            note.channel.hash(&mut hasher);
+        }
+        markers.len().hash(&mut hasher);
+        for marker in markers {
+            marker.tick.hash(&mut hasher);
+            marker.text.hash(&mut hasher);
+        }
+        format!("{:x}", hasher.finish())
+    }
+
+    fn build_chart_data(
+        project: Project,
+        source_track_name: String,
+        notes: Vec<KeyflowMidiNote>,
+        item_start_time: f64,
+    ) -> Result<MidiChartData, String> {
+        if notes.is_empty() {
+            return Err("No MIDI notes found".to_string());
+        }
+
+        let item_start_tick = Self::time_to_tick(project, item_start_time);
+        let import_notes = Self::import_notes(&notes, item_start_tick);
 
         let markers = Self::gather_markers(project);
+        let source_fingerprint =
+            Self::make_source_fingerprint(&source_track_name, &import_notes, &markers);
         let midi_file = MidiFile::from_parts(
             REAPER_PPQ,
             vec![MidiTrack {
@@ -247,19 +276,6 @@ impl ReaperMidiAnalysis {
             })
             .collect::<Vec<_>>();
 
-        let mut hasher = DefaultHasher::new();
-        source_track_name.hash(&mut hasher);
-        chart_text.hash(&mut hasher);
-        import_notes.len().hash(&mut hasher);
-        for note in &import_notes {
-            note.pitch.hash(&mut hasher);
-            note.velocity.hash(&mut hasher);
-            note.start_tick.hash(&mut hasher);
-            note.duration_ticks.hash(&mut hasher);
-            note.channel.hash(&mut hasher);
-        }
-        let source_fingerprint = format!("{:x}", hasher.finish());
-
         Ok(MidiChartData {
             source_track_name,
             source_fingerprint,
@@ -276,6 +292,46 @@ impl Default for ReaperMidiAnalysis {
 }
 
 impl MidiAnalysisService for ReaperMidiAnalysis {
+    async fn source_fingerprint(
+        &self,
+        _cx: &Context,
+        request: MidiChartRequest,
+    ) -> Result<String, String> {
+        let Some(ts) = task_support() else {
+            return Err("TaskSupport not available".to_string());
+        };
+        ts.main_thread_future(move || {
+            let Some(project) = Self::resolve_project(&request.project) else {
+                return Err("Project not found".to_string());
+            };
+            let Some(track) = Self::find_track_by_tag(&project, request.track_tag.as_deref()) else {
+                let tag = request.track_tag.unwrap_or_else(|| "<none>".to_string());
+                return Err(format!("No track matched tag '{}'", tag));
+            };
+            let track_name = track
+                .name()
+                .map(|name| name.to_str().to_string())
+                .unwrap_or_else(|| "Unnamed Track".to_string());
+            let Some((take, item_start_time)) = Self::get_first_midi_take(&track) else {
+                return Err(format!("Track '{}' has no MIDI take", track_name));
+            };
+            let notes = Self::read_keyflow_notes(take);
+            if notes.is_empty() {
+                return Err("No MIDI notes found".to_string());
+            }
+            let item_start_tick = Self::time_to_tick(project, item_start_time);
+            let import_notes = Self::import_notes(&notes, item_start_tick);
+            let markers = Self::gather_markers(project);
+            Ok(Self::make_source_fingerprint(
+                &track_name,
+                &import_notes,
+                &markers,
+            ))
+        })
+        .await
+        .unwrap_or_else(|_| Err("Failed to execute MIDI analysis on main thread".to_string()))
+    }
+
     async fn generate_chart_data(
         &self,
         _cx: &Context,
