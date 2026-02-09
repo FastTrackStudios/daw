@@ -2131,100 +2131,465 @@ impl FxService for ReaperFx {
     async fn create_container(
         &self,
         _cx: &Context,
-        _project: ProjectContext,
-        _request: CreateContainerRequest,
+        project: ProjectContext,
+        request: CreateContainerRequest,
     ) -> Option<FxNodeId> {
-        // TODO(US-005): Implement container creation
-        warn!("ReaperFx::create_container not yet implemented");
-        None
+        debug!("ReaperFx::create_container({:?})", request.name);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return None;
+        };
+
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)?;
+            let (_track, chain) = resolve_fx_chain(&proj, &request.context)?;
+            let is_input = chain.is_input_fx();
+            let track = chain.track()?;
+            let raw_track = track.raw().ok()?;
+
+            // Add container at end of chain, then move to requested position
+            let container_fx = chain.insert_fx_by_name(chain.fx_count(), "Container")?;
+            let container_index = container_fx.index();
+
+            // Move to requested position if not already there
+            if container_index != request.index && request.index < chain.fx_count() {
+                unsafe {
+                    Reaper::get().medium_reaper().track_fx_copy_to_track(
+                        (raw_track, fx_location(container_index, is_input)),
+                        (raw_track, fx_location(request.index, is_input)),
+                        TransferBehavior::Move,
+                    );
+                }
+            }
+
+            // Set the container name
+            let final_index =
+                if container_index != request.index && request.index < chain.fx_count() {
+                    request.index
+                } else {
+                    container_index
+                };
+            let container_fx = chain.fx_by_index_untracked(final_index);
+            if let Ok(c_name) = std::ffi::CString::new(request.name) {
+                unsafe {
+                    let _ = container_fx.set_named_config_param("renamed_name", c_name.as_ptr());
+                }
+            }
+
+            // Return the new container's node ID
+            Some(FxNodeId::container(format!("{}", final_index)))
+        })
+        .await
+        .unwrap_or(None)
     }
 
     async fn move_to_container(
         &self,
         _cx: &Context,
-        _project: ProjectContext,
-        _request: MoveToContainerRequest,
+        project: ProjectContext,
+        request: MoveToContainerRequest,
     ) {
-        // TODO(US-005): Implement move-to-container
-        warn!("ReaperFx::move_to_container not yet implemented");
+        debug!(
+            "ReaperFx::move_to_container({:?} -> {:?})",
+            request.node_id, request.container_id
+        );
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return;
+        };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some((_track, chain)) = resolve_fx_chain(&proj, &request.context) else {
+                return;
+            };
+            let is_input = chain.is_input_fx();
+            let Some(track) = chain.track() else { return };
+            let Ok(raw_track) = track.raw() else { return };
+
+            // Resolve source FX raw index
+            let Some(source_raw) = resolve_node_to_raw_index(&chain, &request.node_id) else {
+                warn!("Could not resolve source node {:?}", request.node_id);
+                return;
+            };
+
+            // Resolve destination container raw index
+            let Some(container_raw) = resolve_node_to_raw_index(&chain, &request.container_id)
+            else {
+                warn!("Could not resolve container {:?}", request.container_id);
+                return;
+            };
+
+            // Read the container's child count and compute destination slot
+            let container_fx = chain.fx_by_index_untracked(container_raw);
+            let child_count = read_config_u32(&container_fx, "container_count");
+
+            // Destination slot: CONTAINER_BASE + container_addr + stride * (child_pos + 1)
+            // For top-level containers, stride is 1
+            // child_index is clamped to child_count (append at end)
+            let child_pos = request.child_index.min(child_count);
+            let dest_raw = CONTAINER_BASE + container_raw + (child_pos + 1);
+
+            unsafe {
+                Reaper::get().medium_reaper().track_fx_copy_to_track(
+                    (raw_track, fx_location(source_raw, is_input)),
+                    (raw_track, fx_location(dest_raw, is_input)),
+                    TransferBehavior::Move,
+                );
+            }
+        });
     }
 
     async fn move_from_container(
         &self,
         _cx: &Context,
-        _project: ProjectContext,
-        _request: MoveFromContainerRequest,
+        project: ProjectContext,
+        request: MoveFromContainerRequest,
     ) {
-        // TODO(US-005): Implement move-from-container
-        warn!("ReaperFx::move_from_container not yet implemented");
+        debug!(
+            "ReaperFx::move_from_container({:?} -> index {})",
+            request.node_id, request.target_index
+        );
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return;
+        };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some((_track, chain)) = resolve_fx_chain(&proj, &request.context) else {
+                return;
+            };
+            let is_input = chain.is_input_fx();
+            let Some(track) = chain.track() else { return };
+            let Ok(raw_track) = track.raw() else { return };
+
+            // Resolve source FX (inside container)
+            let Some(source_raw) = resolve_node_to_raw_index(&chain, &request.node_id) else {
+                warn!("Could not resolve node {:?}", request.node_id);
+                return;
+            };
+
+            // Move to top-level position
+            unsafe {
+                Reaper::get().medium_reaper().track_fx_copy_to_track(
+                    (raw_track, fx_location(source_raw, is_input)),
+                    (raw_track, fx_location(request.target_index, is_input)),
+                    TransferBehavior::Move,
+                );
+            }
+        });
     }
 
     async fn set_routing_mode(
         &self,
         _cx: &Context,
-        _project: ProjectContext,
-        _context: FxChainContext,
-        _node_id: FxNodeId,
-        _mode: FxRoutingMode,
+        project: ProjectContext,
+        context: FxChainContext,
+        node_id: FxNodeId,
+        mode: FxRoutingMode,
     ) {
-        // TODO(US-005): Implement routing mode set via SetNamedConfigParm(fx, "parallel", "0"/"1")
-        warn!("ReaperFx::set_routing_mode not yet implemented");
+        debug!("ReaperFx::set_routing_mode({:?}, {:?})", node_id, mode);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return;
+        };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some((_track, chain)) = resolve_fx_chain(&proj, &context) else {
+                return;
+            };
+
+            let Some(raw_index) = resolve_node_to_raw_index(&chain, &node_id) else {
+                warn!("Could not resolve container {:?}", node_id);
+                return;
+            };
+
+            let container_fx = chain.fx_by_index_untracked(raw_index);
+            let value = mode.to_reaper_param();
+            if let Ok(c_value) = std::ffi::CString::new(value) {
+                unsafe {
+                    let _ = container_fx.set_named_config_param("parallel", c_value.as_ptr());
+                }
+            }
+        });
     }
 
     async fn get_container_channel_config(
         &self,
         _cx: &Context,
-        _project: ProjectContext,
-        _context: FxChainContext,
-        _container_id: FxNodeId,
+        project: ProjectContext,
+        context: FxChainContext,
+        container_id: FxNodeId,
     ) -> FxContainerChannelConfig {
-        // TODO(US-004): Implement channel config read via GetNamedConfigParm
-        warn!("ReaperFx::get_container_channel_config not yet implemented");
-        FxContainerChannelConfig::default()
+        debug!("ReaperFx::get_container_channel_config({:?})", container_id);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return FxContainerChannelConfig::default();
+        };
+
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)?;
+            let (_track, chain) = resolve_fx_chain(&proj, &context)?;
+
+            let raw_index = resolve_node_to_raw_index(&chain, &container_id)?;
+            let container_fx = chain.fx_by_index_untracked(raw_index);
+
+            Some(FxContainerChannelConfig {
+                nch: read_config_u32(&container_fx, "container_nch"),
+                nch_in: read_config_u32(&container_fx, "container_nch_in"),
+                nch_out: read_config_u32(&container_fx, "container_nch_out"),
+            })
+        })
+        .await
+        .unwrap_or(Some(FxContainerChannelConfig::default()))
+        .unwrap_or_default()
     }
 
     async fn set_container_channel_config(
         &self,
         _cx: &Context,
-        _project: ProjectContext,
-        _request: SetContainerChannelConfigRequest,
+        project: ProjectContext,
+        request: SetContainerChannelConfigRequest,
     ) {
-        // TODO(US-005): Implement channel config set via SetNamedConfigParm
-        warn!("ReaperFx::set_container_channel_config not yet implemented");
+        debug!(
+            "ReaperFx::set_container_channel_config({:?})",
+            request.container_id
+        );
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return;
+        };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some((_track, chain)) = resolve_fx_chain(&proj, &request.context) else {
+                return;
+            };
+
+            let Some(raw_index) = resolve_node_to_raw_index(&chain, &request.container_id) else {
+                warn!("Could not resolve container {:?}", request.container_id);
+                return;
+            };
+
+            let container_fx = chain.fx_by_index_untracked(raw_index);
+
+            // Set each channel config parameter
+            let params = [
+                ("container_nch", request.config.nch),
+                ("container_nch_in", request.config.nch_in),
+                ("container_nch_out", request.config.nch_out),
+            ];
+
+            for (key, value) in &params {
+                if let Ok(c_value) = std::ffi::CString::new(value.to_string()) {
+                    unsafe {
+                        let _ = container_fx.set_named_config_param(*key, c_value.as_ptr());
+                    }
+                }
+            }
+        });
     }
 
     async fn enclose_in_container(
         &self,
         _cx: &Context,
-        _project: ProjectContext,
-        _request: EncloseInContainerRequest,
+        project: ProjectContext,
+        request: EncloseInContainerRequest,
     ) -> Option<FxNodeId> {
-        // TODO(US-005): Implement enclose-in-container
-        warn!("ReaperFx::enclose_in_container not yet implemented");
-        None
+        debug!(
+            "ReaperFx::enclose_in_container({:?}, {:?})",
+            request.node_ids, request.name
+        );
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return None;
+        };
+
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)?;
+            let (_track, chain) = resolve_fx_chain(&proj, &request.context)?;
+            let is_input = chain.is_input_fx();
+            let track = chain.track()?;
+            let raw_track = track.raw().ok()?;
+
+            if request.node_ids.is_empty() {
+                return None;
+            }
+
+            // Resolve all source FX to raw indices
+            let mut raw_indices: Vec<u32> = request
+                .node_ids
+                .iter()
+                .filter_map(|id| resolve_node_to_raw_index(&chain, id))
+                .collect();
+
+            if raw_indices.is_empty() {
+                warn!("Could not resolve any node IDs for enclose_in_container");
+                return None;
+            }
+
+            // Sort so we know the insertion position (first FX's position)
+            raw_indices.sort();
+            let insert_pos = raw_indices[0];
+
+            // Create a container at the position of the first FX
+            let container_fx = chain.insert_fx_by_name(insert_pos, "Container")?;
+            let container_index = container_fx.index();
+
+            // Set the container name
+            if let Ok(c_name) = std::ffi::CString::new(request.name) {
+                unsafe {
+                    let _ = container_fx.set_named_config_param("renamed_name", c_name.as_ptr());
+                }
+            }
+
+            // Move each source FX into the container.
+            // After inserting the container, indices of FX after it shift by +1.
+            // Move in reverse order to maintain index stability.
+            for (child_pos, &original_raw) in raw_indices.iter().enumerate() {
+                // Adjust for the container insertion: FX after insert_pos shifted +1
+                let adjusted_raw = if original_raw >= insert_pos {
+                    original_raw + 1
+                } else {
+                    original_raw
+                };
+
+                let dest_raw = CONTAINER_BASE + container_index + (child_pos as u32 + 1);
+
+                unsafe {
+                    Reaper::get().medium_reaper().track_fx_copy_to_track(
+                        (raw_track, fx_location(adjusted_raw, is_input)),
+                        (raw_track, fx_location(dest_raw, is_input)),
+                        TransferBehavior::Move,
+                    );
+                }
+            }
+
+            Some(FxNodeId::container(format!("{}", container_index)))
+        })
+        .await
+        .unwrap_or(None)
     }
 
     async fn explode_container(
         &self,
         _cx: &Context,
-        _project: ProjectContext,
-        _context: FxChainContext,
-        _container_id: FxNodeId,
+        project: ProjectContext,
+        context: FxChainContext,
+        container_id: FxNodeId,
     ) {
-        // TODO(US-005): Implement explode-container
-        warn!("ReaperFx::explode_container not yet implemented");
+        debug!("ReaperFx::explode_container({:?})", container_id);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return;
+        };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some((_track, chain)) = resolve_fx_chain(&proj, &context) else {
+                return;
+            };
+            let is_input = chain.is_input_fx();
+            let Some(track) = chain.track() else { return };
+            let Ok(raw_track) = track.raw() else { return };
+
+            let Some(container_raw) = resolve_node_to_raw_index(&chain, &container_id) else {
+                warn!("Could not resolve container {:?}", container_id);
+                return;
+            };
+
+            let container_fx = chain.fx_by_index_untracked(container_raw);
+            let child_count = read_config_u32(&container_fx, "container_count");
+
+            if child_count == 0 {
+                // Empty container — just delete it
+                unsafe {
+                    let _ = Reaper::get()
+                        .medium_reaper()
+                        .track_fx_delete(raw_track, fx_location(container_raw, is_input));
+                }
+                return;
+            }
+
+            // Move children out in reverse order (last child first) to maintain
+            // stable indices. Each child moves to the position right after the
+            // container's current position.
+            let dest_index = container_raw + 1;
+            for i in (0..child_count).rev() {
+                let child_raw = CONTAINER_BASE + container_raw + (i + 1);
+                unsafe {
+                    Reaper::get().medium_reaper().track_fx_copy_to_track(
+                        (raw_track, fx_location(child_raw, is_input)),
+                        (raw_track, fx_location(dest_index, is_input)),
+                        TransferBehavior::Move,
+                    );
+                }
+            }
+
+            // Now delete the empty container
+            unsafe {
+                let _ = Reaper::get()
+                    .medium_reaper()
+                    .track_fx_delete(raw_track, fx_location(container_raw, is_input));
+            }
+        });
     }
 
     async fn rename_container(
         &self,
         _cx: &Context,
-        _project: ProjectContext,
-        _context: FxChainContext,
-        _container_id: FxNodeId,
-        _name: String,
+        project: ProjectContext,
+        context: FxChainContext,
+        container_id: FxNodeId,
+        name: String,
     ) {
-        // TODO(US-005): Implement via SetNamedConfigParm(fx, "renamed_name", name)
-        warn!("ReaperFx::rename_container not yet implemented");
+        debug!("ReaperFx::rename_container({:?}, {:?})", container_id, name);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return;
+        };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some((_track, chain)) = resolve_fx_chain(&proj, &context) else {
+                return;
+            };
+
+            let Some(raw_index) = resolve_node_to_raw_index(&chain, &container_id) else {
+                warn!("Could not resolve container {:?}", container_id);
+                return;
+            };
+
+            let container_fx = chain.fx_by_index_untracked(raw_index);
+            if let Ok(c_name) = std::ffi::CString::new(name) {
+                unsafe {
+                    let _ = container_fx.set_named_config_param("renamed_name", c_name.as_ptr());
+                }
+            }
+        });
     }
 
     // =========================================================================
