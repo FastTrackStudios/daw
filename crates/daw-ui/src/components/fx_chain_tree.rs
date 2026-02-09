@@ -728,7 +728,7 @@ fn FxTreeNode(props: FxTreeNodeProps) -> Element {
     let node_id = node.id.as_str().to_string();
     let is_selected = selected.read().as_deref() == Some(node_id.as_str());
 
-    let indent_px = depth * 16;
+    let indent_px = depth * 20;
 
     match &node.kind {
         FxNodeKind::Container {
@@ -757,7 +757,7 @@ fn FxTreeNode(props: FxTreeNodeProps) -> Element {
             } else {
                 "hover:bg-accent/50"
             };
-            let chevron = if is_collapsed { ">" } else { "v" };
+            let chevron = if is_collapsed { "\u{25B6}" } else { "\u{25BC}" };
 
             let toggle_id = node_id.clone();
             let select_id = node_id.clone();
@@ -793,7 +793,7 @@ fn FxTreeNode(props: FxTreeNodeProps) -> Element {
 
                     // Collapse toggle
                     button {
-                        class: "w-4 h-4 flex items-center justify-center text-muted-foreground hover:text-foreground text-[10px] font-mono",
+                        class: "w-4 h-4 flex items-center justify-center text-muted-foreground hover:text-foreground text-[8px]",
                         onclick: move |evt| {
                             evt.stop_propagation();
                             let mut set = collapsed.write();
@@ -806,16 +806,16 @@ fn FxTreeNode(props: FxTreeNodeProps) -> Element {
                         "{chevron}"
                     }
 
-                    // Container icon (routing badge — clickable to toggle)
+                    // Container icon (routing badge)
                     span { class: "text-[10px] {routing_color} font-bold w-4 text-center",
                         "{routing_label}"
                     }
 
                     // Name
-                    span { class: "flex-1 truncate {enabled_class}", "{name}" }
+                    span { class: "flex-1 truncate font-medium {enabled_class}", "{name}" }
 
-                    // Child count
-                    span { class: "text-[10px] text-muted-foreground", "{child_count}" }
+                    // Child count badge
+                    span { class: "text-[9px] text-muted-foreground bg-muted px-1 rounded", "{child_count}" }
 
                     // Enable indicator
                     span {
@@ -823,16 +823,20 @@ fn FxTreeNode(props: FxTreeNodeProps) -> Element {
                     }
                 }
 
-                // Children (if not collapsed)
+                // Children (if not collapsed) — wrapped in a bordered container for visual nesting
                 if !is_collapsed {
-                    for child in children.iter() {
-                        FxTreeNode {
-                            key: "{child.id.as_str()}",
-                            node: child.clone(),
-                            depth: depth + 1,
-                            collapsed: collapsed.clone(),
-                            selected: selected.clone(),
-                            context_menu: context_menu.clone(),
+                    div {
+                        class: "ml-2 border-l border-border/50",
+                        style: "margin-left: {indent_px + 10}px",
+                        for child in children.iter() {
+                            FxTreeNode {
+                                key: "{child.id.as_str()}",
+                                node: child.clone(),
+                                depth: depth + 1,
+                                collapsed: collapsed.clone(),
+                                selected: selected.clone(),
+                                context_menu: context_menu.clone(),
+                            }
                         }
                     }
                 }
