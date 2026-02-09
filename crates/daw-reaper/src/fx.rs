@@ -222,12 +222,19 @@ fn read_chain_state(chain: &FxChain) -> CachedChainState {
             .get_or_query_guid()
             .map(|g| g.to_string_without_braces())
             .unwrap_or_default();
-        let name = fx.name().to_str().to_string();
+        let name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            fx.name().to_str().to_string()
+        }))
+        .unwrap_or_else(|_| "(unknown)".to_string());
         let index = fx.index();
-        let enabled = fx.is_enabled();
+        let enabled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fx.is_enabled()))
+            .unwrap_or(false);
 
         // Read parameter values (up to MAX_MONITORED_PARAMS)
-        let param_count = fx.parameter_count().min(MAX_MONITORED_PARAMS);
+        let param_count =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fx.parameter_count()))
+                .unwrap_or(0)
+                .min(MAX_MONITORED_PARAMS);
         let mut param_values = Vec::with_capacity(param_count as usize);
         for i in 0..param_count {
             let param = fx.parameter_by_index(i);
@@ -261,7 +268,7 @@ fn read_container_states(chain: &FxChain) -> Vec<CachedContainerState> {
     for i in 0..top_count {
         let fx = chain.fx_by_index_untracked(i);
         if is_container_fx(&fx) {
-            snapshot_container(chain, i, 1, &format!("{}", i), &mut containers);
+            snapshot_container(chain, &fx, &format!("{}", i), &mut containers);
         }
     }
 
@@ -269,32 +276,32 @@ fn read_container_states(chain: &FxChain) -> Vec<CachedContainerState> {
 }
 
 /// Recursively snapshot a container and its nested containers.
+/// Uses `container_item.X` API to get child FX IDs safely.
 fn snapshot_container(
     chain: &FxChain,
-    addr: u32,
-    stride: u32,
+    container_fx: &reaper_high::Fx,
     path: &str,
     out: &mut Vec<CachedContainerState>,
 ) {
-    let container_fx = chain.fx_by_index_untracked(addr);
-    let child_count = read_config_u32(&container_fx, "container_count");
-    let name = container_fx.name().to_str().to_string();
-    let routing_mode = read_config_u32(&container_fx, "parallel");
+    let child_count = read_config_u32(container_fx, "container_count");
+    let name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        container_fx.name().to_str().to_string()
+    }))
+    .unwrap_or_else(|_| "Container".to_string());
+    let routing_mode = read_config_u32(container_fx, "parallel");
 
     let mut child_ids = Vec::with_capacity(child_count as usize);
 
     for i in 0..child_count {
-        let child_raw = CONTAINER_BASE + addr + stride * (i + 1);
+        let Some(child_raw) = container_child_fx_id(container_fx, i) else {
+            continue;
+        };
         let child_fx = chain.fx_by_index_untracked(child_raw);
 
         if is_container_fx(&child_fx) {
             let child_path = format!("{}:{}", path, i);
             child_ids.push(format!("c:{}", child_path));
-
-            // Recurse into nested container
-            let nested_count = read_config_u32(&child_fx, "container_count");
-            let nested_stride = (nested_count + 1) * stride;
-            snapshot_container(chain, child_raw, nested_stride, &child_path, out);
+            snapshot_container(chain, &child_fx, &child_path, out);
         } else {
             // Plugin child — identify by GUID
             let guid = reaper_high::get_fx_guid(chain, child_raw)
@@ -585,9 +592,13 @@ fn resolve_fx_index(chain: &FxChain, fx_ref: &FxRef) -> Option<u32> {
         FxRef::Name(name) => {
             // Search by name (first match)
             for fx in chain.index_based_fxs() {
-                let fx_name = fx.name();
-                if fx_name.to_str() == name {
-                    return Some(fx.index());
+                let fx_name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    fx.name().to_str().to_string()
+                }));
+                if let Ok(n) = fx_name {
+                    if n == *name {
+                        return Some(fx.index());
+                    }
                 }
             }
             None
@@ -616,18 +627,31 @@ fn parse_fx_type(sub_type: &str) -> FxType {
     }
 }
 
-/// Build an Fx proto struct from a reaper-high Fx
+/// Build an Fx proto struct from a reaper-high Fx.
+///
+/// Uses `catch_unwind` around methods that call `.expect()` internally
+/// (like `name()`) to prevent panics from crashing REAPER when an FX
+/// reference is stale (e.g. container child with an invalid index).
 fn build_fx_info(fx: &reaper_high::Fx) -> Fx {
     let guid = fx
         .get_or_query_guid()
         .map(|g| g.to_string_without_braces())
         .unwrap_or_default();
-    let name = fx.name().to_str().to_string();
+    let name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        fx.name().to_str().to_string()
+    }))
+    .unwrap_or_else(|_| "(unknown)".to_string());
     let index = fx.index();
-    let enabled = fx.is_enabled();
-    let offline = !fx.is_online();
-    let window_open = fx.window_is_open();
-    let parameter_count = fx.parameter_count();
+    let enabled =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fx.is_enabled())).unwrap_or(false);
+    let offline =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| !fx.is_online())).unwrap_or(false);
+    let window_open =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fx.window_is_open()))
+            .unwrap_or(false);
+    let parameter_count =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| fx.parameter_count()))
+            .unwrap_or(0);
 
     // Get plugin type and name via info() (REAPER >= 6.37)
     let (plugin_name, plugin_type, preset_name) = match fx.info() {
@@ -778,22 +802,35 @@ fn read_config_u32(fx: &reaper_high::Fx, key: &str) -> u32 {
         .unwrap_or(0)
 }
 
+/// Get the raw FX index for child `child_index` (0-based) inside a container,
+/// using REAPER's v7.06+ `container_item.X` named config param.
+///
+/// This is much safer than computing stride-based addresses manually, because
+/// REAPER validates the index and returns the correct encoded FX ID directly.
+fn container_child_fx_id(container_fx: &reaper_high::Fx, child_index: u32) -> Option<u32> {
+    let key = format!("container_item.{}", child_index);
+    read_config_str(container_fx, &key).and_then(|s| s.parse::<u32>().ok())
+}
+
 /// Build an FxNode for a plugin (non-container) FX.
 fn build_plugin_node(chain: &FxChain, fx: &reaper_high::Fx, parent_id: Option<FxNodeId>) -> FxNode {
     let guid = reaper_high::get_fx_guid(chain, fx.index())
         .map(|g| g.to_string_without_braces())
         .unwrap_or_default();
 
-    let enabled = fx.is_enabled();
     let fx_info = build_fx_info(fx);
+    let enabled = fx_info.enabled;
     FxNode::plugin(FxNodeId::from_guid(guid), fx_info, enabled, parent_id)
 }
 
-/// Build an FxNode for a top-level container, recursively building its children.
+/// Build an FxNode for a container, recursively building its children.
+///
+/// Uses REAPER's v7.06+ `container_item.X` API to get child FX IDs directly,
+/// avoiding manual stride-based address computation which was error-prone.
 fn build_container_node(
     chain: &FxChain,
     container_fx: &reaper_high::Fx,
-    container_flat_index: u32,
+    _container_flat_index: u32,
     parent_id: Option<FxNodeId>,
     path: &str,
 ) -> FxNode {
@@ -813,19 +850,47 @@ fn build_container_node(
     // Container name: try renamed_name first, fall back to FX name
     let name = read_config_str(container_fx, "renamed_name")
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| container_fx.name().to_str().to_string());
+        .unwrap_or_else(|| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                container_fx.name().to_str().to_string()
+            }))
+            .unwrap_or_else(|_| "Container".to_string())
+        });
 
-    let enabled = container_fx.is_enabled();
+    let enabled =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| container_fx.is_enabled()))
+            .unwrap_or(true);
 
-    // Build children recursively — stride starts at 1 for direct children
-    let children = build_children_at(
-        chain,
-        container_flat_index,
-        child_count,
-        1, // stride at first level of descent
-        &container_id,
-        path,
-    );
+    // Build children using container_item.X API
+    let mut children = Vec::new();
+    for i in 0..child_count {
+        let Some(child_raw) = container_child_fx_id(container_fx, i) else {
+            warn!(
+                "container_item.{} not found in container at path {}",
+                i, path
+            );
+            continue;
+        };
+
+        let child_fx = chain.fx_by_index_untracked(child_raw);
+        let child_path = format!("{}:{}", path, i);
+
+        if is_container_fx(&child_fx) {
+            children.push(build_container_node(
+                chain,
+                &child_fx,
+                child_raw,
+                Some(container_id.clone()),
+                &child_path,
+            ));
+        } else {
+            children.push(build_plugin_node(
+                chain,
+                &child_fx,
+                Some(container_id.clone()),
+            ));
+        }
+    }
 
     let mut node = FxNode::container(
         container_id,
@@ -839,82 +904,6 @@ fn build_container_node(
         *c = children;
     }
     node
-}
-
-/// Recursively build child nodes within a container using REAPER's stride-based addressing.
-///
-/// For a container at `container_addr` with `child_count` children,
-/// each child lives at: `0x2000000 + container_addr + stride * (child_pos + 1)`
-///
-/// When we encounter a nested container with N children, the stride for
-/// *its* children becomes `(N + 1) * current_stride`. This multiplicative
-/// growth ensures each nested level has enough address space for its contents.
-fn build_children_at(
-    chain: &FxChain,
-    container_addr: u32,
-    child_count: u32,
-    stride: u32,
-    parent_id: &FxNodeId,
-    parent_path: &str,
-) -> Vec<FxNode> {
-    let mut children = Vec::new();
-
-    for i in 0..child_count {
-        // Compute the raw REAPER index for this child.
-        // Children are 1-indexed within the container: first child at stride*1,
-        // second at stride*2, etc.
-        let child_raw_index = CONTAINER_BASE + container_addr + stride * (i + 1);
-        let child_fx = chain.fx_by_index_untracked(child_raw_index);
-        let child_path = format!("{}:{}", parent_path, i);
-
-        if is_container_fx(&child_fx) {
-            // Nested container — compute new stride and recurse
-            let nested_child_count = read_config_u32(&child_fx, "container_count");
-            let nested_stride = (nested_child_count + 1) * stride;
-
-            let nested_container_id = FxNodeId::container(&child_path);
-
-            let routing = read_config_str(&child_fx, "parallel")
-                .map(|s| FxRoutingMode::from_reaper_param(&s))
-                .unwrap_or_default();
-            let channel_config = FxContainerChannelConfig {
-                nch: read_config_u32(&child_fx, "container_nch"),
-                nch_in: read_config_u32(&child_fx, "container_nch_in"),
-                nch_out: read_config_u32(&child_fx, "container_nch_out"),
-            };
-            let name = read_config_str(&child_fx, "renamed_name")
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| child_fx.name().to_str().to_string());
-            let enabled = child_fx.is_enabled();
-
-            // Recurse into nested container's children
-            let nested_children = build_children_at(
-                chain,
-                child_raw_index,
-                nested_child_count,
-                nested_stride,
-                &nested_container_id,
-                &child_path,
-            );
-
-            let mut node = FxNode::container(
-                nested_container_id,
-                name,
-                routing,
-                channel_config,
-                enabled,
-                Some(parent_id.clone()),
-            );
-            if let Some(c) = node.children_mut() {
-                *c = nested_children;
-            }
-            children.push(node);
-        } else {
-            children.push(build_plugin_node(chain, &child_fx, Some(parent_id.clone())));
-        }
-    }
-
-    children
 }
 
 // =============================================================================
@@ -942,7 +931,8 @@ fn resolve_node_to_raw_index(chain: &FxChain, node_id: &FxNodeId) -> Option<u32>
     }
 }
 
-/// Resolve a container FxNodeId by parsing its path and walking stride math.
+/// Resolve a container FxNodeId by parsing its path and using `container_item.X`
+/// to walk through nested containers.
 ///
 /// Path format: "container:top_idx:child_idx:grandchild_idx:..."
 /// The first segment is the top-level FX chain index; subsequent segments
@@ -955,7 +945,7 @@ fn resolve_container_path(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
         return None;
     }
 
-    // First segment is the top-level FX index
+    // First segment is the top-level FX chain index
     let top_index = segments[0];
     if top_index >= chain.fx_count() {
         return None;
@@ -966,32 +956,13 @@ fn resolve_container_path(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
         return Some(top_index);
     }
 
-    // Walk into nested containers using stride math.
-    // At each level: child_raw = CONTAINER_BASE + parent_addr + stride * (child_pos + 1)
-    // When descending into a nested container with N children: stride *= (N + 1)
+    // Walk into nested containers using container_item.X
     let mut current_addr = top_index;
-    let mut stride: u32 = 1;
 
-    for (seg_idx, &child_pos) in segments[1..].iter().enumerate() {
-        // Read the container_count at current_addr to validate child position
+    for &child_pos in &segments[1..] {
         let container_fx = chain.fx_by_index_untracked(current_addr);
-        let child_count = read_config_u32(&container_fx, "container_count");
-
-        if child_pos >= child_count {
-            return None; // child position out of range
-        }
-
-        // Compute the raw index for this child
-        let child_raw = CONTAINER_BASE + current_addr + stride * (child_pos + 1);
+        let child_raw = container_child_fx_id(&container_fx, child_pos)?;
         current_addr = child_raw;
-
-        // If there are more segments, we need to descend further — update stride
-        let is_last = seg_idx == segments.len() - 2; // -2 because we skip segments[0]
-        if !is_last {
-            let child_fx = chain.fx_by_index_untracked(child_raw);
-            let nested_count = read_config_u32(&child_fx, "container_count");
-            stride = (nested_count + 1) * stride;
-        }
     }
 
     Some(current_addr)
@@ -1021,8 +992,7 @@ fn scan_containers_for_guid(chain: &FxChain, target_guid: &str, top_count: u32) 
     for i in 0..top_count {
         let fx = chain.fx_by_index_untracked(i);
         if is_container_fx(&fx) {
-            let child_count = read_config_u32(&fx, "container_count");
-            if let Some(raw) = scan_children_for_guid(chain, i, child_count, 1, target_guid) {
+            if let Some(raw) = scan_children_for_guid(chain, &fx, target_guid) {
                 return Some(raw);
             }
         }
@@ -1031,24 +1001,23 @@ fn scan_containers_for_guid(chain: &FxChain, target_guid: &str, top_count: u32) 
 }
 
 /// Recursively scan children of a container for a plugin with the given GUID.
+/// Uses `container_item.X` to get child FX IDs.
 fn scan_children_for_guid(
     chain: &FxChain,
-    container_addr: u32,
-    child_count: u32,
-    stride: u32,
+    container_fx: &reaper_high::Fx,
     target_guid: &str,
 ) -> Option<u32> {
+    let child_count = read_config_u32(container_fx, "container_count");
+
     for i in 0..child_count {
-        let child_raw = CONTAINER_BASE + container_addr + stride * (i + 1);
+        let Some(child_raw) = container_child_fx_id(container_fx, i) else {
+            continue;
+        };
         let child_fx = chain.fx_by_index_untracked(child_raw);
 
         if is_container_fx(&child_fx) {
             // Recurse into nested container
-            let nested_count = read_config_u32(&child_fx, "container_count");
-            let nested_stride = (nested_count + 1) * stride;
-            if let Some(raw) =
-                scan_children_for_guid(chain, child_raw, nested_count, nested_stride, target_guid)
-            {
+            if let Some(raw) = scan_children_for_guid(chain, &child_fx, target_guid) {
                 return Some(raw);
             }
         } else {
@@ -1065,9 +1034,8 @@ fn scan_children_for_guid(
 
 /// Build a mapping from raw REAPER index to FxNodeId by walking the tree.
 ///
-/// This is the reverse of `resolve_node_to_raw_index`. It builds the full tree
-/// and then walks it depth-first, recording each node's raw index alongside its
-/// FxNodeId.
+/// This is the reverse of `resolve_node_to_raw_index`. Walks the tree using
+/// `container_item.X` and matches against the target raw index.
 fn raw_index_to_node_id(chain: &FxChain, raw_index: u32) -> Option<FxNodeId> {
     let top_count = chain.fx_count();
 
@@ -1087,10 +1055,7 @@ fn raw_index_to_node_id(chain: &FxChain, raw_index: u32) -> Option<FxNodeId> {
         // If this is a container, search its children
         let fx = chain.fx_by_index_untracked(i);
         if is_container_fx(&fx) {
-            let child_count = read_config_u32(&fx, "container_count");
-            if let Some(id) =
-                search_children_for_raw(chain, i, child_count, 1, raw_index, &format!("{}", i))
-            {
+            if let Some(id) = search_children_for_raw(chain, &fx, raw_index, &format!("{}", i)) {
                 return Some(id);
             }
         }
@@ -1100,16 +1065,19 @@ fn raw_index_to_node_id(chain: &FxChain, raw_index: u32) -> Option<FxNodeId> {
 }
 
 /// Recursively search children for a specific raw index, returning its FxNodeId.
+/// Uses `container_item.X` to get child FX IDs.
 fn search_children_for_raw(
     chain: &FxChain,
-    container_addr: u32,
-    child_count: u32,
-    stride: u32,
+    container_fx: &reaper_high::Fx,
     target_raw: u32,
     parent_path: &str,
 ) -> Option<FxNodeId> {
+    let child_count = read_config_u32(container_fx, "container_count");
+
     for i in 0..child_count {
-        let child_raw = CONTAINER_BASE + container_addr + stride * (i + 1);
+        let Some(child_raw) = container_child_fx_id(container_fx, i) else {
+            continue;
+        };
         let child_path = format!("{}:{}", parent_path, i);
 
         if child_raw == target_raw {
@@ -1126,16 +1094,7 @@ fn search_children_for_raw(
         // If this child is a container, recurse
         let child_fx = chain.fx_by_index_untracked(child_raw);
         if is_container_fx(&child_fx) {
-            let nested_count = read_config_u32(&child_fx, "container_count");
-            let nested_stride = (nested_count + 1) * stride;
-            if let Some(id) = search_children_for_raw(
-                chain,
-                child_raw,
-                nested_count,
-                nested_stride,
-                target_raw,
-                &child_path,
-            ) {
+            if let Some(id) = search_children_for_raw(chain, &child_fx, target_raw, &child_path) {
                 return Some(id);
             }
         }
@@ -2047,7 +2006,10 @@ impl FxService for ReaperFx {
                     .get_or_query_guid()
                     .map(|g| g.to_string_without_braces())
                     .unwrap_or_default();
-                let plugin_name = fx.name().to_str().to_string();
+                let plugin_name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    fx.name().to_str().to_string()
+                }))
+                .unwrap_or_else(|_| "(unknown)".to_string());
                 let index = fx.index();
 
                 // Get the base64-encoded VST chunk
@@ -2262,15 +2224,29 @@ impl FxService for ReaperFx {
                 return;
             };
 
-            // Read the container's child count and compute destination slot
+            // Compute destination slot using container_item.X API.
+            // To insert at position N, we use the raw index of item N (shifting it),
+            // or for appending, one past the last item.
             let container_fx = chain.fx_by_index_untracked(container_raw);
             let child_count = read_config_u32(&container_fx, "container_count");
-
-            // Destination slot: CONTAINER_BASE + container_addr + stride * (child_pos + 1)
-            // For top-level containers, stride is 1
-            // child_index is clamped to child_count (append at end)
             let child_pos = request.child_index.min(child_count);
-            let dest_raw = CONTAINER_BASE + container_raw + (child_pos + 1);
+
+            let dest_raw = if child_count == 0 || child_pos == 0 {
+                // Empty container or inserting at start: use first slot
+                // The first child slot is always container_item.0's address
+                // For an empty container, REAPER accepts the first-slot address
+                container_child_fx_id(&container_fx, 0)
+                    .unwrap_or(CONTAINER_BASE + container_raw + 1)
+            } else if child_pos >= child_count {
+                // Appending: one past the last existing child
+                container_child_fx_id(&container_fx, child_count - 1)
+                    .map(|last| last + 1)
+                    .unwrap_or(CONTAINER_BASE + container_raw + child_count + 1)
+            } else {
+                // Inserting at position: use the existing child's slot (it will shift)
+                container_child_fx_id(&container_fx, child_pos)
+                    .unwrap_or(CONTAINER_BASE + container_raw + child_pos + 1)
+            };
 
             unsafe {
                 Reaper::get().medium_reaper().track_fx_copy_to_track(
@@ -2498,18 +2474,33 @@ impl FxService for ReaperFx {
                 }
             }
 
-            // Move each source FX into the container.
+            // Move each source FX into the container one at a time.
             // After inserting the container, indices of FX after it shift by +1.
-            // Move in reverse order to maintain index stability.
-            for (child_pos, &original_raw) in raw_indices.iter().enumerate() {
+            // After each move into the container, we re-query container_item.X
+            // to get the correct destination slot for the next insertion.
+            for (idx, &original_raw) in raw_indices.iter().enumerate() {
                 // Adjust for the container insertion: FX after insert_pos shifted +1
                 let adjusted_raw = if original_raw >= insert_pos {
                     original_raw + 1
                 } else {
                     original_raw
                 };
+                // Also adjust for previously moved FX (they left the main chain)
+                let adjusted_raw = adjusted_raw - (idx as u32);
 
-                let dest_raw = CONTAINER_BASE + container_index + (child_pos as u32 + 1);
+                // For destination: query existing child count and append
+                let container_fx_ref = chain.fx_by_index_untracked(container_index);
+                let current_count = read_config_u32(&container_fx_ref, "container_count");
+                let dest_raw = if current_count == 0 {
+                    // First child: use container_item.0 or fallback
+                    container_child_fx_id(&container_fx_ref, 0)
+                        .unwrap_or(CONTAINER_BASE + container_index + 1)
+                } else {
+                    // Append after last: get last child's raw index + 1
+                    container_child_fx_id(&container_fx_ref, current_count - 1)
+                        .map(|last| last + 1)
+                        .unwrap_or(CONTAINER_BASE + container_index + current_count + 1)
+                };
 
                 unsafe {
                     Reaper::get().medium_reaper().track_fx_copy_to_track(
@@ -2572,9 +2563,19 @@ impl FxService for ReaperFx {
             // Move children out in reverse order (last child first) to maintain
             // stable indices. Each child moves to the position right after the
             // container's current position.
+            // Re-query container_item.X each iteration since indices shift after each move.
             let dest_index = container_raw + 1;
-            for i in (0..child_count).rev() {
-                let child_raw = CONTAINER_BASE + container_raw + (i + 1);
+            for _ in (0..child_count).rev() {
+                // Always move the last remaining child out
+                let container_fx_ref = chain.fx_by_index_untracked(container_raw);
+                let remaining = read_config_u32(&container_fx_ref, "container_count");
+                if remaining == 0 {
+                    break;
+                }
+                let Some(child_raw) = container_child_fx_id(&container_fx_ref, remaining - 1)
+                else {
+                    break;
+                };
                 unsafe {
                     Reaper::get().medium_reaper().track_fx_copy_to_track(
                         (raw_track, fx_location(child_raw, is_input)),
