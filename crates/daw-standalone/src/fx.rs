@@ -2,7 +2,7 @@
 
 use daw_proto::{
     AddFxAtRequest, Fx, FxChainContext, FxLatency, FxParamModulation, FxParameter, FxService,
-    FxTarget, ProjectContext, SetNamedConfigRequest, SetParameterByNameRequest,
+    FxStateChunk, FxTarget, ProjectContext, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
 use roam::Context;
@@ -196,5 +196,59 @@ impl FxService for StandaloneFx {
         _param_index: u32,
     ) -> FxParamModulation {
         FxParamModulation::default()
+    }
+
+    async fn get_fx_state_chunk(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _target: FxTarget,
+    ) -> Option<Vec<u8>> {
+        None
+    }
+
+    async fn set_fx_state_chunk(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _target: FxTarget,
+        _chunk: Vec<u8>,
+    ) {
+    }
+
+    async fn get_fx_state_chunk_encoded(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _target: FxTarget,
+    ) -> Option<String> {
+        None
+    }
+
+    async fn set_fx_state_chunk_encoded(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _target: FxTarget,
+        _encoded: String,
+    ) {
+    }
+
+    async fn get_fx_chain_state(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _context: FxChainContext,
+    ) -> Vec<FxStateChunk> {
+        vec![]
+    }
+
+    async fn set_fx_chain_state(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _context: FxChainContext,
+        _chunks: Vec<FxStateChunk>,
+    ) {
     }
 }

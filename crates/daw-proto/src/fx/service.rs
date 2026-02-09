@@ -3,8 +3,8 @@
 //! Defines the RPC interface for FX (audio plugin) operations.
 
 use super::{
-    AddFxAtRequest, Fx, FxChainContext, FxLatency, FxParamModulation, FxParameter, FxTarget,
-    SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
+    AddFxAtRequest, Fx, FxChainContext, FxLatency, FxParamModulation, FxParameter, FxStateChunk,
+    FxTarget, SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
 };
 use crate::ProjectContext;
 use roam::service;
@@ -153,4 +153,70 @@ pub trait FxService {
         target: FxTarget,
         param_index: u32,
     ) -> FxParamModulation;
+
+    // =========================================================================
+    // State Chunks
+    //
+    // Binary plugin state capture and restore.
+    //
+    // Following Track Snapshot's approach: full binary state round-trip via
+    // REAPER's native chunk format. Individual FX chunks use vst_chunk (base64).
+    // Full chain chunks capture all FX state in one operation.
+    //
+    // Reference: FTS-GUITAR/Scripts/Daniel Lumertz Scripts/Tracks/Track Snapshot
+    // =========================================================================
+
+    /// Get the binary state chunk for a single FX (decoded bytes).
+    ///
+    /// This captures the complete plugin state including internal state
+    /// not exposed as parameters. Uses REAPER's `vst_chunk` named config.
+    async fn get_fx_state_chunk(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Option<Vec<u8>>;
+
+    /// Set the binary state chunk for a single FX (decoded bytes).
+    ///
+    /// Restores complete plugin state. The FX must already exist in the chain.
+    async fn set_fx_state_chunk(&self, project: ProjectContext, target: FxTarget, chunk: Vec<u8>);
+
+    /// Get the base64-encoded state chunk for a single FX.
+    ///
+    /// More efficient than `get_fx_state_chunk` when the data will be
+    /// serialized (avoids decode + re-encode round-trip).
+    async fn get_fx_state_chunk_encoded(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Option<String>;
+
+    /// Set the base64-encoded state chunk for a single FX.
+    async fn set_fx_state_chunk_encoded(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+        encoded: String,
+    );
+
+    /// Capture state chunks for all FX in a chain.
+    ///
+    /// Returns a list of (fx_guid, base64_encoded_chunk) pairs in chain order.
+    /// Like Track Snapshot, this captures the full binary state of every plugin.
+    async fn get_fx_chain_state(
+        &self,
+        project: ProjectContext,
+        context: FxChainContext,
+    ) -> Vec<FxStateChunk>;
+
+    /// Restore state chunks for all FX in a chain.
+    ///
+    /// Matches FX by GUID and applies state chunks. FX not found in the
+    /// chain are skipped (graceful handling of missing FX, like Track Snapshot).
+    async fn set_fx_chain_state(
+        &self,
+        project: ProjectContext,
+        context: FxChainContext,
+        chunks: Vec<FxStateChunk>,
+    );
 }

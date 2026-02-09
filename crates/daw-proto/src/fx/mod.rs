@@ -12,6 +12,7 @@ pub use error::FxError;
 pub use event::FxEvent;
 pub use service::{FxService, FxServiceClient, FxServiceDispatcher};
 pub use types::{
-    AddFxAtRequest, Fx, FxChainContext, FxLatency, FxParamModulation, FxParameter, FxRef, FxTarget,
-    FxType, SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
+    AddFxAtRequest, Fx, FxChainContext, FxLatency, FxParamModulation, FxParameter, FxRef,
+    FxStateChunk, FxTarget, FxType, SetNamedConfigRequest, SetParameterByNameRequest,
+    SetParameterRequest,
 };

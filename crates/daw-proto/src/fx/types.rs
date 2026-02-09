@@ -304,3 +304,28 @@ pub struct AddFxAtRequest {
     /// Position in chain
     pub index: u32,
 }
+
+// =============================================================================
+// State Chunk Types
+// =============================================================================
+
+/// Captured binary state of a single FX plugin.
+///
+/// Stores the FX GUID for matching on restore and the base64-encoded
+/// binary chunk. This follows the Track Snapshot pattern of capturing
+/// complete plugin state for full-fidelity recall.
+#[derive(Clone, Debug, Facet)]
+pub struct FxStateChunk {
+    /// GUID of the FX instance this chunk belongs to.
+    pub fx_guid: String,
+    /// Index of the FX in the chain at capture time (for ordering).
+    pub fx_index: u32,
+    /// Plugin name at capture time (for display/diagnostics).
+    pub plugin_name: String,
+    /// Base64-encoded binary plugin state.
+    ///
+    /// This is the raw VST/CLAP state chunk that fully describes the
+    /// plugin's internal state, including settings not exposed as
+    /// automation parameters.
+    pub encoded_chunk: String,
+}

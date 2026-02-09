@@ -17,8 +17,8 @@
 
 use daw_proto::{
     AddFxAtRequest, Fx, FxChainContext, FxLatency, FxParamModulation, FxParameter, FxRef,
-    FxService, FxTarget, FxType, ProjectContext, SetNamedConfigRequest, SetParameterByNameRequest,
-    SetParameterRequest,
+    FxService, FxStateChunk, FxTarget, FxType, ProjectContext, SetNamedConfigRequest,
+    SetParameterByNameRequest, SetParameterRequest,
 };
 use reaper_high::{FxChain, Reaper, Track};
 use reaper_medium::{FxPresetRef, TrackFxLocation, TransferBehavior};
@@ -923,9 +923,8 @@ impl FxService for ReaperFx {
 
         ts.main_thread_future(move || {
             let proj = resolve_project(&project)?;
-            let (track, chain) = resolve_fx_chain(&proj, &target.context)?;
+            let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
-            let location = fx_location(index, chain.is_input_fx());
 
             // Use named config param "pdc" for PDC info
             let fx = chain.fx_by_index(index)?;
@@ -952,7 +951,7 @@ impl FxService for ReaperFx {
     async fn get_param_modulation(
         &self,
         _cx: &Context,
-        project: ProjectContext,
+        _project: ProjectContext,
         target: FxTarget,
         param_index: u32,
     ) -> FxParamModulation {
@@ -965,5 +964,214 @@ impl FxService for ReaperFx {
         // named config params. For now, return defaults — this can be enhanced
         // when we need LFO/linking info for the rig UI.
         FxParamModulation::default()
+    }
+
+    // =========================================================================
+    // State Chunks
+    //
+    // Uses reaper-high's vst_chunk / set_vst_chunk for individual FX binary
+    // state, and iterates the chain for full chain capture/restore.
+    // =========================================================================
+
+    async fn get_fx_state_chunk(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Option<Vec<u8>> {
+        debug!("ReaperFx::get_fx_state_chunk({:?})", target);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return None;
+        };
+
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)?;
+            let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
+            let index = resolve_fx_index(&chain, &target.fx)?;
+            let fx = chain.fx_by_index(index)?;
+            fx.vst_chunk().ok()
+        })
+        .await
+        .unwrap_or(None)
+    }
+
+    async fn set_fx_state_chunk(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        target: FxTarget,
+        chunk: Vec<u8>,
+    ) {
+        debug!("ReaperFx::set_fx_state_chunk({:?})", target);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return;
+        };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some((_track, chain)) = resolve_fx_chain(&proj, &target.context) else {
+                return;
+            };
+            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
+                return;
+            };
+            if let Some(fx) = chain.fx_by_index(index) {
+                let _ = fx.set_vst_chunk(&chunk);
+            }
+        });
+    }
+
+    async fn get_fx_state_chunk_encoded(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Option<String> {
+        debug!("ReaperFx::get_fx_state_chunk_encoded({:?})", target);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return None;
+        };
+
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)?;
+            let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
+            let index = resolve_fx_index(&chain, &target.fx)?;
+            let fx = chain.fx_by_index(index)?;
+            fx.vst_chunk_encoded().ok().map(|s| s.to_str().to_string())
+        })
+        .await
+        .unwrap_or(None)
+    }
+
+    async fn set_fx_state_chunk_encoded(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        target: FxTarget,
+        encoded: String,
+    ) {
+        debug!("ReaperFx::set_fx_state_chunk_encoded({:?})", target);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return;
+        };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some((_track, chain)) = resolve_fx_chain(&proj, &target.context) else {
+                return;
+            };
+            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
+                return;
+            };
+            if let Some(fx) = chain.fx_by_index(index) {
+                let _ = fx.set_vst_chunk_encoded(encoded);
+            }
+        });
+    }
+
+    async fn get_fx_chain_state(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        context: FxChainContext,
+    ) -> Vec<FxStateChunk> {
+        debug!("ReaperFx::get_fx_chain_state({:?})", context);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return vec![];
+        };
+
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)?;
+            let (_track, chain) = resolve_fx_chain(&proj, &context)?;
+
+            let mut chunks = Vec::new();
+            for fx in chain.fxs() {
+                let guid = fx
+                    .get_or_query_guid()
+                    .map(|g| g.to_string_without_braces())
+                    .unwrap_or_default();
+                let plugin_name = fx.name().to_str().to_string();
+                let index = fx.index();
+
+                // Get the base64-encoded VST chunk
+                if let Ok(encoded) = fx.vst_chunk_encoded() {
+                    chunks.push(FxStateChunk {
+                        fx_guid: guid,
+                        fx_index: index,
+                        plugin_name,
+                        encoded_chunk: encoded.to_str().to_string(),
+                    });
+                }
+            }
+            Some(chunks)
+        })
+        .await
+        .unwrap_or(Some(vec![]))
+        .unwrap_or_default()
+    }
+
+    async fn set_fx_chain_state(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        context: FxChainContext,
+        chunks: Vec<FxStateChunk>,
+    ) {
+        debug!(
+            "ReaperFx::set_fx_chain_state({:?}, {} chunks)",
+            context,
+            chunks.len()
+        );
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return;
+        };
+
+        // Apply all chunks in a single main-thread operation for atomicity
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some((_track, chain)) = resolve_fx_chain(&proj, &context) else {
+                return;
+            };
+
+            // Build a GUID → FX index lookup (like Snapshooter's hashmap approach)
+            let mut guid_to_index = std::collections::HashMap::new();
+            for fx in chain.fxs() {
+                if let Ok(guid) = fx.get_or_query_guid() {
+                    guid_to_index.insert(guid.to_string_without_braces(), fx.index());
+                }
+            }
+
+            // Apply each chunk by matching GUID
+            for chunk in &chunks {
+                if let Some(&fx_index) = guid_to_index.get(&chunk.fx_guid) {
+                    if let Some(fx) = chain.fx_by_index(fx_index) {
+                        let _ = fx.set_vst_chunk_encoded(chunk.encoded_chunk.clone());
+                    }
+                } else {
+                    debug!(
+                        "FX GUID {} not found in chain, skipping (plugin: {})",
+                        chunk.fx_guid, chunk.plugin_name
+                    );
+                }
+            }
+        });
     }
 }
