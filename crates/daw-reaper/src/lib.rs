@@ -32,6 +32,7 @@
 
 pub mod audio_engine;
 pub mod automation;
+pub mod fx;
 pub mod item;
 pub mod live_midi;
 pub mod marker;
@@ -47,6 +48,7 @@ pub mod transport;
 // Re-export the main types
 pub use audio_engine::ReaperAudioEngine;
 pub use automation::ReaperAutomation;
+pub use fx::ReaperFx;
 pub use item::{ReaperItem, ReaperTake};
 pub use live_midi::ReaperLiveMidi;
 pub use marker::ReaperMarker;
