@@ -4,9 +4,11 @@ use std::sync::Arc;
 
 use crate::DawClients;
 use daw_proto::{
-    AddFxAtRequest, Fx, FxChainContext, FxEvent, FxLatency, FxParamModulation, FxParameter, FxRef,
-    FxStateChunk, FxTarget, ProjectContext, SetNamedConfigRequest, SetParameterByNameRequest,
-    SetParameterRequest,
+    AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
+    FxContainerChannelConfig, FxEvent, FxLatency, FxNode, FxNodeId, FxParamModulation, FxParameter,
+    FxRef, FxRoutingMode, FxStateChunk, FxTarget, FxTree, MoveFromContainerRequest,
+    MoveToContainerRequest, ProjectContext, SetContainerChannelConfigRequest,
+    SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
 };
 use eyre::Result;
 
@@ -265,6 +267,166 @@ impl FxChain {
             self.project_id.clone(),
             self.clients.clone(),
         ))
+    }
+
+    // =========================================================================
+    // Container / Tree Operations
+    // =========================================================================
+
+    /// Get the full FX tree (containers + plugins) for this chain.
+    pub async fn tree(&self) -> Result<FxTree> {
+        let tree = self
+            .clients
+            .fx
+            .get_fx_tree(self.project_context(), self.context.clone())
+            .await?;
+        Ok(tree)
+    }
+
+    /// Create a new container at the specified position.
+    pub async fn create_container(&self, name: &str, index: u32) -> Result<FxNodeId> {
+        let request = CreateContainerRequest {
+            context: self.context.clone(),
+            name: name.to_string(),
+            index,
+        };
+        self.clients
+            .fx
+            .create_container(self.project_context(), request)
+            .await?
+            .ok_or_else(|| eyre::eyre!("Failed to create container: {}", name))
+    }
+
+    /// Move an FX node into a container at the specified child position.
+    pub async fn move_to_container(
+        &self,
+        node_id: &FxNodeId,
+        container_id: &FxNodeId,
+        child_index: u32,
+    ) -> Result<()> {
+        let request = MoveToContainerRequest {
+            context: self.context.clone(),
+            node_id: node_id.clone(),
+            container_id: container_id.clone(),
+            child_index,
+        };
+        self.clients
+            .fx
+            .move_to_container(self.project_context(), request)
+            .await?;
+        Ok(())
+    }
+
+    /// Move an FX node out of its container to a top-level position.
+    pub async fn move_from_container(&self, node_id: &FxNodeId, target_index: u32) -> Result<()> {
+        let request = MoveFromContainerRequest {
+            context: self.context.clone(),
+            node_id: node_id.clone(),
+            target_index,
+        };
+        self.clients
+            .fx
+            .move_from_container(self.project_context(), request)
+            .await?;
+        Ok(())
+    }
+
+    /// Set the routing mode (serial/parallel) for a container.
+    pub async fn set_routing_mode(
+        &self,
+        container_id: &FxNodeId,
+        mode: FxRoutingMode,
+    ) -> Result<()> {
+        self.clients
+            .fx
+            .set_routing_mode(
+                self.project_context(),
+                self.context.clone(),
+                container_id.clone(),
+                mode,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Get channel configuration for a container.
+    pub async fn container_channel_config(
+        &self,
+        container_id: &FxNodeId,
+    ) -> Result<FxContainerChannelConfig> {
+        let config = self
+            .clients
+            .fx
+            .get_container_channel_config(
+                self.project_context(),
+                self.context.clone(),
+                container_id.clone(),
+            )
+            .await?;
+        Ok(config)
+    }
+
+    /// Set channel configuration for a container.
+    pub async fn set_container_channel_config(
+        &self,
+        container_id: &FxNodeId,
+        config: FxContainerChannelConfig,
+    ) -> Result<()> {
+        let request = SetContainerChannelConfigRequest {
+            context: self.context.clone(),
+            container_id: container_id.clone(),
+            config,
+        };
+        self.clients
+            .fx
+            .set_container_channel_config(self.project_context(), request)
+            .await?;
+        Ok(())
+    }
+
+    /// Enclose existing FX nodes in a new container.
+    pub async fn enclose_in_container(
+        &self,
+        node_ids: &[FxNodeId],
+        name: &str,
+    ) -> Result<FxNodeId> {
+        let request = EncloseInContainerRequest {
+            context: self.context.clone(),
+            node_ids: node_ids.to_vec(),
+            name: name.to_string(),
+        };
+        self.clients
+            .fx
+            .enclose_in_container(self.project_context(), request)
+            .await?
+            .ok_or_else(|| eyre::eyre!("Failed to enclose FX in container"))
+    }
+
+    /// Explode a container: move all children to the parent level, then delete it.
+    pub async fn explode_container(&self, container_id: &FxNodeId) -> Result<()> {
+        self.clients
+            .fx
+            .explode_container(
+                self.project_context(),
+                self.context.clone(),
+                container_id.clone(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Rename a container.
+    pub async fn rename_container(&self, container_id: &FxNodeId, name: &str) -> Result<()> {
+        self.clients
+            .fx
+            .rename_container(
+                self.project_context(),
+                self.context.clone(),
+                container_id.clone(),
+                name.to_string(),
+            )
+            .await?;
+        Ok(())
     }
 }
 
