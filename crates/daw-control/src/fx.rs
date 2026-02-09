@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::DawClients;
 use daw_proto::{
-    AddFxAtRequest, Fx, FxChainContext, FxLatency, FxParamModulation, FxParameter, FxRef,
+    AddFxAtRequest, Fx, FxChainContext, FxEvent, FxLatency, FxParamModulation, FxParameter, FxRef,
     FxStateChunk, FxTarget, ProjectContext, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
@@ -212,6 +212,32 @@ impl FxChain {
             .set_fx_chain_state(self.project_context(), self.context.clone(), chunks)
             .await?;
         Ok(())
+    }
+
+    /// Subscribe to FX chain events (parameter changes, add/remove, enable/bypass).
+    ///
+    /// Returns a stream of `FxEvent`s for this chain. Events are delivered
+    /// reactively — only when state actually changes.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use daw_control::FxChain;
+    /// # async fn example(chain: FxChain) -> eyre::Result<()> {
+    /// let mut rx = chain.subscribe_events().await?;
+    /// while let Some(event) = rx.recv().await? {
+    ///     println!("FX event: {:?}", event);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn subscribe_events(&self) -> Result<roam::Rx<FxEvent>> {
+        let (tx, rx) = roam::channel::<FxEvent>();
+        self.clients
+            .fx
+            .subscribe_fx_events(self.project_context(), self.context.clone(), tx)
+            .await?;
+        Ok(rx)
     }
 
     // =========================================================================

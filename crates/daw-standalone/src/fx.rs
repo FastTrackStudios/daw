@@ -1,11 +1,11 @@
 //! Standalone FX implementation
 
 use daw_proto::{
-    AddFxAtRequest, Fx, FxChainContext, FxLatency, FxParamModulation, FxParameter, FxService,
-    FxStateChunk, FxTarget, ProjectContext, SetNamedConfigRequest, SetParameterByNameRequest,
-    SetParameterRequest,
+    AddFxAtRequest, Fx, FxChainContext, FxEvent, FxLatency, FxParamModulation, FxParameter,
+    FxService, FxStateChunk, FxTarget, ProjectContext, SetNamedConfigRequest,
+    SetParameterByNameRequest, SetParameterRequest,
 };
-use roam::Context;
+use roam::{Context, Tx};
 use uuid::Uuid;
 
 /// Standalone FX service implementation.
@@ -250,5 +250,15 @@ impl FxService for StandaloneFx {
         _context: FxChainContext,
         _chunks: Vec<FxStateChunk>,
     ) {
+    }
+
+    async fn subscribe_fx_events(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _context: FxChainContext,
+        _events: Tx<FxEvent>,
+    ) {
+        // Standalone: no FX events to observe
     }
 }

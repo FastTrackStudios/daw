@@ -3,10 +3,11 @@
 //! Defines the RPC interface for FX (audio plugin) operations.
 
 use super::{
-    AddFxAtRequest, Fx, FxChainContext, FxLatency, FxParamModulation, FxParameter, FxStateChunk,
-    FxTarget, SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
+    AddFxAtRequest, Fx, FxChainContext, FxEvent, FxLatency, FxParamModulation, FxParameter,
+    FxStateChunk, FxTarget, SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
 };
 use crate::ProjectContext;
+use roam::Tx;
 use roam::service;
 
 /// Service for managing FX (audio plugins) in a DAW project
@@ -218,5 +219,27 @@ pub trait FxService {
         project: ProjectContext,
         context: FxChainContext,
         chunks: Vec<FxStateChunk>,
+    );
+
+    // =========================================================================
+    // Observation / Subscriptions
+    //
+    // Reactive push-based FX state observation.
+    // Follows the same pattern as TransportService::subscribe_state.
+    // =========================================================================
+
+    /// Subscribe to FX chain events for a specific chain.
+    ///
+    /// Events include parameter changes, FX add/remove/reorder,
+    /// enable/bypass changes, and preset changes. The subscription
+    /// delivers events through a unified `FxEvent` stream.
+    ///
+    /// The subscriber receives events until the sender is dropped
+    /// or the subscriber disconnects.
+    async fn subscribe_fx_events(
+        &self,
+        project: ProjectContext,
+        context: FxChainContext,
+        events: Tx<FxEvent>,
     );
 }

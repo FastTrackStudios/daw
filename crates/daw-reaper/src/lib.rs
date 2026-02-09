@@ -62,3 +62,6 @@ pub use transport::ReaperTransport;
 
 // Re-export the TaskSupport setter and transport broadcaster functions
 pub use transport::{init_transport_broadcaster, poll_and_broadcast, set_task_support};
+
+// Re-export FX broadcaster functions
+pub use fx::{init_fx_broadcaster, poll_and_broadcast_fx};
