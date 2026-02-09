@@ -87,14 +87,15 @@ pub fn FxChainTree() -> Element {
     let mut tree = use_signal(FxTree::new);
     let mut error_msg = use_signal(|| Option::<String>::None);
     let mut connected = use_signal(|| false);
-    let collapsed = use_signal(HashSet::<String>::new);
+    let mut collapsed = use_signal(HashSet::<String>::new);
     let selected = use_signal(|| Option::<String>::None);
     let mut track_guid = use_signal(|| Option::<String>::None);
+    let mut track_name = use_signal(|| Option::<String>::None);
     let mut context_menu = use_signal(|| Option::<FxContextMenu>::None);
     let mut rename_state = use_signal(|| Option::<RenameState>::None);
     let mut create_container = use_signal(|| Option::<CreateContainerState>::None);
 
-    // Poll for FX tree
+    // Poll for FX tree — follows the currently selected track in REAPER
     use_future(move || async move {
         // Poll-wait for DAW
         loop {
@@ -111,54 +112,49 @@ pub fn FxChainTree() -> Element {
         loop {
             match daw.current_project().await {
                 Ok(project) => {
-                    let tguid = track_guid.read().clone();
-                    let target_guid = if let Some(guid) = tguid {
-                        Some(guid)
-                    } else {
-                        // Find first track with FX
-                        match project.tracks().all().await {
-                            Ok(tracks) => {
-                                let mut found = None;
-                                for t in &tracks {
-                                    let chain = project.tracks().by_guid(&t.guid).await;
-                                    if let Ok(Some(th)) = chain {
-                                        let fx_chain = th.fx_chain();
-                                        if let Ok(count) = fx_chain.count().await {
-                                            if count > 0 {
-                                                found = Some(t.guid.clone());
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
-                                found
-                            }
-                            Err(_) => None,
-                        }
-                    };
+                    // Follow REAPER's selected track
+                    let sel_tracks = project.tracks().selected().await.unwrap_or_default();
+                    let sel_track = sel_tracks.into_iter().next();
 
-                    if let Some(guid) = target_guid {
+                    if let Some(th) = sel_track {
+                        let guid = th.guid().to_string();
+                        let name = th.info().await.map(|t| t.name).unwrap_or_default();
+
+                        // Update track name for header display
+                        let prev_guid = track_guid.read().clone();
+                        if prev_guid.as_deref() != Some(&guid) {
+                            // Track changed — reset collapsed state
+                            collapsed.write().clear();
+                        }
                         track_guid.set(Some(guid.clone()));
+                        track_name.set(Some(name));
+
+                        // Fetch FX tree for this track
                         match project.tracks().by_guid(&guid).await {
-                            Ok(Some(track_handle)) => {
-                                let chain = track_handle.fx_chain();
-                                match chain.tree().await {
-                                    Ok(fx_tree) => {
-                                        tree.set(fx_tree);
-                                        error_msg.set(None);
-                                    }
-                                    Err(e) => {
-                                        error_msg.set(Some(format!("FX tree error: {:?}", e)));
-                                    }
+                            Ok(Some(track_handle)) => match track_handle.fx_chain().tree().await {
+                                Ok(fx_tree) => {
+                                    tree.set(fx_tree);
+                                    error_msg.set(None);
                                 }
-                            }
+                                Err(e) => {
+                                    error_msg.set(Some(format!("FX tree error: {:?}", e)));
+                                }
+                            },
                             Ok(None) => {
                                 track_guid.set(None);
+                                track_name.set(None);
+                                tree.set(FxTree::new());
                             }
                             Err(e) => {
                                 error_msg.set(Some(format!("Track error: {:?}", e)));
                             }
                         }
+                    } else {
+                        // No track selected
+                        track_guid.set(None);
+                        track_name.set(None);
+                        tree.set(FxTree::new());
+                        error_msg.set(None);
                     }
                 }
                 Err(e) => {
@@ -196,25 +192,33 @@ pub fn FxChainTree() -> Element {
     let fx_tree = tree.read().clone();
     let total = fx_tree.total_count();
     let node_count = fx_tree.nodes.len() as u32;
+    let tname = track_name.read().clone();
+    let has_track = track_guid.read().is_some();
 
     rsx! {
         div { class: "h-full w-full flex flex-col bg-card overflow-hidden",
-            // Header with "+" button
+            // Header with track name and "+" button
             div { class: "px-3 py-2 border-b border-border flex items-center justify-between",
-                h2 { class: "text-sm font-semibold text-foreground", "FX Chain" }
-                div { class: "flex items-center gap-2",
-                    // Create Container button
-                    button {
-                        class: "text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent/50 transition-colors",
-                        title: "Create Container",
-                        onclick: move |_| {
-                            create_container.set(Some(CreateContainerState {
-                                name: String::new(),
-                            }));
-                        },
-                        "+ Container"
+                div { class: "flex items-center gap-2 min-w-0",
+                    h2 { class: "text-sm font-semibold text-foreground whitespace-nowrap", "FX Chain" }
+                    if let Some(name) = &tname {
+                        span { class: "text-xs text-muted-foreground truncate", "{name}" }
                     }
-                    span { class: "text-[10px] text-muted-foreground", "{total} FX" }
+                }
+                if has_track {
+                    div { class: "flex items-center gap-2 flex-shrink-0",
+                        button {
+                            class: "text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-accent/50 transition-colors",
+                            title: "Create Container",
+                            onclick: move |_| {
+                                create_container.set(Some(CreateContainerState {
+                                    name: String::new(),
+                                }));
+                            },
+                            "+ Container"
+                        }
+                        span { class: "text-[10px] text-muted-foreground", "{total} FX" }
+                    }
                 }
             }
 
@@ -276,7 +280,11 @@ pub fn FxChainTree() -> Element {
 
             // Tree content
             div { class: "flex-1 overflow-y-auto px-1 py-1",
-                if fx_tree.nodes.is_empty() {
+                if !has_track {
+                    div { class: "text-center text-muted-foreground text-xs py-8",
+                        "Select a track in REAPER"
+                    }
+                } else if fx_tree.nodes.is_empty() {
                     div { class: "text-center text-muted-foreground text-xs py-8",
                         "No FX in chain"
                     }
