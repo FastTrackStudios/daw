@@ -16,9 +16,12 @@
 //!   See: FTS-GUITAR/Scripts/Daniel Lumertz Scripts/Tracks/Track Snapshot
 
 use daw_proto::{
-    AddFxAtRequest, Fx, FxChainContext, FxEvent, FxLatency, FxParamModulation, FxParameter, FxRef,
-    FxService, FxStateChunk, FxTarget, FxType, ProjectContext, SetNamedConfigRequest,
-    SetParameterByNameRequest, SetParameterRequest,
+    AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
+    FxContainerChannelConfig, FxEvent, FxLatency, FxNode, FxNodeId, FxParamModulation, FxParameter,
+    FxRef, FxRoutingMode, FxService, FxStateChunk, FxTarget, FxTree, FxType,
+    MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
+    SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
+    SetParameterRequest,
 };
 use reaper_high::{FxChain, Reaper, Track};
 use reaper_medium::{FxPresetRef, TrackFxLocation, TransferBehavior};
@@ -494,6 +497,210 @@ fn build_fx_parameter(param: &reaper_high::FxParameter) -> FxParameter {
         formatted,
         is_toggle,
     }
+}
+
+// =============================================================================
+// FX Tree Building — recursive container traversal
+//
+// REAPER's FX container system uses stride-based addressing:
+// - Top-level FX: flat indices 0..count-1
+// - Container children: 0x2000000 + container_flat_index + (stride * child_pos)
+// - Stride grows at each depth: new_stride = (child_count + 1) * prev_stride
+//
+// We use the high-level Fx API for most queries (name, GUID, named config params)
+// since fx_by_index() doesn't validate indices. The one exception is is_enabled()
+// which has an is_available() guard — for that we call medium-level API directly.
+// =============================================================================
+
+/// REAPER container addressing base offset.
+const CONTAINER_BASE: u32 = 0x2000000;
+
+/// Build the complete FxNode tree from an FxChain.
+///
+/// Entry point that iterates top-level FX (flat indices 0..count-1) and
+/// recurses into containers.
+fn build_fx_tree_from_chain(chain: &FxChain, _is_input: bool, top_level_count: u32) -> Vec<FxNode> {
+    let mut nodes = Vec::new();
+
+    for i in 0..top_level_count {
+        // Use untracked to avoid bounds check (fx_by_index returns None for >= fx_count)
+        let fx = chain.fx_by_index_untracked(i);
+        let path_prefix = format!("{}", i);
+
+        if is_container_fx(&fx) {
+            nodes.push(build_container_node(
+                chain,
+                &fx,
+                i,    // flat index for this container
+                None, // no parent (top-level)
+                &path_prefix,
+            ));
+        } else {
+            nodes.push(build_plugin_node(chain, &fx, None));
+        }
+    }
+
+    nodes
+}
+
+/// Check if an FX slot is a container by querying its fx_type.
+fn is_container_fx(fx: &reaper_high::Fx) -> bool {
+    read_config_str(fx, "fx_type")
+        .map(|v| v == "Container")
+        .unwrap_or(false)
+}
+
+/// Read a named config param as a trimmed string, returning None on failure.
+fn read_config_str(fx: &reaper_high::Fx, key: &str) -> Option<String> {
+    fx.get_named_config_param(key, 256)
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_string())
+}
+
+/// Read a named config param as u32, returning 0 on failure.
+fn read_config_u32(fx: &reaper_high::Fx, key: &str) -> u32 {
+    read_config_str(fx, key)
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0)
+}
+
+/// Build an FxNode for a plugin (non-container) FX.
+fn build_plugin_node(chain: &FxChain, fx: &reaper_high::Fx, parent_id: Option<FxNodeId>) -> FxNode {
+    let guid = reaper_high::get_fx_guid(chain, fx.index())
+        .map(|g| g.to_string_without_braces())
+        .unwrap_or_default();
+
+    let enabled = fx.is_enabled();
+    let fx_info = build_fx_info(fx);
+    FxNode::plugin(FxNodeId::from_guid(guid), fx_info, enabled, parent_id)
+}
+
+/// Build an FxNode for a top-level container, recursively building its children.
+fn build_container_node(
+    chain: &FxChain,
+    container_fx: &reaper_high::Fx,
+    container_flat_index: u32,
+    parent_id: Option<FxNodeId>,
+    path: &str,
+) -> FxNode {
+    let container_id = FxNodeId::container(path);
+
+    // Read container properties
+    let child_count = read_config_u32(container_fx, "container_count");
+    let routing = read_config_str(container_fx, "parallel")
+        .map(|s| FxRoutingMode::from_reaper_param(&s))
+        .unwrap_or_default();
+    let channel_config = FxContainerChannelConfig {
+        nch: read_config_u32(container_fx, "container_nch"),
+        nch_in: read_config_u32(container_fx, "container_nch_in"),
+        nch_out: read_config_u32(container_fx, "container_nch_out"),
+    };
+
+    // Container name: try renamed_name first, fall back to FX name
+    let name = read_config_str(container_fx, "renamed_name")
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| container_fx.name().to_str().to_string());
+
+    let enabled = container_fx.is_enabled();
+
+    // Build children recursively — stride starts at 1 for direct children
+    let children = build_children_at(
+        chain,
+        container_flat_index,
+        child_count,
+        1, // stride at first level of descent
+        &container_id,
+        path,
+    );
+
+    let mut node = FxNode::container(
+        container_id,
+        name,
+        routing,
+        channel_config,
+        enabled,
+        parent_id,
+    );
+    if let Some(c) = node.children_mut() {
+        *c = children;
+    }
+    node
+}
+
+/// Recursively build child nodes within a container using REAPER's stride-based addressing.
+///
+/// For a container at `container_addr` with `child_count` children,
+/// each child lives at: `0x2000000 + container_addr + stride * (child_pos + 1)`
+///
+/// When we encounter a nested container with N children, the stride for
+/// *its* children becomes `(N + 1) * current_stride`. This multiplicative
+/// growth ensures each nested level has enough address space for its contents.
+fn build_children_at(
+    chain: &FxChain,
+    container_addr: u32,
+    child_count: u32,
+    stride: u32,
+    parent_id: &FxNodeId,
+    parent_path: &str,
+) -> Vec<FxNode> {
+    let mut children = Vec::new();
+
+    for i in 0..child_count {
+        // Compute the raw REAPER index for this child.
+        // Children are 1-indexed within the container: first child at stride*1,
+        // second at stride*2, etc.
+        let child_raw_index = CONTAINER_BASE + container_addr + stride * (i + 1);
+        let child_fx = chain.fx_by_index_untracked(child_raw_index);
+        let child_path = format!("{}:{}", parent_path, i);
+
+        if is_container_fx(&child_fx) {
+            // Nested container — compute new stride and recurse
+            let nested_child_count = read_config_u32(&child_fx, "container_count");
+            let nested_stride = (nested_child_count + 1) * stride;
+
+            let nested_container_id = FxNodeId::container(&child_path);
+
+            let routing = read_config_str(&child_fx, "parallel")
+                .map(|s| FxRoutingMode::from_reaper_param(&s))
+                .unwrap_or_default();
+            let channel_config = FxContainerChannelConfig {
+                nch: read_config_u32(&child_fx, "container_nch"),
+                nch_in: read_config_u32(&child_fx, "container_nch_in"),
+                nch_out: read_config_u32(&child_fx, "container_nch_out"),
+            };
+            let name = read_config_str(&child_fx, "renamed_name")
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| child_fx.name().to_str().to_string());
+            let enabled = child_fx.is_enabled();
+
+            // Recurse into nested container's children
+            let nested_children = build_children_at(
+                chain,
+                child_raw_index,
+                nested_child_count,
+                nested_stride,
+                &nested_container_id,
+                &child_path,
+            );
+
+            let mut node = FxNode::container(
+                nested_container_id,
+                name,
+                routing,
+                channel_config,
+                enabled,
+                Some(parent_id.clone()),
+            );
+            if let Some(c) = node.children_mut() {
+                *c = nested_children;
+            }
+            children.push(node);
+        } else {
+            children.push(build_plugin_node(chain, &child_fx, Some(parent_id.clone())));
+        }
+    }
+
+    children
 }
 
 // =============================================================================
@@ -1459,6 +1666,153 @@ impl FxService for ReaperFx {
                 }
             }
         });
+    }
+
+    // =========================================================================
+    // Container / Tree Operations
+    //
+    // Stub implementations — real container traversal and mutation will be
+    // implemented in US-004 and US-005.
+    // =========================================================================
+
+    async fn get_fx_tree(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        context: FxChainContext,
+    ) -> FxTree {
+        debug!("ReaperFx::get_fx_tree({:?})", context);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return FxTree::new();
+        };
+
+        ts.main_thread_future(move || {
+            let Some(proj) = resolve_project(&project) else {
+                warn!("Project not found");
+                return FxTree::new();
+            };
+            let Some((_track, chain)) = resolve_fx_chain(&proj, &context) else {
+                warn!("FX chain not found");
+                return FxTree::new();
+            };
+
+            let is_input = matches!(
+                context,
+                FxChainContext::Input(_) | FxChainContext::Monitoring
+            );
+            let top_level_count = chain.fx_count();
+
+            if top_level_count == 0 {
+                return FxTree::new();
+            }
+
+            let nodes = build_fx_tree_from_chain(&chain, is_input, top_level_count);
+
+            FxTree::from_nodes(nodes)
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    async fn create_container(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _request: CreateContainerRequest,
+    ) -> Option<FxNodeId> {
+        // TODO(US-005): Implement container creation
+        warn!("ReaperFx::create_container not yet implemented");
+        None
+    }
+
+    async fn move_to_container(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _request: MoveToContainerRequest,
+    ) {
+        // TODO(US-005): Implement move-to-container
+        warn!("ReaperFx::move_to_container not yet implemented");
+    }
+
+    async fn move_from_container(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _request: MoveFromContainerRequest,
+    ) {
+        // TODO(US-005): Implement move-from-container
+        warn!("ReaperFx::move_from_container not yet implemented");
+    }
+
+    async fn set_routing_mode(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _context: FxChainContext,
+        _node_id: FxNodeId,
+        _mode: FxRoutingMode,
+    ) {
+        // TODO(US-005): Implement routing mode set via SetNamedConfigParm(fx, "parallel", "0"/"1")
+        warn!("ReaperFx::set_routing_mode not yet implemented");
+    }
+
+    async fn get_container_channel_config(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _context: FxChainContext,
+        _container_id: FxNodeId,
+    ) -> FxContainerChannelConfig {
+        // TODO(US-004): Implement channel config read via GetNamedConfigParm
+        warn!("ReaperFx::get_container_channel_config not yet implemented");
+        FxContainerChannelConfig::default()
+    }
+
+    async fn set_container_channel_config(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _request: SetContainerChannelConfigRequest,
+    ) {
+        // TODO(US-005): Implement channel config set via SetNamedConfigParm
+        warn!("ReaperFx::set_container_channel_config not yet implemented");
+    }
+
+    async fn enclose_in_container(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _request: EncloseInContainerRequest,
+    ) -> Option<FxNodeId> {
+        // TODO(US-005): Implement enclose-in-container
+        warn!("ReaperFx::enclose_in_container not yet implemented");
+        None
+    }
+
+    async fn explode_container(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _context: FxChainContext,
+        _container_id: FxNodeId,
+    ) {
+        // TODO(US-005): Implement explode-container
+        warn!("ReaperFx::explode_container not yet implemented");
+    }
+
+    async fn rename_container(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _context: FxChainContext,
+        _container_id: FxNodeId,
+        _name: String,
+    ) {
+        // TODO(US-005): Implement via SetNamedConfigParm(fx, "renamed_name", name)
+        warn!("ReaperFx::rename_container not yet implemented");
     }
 
     // =========================================================================
