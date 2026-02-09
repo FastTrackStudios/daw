@@ -719,18 +719,56 @@ fn build_fx_tree_from_chain(chain: &FxChain, _is_input: bool, top_level_count: u
     nodes
 }
 
-/// Check if an FX slot is a container by querying its fx_type.
+/// Check if an FX slot is a container.
+///
+/// Uses multiple detection methods because `get_named_config_param` returns
+/// raw bytes that may contain null terminators or binary data that doesn't
+/// cleanly compare as a string:
+///
+/// 1. `fx_type` config param == "Container" (primary, may fail with raw bytes)
+/// 2. `container_count` config param > 0 (reliable — only containers have this)
+/// 3. `info().sub_type_expression` == "Container" (uses the string-safe API)
 fn is_container_fx(fx: &reaper_high::Fx) -> bool {
-    read_config_str(fx, "fx_type")
-        .map(|v| v == "Container")
-        .unwrap_or(false)
+    // Method 1: check fx_type via raw bytes
+    if let Some(ft) = read_config_str(fx, "fx_type") {
+        if ft == "Container" {
+            return true;
+        }
+    }
+
+    // Method 2: if container_count exists and is > 0, it's definitely a container
+    // (also catches containers with 0 children, since the param still exists)
+    if let Some(cc) = read_config_str(fx, "container_count") {
+        if cc.parse::<u32>().unwrap_or(0) > 0 {
+            return true;
+        }
+        // Even if container_count is "0", the param existing means it's a container
+        // (an empty container still returns "0")
+        if cc.parse::<u32>().is_ok() {
+            return true;
+        }
+    }
+
+    // Method 3: use the higher-level info() API which handles string conversion properly
+    if let Ok(info) = fx.info() {
+        if info.sub_type_expression == "Container" {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Read a named config param as a trimmed string, returning None on failure.
+///
+/// Note: `get_named_config_param` returns raw `Vec<u8>` which may contain
+/// null terminators. We strip them before converting to a string.
 fn read_config_str(fx: &reaper_high::Fx, key: &str) -> Option<String> {
-    fx.get_named_config_param(key, 256)
-        .ok()
-        .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_string())
+    fx.get_named_config_param(key, 256).ok().map(|bytes| {
+        // Strip null terminators and trailing whitespace
+        let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+        String::from_utf8_lossy(&bytes[..end]).trim().to_string()
+    })
 }
 
 /// Read a named config param as u32, returning 0 on failure.
