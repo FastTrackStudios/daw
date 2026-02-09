@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use crate::DawClients;
 use daw_proto::{
-    AddFxAtRequest, Fx, FxChainContext, FxLatency, FxParamModulation, FxParameter, FxRef, FxTarget,
-    ProjectContext, SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
+    AddFxAtRequest, Fx, FxChainContext, FxLatency, FxParamModulation, FxParameter, FxRef,
+    FxStateChunk, FxTarget, ProjectContext, SetNamedConfigRequest, SetParameterByNameRequest,
+    SetParameterRequest,
 };
 use eyre::Result;
 
@@ -183,6 +184,39 @@ impl FxChain {
             self.clients.clone(),
         ))
     }
+
+    // =========================================================================
+    // State Chunk Operations
+    // =========================================================================
+
+    /// Capture state chunks for all FX in the chain.
+    ///
+    /// Returns a list of `FxStateChunk` entries in chain order, each containing
+    /// the FX GUID, index, plugin name, and base64-encoded binary state.
+    pub async fn state(&self) -> Result<Vec<FxStateChunk>> {
+        let chunks = self
+            .clients
+            .fx
+            .get_fx_chain_state(self.project_context(), self.context.clone())
+            .await?;
+        Ok(chunks)
+    }
+
+    /// Restore state chunks for all FX in the chain.
+    ///
+    /// Matches FX by GUID and applies their saved state. FX not found in
+    /// the current chain are skipped gracefully.
+    pub async fn restore_state(&self, chunks: Vec<FxStateChunk>) -> Result<()> {
+        self.clients
+            .fx
+            .set_fx_chain_state(self.project_context(), self.context.clone(), chunks)
+            .await?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // FX Management (continued)
+    // =========================================================================
 
     /// Add an FX at a specific position in the chain
     pub async fn add_at(&self, fx_name: &str, index: u32) -> Result<FxHandle> {
@@ -477,6 +511,60 @@ impl FxHandle {
             .await?;
         Ok(latency)
     }
+
+    // =========================================================================
+    // State Chunk Operations
+    // =========================================================================
+
+    /// Get the binary state chunk for this FX (decoded bytes).
+    ///
+    /// Captures the complete plugin state including internal state
+    /// not exposed as parameters.
+    pub async fn state_chunk(&self) -> Result<Option<Vec<u8>>> {
+        let chunk = self
+            .clients
+            .fx
+            .get_fx_state_chunk(self.project_context(), self.target())
+            .await?;
+        Ok(chunk)
+    }
+
+    /// Set the binary state chunk for this FX (decoded bytes).
+    ///
+    /// Restores complete plugin state. The FX must already exist in the chain.
+    pub async fn set_state_chunk(&self, chunk: Vec<u8>) -> Result<()> {
+        self.clients
+            .fx
+            .set_fx_state_chunk(self.project_context(), self.target(), chunk)
+            .await?;
+        Ok(())
+    }
+
+    /// Get the base64-encoded state chunk for this FX.
+    ///
+    /// More efficient than `state_chunk()` when the data will be serialized
+    /// (avoids decode + re-encode round-trip).
+    pub async fn state_chunk_encoded(&self) -> Result<Option<String>> {
+        let encoded = self
+            .clients
+            .fx
+            .get_fx_state_chunk_encoded(self.project_context(), self.target())
+            .await?;
+        Ok(encoded)
+    }
+
+    /// Set the base64-encoded state chunk for this FX.
+    pub async fn set_state_chunk_encoded(&self, encoded: String) -> Result<()> {
+        self.clients
+            .fx
+            .set_fx_state_chunk_encoded(self.project_context(), self.target(), encoded)
+            .await?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Named Config
+    // =========================================================================
 
     /// Get a named configuration parameter
     pub async fn get_config(&self, key: &str) -> Result<Option<String>> {
