@@ -704,6 +704,242 @@ fn build_children_at(
 }
 
 // =============================================================================
+// FxNodeId Resolution Layer
+//
+// Maps stable FxNodeId values to/from REAPER's raw stride-based FX indices.
+// Plugin nodes resolve via GUID scan. Container nodes resolve via path-based
+// stride math (the path "container:2:1" encodes the traversal through the tree).
+// =============================================================================
+
+/// Resolve an FxNodeId to a raw REAPER FX index within a chain.
+///
+/// - **Plugin nodes** (GUID-based): scans the chain for a matching GUID, then
+///   checks nested containers if not found at the top level.
+/// - **Container nodes** (path-based): parses the path segments and walks the
+///   stride math to compute the raw index.
+///
+/// Returns the raw index suitable for `TrackFxLocation::NormalFxChain(raw)` or
+/// `TrackFxLocation::InputFxChain(raw)`.
+fn resolve_node_to_raw_index(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
+    if node_id.is_container() {
+        resolve_container_path(chain, node_id)
+    } else {
+        resolve_plugin_guid(chain, node_id)
+    }
+}
+
+/// Resolve a container FxNodeId by parsing its path and walking stride math.
+///
+/// Path format: "container:top_idx:child_idx:grandchild_idx:..."
+/// The first segment is the top-level FX chain index; subsequent segments
+/// are child positions within nested containers.
+fn resolve_container_path(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
+    let path_str = node_id.as_str().strip_prefix("container:")?;
+    let segments: Vec<u32> = path_str.split(':').filter_map(|s| s.parse().ok()).collect();
+
+    if segments.is_empty() {
+        return None;
+    }
+
+    // First segment is the top-level FX index
+    let top_index = segments[0];
+    if top_index >= chain.fx_count() {
+        return None;
+    }
+
+    if segments.len() == 1 {
+        // Top-level container — its raw index is just the flat index
+        return Some(top_index);
+    }
+
+    // Walk into nested containers using stride math.
+    // At each level: child_raw = CONTAINER_BASE + parent_addr + stride * (child_pos + 1)
+    // When descending into a nested container with N children: stride *= (N + 1)
+    let mut current_addr = top_index;
+    let mut stride: u32 = 1;
+
+    for (seg_idx, &child_pos) in segments[1..].iter().enumerate() {
+        // Read the container_count at current_addr to validate child position
+        let container_fx = chain.fx_by_index_untracked(current_addr);
+        let child_count = read_config_u32(&container_fx, "container_count");
+
+        if child_pos >= child_count {
+            return None; // child position out of range
+        }
+
+        // Compute the raw index for this child
+        let child_raw = CONTAINER_BASE + current_addr + stride * (child_pos + 1);
+        current_addr = child_raw;
+
+        // If there are more segments, we need to descend further — update stride
+        let is_last = seg_idx == segments.len() - 2; // -2 because we skip segments[0]
+        if !is_last {
+            let child_fx = chain.fx_by_index_untracked(child_raw);
+            let nested_count = read_config_u32(&child_fx, "container_count");
+            stride = (nested_count + 1) * stride;
+        }
+    }
+
+    Some(current_addr)
+}
+
+/// Resolve a plugin FxNodeId by scanning for its GUID.
+///
+/// First checks top-level FX (fast path), then recursively scans containers.
+fn resolve_plugin_guid(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
+    let target_guid = node_id.as_str();
+
+    // Fast path: check top-level FX
+    let top_count = chain.fx_count();
+    for i in 0..top_count {
+        let guid = reaper_high::get_fx_guid(chain, i).map(|g| g.to_string_without_braces());
+        if guid.as_deref() == Some(target_guid) {
+            return Some(i);
+        }
+    }
+
+    // Slow path: scan inside containers recursively
+    scan_containers_for_guid(chain, target_guid, top_count)
+}
+
+/// Recursively scan containers at the top level looking for a plugin with the given GUID.
+fn scan_containers_for_guid(chain: &FxChain, target_guid: &str, top_count: u32) -> Option<u32> {
+    for i in 0..top_count {
+        let fx = chain.fx_by_index_untracked(i);
+        if is_container_fx(&fx) {
+            let child_count = read_config_u32(&fx, "container_count");
+            if let Some(raw) = scan_children_for_guid(chain, i, child_count, 1, target_guid) {
+                return Some(raw);
+            }
+        }
+    }
+    None
+}
+
+/// Recursively scan children of a container for a plugin with the given GUID.
+fn scan_children_for_guid(
+    chain: &FxChain,
+    container_addr: u32,
+    child_count: u32,
+    stride: u32,
+    target_guid: &str,
+) -> Option<u32> {
+    for i in 0..child_count {
+        let child_raw = CONTAINER_BASE + container_addr + stride * (i + 1);
+        let child_fx = chain.fx_by_index_untracked(child_raw);
+
+        if is_container_fx(&child_fx) {
+            // Recurse into nested container
+            let nested_count = read_config_u32(&child_fx, "container_count");
+            let nested_stride = (nested_count + 1) * stride;
+            if let Some(raw) =
+                scan_children_for_guid(chain, child_raw, nested_count, nested_stride, target_guid)
+            {
+                return Some(raw);
+            }
+        } else {
+            // Check GUID of this plugin
+            let guid =
+                reaper_high::get_fx_guid(chain, child_raw).map(|g| g.to_string_without_braces());
+            if guid.as_deref() == Some(target_guid) {
+                return Some(child_raw);
+            }
+        }
+    }
+    None
+}
+
+/// Build a mapping from raw REAPER index to FxNodeId by walking the tree.
+///
+/// This is the reverse of `resolve_node_to_raw_index`. It builds the full tree
+/// and then walks it depth-first, recording each node's raw index alongside its
+/// FxNodeId.
+fn raw_index_to_node_id(chain: &FxChain, raw_index: u32) -> Option<FxNodeId> {
+    let top_count = chain.fx_count();
+
+    // Check top-level FX first
+    for i in 0..top_count {
+        if i == raw_index {
+            let fx = chain.fx_by_index_untracked(i);
+            if is_container_fx(&fx) {
+                return Some(FxNodeId::container(format!("{}", i)));
+            } else {
+                let guid =
+                    reaper_high::get_fx_guid(chain, i).map(|g| g.to_string_without_braces())?;
+                return Some(FxNodeId::from_guid(guid));
+            }
+        }
+
+        // If this is a container, search its children
+        let fx = chain.fx_by_index_untracked(i);
+        if is_container_fx(&fx) {
+            let child_count = read_config_u32(&fx, "container_count");
+            if let Some(id) =
+                search_children_for_raw(chain, i, child_count, 1, raw_index, &format!("{}", i))
+            {
+                return Some(id);
+            }
+        }
+    }
+
+    None
+}
+
+/// Recursively search children for a specific raw index, returning its FxNodeId.
+fn search_children_for_raw(
+    chain: &FxChain,
+    container_addr: u32,
+    child_count: u32,
+    stride: u32,
+    target_raw: u32,
+    parent_path: &str,
+) -> Option<FxNodeId> {
+    for i in 0..child_count {
+        let child_raw = CONTAINER_BASE + container_addr + stride * (i + 1);
+        let child_path = format!("{}:{}", parent_path, i);
+
+        if child_raw == target_raw {
+            let child_fx = chain.fx_by_index_untracked(child_raw);
+            if is_container_fx(&child_fx) {
+                return Some(FxNodeId::container(child_path));
+            } else {
+                let guid = reaper_high::get_fx_guid(chain, child_raw)
+                    .map(|g| g.to_string_without_braces())?;
+                return Some(FxNodeId::from_guid(guid));
+            }
+        }
+
+        // If this child is a container, recurse
+        let child_fx = chain.fx_by_index_untracked(child_raw);
+        if is_container_fx(&child_fx) {
+            let nested_count = read_config_u32(&child_fx, "container_count");
+            let nested_stride = (nested_count + 1) * stride;
+            if let Some(id) = search_children_for_raw(
+                chain,
+                child_raw,
+                nested_count,
+                nested_stride,
+                target_raw,
+                &child_path,
+            ) {
+                return Some(id);
+            }
+        }
+    }
+    None
+}
+
+/// Convenience: resolve an FxNodeId to a TrackFxLocation.
+fn resolve_node_to_location(
+    chain: &FxChain,
+    node_id: &FxNodeId,
+    is_input: bool,
+) -> Option<TrackFxLocation> {
+    let raw = resolve_node_to_raw_index(chain, node_id)?;
+    Some(fx_location(raw, is_input))
+}
+
+// =============================================================================
 // FxService Implementation
 // =============================================================================
 
