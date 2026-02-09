@@ -1,5 +1,6 @@
 //! FX events for reactive subscriptions
 
+use super::tree::{FxNodeId, FxRoutingMode};
 use super::{Fx, FxChainContext};
 use facet::Facet;
 
@@ -7,6 +8,9 @@ use facet::Facet;
 #[repr(u8)]
 #[derive(Debug, Clone, Facet)]
 pub enum FxEvent {
+    // =========================================================================
+    // Plugin events (existing)
+    // =========================================================================
     /// An FX was added to a chain
     Added { context: FxChainContext, fx: Fx },
     /// An FX was removed from a chain
@@ -46,4 +50,42 @@ pub enum FxEvent {
         fx_guid: String,
         open: bool,
     },
+
+    // =========================================================================
+    // Container events (new)
+    // =========================================================================
+    /// A new container was created
+    ContainerCreated {
+        context: FxChainContext,
+        container_id: FxNodeId,
+        name: String,
+    },
+    /// A container was removed (children may have been moved or removed)
+    ContainerRemoved {
+        context: FxChainContext,
+        container_id: FxNodeId,
+    },
+    /// Container routing mode changed (serial/parallel)
+    RoutingModeChanged {
+        context: FxChainContext,
+        container_id: FxNodeId,
+        mode: FxRoutingMode,
+    },
+    /// An FX was moved into a container
+    MovedToContainer {
+        context: FxChainContext,
+        node_id: FxNodeId,
+        source_container: Option<FxNodeId>,
+        dest_container: FxNodeId,
+    },
+    /// A container was renamed
+    ContainerRenamed {
+        context: FxChainContext,
+        container_id: FxNodeId,
+        name: String,
+    },
+    /// Catch-all for complex tree structure mutations that affect container hierarchy.
+    /// Emitted when the tree shape changes in ways that can't be described by
+    /// individual add/remove/move events (e.g., bulk restructuring).
+    TreeStructureChanged { context: FxChainContext },
 }

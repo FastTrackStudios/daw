@@ -54,11 +54,28 @@ struct CachedFxState {
     param_values: Vec<f64>,
 }
 
+/// Cached state for a container in the FX chain (for structure change detection)
+#[derive(Clone, Debug, PartialEq)]
+struct CachedContainerState {
+    /// Synthetic container ID (e.g. "container:2")
+    node_id: String,
+    /// Display name of the container
+    name: String,
+    /// Routing mode (serial=0, parallel=1)
+    routing_mode: u32,
+    /// Number of direct children
+    child_count: u32,
+    /// GUIDs of direct child plugins (containers are represented by their node_id prefixed with "c:")
+    child_ids: Vec<String>,
+}
+
 /// Cached state for an entire FX chain (for change detection)
 #[derive(Clone, Debug)]
 struct CachedChainState {
     /// Ordered list of FX states (by chain index)
     fx_states: Vec<CachedFxState>,
+    /// Container tree structure snapshot (for detecting structural changes)
+    containers: Vec<CachedContainerState>,
 }
 
 /// Key for identifying an FX chain (project + chain context)
@@ -226,7 +243,74 @@ fn read_chain_state(chain: &FxChain) -> CachedChainState {
         });
     }
 
-    CachedChainState { fx_states }
+    // Snapshot container structure for tree change detection
+    let containers = read_container_states(chain);
+
+    CachedChainState {
+        fx_states,
+        containers,
+    }
+}
+
+/// Read container structure from an FX chain for caching.
+/// Walks top-level FX looking for containers, then recursively snapshots nested ones.
+fn read_container_states(chain: &FxChain) -> Vec<CachedContainerState> {
+    let mut containers = Vec::new();
+    let top_count = chain.fx_count();
+
+    for i in 0..top_count {
+        let fx = chain.fx_by_index_untracked(i);
+        if is_container_fx(&fx) {
+            snapshot_container(chain, i, 1, &format!("{}", i), &mut containers);
+        }
+    }
+
+    containers
+}
+
+/// Recursively snapshot a container and its nested containers.
+fn snapshot_container(
+    chain: &FxChain,
+    addr: u32,
+    stride: u32,
+    path: &str,
+    out: &mut Vec<CachedContainerState>,
+) {
+    let container_fx = chain.fx_by_index_untracked(addr);
+    let child_count = read_config_u32(&container_fx, "container_count");
+    let name = container_fx.name().to_str().to_string();
+    let routing_mode = read_config_u32(&container_fx, "parallel");
+
+    let mut child_ids = Vec::with_capacity(child_count as usize);
+
+    for i in 0..child_count {
+        let child_raw = CONTAINER_BASE + addr + stride * (i + 1);
+        let child_fx = chain.fx_by_index_untracked(child_raw);
+
+        if is_container_fx(&child_fx) {
+            let child_path = format!("{}:{}", path, i);
+            child_ids.push(format!("c:{}", child_path));
+
+            // Recurse into nested container
+            let nested_count = read_config_u32(&child_fx, "container_count");
+            let nested_stride = (nested_count + 1) * stride;
+            snapshot_container(chain, child_raw, nested_stride, &child_path, out);
+        } else {
+            // Plugin child — identify by GUID
+            let guid = reaper_high::get_fx_guid(chain, child_raw)
+                .map(|g| g.to_string_without_braces())
+                .unwrap_or_default();
+            child_ids.push(guid);
+        }
+    }
+
+    out.push(CachedContainerState {
+        node_id: format!("container:{}", path),
+        name,
+        routing_mode,
+        child_count,
+        child_ids,
+    });
 }
 
 /// Diff two chain states and broadcast FxEvents for any changes
@@ -314,6 +398,98 @@ fn diff_and_broadcast(
                 }
             }
         }
+    }
+
+    // =========================================================================
+    // Container structure diffing
+    // =========================================================================
+    diff_containers(tx, context, &prev.containers, &curr.containers);
+}
+
+/// Diff container snapshots and emit container-specific events.
+fn diff_containers(
+    tx: &broadcast::Sender<FxEvent>,
+    context: &FxChainContext,
+    prev: &[CachedContainerState],
+    curr: &[CachedContainerState],
+) {
+    let prev_map: HashMap<&str, &CachedContainerState> =
+        prev.iter().map(|c| (c.node_id.as_str(), c)).collect();
+    let curr_map: HashMap<&str, &CachedContainerState> =
+        curr.iter().map(|c| (c.node_id.as_str(), c)).collect();
+
+    // Detect new containers
+    for c in curr {
+        if !prev_map.contains_key(c.node_id.as_str()) {
+            let _ = tx.send(FxEvent::ContainerCreated {
+                context: context.clone(),
+                container_id: FxNodeId::container(&c.node_id["container:".len()..]),
+                name: c.name.clone(),
+            });
+        }
+    }
+
+    // Detect removed containers
+    for p in prev {
+        if !curr_map.contains_key(p.node_id.as_str()) {
+            let _ = tx.send(FxEvent::ContainerRemoved {
+                context: context.clone(),
+                container_id: FxNodeId::container(&p.node_id["container:".len()..]),
+            });
+        }
+    }
+
+    // Detect changes in existing containers
+    let mut tree_changed = false;
+    for c in curr {
+        if let Some(p) = prev_map.get(c.node_id.as_str()) {
+            let container_id = FxNodeId::container(&c.node_id["container:".len()..]);
+
+            // Routing mode change
+            if p.routing_mode != c.routing_mode {
+                let _ = tx.send(FxEvent::RoutingModeChanged {
+                    context: context.clone(),
+                    container_id: container_id.clone(),
+                    mode: FxRoutingMode::from_reaper_param(&c.routing_mode.to_string()),
+                });
+            }
+
+            // Name change
+            if p.name != c.name {
+                let _ = tx.send(FxEvent::ContainerRenamed {
+                    context: context.clone(),
+                    container_id: container_id.clone(),
+                    name: c.name.clone(),
+                });
+            }
+
+            // Child list changed (additions, removals, reordering)
+            if p.child_ids != c.child_ids {
+                tree_changed = true;
+
+                // Emit MovedToContainer for plugins that moved INTO this container
+                for child_id in &c.child_ids {
+                    if !child_id.starts_with("c:") && !p.child_ids.contains(child_id) {
+                        // Find where this plugin was before (which container had it)
+                        let source = prev.iter().find(|pc| pc.child_ids.contains(child_id));
+                        let _ = tx.send(FxEvent::MovedToContainer {
+                            context: context.clone(),
+                            node_id: FxNodeId::from_guid(child_id),
+                            source_container: source
+                                .map(|s| FxNodeId::container(&s.node_id["container:".len()..])),
+                            dest_container: container_id.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Emit catch-all if tree structure changed in ways beyond individual events
+    if tree_changed {
+        let _ = tx.send(FxEvent::TreeStructureChanged {
+            context: context.clone(),
+        });
     }
 }
 
@@ -2081,13 +2257,19 @@ impl FxService for ReaperFx {
                     Ok(event) => {
                         // Filter: only forward events for the subscribed chain
                         let event_context = match &event {
-                            FxEvent::Added { context, .. } => context,
-                            FxEvent::Removed { context, .. } => context,
-                            FxEvent::EnabledChanged { context, .. } => context,
-                            FxEvent::Moved { context, .. } => context,
-                            FxEvent::ParameterChanged { context, .. } => context,
-                            FxEvent::PresetChanged { context, .. } => context,
-                            FxEvent::WindowChanged { context, .. } => context,
+                            FxEvent::Added { context, .. }
+                            | FxEvent::Removed { context, .. }
+                            | FxEvent::EnabledChanged { context, .. }
+                            | FxEvent::Moved { context, .. }
+                            | FxEvent::ParameterChanged { context, .. }
+                            | FxEvent::PresetChanged { context, .. }
+                            | FxEvent::WindowChanged { context, .. }
+                            | FxEvent::ContainerCreated { context, .. }
+                            | FxEvent::ContainerRemoved { context, .. }
+                            | FxEvent::RoutingModeChanged { context, .. }
+                            | FxEvent::MovedToContainer { context, .. }
+                            | FxEvent::ContainerRenamed { context, .. }
+                            | FxEvent::TreeStructureChanged { context, .. } => context,
                         };
 
                         if format!("{:?}", event_context) == format!("{:?}", target_context) {
