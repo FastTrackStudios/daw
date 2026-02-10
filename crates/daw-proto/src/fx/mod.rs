@@ -6,13 +6,19 @@
 mod error;
 mod event;
 mod service;
+pub mod tree;
 mod types;
 
 pub use error::FxError;
 pub use event::FxEvent;
 pub use service::{FxService, FxServiceClient, FxServiceDispatcher};
+pub use tree::{
+    FxContainerChannelConfig, FxNode, FxNodeId, FxNodeKind, FxRoutingMode, FxTree,
+    FxTreeDepthFirstIter,
+};
 pub use types::{
-    AddFxAtRequest, Fx, FxChainContext, FxLatency, FxParamModulation, FxParameter, FxRef,
-    FxStateChunk, FxTarget, FxType, SetNamedConfigRequest, SetParameterByNameRequest,
-    SetParameterRequest,
+    AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
+    FxLatency, FxParamModulation, FxParameter, FxRef, FxStateChunk, FxTarget, FxType,
+    MoveFromContainerRequest, MoveToContainerRequest, SetContainerChannelConfigRequest,
+    SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
 };

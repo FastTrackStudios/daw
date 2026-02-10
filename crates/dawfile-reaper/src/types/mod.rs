@@ -50,8 +50,13 @@ pub mod track;
 
 // Re-export the main types for convenience
 pub use envelope::Envelope;
-pub use fx_chain::FxChain;
-pub use item::Item;
+pub use fx_chain::{
+    parse_js_params, FxChain, FxChainNode, FxContainer, FxEnvelopePoint, FxParamEnvelope,
+    FxParamRef, FxPlugin, JsParamValue, PluginType,
+};
+pub use item::{
+    Item, MidiEvent, MidiEventType, MidiSource, SourceBlock, SourceType, StretchMarker,
+};
 pub use marker_region::{MarkerRegion, MarkerRegionCollection};
 pub use project::ReaperProject;
 pub use time_pos_utils::{

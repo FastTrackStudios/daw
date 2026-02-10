@@ -55,7 +55,8 @@ impl TempoTimePoint {
 
         // Optional fields
         let time_signature_encoded = if tokens.len() > 4 {
-            Some(tokens[4].as_number().ok_or("Invalid time signature")? as i32)
+            let encoded = tokens[4].as_number().ok_or("Invalid time signature")? as i32;
+            if encoded > 0 { Some(encoded) } else { None }
         } else {
             None
         };
@@ -178,6 +179,8 @@ pub struct TempoTimeEnvelope {
 }
 
 impl TempoTimeEnvelope {
+    const EPSILON: f64 = 1e-9;
+
     /// Create a new tempo envelope with defaults
     pub fn new(default_tempo: f64, default_time_signature: (i32, i32)) -> Self {
         Self {
@@ -218,192 +221,194 @@ impl TempoTimeEnvelope {
         (current_tempo, current_time_sig)
     }
 
-    /// Calculate the total number of beats up to a given time
-    /// This integrates tempo changes over time
-    pub fn beats_at_time(&self, time: f64) -> f64 {
+    fn integrate_linear_tempo_segment(
+        start: &TempoTimePoint,
+        end: &TempoTimePoint,
+        from: f64,
+        to: f64,
+    ) -> f64 {
+        let seg_duration = end.position - start.position;
+        if seg_duration <= Self::EPSILON {
+            return (to - from) * start.tempo / 60.0;
+        }
+
+        let off_from = (from - start.position).clamp(0.0, seg_duration);
+        let off_to = (to - start.position).clamp(0.0, seg_duration);
+        if off_to <= off_from {
+            return 0.0;
+        }
+
+        let slope = (end.tempo - start.tempo) / seg_duration;
+        let tempo_integral =
+            start.tempo * (off_to - off_from) + 0.5 * slope * (off_to * off_to - off_from * off_from);
+        tempo_integral / 60.0
+    }
+
+    fn integrate_between_points(
+        start: &TempoTimePoint,
+        end: &TempoTimePoint,
+        from: f64,
+        to: f64,
+    ) -> f64 {
+        if to <= from {
+            return 0.0;
+        }
+        Self::integrate_linear_tempo_segment(start, end, from, to)
+    }
+
+    fn quarter_notes_at_time(&self, time: f64) -> f64 {
+        if time <= 0.0 {
+            return 0.0;
+        }
         if self.points.is_empty() {
-            // No tempo changes, simple calculation
             return time * self.default_tempo / 60.0;
         }
 
-        let mut total_beats = 0.0;
-        let mut last_time = 0.0;
-        let mut current_tempo = self.default_tempo;
+        let mut total_qn = 0.0f64;
+        let first = &self.points[0];
 
-        println!("Debug: Calculating beats at time {:.3}s", time);
-        println!("  Default tempo: {:.1} BPM", self.default_tempo);
+        // Pre-first-marker segment runs at default tempo.
+        if time <= first.position {
+            return time * self.default_tempo / 60.0;
+        }
+        total_qn += (first.position.max(0.0)) * self.default_tempo / 60.0;
 
-        for (i, point) in self.points.iter().enumerate() {
-            println!(
-                "  Point {}: {:.3}s, {:.1} BPM",
-                i, point.position, point.tempo
-            );
+        for idx in 0..self.points.len() {
+            let start = &self.points[idx];
+            let next = self.points.get(idx + 1);
 
-            if point.position <= time {
-                // Add beats for the time segment before this point
-                let segment_duration = point.position - last_time;
-                let segment_beats = segment_duration * current_tempo / 60.0;
-                total_beats += segment_beats;
+            let seg_from = start.position.max(0.0);
+            let seg_to = next.map(|p| p.position).unwrap_or(time).min(time);
+            if seg_to <= seg_from {
+                continue;
+            }
 
-                println!(
-                    "    Segment {:.3}s to {:.3}s: {:.3}s at {:.1} BPM = {:.3} beats",
-                    last_time, point.position, segment_duration, current_tempo, segment_beats
-                );
-                println!("    Total beats so far: {:.3}", total_beats);
-
-                // Update for next segment
-                last_time = point.position;
-                current_tempo = point.tempo;
+            if let Some(end) = next {
+                total_qn += Self::integrate_between_points(start, end, seg_from, seg_to);
             } else {
-                // This point is after our target time, add final segment
-                let segment_duration = time - last_time;
-                let segment_beats = segment_duration * current_tempo / 60.0;
-                total_beats += segment_beats;
+                total_qn += (seg_to - seg_from) * start.tempo / 60.0;
+            }
 
-                println!(
-                    "    Final segment {:.3}s to {:.3}s: {:.3}s at {:.1} BPM = {:.3} beats",
-                    last_time, time, segment_duration, current_tempo, segment_beats
-                );
-                println!("    Final total beats: {:.3}", total_beats);
-                return total_beats;
+            if time <= seg_to + Self::EPSILON {
+                break;
             }
         }
 
-        // Add final segment if we haven't reached the target time yet
-        if last_time < time {
-            let segment_duration = time - last_time;
-            let segment_beats = segment_duration * current_tempo / 60.0;
-            total_beats += segment_beats;
+        total_qn
+    }
 
-            println!(
-                "    Final segment {:.3}s to {:.3}s: {:.3}s at {:.1} BPM = {:.3} beats",
-                last_time, time, segment_duration, current_tempo, segment_beats
-            );
-            println!("    Final total beats: {:.3}", total_beats);
-        }
-
-        total_beats
+    /// Calculate the total number of beats up to a given time
+    /// This integrates tempo changes over time
+    pub fn beats_at_time(&self, time: f64) -> f64 {
+        self.quarter_notes_at_time(time)
     }
 
     /// Calculate musical position (measure and beat) at a given time
     /// Returns (measure, beat, beat_fraction) where measure is 1-based
     /// This is more complex because time signatures can change throughout the song
     pub fn musical_position_at_time(&self, time: f64) -> (i32, i32, f64) {
-        if self.points.is_empty() {
-            // No tempo changes, simple calculation with effective tempo
-            let tempo_ratio = self.default_time_signature.1 as f64 / 4.0;
-            let effective_tempo = self.default_tempo * tempo_ratio;
-            let total_beats = time * effective_tempo / 60.0;
-            let beats_per_measure = self.default_time_signature.0 as f64;
-            let measure = (total_beats / beats_per_measure).floor() as i32 + 1;
-            let beat_in_measure = ((total_beats - 1.0) % beats_per_measure + 1.0) as i32;
-            let beat_fraction = total_beats
-                - (measure - 1) as f64 * beats_per_measure
-                - (beat_in_measure - 1) as f64;
-            return (measure, beat_in_measure, beat_fraction);
+        if time <= 0.0 {
+            return (1, 1, 0.0);
         }
 
-        // Need to account for time signature changes throughout the song
-        let mut total_beats = 0.0;
-        let mut last_time = 0.0;
-        let mut current_tempo = self.default_tempo;
-        let mut current_time_sig = self.default_time_signature;
-        let mut current_measure = 1.0; // Track measures as we go
+        let target_qn = self.quarter_notes_at_time(time);
 
-        // Add bounds checking to prevent overflow
-        let max_measures = 1000.0;
+        let mut measure = 1i32;
+        let mut quarter_in_measure = 0.0f64;
+        let mut current_sig = self.default_time_signature;
 
+        let advance_quarters = |quarters: f64,
+                                sig: (i32, i32),
+                                measure_ref: &mut i32,
+                                qim: &mut f64| {
+            if quarters <= 0.0 {
+                return;
+            }
+            let measure_len_qn = (sig.0 as f64) * (4.0 / sig.1 as f64);
+            *qim += quarters;
+            while *qim + Self::EPSILON >= measure_len_qn {
+                *qim -= measure_len_qn;
+                *measure_ref += 1;
+            }
+            if *qim < 0.0 {
+                *qim = 0.0;
+            }
+        };
+
+        let mut sig_changes: Vec<(f64, (i32, i32))> = vec![(0.0, current_sig)];
         for point in &self.points {
-            if point.position <= time {
-                // Add beats for the time segment before this point
-                let segment_duration = point.position - last_time;
-
-                // Calculate effective tempo based on time signature
-                // Convert tempo to quarter note equivalents based on the note value
-                // Ratio = denominator / 4 (e.g., 8/4 = 2.0 for eighth notes, 2/4 = 0.5 for half notes)
-                let tempo_ratio = current_time_sig.1 as f64 / 4.0;
-                let effective_tempo = current_tempo * tempo_ratio;
-
-                let segment_beats = segment_duration * effective_tempo / 60.0;
-                total_beats += segment_beats;
-
-                // Calculate how many measures this segment represents
-                let beats_per_measure = current_time_sig.0 as f64;
-                let segment_measures = segment_beats / beats_per_measure;
-                current_measure += segment_measures;
-
-                // Prevent overflow
-                if current_measure > max_measures {
-                    current_measure = max_measures;
+            if let Some(sig) = point.time_signature() {
+                let qn = self.quarter_notes_at_time(point.position);
+                if let Some((last_qn, last_sig)) = sig_changes.last().copied() {
+                    if (qn - last_qn).abs() <= Self::EPSILON {
+                        sig_changes.pop();
+                        sig_changes.push((qn, sig));
+                    } else if sig != last_sig {
+                        sig_changes.push((qn, sig));
+                    }
                 }
-
-                // Update for next segment
-                last_time = point.position;
-                current_tempo = point.tempo;
-                if let Some(time_sig) = point.time_signature() {
-                    current_time_sig = time_sig;
-                }
-            } else {
-                // This point is after our target time, add final segment
-                let segment_duration = time - last_time;
-
-                // Calculate effective tempo based on current time signature
-                let tempo_ratio = current_time_sig.1 as f64 / 4.0;
-                let effective_tempo = current_tempo * tempo_ratio;
-
-                let segment_beats = segment_duration * effective_tempo / 60.0;
-                total_beats += segment_beats;
-
-                // Calculate final segment measures
-                let beats_per_measure = current_time_sig.0 as f64;
-                let segment_measures = segment_beats / beats_per_measure;
-                current_measure += segment_measures;
-
-                // Prevent overflow
-                if current_measure > max_measures {
-                    current_measure = max_measures;
-                }
-
-                // Calculate final position with bounds checking
-                let measure = (current_measure.floor() as i32 + 1).clamp(1, 1000);
-                let beat_in_measure =
-                    ((current_measure - current_measure.floor()) * beats_per_measure + 1.0) as i32;
-                let beat_in_measure = beat_in_measure.clamp(1, beats_per_measure as i32);
-                let beat_fraction = (current_measure - current_measure.floor()) * beats_per_measure;
-
-                return (measure, beat_in_measure, beat_fraction);
             }
         }
 
-        // Add final segment if we haven't reached the target time yet
-        if last_time < time {
-            let segment_duration = time - last_time;
+        let mut prev_qn = 0.0f64;
+        let mut done = false;
 
-            // Calculate effective tempo based on current time signature
-            let tempo_ratio = current_time_sig.1 as f64 / 4.0;
-            let effective_tempo = current_tempo * tempo_ratio;
-
-            let segment_beats = segment_duration * effective_tempo / 60.0;
-            total_beats += segment_beats;
-
-            let beats_per_measure = current_time_sig.0 as f64;
-            let segment_measures = segment_beats / beats_per_measure;
-            current_measure += segment_measures;
-
-            // Prevent overflow
-            if current_measure > max_measures {
-                current_measure = max_measures;
+        for (idx, (change_qn, next_sig)) in sig_changes.iter().enumerate() {
+            if idx == 0 {
+                current_sig = *next_sig;
+                continue;
             }
+
+            if *change_qn <= prev_qn + Self::EPSILON {
+                current_sig = *next_sig;
+                continue;
+            }
+
+            let stop_qn = target_qn.min(*change_qn);
+            if stop_qn > prev_qn + Self::EPSILON {
+                advance_quarters(
+                    stop_qn - prev_qn,
+                    current_sig,
+                    &mut measure,
+                    &mut quarter_in_measure,
+                );
+                prev_qn = stop_qn;
+            }
+
+            if target_qn <= *change_qn + Self::EPSILON {
+                done = true;
+                break;
+            }
+
+            current_sig = *next_sig;
         }
 
-        // Calculate final position with bounds checking
-        let measure = (current_measure.floor() as i32 + 1).clamp(1, 1000);
-        let beat_in_measure =
-            ((current_measure - current_measure.floor()) * current_time_sig.0 as f64 + 1.0) as i32;
-        let beat_in_measure = beat_in_measure.clamp(1, current_time_sig.0);
-        let beat_fraction = (current_measure - current_measure.floor()) * current_time_sig.0 as f64;
+        if !done && target_qn > prev_qn + Self::EPSILON {
+            advance_quarters(
+                target_qn - prev_qn,
+                current_sig,
+                &mut measure,
+                &mut quarter_in_measure,
+            );
+        }
 
-        (measure, beat_in_measure, beat_fraction)
+        let beat_len_qn = 4.0 / current_sig.1 as f64;
+        let beat_pos = quarter_in_measure / beat_len_qn;
+        let beat_whole = beat_pos.floor();
+        let mut beat = (beat_whole as i32 + 1).clamp(1, current_sig.0.max(1));
+        let mut fraction = (beat_pos - beat_whole).clamp(0.0, 1.0);
+
+        // Normalize near-boundary floating point residue.
+        if fraction >= 1.0 - 1e-6 {
+            fraction = 0.0;
+            beat += 1;
+        }
+        if beat > current_sig.0.max(1) {
+            beat = 1;
+            measure += 1;
+        }
+
+        (measure.clamp(1, 1_000_000), beat, fraction)
     }
 
     /// Get musical position as a formatted string in REAPER's format (measure.beat.fraction)

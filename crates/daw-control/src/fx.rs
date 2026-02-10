@@ -5,8 +5,8 @@ use std::sync::Arc;
 use crate::DawClients;
 use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
-    FxContainerChannelConfig, FxEvent, FxLatency, FxNode, FxNodeId, FxParamModulation, FxParameter,
-    FxRef, FxRoutingMode, FxStateChunk, FxTarget, FxTree, MoveFromContainerRequest,
+    FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation, FxParameter, FxRef,
+    FxRoutingMode, FxStateChunk, FxTarget, FxTree, MoveFromContainerRequest,
     MoveToContainerRequest, ProjectContext, SetContainerChannelConfigRequest,
     SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
 };
@@ -362,7 +362,8 @@ impl FxChain {
                 self.context.clone(),
                 container_id.clone(),
             )
-            .await?;
+            .await?
+            .ok_or_else(|| eyre::eyre!("Container channel config not found"))?;
         Ok(config)
     }
 
@@ -424,6 +425,39 @@ impl FxChain {
                 self.context.clone(),
                 container_id.clone(),
                 name.to_string(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Raw FX Chain Chunk Operations
+    // =========================================================================
+
+    /// Get the raw RPP chunk text for this FX chain section.
+    ///
+    /// Returns the full `<FXCHAIN ...>...</FXCHAIN>` block as RPP text.
+    /// Useful for extracting container blocks for module presets.
+    pub async fn fx_chain_chunk_text(&self) -> Result<String> {
+        self.clients
+            .fx
+            .get_fx_chain_chunk_text(self.project_context(), self.context.clone())
+            .await?
+            .ok_or_else(|| eyre::eyre!("No FX chain chunk found"))
+    }
+
+    /// Insert a raw RPP chunk block into this FX chain.
+    ///
+    /// The `chunk_text` should be a complete RPP block (e.g., a `<CONTAINER>`
+    /// block). REAPER handles all plugin instantiation and state restoration
+    /// atomically.
+    pub async fn insert_chunk(&self, chunk_text: &str) -> Result<()> {
+        self.clients
+            .fx
+            .insert_fx_chain_chunk(
+                self.project_context(),
+                self.context.clone(),
+                chunk_text.to_string(),
             )
             .await?;
         Ok(())
@@ -696,7 +730,8 @@ impl FxHandle {
             .clients
             .fx
             .get_fx_latency(self.project_context(), self.target())
-            .await?;
+            .await?
+            .ok_or_else(|| eyre::eyre!("FX latency not available"))?;
         Ok(latency)
     }
 
@@ -962,7 +997,8 @@ impl FxParamHandle {
             .clients
             .fx
             .get_param_modulation(self.project_context(), self.target(), index)
-            .await?;
+            .await?
+            .ok_or_else(|| eyre::eyre!("Parameter modulation not available"))?;
         Ok(mod_state)
     }
 }

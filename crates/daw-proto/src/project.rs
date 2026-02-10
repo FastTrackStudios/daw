@@ -18,7 +18,7 @@ use roam::{Tx, service};
 /// Used by all DAW services to target operations at a specific project
 /// or the currently active project.
 #[repr(u8)]
-#[derive(Clone, Debug, Default, Facet)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Facet)]
 pub enum ProjectContext {
     /// The currently active/focused project (default)
     #[default]

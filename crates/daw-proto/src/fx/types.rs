@@ -11,7 +11,7 @@ use facet::Facet;
 /// - Track input chain (recording FX)
 /// - Monitoring chain (global monitoring FX)
 #[repr(u8)]
-#[derive(Clone, Debug, Facet)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Facet)]
 pub enum FxChainContext {
     /// Normal track FX (output/playback chain)
     Track(String), // track GUID
@@ -179,6 +179,11 @@ pub struct FxParameter {
     pub formatted: String,
     /// Whether this is a toggle/boolean parameter
     pub is_toggle: bool,
+    /// Number of discrete steps (None = continuous, Some(n) = dropdown with n choices)
+    pub step_count: Option<u32>,
+    /// Labels for each discrete step (empty for continuous params).
+    /// Each entry is (normalized_value, display_label).
+    pub step_labels: Vec<(f64, String)>,
 }
 
 impl FxParameter {
@@ -190,6 +195,8 @@ impl FxParameter {
             value,
             formatted: format!("{:.2}", value),
             is_toggle: false,
+            step_count: None,
+            step_labels: Vec::new(),
         }
     }
 }
@@ -303,6 +310,67 @@ pub struct AddFxAtRequest {
     pub name: String,
     /// Position in chain
     pub index: u32,
+}
+
+// =============================================================================
+// Container Request Types
+// =============================================================================
+
+/// Request to create a new container in an FX chain.
+#[derive(Clone, Debug, Facet)]
+pub struct CreateContainerRequest {
+    /// Which FX chain to create the container in.
+    pub context: FxChainContext,
+    /// Display name for the container (e.g., "DRIVE", "PRE-FX").
+    pub name: String,
+    /// Position in the chain to insert the container (0-based).
+    pub index: u32,
+}
+
+/// Request to move an FX node into a container.
+#[derive(Clone, Debug, Facet)]
+pub struct MoveToContainerRequest {
+    /// Which FX chain the operation is in.
+    pub context: FxChainContext,
+    /// The node to move.
+    pub node_id: super::FxNodeId,
+    /// The target container to move the node into.
+    pub container_id: super::FxNodeId,
+    /// Position within the container's children (0-based).
+    pub child_index: u32,
+}
+
+/// Request to move an FX node out of its container to a parent-level position.
+#[derive(Clone, Debug, Facet)]
+pub struct MoveFromContainerRequest {
+    /// Which FX chain the operation is in.
+    pub context: FxChainContext,
+    /// The node to move out.
+    pub node_id: super::FxNodeId,
+    /// Position in the parent level to insert at (0-based).
+    pub target_index: u32,
+}
+
+/// Request to enclose one or more FX nodes in a new container.
+#[derive(Clone, Debug, Facet)]
+pub struct EncloseInContainerRequest {
+    /// Which FX chain the operation is in.
+    pub context: FxChainContext,
+    /// Node IDs to enclose (must be siblings at the same level).
+    pub node_ids: Vec<super::FxNodeId>,
+    /// Display name for the new container.
+    pub name: String,
+}
+
+/// Request to set the channel configuration for a container.
+#[derive(Clone, Debug, Facet)]
+pub struct SetContainerChannelConfigRequest {
+    /// Which FX chain the operation is in.
+    pub context: FxChainContext,
+    /// The container node.
+    pub container_id: super::FxNodeId,
+    /// New channel configuration.
+    pub config: super::FxContainerChannelConfig,
 }
 
 // =============================================================================

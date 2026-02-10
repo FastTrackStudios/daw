@@ -5,6 +5,7 @@ use std::fmt;
 
 use crate::primitives::{BlockType, RppBlock, Token};
 use crate::types::envelope::Envelope;
+use crate::types::fx_chain::FxChain;
 use crate::types::item::Item;
 
 /// Automation mode for tracks
@@ -383,6 +384,7 @@ pub struct HardwareOutputSettings {
 pub struct Track {
     // Basic track properties
     pub name: String,                    // NAME - Track name
+    pub selected: bool,                  // SEL - Track selected in TCP/MCP
     pub locked: bool,                    // LOCK - Track controls are locked
     pub peak_color: Option<i32>,         // PEAKCOL - Peak colour
     pub beat: Option<i32>,               // BEAT - Track timebase (-1 = project default)
@@ -500,11 +502,7 @@ pub struct MidiNoteName {
     pub note_number_2: i32,   // field 5 - note number
 }
 
-/// FX Chain (placeholder - will be implemented separately)
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FxChain {
-    pub raw_content: String,
-}
+// FxChain is now defined in fx_chain.rs and imported above.
 
 /// Freeze data (placeholder - will be implemented separately)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -560,6 +558,7 @@ impl Track {
 
         let mut track = Track {
             name: String::new(),
+            selected: false,
             locked: false,
             peak_color: None,
             beat: None,
@@ -639,6 +638,7 @@ impl Track {
     pub fn from_rpp_block(block_content: &str) -> Result<Self, String> {
         let mut track = Track {
             name: String::new(),
+            selected: false,
             locked: false,
             peak_color: None,
             beat: None,
@@ -774,10 +774,21 @@ impl Track {
                     let fx_lines = &lines[fx_start..i];
                     let fx_content = fx_lines.join("\n");
 
-                    // Parse the FX chain (placeholder for now)
-                    track.fx_chain = Some(FxChain {
-                        raw_content: fx_content,
-                    });
+                    // Parse the FX chain using the full parser
+                    match FxChain::parse(&fx_content) {
+                        Ok(parsed) => track.fx_chain = Some(parsed),
+                        Err(_) => {
+                            // Fallback: store with raw content only
+                            track.fx_chain = Some(FxChain {
+                                window_rect: None,
+                                show: 0,
+                                last_sel: 0,
+                                docked: false,
+                                nodes: Vec::new(),
+                                raw_content: fx_content,
+                            });
+                        }
+                    }
                     continue;
                 } else {
                     // Skip other nested blocks with proper depth handling
@@ -838,6 +849,11 @@ impl Track {
                 "LOCK" => {
                     if tokens.len() > 1 {
                         track.locked = Self::parse_bool(&tokens[1])?;
+                    }
+                }
+                "SEL" => {
+                    if tokens.len() > 1 {
+                        track.selected = Self::parse_bool(&tokens[1])?;
                     }
                 }
                 "PEAKCOL" => {

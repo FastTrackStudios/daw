@@ -58,7 +58,7 @@ impl From<String> for TrackRef {
 ///
 /// Contains all relevant track information including identification,
 /// state flags, levels, and structural information.
-#[derive(Clone, Debug, Facet)]
+#[derive(Clone, Debug, PartialEq, Facet)]
 pub struct Track {
     /// Unique GUID for stable identification across sessions
     pub guid: String,

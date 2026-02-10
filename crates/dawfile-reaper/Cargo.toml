@@ -10,6 +10,9 @@ license = "MIT"
 # Parser dependencies
 nom = "8"
 
+# Domain types for conversion
+daw-proto = { workspace = true }
+
 # Common workspace dependencies
 serde = { workspace = true }
 thiserror = { workspace = true }

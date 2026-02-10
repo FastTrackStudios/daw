@@ -1,10 +1,23 @@
 //! FX service trait
 //!
 //! Defines the RPC interface for FX (audio plugin) operations.
+//!
+//! ## Return Type Conventions
+//!
+//! - **Query methods** (`get_*`, `fx_count`): Return `Option<T>` when the target
+//!   may not exist (single item lookups), or `Vec<T>` / plain `T` for
+//!   collection queries and counts where "not found" is just "empty".
+//! - **Mutation methods** (`set_*`, `move_*`, `remove_*`, `create_*`, etc.):
+//!   Return `Result<(), String>` (or `Result<T, String>` when producing a value)
+//!   so callers can detect and handle failures.
+//! - **Subscription methods**: Return `Result<(), String>` for setup failures.
 
 use super::{
-    AddFxAtRequest, Fx, FxChainContext, FxEvent, FxLatency, FxParamModulation, FxParameter,
-    FxStateChunk, FxTarget, SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
+    AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
+    FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation, FxParameter,
+    FxRoutingMode, FxStateChunk, FxTarget, FxTree, MoveFromContainerRequest,
+    MoveToContainerRequest, SetContainerChannelConfigRequest, SetNamedConfigRequest,
+    SetParameterByNameRequest, SetParameterRequest,
 };
 use crate::ProjectContext;
 use roam::Tx;
@@ -34,10 +47,20 @@ pub trait FxService {
     // =========================================================================
 
     /// Enable or bypass an FX
-    async fn set_fx_enabled(&self, project: ProjectContext, target: FxTarget, enabled: bool);
+    async fn set_fx_enabled(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+        enabled: bool,
+    ) -> Result<(), String>;
 
     /// Set FX offline state (completely disable processing)
-    async fn set_fx_offline(&self, project: ProjectContext, target: FxTarget, offline: bool);
+    async fn set_fx_offline(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+        offline: bool,
+    ) -> Result<(), String>;
 
     // =========================================================================
     // FX Management
@@ -62,10 +85,15 @@ pub trait FxService {
     async fn add_fx_at(&self, project: ProjectContext, request: AddFxAtRequest) -> Option<String>;
 
     /// Remove an FX from the chain
-    async fn remove_fx(&self, project: ProjectContext, target: FxTarget);
+    async fn remove_fx(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;
 
     /// Move an FX to a new position in the chain
-    async fn move_fx(&self, project: ProjectContext, target: FxTarget, new_index: u32);
+    async fn move_fx(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+        new_index: u32,
+    ) -> Result<(), String>;
 
     // =========================================================================
     // Parameters
@@ -83,7 +111,11 @@ pub trait FxService {
     ) -> Option<FxParameter>;
 
     /// Set a parameter value by index (normalized 0.0-1.0)
-    async fn set_parameter(&self, project: ProjectContext, request: SetParameterRequest);
+    async fn set_parameter(
+        &self,
+        project: ProjectContext,
+        request: SetParameterRequest,
+    ) -> Result<(), String>;
 
     /// Get a parameter by name (first match)
     async fn get_parameter_by_name(
@@ -98,33 +130,38 @@ pub trait FxService {
         &self,
         project: ProjectContext,
         request: SetParameterByNameRequest,
-    );
+    ) -> Result<(), String>;
 
     // =========================================================================
     // Presets
     // =========================================================================
 
     /// Navigate to the next preset
-    async fn next_preset(&self, project: ProjectContext, target: FxTarget);
+    async fn next_preset(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;
 
     /// Navigate to the previous preset
-    async fn prev_preset(&self, project: ProjectContext, target: FxTarget);
+    async fn prev_preset(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;
 
     /// Set preset by index
-    async fn set_preset(&self, project: ProjectContext, target: FxTarget, index: u32);
+    async fn set_preset(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+        index: u32,
+    ) -> Result<(), String>;
 
     // =========================================================================
     // UI
     // =========================================================================
 
     /// Open the FX UI window
-    async fn open_fx_ui(&self, project: ProjectContext, target: FxTarget);
+    async fn open_fx_ui(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;
 
     /// Close the FX UI window
-    async fn close_fx_ui(&self, project: ProjectContext, target: FxTarget);
+    async fn close_fx_ui(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;
 
     /// Toggle the FX UI window
-    async fn toggle_fx_ui(&self, project: ProjectContext, target: FxTarget);
+    async fn toggle_fx_ui(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;
 
     // =========================================================================
     // Advanced (Named Config Parameters)
@@ -142,10 +179,14 @@ pub trait FxService {
     ) -> Option<String>;
 
     /// Set a named configuration parameter (TrackFX_SetNamedConfigParm)
-    async fn set_named_config(&self, project: ProjectContext, request: SetNamedConfigRequest);
+    async fn set_named_config(
+        &self,
+        project: ProjectContext,
+        request: SetNamedConfigRequest,
+    ) -> Result<(), String>;
 
     /// Get FX latency information (PDC)
-    async fn get_fx_latency(&self, project: ProjectContext, target: FxTarget) -> FxLatency;
+    async fn get_fx_latency(&self, project: ProjectContext, target: FxTarget) -> Option<FxLatency>;
 
     /// Get parameter modulation state
     async fn get_param_modulation(
@@ -153,7 +194,7 @@ pub trait FxService {
         project: ProjectContext,
         target: FxTarget,
         param_index: u32,
-    ) -> FxParamModulation;
+    ) -> Option<FxParamModulation>;
 
     // =========================================================================
     // State Chunks
@@ -180,7 +221,12 @@ pub trait FxService {
     /// Set the binary state chunk for a single FX (decoded bytes).
     ///
     /// Restores complete plugin state. The FX must already exist in the chain.
-    async fn set_fx_state_chunk(&self, project: ProjectContext, target: FxTarget, chunk: Vec<u8>);
+    async fn set_fx_state_chunk(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+        chunk: Vec<u8>,
+    ) -> Result<(), String>;
 
     /// Get the base64-encoded state chunk for a single FX.
     ///
@@ -198,7 +244,7 @@ pub trait FxService {
         project: ProjectContext,
         target: FxTarget,
         encoded: String,
-    );
+    ) -> Result<(), String>;
 
     /// Capture state chunks for all FX in a chain.
     ///
@@ -219,7 +265,129 @@ pub trait FxService {
         project: ProjectContext,
         context: FxChainContext,
         chunks: Vec<FxStateChunk>,
-    );
+    ) -> Result<(), String>;
+
+    // =========================================================================
+    // Container / Tree Operations
+    //
+    // Tree-aware methods for reading and manipulating FX containers.
+    // All container methods use FxNodeId for addressing — never raw
+    // REAPER indices. The tree model abstracts the DAW's internal
+    // encoding completely.
+    // =========================================================================
+
+    /// Get the full FX chain as a recursive tree.
+    ///
+    /// Returns the complete hierarchy including containers, their children,
+    /// routing modes, and channel configurations. This is the primary method
+    /// for reading container-aware FX chain state.
+    async fn get_fx_tree(&self, project: ProjectContext, context: FxChainContext) -> FxTree;
+
+    /// Create a new empty container at a position in the chain.
+    ///
+    /// Returns the `FxNodeId` of the newly created container.
+    async fn create_container(
+        &self,
+        project: ProjectContext,
+        request: CreateContainerRequest,
+    ) -> Option<FxNodeId>;
+
+    /// Move an FX node into a container at a specified child position.
+    async fn move_to_container(
+        &self,
+        project: ProjectContext,
+        request: MoveToContainerRequest,
+    ) -> Result<(), String>;
+
+    /// Move an FX node out of its container to a parent-level position.
+    async fn move_from_container(
+        &self,
+        project: ProjectContext,
+        request: MoveFromContainerRequest,
+    ) -> Result<(), String>;
+
+    /// Set the routing mode (serial/parallel) for FX within a container.
+    async fn set_routing_mode(
+        &self,
+        project: ProjectContext,
+        context: FxChainContext,
+        node_id: FxNodeId,
+        mode: FxRoutingMode,
+    ) -> Result<(), String>;
+
+    /// Get the channel configuration for a container.
+    async fn get_container_channel_config(
+        &self,
+        project: ProjectContext,
+        context: FxChainContext,
+        container_id: FxNodeId,
+    ) -> Option<FxContainerChannelConfig>;
+
+    /// Set the channel configuration for a container.
+    async fn set_container_channel_config(
+        &self,
+        project: ProjectContext,
+        request: SetContainerChannelConfigRequest,
+    ) -> Result<(), String>;
+
+    /// Enclose one or more existing FX nodes in a new container.
+    ///
+    /// Creates a container at the position of the first specified node,
+    /// then moves all specified nodes into it. Returns the new container's
+    /// `FxNodeId`.
+    async fn enclose_in_container(
+        &self,
+        project: ProjectContext,
+        request: EncloseInContainerRequest,
+    ) -> Option<FxNodeId>;
+
+    /// Explode a container — moves all children out to the parent level,
+    /// then removes the empty container.
+    async fn explode_container(
+        &self,
+        project: ProjectContext,
+        context: FxChainContext,
+        container_id: FxNodeId,
+    ) -> Result<(), String>;
+
+    /// Rename a container.
+    async fn rename_container(
+        &self,
+        project: ProjectContext,
+        context: FxChainContext,
+        container_id: FxNodeId,
+        name: String,
+    ) -> Result<(), String>;
+
+    // =========================================================================
+    // Raw Chunk Text Operations
+    //
+    // Track Snapshot-style operations that work with raw RPP chunk text.
+    // Used for atomic module preset save/load — captures the full container
+    // block including nested FX, their binary state, routing, and config.
+    // =========================================================================
+
+    /// Get the raw RPP chunk text for the entire FX chain section.
+    ///
+    /// Returns the `<FXCHAIN ...>...</FXCHAIN>` block as a string from the
+    /// track's state chunk. Returns `None` if the track has no FX chain.
+    async fn get_fx_chain_chunk_text(
+        &self,
+        project: ProjectContext,
+        context: FxChainContext,
+    ) -> Option<String>;
+
+    /// Insert a raw RPP chunk block into the FX chain.
+    ///
+    /// The `chunk_text` should be a complete RPP block (e.g., a `<CONTAINER>`
+    /// block with nested FX). It is appended at the end of the existing chain.
+    /// REAPER handles all plugin instantiation and state restoration atomically.
+    async fn insert_fx_chain_chunk(
+        &self,
+        project: ProjectContext,
+        context: FxChainContext,
+        chunk_text: String,
+    ) -> Result<(), String>;
 
     // =========================================================================
     // Observation / Subscriptions

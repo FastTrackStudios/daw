@@ -31,7 +31,7 @@ impl Default for ReaperAudioEngine {
 
 impl AudioEngineService for ReaperAudioEngine {
     async fn get_state(&self, _cx: &Context) -> AudioEngineState {
-        info!("ReaperAudioEngine: get_state called");
+        debug!("ReaperAudioEngine: get_state called");
         if let Some(ts) = task_support() {
             ts.main_thread_future(|| {
                 let reaper = Reaper::get();
@@ -44,7 +44,7 @@ impl AudioEngineService for ReaperAudioEngine {
                 // even when audio engine isn't actively running
                 let latency = get_audio_latency_internal(medium);
 
-                info!(
+                debug!(
                     "AudioEngineState: running={}, prebuffer={}, in={}, out={}, rate={}",
                     is_running,
                     is_prebuffer,

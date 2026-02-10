@@ -50,7 +50,12 @@
 
 use thiserror::Error;
 
+pub mod chunk_ops;
+pub mod compat;
+pub mod convert;
+pub mod io;
 pub mod primitives;
+pub mod rpp_tree;
 pub mod types;
 
 #[cfg(test)]
@@ -131,8 +136,31 @@ mod tests {
 pub use primitives::{
     parse_rpp, BlockType, QuoteType, RppBlock, RppBlockContent, RppProject, Token,
 };
+pub use rpp_tree::{
+    add_rchunk, add_rnode, add_rtoken, create_rchunk, create_rnode_from_line,
+    create_rnode_from_tokens, create_rpp, create_rtokens, read_rpp, read_rpp_chunk,
+    read_rpp_lines, stringify_rpp_node, tokenize as tokenize_tree, write_rpp, GuidStripPolicy,
+    RChunk, RNode, RNodeTree, RToken as TreeToken,
+};
+pub use io::{
+    fx_tree_to_rfxchain_text, parse_chunk_text, parse_fxchain_text, parse_fxchain_tree,
+    parse_daw_tracks_from_project_text, parse_project_text, read_chunk, read_fxchain,
+    read_fxchain_tree, read_project, write_chunk, write_fx_tree, write_fxchain,
+    daw_tracks_to_rpp_project_text,
+};
+pub use convert::{
+    daw_track_to_rpp_track_chunk, fx_chain_to_tree, rpp_track_to_daw_track, rpp_tracks_to_daw_tracks,
+    tree_to_fx_chain,
+};
+pub use compat::{
+    AddRChunk, AddRNode, AddRToken, CreateNodeInput, CreateRChunk, CreateRNode, CreateRPP,
+    CreateRTokens, LUA_API_MATRIX, ReadRPP, ReadRPPChunk, ReadRPPChunkLines, StringifyRPPNode,
+    WriteRPP,
+};
 pub use types::{
-    Envelope, FxChain, Item, MarkerRegion, MarkerRegionCollection, ReaperProject,
+    parse_js_params, Envelope, FxChain, FxChainNode, FxContainer, FxEnvelopePoint, FxParamEnvelope,
+    FxParamRef, FxPlugin, Item, JsParamValue, MarkerRegion, MarkerRegionCollection, MidiEvent,
+    MidiEventType, MidiSource, PluginType, ReaperProject, SourceBlock, SourceType, StretchMarker,
     TempoTimeEnvelope, TempoTimePoint, Track,
 };
 

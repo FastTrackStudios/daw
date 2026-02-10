@@ -1,0 +1,27 @@
+[package]
+name = "daw-ui"
+description = "DAW UI — Dioxus components for DAW integration (mixer, TCP, arrangement, FX browser)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+daw-control = { path = "../daw-control" }
+daw-proto = { path = "../daw-proto" }
+eyre = { workspace = true }
+
+# UI framework (conditional on feature)
+dioxus = { workspace = true, optional = true }
+dioxus-native = { workspace = true, optional = true }
+
+# Logging
+tracing = { workspace = true, optional = true }
+
+tokio = { version = "1", features = ["time"] }
+
+[features]
+default = ["web"]
+web = ["dep:dioxus", "dep:tracing"]
+native = ["dep:dioxus-native", "dep:tracing"]
+
+[lints]
+workspace = true

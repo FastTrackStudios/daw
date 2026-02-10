@@ -25,7 +25,6 @@ use daw_standalone::{
     StandaloneItem, StandaloneMarker, StandaloneMidi, StandaloneMidiAnalysis, StandaloneProject,
     StandaloneRegion, StandaloneTake, StandaloneTempoMap, StandaloneTrack, StandaloneTransport,
 };
-use roam::session::RoutedDispatcher;
 use roam_telemetry::{
     ExporterConfig, LoggingExporter, OtlpExporter, SpanExporter, TelemetryMiddleware,
 };

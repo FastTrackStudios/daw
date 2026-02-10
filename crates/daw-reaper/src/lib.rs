@@ -43,6 +43,7 @@ pub mod project_context;
 pub mod region;
 pub mod routing;
 pub mod tempo_map;
+pub mod track;
 pub mod transport;
 
 // Re-export the main types
@@ -58,6 +59,7 @@ pub use project::ReaperProject;
 pub use region::ReaperRegion;
 pub use routing::ReaperRouting;
 pub use tempo_map::ReaperTempoMap;
+pub use track::ReaperTrack;
 pub use transport::ReaperTransport;
 
 // Re-export the TaskSupport setter and transport broadcaster functions

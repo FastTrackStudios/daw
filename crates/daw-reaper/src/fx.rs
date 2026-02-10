@@ -23,8 +23,8 @@ use daw_proto::{
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
-use reaper_high::{FxChain, Reaper, Track};
-use reaper_medium::{FxPresetRef, TrackFxLocation, TransferBehavior};
+use reaper_high::{FxChain, MAX_TRACK_CHUNK_SIZE, Reaper, Track};
+use reaper_medium::{ChunkCacheHint, FxPresetRef, TrackFxLocation, TransferBehavior};
 use roam::{Context, Tx};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -78,23 +78,19 @@ struct CachedChainState {
     containers: Vec<CachedContainerState>,
 }
 
-/// Key for identifying an FX chain (project + chain context)
+/// Key for identifying an FX chain (project + chain context).
+/// Uses proper PartialEq/Hash on the domain types — no string allocation.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct ChainKey {
     project_guid: String,
-    context: String, // serialized FxChainContext
+    context: FxChainContext,
 }
 
 impl ChainKey {
     fn new(project_guid: &str, context: &FxChainContext) -> Self {
-        let ctx_str = match context {
-            FxChainContext::Track(guid) => format!("track:{}", guid),
-            FxChainContext::Input(guid) => format!("input:{}", guid),
-            FxChainContext::Monitoring => "monitoring".to_string(),
-        };
         Self {
             project_guid: project_guid.to_string(),
-            context: ctx_str,
+            context: context.clone(),
         }
     }
 }
@@ -128,11 +124,7 @@ fn fx_event_receiver() -> Option<broadcast::Receiver<FxEvent>> {
 fn register_monitored_chain(project: ProjectContext, context: FxChainContext) {
     if let Some(chains) = FX_MONITORED_CHAINS.get() {
         let mut chains = chains.lock().unwrap();
-        // Check if already monitoring this chain (compare serialized forms)
-        let key = format!("{:?}|{:?}", project, context);
-        let already = chains
-            .iter()
-            .any(|(p, c)| format!("{:?}|{:?}", p, c) == key);
+        let already = chains.iter().any(|(p, c)| p == &project && c == &context);
         if !already {
             chains.push((project, context));
         }
@@ -579,15 +571,10 @@ fn resolve_fx_index(chain: &FxChain, fx_ref: &FxRef) -> Option<u32> {
             }
         }
         FxRef::Guid(guid) => {
-            // Search by GUID — this is how Snapshooter identifies FX for stability
-            for fx in chain.fxs() {
-                if let Some(fx_guid) = fx.guid() {
-                    if fx_guid.to_string_without_braces() == *guid {
-                        return Some(fx.index());
-                    }
-                }
-            }
-            None
+            // Container-aware GUID lookup: scans top-level FX first,
+            // then recursively walks into containers using container_item.X.
+            let node_id = FxNodeId::from_guid(guid.clone());
+            resolve_plugin_guid(chain, &node_id)
         }
         FxRef::Name(name) => {
             // Search by name (first match)
@@ -613,6 +600,33 @@ fn fx_location(index: u32, is_input: bool) -> TrackFxLocation {
     } else {
         TrackFxLocation::NormalFxChain(index)
     }
+}
+
+/// Find the byte offset of the closing `>` for an RPP block.
+///
+/// RPP uses `<TAG` to open blocks and a standalone `>` (possibly indented)
+/// to close them. This function tracks nesting depth line-by-line and returns
+/// the byte offset of the closing `>` character.
+fn find_block_end(block_text: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut offset = 0usize;
+
+    for line in block_text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('<') {
+            depth += 1;
+        }
+        if trimmed == ">" {
+            depth -= 1;
+            if depth == 0 {
+                // Return the offset of the `>` character in this line
+                let gt_pos = line.rfind('>').unwrap();
+                return Some(offset + gt_pos);
+            }
+        }
+        offset += line.len() + 1; // +1 for newline
+    }
+    None
 }
 
 /// Convert reaper-high FxInfo sub_type_expression to our FxType
@@ -654,13 +668,21 @@ fn build_fx_info(fx: &reaper_high::Fx) -> Fx {
             .unwrap_or(0);
 
     // Get plugin type and name via info() (REAPER >= 6.37)
-    let (plugin_name, plugin_type, preset_name) = match fx.info() {
+    let (plugin_name, plugin_type) = match fx.info() {
         Ok(info) => {
             let ptype = parse_fx_type(&info.sub_type_expression);
-            (info.effect_name, ptype, None) // TODO: preset name from named config
+            (info.effect_name, ptype)
         }
-        Err(_) => (name.clone(), FxType::Unknown, None),
+        Err(_) => (name.clone(), FxType::Unknown),
     };
+
+    // Get preset name via dedicated TrackFX_GetPreset API
+    let preset_name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        fx.preset_name()
+            .map(|rs| rs.to_str().to_string())
+            .filter(|s| !s.is_empty())
+    }))
+    .unwrap_or(None);
 
     Fx {
         guid,
@@ -688,7 +710,90 @@ fn build_fx_parameter(param: &reaper_high::FxParameter) -> FxParameter {
         .formatted_value()
         .map(|f| f.to_str().to_string())
         .unwrap_or_else(|_| format!("{:.2}", value));
-    let is_toggle = matches!(param.character(), reaper_high::FxParameterCharacter::Toggle);
+
+    let character = param.character();
+    let is_toggle = matches!(character, reaper_high::FxParameterCharacter::Toggle);
+    let step_sizes_result = param.step_sizes();
+
+    debug!(
+        "  param[{}] '{}': character={:?}, step_sizes={:?}, is_toggle={}",
+        index, name, character, step_sizes_result, is_toggle
+    );
+
+    // Detect discrete parameters via step_sizes() or character().
+    // VST plugins may report Discrete character but no step_sizes.
+    // CLAP plugins may report step_sizes but not Discrete character.
+    // We check both paths.
+    let is_discrete_character = matches!(character, reaper_high::FxParameterCharacter::Discrete);
+
+    let step_count_from_sizes = step_sizes_result.and_then(|ss| {
+        if let reaper_medium::GetParameterStepSizesResult::Normal { normal_step, .. } = ss {
+            if normal_step > 0.0 {
+                let n = (1.0 / normal_step).round() as u32;
+                if n >= 2 && n <= 256 { Some(n) } else { None }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    // If character says Discrete but step_sizes didn't give us a count,
+    // try to get the count from the formatted values by probing.
+    let step_count = step_count_from_sizes.or_else(|| {
+        if is_discrete_character {
+            // For VST discrete params without step_sizes, probe for step count
+            // by checking how many distinct formatted values exist in 0..1 range
+            let mut count = 0u32;
+            let mut last_label = String::new();
+            for i in 0..=256 {
+                let norm = (i as f64) / 256.0;
+                if let Ok(s) = param.format_reaper_normalized_value(
+                    reaper_medium::ReaperNormalizedFxParamValue::new(norm),
+                ) {
+                    let label = s.to_str().to_string();
+                    if label != last_label {
+                        count += 1;
+                        last_label = label;
+                    }
+                }
+            }
+            if count >= 2 && count <= 256 {
+                debug!("    → discrete from character probe: {} steps", count);
+                Some(count)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    debug!("    → final step_count={:?}", step_count);
+
+    // Enumerate labels for discrete parameters by formatting each step value
+    let step_labels = if let Some(n) = step_count {
+        let mut labels = Vec::with_capacity(n as usize);
+        for i in 0..n {
+            // Normalized value for step i out of (n-1) steps
+            let norm = if n <= 1 {
+                0.0
+            } else {
+                (i as f64) / ((n - 1) as f64)
+            };
+            let label = param
+                .format_reaper_normalized_value(reaper_medium::ReaperNormalizedFxParamValue::new(
+                    norm,
+                ))
+                .map(|s| s.to_str().to_string())
+                .unwrap_or_else(|_| format!("{}", i));
+            labels.push((norm, label));
+        }
+        labels
+    } else {
+        Vec::new()
+    };
 
     FxParameter {
         index,
@@ -696,6 +801,8 @@ fn build_fx_parameter(param: &reaper_high::FxParameter) -> FxParameter {
         value,
         formatted,
         is_toggle,
+        step_count,
+        step_labels,
     }
 }
 
@@ -802,6 +909,20 @@ fn read_config_u32(fx: &reaper_high::Fx, key: &str) -> u32 {
         .unwrap_or(0)
 }
 
+/// Read a named config param as i32, returning 0 on failure.
+fn read_config_i32(fx: &reaper_high::Fx, key: &str) -> i32 {
+    read_config_str(fx, key)
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(0)
+}
+
+/// Read a named config param as f64, returning 0.0 on failure.
+fn read_config_f64(fx: &reaper_high::Fx, key: &str) -> f64 {
+    read_config_str(fx, key)
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(0.0)
+}
+
 /// Get the raw FX index for child `child_index` (0-based) inside a container,
 /// using REAPER's v7.06+ `container_item.X` named config param.
 ///
@@ -810,6 +931,27 @@ fn read_config_u32(fx: &reaper_high::Fx, key: &str) -> u32 {
 fn container_child_fx_id(container_fx: &reaper_high::Fx, child_index: u32) -> Option<u32> {
     let key = format!("container_item.{}", child_index);
     read_config_str(container_fx, &key).and_then(|s| s.parse::<u32>().ok())
+}
+
+/// Verify that a container has the expected child count.
+///
+/// Used after container mutations (move_to, move_from, enclose, explode) to detect
+/// silent failures from incorrect stride addressing or stale indices.
+fn verify_container_child_count(
+    chain: &FxChain,
+    container_index: u32,
+    expected_count: u32,
+) -> Result<(), String> {
+    let container_fx = chain.fx_by_index_untracked(container_index);
+    let actual = read_config_u32(&container_fx, "container_count");
+    if actual != expected_count {
+        Err(format!(
+            "container at index {} has {} children, expected {}",
+            container_index, actual, expected_count
+        ))
+    } else {
+        Ok(())
+    }
 }
 
 /// Build an FxNode for a plugin (non-container) FX.
@@ -1136,11 +1278,11 @@ impl FxService for ReaperFx {
 
         ts.main_thread_future(move || {
             let Some(proj) = resolve_project(&project) else {
-                warn!("Project not found");
+                warn!("get_fx_list: project not found ({:?})", project);
                 return vec![];
             };
             let Some((_track, chain)) = resolve_fx_chain(&proj, &context) else {
-                warn!("FX chain not found");
+                warn!("get_fx_list: FX chain not found ({:?})", context);
                 return vec![];
             };
 
@@ -1162,7 +1304,8 @@ impl FxService for ReaperFx {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
-            let fx = chain.fx_by_index(index)?;
+            // Use untracked: container children have encoded indices (0x2000000+)
+            let fx = chain.fx_by_index_untracked(index);
             Some(build_fx_info(&fx))
         })
         .await
@@ -1202,32 +1345,29 @@ impl FxService for ReaperFx {
         project: ProjectContext,
         target: FxTarget,
         enabled: bool,
-    ) {
+    ) -> Result<(), String> {
         debug!("ReaperFx::set_fx_enabled({:?}, {})", target, enabled);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &target.context) else {
-                return;
-            };
-            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
-                return;
-            };
-            if let Some(fx) = chain.fx_by_index(index) {
-                if enabled {
-                    let _ = fx.enable();
-                } else {
-                    let _ = fx.disable();
-                }
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
+            let (_track, chain) = resolve_fx_chain(&proj, &target.context)
+                .ok_or_else(|| format!("FX chain not found for {:?}", target.context))?;
+            let index = resolve_fx_index(&chain, &target.fx)
+                .ok_or_else(|| format!("FX not found for {:?}", target.fx))?;
+            let fx = chain.fx_by_index_untracked(index);
+            if enabled {
+                fx.enable().map_err(|e| format!("enable failed: {}", e))?;
+            } else {
+                fx.disable().map_err(|e| format!("disable failed: {}", e))?;
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     async fn set_fx_offline(
@@ -1236,28 +1376,26 @@ impl FxService for ReaperFx {
         project: ProjectContext,
         target: FxTarget,
         offline: bool,
-    ) {
+    ) -> Result<(), String> {
         debug!("ReaperFx::set_fx_offline({:?}, {})", target, offline);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &target.context) else {
-                return;
-            };
-            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
-                return;
-            };
-            if let Some(fx) = chain.fx_by_index(index) {
-                let _ = fx.set_online(!offline);
-            }
-        });
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
+            let (_track, chain) = resolve_fx_chain(&proj, &target.context)
+                .ok_or_else(|| format!("FX chain not found for {:?}", target.context))?;
+            let index = resolve_fx_index(&chain, &target.fx)
+                .ok_or_else(|| format!("FX not found for {:?}", target.fx))?;
+            let fx = chain.fx_by_index_untracked(index);
+            fx.set_online(!offline)
+                .map_err(|e| format!("set_online failed: {}", e))?;
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     // =========================================================================
@@ -1328,32 +1466,38 @@ impl FxService for ReaperFx {
         .unwrap_or(None)
     }
 
-    async fn remove_fx(&self, _cx: &Context, project: ProjectContext, target: FxTarget) {
+    async fn remove_fx(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Result<(), String> {
         debug!("ReaperFx::remove_fx({:?})", target);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((track, chain)) = resolve_fx_chain(&proj, &target.context) else {
-                return;
-            };
-            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
-                return;
-            };
-            let Ok(raw_track) = track.raw() else { return };
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
+            let (track, chain) = resolve_fx_chain(&proj, &target.context)
+                .ok_or_else(|| format!("FX chain not found for {:?}", target.context))?;
+            let index = resolve_fx_index(&chain, &target.fx)
+                .ok_or_else(|| format!("FX not found for {:?}", target.fx))?;
+            let raw_track = track
+                .raw()
+                .map_err(|e| format!("raw track failed: {}", e))?;
             let location = fx_location(index, chain.is_input_fx());
             unsafe {
-                let _ = Reaper::get()
+                Reaper::get()
                     .medium_reaper()
-                    .track_fx_delete(raw_track, location);
+                    .track_fx_delete(raw_track, location)
+                    .map_err(|e| format!("track_fx_delete failed: {}", e))?;
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     async fn move_fx(
@@ -1362,25 +1506,22 @@ impl FxService for ReaperFx {
         project: ProjectContext,
         target: FxTarget,
         new_index: u32,
-    ) {
+    ) -> Result<(), String> {
         debug!("ReaperFx::move_fx({:?}, {})", target, new_index);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((track, chain)) = resolve_fx_chain(&proj, &target.context) else {
-                return;
-            };
-            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
-                return;
-            };
-            let Ok(raw_track) = track.raw() else { return };
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
+            let (track, chain) = resolve_fx_chain(&proj, &target.context)
+                .ok_or_else(|| format!("FX chain not found for {:?}", target.context))?;
+            let index = resolve_fx_index(&chain, &target.fx)
+                .ok_or_else(|| format!("FX not found for {:?}", target.fx))?;
+            let raw_track = track
+                .raw()
+                .map_err(|e| format!("raw track failed: {}", e))?;
             let is_input = chain.is_input_fx();
             unsafe {
                 Reaper::get().medium_reaper().track_fx_copy_to_track(
@@ -1389,7 +1530,10 @@ impl FxService for ReaperFx {
                     TransferBehavior::Move,
                 );
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     // =========================================================================
@@ -1416,7 +1560,7 @@ impl FxService for ReaperFx {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
-            let fx = chain.fx_by_index(index)?;
+            let fx = chain.fx_by_index_untracked(index);
 
             Some(
                 fx.parameters()
@@ -1447,7 +1591,7 @@ impl FxService for ReaperFx {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let fx_idx = resolve_fx_index(&chain, &target.fx)?;
-            let fx = chain.fx_by_index(fx_idx)?;
+            let fx = chain.fx_by_index_untracked(fx_idx);
 
             if index >= fx.parameter_count() {
                 return None;
@@ -1464,33 +1608,60 @@ impl FxService for ReaperFx {
         _cx: &Context,
         project: ProjectContext,
         request: SetParameterRequest,
-    ) {
+    ) -> Result<(), String> {
         debug!(
-            "ReaperFx::set_parameter({:?}, idx={}, val={})",
-            request.target, request.index, request.value
+            "ReaperFx::set_parameter(fx={:?}, idx={}, val={:.4})",
+            request.target.fx, request.index, request.value
         );
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &request.target.context) else {
-                return;
-            };
-            let Some(fx_idx) = resolve_fx_index(&chain, &request.target.fx) else {
-                return;
-            };
-            if let Some(fx) = chain.fx_by_index(fx_idx) {
+        let result = ts
+            .main_thread_future(move || {
+                let proj = resolve_project(&project).ok_or_else(|| {
+                    warn!("set_parameter: project not found");
+                    "project not found".to_string()
+                })?;
+                let (track, chain) =
+                    resolve_fx_chain(&proj, &request.target.context).ok_or_else(|| {
+                        warn!(
+                            "set_parameter: FX chain not found for {:?}",
+                            request.target.context
+                        );
+                        format!("FX chain not found for {:?}", request.target.context)
+                    })?;
+                let fx_idx = resolve_fx_index(&chain, &request.target.fx).ok_or_else(|| {
+                    warn!("set_parameter: FX not found for {:?}", request.target.fx);
+                    format!("FX not found for {:?}", request.target.fx)
+                })?;
+                // Use reaper-high FxParameter directly — handles track/location
+                // resolution internally via track_and_location()
+                let fx = chain.fx_by_index(fx_idx).ok_or_else(|| {
+                    warn!("set_parameter: fx_by_index({}) returned None", fx_idx);
+                    format!("fx_by_index({}) returned None", fx_idx)
+                })?;
                 let param = fx.parameter_by_index(request.index);
-                let value = reaper_medium::ReaperNormalizedFxParamValue::new(request.value);
-                let _ = param.set_reaper_normalized_value(value);
-            }
-        });
+                let norm_val = reaper_medium::ReaperNormalizedFxParamValue::new(request.value);
+
+                param.set_reaper_normalized_value(norm_val).map_err(|e| {
+                    warn!("set_parameter: set_reaper_normalized_value failed: {e}");
+                    format!("set_reaper_normalized_value failed: {e}")
+                })?;
+                // Note: CLAP plugins apply parameter changes asynchronously
+                // (via the next process() or flush() cycle), so immediate
+                // read-back may not reflect the new value yet. Trust the
+                // return value from set_reaper_normalized_value().
+                Ok(())
+            })
+            .await
+            .unwrap_or_else(|_| Err("main thread future cancelled".into()));
+
+        if let Err(ref e) = result {
+            warn!("set_parameter failed: {}", e);
+        }
+        result
     }
 
     async fn get_parameter_by_name(
@@ -1511,7 +1682,7 @@ impl FxService for ReaperFx {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let fx_idx = resolve_fx_index(&chain, &target.fx)?;
-            let fx = chain.fx_by_index(fx_idx)?;
+            let fx = chain.fx_by_index_untracked(fx_idx);
 
             // Search by name (linear scan — parameter lists are typically small)
             for param in fx.parameters() {
@@ -1532,100 +1703,119 @@ impl FxService for ReaperFx {
         _cx: &Context,
         project: ProjectContext,
         request: SetParameterByNameRequest,
-    ) {
+    ) -> Result<(), String> {
         debug!(
             "ReaperFx::set_parameter_by_name({:?}, {:?}, {})",
             request.target, request.name, request.value
         );
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &request.target.context) else {
-                return;
-            };
-            let Some(fx_idx) = resolve_fx_index(&chain, &request.target.fx) else {
-                return;
-            };
-            if let Some(fx) = chain.fx_by_index(fx_idx) {
-                for param in fx.parameters() {
-                    if let Ok(pname) = param.name() {
-                        if pname.to_str() == request.name {
-                            let value =
-                                reaper_medium::ReaperNormalizedFxParamValue::new(request.value);
-                            let _ = param.set_reaper_normalized_value(value);
-                            return;
-                        }
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| {
+                format!("set_parameter_by_name: project not found ({:?})", project)
+            })?;
+            let (_track, chain) =
+                resolve_fx_chain(&proj, &request.target.context).ok_or_else(|| {
+                    format!(
+                        "set_parameter_by_name: FX chain not found ({:?})",
+                        request.target.context
+                    )
+                })?;
+            let fx_idx = resolve_fx_index(&chain, &request.target.fx).ok_or_else(|| {
+                format!(
+                    "set_parameter_by_name: FX not found ({:?})",
+                    request.target.fx
+                )
+            })?;
+            let fx = chain.fx_by_index_untracked(fx_idx);
+            for param in fx.parameters() {
+                if let Ok(pname) = param.name() {
+                    if pname.to_str() == request.name {
+                        let value = reaper_medium::ReaperNormalizedFxParamValue::new(request.value);
+                        let _ = param.set_reaper_normalized_value(value);
+                        return Ok(());
                     }
                 }
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     // =========================================================================
     // Presets
     // =========================================================================
 
-    async fn next_preset(&self, _cx: &Context, project: ProjectContext, target: FxTarget) {
+    async fn next_preset(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Result<(), String> {
         debug!("ReaperFx::next_preset({:?})", target);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((track, chain)) = resolve_fx_chain(&proj, &target.context) else {
-                return;
-            };
-            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
-                return;
-            };
-            let Ok(raw_track) = track.raw() else { return };
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)
+                .ok_or_else(|| format!("next_preset: project not found ({:?})", project))?;
+            let (track, chain) = resolve_fx_chain(&proj, &target.context)
+                .ok_or_else(|| format!("next_preset: FX chain not found ({:?})", target.context))?;
+            let index = resolve_fx_index(&chain, &target.fx)
+                .ok_or_else(|| format!("next_preset: FX not found ({:?})", target.fx))?;
+            let raw_track = track
+                .raw()
+                .map_err(|_| "next_preset: raw track not available".to_string())?;
             let location = fx_location(index, chain.is_input_fx());
             unsafe {
                 let _ = Reaper::get()
                     .medium_reaper()
                     .track_fx_navigate_presets(raw_track, location, 1);
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
-    async fn prev_preset(&self, _cx: &Context, project: ProjectContext, target: FxTarget) {
+    async fn prev_preset(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Result<(), String> {
         debug!("ReaperFx::prev_preset({:?})", target);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((track, chain)) = resolve_fx_chain(&proj, &target.context) else {
-                return;
-            };
-            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
-                return;
-            };
-            let Ok(raw_track) = track.raw() else { return };
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)
+                .ok_or_else(|| format!("prev_preset: project not found ({:?})", project))?;
+            let (track, chain) = resolve_fx_chain(&proj, &target.context)
+                .ok_or_else(|| format!("prev_preset: FX chain not found ({:?})", target.context))?;
+            let index = resolve_fx_index(&chain, &target.fx)
+                .ok_or_else(|| format!("prev_preset: FX not found ({:?})", target.fx))?;
+            let raw_track = track
+                .raw()
+                .map_err(|_| "prev_preset: raw track not available".to_string())?;
             let location = fx_location(index, chain.is_input_fx());
             unsafe {
                 let _ = Reaper::get()
                     .medium_reaper()
                     .track_fx_navigate_presets(raw_track, location, -1);
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     async fn set_preset(
@@ -1634,25 +1824,23 @@ impl FxService for ReaperFx {
         project: ProjectContext,
         target: FxTarget,
         index: u32,
-    ) {
+    ) -> Result<(), String> {
         debug!("ReaperFx::set_preset({:?}, {})", target, index);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((track, chain)) = resolve_fx_chain(&proj, &target.context) else {
-                return;
-            };
-            let Some(fx_idx) = resolve_fx_index(&chain, &target.fx) else {
-                return;
-            };
-            let Ok(raw_track) = track.raw() else { return };
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)
+                .ok_or_else(|| format!("set_preset: project not found ({:?})", project))?;
+            let (track, chain) = resolve_fx_chain(&proj, &target.context)
+                .ok_or_else(|| format!("set_preset: FX chain not found ({:?})", target.context))?;
+            let fx_idx = resolve_fx_index(&chain, &target.fx)
+                .ok_or_else(|| format!("set_preset: FX not found ({:?})", target.fx))?;
+            let raw_track = track
+                .raw()
+                .map_err(|e| format!("set_preset: raw track failed: {}", e))?;
             let location = fx_location(fx_idx, chain.is_input_fx());
             unsafe {
                 let _ = Reaper::get().medium_reaper().track_fx_set_preset_by_index(
@@ -1661,87 +1849,100 @@ impl FxService for ReaperFx {
                     FxPresetRef::Preset(index),
                 );
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     // =========================================================================
     // UI
     // =========================================================================
 
-    async fn open_fx_ui(&self, _cx: &Context, project: ProjectContext, target: FxTarget) {
+    async fn open_fx_ui(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Result<(), String> {
         debug!("ReaperFx::open_fx_ui({:?})", target);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &target.context) else {
-                return;
-            };
-            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
-                return;
-            };
-            if let Some(fx) = chain.fx_by_index(index) {
-                let _ = fx.show_in_floating_window();
-            }
-        });
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)
+                .ok_or_else(|| format!("open_fx_ui: project not found ({:?})", project))?;
+            let (_track, chain) = resolve_fx_chain(&proj, &target.context)
+                .ok_or_else(|| format!("open_fx_ui: FX chain not found ({:?})", target.context))?;
+            let index = resolve_fx_index(&chain, &target.fx)
+                .ok_or_else(|| format!("open_fx_ui: FX not found ({:?})", target.fx))?;
+            let fx = chain.fx_by_index_untracked(index);
+            let _ = fx.show_in_floating_window();
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
-    async fn close_fx_ui(&self, _cx: &Context, project: ProjectContext, target: FxTarget) {
+    async fn close_fx_ui(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Result<(), String> {
         debug!("ReaperFx::close_fx_ui({:?})", target);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &target.context) else {
-                return;
-            };
-            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
-                return;
-            };
-            if let Some(fx) = chain.fx_by_index(index) {
-                let _ = fx.hide_floating_window();
-            }
-        });
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)
+                .ok_or_else(|| format!("close_fx_ui: project not found ({:?})", project))?;
+            let (_track, chain) = resolve_fx_chain(&proj, &target.context)
+                .ok_or_else(|| format!("close_fx_ui: FX chain not found ({:?})", target.context))?;
+            let index = resolve_fx_index(&chain, &target.fx)
+                .ok_or_else(|| format!("close_fx_ui: FX not found ({:?})", target.fx))?;
+            let fx = chain.fx_by_index_untracked(index);
+            let _ = fx.hide_floating_window();
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
-    async fn toggle_fx_ui(&self, _cx: &Context, project: ProjectContext, target: FxTarget) {
+    async fn toggle_fx_ui(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Result<(), String> {
         debug!("ReaperFx::toggle_fx_ui({:?})", target);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &target.context) else {
-                return;
-            };
-            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
-                return;
-            };
-            if let Some(fx) = chain.fx_by_index(index) {
-                if fx.window_is_open() {
-                    let _ = fx.hide_floating_window();
-                } else {
-                    let _ = fx.show_in_floating_window();
-                }
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)
+                .ok_or_else(|| format!("toggle_fx_ui: project not found ({:?})", project))?;
+            let (_track, chain) = resolve_fx_chain(&proj, &target.context).ok_or_else(|| {
+                format!("toggle_fx_ui: FX chain not found ({:?})", target.context)
+            })?;
+            let index = resolve_fx_index(&chain, &target.fx)
+                .ok_or_else(|| format!("toggle_fx_ui: FX not found ({:?})", target.fx))?;
+            let fx = chain.fx_by_index_untracked(index);
+            if fx.window_is_open() {
+                let _ = fx.hide_floating_window();
+            } else {
+                let _ = fx.show_in_floating_window();
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     // =========================================================================
@@ -1766,7 +1967,7 @@ impl FxService for ReaperFx {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
-            let fx = chain.fx_by_index(index)?;
+            let fx = chain.fx_by_index_untracked(index);
             let bytes = fx.get_named_config_param(&*key, 4096).ok()?;
             Some(String::from_utf8_lossy(&bytes).to_string())
         })
@@ -1779,35 +1980,39 @@ impl FxService for ReaperFx {
         _cx: &Context,
         project: ProjectContext,
         request: SetNamedConfigRequest,
-    ) {
+    ) -> Result<(), String> {
         debug!(
             "ReaperFx::set_named_config({:?}, {:?})",
             request.target, request.key
         );
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &request.target.context) else {
-                return;
-            };
-            let Some(index) = resolve_fx_index(&chain, &request.target.fx) else {
-                return;
-            };
-            if let Some(fx) = chain.fx_by_index(index) {
-                if let Ok(c_string) = std::ffi::CString::new(request.value) {
-                    unsafe {
-                        let _ = fx.set_named_config_param(&*request.key, c_string.as_ptr());
-                    }
-                }
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)
+                .ok_or_else(|| format!("set_named_config: project not found ({:?})", project))?;
+            let (_track, chain) =
+                resolve_fx_chain(&proj, &request.target.context).ok_or_else(|| {
+                    format!(
+                        "set_named_config: FX chain not found ({:?})",
+                        request.target.context
+                    )
+                })?;
+            let index = resolve_fx_index(&chain, &request.target.fx).ok_or_else(|| {
+                format!("set_named_config: FX not found ({:?})", request.target.fx)
+            })?;
+            let fx = chain.fx_by_index_untracked(index);
+            let c_string = std::ffi::CString::new(request.value)
+                .map_err(|e| format!("set_named_config: invalid value: {}", e))?;
+            unsafe {
+                let _ = fx.set_named_config_param(&*request.key, c_string.as_ptr());
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     async fn get_fx_latency(
@@ -1815,12 +2020,12 @@ impl FxService for ReaperFx {
         _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
-    ) -> FxLatency {
+    ) -> Option<FxLatency> {
         debug!("ReaperFx::get_fx_latency({:?})", target);
 
         let Some(ts) = task_support() else {
             warn!("TaskSupport not set");
-            return FxLatency::default();
+            return None;
         };
 
         ts.main_thread_future(move || {
@@ -1828,44 +2033,66 @@ impl FxService for ReaperFx {
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
 
-            // Use named config param "pdc" for PDC info
-            let fx = chain.fx_by_index(index)?;
-            let pdc = fx
-                .get_named_config_param("pdc", 64)
-                .ok()
-                .and_then(|bytes| {
-                    let s = String::from_utf8_lossy(&bytes);
-                    s.trim().parse::<i32>().ok()
-                })
-                .unwrap_or(0);
+            let fx = chain.fx_by_index_untracked(index);
+            let pdc_samples = read_config_i32(&fx, "pdc");
+            let chain_pdc_actual = read_config_i32(&fx, "chain_pdc_actual");
+            let chain_pdc_reporting = read_config_i32(&fx, "chain_pdc_reporting");
 
             Some(FxLatency {
-                pdc_samples: pdc,
-                chain_pdc_actual: 0, // Would need TrackFX_GetNamedConfigParm with other keys
-                chain_pdc_reporting: 0,
+                pdc_samples,
+                chain_pdc_actual,
+                chain_pdc_reporting,
             })
         })
         .await
-        .unwrap_or(Some(FxLatency::default()))
-        .unwrap_or_default()
+        .unwrap_or(None)
     }
 
     async fn get_param_modulation(
         &self,
         _cx: &Context,
-        _project: ProjectContext,
+        project: ProjectContext,
         target: FxTarget,
         param_index: u32,
-    ) -> FxParamModulation {
+    ) -> Option<FxParamModulation> {
         debug!(
             "ReaperFx::get_param_modulation({:?}, {})",
             target, param_index
         );
 
-        // Parameter modulation info requires parsing the track chunk or using
-        // named config params. For now, return defaults — this can be enhanced
-        // when we need LFO/linking info for the rig UI.
-        FxParamModulation::default()
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return None;
+        };
+
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)?;
+            let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
+            let index = resolve_fx_index(&chain, &target.fx)?;
+            let fx = chain.fx_by_index_untracked(index);
+
+            let p = param_index;
+            let lfo_active =
+                read_config_str(&fx, &format!("param.{p}.lfo.active")).map_or(false, |s| s == "1");
+            let lfo_speed = read_config_f64(&fx, &format!("param.{p}.lfo.speed"));
+            let lfo_strength = read_config_f64(&fx, &format!("param.{p}.lfo.strength"));
+
+            let link_active = read_config_str(&fx, &format!("param.{p}.plink.active"))
+                .map_or(false, |s| s == "1");
+            let link_fx_index = read_config_i32(&fx, &format!("param.{p}.plink.effect"));
+            let link_param_index = read_config_i32(&fx, &format!("param.{p}.plink.param"));
+
+            Some(FxParamModulation {
+                lfo_active,
+                lfo_speed,
+                lfo_strength,
+                link_active,
+                link_fx_index,
+                link_param_index,
+            })
+        })
+        .await
+        .unwrap_or(None)
     }
 
     // =========================================================================
@@ -1892,7 +2119,7 @@ impl FxService for ReaperFx {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
-            let fx = chain.fx_by_index(index)?;
+            let fx = chain.fx_by_index_untracked(index);
             fx.vst_chunk().ok()
         })
         .await
@@ -1905,28 +2132,26 @@ impl FxService for ReaperFx {
         project: ProjectContext,
         target: FxTarget,
         chunk: Vec<u8>,
-    ) {
+    ) -> Result<(), String> {
         debug!("ReaperFx::set_fx_state_chunk({:?})", target);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &target.context) else {
-                return;
-            };
-            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
-                return;
-            };
-            if let Some(fx) = chain.fx_by_index(index) {
-                let _ = fx.set_vst_chunk(&chunk);
-            }
-        });
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
+            let (_track, chain) = resolve_fx_chain(&proj, &target.context)
+                .ok_or_else(|| format!("FX chain not found for {:?}", target.context))?;
+            let index = resolve_fx_index(&chain, &target.fx)
+                .ok_or_else(|| format!("FX not found for {:?}", target.fx))?;
+            let fx = chain.fx_by_index_untracked(index);
+            fx.set_vst_chunk(&chunk)
+                .map_err(|e| format!("set_vst_chunk failed: {}", e))?;
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     async fn get_fx_state_chunk_encoded(
@@ -1946,7 +2171,7 @@ impl FxService for ReaperFx {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
-            let fx = chain.fx_by_index(index)?;
+            let fx = chain.fx_by_index_untracked(index);
             fx.vst_chunk_encoded().ok().map(|s| s.to_str().to_string())
         })
         .await
@@ -1959,28 +2184,36 @@ impl FxService for ReaperFx {
         project: ProjectContext,
         target: FxTarget,
         encoded: String,
-    ) {
+    ) -> Result<(), String> {
         debug!("ReaperFx::set_fx_state_chunk_encoded({:?})", target);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &target.context) else {
-                return;
-            };
-            let Some(index) = resolve_fx_index(&chain, &target.fx) else {
-                return;
-            };
-            if let Some(fx) = chain.fx_by_index(index) {
-                let _ = fx.set_vst_chunk_encoded(encoded);
-            }
-        });
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| {
+                format!(
+                    "set_fx_state_chunk_encoded: project not found ({:?})",
+                    project
+                )
+            })?;
+            let (_track, chain) = resolve_fx_chain(&proj, &target.context).ok_or_else(|| {
+                format!(
+                    "set_fx_state_chunk_encoded: FX chain not found ({:?})",
+                    target.context
+                )
+            })?;
+            let index = resolve_fx_index(&chain, &target.fx).ok_or_else(|| {
+                format!("set_fx_state_chunk_encoded: FX not found ({:?})", target.fx)
+            })?;
+            let fx = chain.fx_by_index_untracked(index);
+            fx.set_vst_chunk_encoded(encoded)
+                .map_err(|e| format!("set_vst_chunk_encoded failed: {}", e))?;
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     async fn get_fx_chain_state(
@@ -2000,6 +2233,9 @@ impl FxService for ReaperFx {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &context)?;
 
+            let fx_count = chain.fx_count();
+            debug!("get_fx_chain_state: chain has {} FX", fx_count);
+
             let mut chunks = Vec::new();
             for fx in chain.fxs() {
                 let guid = fx
@@ -2013,15 +2249,33 @@ impl FxService for ReaperFx {
                 let index = fx.index();
 
                 // Get the base64-encoded VST chunk
-                if let Ok(encoded) = fx.vst_chunk_encoded() {
-                    chunks.push(FxStateChunk {
-                        fx_guid: guid,
-                        fx_index: index,
-                        plugin_name,
-                        encoded_chunk: encoded.to_str().to_string(),
-                    });
+                match fx.vst_chunk_encoded() {
+                    Ok(encoded) => {
+                        let chunk_len = encoded.to_str().len();
+                        debug!(
+                            "  FX[{}] '{}' (GUID {}) — chunk captured ({} bytes)",
+                            index, plugin_name, guid, chunk_len
+                        );
+                        chunks.push(FxStateChunk {
+                            fx_guid: guid,
+                            fx_index: index,
+                            plugin_name,
+                            encoded_chunk: encoded.to_str().to_string(),
+                        });
+                    }
+                    Err(e) => {
+                        warn!(
+                            "  FX[{}] '{}' (GUID {}) — vst_chunk_encoded FAILED: {}",
+                            index, plugin_name, guid, e
+                        );
+                    }
                 }
             }
+            debug!(
+                "get_fx_chain_state: captured {}/{} FX chunks",
+                chunks.len(),
+                fx_count
+            );
             Some(chunks)
         })
         .await
@@ -2035,7 +2289,7 @@ impl FxService for ReaperFx {
         project: ProjectContext,
         context: FxChainContext,
         chunks: Vec<FxStateChunk>,
-    ) {
+    ) -> Result<(), String> {
         debug!(
             "ReaperFx::set_fx_chain_state({:?}, {} chunks)",
             context,
@@ -2043,41 +2297,73 @@ impl FxService for ReaperFx {
         );
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
         // Apply all chunks in a single main-thread operation for atomicity
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &context) else {
-                return;
-            };
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)
+                .ok_or_else(|| format!("set_fx_chain_state: project not found ({:?})", project))?;
+            let (_track, chain) = resolve_fx_chain(&proj, &context)
+                .ok_or_else(|| format!("set_fx_chain_state: FX chain not found ({:?})", context))?;
 
             // Build a GUID → FX index lookup (like Snapshooter's hashmap approach)
             let mut guid_to_index = std::collections::HashMap::new();
+            // Also build name → list of indices for cross-track fallback
+            let mut name_to_indices: std::collections::HashMap<String, Vec<u32>> =
+                std::collections::HashMap::new();
             for fx in chain.fxs() {
                 if let Ok(guid) = fx.get_or_query_guid() {
                     guid_to_index.insert(guid.to_string_without_braces(), fx.index());
                 }
+                let fx_name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    fx.name().to_str().to_string()
+                }))
+                .unwrap_or_default();
+                name_to_indices.entry(fx_name).or_default().push(fx.index());
             }
+            // Track how many instances of each name have been consumed (for duplicate plugins)
+            let mut name_consumed: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
 
-            // Apply each chunk by matching GUID
+            // Apply each chunk: try GUID match first, then fall back to plugin name
             for chunk in &chunks {
                 if let Some(&fx_index) = guid_to_index.get(&chunk.fx_guid) {
+                    // GUID match (same track recall)
                     if let Some(fx) = chain.fx_by_index(fx_index) {
                         let _ = fx.set_vst_chunk_encoded(chunk.encoded_chunk.clone());
                     }
                 } else {
-                    debug!(
-                        "FX GUID {} not found in chain, skipping (plugin: {})",
-                        chunk.fx_guid, chunk.plugin_name
-                    );
+                    // Cross-track fallback: match by plugin name (positional for duplicates)
+                    let consumed = name_consumed.entry(chunk.plugin_name.clone()).or_insert(0);
+                    if let Some(indices) = name_to_indices.get(&chunk.plugin_name) {
+                        if let Some(&fx_index) = indices.get(*consumed) {
+                            info!(
+                                "Cross-track match: '{}' GUID {} → index {} (by name, pos {})",
+                                chunk.plugin_name, chunk.fx_guid, fx_index, consumed
+                            );
+                            if let Some(fx) = chain.fx_by_index(fx_index) {
+                                let _ = fx.set_vst_chunk_encoded(chunk.encoded_chunk.clone());
+                            }
+                            *consumed += 1;
+                        } else {
+                            warn!(
+                                "FX '{}' has no more unmatched instances (pos {})",
+                                chunk.plugin_name, consumed
+                            );
+                        }
+                    } else {
+                        warn!(
+                            "FX '{}' (GUID {}) not found by name either",
+                            chunk.plugin_name, chunk.fx_guid
+                        );
+                    }
                 }
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     // =========================================================================
@@ -2102,11 +2388,11 @@ impl FxService for ReaperFx {
 
         ts.main_thread_future(move || {
             let Some(proj) = resolve_project(&project) else {
-                warn!("Project not found");
+                warn!("get_fx_tree: project not found ({:?})", project);
                 return FxTree::new();
             };
             let Some((_track, chain)) = resolve_fx_chain(&proj, &context) else {
-                warn!("FX chain not found");
+                warn!("get_fx_tree: FX chain not found ({:?})", context);
                 return FxTree::new();
             };
 
@@ -2189,63 +2475,51 @@ impl FxService for ReaperFx {
         _cx: &Context,
         project: ProjectContext,
         request: MoveToContainerRequest,
-    ) {
+    ) -> Result<(), String> {
         debug!(
             "ReaperFx::move_to_container({:?} -> {:?})",
             request.node_id, request.container_id
         );
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &request.context) else {
-                return;
-            };
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
+            let (_track, chain) = resolve_fx_chain(&proj, &request.context)
+                .ok_or_else(|| format!("FX chain not found for {:?}", request.context))?;
             let is_input = chain.is_input_fx();
-            let Some(track) = chain.track() else { return };
-            let Ok(raw_track) = track.raw() else { return };
+            let track = chain.track().ok_or_else(|| "track not found".to_string())?;
+            let raw_track = track
+                .raw()
+                .map_err(|e| format!("raw track failed: {}", e))?;
 
             // Resolve source FX raw index
-            let Some(source_raw) = resolve_node_to_raw_index(&chain, &request.node_id) else {
-                warn!("Could not resolve source node {:?}", request.node_id);
-                return;
-            };
+            let source_raw = resolve_node_to_raw_index(&chain, &request.node_id)
+                .ok_or_else(|| format!("could not resolve source node {:?}", request.node_id))?;
 
             // Resolve destination container raw index
-            let Some(container_raw) = resolve_node_to_raw_index(&chain, &request.container_id)
-            else {
-                warn!("Could not resolve container {:?}", request.container_id);
-                return;
-            };
+            let container_raw = resolve_node_to_raw_index(&chain, &request.container_id)
+                .ok_or_else(|| format!("could not resolve container {:?}", request.container_id))?;
 
             // Compute destination slot using container_item.X API.
-            // To insert at position N, we use the raw index of item N (shifting it),
-            // or for appending, one past the last item.
             let container_fx = chain.fx_by_index_untracked(container_raw);
             let child_count = read_config_u32(&container_fx, "container_count");
             let child_pos = request.child_index.min(child_count);
 
+            let top_count = chain.fx_count();
+            let stride = top_count + 1;
             let dest_raw = if child_count == 0 || child_pos == 0 {
-                // Empty container or inserting at start: use first slot
-                // The first child slot is always container_item.0's address
-                // For an empty container, REAPER accepts the first-slot address
                 container_child_fx_id(&container_fx, 0)
-                    .unwrap_or(CONTAINER_BASE + container_raw + 1)
+                    .unwrap_or(CONTAINER_BASE + container_raw + stride)
             } else if child_pos >= child_count {
-                // Appending: one past the last existing child
                 container_child_fx_id(&container_fx, child_count - 1)
                     .map(|last| last + 1)
-                    .unwrap_or(CONTAINER_BASE + container_raw + child_count + 1)
+                    .unwrap_or(CONTAINER_BASE + container_raw + stride * (child_count + 1))
             } else {
-                // Inserting at position: use the existing child's slot (it will shift)
                 container_child_fx_id(&container_fx, child_pos)
-                    .unwrap_or(CONTAINER_BASE + container_raw + child_pos + 1)
+                    .unwrap_or(CONTAINER_BASE + container_raw + stride * (child_pos + 1))
             };
 
             unsafe {
@@ -2255,7 +2529,13 @@ impl FxService for ReaperFx {
                     TransferBehavior::Move,
                 );
             }
-        });
+
+            // Verify container child count increased by 1
+            verify_container_child_count(&chain, container_raw, child_count + 1)?;
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     async fn move_from_container(
@@ -2263,33 +2543,32 @@ impl FxService for ReaperFx {
         _cx: &Context,
         project: ProjectContext,
         request: MoveFromContainerRequest,
-    ) {
+    ) -> Result<(), String> {
         debug!(
             "ReaperFx::move_from_container({:?} -> index {})",
             request.node_id, request.target_index
         );
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &request.context) else {
-                return;
-            };
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
+            let (_track, chain) = resolve_fx_chain(&proj, &request.context)
+                .ok_or_else(|| format!("FX chain not found for {:?}", request.context))?;
             let is_input = chain.is_input_fx();
-            let Some(track) = chain.track() else { return };
-            let Ok(raw_track) = track.raw() else { return };
+            let track = chain.track().ok_or_else(|| "track not found".to_string())?;
+            let raw_track = track
+                .raw()
+                .map_err(|e| format!("raw track failed: {}", e))?;
 
             // Resolve source FX (inside container)
-            let Some(source_raw) = resolve_node_to_raw_index(&chain, &request.node_id) else {
-                warn!("Could not resolve node {:?}", request.node_id);
-                return;
-            };
+            let source_raw = resolve_node_to_raw_index(&chain, &request.node_id)
+                .ok_or_else(|| format!("could not resolve node {:?}", request.node_id))?;
+
+            // Capture top-level FX count before the move for verification
+            let top_count_before = chain.fx_count();
 
             // Move to top-level position
             unsafe {
@@ -2299,7 +2578,22 @@ impl FxService for ReaperFx {
                     TransferBehavior::Move,
                 );
             }
-        });
+
+            // Verify: top-level count should have increased by 1 (child moved out)
+            let top_count_after = chain.fx_count();
+            if top_count_after != top_count_before + 1 {
+                return Err(format!(
+                    "move_from_container: top-level FX count {} -> {} (expected {})",
+                    top_count_before,
+                    top_count_after,
+                    top_count_before + 1
+                ));
+            }
+
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     async fn set_routing_mode(
@@ -2309,35 +2603,35 @@ impl FxService for ReaperFx {
         context: FxChainContext,
         node_id: FxNodeId,
         mode: FxRoutingMode,
-    ) {
+    ) -> Result<(), String> {
         debug!("ReaperFx::set_routing_mode({:?}, {:?})", node_id, mode);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &context) else {
-                return;
-            };
-
-            let Some(raw_index) = resolve_node_to_raw_index(&chain, &node_id) else {
-                warn!("Could not resolve container {:?}", node_id);
-                return;
-            };
-
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)
+                .ok_or_else(|| format!("set_routing_mode: project not found ({:?})", project))?;
+            let (_track, chain) = resolve_fx_chain(&proj, &context)
+                .ok_or_else(|| format!("set_routing_mode: FX chain not found ({:?})", context))?;
+            let raw_index = resolve_node_to_raw_index(&chain, &node_id).ok_or_else(|| {
+                format!(
+                    "set_routing_mode: could not resolve container ({:?})",
+                    node_id
+                )
+            })?;
             let container_fx = chain.fx_by_index_untracked(raw_index);
             let value = mode.to_reaper_param();
-            if let Ok(c_value) = std::ffi::CString::new(value) {
-                unsafe {
-                    let _ = container_fx.set_named_config_param("parallel", c_value.as_ptr());
-                }
+            let c_value = std::ffi::CString::new(value)
+                .map_err(|e| format!("set_routing_mode: invalid value: {}", e))?;
+            unsafe {
+                let _ = container_fx.set_named_config_param("parallel", c_value.as_ptr());
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     async fn get_container_channel_config(
@@ -2346,12 +2640,12 @@ impl FxService for ReaperFx {
         project: ProjectContext,
         context: FxChainContext,
         container_id: FxNodeId,
-    ) -> FxContainerChannelConfig {
+    ) -> Option<FxContainerChannelConfig> {
         debug!("ReaperFx::get_container_channel_config({:?})", container_id);
 
         let Some(ts) = task_support() else {
             warn!("TaskSupport not set");
-            return FxContainerChannelConfig::default();
+            return None;
         };
 
         ts.main_thread_future(move || {
@@ -2368,8 +2662,7 @@ impl FxService for ReaperFx {
             })
         })
         .await
-        .unwrap_or(Some(FxContainerChannelConfig::default()))
-        .unwrap_or_default()
+        .unwrap_or(None)
     }
 
     async fn set_container_channel_config(
@@ -2377,30 +2670,36 @@ impl FxService for ReaperFx {
         _cx: &Context,
         project: ProjectContext,
         request: SetContainerChannelConfigRequest,
-    ) {
+    ) -> Result<(), String> {
         debug!(
             "ReaperFx::set_container_channel_config({:?})",
             request.container_id
         );
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &request.context) else {
-                return;
-            };
-
-            let Some(raw_index) = resolve_node_to_raw_index(&chain, &request.container_id) else {
-                warn!("Could not resolve container {:?}", request.container_id);
-                return;
-            };
-
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| {
+                format!(
+                    "set_container_channel_config: project not found ({:?})",
+                    project
+                )
+            })?;
+            let (_track, chain) = resolve_fx_chain(&proj, &request.context).ok_or_else(|| {
+                format!(
+                    "set_container_channel_config: FX chain not found ({:?})",
+                    request.context
+                )
+            })?;
+            let raw_index =
+                resolve_node_to_raw_index(&chain, &request.container_id).ok_or_else(|| {
+                    format!(
+                        "set_container_channel_config: could not resolve container ({:?})",
+                        request.container_id
+                    )
+                })?;
             let container_fx = chain.fx_by_index_untracked(raw_index);
 
             // Set each channel config parameter
@@ -2411,13 +2710,16 @@ impl FxService for ReaperFx {
             ];
 
             for (key, value) in &params {
-                if let Ok(c_value) = std::ffi::CString::new(value.to_string()) {
-                    unsafe {
-                        let _ = container_fx.set_named_config_param(*key, c_value.as_ptr());
-                    }
+                let c_value = std::ffi::CString::new(value.to_string())
+                    .map_err(|e| format!("set_container_channel_config: invalid value: {}", e))?;
+                unsafe {
+                    let _ = container_fx.set_named_config_param(*key, c_value.as_ptr());
                 }
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     async fn enclose_in_container(
@@ -2439,79 +2741,140 @@ impl FxService for ReaperFx {
         ts.main_thread_future(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &request.context)?;
-            let is_input = chain.is_input_fx();
             let track = chain.track()?;
-            let raw_track = track.raw().ok()?;
 
             if request.node_ids.is_empty() {
                 return None;
             }
 
-            // Resolve all source FX to raw indices
-            let mut raw_indices: Vec<u32> = request
+            // ── Chunk-based approach ────────────────────────────────────
+            // Instead of using REAPER's live API with fragile stride-based
+            // addressing, we:
+            //   1. Get the full track chunk as RPP text
+            //   2. Parse the FXCHAIN block with dawfile-reaper
+            //   3. Rearrange nodes in memory (remove selected, wrap in container)
+            //   4. Serialize back and set the chunk atomically
+
+            // Step 1: Get track chunk and extract FXCHAIN text
+            let chunk = track
+                .chunk(MAX_TRACK_CHUNK_SIZE, ChunkCacheHint::NormalMode)
+                .ok()?;
+            let chunk_str = chunk.to_string();
+
+            // Find the FXCHAIN block boundaries in the raw text
+            let fxchain_start = chunk_str.find("<FXCHAIN")?;
+            let fxchain_region = &chunk_str[fxchain_start..];
+            let fxchain_end = find_block_end(fxchain_region)? + fxchain_start;
+            let fxchain_text = &chunk_str[fxchain_start..=fxchain_end];
+
+            // Step 2: Parse FX chain into structured types
+            let mut parsed_chain = dawfile_reaper::types::FxChain::parse(fxchain_text)
+                .map_err(|e| warn!("Failed to parse FXCHAIN chunk: {}", e))
+                .ok()?;
+
+            info!(
+                "enclose_in_container: parsed {} top-level nodes",
+                parsed_chain.nodes.len()
+            );
+
+            // Step 3: Collect the GUIDs we want to enclose
+            let target_guids: std::collections::HashSet<String> = request
                 .node_ids
                 .iter()
-                .filter_map(|id| resolve_node_to_raw_index(&chain, id))
+                .filter(|id| !id.is_container())
+                .map(|id| id.as_str().to_string())
                 .collect();
 
-            if raw_indices.is_empty() {
-                warn!("Could not resolve any node IDs for enclose_in_container");
+            // Find matching node indices (by FXID GUID)
+            let mut matched_indices: Vec<usize> = Vec::new();
+            for (i, node) in parsed_chain.nodes.iter().enumerate() {
+                let fxid = match node {
+                    dawfile_reaper::types::FxChainNode::Plugin(p) => p.fxid.as_deref(),
+                    dawfile_reaper::types::FxChainNode::Container(c) => c.fxid.as_deref(),
+                };
+                if let Some(guid) = fxid {
+                    // dawfile-reaper stores GUIDs with braces: {GUID}
+                    // our FxNodeId stores them without braces
+                    let guid_clean = guid
+                        .trim_start_matches('{')
+                        .trim_end_matches('}')
+                        .to_lowercase();
+                    if target_guids.iter().any(|t| t.to_lowercase() == guid_clean) {
+                        matched_indices.push(i);
+                    }
+                }
+            }
+
+            if matched_indices.is_empty() {
+                warn!(
+                    "enclose_in_container: no nodes matched target GUIDs: {:?}",
+                    target_guids
+                );
                 return None;
             }
 
-            // Sort so we know the insertion position (first FX's position)
-            raw_indices.sort();
-            let insert_pos = raw_indices[0];
+            info!(
+                "enclose_in_container: matched {} nodes at indices {:?}",
+                matched_indices.len(),
+                matched_indices
+            );
 
-            // Create a container at the position of the first FX
-            let container_fx = chain.insert_fx_by_name(insert_pos, "Container")?;
-            let container_index = container_fx.index();
+            // Remove matched nodes from the chain (in reverse order to preserve indices)
+            let insert_pos = matched_indices[0]; // container goes where first matched node was
+            let mut removed_nodes: Vec<dawfile_reaper::types::FxChainNode> = Vec::new();
+            for &idx in matched_indices.iter().rev() {
+                removed_nodes.push(parsed_chain.nodes.remove(idx));
+            }
+            removed_nodes.reverse(); // restore original order
 
-            // Set the container name
-            if let Ok(c_name) = std::ffi::CString::new(request.name) {
-                unsafe {
-                    let _ = container_fx.set_named_config_param("renamed_name", c_name.as_ptr());
-                }
+            // Build a new container wrapping the removed nodes
+            let container = dawfile_reaper::types::FxContainer {
+                name: request.name.clone(),
+                bypassed: false,
+                offline: false,
+                fxid: None,
+                float_pos: None,
+                parallel: false,
+                container_cfg: Some([2, 2, 2, 0]), // stereo default
+                show: 0,
+                last_sel: 0,
+                docked: false,
+                children: removed_nodes,
+                raw_block: String::new(),
+            };
+
+            // Insert the container at the position of the first removed node
+            let insert_at = insert_pos.min(parsed_chain.nodes.len());
+            parsed_chain
+                .nodes
+                .insert(insert_at, dawfile_reaper::types::FxChainNode::Container(container));
+
+            info!(
+                "enclose_in_container: new chain has {} top-level nodes, container '{}' at index {}",
+                parsed_chain.nodes.len(),
+                request.name,
+                insert_at
+            );
+
+            // Step 4: Serialize back to RPP text
+            let new_fxchain_text = parsed_chain.to_rpp_string();
+
+            // Replace the FXCHAIN block in the full track chunk
+            let mut new_chunk_str = String::with_capacity(chunk_str.len());
+            new_chunk_str.push_str(&chunk_str[..fxchain_start]);
+            new_chunk_str.push_str(&new_fxchain_text);
+            // Skip past the old FXCHAIN block (fxchain_end points to the closing >)
+            if fxchain_end + 1 < chunk_str.len() {
+                new_chunk_str.push_str(&chunk_str[fxchain_end + 1..]);
             }
 
-            // Move each source FX into the container one at a time.
-            // After inserting the container, indices of FX after it shift by +1.
-            // After each move into the container, we re-query container_item.X
-            // to get the correct destination slot for the next insertion.
-            for (idx, &original_raw) in raw_indices.iter().enumerate() {
-                // Adjust for the container insertion: FX after insert_pos shifted +1
-                let adjusted_raw = if original_raw >= insert_pos {
-                    original_raw + 1
-                } else {
-                    original_raw
-                };
-                // Also adjust for previously moved FX (they left the main chain)
-                let adjusted_raw = adjusted_raw - (idx as u32);
+            // Set the modified chunk back on the track
+            let new_chunk = reaper_high::Chunk::new(new_chunk_str);
+            track.set_chunk(new_chunk).ok()?;
 
-                // For destination: query existing child count and append
-                let container_fx_ref = chain.fx_by_index_untracked(container_index);
-                let current_count = read_config_u32(&container_fx_ref, "container_count");
-                let dest_raw = if current_count == 0 {
-                    // First child: use container_item.0 or fallback
-                    container_child_fx_id(&container_fx_ref, 0)
-                        .unwrap_or(CONTAINER_BASE + container_index + 1)
-                } else {
-                    // Append after last: get last child's raw index + 1
-                    container_child_fx_id(&container_fx_ref, current_count - 1)
-                        .map(|last| last + 1)
-                        .unwrap_or(CONTAINER_BASE + container_index + current_count + 1)
-                };
+            info!("enclose_in_container: chunk set successfully");
 
-                unsafe {
-                    Reaper::get().medium_reaper().track_fx_copy_to_track(
-                        (raw_track, fx_location(adjusted_raw, is_input)),
-                        (raw_track, fx_location(dest_raw, is_input)),
-                        TransferBehavior::Move,
-                    );
-                }
-            }
-
-            Some(FxNodeId::container(format!("{}", container_index)))
+            Some(FxNodeId::container(format!("{}", insert_at)))
         })
         .await
         .unwrap_or(None)
@@ -2523,75 +2886,146 @@ impl FxService for ReaperFx {
         project: ProjectContext,
         context: FxChainContext,
         container_id: FxNodeId,
-    ) {
+    ) -> Result<(), String> {
         debug!("ReaperFx::explode_container({:?})", container_id);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &context) else {
-                return;
-            };
-            let is_input = chain.is_input_fx();
-            let Some(track) = chain.track() else { return };
-            let Ok(raw_track) = track.raw() else { return };
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
+            let (_track, chain) = resolve_fx_chain(&proj, &context)
+                .ok_or_else(|| format!("FX chain not found for {:?}", context))?;
+            let track = chain.track().ok_or_else(|| "track not found".to_string())?;
 
-            let Some(container_raw) = resolve_node_to_raw_index(&chain, &container_id) else {
-                warn!("Could not resolve container {:?}", container_id);
-                return;
+            // ── Chunk-based approach ────────────────────────────────────
+            // Parse the FXCHAIN, find the container by GUID, replace it
+            // with its children in-place, serialize back atomically.
+
+            let chunk = track
+                .chunk(MAX_TRACK_CHUNK_SIZE, ChunkCacheHint::NormalMode)
+                .map_err(|e| format!("failed to get track chunk: {:?}", e))?;
+            let chunk_str = chunk.to_string();
+
+            let fxchain_start = chunk_str
+                .find("<FXCHAIN")
+                .ok_or_else(|| "no FXCHAIN block in track chunk".to_string())?;
+            let fxchain_region = &chunk_str[fxchain_start..];
+            let fxchain_end = find_block_end(fxchain_region)
+                .ok_or_else(|| "could not find FXCHAIN closing tag".to_string())?
+                + fxchain_start;
+            let fxchain_text = &chunk_str[fxchain_start..=fxchain_end];
+
+            let mut parsed_chain = dawfile_reaper::types::FxChain::parse(fxchain_text)
+                .map_err(|e| format!("failed to parse FXCHAIN: {}", e))?;
+
+            // Find the container to explode — match by FXID GUID
+            let target_guid = if container_id.is_container() {
+                // For container IDs like "container:2", resolve by index
+                let path_str = container_id
+                    .as_str()
+                    .strip_prefix("container:")
+                    .ok_or_else(|| "invalid container id".to_string())?;
+                let idx: usize = path_str
+                    .split(':')
+                    .next()
+                    .and_then(|s| s.parse().ok())
+                    .ok_or_else(|| format!("invalid container path: {}", path_str))?;
+                // Get the FXID from the node at that index
+                parsed_chain.nodes.get(idx).and_then(|n| match n {
+                    dawfile_reaper::types::FxChainNode::Container(c) => c.fxid.clone(),
+                    _ => None,
+                })
+            } else {
+                Some(container_id.as_str().to_string())
             };
 
-            let container_fx = chain.fx_by_index_untracked(container_raw);
-            let child_count = read_config_u32(&container_fx, "container_count");
+            // Find the container index in the parsed chain
+            let container_idx = parsed_chain
+                .nodes
+                .iter()
+                .position(|node| {
+                    if let dawfile_reaper::types::FxChainNode::Container(c) = node {
+                        if let Some(ref target) = target_guid {
+                            if let Some(ref fxid) = c.fxid {
+                                let fxid_clean = fxid
+                                    .trim_start_matches('{')
+                                    .trim_end_matches('}')
+                                    .to_lowercase();
+                                let target_clean = target
+                                    .trim_start_matches('{')
+                                    .trim_end_matches('}')
+                                    .to_lowercase();
+                                return fxid_clean == target_clean;
+                            }
+                        }
+                        // Fallback: match by index position if no GUID match
+                        false
+                    } else {
+                        false
+                    }
+                })
+                .or_else(|| {
+                    // Fallback: if container_id is "container:N", use N as index
+                    if container_id.is_container() {
+                        container_id
+                            .as_str()
+                            .strip_prefix("container:")
+                            .and_then(|s| s.split(':').next())
+                            .and_then(|s| s.parse::<usize>().ok())
+                            .filter(|&idx| {
+                                idx < parsed_chain.nodes.len()
+                                    && matches!(
+                                        parsed_chain.nodes[idx],
+                                        dawfile_reaper::types::FxChainNode::Container(_)
+                                    )
+                            })
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "could not find container {:?} in parsed FX chain",
+                        container_id
+                    )
+                })?;
 
-            if child_count == 0 {
-                // Empty container — just delete it
-                unsafe {
-                    let _ = Reaper::get()
-                        .medium_reaper()
-                        .track_fx_delete(raw_track, fx_location(container_raw, is_input));
+            // Remove the container and splice its children into the chain
+            let container_node = parsed_chain.nodes.remove(container_idx);
+            if let dawfile_reaper::types::FxChainNode::Container(c) = container_node {
+                info!(
+                    "explode_container: exploding '{}' with {} children at index {}",
+                    c.name,
+                    c.children.len(),
+                    container_idx
+                );
+                // Insert children at the container's former position
+                for (i, child) in c.children.into_iter().enumerate() {
+                    parsed_chain.nodes.insert(container_idx + i, child);
                 }
-                return;
             }
 
-            // Move children out in reverse order (last child first) to maintain
-            // stable indices. Each child moves to the position right after the
-            // container's current position.
-            // Re-query container_item.X each iteration since indices shift after each move.
-            let dest_index = container_raw + 1;
-            for _ in (0..child_count).rev() {
-                // Always move the last remaining child out
-                let container_fx_ref = chain.fx_by_index_untracked(container_raw);
-                let remaining = read_config_u32(&container_fx_ref, "container_count");
-                if remaining == 0 {
-                    break;
-                }
-                let Some(child_raw) = container_child_fx_id(&container_fx_ref, remaining - 1)
-                else {
-                    break;
-                };
-                unsafe {
-                    Reaper::get().medium_reaper().track_fx_copy_to_track(
-                        (raw_track, fx_location(child_raw, is_input)),
-                        (raw_track, fx_location(dest_index, is_input)),
-                        TransferBehavior::Move,
-                    );
-                }
+            // Serialize and set chunk back
+            let new_fxchain_text = parsed_chain.to_rpp_string();
+            let mut new_chunk_str = String::with_capacity(chunk_str.len());
+            new_chunk_str.push_str(&chunk_str[..fxchain_start]);
+            new_chunk_str.push_str(&new_fxchain_text);
+            if fxchain_end + 1 < chunk_str.len() {
+                new_chunk_str.push_str(&chunk_str[fxchain_end + 1..]);
             }
 
-            // Now delete the empty container
-            unsafe {
-                let _ = Reaper::get()
-                    .medium_reaper()
-                    .track_fx_delete(raw_track, fx_location(container_raw, is_input));
-            }
-        });
+            let new_chunk = reaper_high::Chunk::new(new_chunk_str);
+            track
+                .set_chunk(new_chunk)
+                .map_err(|e| format!("failed to set track chunk: {:?}", e))?;
+
+            info!("explode_container: chunk set successfully");
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     async fn rename_container(
@@ -2601,34 +3035,133 @@ impl FxService for ReaperFx {
         context: FxChainContext,
         container_id: FxNodeId,
         name: String,
-    ) {
+    ) -> Result<(), String> {
         debug!("ReaperFx::rename_container({:?}, {:?})", container_id, name);
 
         let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return;
+            return Err("TaskSupport not set".into());
         };
 
-        let _ = ts.do_later_in_main_thread_asap(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return;
-            };
-            let Some((_track, chain)) = resolve_fx_chain(&proj, &context) else {
-                return;
-            };
-
-            let Some(raw_index) = resolve_node_to_raw_index(&chain, &container_id) else {
-                warn!("Could not resolve container {:?}", container_id);
-                return;
-            };
-
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)
+                .ok_or_else(|| format!("rename_container: project not found ({:?})", project))?;
+            let (_track, chain) = resolve_fx_chain(&proj, &context)
+                .ok_or_else(|| format!("rename_container: FX chain not found ({:?})", context))?;
+            let raw_index = resolve_node_to_raw_index(&chain, &container_id).ok_or_else(|| {
+                format!(
+                    "rename_container: could not resolve container ({:?})",
+                    container_id
+                )
+            })?;
             let container_fx = chain.fx_by_index_untracked(raw_index);
-            if let Ok(c_name) = std::ffi::CString::new(name) {
-                unsafe {
-                    let _ = container_fx.set_named_config_param("renamed_name", c_name.as_ptr());
-                }
+            let c_name = std::ffi::CString::new(name)
+                .map_err(|e| format!("rename_container: invalid name: {}", e))?;
+            unsafe {
+                let _ = container_fx.set_named_config_param("renamed_name", c_name.as_ptr());
             }
-        });
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+    }
+
+    // =========================================================================
+    // Raw FX Chain Chunk Operations
+    //
+    // Operates on the track's raw RPP state text. Used for atomic module
+    // preset save/load — capture a full <CONTAINER> block and splice it
+    // into any track's FXCHAIN section in a single operation.
+    // =========================================================================
+
+    async fn get_fx_chain_chunk_text(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        context: FxChainContext,
+    ) -> Option<String> {
+        debug!("ReaperFx::get_fx_chain_chunk_text({:?})", context);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return None;
+        };
+
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)?;
+            let (track, _chain) = resolve_fx_chain(&proj, &context)?;
+
+            // Get full track state as RPP text.
+            // NormalMode is required here — UndoMode returns cached data that
+            // may be stale after structural changes like enclose_in_container.
+            let chunk = track
+                .chunk(MAX_TRACK_CHUNK_SIZE, ChunkCacheHint::NormalMode)
+                .ok()?;
+            let region = chunk.region();
+
+            // Find the <FXCHAIN ...>...</FXCHAIN> block
+            let fxchain_region = region.find_first_tag_named(0, "FXCHAIN")?;
+            let content = fxchain_region.content().to_string();
+            Some(content)
+        })
+        .await
+        .unwrap_or(None)
+    }
+
+    async fn insert_fx_chain_chunk(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        context: FxChainContext,
+        chunk_text: String,
+    ) -> Result<(), String> {
+        info!(
+            "ReaperFx::insert_fx_chain_chunk({:?}, {} bytes)",
+            context,
+            chunk_text.len()
+        );
+
+        let Some(ts) = task_support() else {
+            return Err("TaskSupport not set".into());
+        };
+
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)
+                .ok_or_else(|| "insert_fx_chain_chunk: project not found".to_string())?;
+            let (track, _chain) = resolve_fx_chain(&proj, &context)
+                .ok_or_else(|| "insert_fx_chain_chunk: FX chain not found".to_string())?;
+
+            // Get full track state as RPP text.
+            // NormalMode ensures we see the current state (not undo cache).
+            let mut chunk = track
+                .chunk(MAX_TRACK_CHUNK_SIZE, ChunkCacheHint::NormalMode)
+                .map_err(|e| {
+                    format!("insert_fx_chain_chunk: failed to get track chunk: {:?}", e)
+                })?;
+            let region = chunk.region();
+
+            // Find the <FXCHAIN> block
+            if let Some(fxchain_region) = region.find_first_tag_named(0, "FXCHAIN") {
+                // FXCHAIN exists — insert the new block before its closing `>` line
+                let closing_line = fxchain_region.last_line();
+                chunk.insert_before_region_as_block(&closing_line, &chunk_text);
+            } else {
+                // No FXCHAIN section (empty track). Create one wrapping the chunk text,
+                // and insert it before the track's closing `>` line.
+                let fxchain_block =
+                    format!("<FXCHAIN\nSHOW 0\nLASTSEL 0\nDOCKED 0\n{}\n>", chunk_text);
+                let track_closing = chunk.region().last_line();
+                chunk.insert_before_region_as_block(&track_closing, &fxchain_block);
+            }
+
+            // Set the modified chunk back on the track
+            track
+                .set_chunk(chunk)
+                .map_err(|e| format!("Failed to set track chunk: {:?}", e))?;
+            info!("Successfully inserted FX chain chunk");
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
     }
 
     // =========================================================================

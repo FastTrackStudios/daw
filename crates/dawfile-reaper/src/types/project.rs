@@ -1218,10 +1218,13 @@ impl ReaperProject {
                         project.tempo_envelope = Some(tempo_envelope);
                     }
                 }
-                BlockType::FxChain => match FxChain::from_block(block) {
-                    Ok(fx_chain) => project.fx_chains.push(fx_chain),
-                    Err(e) => eprintln!("Warning: Failed to parse FX chain: {}", e),
-                },
+                BlockType::FxChain => {
+                    let block_text = format!("{}", block);
+                    match FxChain::parse(&block_text) {
+                        Ok(fx_chain) => project.fx_chains.push(fx_chain),
+                        Err(e) => eprintln!("Warning: Failed to parse FX chain: {}", e),
+                    }
+                }
                 _ => {
                     // Ignore other block types for now
                 }

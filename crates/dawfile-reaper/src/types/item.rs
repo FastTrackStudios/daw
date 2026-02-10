@@ -199,7 +199,13 @@ impl fmt::Display for SoloState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceType {
     Wave,
+    Mp3,
     Midi,
+    Video,
+    Section,
+    Empty,
+    Flac,
+    Vorbis,
     OfflineWave,
     Unknown(String),
 }
@@ -208,7 +214,13 @@ impl From<&str> for SourceType {
     fn from(value: &str) -> Self {
         match value.to_uppercase().as_str() {
             "WAVE" => SourceType::Wave,
+            "MP3" => SourceType::Mp3,
             "MIDI" => SourceType::Midi,
+            "VIDEO" => SourceType::Video,
+            "SECTION" => SourceType::Section,
+            "EMPTY" => SourceType::Empty,
+            "FLAC" => SourceType::Flac,
+            "VORBIS" => SourceType::Vorbis,
             "_OFFLINE_WAVE" => SourceType::OfflineWave,
             _ => SourceType::Unknown(value.to_string()),
         }
@@ -219,7 +231,13 @@ impl fmt::Display for SourceType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SourceType::Wave => write!(f, "Wave"),
+            SourceType::Mp3 => write!(f, "MP3"),
             SourceType::Midi => write!(f, "MIDI"),
+            SourceType::Video => write!(f, "Video"),
+            SourceType::Section => write!(f, "Section"),
+            SourceType::Empty => write!(f, "Empty"),
+            SourceType::Flac => write!(f, "FLAC"),
+            SourceType::Vorbis => write!(f, "Vorbis"),
             SourceType::OfflineWave => write!(f, "Offline Wave"),
             SourceType::Unknown(val) => write!(f, "Unknown({})", val),
         }
@@ -294,6 +312,9 @@ pub struct Item {
     // Takes
     pub takes: Vec<Take>,
 
+    // Stretch markers
+    pub stretch_markers: Vec<StretchMarker>,
+
     // Raw content for preservation
     pub raw_content: String,
 }
@@ -355,9 +376,99 @@ pub struct Take {
 /// Source block for a take
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceBlock {
-    pub source_type: SourceType, // WAVE, MIDI, etc.
-    pub file_path: String,       // FILE - Source file path
-    pub raw_content: String,     // Raw content for preservation
+    pub source_type: SourceType,       // WAVE, MIDI, etc.
+    pub file_path: String,             // FILE - Source file path
+    pub midi_data: Option<MidiSource>, // Parsed MIDI data (if source is MIDI)
+    pub raw_content: String,           // Raw content for preservation
+}
+
+/// Parsed MIDI source data from a `<SOURCE MIDI>` block.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MidiSource {
+    /// Ticks per quarter note (from HASDATA line, e.g. 960)
+    pub ticks_per_qn: u32,
+    /// Pooled events GUID (from POOLEDEVTS line)
+    pub pooled_evts_guid: Option<String>,
+    /// MIDI events
+    pub events: Vec<MidiEvent>,
+    /// Source GUID
+    pub guid: Option<String>,
+}
+
+/// A single MIDI event from an RPP `E` line.
+///
+/// Format: `E <delta_ticks> <status_hex> <data1_hex> [data2_hex] [...]`
+/// The status byte determines the event type:
+/// - `8x` = Note Off, `9x` = Note On, `Ax` = Aftertouch
+/// - `Bx` = Control Change, `Cx` = Program Change, `Dx` = Channel Pressure
+/// - `Ex` = Pitch Bend, `Fx` = System (SysEx, etc.)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MidiEvent {
+    /// Delta time in ticks from previous event
+    pub delta_ticks: u32,
+    /// Raw MIDI bytes (status + data, parsed from hex)
+    pub bytes: Vec<u8>,
+}
+
+impl MidiEvent {
+    /// Get the MIDI status byte (first byte).
+    pub fn status(&self) -> u8 {
+        self.bytes.first().copied().unwrap_or(0)
+    }
+
+    /// Get the event type (upper nibble of status byte).
+    pub fn event_type(&self) -> MidiEventType {
+        match self.status() >> 4 {
+            0x8 => MidiEventType::NoteOff,
+            0x9 => {
+                // Note On with velocity 0 is actually Note Off
+                if self.bytes.get(2).copied().unwrap_or(0) == 0 {
+                    MidiEventType::NoteOff
+                } else {
+                    MidiEventType::NoteOn
+                }
+            }
+            0xA => MidiEventType::Aftertouch,
+            0xB => MidiEventType::ControlChange,
+            0xC => MidiEventType::ProgramChange,
+            0xD => MidiEventType::ChannelPressure,
+            0xE => MidiEventType::PitchBend,
+            0xF => MidiEventType::System,
+            _ => MidiEventType::Unknown,
+        }
+    }
+
+    /// Get the MIDI channel (0-15, from lower nibble of status byte).
+    pub fn channel(&self) -> u8 {
+        self.status() & 0x0F
+    }
+}
+
+/// MIDI event type classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MidiEventType {
+    NoteOn,
+    NoteOff,
+    Aftertouch,
+    ControlChange,
+    ProgramChange,
+    ChannelPressure,
+    PitchBend,
+    System,
+    Unknown,
+}
+
+/// A stretch marker within a media item.
+///
+/// From `SM` lines: `SM <position> <source_position> [<rate>]`
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StretchMarker {
+    /// Position within the item (in seconds)
+    pub position: f64,
+    /// Source position (in seconds)
+    pub source_position: f64,
+    /// Stretch rate at this marker (optional)
+    pub rate: Option<f64>,
 }
 
 impl Item {
@@ -468,6 +579,7 @@ impl Item {
             take_guid: None,
             rec_pass: None,
             takes: Vec::new(),
+            stretch_markers: Vec::new(),
             raw_content: block_content.to_string(),
         };
 
@@ -808,6 +920,20 @@ impl Item {
                         }
                     }
                 }
+                "SM" => {
+                    // Stretch marker: SM <position> <source_position> [<rate>]
+                    if tokens.len() >= 3 {
+                        item.stretch_markers.push(StretchMarker {
+                            position: Self::parse_float(&tokens[1])?,
+                            source_position: Self::parse_float(&tokens[2])?,
+                            rate: if tokens.len() > 3 {
+                                Some(Self::parse_float(&tokens[3])?)
+                            } else {
+                                None
+                            },
+                        });
+                    }
+                }
                 _ => {
                     // Handle take-specific fields
                     if let Some(ref mut take) = current_take {
@@ -864,8 +990,8 @@ impl Item {
     fn parse_source_block(block_content: &str) -> Result<SourceBlock, String> {
         let lines: Vec<&str> = block_content.lines().collect();
 
-        if lines.len() < 3 {
-            return Err("SOURCE block must have at least 3 lines".to_string());
+        if lines.len() < 2 {
+            return Err("SOURCE block must have at least 2 lines".to_string());
         }
 
         // First line should be "<SOURCE TYPE"
@@ -880,7 +1006,8 @@ impl Item {
 
         // Find FILE line
         let mut file_path = String::new();
-        for line in &lines[1..lines.len() - 1] {
+        let inner_lines = &lines[1..lines.len().saturating_sub(1)];
+        for line in inner_lines {
             let line = line.trim();
             if line.starts_with("FILE") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -897,11 +1024,60 @@ impl Item {
             }
         }
 
+        // Parse MIDI data if this is a MIDI source
+        let midi_data = if source_type == SourceType::Midi {
+            Some(Self::parse_midi_source(inner_lines))
+        } else {
+            None
+        };
+
         Ok(SourceBlock {
             source_type,
             file_path,
+            midi_data,
             raw_content: block_content.to_string(),
         })
+    }
+
+    /// Parse MIDI source data from inner lines of a `<SOURCE MIDI>` block.
+    fn parse_midi_source(lines: &[&str]) -> MidiSource {
+        let mut midi = MidiSource {
+            ticks_per_qn: 960,
+            pooled_evts_guid: None,
+            events: Vec::new(),
+            guid: None,
+        };
+
+        for line in lines {
+            let line = line.trim();
+
+            if line.starts_with("HASDATA ") {
+                // HASDATA 1 960 QN
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 {
+                    midi.ticks_per_qn = parts[2].parse().unwrap_or(960);
+                }
+            } else if line.starts_with("POOLEDEVTS ") {
+                midi.pooled_evts_guid = Some(line[11..].trim().to_string());
+            } else if line.starts_with("GUID ") {
+                midi.guid = Some(line[5..].trim().to_string());
+            } else if line.starts_with("E ") || line.starts_with("e ") {
+                // MIDI event: E <delta_ticks> <status_hex> <data1_hex> [data2_hex ...]
+                let parts: Vec<&str> = line[2..].split_whitespace().collect();
+                if parts.len() >= 2 {
+                    let delta_ticks = parts[0].parse::<u32>().unwrap_or(0);
+                    let bytes: Vec<u8> = parts[1..]
+                        .iter()
+                        .filter_map(|s| u8::from_str_radix(s, 16).ok())
+                        .collect();
+                    if !bytes.is_empty() {
+                        midi.events.push(MidiEvent { delta_ticks, bytes });
+                    }
+                }
+            }
+        }
+
+        midi
     }
 
     /// Parse a float from a token
@@ -1290,5 +1466,277 @@ mod tests {
         assert_eq!(source.file_path, "C:\\Path\\To\\AudioFile.wav");
 
         println!("✅ Successfully parsed simple item!");
+    }
+
+    #[test]
+    fn test_parse_midi_item() {
+        let rpp_content = r#"<ITEM
+  POSITION 0.0
+  SNAPOFFS 0
+  LENGTH 4.0
+  LOOP 1
+  ALLTAKES 0
+  SEL 0
+  NAME "MIDI Pattern"
+  VOLPAN 1 0 1 -1
+  SOFFS 0
+  PLAYRATE 1 1 0 -1 0 0.0025
+  CHANMODE 0
+  GUID {AABB0011-2233-4455-6677-8899AABBCCDD}
+  <SOURCE MIDI
+    HASDATA 1 960 QN
+    CCINTERP 32
+    POOLEDEVTS {11223344-5566-7788-99AA-BBCCDDEEFF00}
+    E 0 90 3c 7f
+    E 480 80 3c 00
+    E 0 90 40 64
+    E 480 80 40 00
+    GUID {FFEEDDCC-BBAA-9988-7766-554433221100}
+  >
+>"#;
+
+        let item = Item::from_rpp_block(rpp_content).unwrap();
+        assert_eq!(item.takes.len(), 1);
+        assert_eq!(item.name, "MIDI Pattern");
+
+        let take = &item.takes[0];
+        let source = take.source.as_ref().unwrap();
+        assert_eq!(source.source_type, SourceType::Midi);
+        assert!(source.midi_data.is_some());
+
+        let midi = source.midi_data.as_ref().unwrap();
+        assert_eq!(midi.ticks_per_qn, 960);
+        assert_eq!(
+            midi.pooled_evts_guid.as_deref(),
+            Some("{11223344-5566-7788-99AA-BBCCDDEEFF00}")
+        );
+        assert_eq!(
+            midi.guid.as_deref(),
+            Some("{FFEEDDCC-BBAA-9988-7766-554433221100}")
+        );
+
+        // 4 MIDI events: note on C4, note off C4, note on E4, note off E4
+        assert_eq!(midi.events.len(), 4);
+
+        // First event: Note On C4 (0x3c = 60) velocity 127
+        let ev0 = &midi.events[0];
+        assert_eq!(ev0.delta_ticks, 0);
+        assert_eq!(ev0.bytes, vec![0x90, 0x3c, 0x7f]);
+        assert_eq!(ev0.event_type(), MidiEventType::NoteOn);
+        assert_eq!(ev0.channel(), 0);
+
+        // Second event: Note Off C4 after 480 ticks
+        let ev1 = &midi.events[1];
+        assert_eq!(ev1.delta_ticks, 480);
+        assert_eq!(ev1.bytes, vec![0x80, 0x3c, 0x00]);
+        assert_eq!(ev1.event_type(), MidiEventType::NoteOff);
+
+        // Third event: Note On E4 (0x40 = 64) velocity 100
+        let ev2 = &midi.events[2];
+        assert_eq!(ev2.delta_ticks, 0);
+        assert_eq!(ev2.bytes, vec![0x90, 0x40, 0x64]);
+        assert_eq!(ev2.event_type(), MidiEventType::NoteOn);
+
+        // Fourth event: Note Off E4
+        let ev3 = &midi.events[3];
+        assert_eq!(ev3.delta_ticks, 480);
+        assert_eq!(ev3.bytes, vec![0x80, 0x40, 0x00]);
+        assert_eq!(ev3.event_type(), MidiEventType::NoteOff);
+    }
+
+    #[test]
+    fn test_parse_stretch_markers() {
+        let rpp_content = r#"<ITEM
+  POSITION 1.0
+  SNAPOFFS 0
+  LENGTH 10.0
+  LOOP 0
+  ALLTAKES 0
+  SEL 0
+  NAME "Stretched Audio"
+  VOLPAN 1 0 1 -1
+  SOFFS 0
+  PLAYRATE 1 1 0 -1 0 0.0025
+  CHANMODE 0
+  SM 0 0
+  SM 2.5 2.0 1.25
+  SM 5.0 4.5
+  <SOURCE WAVE
+    FILE "audio.wav"
+  >
+>"#;
+
+        let item = Item::from_rpp_block(rpp_content).unwrap();
+        assert_eq!(item.stretch_markers.len(), 3);
+
+        let sm0 = &item.stretch_markers[0];
+        assert_eq!(sm0.position, 0.0);
+        assert_eq!(sm0.source_position, 0.0);
+        assert!(sm0.rate.is_none());
+
+        let sm1 = &item.stretch_markers[1];
+        assert_eq!(sm1.position, 2.5);
+        assert_eq!(sm1.source_position, 2.0);
+        assert_eq!(sm1.rate, Some(1.25));
+
+        let sm2 = &item.stretch_markers[2];
+        assert_eq!(sm2.position, 5.0);
+        assert_eq!(sm2.source_position, 4.5);
+        assert!(sm2.rate.is_none());
+    }
+
+    #[test]
+    fn test_source_type_variants() {
+        assert_eq!(SourceType::from("WAVE"), SourceType::Wave);
+        assert_eq!(SourceType::from("MP3"), SourceType::Mp3);
+        assert_eq!(SourceType::from("MIDI"), SourceType::Midi);
+        assert_eq!(SourceType::from("VIDEO"), SourceType::Video);
+        assert_eq!(SourceType::from("SECTION"), SourceType::Section);
+        assert_eq!(SourceType::from("EMPTY"), SourceType::Empty);
+        assert_eq!(SourceType::from("FLAC"), SourceType::Flac);
+        assert_eq!(SourceType::from("VORBIS"), SourceType::Vorbis);
+        assert_eq!(SourceType::from("_OFFLINE_WAVE"), SourceType::OfflineWave);
+        // Case-insensitive for standard types
+        assert_eq!(SourceType::from("wave"), SourceType::Wave);
+        assert_eq!(SourceType::from("midi"), SourceType::Midi);
+        // Unknown type preserved
+        assert_eq!(
+            SourceType::from("CUSTOM"),
+            SourceType::Unknown("CUSTOM".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_empty_source() {
+        let rpp_content = r#"<ITEM
+  POSITION 0.0
+  SNAPOFFS 0
+  LENGTH 2.0
+  LOOP 0
+  ALLTAKES 0
+  SEL 0
+  NAME "Empty Item"
+  VOLPAN 1 0 1 -1
+  SOFFS 0
+  PLAYRATE 1 1 0 -1 0 0.0025
+  CHANMODE 0
+  <SOURCE EMPTY
+  >
+>"#;
+
+        let item = Item::from_rpp_block(rpp_content).unwrap();
+        assert_eq!(item.takes.len(), 1);
+        let source = item.takes[0].source.as_ref().unwrap();
+        assert_eq!(source.source_type, SourceType::Empty);
+        assert!(source.file_path.is_empty());
+        assert!(source.midi_data.is_none());
+    }
+
+    #[test]
+    fn test_midi_event_types() {
+        // Control Change on channel 5
+        let cc = MidiEvent {
+            delta_ticks: 0,
+            bytes: vec![0xB5, 0x07, 0x7F],
+        };
+        assert_eq!(cc.event_type(), MidiEventType::ControlChange);
+        assert_eq!(cc.channel(), 5);
+        assert_eq!(cc.status(), 0xB5);
+
+        // Program Change on channel 0
+        let pc = MidiEvent {
+            delta_ticks: 0,
+            bytes: vec![0xC0, 0x05],
+        };
+        assert_eq!(pc.event_type(), MidiEventType::ProgramChange);
+        assert_eq!(pc.channel(), 0);
+
+        // Pitch Bend on channel 3
+        let pb = MidiEvent {
+            delta_ticks: 0,
+            bytes: vec![0xE3, 0x00, 0x40],
+        };
+        assert_eq!(pb.event_type(), MidiEventType::PitchBend);
+        assert_eq!(pb.channel(), 3);
+
+        // Channel Pressure (Aftertouch)
+        let cp = MidiEvent {
+            delta_ticks: 0,
+            bytes: vec![0xD0, 0x64],
+        };
+        assert_eq!(cp.event_type(), MidiEventType::ChannelPressure);
+
+        // Poly Aftertouch
+        let at = MidiEvent {
+            delta_ticks: 0,
+            bytes: vec![0xA1, 0x3C, 0x40],
+        };
+        assert_eq!(at.event_type(), MidiEventType::Aftertouch);
+
+        // System message (0xF0+)
+        let sys = MidiEvent {
+            delta_ticks: 0,
+            bytes: vec![0xF0, 0x7E, 0x7F],
+        };
+        assert_eq!(sys.event_type(), MidiEventType::System);
+        // System messages: channel nibble is 0 (0xF0 & 0x0F)
+        assert_eq!(sys.channel(), 0);
+
+        // Empty event — status() returns 0, event_type() returns Unknown
+        let empty = MidiEvent {
+            delta_ticks: 0,
+            bytes: vec![],
+        };
+        assert_eq!(empty.event_type(), MidiEventType::Unknown);
+        assert_eq!(empty.status(), 0);
+        assert_eq!(empty.channel(), 0);
+    }
+
+    #[test]
+    fn test_parse_midi_with_multiple_takes() {
+        let rpp_content = r#"<ITEM
+  POSITION 0.0
+  SNAPOFFS 0
+  LENGTH 4.0
+  LOOP 1
+  ALLTAKES 0
+  SEL 0
+  NAME "Multi-take MIDI"
+  VOLPAN 1 0 1 -1
+  SOFFS 0
+  PLAYRATE 1 1 0 -1 0 0.0025
+  CHANMODE 0
+  <SOURCE MIDI
+    HASDATA 1 960 QN
+    E 0 90 3c 7f
+    E 960 80 3c 00
+  >
+  TAKE SEL
+  NAME "Alternate Take"
+  SOFFS 0
+  CHANMODE 0
+  GUID {11111111-2222-3333-4444-555555555555}
+  <SOURCE WAVE
+    FILE "alt-audio.wav"
+  >
+>"#;
+
+        let item = Item::from_rpp_block(rpp_content).unwrap();
+        assert_eq!(item.takes.len(), 2);
+
+        // First take has MIDI source
+        let take1 = &item.takes[0];
+        let src1 = take1.source.as_ref().unwrap();
+        assert_eq!(src1.source_type, SourceType::Midi);
+        let midi = src1.midi_data.as_ref().unwrap();
+        assert_eq!(midi.events.len(), 2);
+
+        // Second take has audio source
+        let take2 = &item.takes[1];
+        assert!(take2.is_selected);
+        assert_eq!(take2.name, "Alternate Take");
+        let src2 = take2.source.as_ref().unwrap();
+        assert_eq!(src2.source_type, SourceType::Wave);
+        assert!(src2.midi_data.is_none());
     }
 }
