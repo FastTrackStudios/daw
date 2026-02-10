@@ -790,6 +790,14 @@ fn build_fx_parameter(param: &reaper_high::FxParameter) -> FxParameter {
                 .unwrap_or_else(|_| format!("{}", i));
             labels.push((norm, label));
         }
+        debug!(
+            "    → step_labels for '{}': {:?}",
+            name,
+            labels
+                .iter()
+                .map(|(n, l)| format!("{:.3}={}", n, l))
+                .collect::<Vec<_>>()
+        );
         labels
     } else {
         Vec::new()
@@ -1562,11 +1570,11 @@ impl FxService for ReaperFx {
             let index = resolve_fx_index(&chain, &target.fx)?;
             let fx = chain.fx_by_index_untracked(index);
 
-            Some(
-                fx.parameters()
-                    .map(|param| build_fx_parameter(&param))
-                    .collect::<Vec<_>>(),
-            )
+            let params: Vec<FxParameter> = fx
+                .parameters()
+                .map(|param| build_fx_parameter(&param))
+                .collect();
+            Some(params)
         })
         .await
         .unwrap_or(Some(vec![]))
