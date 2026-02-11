@@ -4,14 +4,28 @@
 - Tempo-heavy fixture (tracked): `/Users/codywright/Documents/Development/Rust/roam-test/modules/dawfile/dawfile-reaper/tests/fixtures/tempo-map-advanced.RPP`
 - Large real-world fixture (local, git-ignored): `/Users/codywright/Documents/Development/Rust/roam-test/modules/dawfile/dawfile-reaper/tests/fixtures/local/Goodness of God.RPP`
 
-## Commands
-### CLI timing utility
+## Canonical Command Set
+### Perf matrix script (recommended)
 ```bash
-cargo run -p dawfile-reaper --bin rpp_perf -- \
+modules/dawfile/dawfile-reaper/scripts/perf_matrix.sh
+```
+
+This runs `rpp_perf` in release mode with the canonical fixture pair:
+- `tests/fixtures/tempo-map-advanced.RPP` (tempo-heavy)
+- `tests/fixtures/local/Goodness of God.RPP` (large real-world)
+
+Artifacts:
+- `modules/dawfile/dawfile-reaper/docs/perf-runs/latest.md` (summary table)
+- `modules/dawfile/dawfile-reaper/docs/perf-runs/latest.txt` (raw CLI output)
+
+### Direct CLI timing utility (equivalent)
+```bash
+cargo run -p dawfile-reaper --release --bin rpp_perf -- \
   --fixture modules/dawfile/dawfile-reaper/tests/fixtures/tempo-map-advanced.RPP \
   --fixture "modules/dawfile/dawfile-reaper/tests/fixtures/local/Goodness of God.RPP" \
   --warmup 1 \
-  --repeat 3
+  --repeat 3 \
+  --typed-mode full
 ```
 
 ### Criterion benchmark
@@ -31,19 +45,28 @@ From `/Users/codywright/Documents/Development/Rust/roam-test/modules/dawfile/daw
 - `parse_rpp_file`: `40.276s` (~`10.40 MB/s`)
 - typed conversion: `0.527s`
 
-## Current (2026-02-11)
-From `rpp_perf` against `Goodness of God.RPP` (`--repeat 3`, release):
-- fixture size: `418.82 MB`
-- parse avg: `0.3274s` (~`1279.21 MB/s`)
-- typed avg (full mode): `0.0062s`
-- peak RSS: `1254.86 MB`
+## Current Baseline (2026-02-11)
+From `rpp_perf` (`--release --warmup 1 --repeat 3 --typed-mode full`):
 
-## Allocation Telemetry (2026-02-11)
-From `rpp_perf` with allocator counters enabled (`--repeat 3`, release):
-- parse alloc calls avg: `4,175,570`
-- parse allocated MB avg: `760.77`
-- typed alloc calls avg: `231,507`
-- typed allocated MB avg: `11.75`
+### tempo-map-advanced.RPP
+- fixture size: `0.01 MB`
+- parse avg: `0.0001s` (~`59.79 MB/s`)
+- typed avg: `0.0000s`
+- peak RSS: `2.19 MB`
+- parse alloc calls avg: `473`
+- parse alloc MB avg: `0.06`
+- typed alloc calls avg: `262`
+- typed alloc MB avg: `0.04`
+
+### Goodness of God.RPP
+- fixture size: `418.82 MB`
+- parse avg: `0.3174s` (~`1319.62 MB/s`)
+- typed avg: `0.0549s`
+- peak RSS: `1295.77 MB`
+- parse alloc calls avg: `4,362,878`
+- parse alloc MB avg: `752.15`
+- typed alloc calls avg: `529,959`
+- typed alloc MB avg: `70.40`
 
 Notes:
 - Allocation telemetry mode adds overhead and should be used for relative allocation comparisons between commits, not absolute throughput comparisons.
