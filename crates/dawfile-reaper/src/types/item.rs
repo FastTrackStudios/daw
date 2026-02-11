@@ -522,49 +522,434 @@ pub struct StretchMarker {
 }
 
 impl Item {
-    /// Create an Item from a parsed RPP block (legacy method for compatibility)
-    pub fn from_block(block: &crate::primitives::RppBlock) -> Result<Self, String> {
-        // Convert the block back to string format for parsing
-        let mut content = String::new();
-        content.push('<');
-        content.push_str(&block.name);
-
-        // Add parameters if any
-        if !block.params.is_empty() {
-            for param in &block.params {
-                content.push(' ');
-                content.push_str(&param.to_string());
+    fn fast_classify_item_token(raw: &str) -> Token {
+        if let Some(hex) = raw.strip_prefix("0x") {
+            if let Ok(v) = u64::from_str_radix(hex, 16) {
+                return Token::HexInteger(v);
             }
         }
-        content.push('\n');
 
-        // Add content lines
+        if let Ok(v) = raw.parse::<i64>() {
+            return Token::Integer(v);
+        }
+        if let Ok(v) = raw.parse::<f64>() {
+            return Token::Float(v);
+        }
+        if raw.contains(',') {
+            let normalized = raw.replace(',', ".");
+            if let Ok(v) = normalized.parse::<f64>() {
+                return Token::Float(v);
+            }
+        }
+        Token::Identifier(raw.to_string())
+    }
+
+    fn parse_item_token_line(line: &str) -> Result<Vec<Token>, String> {
+        if line.contains('"')
+            || line.contains('\'')
+            || line.contains('`')
+            || line.contains('#')
+            || line.contains(';')
+        {
+            return crate::primitives::token::parse_token_line(line)
+                .map(|(_, tokens)| tokens)
+                .map_err(|e| format!("{e:?}"));
+        }
+
+        let mut parts = line.split_whitespace();
+        let Some(first) = parts.next() else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::with_capacity(8);
+        out.push(Self::fast_classify_item_token(first));
+        out.extend(parts.map(Self::fast_classify_item_token));
+        Ok(out)
+    }
+
+    fn default_take() -> Take {
+        Take {
+            is_selected: false,
+            name: String::new(),
+            volpan: None,
+            slip_offset: 0.0,
+            playrate: None,
+            channel_mode: ChannelMode::Normal,
+            take_color: None,
+            take_guid: None,
+            rec_pass: None,
+            source: None,
+        }
+    }
+
+    fn apply_item_tokens(
+        item: &mut Item,
+        tokens: &[Token],
+        current_take: &mut Option<Take>,
+        in_take_context: &mut bool,
+    ) -> Result<(), String> {
+        if tokens.is_empty() {
+            return Ok(());
+        }
+        let identifier = match &tokens[0] {
+            Token::Identifier(id) => id.as_str(),
+            _ => return Ok(()),
+        };
+
+        match identifier {
+            "POSITION" => {
+                if tokens.len() > 1 {
+                    item.position = Self::parse_float(&tokens[1])?;
+                }
+            }
+            "SNAPOFFS" => {
+                if tokens.len() > 1 {
+                    item.snap_offset = Self::parse_float(&tokens[1])?;
+                }
+            }
+            "LENGTH" => {
+                if tokens.len() > 1 {
+                    item.length = Self::parse_float(&tokens[1])?;
+                }
+            }
+            "LOOP" => {
+                if tokens.len() > 1 {
+                    item.loop_source = Self::parse_bool(&tokens[1])?;
+                }
+            }
+            "ALLTAKES" => {
+                if tokens.len() > 1 {
+                    item.play_all_takes = Self::parse_bool(&tokens[1])?;
+                }
+            }
+            "COLOR" => {
+                if tokens.len() > 1 {
+                    item.color = Some(Self::parse_int(&tokens[1])?);
+                }
+            }
+            "BEAT" => {
+                if tokens.len() > 1 {
+                    item.beat = Some(ItemTimebase::from(Self::parse_int(&tokens[1])?));
+                }
+            }
+            "SEL" => {
+                if tokens.len() > 1 {
+                    item.selected = Self::parse_bool(&tokens[1])?;
+                }
+            }
+            "FADEIN" => {
+                if tokens.len() >= 3 {
+                    item.fade_in = Some(FadeSettings {
+                        curve_type: FadeCurveType::from(Self::parse_int(&tokens[1])?),
+                        time: Self::parse_float(&tokens[2])?,
+                        unknown_field_3: if tokens.len() > 3 {
+                            Self::parse_float(&tokens[3])?
+                        } else {
+                            0.0
+                        },
+                        unknown_field_4: if tokens.len() > 4 {
+                            Self::parse_int(&tokens[4])?
+                        } else {
+                            0
+                        },
+                        unknown_field_5: if tokens.len() > 5 {
+                            Self::parse_int(&tokens[5])?
+                        } else {
+                            0
+                        },
+                        unknown_field_6: if tokens.len() > 6 {
+                            Self::parse_int(&tokens[6])?
+                        } else {
+                            0
+                        },
+                        unknown_field_7: if tokens.len() > 7 {
+                            Self::parse_int(&tokens[7])?
+                        } else {
+                            0
+                        },
+                    });
+                }
+            }
+            "FADEOUT" => {
+                if tokens.len() >= 3 {
+                    item.fade_out = Some(FadeSettings {
+                        curve_type: FadeCurveType::from(Self::parse_int(&tokens[1])?),
+                        time: Self::parse_float(&tokens[2])?,
+                        unknown_field_3: if tokens.len() > 3 {
+                            Self::parse_float(&tokens[3])?
+                        } else {
+                            0.0
+                        },
+                        unknown_field_4: if tokens.len() > 4 {
+                            Self::parse_int(&tokens[4])?
+                        } else {
+                            0
+                        },
+                        unknown_field_5: if tokens.len() > 5 {
+                            Self::parse_int(&tokens[5])?
+                        } else {
+                            0
+                        },
+                        unknown_field_6: if tokens.len() > 6 {
+                            Self::parse_int(&tokens[6])?
+                        } else {
+                            0
+                        },
+                        unknown_field_7: if tokens.len() > 7 {
+                            Self::parse_int(&tokens[7])?
+                        } else {
+                            0
+                        },
+                    });
+                }
+            }
+            "MUTE" => {
+                if tokens.len() >= 3 {
+                    item.mute = Some(MuteSettings {
+                        muted: Self::parse_bool(&tokens[1])?,
+                        solo_state: SoloState::from(Self::parse_int(&tokens[2])?),
+                    });
+                }
+            }
+            "IGUID" => {
+                if tokens.len() > 1 {
+                    item.item_guid = Some(Self::parse_string(&tokens[1])?);
+                }
+            }
+            "IID" => {
+                if tokens.len() > 1 {
+                    item.item_id = Some(Self::parse_int(&tokens[1])?);
+                }
+            }
+            "NAME" => {
+                if tokens.len() > 1 {
+                    let name = Self::parse_string(&tokens[1])?;
+                    if *in_take_context {
+                        if let Some(ref mut take) = current_take {
+                            take.name = name;
+                        }
+                    } else {
+                        item.name = name;
+                    }
+                }
+            }
+            "VOLPAN" => {
+                if tokens.len() >= 5 {
+                    item.volpan = Some(VolPanSettings {
+                        item_trim: Self::parse_float(&tokens[1])?,
+                        take_pan: Self::parse_float(&tokens[2])?,
+                        take_volume: Self::parse_float(&tokens[3])?,
+                        take_pan_law: Self::parse_float(&tokens[4])?,
+                    });
+                }
+            }
+            "SOFFS" => {
+                if tokens.len() > 1 {
+                    item.slip_offset = Self::parse_float(&tokens[1])?;
+                }
+            }
+            "PLAYRATE" => {
+                if tokens.len() >= 4 {
+                    item.playrate = Some(PlayRateSettings {
+                        rate: Self::parse_float(&tokens[1])?,
+                        preserve_pitch: Self::parse_bool(&tokens[2])?,
+                        pitch_adjust: Self::parse_float(&tokens[3])?,
+                        pitch_mode: PitchMode::from(Self::parse_int(&tokens[4])?),
+                        unknown_field_5: if tokens.len() > 5 {
+                            Self::parse_int(&tokens[5])?
+                        } else {
+                            0
+                        },
+                        unknown_field_6: if tokens.len() > 6 {
+                            Self::parse_float(&tokens[6])?
+                        } else {
+                            0.0
+                        },
+                    });
+                }
+            }
+            "CHANMODE" => {
+                if tokens.len() > 1 {
+                    item.channel_mode = ChannelMode::from(Self::parse_int(&tokens[1])?);
+                }
+            }
+            "GUID" => {
+                if tokens.len() > 1 {
+                    let guid = Self::parse_string(&tokens[1])?;
+                    if *in_take_context {
+                        if let Some(ref mut take) = current_take {
+                            take.take_guid = Some(guid);
+                        }
+                    } else {
+                        item.take_guid = Some(guid.clone());
+                        if let Some(ref mut take) = current_take {
+                            take.take_guid = Some(guid);
+                        }
+                    }
+                }
+            }
+            "RECPASS" => {
+                if tokens.len() > 1 {
+                    let rec_pass = Self::parse_int(&tokens[1])?;
+                    if *in_take_context {
+                        if let Some(ref mut take) = current_take {
+                            take.rec_pass = Some(rec_pass);
+                        }
+                    } else {
+                        item.rec_pass = Some(rec_pass);
+                    }
+                }
+            }
+            "TAKE" => {
+                let is_selected = matches!(tokens.get(1), Some(Token::Identifier(flag)) if flag == "SEL");
+                if let Some(take) = current_take.take() {
+                    item.takes.push(take);
+                }
+                *current_take = Some(Take {
+                    is_selected,
+                    ..Self::default_take()
+                });
+                *in_take_context = true;
+            }
+            "TAKEVOLPAN" => {
+                if let Some(ref mut take) = current_take {
+                    if tokens.len() >= 4 {
+                        take.volpan = Some(VolPanSettings {
+                            item_trim: 0.0,
+                            take_pan: Self::parse_float(&tokens[1])?,
+                            take_volume: Self::parse_float(&tokens[2])?,
+                            take_pan_law: Self::parse_float(&tokens[3])?,
+                        });
+                    }
+                }
+            }
+            "TAKECOLOR" => {
+                if let Some(ref mut take) = current_take {
+                    if tokens.len() > 1 {
+                        take.take_color = Some(Self::parse_int(&tokens[1])?);
+                    }
+                }
+            }
+            "SM" => {
+                if tokens.len() >= 3 {
+                    item.stretch_markers.push(StretchMarker {
+                        position: Self::parse_float(&tokens[1])?,
+                        source_position: Self::parse_float(&tokens[2])?,
+                        rate: if tokens.len() > 3 {
+                            Some(Self::parse_float(&tokens[3])?)
+                        } else {
+                            None
+                        },
+                    });
+                }
+            }
+            _ => {
+                if let Some(ref mut take) = current_take {
+                    match identifier {
+                        "SOFFS" => {
+                            if tokens.len() > 1 {
+                                take.slip_offset = Self::parse_float(&tokens[1])?;
+                            }
+                        }
+                        "PLAYRATE" => {
+                            if tokens.len() >= 4 {
+                                take.playrate = Some(PlayRateSettings {
+                                    rate: Self::parse_float(&tokens[1])?,
+                                    preserve_pitch: Self::parse_bool(&tokens[2])?,
+                                    pitch_adjust: Self::parse_float(&tokens[3])?,
+                                    pitch_mode: PitchMode::from(Self::parse_int(&tokens[4])?),
+                                    unknown_field_5: if tokens.len() > 5 {
+                                        Self::parse_int(&tokens[5])?
+                                    } else {
+                                        0
+                                    },
+                                    unknown_field_6: if tokens.len() > 6 {
+                                        Self::parse_float(&tokens[6])?
+                                    } else {
+                                        0.0
+                                    },
+                                });
+                            }
+                        }
+                        "CHANMODE" => {
+                            if tokens.len() > 1 {
+                                take.channel_mode = ChannelMode::from(Self::parse_int(&tokens[1])?);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Create an Item from a parsed RPP block (legacy method for compatibility)
+    pub fn from_block(block: &crate::primitives::RppBlock) -> Result<Self, String> {
+        let mut item = Item {
+            position: 0.0,
+            snap_offset: 0.0,
+            length: 0.0,
+            loop_source: false,
+            play_all_takes: false,
+            color: None,
+            beat: None,
+            selected: false,
+            fade_in: None,
+            fade_out: None,
+            mute: None,
+            item_guid: None,
+            item_id: None,
+            name: String::new(),
+            volpan: None,
+            slip_offset: 0.0,
+            playrate: None,
+            channel_mode: ChannelMode::Normal,
+            take_guid: None,
+            rec_pass: None,
+            takes: Vec::new(),
+            stretch_markers: Vec::new(),
+            raw_content: String::new(),
+        };
+        let mut current_take: Option<Take> = Some(Self::default_take());
+        let mut in_take_context = false;
+
         for child in &block.children {
             match child {
                 crate::primitives::RppBlockContent::Content(tokens) => {
-                    content.push_str("  ");
-                    let mut first = true;
-                    for token in tokens {
-                        if !first {
-                            content.push(' ');
+                    let reparsed;
+                    let tokens = if let [Token::Identifier(raw)] = tokens.as_slice() {
+                        if raw.contains(' ') {
+                            reparsed = Self::parse_item_token_line(raw)?;
+                            reparsed.as_slice()
+                        } else {
+                            tokens.as_slice()
                         }
-                        first = false;
-                        content.push_str(&token.to_string());
-                    }
-                    content.push('\n');
+                    } else {
+                        tokens.as_slice()
+                    };
+                    Self::apply_item_tokens(
+                        &mut item,
+                        tokens,
+                        &mut current_take,
+                        &mut in_take_context,
+                    )?;
                 }
                 crate::primitives::RppBlockContent::Block(nested_block) => {
-                    // For nested blocks, we need to handle them specially
-                    // This is a simplified approach - in practice, you might want more sophisticated handling
-                    content.push_str("  <");
-                    content.push_str(&nested_block.name);
-                    content.push_str(">\n");
+                    if nested_block.name == "SOURCE" {
+                        let source_block = Self::parse_source_block_from_rpp_block(nested_block)?;
+                        if let Some(ref mut take) = current_take {
+                            take.source = Some(source_block);
+                        }
+                    }
                 }
             }
         }
 
-        content.push('>');
-        Self::from_rpp_block(&content)
+        if let Some(take) = current_take {
+            item.takes.push(take);
+        }
+        Ok(item)
     }
 
     /// Create an Item from a raw RPP item block string
@@ -612,8 +997,6 @@ impl Item {
     /// let item = Item::from_rpp_block(rpp_content).unwrap();
     /// ```
     pub fn from_rpp_block(block_content: &str) -> Result<Self, String> {
-        use crate::primitives::token::parse_token_line;
-
         let mut item = Item {
             position: 0.0,
             snap_offset: 0.0,
@@ -642,18 +1025,7 @@ impl Item {
 
         let lines: Vec<&str> = block_content.lines().collect();
         let mut i = 0;
-        let mut current_take: Option<Take> = Some(Take {
-            is_selected: false,
-            name: String::new(),
-            volpan: None,
-            slip_offset: 0.0,
-            playrate: None,
-            channel_mode: ChannelMode::Normal,
-            take_color: None,
-            take_guid: None,
-            rec_pass: None,
-            source: None,
-        });
+        let mut current_take: Option<Take> = Some(Self::default_take());
         let mut in_take_context = false; // Track whether we're parsing take-level fields
 
         while i < lines.len() {
@@ -709,8 +1081,8 @@ impl Item {
             }
 
             // Parse token line
-            let tokens = match parse_token_line(line) {
-                Ok((_, tokens)) => tokens,
+            let tokens = match Self::parse_item_token_line(line) {
+                Ok(tokens) => tokens,
                 Err(_) => {
                     i += 1;
                     continue;
@@ -722,321 +1094,12 @@ impl Item {
                 continue;
             }
 
-            let identifier = match &tokens[0] {
-                Token::Identifier(id) => id,
-                _ => {
-                    i += 1;
-                    continue;
-                }
-            };
-
-            match identifier.as_str() {
-                "POSITION" => {
-                    if tokens.len() > 1 {
-                        item.position = Self::parse_float(&tokens[1])?;
-                    }
-                }
-                "SNAPOFFS" => {
-                    if tokens.len() > 1 {
-                        item.snap_offset = Self::parse_float(&tokens[1])?;
-                    }
-                }
-                "LENGTH" => {
-                    if tokens.len() > 1 {
-                        item.length = Self::parse_float(&tokens[1])?;
-                    }
-                }
-                "LOOP" => {
-                    if tokens.len() > 1 {
-                        item.loop_source = Self::parse_bool(&tokens[1])?;
-                    }
-                }
-                "ALLTAKES" => {
-                    if tokens.len() > 1 {
-                        item.play_all_takes = Self::parse_bool(&tokens[1])?;
-                    }
-                }
-                "COLOR" => {
-                    if tokens.len() > 1 {
-                        item.color = Some(Self::parse_int(&tokens[1])?);
-                    }
-                }
-                "BEAT" => {
-                    if tokens.len() > 1 {
-                        item.beat = Some(ItemTimebase::from(Self::parse_int(&tokens[1])?));
-                    }
-                }
-                "SEL" => {
-                    if tokens.len() > 1 {
-                        item.selected = Self::parse_bool(&tokens[1])?;
-                    }
-                }
-                "FADEIN" => {
-                    if tokens.len() >= 3 {
-                        item.fade_in = Some(FadeSettings {
-                            curve_type: FadeCurveType::from(Self::parse_int(&tokens[1])?),
-                            time: Self::parse_float(&tokens[2])?,
-                            unknown_field_3: if tokens.len() > 3 {
-                                Self::parse_float(&tokens[3])?
-                            } else {
-                                0.0
-                            },
-                            unknown_field_4: if tokens.len() > 4 {
-                                Self::parse_int(&tokens[4])?
-                            } else {
-                                0
-                            },
-                            unknown_field_5: if tokens.len() > 5 {
-                                Self::parse_int(&tokens[5])?
-                            } else {
-                                0
-                            },
-                            unknown_field_6: if tokens.len() > 6 {
-                                Self::parse_int(&tokens[6])?
-                            } else {
-                                0
-                            },
-                            unknown_field_7: if tokens.len() > 7 {
-                                Self::parse_int(&tokens[7])?
-                            } else {
-                                0
-                            },
-                        });
-                    }
-                }
-                "FADEOUT" => {
-                    if tokens.len() >= 3 {
-                        item.fade_out = Some(FadeSettings {
-                            curve_type: FadeCurveType::from(Self::parse_int(&tokens[1])?),
-                            time: Self::parse_float(&tokens[2])?,
-                            unknown_field_3: if tokens.len() > 3 {
-                                Self::parse_float(&tokens[3])?
-                            } else {
-                                0.0
-                            },
-                            unknown_field_4: if tokens.len() > 4 {
-                                Self::parse_int(&tokens[4])?
-                            } else {
-                                0
-                            },
-                            unknown_field_5: if tokens.len() > 5 {
-                                Self::parse_int(&tokens[5])?
-                            } else {
-                                0
-                            },
-                            unknown_field_6: if tokens.len() > 6 {
-                                Self::parse_int(&tokens[6])?
-                            } else {
-                                0
-                            },
-                            unknown_field_7: if tokens.len() > 7 {
-                                Self::parse_int(&tokens[7])?
-                            } else {
-                                0
-                            },
-                        });
-                    }
-                }
-                "MUTE" => {
-                    if tokens.len() >= 3 {
-                        item.mute = Some(MuteSettings {
-                            muted: Self::parse_bool(&tokens[1])?,
-                            solo_state: SoloState::from(Self::parse_int(&tokens[2])?),
-                        });
-                    }
-                }
-                "IGUID" => {
-                    if tokens.len() > 1 {
-                        item.item_guid = Some(Self::parse_string(&tokens[1])?);
-                    }
-                }
-                "IID" => {
-                    if tokens.len() > 1 {
-                        item.item_id = Some(Self::parse_int(&tokens[1])?);
-                    }
-                }
-                "NAME" => {
-                    if tokens.len() > 1 {
-                        let name = Self::parse_string(&tokens[1])?;
-                        if in_take_context {
-                            // This is a take-level NAME
-                            if let Some(ref mut take) = current_take {
-                                take.name = name;
-                            }
-                        } else {
-                            // This is an item-level NAME
-                            item.name = name;
-                        }
-                    }
-                }
-                "VOLPAN" => {
-                    if tokens.len() >= 5 {
-                        item.volpan = Some(VolPanSettings {
-                            item_trim: Self::parse_float(&tokens[1])?,
-                            take_pan: Self::parse_float(&tokens[2])?,
-                            take_volume: Self::parse_float(&tokens[3])?,
-                            take_pan_law: Self::parse_float(&tokens[4])?,
-                        });
-                    }
-                }
-                "SOFFS" => {
-                    if tokens.len() > 1 {
-                        item.slip_offset = Self::parse_float(&tokens[1])?;
-                    }
-                }
-                "PLAYRATE" => {
-                    if tokens.len() >= 4 {
-                        item.playrate = Some(PlayRateSettings {
-                            rate: Self::parse_float(&tokens[1])?,
-                            preserve_pitch: Self::parse_bool(&tokens[2])?,
-                            pitch_adjust: Self::parse_float(&tokens[3])?,
-                            pitch_mode: PitchMode::from(Self::parse_int(&tokens[4])?),
-                            unknown_field_5: if tokens.len() > 5 {
-                                Self::parse_int(&tokens[5])?
-                            } else {
-                                0
-                            },
-                            unknown_field_6: if tokens.len() > 6 {
-                                Self::parse_float(&tokens[6])?
-                            } else {
-                                0.0
-                            },
-                        });
-                    }
-                }
-                "CHANMODE" => {
-                    if tokens.len() > 1 {
-                        item.channel_mode = ChannelMode::from(Self::parse_int(&tokens[1])?);
-                    }
-                }
-                "GUID" => {
-                    if tokens.len() > 1 {
-                        let guid = Self::parse_string(&tokens[1])?;
-                        if in_take_context {
-                            // This is a take-level GUID
-                            if let Some(ref mut take) = current_take {
-                                take.take_guid = Some(guid);
-                            }
-                        } else {
-                            // This is an item-level GUID (first take's GUID)
-                            item.take_guid = Some(guid.clone());
-                            // Also set it as the first take's GUID
-                            if let Some(ref mut take) = current_take {
-                                take.take_guid = Some(guid);
-                            }
-                        }
-                    }
-                }
-                "RECPASS" => {
-                    if tokens.len() > 1 {
-                        let rec_pass = Self::parse_int(&tokens[1])?;
-                        if in_take_context {
-                            // This is a take-level RECPASS
-                            if let Some(ref mut take) = current_take {
-                                take.rec_pass = Some(rec_pass);
-                            }
-                        } else {
-                            // This is an item-level RECPASS
-                            item.rec_pass = Some(rec_pass);
-                        }
-                    }
-                }
-                "TAKE" => {
-                    // Check if this is TAKE SEL
-                    let is_selected =
-                        tokens.len() > 1 && tokens[1] == Token::Identifier("SEL".to_string());
-
-                    // Start of a new take
-                    if let Some(take) = current_take.take() {
-                        item.takes.push(take);
-                    }
-                    current_take = Some(Take {
-                        is_selected,
-                        name: String::new(),
-                        volpan: None,
-                        slip_offset: 0.0,
-                        playrate: None,
-                        channel_mode: ChannelMode::Normal,
-                        take_color: None,
-                        take_guid: None,
-                        rec_pass: None,
-                        source: None,
-                    });
-                    in_take_context = true; // We're now in take context
-                }
-                "TAKEVOLPAN" => {
-                    if let Some(ref mut take) = current_take {
-                        if tokens.len() >= 4 {
-                            take.volpan = Some(VolPanSettings {
-                                item_trim: 0.0, // Not applicable for takes
-                                take_pan: Self::parse_float(&tokens[1])?,
-                                take_volume: Self::parse_float(&tokens[2])?,
-                                take_pan_law: Self::parse_float(&tokens[3])?,
-                            });
-                        }
-                    }
-                }
-                "TAKECOLOR" => {
-                    if let Some(ref mut take) = current_take {
-                        if tokens.len() > 1 {
-                            take.take_color = Some(Self::parse_int(&tokens[1])?);
-                        }
-                    }
-                }
-                "SM" => {
-                    // Stretch marker: SM <position> <source_position> [<rate>]
-                    if tokens.len() >= 3 {
-                        item.stretch_markers.push(StretchMarker {
-                            position: Self::parse_float(&tokens[1])?,
-                            source_position: Self::parse_float(&tokens[2])?,
-                            rate: if tokens.len() > 3 {
-                                Some(Self::parse_float(&tokens[3])?)
-                            } else {
-                                None
-                            },
-                        });
-                    }
-                }
-                _ => {
-                    // Handle take-specific fields
-                    if let Some(ref mut take) = current_take {
-                        match identifier.as_str() {
-                            "SOFFS" => {
-                                if tokens.len() > 1 {
-                                    take.slip_offset = Self::parse_float(&tokens[1])?;
-                                }
-                            }
-                            "PLAYRATE" => {
-                                if tokens.len() >= 4 {
-                                    take.playrate = Some(PlayRateSettings {
-                                        rate: Self::parse_float(&tokens[1])?,
-                                        preserve_pitch: Self::parse_bool(&tokens[2])?,
-                                        pitch_adjust: Self::parse_float(&tokens[3])?,
-                                        pitch_mode: PitchMode::from(Self::parse_int(&tokens[4])?),
-                                        unknown_field_5: if tokens.len() > 5 {
-                                            Self::parse_int(&tokens[5])?
-                                        } else {
-                                            0
-                                        },
-                                        unknown_field_6: if tokens.len() > 6 {
-                                            Self::parse_float(&tokens[6])?
-                                        } else {
-                                            0.0
-                                        },
-                                    });
-                                }
-                            }
-                            "CHANMODE" => {
-                                if tokens.len() > 1 {
-                                    take.channel_mode =
-                                        ChannelMode::from(Self::parse_int(&tokens[1])?);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
+            Self::apply_item_tokens(
+                &mut item,
+                &tokens,
+                &mut current_take,
+                &mut in_take_context,
+            )?;
 
             i += 1;
         }
@@ -1099,6 +1162,71 @@ impl Item {
             file_path,
             midi_data,
             raw_content: block_content.to_string(),
+        })
+    }
+
+    /// Parse a SOURCE block directly from parsed block structure.
+    /// Falls back to string parser for MIDI/complex nested formats.
+    fn parse_source_block_from_rpp_block(
+        block: &crate::primitives::RppBlock,
+    ) -> Result<SourceBlock, String> {
+        if block.name != "SOURCE" {
+            return Err("Expected SOURCE block".to_string());
+        }
+
+        if block
+            .children
+            .iter()
+            .any(|c| matches!(c, crate::primitives::RppBlockContent::Block(_)))
+        {
+            return Self::parse_source_block(&block.to_string());
+        }
+
+        let source_type = block
+            .params
+            .first()
+            .and_then(Token::as_string)
+            .map(SourceType::from)
+            .unwrap_or_else(|| SourceType::Unknown(String::new()));
+
+        if source_type == SourceType::Midi {
+            return Self::parse_source_block(&block.to_string());
+        }
+
+        let mut file_path = String::new();
+        for child in &block.children {
+            if let crate::primitives::RppBlockContent::Content(tokens) = child {
+                let reparsed;
+                let tokens = if let [Token::Identifier(raw)] = tokens.as_slice() {
+                    if raw.contains(' ') {
+                        reparsed = Self::parse_item_token_line(raw)?;
+                        reparsed.as_slice()
+                    } else {
+                        tokens.as_slice()
+                    }
+                } else {
+                    tokens.as_slice()
+                };
+                if !matches!(tokens.first(), Some(Token::Identifier(id)) if id == "FILE") {
+                    continue;
+                }
+                let mut buf = String::new();
+                for token in tokens.iter().skip(1) {
+                    if !buf.is_empty() {
+                        buf.push(' ');
+                    }
+                    buf.push_str(&Self::parse_string(token)?);
+                }
+                file_path = buf.replace("\\\\", "\\");
+                break;
+            }
+        }
+
+        Ok(SourceBlock {
+            source_type,
+            file_path,
+            midi_data: None,
+            raw_content: String::new(),
         })
     }
 

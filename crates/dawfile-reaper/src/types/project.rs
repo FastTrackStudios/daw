@@ -1226,14 +1226,7 @@ impl ReaperProject {
                     if let RppBlockContent::Content(tokens) = child {
                         if let Some(Token::Identifier(kind)) = tokens.first() {
                             if kind == "MARKER" {
-                                let marker_line = tokens
-                                    .iter()
-                                    .map(|t| t.to_string())
-                                    .collect::<Vec<_>>()
-                                    .join(" ");
-                                match super::marker_region::MarkerRegion::from_marker_line(
-                                    &marker_line,
-                                ) {
+                                match super::marker_region::MarkerRegion::from_marker_tokens(tokens) {
                                     Ok(marker_region) => project.markers_regions.add(marker_region),
                                     Err(e) => eprintln!("Warning: Failed to parse marker: {}", e),
                                 }
@@ -1326,8 +1319,7 @@ impl ReaperProject {
                         if block.block_type != BlockType::FxChain {
                             return None;
                         }
-                        let block_text = format!("{}", block);
-                        Some((idx, FxChain::parse(&block_text)))
+                        Some((idx, FxChain::from_block(block)))
                     })
                     .collect();
                 fx_results.sort_by_key(|(idx, _)| *idx);
@@ -1358,8 +1350,7 @@ impl ReaperProject {
                         Err(e) => eprintln!("Warning: Failed to parse envelope: {}", e),
                     },
                     BlockType::FxChain if options.parse_project_fxchains => {
-                        let block_text = format!("{}", block);
-                        match FxChain::parse(&block_text) {
+                        match FxChain::from_block(block) {
                             Ok(fx_chain) => project.fx_chains.push(fx_chain),
                             Err(e) => eprintln!("Warning: Failed to parse FX chain: {}", e),
                         }

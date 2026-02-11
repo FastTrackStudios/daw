@@ -84,8 +84,15 @@ impl fmt::Display for RppBlockContent {
         match self {
             RppBlockContent::Block(block) => write!(f, "{}", block),
             RppBlockContent::Content(tokens) => {
-                let token_strs: Vec<String> = tokens.iter().map(|t| t.to_string()).collect();
-                write!(f, "{}", token_strs.join(" "))
+                let mut first = true;
+                for token in tokens {
+                    if !first {
+                        write!(f, " ")?;
+                    }
+                    first = false;
+                    write!(f, "{}", token)?;
+                }
+                Ok(())
             }
         }
     }
@@ -98,8 +105,9 @@ impl fmt::Display for RppBlock {
 
         // Add parameters if any
         if !self.params.is_empty() {
-            let param_strs: Vec<String> = self.params.iter().map(|t| t.to_string()).collect();
-            write!(f, " {}", param_strs.join(" "))?;
+            for param in &self.params {
+                write!(f, " {}", param)?;
+            }
         }
         writeln!(f)?;
 

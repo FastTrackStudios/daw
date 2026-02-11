@@ -22,6 +22,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+use crate::primitives::{RppBlock, RppBlockContent, Token};
 
 // ---------------------------------------------------------------------------
 // Core types
@@ -194,6 +195,22 @@ pub struct FxContainer {
 // ---------------------------------------------------------------------------
 
 impl FxChain {
+    /// Parse an FX chain directly from a parsed RPP block.
+    pub fn from_block(block: &RppBlock) -> Result<Self, String> {
+        if block.name != "FXCHAIN" && block.name != "FXCHAIN_REC" {
+            return Err(format!(
+                "Expected FXCHAIN/FXCHAIN_REC block, got {}",
+                block.name
+            ));
+        }
+        let mut inner_owned = Vec::new();
+        for child in &block.children {
+            append_block_content_lines(child, &mut inner_owned);
+        }
+        let inner_refs: Vec<&str> = inner_owned.iter().map(|s| s.as_str()).collect();
+        parse_inner_lines(&inner_refs, String::new(), false)
+    }
+
     /// Parse an FX chain from raw RPP text content.
     ///
     /// `content` should be the full text of the `<FXCHAIN ...>...</FXCHAIN>`
@@ -204,169 +221,222 @@ impl FxChain {
 
         // Strip the outer <FXCHAIN ...> and closing > if present
         let inner = strip_outer_block(content, "FXCHAIN");
-
-        let mut chain = FxChain {
-            window_rect: None,
-            show: 0,
-            last_sel: 0,
-            docked: false,
-            nodes: Vec::new(),
-            raw_content,
-        };
-
         let lines: Vec<&str> = inner.lines().collect();
-        let mut i = 0;
-
-        // State for the "next FX" being assembled
-        let mut pending_bypass: Option<(bool, bool)> = None;
-        let mut pending_parallel = false;
-
-        while i < lines.len() {
-            let line = lines[i].trim();
-
-            if line.is_empty() {
-                i += 1;
-                continue;
-            }
-
-            // --- Chain-level properties (before any FX) ---
-            if line.starts_with("WNDRECT ") {
-                chain.window_rect = parse_4_ints(&line[8..]);
-                i += 1;
-                continue;
-            }
-            if line.starts_with("SHOW ") {
-                chain.show = parse_int(&line[5..]).unwrap_or(0);
-                i += 1;
-                continue;
-            }
-            if line.starts_with("LASTSEL ") {
-                chain.last_sel = parse_int(&line[8..]).unwrap_or(0);
-                i += 1;
-                continue;
-            }
-            if line.starts_with("DOCKED ") {
-                chain.docked = parse_int(&line[7..]).unwrap_or(0) != 0;
-                i += 1;
-                continue;
-            }
-
-            // --- Per-FX properties ---
-            if line.starts_with("BYPASS ") {
-                let parts: Vec<&str> = line[7..].split_whitespace().collect();
-                let bypassed = parts
-                    .first()
-                    .and_then(|s| s.parse::<i32>().ok())
-                    .unwrap_or(0)
-                    != 0;
-                let offline = parts
-                    .get(1)
-                    .and_then(|s| s.parse::<i32>().ok())
-                    .unwrap_or(0)
-                    != 0;
-                pending_bypass = Some((bypassed, offline));
-                i += 1;
-                continue;
-            }
-
-            if line.starts_with("PARALLEL ") {
-                pending_parallel = parse_int(&line[9..]).unwrap_or(0) != 0;
-                i += 1;
-                continue;
-            }
-
-            // --- Plugin block ---
-            if line.starts_with("<VST ")
-                || line.starts_with("<AU ")
-                || line.starts_with("<JS ")
-                || line.starts_with("<CLAP ")
-                || line.starts_with("<VIDEO_EFFECT ")
-            {
-                let (plugin_block, end_idx) = extract_block(&lines, i);
-                let (bypassed, offline) = pending_bypass.take().unwrap_or((false, false));
-                let parallel = pending_parallel;
-                pending_parallel = false;
-
-                let mut plugin = parse_plugin_block(&plugin_block, bypassed, offline);
-                plugin.parallel = parallel;
-
-                // Scan post-plugin metadata lines
-                let mut j = end_idx + 1;
-                while j < lines.len() {
-                    let meta = lines[j].trim();
-                    if meta.starts_with("FLOATPOS ") {
-                        plugin.float_pos = parse_4_ints(&meta[9..]);
-                        j += 1;
-                    } else if meta.starts_with("FXID ") {
-                        plugin.fxid = Some(meta[5..].trim().to_string());
-                        j += 1;
-                    } else if meta.starts_with("WAK ") {
-                        plugin.wak = parse_2_ints(&meta[4..]);
-                        j += 1;
-                    } else if meta.starts_with("PRESETNAME ") {
-                        plugin.preset_name = Some(unquote(&meta[11..]));
-                        j += 1;
-                    } else if meta.starts_with("<PARMENV ") {
-                        let (env_block, env_end) = extract_block(&lines, j);
-                        plugin
-                            .param_envelopes
-                            .push(parse_param_envelope(&env_block));
-                        j = env_end + 1;
-                    } else if meta.starts_with("PARM_TCP ") {
-                        plugin.params_on_tcp.push(parse_param_ref(&meta[9..]));
-                        j += 1;
-                    } else {
-                        break;
-                    }
-                }
-
-                chain.nodes.push(FxChainNode::Plugin(plugin));
-                i = j;
-                continue;
-            }
-
-            // --- Container block ---
-            if line.starts_with("<CONTAINER ") || line == "<CONTAINER" {
-                let (container_block, end_idx) = extract_block(&lines, i);
-                let (bypassed, offline) = pending_bypass.take().unwrap_or((false, false));
-                let parallel = pending_parallel;
-                pending_parallel = false;
-
-                let mut container = parse_container_block(&container_block, bypassed, offline);
-                container.parallel = parallel;
-
-                // Scan post-container metadata lines
-                let mut j = end_idx + 1;
-                while j < lines.len() {
-                    let meta = lines[j].trim();
-                    if meta.starts_with("FLOATPOS ") {
-                        container.float_pos = parse_4_ints(&meta[9..]);
-                        j += 1;
-                    } else if meta.starts_with("FXID ") {
-                        container.fxid = Some(meta[5..].trim().to_string());
-                        j += 1;
-                    } else {
-                        break;
-                    }
-                }
-
-                chain.nodes.push(FxChainNode::Container(container));
-                i = j;
-                continue;
-            }
-
-            // Skip unrecognized lines
-            i += 1;
-        }
-
-        Ok(chain)
+        parse_inner_lines(&lines, raw_content, true)
     }
 }
 
+fn append_block_content_lines(content: &RppBlockContent, out: &mut Vec<String>) {
+    match content {
+        RppBlockContent::Content(tokens) => out.push(tokens_to_line(tokens)),
+        RppBlockContent::Block(block) => {
+            out.push(block_header_line(block));
+            for child in &block.children {
+                append_block_content_lines(child, out);
+            }
+            out.push(">".to_string());
+        }
+    }
+}
+
+fn tokens_to_line(tokens: &[Token]) -> String {
+    if let [Token::Identifier(raw)] = tokens {
+        return raw.clone();
+    }
+    let mut line = String::new();
+    let mut first = true;
+    for token in tokens {
+        if !first {
+            line.push(' ');
+        }
+        first = false;
+        line.push_str(&token.to_string());
+    }
+    line
+}
+
+fn block_header_line(block: &RppBlock) -> String {
+    let mut line = String::new();
+    line.push('<');
+    line.push_str(&block.name);
+    for param in &block.params {
+        line.push(' ');
+        line.push_str(&param.to_string());
+    }
+    line
+}
+
+fn parse_inner_lines(
+    lines: &[&str],
+    raw_content: String,
+    preserve_raw_blocks: bool,
+) -> Result<FxChain, String> {
+    let mut chain = FxChain {
+        window_rect: None,
+        show: 0,
+        last_sel: 0,
+        docked: false,
+        nodes: Vec::new(),
+        raw_content,
+    };
+
+    let mut i = 0;
+    let mut pending_bypass: Option<(bool, bool)> = None;
+    let mut pending_parallel = false;
+
+    while i < lines.len() {
+        let line = lines[i].trim();
+
+        if line.is_empty() {
+            i += 1;
+            continue;
+        }
+
+        if line.starts_with("WNDRECT ") {
+            chain.window_rect = parse_4_ints(&line[8..]);
+            i += 1;
+            continue;
+        }
+        if line.starts_with("SHOW ") {
+            chain.show = parse_int(&line[5..]).unwrap_or(0);
+            i += 1;
+            continue;
+        }
+        if line.starts_with("LASTSEL ") {
+            chain.last_sel = parse_int(&line[8..]).unwrap_or(0);
+            i += 1;
+            continue;
+        }
+        if line.starts_with("DOCKED ") {
+            chain.docked = parse_int(&line[7..]).unwrap_or(0) != 0;
+            i += 1;
+            continue;
+        }
+
+        if line.starts_with("BYPASS ") {
+            let parts: Vec<&str> = line[7..].split_whitespace().collect();
+            let bypassed = parts
+                .first()
+                .and_then(|s| s.parse::<i32>().ok())
+                .unwrap_or(0)
+                != 0;
+            let offline = parts
+                .get(1)
+                .and_then(|s| s.parse::<i32>().ok())
+                .unwrap_or(0)
+                != 0;
+            pending_bypass = Some((bypassed, offline));
+            i += 1;
+            continue;
+        }
+
+        if line.starts_with("PARALLEL ") {
+            pending_parallel = parse_int(&line[9..]).unwrap_or(0) != 0;
+            i += 1;
+            continue;
+        }
+
+        if line.starts_with("<VST ")
+            || line.starts_with("<AU ")
+            || line.starts_with("<JS ")
+            || line.starts_with("<CLAP ")
+            || line.starts_with("<VIDEO_EFFECT ")
+        {
+            let (plugin_block, end_idx) = extract_block(lines, i);
+            let (bypassed, offline) = pending_bypass.take().unwrap_or((false, false));
+            let parallel = pending_parallel;
+            pending_parallel = false;
+
+            let mut plugin =
+                parse_plugin_block(&plugin_block, bypassed, offline, preserve_raw_blocks);
+            plugin.parallel = parallel;
+
+            let mut j = end_idx + 1;
+            while j < lines.len() {
+                let meta = lines[j].trim();
+                if meta.starts_with("FLOATPOS ") {
+                    plugin.float_pos = parse_4_ints(&meta[9..]);
+                    j += 1;
+                } else if meta.starts_with("FXID ") {
+                    plugin.fxid = Some(meta[5..].trim().to_string());
+                    j += 1;
+                } else if meta.starts_with("WAK ") {
+                    plugin.wak = parse_2_ints(&meta[4..]);
+                    j += 1;
+                } else if meta.starts_with("PRESETNAME ") {
+                    plugin.preset_name = Some(unquote(&meta[11..]));
+                    j += 1;
+                } else if meta.starts_with("<PARMENV ") {
+                    let (env_block, env_end) = extract_block(lines, j);
+                    plugin
+                        .param_envelopes
+                        .push(parse_param_envelope(&env_block, preserve_raw_blocks));
+                    j = env_end + 1;
+                } else if meta.starts_with("PARM_TCP ") {
+                    plugin.params_on_tcp.push(parse_param_ref(&meta[9..]));
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+
+            chain.nodes.push(FxChainNode::Plugin(plugin));
+            i = j;
+            continue;
+        }
+
+        if line.starts_with("<CONTAINER ") || line == "<CONTAINER" {
+            let (container_block, end_idx) = extract_block(lines, i);
+            let (bypassed, offline) = pending_bypass.take().unwrap_or((false, false));
+            let parallel = pending_parallel;
+            pending_parallel = false;
+
+            let mut container = parse_container_block(
+                &container_block,
+                bypassed,
+                offline,
+                preserve_raw_blocks,
+            );
+            container.parallel = parallel;
+
+            let mut j = end_idx + 1;
+            while j < lines.len() {
+                let meta = lines[j].trim();
+                if meta.starts_with("FLOATPOS ") {
+                    container.float_pos = parse_4_ints(&meta[9..]);
+                    j += 1;
+                } else if meta.starts_with("FXID ") {
+                    container.fxid = Some(meta[5..].trim().to_string());
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+
+            chain.nodes.push(FxChainNode::Container(container));
+            i = j;
+            continue;
+        }
+
+        i += 1;
+    }
+
+    Ok(chain)
+}
+
 /// Parse a plugin block (`<VST ...>...</>`) into an `FxPlugin`.
-fn parse_plugin_block(block_lines: &[&str], bypassed: bool, offline: bool) -> FxPlugin {
+fn parse_plugin_block(
+    block_lines: &[&str],
+    bypassed: bool,
+    offline: bool,
+    preserve_raw_block: bool,
+) -> FxPlugin {
     let header = block_lines.first().copied().unwrap_or("");
-    let raw_block = block_lines.join("\n");
+    let raw_block = if preserve_raw_block {
+        block_lines.join("\n")
+    } else {
+        String::new()
+    };
 
     // Parse header: <TYPE "Display Name" "file.dll" extra_params...
     let (plugin_type, name, file) = parse_plugin_header(header);
@@ -507,9 +577,18 @@ fn extract_first_quoted(s: &str) -> (String, &str) {
 }
 
 /// Parse a `<CONTAINER ...>...</>` block into an `FxContainer`.
-fn parse_container_block(block_lines: &[&str], bypassed: bool, offline: bool) -> FxContainer {
+fn parse_container_block(
+    block_lines: &[&str],
+    bypassed: bool,
+    offline: bool,
+    preserve_raw_blocks: bool,
+) -> FxContainer {
     let header = block_lines.first().copied().unwrap_or("");
-    let raw_block = block_lines.join("\n");
+    let raw_block = if preserve_raw_blocks {
+        block_lines.join("\n")
+    } else {
+        String::new()
+    };
 
     // Parse container name from header: <CONTAINER Container "NAME" ""
     // or <CONTAINER Container NAME
@@ -606,7 +685,7 @@ fn parse_container_block(block_lines: &[&str], bypassed: bool, offline: bool) ->
             let par = pending_parallel;
             pending_parallel = false;
 
-            let mut plugin = parse_plugin_block(&plugin_block, bp, ol);
+            let mut plugin = parse_plugin_block(&plugin_block, bp, ol, preserve_raw_blocks);
             plugin.parallel = par;
 
             // Post-plugin metadata
@@ -629,7 +708,7 @@ fn parse_container_block(block_lines: &[&str], bypassed: bool, offline: bool) ->
                     let (env_block, env_end) = extract_block(&inner_lines, j);
                     plugin
                         .param_envelopes
-                        .push(parse_param_envelope(&env_block));
+                        .push(parse_param_envelope(&env_block, preserve_raw_blocks));
                     j = env_end + 1;
                 } else if meta.starts_with("PARM_TCP ") {
                     plugin.params_on_tcp.push(parse_param_ref(&meta[9..]));
@@ -651,7 +730,8 @@ fn parse_container_block(block_lines: &[&str], bypassed: bool, offline: bool) ->
             let par = pending_parallel;
             pending_parallel = false;
 
-            let mut child_container = parse_container_block(&child_block, bp, ol);
+            let mut child_container =
+                parse_container_block(&child_block, bp, ol, preserve_raw_blocks);
             child_container.parallel = par;
 
             // Post-container metadata
@@ -863,9 +943,13 @@ fn parse_param_ref(s: &str) -> FxParamRef {
 ///
 /// Format: `<PARMENV <param_ref> <mode> <range_max> <default_value>`
 /// followed by EGUID, ACT, VIS, ARM, DEFSHAPE, PT lines.
-fn parse_param_envelope(block_lines: &[&str]) -> FxParamEnvelope {
+fn parse_param_envelope(block_lines: &[&str], preserve_raw_block: bool) -> FxParamEnvelope {
     let header = block_lines.first().copied().unwrap_or("");
-    let raw_block = block_lines.join("\n");
+    let raw_block = if preserve_raw_block {
+        block_lines.join("\n")
+    } else {
+        String::new()
+    };
 
     // Parse header: <PARMENV 0:_Main_p1__Bank 0 1 0.5
     let header_trimmed = header.trim().strip_prefix("<PARMENV ").unwrap_or("");

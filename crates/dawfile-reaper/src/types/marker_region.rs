@@ -36,27 +36,23 @@ pub struct MarkerRegion {
 }
 
 impl MarkerRegion {
-    /// Create a MarkerRegion from a raw RPP marker line
-    pub fn from_marker_line(line: &str) -> Result<Self, String> {
-        let (_remaining, tokens) =
-            parse_token_line(line).map_err(|e| format!("Failed to parse marker line: {:?}", e))?;
-
-        // Note: remaining input is expected for marker lines as they may have trailing whitespace
-
+    /// Create a MarkerRegion from already-parsed tokenized marker content.
+    pub fn from_marker_tokens(tokens: &[crate::primitives::Token]) -> Result<Self, String> {
         if tokens.len() < 5 {
             return Err(format!(
-                "Marker line has insufficient tokens: expected at least 5, got {}: {:?}",
-                tokens.len(),
-                tokens
+                "Marker tokens have insufficient length: expected at least 5, got {}",
+                tokens.len()
             ));
         }
+        match tokens.first() {
+            Some(crate::primitives::Token::Identifier(kind)) if kind == "MARKER" => {}
+            _ => return Err("Marker tokens must start with MARKER".to_string()),
+        }
 
-        // Skip the first token "MARKER" and parse the rest
         let id = tokens[1].as_number().ok_or("Invalid marker ID")? as i32;
         let position = tokens[2].as_number().ok_or("Invalid marker position")?;
         let name = tokens[3].as_string().unwrap_or("").to_string();
 
-        // Optional fields with defaults
         let color = if tokens.len() > 4 {
             tokens[4].as_number().unwrap_or(0.0) as i32
         } else {
@@ -72,7 +68,6 @@ impl MarkerRegion {
         } else {
             0
         };
-        // Skip tokens[7] which appears to be a single character (possibly a flag)
         let guid = if tokens.len() > 8 {
             tokens[8].as_string().unwrap_or("").to_string()
         } else {
@@ -83,8 +78,6 @@ impl MarkerRegion {
         } else {
             0
         };
-
-        // Check if this is a region (has end position)
         let end_position = if tokens.len() > 10 {
             Some(
                 tokens[10]
@@ -105,8 +98,18 @@ impl MarkerRegion {
             guid,
             additional,
             end_position,
-            beat_position: None, // Will be calculated later using tempo data
+            beat_position: None,
         })
+    }
+
+    /// Create a MarkerRegion from a raw RPP marker line
+    pub fn from_marker_line(line: &str) -> Result<Self, String> {
+        let (_remaining, tokens) =
+            parse_token_line(line).map_err(|e| format!("Failed to parse marker line: {:?}", e))?;
+
+        // Note: remaining input is expected for marker lines as they may have trailing whitespace
+
+        Self::from_marker_tokens(&tokens)
     }
 
     /// Check if this is a region (has an end position)
