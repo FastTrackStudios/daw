@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use crate::primitives::token::parse_token_line;
+use crate::primitives::{token::parse_token_line, Token};
 
 /// A tempo/time signature change point
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -35,25 +35,23 @@ pub struct TempoTimePoint {
 }
 
 impl TempoTimePoint {
-    /// Create a TempoTimePoint from a raw RPP PT line
-    pub fn from_pt_line(line: &str) -> Result<Self, String> {
-        let (_remaining, tokens) =
-            parse_token_line(line).map_err(|e| format!("Failed to parse PT line: {:?}", e))?;
-
+    /// Create a TempoTimePoint from already-tokenized PT line tokens.
+    pub fn from_tokens(tokens: &[Token]) -> Result<Self, String> {
         if tokens.len() < 4 {
             return Err(format!(
-                "PT line has insufficient tokens: expected at least 4, got {}: {:?}",
-                tokens.len(),
-                tokens
+                "PT line has insufficient tokens: expected at least 4, got {}",
+                tokens.len()
             ));
         }
+        let is_pt = matches!(tokens.first(), Some(Token::Identifier(s)) if s == "PT");
+        if !is_pt {
+            return Err("tempo point tokens must start with PT".to_string());
+        }
 
-        // Skip the first token "PT" and parse the rest
         let position = tokens[1].as_number().ok_or("Invalid position")?;
         let tempo = tokens[2].as_number().ok_or("Invalid tempo")?;
         let shape = tokens[3].as_number().ok_or("Invalid shape")? as i32;
 
-        // Optional fields
         let time_signature_encoded = if tokens.len() > 4 {
             let encoded = tokens[4].as_number().ok_or("Invalid time signature")? as i32;
             if encoded > 0 { Some(encoded) } else { None }
@@ -79,10 +77,8 @@ impl TempoTimePoint {
             0.0
         };
 
-        // The metronome pattern is typically the last token if present
         let metronome_pattern = if tokens.len() > 8 {
-            // Look for the last non-empty string/identifier token
-            let mut pattern = "".to_string();
+            let mut pattern = String::new();
             for i in (8..tokens.len()).rev() {
                 if let Some(p) = tokens[i].as_string() {
                     if !p.is_empty() {
@@ -93,7 +89,7 @@ impl TempoTimePoint {
             }
             pattern
         } else {
-            "".to_string()
+            String::new()
         };
 
         let unknown2 = if tokens.len() > 9 {
@@ -127,6 +123,13 @@ impl TempoTimePoint {
             unknown3,
             unknown4,
         })
+    }
+
+    /// Create a TempoTimePoint from a raw RPP PT line
+    pub fn from_pt_line(line: &str) -> Result<Self, String> {
+        let (_remaining, tokens) =
+            parse_token_line(line).map_err(|e| format!("Failed to parse PT line: {:?}", e))?;
+        Self::from_tokens(&tokens)
     }
 
     /// Decode time signature from the encoded value

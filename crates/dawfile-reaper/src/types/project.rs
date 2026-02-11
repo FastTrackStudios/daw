@@ -1224,8 +1224,8 @@ impl ReaperProject {
             if block.block_type == BlockType::Project && options.parse_markers_regions {
                 for child in &block.children {
                     if let RppBlockContent::Content(tokens) = child {
-                        if let Some(first_token) = tokens.first() {
-                            if first_token.to_string() == "MARKER" {
+                        if let Some(Token::Identifier(kind)) = tokens.first() {
+                            if kind == "MARKER" {
                                 let marker_line = tokens
                                     .iter()
                                     .map(|t| t.to_string())
@@ -1390,16 +1390,9 @@ impl ReaperProject {
         // Parse the block content to extract tempo points
         for child in &block.children {
             if let crate::primitives::RppBlockContent::Content(tokens) = child {
-                if let Some(first_token) = tokens.first() {
-                    if first_token.to_string() == "PT" {
-                        // Reconstruct the PT line
-                        let pt_line = tokens
-                            .iter()
-                            .map(|t| t.to_string())
-                            .collect::<Vec<_>>()
-                            .join(" ");
-
-                        if let Ok(point) = TempoTimePoint::from_pt_line(&pt_line) {
+                if let Some(Token::Identifier(kind)) = tokens.first() {
+                    if kind == "PT" {
+                        if let Ok(point) = TempoTimePoint::from_tokens(tokens) {
                             points.push(point);
                         }
                     }

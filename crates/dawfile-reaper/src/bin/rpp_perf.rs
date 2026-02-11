@@ -1,8 +1,43 @@
+use std::alloc::{GlobalAlloc, Layout, System};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use dawfile_reaper::{parse_rpp_file, DecodeOptions, ReaperProject};
+
+struct CountingAllocator;
+
+static ALLOC_CALLS: AtomicU64 = AtomicU64::new(0);
+static ALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
+
+#[global_allocator]
+static GLOBAL: CountingAllocator = CountingAllocator;
+
+unsafe impl GlobalAlloc for CountingAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        ALLOC_CALLS.fetch_add(1, Ordering::Relaxed);
+        ALLOC_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
+        unsafe { System.alloc(layout) }
+    }
+
+    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        ALLOC_CALLS.fetch_add(1, Ordering::Relaxed);
+        ALLOC_BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
+        unsafe { System.alloc_zeroed(layout) }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+        ALLOC_CALLS.fetch_add(1, Ordering::Relaxed);
+        let delta = new_size.saturating_sub(layout.size()) as u64;
+        ALLOC_BYTES.fetch_add(delta, Ordering::Relaxed);
+        unsafe { System.realloc(ptr, layout, new_size) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        unsafe { System.dealloc(ptr, layout) }
+    }
+}
 
 #[derive(Debug)]
 struct Config {
@@ -40,6 +75,10 @@ struct FixtureResult {
     typed_avg: Duration,
     throughput_mb_s: f64,
     peak_rss_mb: Option<f64>,
+    parse_alloc_calls_avg: u64,
+    parse_alloc_mb_avg: f64,
+    typed_alloc_calls_avg: u64,
+    typed_alloc_mb_avg: f64,
 }
 
 fn parse_args() -> Result<Config, String> {
@@ -119,6 +158,18 @@ fn mb(bytes: usize) -> f64 {
     bytes as f64 / (1024.0 * 1024.0)
 }
 
+fn reset_alloc_counters() {
+    ALLOC_CALLS.store(0, Ordering::Relaxed);
+    ALLOC_BYTES.store(0, Ordering::Relaxed);
+}
+
+fn read_alloc_counters() -> (u64, u64) {
+    (
+        ALLOC_CALLS.load(Ordering::Relaxed),
+        ALLOC_BYTES.load(Ordering::Relaxed),
+    )
+}
+
 #[cfg(unix)]
 fn peak_rss_bytes() -> Option<u64> {
     let mut usage = std::mem::MaybeUninit::<libc::rusage>::uninit();
@@ -161,16 +212,29 @@ fn run_fixture(
 
     let mut parse_total = Duration::ZERO;
     let mut typed_total = Duration::ZERO;
+    let mut parse_alloc_calls_total = 0u64;
+    let mut parse_alloc_bytes_total = 0u64;
+    let mut typed_alloc_calls_total = 0u64;
+    let mut typed_alloc_bytes_total = 0u64;
     for _ in 0..repeat {
+        reset_alloc_counters();
         let t0 = Instant::now();
         let parsed = parse_rpp_file(content).expect("parse failed");
         let t1 = Instant::now();
+        let (parse_calls, parse_bytes) = read_alloc_counters();
+
+        reset_alloc_counters();
         let _typed = ReaperProject::from_rpp_project_with_options(&parsed, decode_opts)
             .expect("typed conversion failed");
         let t2 = Instant::now();
+        let (typed_calls, typed_bytes) = read_alloc_counters();
 
         parse_total += t1 - t0;
         typed_total += t2 - t1;
+        parse_alloc_calls_total += parse_calls;
+        parse_alloc_bytes_total += parse_bytes;
+        typed_alloc_calls_total += typed_calls;
+        typed_alloc_bytes_total += typed_bytes;
     }
 
     let parse_avg = parse_total / repeat as u32;
@@ -185,6 +249,10 @@ fn run_fixture(
         typed_avg,
         throughput_mb_s,
         peak_rss_mb,
+        parse_alloc_calls_avg: parse_alloc_calls_total / repeat as u64,
+        parse_alloc_mb_avg: mb((parse_alloc_bytes_total / repeat as u64) as usize),
+        typed_alloc_calls_avg: typed_alloc_calls_total / repeat as u64,
+        typed_alloc_mb_avg: mb((typed_alloc_bytes_total / repeat as u64) as usize),
     }
 }
 
@@ -226,6 +294,10 @@ fn main() -> Result<(), String> {
             Some(v) => println!("  peak_rss_mb: {:.2}", v),
             None => println!("  peak_rss_mb: n/a"),
         }
+        println!("  parse_alloc_calls_avg: {}", r.parse_alloc_calls_avg);
+        println!("  parse_alloc_mb_avg: {:.2}", r.parse_alloc_mb_avg);
+        println!("  typed_alloc_calls_avg: {}", r.typed_alloc_calls_avg);
+        println!("  typed_alloc_mb_avg: {:.2}", r.typed_alloc_mb_avg);
     }
 
     Ok(())

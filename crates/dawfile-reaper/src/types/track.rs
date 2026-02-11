@@ -589,7 +589,6 @@ impl Track {
         if block.block_type != BlockType::Track {
             return Err(format!("Expected Track block, got {:?}", block.block_type));
         }
-
         let mut track = Track {
             name: String::new(),
             selected: false,
@@ -635,12 +634,14 @@ impl Track {
 
         // Convert block back to string for parsing
         let mut content = String::new();
-        content.push_str(&format!("<{}", block.name));
+        content.push('<');
+        content.push_str(&block.name);
 
         // Add parameters if any
         if !block.params.is_empty() {
             for param in &block.params {
-                content.push_str(&format!(" {}", param));
+                content.push(' ');
+                content.push_str(&param.to_string());
             }
         }
         content.push('\n');
@@ -649,15 +650,21 @@ impl Track {
         for child in &block.children {
             match child {
                 crate::primitives::RppBlockContent::Content(tokens) => {
-                    let line = tokens
-                        .iter()
-                        .map(|t| t.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-                    content.push_str(&format!("  {}\n", line));
+                    content.push_str("  ");
+                    let mut first = true;
+                    for token in tokens {
+                        if !first {
+                            content.push(' ');
+                        }
+                        first = false;
+                        content.push_str(&token.to_string());
+                    }
+                    content.push('\n');
                 }
                 crate::primitives::RppBlockContent::Block(nested_block) => {
-                    content.push_str(&format!("  <{}>\n", nested_block.name));
+                    content.push_str("  <");
+                    content.push_str(&nested_block.name);
+                    content.push_str(">\n");
                 }
             }
         }
