@@ -121,8 +121,11 @@ fn parse_block_header(block_line: &str) -> Result<(String, Vec<Token>), String> 
         if tokens.is_empty() {
             return Err("empty block header".to_string());
         }
-        let name = tokens[0].to_string();
-        return Ok((name, tokens[1..].to_vec()));
+        let mut iter = tokens.into_iter();
+        let first = iter.next().ok_or_else(|| "empty block header".to_string())?;
+        let name = first.to_string();
+        let params: Vec<Token> = iter.collect();
+        return Ok((name, params));
     }
 
     let mut parts = block_line.split_whitespace();
@@ -147,14 +150,18 @@ fn requires_structured_tokens(block_name: &str) -> bool {
     )
 }
 
-fn is_skippable_line(line: &str) -> bool {
-    let line = line.trim();
+#[inline]
+fn is_skippable_trimmed(line: &str) -> bool {
     line.is_empty() || line.starts_with("//") || line.starts_with('#') || line.starts_with(';')
 }
 
 fn parse_single_block_lines(lines: &[&str], base_line_no: usize) -> Result<RppBlock, String> {
     let mut idx = 0usize;
-    while idx < lines.len() && is_skippable_line(lines[idx]) {
+    while idx < lines.len() {
+        let trimmed = lines[idx].trim();
+        if !is_skippable_trimmed(trimmed) {
+            break;
+        }
         idx += 1;
     }
     if idx >= lines.len() {
@@ -183,7 +190,7 @@ fn parse_single_block_lines(lines: &[&str], base_line_no: usize) -> Result<RppBl
         let line = lines[idx].trim();
         idx += 1;
 
-        if is_skippable_line(line) {
+        if is_skippable_trimmed(line) {
             continue;
         }
 
@@ -293,7 +300,7 @@ fn parse_rpp_fast_single(content: &str) -> Result<RppProject, String> {
     for (line_idx0, raw_line) in lines.enumerate() {
         let line_no = line_idx0 + 2;
         let line = raw_line.trim();
-        if is_skippable_line(line) {
+        if is_skippable_trimmed(line) {
             continue;
         }
 
@@ -413,7 +420,7 @@ fn parse_rpp_fast_parallel(content: &str) -> Result<RppProject, String> {
     for (idx, raw_line) in all_lines.iter().enumerate() {
         let line_no = idx + 2;
         let line = raw_line.trim();
-        if is_skippable_line(line) {
+        if is_skippable_trimmed(line) {
             continue;
         }
 
