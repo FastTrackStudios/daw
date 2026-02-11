@@ -77,6 +77,9 @@ pub struct RppBlock {
 pub enum RppBlockContent {
     Block(RppBlock),
     Content(Vec<Token>),
+    /// Opaque raw line for fast parser paths where eager tokenization is skipped.
+    /// Typed decoders can tokenize on demand when needed.
+    RawLine(Box<str>),
 }
 
 impl fmt::Display for RppBlockContent {
@@ -94,6 +97,7 @@ impl fmt::Display for RppBlockContent {
                 }
                 Ok(())
             }
+            RppBlockContent::RawLine(line) => write!(f, "{}", line),
         }
     }
 }

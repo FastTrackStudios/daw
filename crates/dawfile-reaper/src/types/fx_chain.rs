@@ -21,6 +21,7 @@
 //! Container blocks (`<CONTAINER>`) recursively contain the same structure.
 
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::fmt;
 use crate::primitives::{RppBlock, RppBlockContent, Token};
 
@@ -203,11 +204,11 @@ impl FxChain {
                 block.name
             ));
         }
-        let mut inner_owned = Vec::new();
+        let mut inner_owned: Vec<Cow<'_, str>> = Vec::new();
         for child in &block.children {
             append_block_content_lines(child, &mut inner_owned);
         }
-        let inner_refs: Vec<&str> = inner_owned.iter().map(|s| s.as_str()).collect();
+        let inner_refs: Vec<&str> = inner_owned.iter().map(|s| s.as_ref()).collect();
         parse_inner_lines(&inner_refs, String::new(), false)
     }
 
@@ -226,22 +227,23 @@ impl FxChain {
     }
 }
 
-fn append_block_content_lines(content: &RppBlockContent, out: &mut Vec<String>) {
+fn append_block_content_lines<'a>(content: &'a RppBlockContent, out: &mut Vec<Cow<'a, str>>) {
     match content {
         RppBlockContent::Content(tokens) => out.push(tokens_to_line(tokens)),
+        RppBlockContent::RawLine(line) => out.push(Cow::Borrowed(line.as_ref())),
         RppBlockContent::Block(block) => {
-            out.push(block_header_line(block));
+            out.push(Cow::Owned(block_header_line(block)));
             for child in &block.children {
                 append_block_content_lines(child, out);
             }
-            out.push(">".to_string());
+            out.push(Cow::Borrowed(">"));
         }
     }
 }
 
-fn tokens_to_line(tokens: &[Token]) -> String {
+fn tokens_to_line(tokens: &[Token]) -> Cow<'_, str> {
     if let [Token::Identifier(raw)] = tokens {
-        return raw.clone();
+        return Cow::Borrowed(raw.as_str());
     }
     let mut line = String::new();
     let mut first = true;
@@ -252,7 +254,7 @@ fn tokens_to_line(tokens: &[Token]) -> String {
         first = false;
         line.push_str(&token.to_string());
     }
-    line
+    Cow::Owned(line)
 }
 
 fn block_header_line(block: &RppBlock) -> String {
@@ -2874,5 +2876,43 @@ mod tests {
         let final_chain = FxChain::parse(final_fxchain).unwrap();
         assert_eq!(final_chain.nodes.len(), 1);
         assert!(matches!(&final_chain.nodes[0], FxChainNode::Container(_)));
+    }
+
+    #[test]
+    fn test_from_block_supports_rawline_fast_path() {
+        use crate::primitives::{BlockType, QuoteType, RppBlock, RppBlockContent, Token};
+
+        let js_block = RppBlock {
+            block_type: BlockType::Other("JS".to_string()),
+            name: "JS".to_string(),
+            params: vec![
+                Token::String("loser/3BandEQ".to_string(), QuoteType::Double),
+                Token::String("".to_string(), QuoteType::Double),
+            ],
+            children: vec![RppBlockContent::RawLine("AA==".to_string().into_boxed_str())],
+        };
+
+        let fx_block = RppBlock {
+            block_type: BlockType::FxChain,
+            name: "FXCHAIN".to_string(),
+            params: vec![],
+            children: vec![
+                RppBlockContent::RawLine("SHOW 0".to_string().into_boxed_str()),
+                RppBlockContent::RawLine("LASTSEL 0".to_string().into_boxed_str()),
+                RppBlockContent::RawLine("DOCKED 0".to_string().into_boxed_str()),
+                RppBlockContent::RawLine("BYPASS 0 0 0".to_string().into_boxed_str()),
+                RppBlockContent::Block(js_block),
+                RppBlockContent::RawLine("FXID {RAW-PLUGIN-ID}".to_string().into_boxed_str()),
+            ],
+        };
+
+        let chain = FxChain::from_block(&fx_block).expect("parse from block");
+        assert_eq!(chain.nodes.len(), 1);
+        let FxChainNode::Plugin(plugin) = &chain.nodes[0] else {
+            panic!("expected plugin node");
+        };
+        assert_eq!(plugin.plugin_type, PluginType::Js);
+        assert_eq!(plugin.file, "loser/3BandEQ");
+        assert_eq!(plugin.fxid.as_deref(), Some("{RAW-PLUGIN-ID}"));
     }
 }

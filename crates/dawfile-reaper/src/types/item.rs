@@ -522,6 +522,40 @@ pub struct StretchMarker {
 }
 
 impl Item {
+    fn should_parse_item_raw_line(raw: &str) -> bool {
+        let trimmed = raw.trim_start();
+        let Some(first) = trimmed.split_whitespace().next() else {
+            return false;
+        };
+        matches!(
+            first,
+            "POSITION"
+                | "SNAPOFFS"
+                | "LENGTH"
+                | "LOOP"
+                | "ALLTAKES"
+                | "COLOR"
+                | "BEAT"
+                | "SEL"
+                | "FADEIN"
+                | "FADEOUT"
+                | "MUTE"
+                | "IGUID"
+                | "IID"
+                | "NAME"
+                | "VOLPAN"
+                | "SOFFS"
+                | "PLAYRATE"
+                | "CHANMODE"
+                | "GUID"
+                | "RECPASS"
+                | "TAKE"
+                | "TAKEVOLPAN"
+                | "TAKECOLOR"
+                | "SM"
+        )
+    }
+
     fn fast_classify_item_token(raw: &str) -> Token {
         if let Some(hex) = raw.strip_prefix("0x") {
             if let Ok(v) = u64::from_str_radix(hex, 16) {
@@ -919,7 +953,7 @@ impl Item {
                 crate::primitives::RppBlockContent::Content(tokens) => {
                     let reparsed;
                     let tokens = if let [Token::Identifier(raw)] = tokens.as_slice() {
-                        if raw.contains(' ') {
+                        if raw.contains(' ') && Self::should_parse_item_raw_line(raw) {
                             reparsed = Self::parse_item_token_line(raw)?;
                             reparsed.as_slice()
                         } else {
@@ -934,6 +968,17 @@ impl Item {
                         &mut current_take,
                         &mut in_take_context,
                     )?;
+                }
+                crate::primitives::RppBlockContent::RawLine(raw) => {
+                    if Self::should_parse_item_raw_line(raw) {
+                        let tokens = Self::parse_item_token_line(raw)?;
+                        Self::apply_item_tokens(
+                            &mut item,
+                            &tokens,
+                            &mut current_take,
+                            &mut in_take_context,
+                        )?;
+                    }
                 }
                 crate::primitives::RppBlockContent::Block(nested_block) => {
                     if nested_block.name == "SOURCE" {
@@ -1195,31 +1240,44 @@ impl Item {
 
         let mut file_path = String::new();
         for child in &block.children {
-            if let crate::primitives::RppBlockContent::Content(tokens) = child {
-                let reparsed;
-                let tokens = if let [Token::Identifier(raw)] = tokens.as_slice() {
-                    if raw.contains(' ') {
-                        reparsed = Self::parse_item_token_line(raw)?;
-                        reparsed.as_slice()
+            let mut reparsed_tokens: Option<Vec<Token>> = None;
+            let tokens: &[Token] = match child {
+                crate::primitives::RppBlockContent::Content(tokens) => {
+                    if let [Token::Identifier(raw)] = tokens.as_slice() {
+                        if raw.contains(' ') {
+                            if !raw.trim_start().starts_with("FILE") {
+                                continue;
+                            }
+                            reparsed_tokens = Some(Self::parse_item_token_line(raw)?);
+                            reparsed_tokens.as_deref().unwrap_or(tokens.as_slice())
+                        } else {
+                            tokens.as_slice()
+                        }
                     } else {
                         tokens.as_slice()
                     }
-                } else {
-                    tokens.as_slice()
-                };
-                if !matches!(tokens.first(), Some(Token::Identifier(id)) if id == "FILE") {
-                    continue;
                 }
-                let mut buf = String::new();
-                for token in tokens.iter().skip(1) {
-                    if !buf.is_empty() {
-                        buf.push(' ');
+                crate::primitives::RppBlockContent::RawLine(raw) => {
+                    if !raw.trim_start().starts_with("FILE") {
+                        continue;
                     }
-                    buf.push_str(&Self::parse_string(token)?);
+                    reparsed_tokens = Some(Self::parse_item_token_line(raw)?);
+                    reparsed_tokens.as_deref().unwrap_or(&[])
                 }
-                file_path = buf.replace("\\\\", "\\");
-                break;
+                crate::primitives::RppBlockContent::Block(_) => continue,
+            };
+            if !matches!(tokens.first(), Some(Token::Identifier(id)) if id == "FILE") {
+                continue;
             }
+            let mut buf = String::new();
+            for token in tokens.iter().skip(1) {
+                if !buf.is_empty() {
+                    buf.push(' ');
+                }
+                buf.push_str(&Self::parse_string(token)?);
+            }
+            file_path = buf.replace("\\\\", "\\");
+            break;
         }
 
         Ok(SourceBlock {

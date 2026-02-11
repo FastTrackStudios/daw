@@ -977,6 +977,12 @@ impl Track {
                     };
                     Self::apply_tokens(&mut track, tokens)?;
                 }
+                crate::primitives::RppBlockContent::RawLine(raw) => {
+                    if Self::should_parse_track_raw_line(raw) {
+                        let tokens = Self::parse_track_token_line(raw)?;
+                        Self::apply_tokens(&mut track, &tokens)?;
+                    }
+                }
                 crate::primitives::RppBlockContent::Block(nested_block) => {
                     if options.parse_items && nested_block.block_type == BlockType::Item {
                         if let Ok(item) = Item::from_block(nested_block) {

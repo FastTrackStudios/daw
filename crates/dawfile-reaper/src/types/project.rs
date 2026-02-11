@@ -1532,6 +1532,9 @@ mod tests {
                     RppBlockContent::Content(tokens) => {
                         println!("  Content {}: {:?}", j, tokens);
                     }
+                    RppBlockContent::RawLine(raw) => {
+                        println!("  RawLine {}: {}", j, raw);
+                    }
                     RppBlockContent::Block(_) => {
                         println!("  Nested block {}", j);
                     }
