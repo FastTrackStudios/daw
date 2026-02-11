@@ -3,8 +3,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use rayon::prelude::*;
 
 use super::marker_region::MarkerRegionCollection;
+use super::track::TrackParseOptions;
 use super::time_tempo::TempoTimeEnvelope;
 use crate::primitives::{BlockType, RppBlockContent, RppProject, Token};
 
@@ -188,6 +190,46 @@ pub struct ReaperProject {
     pub fx_chains: Vec<FxChain>,
     pub markers_regions: MarkerRegionCollection,
     pub tempo_envelope: Option<TempoTimeEnvelope>,
+}
+
+/// Controls which typed domains to decode from an `RppProject`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DecodeOptions {
+    pub parse_tracks: bool,
+    pub parse_project_items: bool,
+    pub parse_project_envelopes: bool,
+    pub parse_project_fxchains: bool,
+    pub parse_markers_regions: bool,
+    pub parse_tempo_envelope: bool,
+    pub track_options: TrackParseOptions,
+}
+
+impl DecodeOptions {
+    pub const fn full() -> Self {
+        Self {
+            parse_tracks: true,
+            parse_project_items: true,
+            parse_project_envelopes: true,
+            parse_project_fxchains: true,
+            parse_markers_regions: true,
+            parse_tempo_envelope: true,
+            track_options: TrackParseOptions::full(),
+        }
+    }
+
+    /// Summary-oriented decoding: keep project metadata and lightweight tracks,
+    /// skip heavy nested domains by default.
+    pub const fn summary() -> Self {
+        Self {
+            parse_tracks: true,
+            parse_project_items: false,
+            parse_project_envelopes: false,
+            parse_project_fxchains: false,
+            parse_markers_regions: true,
+            parse_tempo_envelope: false,
+            track_options: TrackParseOptions::summary(),
+        }
+    }
 }
 
 /// Project-level properties and settings
@@ -1156,6 +1198,14 @@ impl ProjectProperties {
 impl ReaperProject {
     /// Create a ReaperProject from a parsed RPP project
     pub fn from_rpp_project(rpp_project: &RppProject) -> Result<Self, String> {
+        Self::from_rpp_project_with_options(rpp_project, DecodeOptions::full())
+    }
+
+    /// Create a ReaperProject from a parsed RPP project with selective decoding.
+    pub fn from_rpp_project_with_options(
+        rpp_project: &RppProject,
+        options: DecodeOptions,
+    ) -> Result<Self, String> {
         let mut project = ReaperProject {
             version: rpp_project.version,
             version_string: rpp_project.version_string.clone(),
@@ -1169,70 +1219,160 @@ impl ReaperProject {
             tempo_envelope: None,
         };
 
-        // Parse blocks into their respective types
+        // Parse project-global domains in-order.
         for block in &rpp_project.blocks {
-            match block.block_type {
-                BlockType::Project => {
-                    // Parse markers and regions from project content lines
-                    for child in &block.children {
-                        if let RppBlockContent::Content(tokens) = child {
-                            if let Some(first_token) = tokens.first() {
-                                if first_token.to_string() == "MARKER" {
-                                    // Reconstruct the marker line
-                                    let marker_line = tokens
-                                        .iter()
-                                        .map(|t| t.to_string())
-                                        .collect::<Vec<_>>()
-                                        .join(" ");
-
-                                    match super::marker_region::MarkerRegion::from_marker_line(
-                                        &marker_line,
-                                    ) {
-                                        Ok(marker_region) => {
-                                            project.markers_regions.add(marker_region)
-                                        }
-                                        Err(e) => {
-                                            eprintln!("Warning: Failed to parse marker: {}", e)
-                                        }
-                                    }
+            if block.block_type == BlockType::Project && options.parse_markers_regions {
+                for child in &block.children {
+                    if let RppBlockContent::Content(tokens) = child {
+                        if let Some(first_token) = tokens.first() {
+                            if first_token.to_string() == "MARKER" {
+                                let marker_line = tokens
+                                    .iter()
+                                    .map(|t| t.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(" ");
+                                match super::marker_region::MarkerRegion::from_marker_line(
+                                    &marker_line,
+                                ) {
+                                    Ok(marker_region) => project.markers_regions.add(marker_region),
+                                    Err(e) => eprintln!("Warning: Failed to parse marker: {}", e),
                                 }
                             }
                         }
                     }
                 }
-                BlockType::Track => match Track::from_block(block) {
-                    Ok(track) => project.tracks.push(track),
-                    Err(e) => eprintln!("Warning: Failed to parse track: {}", e),
-                },
-                BlockType::Item => match Item::from_block(block) {
-                    Ok(item) => project.items.push(item),
-                    Err(e) => eprintln!("Warning: Failed to parse item: {}", e),
-                },
-                BlockType::Envelope => match Envelope::from_block(block) {
-                    Ok(envelope) => project.envelopes.push(envelope),
-                    Err(e) => eprintln!("Warning: Failed to parse envelope: {}", e),
-                },
-                BlockType::TempoEnvEx => {
-                    // Parse tempo envelope from TEMPOENVEX block
-                    if let Some(tempo_envelope) = Self::parse_tempo_envelope_block(block) {
-                        project.tempo_envelope = Some(tempo_envelope);
+            }
+
+            if block.block_type == BlockType::TempoEnvEx && options.parse_tempo_envelope {
+                if let Some(tempo_envelope) = Self::parse_tempo_envelope_block(block) {
+                    project.tempo_envelope = Some(tempo_envelope);
+                }
+            }
+        }
+
+        let can_parallelize = rpp_project.blocks.len() >= 16;
+        if can_parallelize {
+            if options.parse_tracks {
+                let mut track_results: Vec<(usize, Result<Track, String>)> = rpp_project
+                    .blocks
+                    .par_iter()
+                    .enumerate()
+                    .filter_map(|(idx, block)| {
+                        if block.block_type != BlockType::Track {
+                            return None;
+                        }
+                        Some((idx, Track::from_block_with_options(block, options.track_options)))
+                    })
+                    .collect();
+                track_results.sort_by_key(|(idx, _)| *idx);
+                for (idx, result) in track_results {
+                    match result {
+                        Ok(track) => project.tracks.push(track),
+                        Err(e) => eprintln!("Warning: Failed to parse track at block {idx}: {e}"),
                     }
                 }
-                BlockType::FxChain => {
-                    let block_text = format!("{}", block);
-                    match FxChain::parse(&block_text) {
-                        Ok(fx_chain) => project.fx_chains.push(fx_chain),
-                        Err(e) => eprintln!("Warning: Failed to parse FX chain: {}", e),
+            }
+
+            if options.parse_project_items {
+                let mut item_results: Vec<(usize, Result<Item, String>)> = rpp_project
+                    .blocks
+                    .par_iter()
+                    .enumerate()
+                    .filter_map(|(idx, block)| {
+                        if block.block_type != BlockType::Item {
+                            return None;
+                        }
+                        Some((idx, Item::from_block(block)))
+                    })
+                    .collect();
+                item_results.sort_by_key(|(idx, _)| *idx);
+                for (idx, result) in item_results {
+                    match result {
+                        Ok(item) => project.items.push(item),
+                        Err(e) => eprintln!("Warning: Failed to parse item at block {idx}: {e}"),
                     }
                 }
-                _ => {
-                    // Ignore other block types for now
+            }
+
+            if options.parse_project_envelopes {
+                let mut envelope_results: Vec<(usize, Result<Envelope, String>)> = rpp_project
+                    .blocks
+                    .par_iter()
+                    .enumerate()
+                    .filter_map(|(idx, block)| {
+                        if block.block_type != BlockType::Envelope {
+                            return None;
+                        }
+                        Some((idx, Envelope::from_block(block)))
+                    })
+                    .collect();
+                envelope_results.sort_by_key(|(idx, _)| *idx);
+                for (idx, result) in envelope_results {
+                    match result {
+                        Ok(envelope) => project.envelopes.push(envelope),
+                        Err(e) => {
+                            eprintln!("Warning: Failed to parse envelope at block {idx}: {e}")
+                        }
+                    }
+                }
+            }
+
+            if options.parse_project_fxchains {
+                let mut fx_results: Vec<(usize, Result<FxChain, String>)> = rpp_project
+                    .blocks
+                    .par_iter()
+                    .enumerate()
+                    .filter_map(|(idx, block)| {
+                        if block.block_type != BlockType::FxChain {
+                            return None;
+                        }
+                        let block_text = format!("{}", block);
+                        Some((idx, FxChain::parse(&block_text)))
+                    })
+                    .collect();
+                fx_results.sort_by_key(|(idx, _)| *idx);
+                for (idx, result) in fx_results {
+                    match result {
+                        Ok(fx) => project.fx_chains.push(fx),
+                        Err(e) => {
+                            eprintln!("Warning: Failed to parse FX chain at block {idx}: {e}")
+                        }
+                    }
+                }
+            }
+        } else {
+            for block in &rpp_project.blocks {
+                match block.block_type {
+                    BlockType::Track if options.parse_tracks => {
+                        match Track::from_block_with_options(block, options.track_options) {
+                            Ok(track) => project.tracks.push(track),
+                            Err(e) => eprintln!("Warning: Failed to parse track: {}", e),
+                        }
+                    }
+                    BlockType::Item if options.parse_project_items => match Item::from_block(block) {
+                        Ok(item) => project.items.push(item),
+                        Err(e) => eprintln!("Warning: Failed to parse item: {}", e),
+                    },
+                    BlockType::Envelope if options.parse_project_envelopes => match Envelope::from_block(block) {
+                        Ok(envelope) => project.envelopes.push(envelope),
+                        Err(e) => eprintln!("Warning: Failed to parse envelope: {}", e),
+                    },
+                    BlockType::FxChain if options.parse_project_fxchains => {
+                        let block_text = format!("{}", block);
+                        match FxChain::parse(&block_text) {
+                            Ok(fx_chain) => project.fx_chains.push(fx_chain),
+                            Err(e) => eprintln!("Warning: Failed to parse FX chain: {}", e),
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
 
         // Process markers to create regions from START/END marker pairs
-        project.markers_regions.process_regions();
+        if options.parse_markers_regions {
+            project.markers_regions.process_regions();
+        }
 
         Ok(project)
     }
@@ -1713,5 +1853,57 @@ mod tests {
             project.tracks.len(),
             project.items.len()
         );
+    }
+
+    #[test]
+    fn test_decode_options_summary_skips_heavy_track_domains() {
+        let input = r#"<REAPER_PROJECT 0.1 "7.42/linux-x86_64" 1758257333
+  <TRACK
+    NAME "Track 1"
+    <ITEM
+      POSITION 0
+      LENGTH 1
+    >
+    <VOLENV
+      PT 0 1 0
+    >
+    <FXCHAIN
+      SHOW 0
+    >
+  >
+>"#;
+
+        let (_, parsed) = parse_rpp(input).expect("parse_rpp");
+        let full = ReaperProject::from_rpp_project_with_options(&parsed, DecodeOptions::full())
+            .expect("full decode");
+        let summary =
+            ReaperProject::from_rpp_project_with_options(&parsed, DecodeOptions::summary())
+                .expect("summary decode");
+
+        assert_eq!(full.tracks.len(), 1);
+        assert_eq!(summary.tracks.len(), 1);
+        assert_eq!(full.tracks[0].items.len(), 1);
+        assert_eq!(summary.tracks[0].items.len(), 0);
+    }
+
+    #[test]
+    fn test_parallel_decode_is_deterministic() {
+        let mut input = String::from("<REAPER_PROJECT 0.1 \"7.42/linux-x86_64\" 1758257333\n");
+        for i in 0..20 {
+            input.push_str(&format!(
+                "  <TRACK\n    NAME \"Track {i}\"\n    <ITEM\n      POSITION {i}\n      LENGTH 1\n    >\n  >\n"
+            ));
+        }
+        input.push('>');
+
+        let (_, parsed) = parse_rpp(&input).expect("parse_rpp");
+        let options = DecodeOptions::summary();
+        let a =
+            ReaperProject::from_rpp_project_with_options(&parsed, options).expect("decode pass A");
+        let b =
+            ReaperProject::from_rpp_project_with_options(&parsed, options).expect("decode pass B");
+
+        assert_eq!(a, b);
+        assert_eq!(a.tracks.len(), 20);
     }
 }

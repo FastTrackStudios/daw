@@ -475,6 +475,32 @@ pub struct Track {
     pub raw_content: String,
 }
 
+/// Controls nested parsing depth when decoding tracks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrackParseOptions {
+    pub parse_items: bool,
+    pub parse_envelopes: bool,
+    pub parse_fx_chain: bool,
+}
+
+impl TrackParseOptions {
+    pub const fn full() -> Self {
+        Self {
+            parse_items: true,
+            parse_envelopes: true,
+            parse_fx_chain: true,
+        }
+    }
+
+    pub const fn summary() -> Self {
+        Self {
+            parse_items: false,
+            parse_envelopes: false,
+            parse_fx_chain: false,
+        }
+    }
+}
+
 /// Receive settings for tracks
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ReceiveSettings {
@@ -552,6 +578,14 @@ impl Track {
 
     /// Create a Track from a parsed RPP block
     pub fn from_block(block: &RppBlock) -> Result<Self, String> {
+        Self::from_block_with_options(block, TrackParseOptions::full())
+    }
+
+    /// Create a Track from a parsed RPP block with configurable nested parsing.
+    pub fn from_block_with_options(
+        block: &RppBlock,
+        options: TrackParseOptions,
+    ) -> Result<Self, String> {
         if block.block_type != BlockType::Track {
             return Err(format!("Expected Track block, got {:?}", block.block_type));
         }
@@ -631,11 +665,19 @@ impl Track {
         content.push('>');
         track.raw_content = content.clone();
 
-        Self::from_rpp_block(&content)
+        Self::from_rpp_block_with_options(&content, options)
     }
 
     /// Create a Track from a raw RPP track block string
     pub fn from_rpp_block(block_content: &str) -> Result<Self, String> {
+        Self::from_rpp_block_with_options(block_content, TrackParseOptions::full())
+    }
+
+    /// Create a Track from a raw RPP track block string with configurable nested parsing.
+    pub fn from_rpp_block_with_options(
+        block_content: &str,
+        options: TrackParseOptions,
+    ) -> Result<Self, String> {
         let mut track = Track {
             name: String::new(),
             selected: false,
@@ -719,9 +761,11 @@ impl Track {
                     let item_lines = &lines[item_start..i];
                     let item_content = item_lines.join("\n");
 
-                    // Parse the item
-                    if let Ok(item) = Item::from_rpp_block(&item_content) {
-                        track.items.push(item);
+                    // Parse the item (optional in summary mode)
+                    if options.parse_items {
+                        if let Ok(item) = Item::from_rpp_block(&item_content) {
+                            track.items.push(item);
+                        }
                     }
                     continue;
                 } else if line.starts_with("<VOLENV")
@@ -747,10 +791,13 @@ impl Track {
                     let env_lines = &lines[env_start..i];
                     let env_content = env_lines.join("\n");
 
-                    // Parse the envelope
-                    if let Ok((_, block)) = crate::primitives::block::parse_block(&env_content) {
-                        if let Ok(envelope) = Envelope::from_block(&block) {
-                            track.envelopes.push(envelope);
+                    // Parse the envelope (optional in summary mode)
+                    if options.parse_envelopes {
+                        if let Ok((_, block)) = crate::primitives::block::parse_block(&env_content)
+                        {
+                            if let Ok(envelope) = Envelope::from_block(&block) {
+                                track.envelopes.push(envelope);
+                            }
                         }
                     }
                     continue;
@@ -774,19 +821,21 @@ impl Track {
                     let fx_lines = &lines[fx_start..i];
                     let fx_content = fx_lines.join("\n");
 
-                    // Parse the FX chain using the full parser
-                    match FxChain::parse(&fx_content) {
-                        Ok(parsed) => track.fx_chain = Some(parsed),
-                        Err(_) => {
-                            // Fallback: store with raw content only
-                            track.fx_chain = Some(FxChain {
-                                window_rect: None,
-                                show: 0,
-                                last_sel: 0,
-                                docked: false,
-                                nodes: Vec::new(),
-                                raw_content: fx_content,
-                            });
+                    if options.parse_fx_chain {
+                        // Parse the FX chain using the full parser
+                        match FxChain::parse(&fx_content) {
+                            Ok(parsed) => track.fx_chain = Some(parsed),
+                            Err(_) => {
+                                // Fallback: store with raw content only
+                                track.fx_chain = Some(FxChain {
+                                    window_rect: None,
+                                    show: 0,
+                                    last_sel: 0,
+                                    docked: false,
+                                    nodes: Vec::new(),
+                                    raw_content: fx_content,
+                                });
+                            }
                         }
                     }
                     continue;

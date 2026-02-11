@@ -296,11 +296,11 @@ mod tests {
         assert_eq!(parse_token("-17"), Ok(("", Token::Integer(-17))));
         assert_eq!(
             parse_token("3.14"),
-            Ok(("", Token::Float(std::f64::consts::PI)))
+            Ok(("", Token::Float(3.14)))
         );
         assert_eq!(
             parse_token("3,14"),
-            Ok(("", Token::Float(std::f64::consts::PI)))
+            Ok(("", Token::Float(3.14)))
         ); // WDL converts commas to dots
         assert_eq!(parse_token("0xFF"), Ok(("", Token::HexInteger(255))));
     }

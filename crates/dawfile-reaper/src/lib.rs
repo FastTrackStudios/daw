@@ -143,10 +143,10 @@ pub use rpp_tree::{
     RChunk, RNode, RNodeTree, RToken as TreeToken,
 };
 pub use io::{
-    fx_tree_to_rfxchain_text, parse_chunk_text, parse_fxchain_text, parse_fxchain_tree,
-    parse_daw_tracks_from_project_text, parse_project_text, read_chunk, read_fxchain,
-    read_fxchain_tree, read_project, write_chunk, write_fx_tree, write_fxchain,
-    daw_tracks_to_rpp_project_text,
+    daw_tracks_to_rpp_project_text, fx_tree_to_rfxchain_text, parse_chunk_text,
+    parse_daw_tracks_from_project_text, parse_fxchain_text, parse_fxchain_tree, parse_project_text,
+    parse_project_text_with_options, read_chunk, read_fxchain, read_fxchain_tree, read_project,
+    write_chunk, write_fx_tree, write_fxchain,
 };
 pub use convert::{
     daw_track_to_rpp_track_chunk, fx_chain_to_tree, rpp_track_to_daw_track, rpp_tracks_to_daw_tracks,
@@ -158,10 +158,10 @@ pub use compat::{
     WriteRPP,
 };
 pub use types::{
-    parse_js_params, Envelope, FxChain, FxChainNode, FxContainer, FxEnvelopePoint, FxParamEnvelope,
-    FxParamRef, FxPlugin, Item, JsParamValue, MarkerRegion, MarkerRegionCollection, MidiEvent,
-    MidiEventType, MidiSource, PluginType, ReaperProject, SourceBlock, SourceType, StretchMarker,
-    TempoTimeEnvelope, TempoTimePoint, Track,
+    parse_js_params, DecodeOptions, Envelope, FxChain, FxChainNode, FxContainer, FxEnvelopePoint,
+    FxParamEnvelope, FxParamRef, FxPlugin, Item, JsParamValue, MarkerRegion, MarkerRegionCollection,
+    MidiEvent, MidiEventType, MidiSource, PluginType, ReaperProject, SourceBlock, SourceType,
+    StretchMarker, TempoTimeEnvelope, TempoTimePoint, Track, TrackParseOptions,
 };
 
 /// Main error type for RPP parsing
@@ -188,16 +188,24 @@ pub type RppResult<T> = Result<T, RppParseError>;
 
 /// Parse a complete RPP file
 pub fn parse_rpp_file(content: &str) -> RppResult<RppProject> {
-    match primitives::project::parse_rpp(content) {
-        Ok((remaining, project)) => {
-            if !remaining.trim().is_empty() {
-                return Err(RppParseError::ParseError(format!(
-                    "Unexpected remaining input: {}",
-                    remaining
-                )));
+    match primitives::fast_project::parse_rpp_fast(content) {
+        Ok(project) => Ok(project),
+        Err(fast_err) => {
+            // Fallback for edge cases to preserve compatibility while we harden the fast path.
+            match primitives::project::parse_rpp(content) {
+                Ok((remaining, project)) => {
+                    if !remaining.trim().is_empty() {
+                        return Err(RppParseError::ParseError(format!(
+                            "Unexpected remaining input: {}",
+                            remaining
+                        )));
+                    }
+                    Ok(project)
+                }
+                Err(e) => Err(RppParseError::ParseError(format!(
+                    "fast parser failed: {fast_err}; nom fallback failed: {e:?}"
+                ))),
             }
-            Ok(project)
         }
-        Err(e) => Err(RppParseError::ParseError(format!("{:?}", e))),
     }
 }

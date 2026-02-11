@@ -9,6 +9,7 @@ license = "MIT"
 [dependencies]
 # Parser dependencies
 nom = "8"
+libc = "0.2"
 
 # Domain types for conversion
 daw-proto = { workspace = true }
@@ -17,6 +18,14 @@ daw-proto = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
+rayon = "1"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "parse_perf"
+harness = false
 
 [lints]
 workspace = true

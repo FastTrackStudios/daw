@@ -20,13 +20,23 @@ use crate::types::track::{
     FolderSettings, FolderState, MonitorMode, MuteSoloSettings, RecordMode, RecordSettings,
     Track as RppTrack, TrackSoloState, VolPanSettings,
 };
-use crate::types::{FxChain, ReaperProject};
+use crate::types::{DecodeOptions, FxChain, ReaperProject};
 use crate::{parse_rpp_file, RppParseError, RppResult};
 
 /// Parse a full project text into typed [`ReaperProject`].
 pub fn parse_project_text(content: &str) -> RppResult<ReaperProject> {
     let parsed = parse_rpp_file(content)?;
     ReaperProject::from_rpp_project(&parsed).map_err(RppParseError::ParseError)
+}
+
+/// Parse project text with selective typed decode options.
+pub fn parse_project_text_with_options(
+    content: &str,
+    options: DecodeOptions,
+) -> RppResult<ReaperProject> {
+    let parsed = parse_rpp_file(content)?;
+    ReaperProject::from_rpp_project_with_options(&parsed, options)
+        .map_err(RppParseError::ParseError)
 }
 
 /// Read and parse a full `.RPP` project file into typed [`ReaperProject`].

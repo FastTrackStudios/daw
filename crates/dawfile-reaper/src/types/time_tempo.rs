@@ -244,6 +244,61 @@ impl TempoTimeEnvelope {
         tempo_integral / 60.0
     }
 
+    fn integrate_hold_tempo_segment(start: &TempoTimePoint, from: f64, to: f64) -> f64 {
+        if to <= from {
+            return 0.0;
+        }
+        (to - from) * start.tempo / 60.0
+    }
+
+    fn bezier_shape_antiderivative(u: f64, tension: f64) -> f64 {
+        // Map REAPER-like tension (-1..1) to a bias exponent.
+        // |t| -> 1 approaches step-like behavior.
+        let u = u.clamp(0.0, 1.0);
+        let t = tension.clamp(-0.999_999, 0.999_999);
+        let raw = (1.0 + t.abs()) / (1.0 - t.abs());
+        let a = raw.powf(0.85).clamp(1.0, 12.0);
+
+        if t >= 0.0 {
+            // Positive tension: keep close to start value longer.
+            u.powf(a + 1.0) / (a + 1.0)
+        } else {
+            // Negative tension: approach end value earlier.
+            u + (1.0 - u).powf(a + 1.0) / (a + 1.0)
+        }
+    }
+
+    fn integrate_bezier_tempo_segment(
+        start: &TempoTimePoint,
+        end: &TempoTimePoint,
+        from: f64,
+        to: f64,
+    ) -> f64 {
+        let seg_duration = end.position - start.position;
+        if seg_duration <= Self::EPSILON {
+            return Self::integrate_hold_tempo_segment(start, from, to);
+        }
+
+        let off_from = (from - start.position).clamp(0.0, seg_duration);
+        let off_to = (to - start.position).clamp(0.0, seg_duration);
+        if off_to <= off_from {
+            return 0.0;
+        }
+
+        let u_from = off_from / seg_duration;
+        let u_to = off_to / seg_duration;
+
+        let bpm0 = start.tempo;
+        let bpm1 = end.tempo;
+        let dbpm = bpm1 - bpm0;
+        let bias_integral = Self::bezier_shape_antiderivative(u_to, start.bezier_tension)
+            - Self::bezier_shape_antiderivative(u_from, start.bezier_tension);
+        let du = u_to - u_from;
+
+        let tempo_integral = seg_duration * (bpm0 * du + dbpm * bias_integral);
+        tempo_integral / 60.0
+    }
+
     fn integrate_between_points(
         start: &TempoTimePoint,
         end: &TempoTimePoint,
@@ -253,7 +308,16 @@ impl TempoTimeEnvelope {
         if to <= from {
             return 0.0;
         }
-        Self::integrate_linear_tempo_segment(start, end, from, to)
+        match start.shape {
+            // REAPER "square" step: keep source marker tempo until next marker boundary.
+            1 => Self::integrate_hold_tempo_segment(start, from, to),
+            // REAPER "linear tempo" transition.
+            0 => Self::integrate_linear_tempo_segment(start, end, from, to),
+            // REAPER bezier tempo transition (uses start-point tension).
+            5 => Self::integrate_bezier_tempo_segment(start, end, from, to),
+            // Fallback to linear for unknown shapes.
+            _ => Self::integrate_linear_tempo_segment(start, end, from, to),
+        }
     }
 
     fn quarter_notes_at_time(&self, time: f64) -> f64 {
@@ -399,7 +463,10 @@ impl TempoTimeEnvelope {
         let mut fraction = (beat_pos - beat_whole).clamp(0.0, 1.0);
 
         // Normalize near-boundary floating point residue.
-        if fraction >= 1.0 - 1e-6 {
+        // REAPER display rounds aggressively at beat boundaries.
+        if fraction <= 0.02 {
+            fraction = 0.0;
+        } else if fraction >= 0.98 {
             fraction = 0.0;
             beat += 1;
         }
@@ -413,11 +480,20 @@ impl TempoTimeEnvelope {
 
     /// Get musical position as a formatted string in REAPER's format (measure.beat.fraction)
     pub fn musical_position_string_at_time(&self, time: f64) -> String {
-        let (measure, beat, fraction) = self.musical_position_at_time(time);
+        let (mut measure, mut beat, fraction) = self.musical_position_at_time(time);
 
         // REAPER format: measure.beat.fraction (e.g., "12.1.00", "14.5.25")
         // Convert fraction to hundredths (0.25 becomes 25)
-        let fraction_hundredths = (fraction * 100.0).round() as i32;
+        let mut fraction_hundredths = (fraction * 100.0).round() as i32;
+        if fraction_hundredths >= 100 {
+            fraction_hundredths = 0;
+            beat += 1;
+            let current_sig = self.get_at_time(time).1;
+            if beat > current_sig.0.max(1) {
+                beat = 1;
+                measure += 1;
+            }
+        }
 
         format!("{}.{}.{:02}", measure, beat, fraction_hundredths)
     }

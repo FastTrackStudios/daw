@@ -58,10 +58,10 @@ pub use item::{
     Item, MidiEvent, MidiEventType, MidiSource, SourceBlock, SourceType, StretchMarker,
 };
 pub use marker_region::{MarkerRegion, MarkerRegionCollection};
-pub use project::ReaperProject;
+pub use project::{DecodeOptions, ReaperProject};
 pub use time_pos_utils::{
     time_to_beat_position, time_to_beat_position_structured,
     time_to_beat_position_structured_with_envelope, time_to_beat_position_with_envelope,
 };
 pub use time_tempo::{TempoTimeEnvelope, TempoTimePoint};
-pub use track::Track;
+pub use track::{Track, TrackParseOptions};

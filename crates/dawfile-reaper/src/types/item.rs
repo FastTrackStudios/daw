@@ -385,14 +385,36 @@ pub struct SourceBlock {
 /// Parsed MIDI source data from a `<SOURCE MIDI>` block.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MidiSource {
+    /// Whether this source reports any data (`HASDATA` field 1)
+    pub has_data: bool,
     /// Ticks per quarter note (from HASDATA line, e.g. 960)
     pub ticks_per_qn: u32,
+    /// Timebase label from HASDATA (typically `QN`)
+    pub ticks_timebase: Option<String>,
+    /// CC interpolation mode (`CCINTERP`)
+    pub cc_interp: Option<i32>,
     /// Pooled events GUID (from POOLEDEVTS line)
     pub pooled_evts_guid: Option<String>,
     /// MIDI events
     pub events: Vec<MidiEvent>,
+    /// Extended `X/x` event blocks (base64 payload blocks)
+    pub extended_events: Vec<MidiExtendedEvent>,
+    /// Ignore project tempo override (`IGNTEMPO`)
+    pub ignore_tempo: Option<MidiIgnoreTempo>,
+    /// MIDI editor velocity/CC lanes (`VELLANE`)
+    pub vel_lanes: Vec<MidiVelLane>,
+    /// Optional ReaBank path (`BANKPROGRAMFILE`)
+    pub bank_program_file: Option<String>,
+    /// Raw CFGEDITVIEW fields (`CFGEDITVIEW`)
+    pub cfg_edit_view: Option<Vec<String>>,
+    /// Raw CFGEDIT fields (`CFGEDIT`)
+    pub cfg_edit: Option<Vec<String>>,
+    /// Raw EVTFILTER fields (`EVTFILTER`)
+    pub evt_filter: Option<Vec<String>>,
     /// Source GUID
     pub guid: Option<String>,
+    /// Unrecognized lines preserved for forward-compatibility.
+    pub unknown_lines: Vec<String>,
 }
 
 /// A single MIDI event from an RPP `E` line.
@@ -408,6 +430,34 @@ pub struct MidiEvent {
     pub delta_ticks: u32,
     /// Raw MIDI bytes (status + data, parsed from hex)
     pub bytes: Vec<u8>,
+}
+
+/// Extended MIDI event block (`<X ...>` / `<x ...>`) with base64 payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MidiExtendedEvent {
+    /// `true` if lowercase `<x ...>` (selected), `false` for uppercase `<X ...>`.
+    pub selected: bool,
+    /// Header fields following `X/x`.
+    pub fields: Vec<String>,
+    /// Base64 payload lines contained by this block.
+    pub data_lines: Vec<String>,
+}
+
+/// `IGNTEMPO` override for MIDI sources.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MidiIgnoreTempo {
+    pub enabled: bool,
+    pub bpm: f64,
+    pub numerator: i32,
+    pub denominator: i32,
+}
+
+/// `VELLANE` row from a MIDI source.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MidiVelLane {
+    pub lane_type: i32,
+    pub midi_editor_height: i32,
+    pub inline_editor_height: i32,
 }
 
 impl MidiEvent {
@@ -613,13 +663,19 @@ impl Item {
                 let mut source_lines = Vec::new();
                 source_lines.push(line);
                 i += 1;
+                let mut depth = 1i32;
 
                 while i < lines.len() {
                     let current_line = lines[i].trim();
                     source_lines.push(current_line);
 
-                    if current_line == ">" {
-                        break;
+                    if current_line.starts_with('<') {
+                        depth += 1;
+                    } else if current_line == ">" {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
                     }
                     i += 1;
                 }
@@ -1042,25 +1098,118 @@ impl Item {
     /// Parse MIDI source data from inner lines of a `<SOURCE MIDI>` block.
     fn parse_midi_source(lines: &[&str]) -> MidiSource {
         let mut midi = MidiSource {
+            has_data: false,
             ticks_per_qn: 960,
+            ticks_timebase: None,
+            cc_interp: None,
             pooled_evts_guid: None,
             events: Vec::new(),
+            extended_events: Vec::new(),
+            ignore_tempo: None,
+            vel_lanes: Vec::new(),
+            bank_program_file: None,
+            cfg_edit_view: None,
+            cfg_edit: None,
+            evt_filter: None,
             guid: None,
+            unknown_lines: Vec::new(),
         };
 
-        for line in lines {
-            let line = line.trim();
+        let mut i = 0usize;
+        while i < lines.len() {
+            let line = lines[i].trim();
 
             if line.starts_with("HASDATA ") {
                 // HASDATA 1 960 QN
                 let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    midi.has_data = parts[1] != "0";
+                }
                 if parts.len() >= 3 {
                     midi.ticks_per_qn = parts[2].parse().unwrap_or(960);
+                }
+                if parts.len() >= 4 {
+                    midi.ticks_timebase = Some(parts[3].to_string());
+                }
+            } else if line.starts_with("CCINTERP ") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    midi.cc_interp = parts[1].parse().ok();
                 }
             } else if line.starts_with("POOLEDEVTS ") {
                 midi.pooled_evts_guid = Some(line[11..].trim().to_string());
             } else if line.starts_with("GUID ") {
                 midi.guid = Some(line[5..].trim().to_string());
+            } else if line.starts_with("IGNTEMPO ") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 5 {
+                    midi.ignore_tempo = Some(MidiIgnoreTempo {
+                        enabled: parts[1] != "0",
+                        bpm: parts[2].parse().unwrap_or(120.0),
+                        numerator: parts[3].parse().unwrap_or(4),
+                        denominator: parts[4].parse().unwrap_or(4),
+                    });
+                }
+            } else if line.starts_with("VELLANE ") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 4 {
+                    midi.vel_lanes.push(MidiVelLane {
+                        lane_type: parts[1].parse().unwrap_or(0),
+                        midi_editor_height: parts[2].parse().unwrap_or(0),
+                        inline_editor_height: parts[3].parse().unwrap_or(0),
+                    });
+                }
+            } else if line.starts_with("BANKPROGRAMFILE ") {
+                let mut v = line["BANKPROGRAMFILE ".len()..].trim().to_string();
+                if v.starts_with('"') && v.ends_with('"') && v.len() >= 2 {
+                    v = v[1..v.len() - 1].to_string();
+                }
+                v = v.replace("\\\\", "\\");
+                midi.bank_program_file = Some(v);
+            } else if line.starts_with("CFGEDITVIEW ") {
+                midi.cfg_edit_view = Some(
+                    line["CFGEDITVIEW ".len()..]
+                        .split_whitespace()
+                        .map(|s| s.to_string())
+                        .collect(),
+                );
+            } else if line.starts_with("CFGEDIT ") {
+                midi.cfg_edit = Some(
+                    line["CFGEDIT ".len()..]
+                        .split_whitespace()
+                        .map(|s| s.to_string())
+                        .collect(),
+                );
+            } else if line.starts_with("EVTFILTER ") {
+                midi.evt_filter = Some(
+                    line["EVTFILTER ".len()..]
+                        .split_whitespace()
+                        .map(|s| s.to_string())
+                        .collect(),
+                );
+            } else if line.starts_with("<X ") || line.starts_with("<x ") {
+                let selected = line.starts_with("<x ");
+                let fields: Vec<String> = line[2..]
+                    .split_whitespace()
+                    .map(|s| s.to_string())
+                    .collect();
+                let mut data_lines = Vec::new();
+                i += 1;
+                while i < lines.len() {
+                    let payload_line = lines[i].trim();
+                    if payload_line == ">" {
+                        break;
+                    }
+                    if !payload_line.is_empty() {
+                        data_lines.push(payload_line.to_string());
+                    }
+                    i += 1;
+                }
+                midi.extended_events.push(MidiExtendedEvent {
+                    selected,
+                    fields,
+                    data_lines,
+                });
             } else if line.starts_with("E ") || line.starts_with("e ") {
                 // MIDI event: E <delta_ticks> <status_hex> <data1_hex> [data2_hex ...]
                 let parts: Vec<&str> = line[2..].split_whitespace().collect();
@@ -1074,7 +1223,11 @@ impl Item {
                         midi.events.push(MidiEvent { delta_ticks, bytes });
                     }
                 }
+            } else if !line.is_empty() {
+                midi.unknown_lines.push(line.to_string());
             }
+
+            i += 1;
         }
 
         midi
@@ -1505,7 +1658,10 @@ mod tests {
         assert!(source.midi_data.is_some());
 
         let midi = source.midi_data.as_ref().unwrap();
+        assert!(midi.has_data);
         assert_eq!(midi.ticks_per_qn, 960);
+        assert_eq!(midi.ticks_timebase.as_deref(), Some("QN"));
+        assert_eq!(midi.cc_interp, Some(32));
         assert_eq!(
             midi.pooled_evts_guid.as_deref(),
             Some("{11223344-5566-7788-99AA-BBCCDDEEFF00}")
@@ -1542,6 +1698,66 @@ mod tests {
         assert_eq!(ev3.delta_ticks, 480);
         assert_eq!(ev3.bytes, vec![0x80, 0x40, 0x00]);
         assert_eq!(ev3.event_type(), MidiEventType::NoteOff);
+    }
+
+    #[test]
+    fn test_parse_midi_extended_fields_and_x_blocks() {
+        let rpp_content = r#"<ITEM
+  POSITION 0
+  SNAPOFFS 0
+  LENGTH 1
+  LOOP 0
+  ALLTAKES 0
+  SEL 0
+  NAME "MIDI Meta"
+  VOLPAN 1 0 1 -1
+  SOFFS 0
+  PLAYRATE 1 1 0 -1 0 0.0025
+  CHANMODE 0
+  <SOURCE MIDI
+    HASDATA 1 960 QN
+    CCINTERP 32
+    <X 7680 0 0 0 6 Am7
+      /wZBbTc=
+    >
+    IGNTEMPO 1 120.00000000 4 4
+    VELLANE 128 97 0
+    BANKPROGRAMFILE "C:\\Path\\To\\GM.reabank"
+    CFGEDITVIEW 3787.8 0.1 0 48 0 0 0
+    CFGEDIT 1 1 0 1
+    EVTFILTER 0 -1 -1 -1 -1 0 1
+    GUID {12345678-1234-5678-9ABC-DEF012345678}
+  >
+>"#;
+
+        let item = Item::from_rpp_block(rpp_content).unwrap();
+        let midi = item.takes[0]
+            .source
+            .as_ref()
+            .unwrap()
+            .midi_data
+            .as_ref()
+            .unwrap();
+
+        assert!(midi.has_data);
+        assert_eq!(midi.cc_interp, Some(32));
+        assert_eq!(midi.extended_events.len(), 1);
+        assert_eq!(midi.extended_events[0].fields[0], "7680");
+        assert_eq!(midi.extended_events[0].fields[5], "Am7");
+        assert_eq!(midi.extended_events[0].data_lines, vec!["/wZBbTc="]);
+
+        let ign = midi.ignore_tempo.as_ref().unwrap();
+        assert!(ign.enabled);
+        assert_eq!(ign.bpm, 120.0);
+        assert_eq!(ign.numerator, 4);
+        assert_eq!(ign.denominator, 4);
+
+        assert_eq!(midi.vel_lanes.len(), 1);
+        assert_eq!(midi.vel_lanes[0].lane_type, 128);
+        assert_eq!(midi.bank_program_file.as_deref(), Some("C:\\Path\\To\\GM.reabank"));
+        assert_eq!(midi.cfg_edit_view.as_ref().unwrap()[0], "3787.8");
+        assert_eq!(midi.cfg_edit.as_ref().unwrap()[0], "1");
+        assert_eq!(midi.evt_filter.as_ref().unwrap()[0], "0");
     }
 
     #[test]
