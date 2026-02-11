@@ -7,6 +7,8 @@ edition.workspace = true
 [dependencies]
 daw-control = { path = "../daw-control" }
 daw-proto = { path = "../daw-proto" }
+dock-dioxus = { path = "../../dock/dock-dioxus", default-features = false }
+dock-proto = { path = "../../dock/dock-proto" }
 eyre = { workspace = true }
 
 # UI framework (conditional on feature)
@@ -20,8 +22,8 @@ tokio = { version = "1", features = ["time"] }
 
 [features]
 default = ["web"]
-web = ["dep:dioxus", "dep:tracing"]
-native = ["dep:dioxus-native", "dep:tracing"]
+web = ["dep:dioxus", "dep:tracing", "dock-dioxus/web"]
+native = ["dep:dioxus-native", "dep:tracing", "dock-dioxus/native"]
 
 [lints]
 workspace = true

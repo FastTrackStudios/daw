@@ -10,6 +10,7 @@
 pub mod components;
 pub mod hooks;
 pub mod layouts;
+pub mod panel_registration;
 pub mod prelude;
 pub mod signals;
 
@@ -20,3 +21,4 @@ pub use components::fx_parameter_browser::FxParameterBrowser;
 pub use components::mixer::MixerPanel;
 pub use components::track_control_panel::TrackControlPanel;
 pub use layouts::daw_panels::FxBrowserDockPanel;
+pub use panel_registration::register_panels;
