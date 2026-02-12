@@ -53,6 +53,7 @@ use thiserror::Error;
 pub mod chunk_ops;
 pub mod compat;
 pub mod convert;
+pub mod index;
 pub mod io;
 pub mod primitives;
 pub mod rpp_tree;
@@ -133,35 +134,37 @@ mod tests {
 }
 
 // Re-export the main types for convenience
-pub use primitives::{
-    parse_rpp, BlockType, QuoteType, RppBlock, RppBlockContent, RppProject, Token,
+pub use compat::{
+    AddRChunk, AddRNode, AddRToken, CreateNodeInput, CreateRChunk, CreateRNode, CreateRPP,
+    CreateRTokens, ReadRPP, ReadRPPChunk, ReadRPPChunkLines, StringifyRPPNode, WriteRPP,
+    LUA_API_MATRIX,
 };
-pub use rpp_tree::{
-    add_rchunk, add_rnode, add_rtoken, create_rchunk, create_rnode_from_line,
-    create_rnode_from_tokens, create_rpp, create_rtokens, read_rpp, read_rpp_chunk,
-    read_rpp_lines, stringify_rpp_node, tokenize as tokenize_tree, write_rpp, GuidStripPolicy,
-    RChunk, RNode, RNodeTree, RToken as TreeToken,
+pub use convert::{
+    daw_track_to_rpp_track_chunk, fx_chain_to_tree, rpp_track_to_daw_track,
+    rpp_tracks_to_daw_tracks, tree_to_fx_chain,
 };
+pub use index::{ProjectIndex, ProjectSummary};
 pub use io::{
     daw_tracks_to_rpp_project_text, fx_tree_to_rfxchain_text, parse_chunk_text,
     parse_daw_tracks_from_project_text, parse_fxchain_text, parse_fxchain_tree, parse_project_text,
     parse_project_text_with_options, read_chunk, read_fxchain, read_fxchain_tree, read_project,
     write_chunk, write_fx_tree, write_fxchain,
 };
-pub use convert::{
-    daw_track_to_rpp_track_chunk, fx_chain_to_tree, rpp_track_to_daw_track, rpp_tracks_to_daw_tracks,
-    tree_to_fx_chain,
+pub use primitives::{
+    parse_rpp, BlockType, QuoteType, RppBlock, RppBlockContent, RppProject, Token,
 };
-pub use compat::{
-    AddRChunk, AddRNode, AddRToken, CreateNodeInput, CreateRChunk, CreateRNode, CreateRPP,
-    CreateRTokens, LUA_API_MATRIX, ReadRPP, ReadRPPChunk, ReadRPPChunkLines, StringifyRPPNode,
-    WriteRPP,
+pub use rpp_tree::{
+    add_rchunk, add_rnode, add_rtoken, create_rchunk, create_rnode_from_line,
+    create_rnode_from_tokens, create_rpp, create_rtokens, read_rpp, read_rpp_chunk, read_rpp_lines,
+    stringify_rpp_node, tokenize as tokenize_tree, write_rpp, GuidStripPolicy, RChunk, RNode,
+    RNodeTree, RToken as TreeToken,
 };
 pub use types::{
     parse_js_params, DecodeOptions, Envelope, FxChain, FxChainNode, FxContainer, FxEnvelopePoint,
-    FxParamEnvelope, FxParamRef, FxPlugin, Item, JsParamValue, MarkerRegion, MarkerRegionCollection,
-    MidiEvent, MidiEventType, MidiSource, PluginType, ReaperProject, SourceBlock, SourceType,
-    StretchMarker, TempoTimeEnvelope, TempoTimePoint, Track, TrackParseOptions,
+    FxParamEnvelope, FxParamRef, FxPlugin, Item, JsParamValue, MarkerRegion,
+    MarkerRegionCollection, MidiEvent, MidiEventType, MidiSource, PluginType, ReaperProject,
+    SourceBlock, SourceType, StretchMarker, TempoTimeEnvelope, TempoTimePoint, Track,
+    TrackParseOptions,
 };
 
 /// Main error type for RPP parsing

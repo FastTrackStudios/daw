@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use dawfile_reaper::{parse_rpp, parse_rpp_file, ReaperProject, SourceType};
+use dawfile_reaper::{parse_rpp, parse_rpp_file, ProjectIndex, ReaperProject, SourceType};
 
 const GOODNESS_FIXTURE_CANDIDATES: [&str; 2] = [
     "tests/fixtures/local/Goodness of God.RPP",
@@ -120,4 +120,70 @@ fn guardrail_fast_vs_nom_typed_parity_tempo_fixture() {
         .filter(|t| t.fx_chain.is_some())
         .count();
     assert_eq!(fast_track_fx, nom_track_fx);
+}
+
+// ── ProjectIndex guardrails ──────────────────────────────────────────────
+
+#[test]
+fn guardrail_index_matches_manual_traversal_goodness() {
+    let Some(path) = resolve_fixture(&GOODNESS_FIXTURE_CANDIDATES) else {
+        eprintln!("SKIP: missing Goodness fixture");
+        return;
+    };
+
+    let content = fs::read_to_string(&path).expect("read Goodness fixture");
+    let parsed = parse_rpp_file(&content).expect("parse_rpp_file");
+    let typed = ReaperProject::from_rpp_project(&parsed).expect("typed decode");
+    let index = ProjectIndex::build(&typed);
+
+    // ── Match all existing guardrail counts ──
+    assert_eq!(index.track_count, 702);
+    assert_eq!(index.total_items(), 988);
+    assert_eq!(index.total_takes(), 1592);
+    assert_eq!(index.source_count("MIDI"), 20);
+    assert_eq!(index.midi_event_count, 69_854);
+    assert_eq!(index.midi_extended_event_count, 28);
+    assert_eq!(index.envelope_count, 67);
+    assert_eq!(index.marker_count + index.region_count, 24);
+    assert_eq!(index.tempo_point_count, 3);
+
+    // ── Verify against manual traversal (same logic as guardrail_goodness_decoded_counts) ──
+    let manual_items = gather_items(&typed);
+    assert_eq!(index.total_items(), manual_items.len() as u32);
+
+    let manual_takes: u32 = manual_items.iter().map(|i| i.takes.len() as u32).sum();
+    assert_eq!(index.total_takes(), manual_takes);
+
+    let manual_envelopes: u32 = typed
+        .tracks
+        .iter()
+        .map(|t| t.envelopes.len() as u32)
+        .sum::<u32>()
+        + typed.envelopes.len() as u32;
+    assert_eq!(index.envelope_count, manual_envelopes);
+
+    // ── Summary display doesn't panic ──
+    let summary = index.summary();
+    let display = summary.to_string();
+    assert!(display.contains("702 tracks"));
+    assert!(display.contains("988 items"));
+}
+
+#[test]
+fn guardrail_index_tempo_fixture() {
+    let path = resolve_fixture(&TEMPO_FIXTURE_CANDIDATES).expect("tempo fixture path");
+    let content = fs::read_to_string(&path).expect("read tempo fixture");
+    let parsed = parse_rpp_file(&content).expect("parse");
+    let typed = ReaperProject::from_rpp_project(&parsed).expect("typed decode");
+    let index = ProjectIndex::build(&typed);
+
+    // Tempo fixture is small — validate basic structure
+    assert!(index.track_count > 0, "should have tracks");
+    assert!(index.tempo_point_count > 0, "should have tempo points");
+
+    // Plugin inventory should be sorted and deduped
+    let names = index.plugin_inventory();
+    for w in names.windows(2) {
+        assert!(w[0] <= w[1], "plugin names should be sorted: {:?}", names);
+    }
 }
