@@ -9,3 +9,4 @@ actions_proto::define_actions! {
 }
 
 pub const GROUP_TRANSPORT: &str = "Transport";
+pub const GROUP_MARKERS_REGIONS: &str = "Markers/Regions";
