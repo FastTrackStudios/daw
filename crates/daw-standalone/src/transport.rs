@@ -25,6 +25,8 @@ struct RuntimeTransport {
     /// Position in seconds when playback started or was last seeked
     /// (needed because Transport.playhead_position may use different representations)
     base_position_seconds: f64,
+    /// Last position where playback was started.
+    last_play_start_seconds: Option<f64>,
 }
 
 impl Default for RuntimeTransport {
@@ -33,6 +35,7 @@ impl Default for RuntimeTransport {
             transport: Transport::new(),
             playback_start_instant: None,
             base_position_seconds: 0.0,
+            last_play_start_seconds: None,
         }
     }
 }
@@ -52,8 +55,17 @@ impl RuntimeTransport {
     /// Start playback from current position
     fn start_playback(&mut self) {
         self.base_position_seconds = self.current_position_seconds();
+        self.last_play_start_seconds = Some(self.base_position_seconds);
         self.playback_start_instant = Some(Instant::now());
         self.transport.play_state = PlayState::Playing;
+    }
+
+    /// Start playback from the remembered last start point.
+    fn start_playback_from_last_start(&mut self) {
+        if let Some(last_start) = self.last_play_start_seconds {
+            self.seek_to(last_start);
+        }
+        self.start_playback();
     }
 
     /// Pause playback, preserving position
@@ -256,6 +268,19 @@ impl TransportService for StandaloneTransport {
             _ => state.start_playback(),
         })
         .await;
+    }
+
+    async fn play_from_last_start_position(&self, _cx: &Context, project: ProjectContext) {
+        let Some(guid) = self.resolve_project(&project).await else {
+            warn!("StandaloneTransport::play_from_last_start_position - could not resolve project");
+            return;
+        };
+        info!(
+            "StandaloneTransport: play_from_last_start_position for project {}",
+            guid
+        );
+        self.with_state_mut(&guid, |state| state.start_playback_from_last_start())
+            .await;
     }
 
     // =========================================================================

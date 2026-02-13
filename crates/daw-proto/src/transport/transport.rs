@@ -167,6 +167,12 @@ pub trait TransportService {
     /// Toggle between play and stop
     async fn play_stop(&self, project: ProjectContext);
 
+    /// Start playback from the last position where playback was started.
+    ///
+    /// This is an FTS transport behavior that remembers the "play start point"
+    /// even if the edit cursor moves later.
+    async fn play_from_last_start_position(&self, project: ProjectContext);
+
     // =========================================================================
     // Recording Control (Priority 1)
     // =========================================================================

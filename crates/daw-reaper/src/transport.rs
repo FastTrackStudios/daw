@@ -481,6 +481,11 @@ impl TransportService for ReaperTransport {
         }
     }
 
+    async fn play_from_last_start_position(&self, _cx: &Context, project: ProjectContext) {
+        debug!("ReaperTransport: play_from_last_start_position (fallback to play)");
+        self.play(_cx, project).await;
+    }
+
     // =========================================================================
     // Recording Control
     // =========================================================================

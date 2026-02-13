@@ -7,4 +7,5 @@ edition = "2024"
 roam = { workspace = true }
 facet = { workspace = true }
 thiserror = { workspace = true }
+actions-proto = { workspace = true }
 # Note: No tokio - this crate is WASM-compatible for use in web apps
