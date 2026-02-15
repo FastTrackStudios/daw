@@ -1,7 +1,7 @@
 //! Standalone implementation for project-level MIDI analysis.
 
-use crate::midi::TakeMidiData;
 use crate::StandaloneMidi;
+use crate::midi::TakeMidiData;
 use daw_proto::{
     MidiAnalysisService, MidiChartData, MidiChartRequest, MidiDetectedChord, ProjectContext,
 };

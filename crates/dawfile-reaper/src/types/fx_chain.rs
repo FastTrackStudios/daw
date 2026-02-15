@@ -20,10 +20,10 @@
 //!
 //! Container blocks (`<CONTAINER>`) recursively contain the same structure.
 
+use crate::primitives::{RppBlock, RppBlockContent, Token};
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::fmt;
-use crate::primitives::{RppBlock, RppBlockContent, Token};
 
 // ---------------------------------------------------------------------------
 // Core types
@@ -393,12 +393,8 @@ fn parse_inner_lines(
             let parallel = pending_parallel;
             pending_parallel = false;
 
-            let mut container = parse_container_block(
-                &container_block,
-                bypassed,
-                offline,
-                preserve_raw_blocks,
-            );
+            let mut container =
+                parse_container_block(&container_block, bypassed, offline, preserve_raw_blocks);
             container.parallel = parallel;
 
             let mut j = end_idx + 1;
@@ -1244,28 +1240,41 @@ impl FxPlugin {
                 PluginType::Vst | PluginType::Vst3 => format!(
                     "<VST \"{}\" {} 0 \"\" 0<00> \"\"",
                     self.name,
-                    if self.file.is_empty() { "plugin.vst" } else { &self.file }
+                    if self.file.is_empty() {
+                        "plugin.vst"
+                    } else {
+                        &self.file
+                    }
                 ),
                 PluginType::Au => format!(
                     "<AU \"{}\" {}",
                     self.name,
-                    if self.file.is_empty() { "plugin.component" } else { &self.file }
+                    if self.file.is_empty() {
+                        "plugin.component"
+                    } else {
+                        &self.file
+                    }
                 ),
-                PluginType::Js => format!(
-                    "<JS \"{}\" \"\"",
-                    self.name,
-                ),
+                PluginType::Js => format!("<JS \"{}\" \"\"", self.name,),
                 PluginType::Clap => format!(
                     "<CLAP \"{}\" {} \"\"",
                     self.name,
-                    if self.file.is_empty() { "plugin.clap" } else { &self.file }
+                    if self.file.is_empty() {
+                        "plugin.clap"
+                    } else {
+                        &self.file
+                    }
                 ),
                 PluginType::Video => format!("<VIDEO_EFFECT \"{}\" \"\"", self.name),
                 PluginType::Other(tag) => format!(
                     "<{} \"{}\" {}",
                     tag,
                     self.name,
-                    if self.file.is_empty() { "\"\"" } else { &self.file }
+                    if self.file.is_empty() {
+                        "\"\""
+                    } else {
+                        &self.file
+                    }
                 ),
             };
             out.push_str(&format!("{}{}\n", indent, header));
@@ -2889,7 +2898,9 @@ mod tests {
                 Token::String("loser/3BandEQ".to_string(), QuoteType::Double),
                 Token::String("".to_string(), QuoteType::Double),
             ],
-            children: vec![RppBlockContent::RawLine("AA==".to_string().into_boxed_str())],
+            children: vec![RppBlockContent::RawLine(
+                "AA==".to_string().into_boxed_str(),
+            )],
         };
 
         let fx_block = RppBlock {

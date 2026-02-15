@@ -834,7 +834,8 @@ impl Item {
                 }
             }
             "TAKE" => {
-                let is_selected = matches!(tokens.get(1), Some(Token::Identifier(flag)) if flag == "SEL");
+                let is_selected =
+                    matches!(tokens.get(1), Some(Token::Identifier(flag)) if flag == "SEL");
                 if let Some(take) = current_take.take() {
                     item.takes.push(take);
                 }
@@ -1139,12 +1140,7 @@ impl Item {
                 continue;
             }
 
-            Self::apply_item_tokens(
-                &mut item,
-                &tokens,
-                &mut current_take,
-                &mut in_take_context,
-            )?;
+            Self::apply_item_tokens(&mut item, &tokens, &mut current_take, &mut in_take_context)?;
 
             i += 1;
         }
@@ -1947,7 +1943,10 @@ mod tests {
 
         assert_eq!(midi.vel_lanes.len(), 1);
         assert_eq!(midi.vel_lanes[0].lane_type, 128);
-        assert_eq!(midi.bank_program_file.as_deref(), Some("C:\\Path\\To\\GM.reabank"));
+        assert_eq!(
+            midi.bank_program_file.as_deref(),
+            Some("C:\\Path\\To\\GM.reabank")
+        );
         assert_eq!(midi.cfg_edit_view.as_ref().unwrap()[0], "3787.8");
         assert_eq!(midi.cfg_edit.as_ref().unwrap()[0], "1");
         assert_eq!(midi.evt_filter.as_ref().unwrap()[0], "0");

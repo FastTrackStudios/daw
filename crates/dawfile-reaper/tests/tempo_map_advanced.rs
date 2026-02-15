@@ -36,7 +36,8 @@ fn advanced_tempo_map_marker_positions_match_labels() {
             continue;
         }
 
-        let Some((exp_measure, exp_beat, exp_frac)) = parse_marker_position_label(&marker.name) else {
+        let Some((exp_measure, exp_beat, exp_frac)) = parse_marker_position_label(&marker.name)
+        else {
             continue;
         };
         // This label-driven check is only valid in the early 4/4 section.
@@ -50,9 +51,7 @@ fn advanced_tempo_map_marker_positions_match_labels() {
         let act_qn = envelope.beats_at_time(marker.position);
         let exp_qn = ((exp_measure - 1) * 4 + (exp_beat - 1)) as f64 + exp_frac;
 
-        if act_measure != exp_measure
-            || act_beat != exp_beat
-            || (act_frac - exp_frac).abs() > 0.02
+        if act_measure != exp_measure || act_beat != exp_beat || (act_frac - exp_frac).abs() > 0.02
         {
             failures.push(format!(
                 "marker={} time={:.12} expected={}.{}.{:03} actual={}.{}.{:03} qn_act={:.12} qn_exp={:.12} dq={:.12}",
@@ -73,7 +72,10 @@ fn advanced_tempo_map_marker_positions_match_labels() {
         checked += 1;
     }
 
-    assert!(checked >= 8, "expected to validate many marker labels, got {checked}");
+    assert!(
+        checked >= 8,
+        "expected to validate many marker labels, got {checked}"
+    );
     assert!(
         failures.is_empty(),
         "tempo marker mismatches:\n{}",
@@ -153,7 +155,11 @@ fn advanced_tempo_map_matches_reaper_oracle_export() {
     }
 
     assert!(checked >= 8, "expected oracle marker rows, got {checked}");
-    assert!(failures.is_empty(), "oracle mismatches:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "oracle mismatches:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]
@@ -212,7 +218,11 @@ fn edge_calibration_matches_reaper_oracle_export() {
     }
 
     assert!(checked >= 5, "expected edge marker rows, got {checked}");
-    assert!(failures.is_empty(), "edge oracle mismatches:\n{}", failures.join("\n"));
+    assert!(
+        failures.is_empty(),
+        "edge oracle mismatches:\n{}",
+        failures.join("\n")
+    );
 }
 
 #[test]
@@ -323,7 +333,11 @@ fn calibration_curve_samples_error_report() {
         sl.2 = sl.2.max(abs_err_local);
     }
 
-    let mean_abs_err = if count > 0 { sum_abs_err / (count as f64) } else { 0.0 };
+    let mean_abs_err = if count > 0 {
+        sum_abs_err / (count as f64)
+    } else {
+        0.0
+    };
     println!(
         "calibration samples={} mean_abs_err_qn={:.12} max_abs_err_qn={:.12}",
         count, mean_abs_err, max_abs_err
@@ -372,9 +386,15 @@ fn calibration_curve_samples_error_report() {
         assert!(*maxe < 1e-9, "shape=0 must be exact, max_abs_err_qn={maxe}");
     }
     if let Some((_, _, maxe)) = per_shape_local.get(&1) {
-        assert!(*maxe < 1e-9, "shape=1 local curve must be exact, max_abs_err_qn={maxe}");
+        assert!(
+            *maxe < 1e-9,
+            "shape=1 local curve must be exact, max_abs_err_qn={maxe}"
+        );
     }
-    assert!(mean_abs_err < 0.03, "mean_abs_err_qn too high: {mean_abs_err}");
+    assert!(
+        mean_abs_err < 0.03,
+        "mean_abs_err_qn too high: {mean_abs_err}"
+    );
     assert!(max_abs_err < 0.2, "max_abs_err_qn too high: {max_abs_err}");
 }
 

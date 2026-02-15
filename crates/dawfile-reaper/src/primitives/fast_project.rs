@@ -122,7 +122,9 @@ fn parse_block_header(block_line: &str) -> Result<(String, Vec<Token>), String> 
             return Err("empty block header".to_string());
         }
         let mut iter = tokens.into_iter();
-        let first = iter.next().ok_or_else(|| "empty block header".to_string())?;
+        let first = iter
+            .next()
+            .ok_or_else(|| "empty block header".to_string())?;
         let name = first.to_string();
         let params: Vec<Token> = iter.collect();
         return Ok((name, params));
@@ -140,13 +142,7 @@ fn parse_block_header(block_line: &str) -> Result<(String, Vec<Token>), String> 
 fn requires_structured_tokens(block_name: &str) -> bool {
     matches!(
         block_name,
-        "REAPER_PROJECT"
-            | "TEMPOENVEX"
-            | "VOLENV"
-            | "VOLENV2"
-            | "PANENV"
-            | "PANENV2"
-            | "PARMENV"
+        "REAPER_PROJECT" | "TEMPOENVEX" | "VOLENV" | "VOLENV2" | "PANENV" | "PANENV2" | "PARMENV"
     )
 }
 
@@ -285,8 +281,8 @@ fn parse_rpp_fast_single(content: &str) -> Result<RppProject, String> {
     }
 
     let header_tail = header_line["<REAPER_PROJECT".len()..].trim();
-    let header_tokens =
-        tokenize_line(header_tail).map_err(|e| format!("failed to parse project header tokens: {e}"))?;
+    let header_tokens = tokenize_line(header_tail)
+        .map_err(|e| format!("failed to parse project header tokens: {e}"))?;
 
     let version = header_tokens
         .first()
@@ -363,7 +359,9 @@ fn parse_rpp_fast_single(content: &str) -> Result<RppProject, String> {
                     .push(RppBlockContent::RawLine(line.to_string().into_boxed_str()));
             }
         } else {
-            project_props.children.push(RppBlockContent::Content(tokens));
+            project_props
+                .children
+                .push(RppBlockContent::Content(tokens));
         }
     }
 
@@ -408,8 +406,8 @@ fn parse_rpp_fast_parallel(content: &str, force_parallel: bool) -> Result<RppPro
     }
 
     let header_tail = header_line["<REAPER_PROJECT".len()..].trim();
-    let header_tokens =
-        tokenize_line(header_tail).map_err(|e| format!("failed to parse project header tokens: {e}"))?;
+    let header_tokens = tokenize_line(header_tail)
+        .map_err(|e| format!("failed to parse project header tokens: {e}"))?;
 
     let version = header_tokens
         .first()
@@ -456,7 +454,9 @@ fn parse_rpp_fast_parallel(content: &str, force_parallel: bool) -> Result<RppPro
             } else {
                 let tokens = tokenize_line(line)
                     .map_err(|e| format!("line {line_no}: invalid content line: {e}"))?;
-                project_props.children.push(RppBlockContent::Content(tokens));
+                project_props
+                    .children
+                    .push(RppBlockContent::Content(tokens));
             }
             continue;
         }

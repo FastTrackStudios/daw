@@ -10,8 +10,7 @@ fn candidate_fixtures() -> Vec<(String, PathBuf)> {
         PathBuf::from("tests/fixtures/tempo-map-advanced.RPP"),
     )];
 
-    let default_large =
-        PathBuf::from("tests/fixtures/local/Goodness of God.RPP");
+    let default_large = PathBuf::from("tests/fixtures/local/Goodness of God.RPP");
     if default_large.exists() {
         out.push(("goodness-of-god".to_string(), default_large));
     }

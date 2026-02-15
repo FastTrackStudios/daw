@@ -304,7 +304,8 @@ impl MidiAnalysisService for ReaperMidiAnalysis {
             let Some(project) = Self::resolve_project(&request.project) else {
                 return Err("Project not found".to_string());
             };
-            let Some(track) = Self::find_track_by_tag(&project, request.track_tag.as_deref()) else {
+            let Some(track) = Self::find_track_by_tag(&project, request.track_tag.as_deref())
+            else {
                 let tag = request.track_tag.unwrap_or_else(|| "<none>".to_string());
                 return Err(format!("No track matched tag '{}'", tag));
             };
@@ -344,7 +345,8 @@ impl MidiAnalysisService for ReaperMidiAnalysis {
             let Some(project) = Self::resolve_project(&request.project) else {
                 return Err("Project not found".to_string());
             };
-            let Some(track) = Self::find_track_by_tag(&project, request.track_tag.as_deref()) else {
+            let Some(track) = Self::find_track_by_tag(&project, request.track_tag.as_deref())
+            else {
                 let tag = request.track_tag.unwrap_or_else(|| "<none>".to_string());
                 return Err(format!("No track matched tag '{}'", tag));
             };

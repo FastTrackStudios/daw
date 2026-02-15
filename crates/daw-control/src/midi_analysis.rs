@@ -23,20 +23,16 @@ impl MidiAnalysis {
 
     /// Generate chart/chord analysis for this project.
     pub async fn generate_chart_data(&self, track_tag: Option<String>) -> Result<MidiChartData> {
-        let req = MidiChartRequest::new(
-            ProjectContext::Project(self.project_id.clone()),
-            track_tag,
-        );
+        let req =
+            MidiChartRequest::new(ProjectContext::Project(self.project_id.clone()), track_tag);
         let result = self.clients.midi_analysis.generate_chart_data(req).await?;
         Ok(result)
     }
 
     /// Get a lightweight source fingerprint for change detection.
     pub async fn source_fingerprint(&self, track_tag: Option<String>) -> Result<String> {
-        let req = MidiChartRequest::new(
-            ProjectContext::Project(self.project_id.clone()),
-            track_tag,
-        );
+        let req =
+            MidiChartRequest::new(ProjectContext::Project(self.project_id.clone()), track_tag);
         let result = self.clients.midi_analysis.source_fingerprint(req).await?;
         Ok(result)
     }

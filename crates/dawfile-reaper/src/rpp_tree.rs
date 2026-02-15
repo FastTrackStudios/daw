@@ -216,7 +216,11 @@ pub struct RChunk {
 }
 
 impl RChunk {
-    fn in_lua_range(index_1_based: usize, start_index: Option<usize>, end_index: Option<usize>) -> bool {
+    fn in_lua_range(
+        index_1_based: usize,
+        start_index: Option<usize>,
+        end_index: Option<usize>,
+    ) -> bool {
         if let Some(start) = start_index {
             if index_1_based < start {
                 return false;
@@ -402,9 +406,7 @@ impl RChunk {
                     return None;
                 }
                 match n {
-                    RNodeTree::Chunk(chunk) if chunk.name().as_deref() == Some(name) => {
-                        Some(chunk)
-                    }
+                    RNodeTree::Chunk(chunk) if chunk.name().as_deref() == Some(name) => Some(chunk),
                     _ => None,
                 }
             })
@@ -753,9 +755,9 @@ where
         }
 
         if trimmed == ">" {
-            let done = stack
-                .pop()
-                .ok_or_else(|| RppParseError::ParseError(format!("line {line_no}: unexpected '>'")))?;
+            let done = stack.pop().ok_or_else(|| {
+                RppParseError::ParseError(format!("line {line_no}: unexpected '>'"))
+            })?;
             if let Some(parent) = stack.last_mut() {
                 parent.children.push(RNodeTree::Chunk(done));
             } else if root.is_none() {
@@ -964,7 +966,10 @@ mod tests {
                 RNodeTree::Chunk(_) => None,
             })
             .collect();
-        assert_eq!(child_lines, vec!["|line one".to_string(), "|line two".to_string()]);
+        assert_eq!(
+            child_lines,
+            vec!["|line one".to_string(), "|line two".to_string()]
+        );
     }
 
     #[test]
@@ -1033,9 +1038,7 @@ mod tests {
 >"#;
 
         let mut root = read_rpp_chunk(fixture).expect("parse");
-        let track = root
-            .find_first_chunk_by_name("TRACK")
-            .expect("track chunk");
+        let track = root.find_first_chunk_by_name("TRACK").expect("track chunk");
         assert!(track.find_first_node_by_name("NAME").is_some());
 
         // Mutate NOTES through the generic chunk API.
@@ -1150,11 +1153,8 @@ mod tests {
         assert_eq!(chunks_2_3.len(), 1);
         assert_eq!(chunks_2_3[0].name().as_deref(), Some("TRACK"));
 
-        let names = root.find_all_nodes_by_filter(
-            |n| matches!(n, RNodeTree::Node(_)),
-            Some(1),
-            Some(3),
-        );
+        let names =
+            root.find_all_nodes_by_filter(|n| matches!(n, RNodeTree::Node(_)), Some(1), Some(3));
         assert_eq!(names.len(), 2);
     }
 }

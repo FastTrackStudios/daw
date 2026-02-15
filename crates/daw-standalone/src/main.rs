@@ -12,15 +12,15 @@
 //! - **TempoMapService**: Tempo and time signature changes
 
 use cell_runtime::run_cell;
+use daw_proto::MidiAnalysisServiceDispatcher;
 use daw_proto::item::{ItemServiceDispatcher, TakeServiceDispatcher};
 use daw_proto::marker::MarkerServiceDispatcher;
 use daw_proto::midi::MidiServiceDispatcher;
-use daw_proto::track::TrackServiceDispatcher;
 use daw_proto::project::ProjectServiceDispatcher;
 use daw_proto::region::RegionServiceDispatcher;
 use daw_proto::tempo_map::TempoMapServiceDispatcher;
+use daw_proto::track::TrackServiceDispatcher;
 use daw_proto::transport::transport::TransportServiceDispatcher;
-use daw_proto::MidiAnalysisServiceDispatcher;
 use daw_standalone::{
     StandaloneItem, StandaloneMarker, StandaloneMidi, StandaloneMidiAnalysis, StandaloneProject,
     StandaloneRegion, StandaloneTake, StandaloneTempoMap, StandaloneTrack, StandaloneTransport,
@@ -99,7 +99,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             RegionServiceDispatcher::new(region).with_middleware(telemetry.clone());
         let tempo_map_dispatcher =
             TempoMapServiceDispatcher::new(tempo_map).with_middleware(telemetry.clone());
-        let track_dispatcher = TrackServiceDispatcher::new(track).with_middleware(telemetry.clone());
+        let track_dispatcher =
+            TrackServiceDispatcher::new(track).with_middleware(telemetry.clone());
         let item_dispatcher = ItemServiceDispatcher::new(item).with_middleware(telemetry.clone());
         let take_dispatcher = TakeServiceDispatcher::new(take).with_middleware(telemetry.clone());
         let midi_dispatcher = MidiServiceDispatcher::new(midi).with_middleware(telemetry.clone());

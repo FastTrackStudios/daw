@@ -3,8 +3,7 @@
 use std::sync::Arc;
 
 use crate::{
-    DawClients, FxChain, Markers, MidiAnalysis, ProjectItems, Regions, TempoMap, Tracks,
-    Transport,
+    DawClients, FxChain, Markers, MidiAnalysis, ProjectItems, Regions, TempoMap, Tracks, Transport,
 };
 use daw_proto::FxChainContext;
 

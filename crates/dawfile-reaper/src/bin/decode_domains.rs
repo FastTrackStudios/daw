@@ -40,7 +40,9 @@ fn parse_args() -> Result<(PathBuf, usize), String> {
             "--help" | "-h" => {
                 println!("decode_domains - typed decode domain profiler");
                 println!("Usage:");
-                println!("  cargo run -p dawfile-reaper --release --bin decode_domains -- [options]");
+                println!(
+                    "  cargo run -p dawfile-reaper --release --bin decode_domains -- [options]"
+                );
                 println!("Options:");
                 println!("  --fixture <path>  RPP fixture path");
                 println!("  --repeat <n>      Decode repeats per scenario (default: 5)");
@@ -215,8 +217,7 @@ fn main() -> Result<(), String> {
         let mut sample: Option<ReaperProject> = None;
         for _ in 0..repeat {
             let t0 = Instant::now();
-            let project =
-                ReaperProject::from_rpp_project_with_options(&parsed, scenario.options)?;
+            let project = ReaperProject::from_rpp_project_with_options(&parsed, scenario.options)?;
             times.push(t0.elapsed().as_secs_f64());
             sample = Some(project);
         }

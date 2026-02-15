@@ -27,7 +27,11 @@ fn chunk_tag(line: &str) -> Option<String> {
         }
         out.push(ch);
     }
-    if out.is_empty() { None } else { Some(out) }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
 }
 
 fn line_tag(line: &str) -> Option<String> {
@@ -136,7 +140,11 @@ fn audit_large_rpp_fixture() {
         .flat_map(|t| t.envelopes.iter())
         .map(|e| e.points.len())
         .sum::<usize>()
-        + typed.envelopes.iter().map(|e| e.points.len()).sum::<usize>();
+        + typed
+            .envelopes
+            .iter()
+            .map(|e| e.points.len())
+            .sum::<usize>();
 
     eprintln!("\n=== LARGE RPP AUDIT ===");
     eprintln!("Path: {}", path.display());

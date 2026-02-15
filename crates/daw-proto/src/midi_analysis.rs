@@ -61,5 +61,6 @@ pub trait MidiAnalysisService {
     async fn source_fingerprint(&self, request: MidiChartRequest) -> Result<String, String>;
 
     /// Analyze MIDI for the given request and return chart/chord data.
-    async fn generate_chart_data(&self, request: MidiChartRequest) -> Result<MidiChartData, String>;
+    async fn generate_chart_data(&self, request: MidiChartRequest)
+    -> Result<MidiChartData, String>;
 }

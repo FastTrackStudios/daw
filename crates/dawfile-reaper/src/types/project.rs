@@ -1,13 +1,13 @@
 //! REAPER project data structures and parsing
 
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-use rayon::prelude::*;
 
 use super::marker_region::MarkerRegionCollection;
-use super::track::TrackParseOptions;
 use super::time_tempo::TempoTimeEnvelope;
+use super::track::TrackParseOptions;
 use crate::primitives::{BlockType, RppBlockContent, RppProject, Token};
 
 /// Automation mode for tracks and envelopes
@@ -1226,7 +1226,8 @@ impl ReaperProject {
                     if let RppBlockContent::Content(tokens) = child {
                         if let Some(Token::Identifier(kind)) = tokens.first() {
                             if kind == "MARKER" {
-                                match super::marker_region::MarkerRegion::from_marker_tokens(tokens) {
+                                match super::marker_region::MarkerRegion::from_marker_tokens(tokens)
+                                {
                                     Ok(marker_region) => project.markers_regions.add(marker_region),
                                     Err(e) => eprintln!("Warning: Failed to parse marker: {}", e),
                                 }
@@ -1254,7 +1255,10 @@ impl ReaperProject {
                         if block.block_type != BlockType::Track {
                             return None;
                         }
-                        Some((idx, Track::from_block_with_options(block, options.track_options)))
+                        Some((
+                            idx,
+                            Track::from_block_with_options(block, options.track_options),
+                        ))
                     })
                     .collect();
                 track_results.sort_by_key(|(idx, _)| *idx);
@@ -1341,14 +1345,17 @@ impl ReaperProject {
                             Err(e) => eprintln!("Warning: Failed to parse track: {}", e),
                         }
                     }
-                    BlockType::Item if options.parse_project_items => match Item::from_block(block) {
+                    BlockType::Item if options.parse_project_items => match Item::from_block(block)
+                    {
                         Ok(item) => project.items.push(item),
                         Err(e) => eprintln!("Warning: Failed to parse item: {}", e),
                     },
-                    BlockType::Envelope if options.parse_project_envelopes => match Envelope::from_block(block) {
-                        Ok(envelope) => project.envelopes.push(envelope),
-                        Err(e) => eprintln!("Warning: Failed to parse envelope: {}", e),
-                    },
+                    BlockType::Envelope if options.parse_project_envelopes => {
+                        match Envelope::from_block(block) {
+                            Ok(envelope) => project.envelopes.push(envelope),
+                            Err(e) => eprintln!("Warning: Failed to parse envelope: {}", e),
+                        }
+                    }
                     BlockType::FxChain if options.parse_project_fxchains => {
                         match FxChain::from_block(block) {
                             Ok(fx_chain) => project.fx_chains.push(fx_chain),

@@ -205,7 +205,12 @@ impl MidiService for ReaperMidi {
         self.get_notes(cx, location).await.len() as u32
     }
 
-    async fn add_note(&self, _cx: &Context, _location: MidiTakeLocation, _note: MidiNoteCreate) -> u32 {
+    async fn add_note(
+        &self,
+        _cx: &Context,
+        _location: MidiTakeLocation,
+        _note: MidiNoteCreate,
+    ) -> u32 {
         Self::readonly_warn("add_note");
         0
     }
@@ -352,11 +357,21 @@ impl MidiService for ReaperMidi {
         Self::readonly_warn("delete_cc");
     }
 
-    async fn set_cc_value(&self, _cx: &Context, _location: MidiTakeLocation, _index: u32, _value: u8) {
+    async fn set_cc_value(
+        &self,
+        _cx: &Context,
+        _location: MidiTakeLocation,
+        _index: u32,
+        _value: u8,
+    ) {
         Self::readonly_warn("set_cc_value");
     }
 
-    async fn get_pitch_bends(&self, _cx: &Context, _location: MidiTakeLocation) -> Vec<MidiPitchBend> {
+    async fn get_pitch_bends(
+        &self,
+        _cx: &Context,
+        _location: MidiTakeLocation,
+    ) -> Vec<MidiPitchBend> {
         Vec::new()
     }
 

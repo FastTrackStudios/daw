@@ -54,7 +54,11 @@ impl TempoTimePoint {
 
         let time_signature_encoded = if tokens.len() > 4 {
             let encoded = tokens[4].as_number().ok_or("Invalid time signature")? as i32;
-            if encoded > 0 { Some(encoded) } else { None }
+            if encoded > 0 {
+                Some(encoded)
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -242,8 +246,8 @@ impl TempoTimeEnvelope {
         }
 
         let slope = (end.tempo - start.tempo) / seg_duration;
-        let tempo_integral =
-            start.tempo * (off_to - off_from) + 0.5 * slope * (off_to * off_to - off_from * off_from);
+        let tempo_integral = start.tempo * (off_to - off_from)
+            + 0.5 * slope * (off_to * off_to - off_from * off_from);
         tempo_integral / 60.0
     }
 
@@ -384,23 +388,21 @@ impl TempoTimeEnvelope {
         let mut quarter_in_measure = 0.0f64;
         let mut current_sig = self.default_time_signature;
 
-        let advance_quarters = |quarters: f64,
-                                sig: (i32, i32),
-                                measure_ref: &mut i32,
-                                qim: &mut f64| {
-            if quarters <= 0.0 {
-                return;
-            }
-            let measure_len_qn = (sig.0 as f64) * (4.0 / sig.1 as f64);
-            *qim += quarters;
-            while *qim + Self::EPSILON >= measure_len_qn {
-                *qim -= measure_len_qn;
-                *measure_ref += 1;
-            }
-            if *qim < 0.0 {
-                *qim = 0.0;
-            }
-        };
+        let advance_quarters =
+            |quarters: f64, sig: (i32, i32), measure_ref: &mut i32, qim: &mut f64| {
+                if quarters <= 0.0 {
+                    return;
+                }
+                let measure_len_qn = (sig.0 as f64) * (4.0 / sig.1 as f64);
+                *qim += quarters;
+                while *qim + Self::EPSILON >= measure_len_qn {
+                    *qim -= measure_len_qn;
+                    *measure_ref += 1;
+                }
+                if *qim < 0.0 {
+                    *qim = 0.0;
+                }
+            };
 
         let mut sig_changes: Vec<(f64, (i32, i32))> = vec![(0.0, current_sig)];
         for point in &self.points {

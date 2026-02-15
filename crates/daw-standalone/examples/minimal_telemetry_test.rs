@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test: Try to invoke a method through the dispatcher
     println!("Testing middleware invocation...");
-    
+
     // Create a dummy context
     let cx = Context::new(
         roam::wire::ConnectionId::new(1),
