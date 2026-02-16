@@ -93,6 +93,12 @@ pub struct Track {
     /// Whether this track is a folder track
     pub is_folder: bool,
 
+    // === Visibility ===
+    /// Whether the track is visible in the TCP (track control panel / arrange view)
+    pub visible_in_tcp: bool,
+    /// Whether the track is visible in the MCP (mixer control panel)
+    pub visible_in_mixer: bool,
+
     // === FX Info ===
     /// Number of FX in the main FX chain
     pub fx_count: u32,
@@ -117,6 +123,8 @@ impl Track {
             parent_guid: None,
             folder_depth: 0,
             is_folder: false,
+            visible_in_tcp: true,
+            visible_in_mixer: true,
             fx_count: 0,
             input_fx_count: 0,
         }

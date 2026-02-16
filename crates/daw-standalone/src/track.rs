@@ -18,6 +18,8 @@ struct TrackState {
     selected: bool,
     volume: f64,
     pan: f64,
+    visible_in_tcp: bool,
+    visible_in_mixer: bool,
 }
 
 impl TrackState {
@@ -32,11 +34,22 @@ impl TrackState {
             selected: false,
             volume: 1.0,
             pan: 0.0,
+            visible_in_tcp: true,
+            visible_in_mixer: true,
         }
     }
 
     fn to_track(&self) -> Track {
-        Track::new(self.guid.clone(), self.index, self.name.clone())
+        let mut track = Track::new(self.guid.clone(), self.index, self.name.clone());
+        track.muted = self.muted;
+        track.soloed = self.soloed;
+        track.armed = self.armed;
+        track.selected = self.selected;
+        track.volume = self.volume;
+        track.pan = self.pan;
+        track.visible_in_tcp = self.visible_in_tcp;
+        track.visible_in_mixer = self.visible_in_mixer;
+        track
     }
 }
 
@@ -277,5 +290,31 @@ impl TrackService for StandaloneTrack {
         _color: u32,
     ) {
         // Color tracking not implemented in standalone
+    }
+
+    async fn set_visible_in_tcp(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        track: TrackRef,
+        visible: bool,
+    ) {
+        let mut tracks = self.tracks.write().await;
+        if let Some(t) = Self::find_track(&mut tracks, &track) {
+            t.visible_in_tcp = visible;
+        }
+    }
+
+    async fn set_visible_in_mixer(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        track: TrackRef,
+        visible: bool,
+    ) {
+        let mut tracks = self.tracks.write().await;
+        if let Some(t) = Self::find_track(&mut tracks, &track) {
+            t.visible_in_mixer = visible;
+        }
     }
 }

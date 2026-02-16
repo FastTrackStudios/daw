@@ -27,6 +27,10 @@ pub enum TrackEvent {
     PanChanged { guid: String, pan: f64 },
     /// Track color changed
     ColorChanged { guid: String, color: Option<u32> },
+    /// Track TCP visibility changed
+    TcpVisibilityChanged { guid: String, visible: bool },
+    /// Track mixer visibility changed
+    MixerVisibilityChanged { guid: String, visible: bool },
     /// Track was moved (index changed)
     Moved {
         guid: String,

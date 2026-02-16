@@ -111,6 +111,10 @@ fn build_track_info(track: &reaper_high::Track) -> Track {
     // The UI uses folder_depth for indentation instead.
     let parent_guid = None;
 
+    // Visibility
+    let visible_in_tcp = track.is_shown(reaper_medium::TrackArea::Tcp);
+    let visible_in_mixer = track.is_shown(reaper_medium::TrackArea::Mcp);
+
     Track {
         guid,
         index,
@@ -125,6 +129,8 @@ fn build_track_info(track: &reaper_high::Track) -> Track {
         parent_guid,
         folder_depth,
         is_folder,
+        visible_in_tcp,
+        visible_in_mixer,
         fx_count,
         input_fx_count,
     }
@@ -523,6 +529,46 @@ impl TrackService for ReaperTrack {
                 let b = (color & 0xFF) as u8;
                 t.set_custom_color(Some(reaper_medium::RgbColor::rgb(r, g, b)));
             }
+        });
+    }
+
+    async fn set_visible_in_tcp(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        track: TrackRef,
+        visible: bool,
+    ) {
+        let Some(ts) = task_support() else { return };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some(t) = resolve_track(&proj, &track) else {
+                return;
+            };
+            t.set_shown(reaper_medium::TrackArea::Tcp, visible);
+        });
+    }
+
+    async fn set_visible_in_mixer(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        track: TrackRef,
+        visible: bool,
+    ) {
+        let Some(ts) = task_support() else { return };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some(t) = resolve_track(&proj, &track) else {
+                return;
+            };
+            t.set_shown(reaper_medium::TrackArea::Mcp, visible);
         });
     }
 }

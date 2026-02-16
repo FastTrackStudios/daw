@@ -85,6 +85,16 @@ pub trait TrackService {
     async fn unmute_all(&self, project: ProjectContext);
 
     // =========================================================================
+    // Visibility
+    // =========================================================================
+
+    /// Set track visibility in the TCP (track control panel / arrange view)
+    async fn set_visible_in_tcp(&self, project: ProjectContext, track: TrackRef, visible: bool);
+
+    /// Set track visibility in the MCP (mixer control panel)
+    async fn set_visible_in_mixer(&self, project: ProjectContext, track: TrackRef, visible: bool);
+
+    // =========================================================================
     // Track Management
     // =========================================================================
 

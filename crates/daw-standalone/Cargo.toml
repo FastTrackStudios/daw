@@ -18,3 +18,5 @@ integration-tests = { workspace = true }
 daw-proto = { path = "../daw-proto" }
 daw-control = { workspace = true }
 eyre = { workspace = true }
+roam-wire = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

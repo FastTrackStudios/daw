@@ -456,6 +456,74 @@ impl TrackHandle {
     }
 
     // =========================================================================
+    // Visibility
+    // =========================================================================
+
+    /// Show the track in the TCP (arrange view)
+    pub async fn show_in_tcp(&self) -> Result<()> {
+        self.clients
+            .track
+            .set_visible_in_tcp(self.context(), self.track_ref(), true)
+            .await?;
+        Ok(())
+    }
+
+    /// Hide the track from the TCP (arrange view)
+    pub async fn hide_in_tcp(&self) -> Result<()> {
+        self.clients
+            .track
+            .set_visible_in_tcp(self.context(), self.track_ref(), false)
+            .await?;
+        Ok(())
+    }
+
+    /// Set TCP visibility
+    pub async fn set_visible_in_tcp(&self, visible: bool) -> Result<()> {
+        self.clients
+            .track
+            .set_visible_in_tcp(self.context(), self.track_ref(), visible)
+            .await?;
+        Ok(())
+    }
+
+    /// Check if track is visible in TCP
+    pub async fn is_visible_in_tcp(&self) -> Result<bool> {
+        Ok(self.info().await?.visible_in_tcp)
+    }
+
+    /// Show the track in the mixer
+    pub async fn show_in_mixer(&self) -> Result<()> {
+        self.clients
+            .track
+            .set_visible_in_mixer(self.context(), self.track_ref(), true)
+            .await?;
+        Ok(())
+    }
+
+    /// Hide the track from the mixer
+    pub async fn hide_in_mixer(&self) -> Result<()> {
+        self.clients
+            .track
+            .set_visible_in_mixer(self.context(), self.track_ref(), false)
+            .await?;
+        Ok(())
+    }
+
+    /// Set mixer visibility
+    pub async fn set_visible_in_mixer(&self, visible: bool) -> Result<()> {
+        self.clients
+            .track
+            .set_visible_in_mixer(self.context(), self.track_ref(), visible)
+            .await?;
+        Ok(())
+    }
+
+    /// Check if track is visible in mixer
+    pub async fn is_visible_in_mixer(&self) -> Result<bool> {
+        Ok(self.info().await?.visible_in_mixer)
+    }
+
+    // =========================================================================
     // FX Chain Access
     // =========================================================================
 
