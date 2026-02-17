@@ -20,6 +20,7 @@ struct TrackState {
     pan: f64,
     visible_in_tcp: bool,
     visible_in_mixer: bool,
+    color: Option<u32>,
 }
 
 impl TrackState {
@@ -36,6 +37,7 @@ impl TrackState {
             pan: 0.0,
             visible_in_tcp: true,
             visible_in_mixer: true,
+            color: None,
         }
     }
 
@@ -49,6 +51,7 @@ impl TrackState {
         track.pan = self.pan;
         track.visible_in_tcp = self.visible_in_tcp;
         track.visible_in_mixer = self.visible_in_mixer;
+        track.color = self.color;
         track
     }
 }
@@ -286,10 +289,13 @@ impl TrackService for StandaloneTrack {
         &self,
         _cx: &Context,
         _project: ProjectContext,
-        _track: TrackRef,
-        _color: u32,
+        track: TrackRef,
+        color: u32,
     ) {
-        // Color tracking not implemented in standalone
+        let mut tracks = self.tracks.write().await;
+        if let Some(t) = Self::find_track(&mut tracks, &track) {
+            t.color = if color == 0 { None } else { Some(color) };
+        }
     }
 
     async fn set_visible_in_tcp(
