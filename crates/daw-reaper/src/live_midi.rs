@@ -1,7 +1,17 @@
 //! REAPER Live MIDI Implementation
 //!
-//! Stub implementation for LiveMidiService - to be implemented when needed
+//! Implements LiveMidiService for REAPER, including StuffMIDIMessage injection
+//! for routing MIDI to armed tracks via the virtual keyboard queue.
 
+use crate::transport::task_support;
+use daw_proto::live_midi::{
+    LiveMidiEvent, LiveMidiService, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming,
+    StuffMidiTarget,
+};
+use roam::Context;
+use tracing::{debug, warn};
+
+#[derive(Clone)]
 pub struct ReaperLiveMidi;
 
 impl ReaperLiveMidi {
@@ -16,6 +26,94 @@ impl Default for ReaperLiveMidi {
     }
 }
 
-// TODO: Implement LiveMidiService trait when needed
-// Need to understand REAPER's MIDI device APIs and how to properly
-// integrate with the real-time MIDI streaming requirements
+impl LiveMidiService for ReaperLiveMidi {
+    // === Device Enumeration (stubs — not yet implemented) ===
+
+    async fn get_input_devices(&self, _cx: &Context) -> Vec<MidiInputDevice> {
+        vec![]
+    }
+
+    async fn get_output_devices(&self, _cx: &Context) -> Vec<MidiOutputDevice> {
+        vec![]
+    }
+
+    async fn get_input_device(&self, _cx: &Context, _id: u32) -> Option<MidiInputDevice> {
+        None
+    }
+
+    async fn get_output_device(&self, _cx: &Context, _id: u32) -> Option<MidiOutputDevice> {
+        None
+    }
+
+    async fn open_input_device(&self, _cx: &Context, _id: u32) -> bool {
+        false
+    }
+
+    async fn close_input_device(&self, _cx: &Context, _id: u32) {}
+
+    async fn open_output_device(&self, _cx: &Context, _id: u32) -> bool {
+        false
+    }
+
+    async fn close_output_device(&self, _cx: &Context, _id: u32) {}
+
+    async fn send_midi(
+        &self,
+        _cx: &Context,
+        _device_id: u32,
+        _message: MidiMessage,
+        _timing: SendMidiTiming,
+    ) {
+    }
+
+    async fn send_midi_batch(&self, _cx: &Context, _device_id: u32, _events: Vec<LiveMidiEvent>) {}
+
+    async fn subscribe_input(&self, _cx: &Context, _device_id: u32) -> bool {
+        false
+    }
+
+    async fn unsubscribe_input(&self, _cx: &Context, _device_id: u32) {}
+
+    // === MIDI Injection ===
+
+    async fn stuff_midi_message(
+        &self,
+        _cx: &Context,
+        target: StuffMidiTarget,
+        message: MidiMessage,
+    ) {
+        let Some((status, data1, data2)) = message.to_raw_bytes() else {
+            warn!(
+                "stuff_midi_message: cannot convert {:?} to short message (SysEx/Raw not supported)",
+                message
+            );
+            return;
+        };
+
+        let mode = match target {
+            StuffMidiTarget::VirtualMidiKeyboard => 0,
+            StuffMidiTarget::ControlInput => 1,
+            StuffMidiTarget::VirtualMidiKeyboardCurrentChannel => 2,
+        };
+
+        debug!(
+            "stuff_midi_message: mode={} status=0x{:02X} data1={} data2={}",
+            mode, status, data1, data2
+        );
+
+        let Some(ts) = task_support() else {
+            warn!("stuff_midi_message: TaskSupport not set");
+            return;
+        };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let reaper = reaper_high::Reaper::get();
+            reaper.medium_reaper().low().StuffMIDIMessage(
+                mode,
+                status as i32,
+                data1 as i32,
+                data2 as i32,
+            );
+        });
+    }
+}

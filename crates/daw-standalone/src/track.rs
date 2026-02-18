@@ -1,6 +1,6 @@
 //! Standalone track implementation
 
-use daw_proto::{ProjectContext, Track, TrackRef, TrackService};
+use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackRef, TrackService};
 use roam::Context;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -206,6 +206,26 @@ impl TrackService for StandaloneTrack {
         if let Some(t) = Self::find_track(&mut tracks, &track) {
             t.armed = armed;
         }
+    }
+
+    async fn set_input_monitoring(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _mode: InputMonitoringMode,
+    ) {
+        // No-op in standalone
+    }
+
+    async fn set_record_input(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _input: RecordInput,
+    ) {
+        // No-op in standalone
     }
 
     async fn set_volume(

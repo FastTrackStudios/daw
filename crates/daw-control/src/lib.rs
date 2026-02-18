@@ -434,6 +434,22 @@ impl Daw {
     pub fn audio_engine(&self) -> &AudioEngineServiceClient {
         &self.clients.audio_engine
     }
+
+    /// Inject a MIDI message into REAPER's virtual keyboard queue.
+    ///
+    /// Messages reach armed tracks whose record input is set to MIDI VKB.
+    /// Use `StuffMidiTarget::VirtualMidiKeyboard` (default) for most cases.
+    pub async fn stuff_midi(
+        &self,
+        target: daw_proto::StuffMidiTarget,
+        message: daw_proto::MidiMessage,
+    ) -> eyre::Result<()> {
+        self.clients
+            .live_midi
+            .stuff_midi_message(target, message)
+            .await?;
+        Ok(())
+    }
 }
 
 // ============================================================================

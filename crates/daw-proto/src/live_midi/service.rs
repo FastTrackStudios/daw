@@ -1,6 +1,8 @@
 //! Live MIDI service trait
 
-use super::{LiveMidiEvent, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming};
+use super::{
+    LiveMidiEvent, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming, StuffMidiTarget,
+};
 use roam::service;
 
 /// Service for real-time MIDI input/output
@@ -56,4 +58,18 @@ pub trait LiveMidiService {
 
     /// Unsubscribe from MIDI input
     async fn unsubscribe_input(&self, device_id: u32);
+
+    // === MIDI Injection (StuffMIDIMessage) ===
+
+    /// Inject a MIDI message into REAPER's internal message queue.
+    ///
+    /// This uses REAPER's `StuffMIDIMessage` API to inject MIDI into the
+    /// virtual keyboard queue or control input queue. Messages injected into
+    /// `VirtualMidiKeyboard` are routed to armed tracks whose record input
+    /// is set to MIDI Virtual Keyboard (VKB).
+    ///
+    /// This is the mechanism used by Helgobox for simulating MIDI input in
+    /// integration tests, and is how we send CC messages to plugins that
+    /// manage presets internally (e.g., Neural DSP Archetype plugins).
+    async fn stuff_midi_message(&self, target: StuffMidiTarget, message: MidiMessage);
 }

@@ -19,4 +19,4 @@ pub use service::{TrackService, TrackServiceClient, TrackServiceDispatcher};
 pub use test_utils::{
     TrackGroup, TrackStructureBuilder, assert_tracks_equal, display_tracklist, format_tracklist,
 };
-pub use track::{Track, TrackRef};
+pub use track::{InputMonitoringMode, RecordInput, Track, TrackRef};

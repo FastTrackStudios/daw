@@ -152,3 +152,59 @@ impl Default for Track {
         Self::new(String::new(), 0, String::new())
     }
 }
+
+/// Input monitoring mode for a track.
+///
+/// Controls whether the track's input signal is monitored (passed through
+/// to FX and output) during recording/playback.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Facet)]
+pub enum InputMonitoringMode {
+    /// No input monitoring.
+    #[default]
+    Off,
+    /// Always monitor input (even when not playing/recording).
+    Normal,
+    /// Only monitor when not playing (tape-style auto-monitoring).
+    NotWhenPlaying,
+}
+
+/// Record input source for a track.
+///
+/// Simplified representation of REAPER's I_RECINPUT encoding.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Facet)]
+pub enum RecordInput {
+    /// No input (-1).
+    None,
+    /// MIDI input from a specific device on a specific channel.
+    /// device_id: None = all devices. channel: None = all channels.
+    /// device_id 62 = Virtual MIDI Keyboard (VKB).
+    Midi {
+        device_id: Option<u8>,
+        channel: Option<u8>,
+    },
+    /// Raw I_RECINPUT value for other input types.
+    Raw(i32),
+}
+
+impl RecordInput {
+    /// MIDI from the Virtual MIDI Keyboard on all channels.
+    ///
+    /// This is the input source needed for `StuffMIDIMessage` with
+    /// `VirtualMidiKeyboard` target to reach the track's FX chain.
+    pub fn midi_virtual_keyboard() -> Self {
+        Self::Midi {
+            device_id: Some(62),
+            channel: None,
+        }
+    }
+
+    /// MIDI from all devices on all channels.
+    pub fn midi_all() -> Self {
+        Self::Midi {
+            device_id: None,
+            channel: None,
+        }
+    }
+}

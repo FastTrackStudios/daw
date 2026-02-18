@@ -18,10 +18,10 @@
 use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
     FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNode, FxNodeId,
-    FxParamModulation, FxParameter, FxPinMappings, FxRef, FxRoutingMode, FxService, FxStateChunk,
-    FxTarget, FxTree, FxType, MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
-    SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
-    SetParameterRequest,
+    FxParamModulation, FxParameter, FxPinMappings, FxPresetIndex, FxRef, FxRoutingMode, FxService,
+    FxStateChunk, FxTarget, FxTree, FxType, MoveFromContainerRequest, MoveToContainerRequest,
+    ProjectContext, SetContainerChannelConfigRequest, SetNamedConfigRequest,
+    SetParameterByNameRequest, SetParameterRequest,
 };
 use reaper_high::{FxChain, MAX_TRACK_CHUNK_SIZE, Reaper, Track};
 use reaper_medium::{ChunkCacheHint, FxPresetRef, TrackFxLocation, TransferBehavior};
@@ -1771,6 +1771,49 @@ impl FxService for ReaperFx {
     // =========================================================================
     // Presets
     // =========================================================================
+
+    async fn get_preset_index(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Option<FxPresetIndex> {
+        debug!("ReaperFx::get_preset_index({:?})", target);
+
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return None;
+        };
+
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project)?;
+            let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
+            let index = resolve_fx_index(&chain, &target.fx)?;
+            let fx = chain.fx_by_index_untracked(index);
+
+            // Get preset index and count via reaper-high
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                fx.preset_index_and_count()
+            }))
+            .ok()?;
+
+            // Get preset name via reaper-high
+            let name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                fx.preset_name()
+                    .map(|rs| rs.to_str().to_string())
+                    .filter(|s| !s.is_empty())
+            }))
+            .unwrap_or(None);
+
+            Some(FxPresetIndex {
+                index: result.index,
+                count: result.count,
+                name,
+            })
+        })
+        .await
+        .unwrap_or(None)
+    }
 
     async fn next_preset(
         &self,

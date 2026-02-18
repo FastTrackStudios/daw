@@ -2,7 +2,7 @@
 //!
 //! Defines the RPC interface for track operations.
 
-use super::{Track, TrackRef};
+use super::{InputMonitoringMode, RecordInput, Track, TrackRef};
 use crate::ProjectContext;
 use roam::service;
 
@@ -50,6 +50,25 @@ pub trait TrackService {
 
     /// Set the arm (record-ready) state of a track
     async fn set_armed(&self, project: ProjectContext, track: TrackRef, armed: bool);
+
+    /// Set the input monitoring mode for a track.
+    ///
+    /// Controls whether input signal passes through to FX and output:
+    /// - `Off` — no monitoring
+    /// - `Normal` — always monitor (needed for MIDI VKB → FX flow)
+    /// - `NotWhenPlaying` — tape-style auto-monitoring
+    async fn set_input_monitoring(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        mode: InputMonitoringMode,
+    );
+
+    /// Set the record input source for a track.
+    ///
+    /// Use `RecordInput::midi_virtual_keyboard()` to receive from REAPER's
+    /// virtual MIDI keyboard queue (pairs with `StuffMIDIMessage`).
+    async fn set_record_input(&self, project: ProjectContext, track: TrackRef, input: RecordInput);
 
     // =========================================================================
     // Volume/Pan

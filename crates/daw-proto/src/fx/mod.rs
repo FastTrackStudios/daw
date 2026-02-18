@@ -18,8 +18,8 @@ pub use tree::{
 };
 pub use types::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
-    FxChannelConfig, FxLatency, FxParamModulation, FxParameter, FxPinMappings, FxRef, FxStateChunk,
-    FxTarget, FxType, MoveFromContainerRequest, MoveToContainerRequest,
+    FxChannelConfig, FxLatency, FxParamModulation, FxParameter, FxPinMappings, FxPresetIndex,
+    FxRef, FxStateChunk, FxTarget, FxType, MoveFromContainerRequest, MoveToContainerRequest,
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };

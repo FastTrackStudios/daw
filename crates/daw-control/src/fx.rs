@@ -6,8 +6,8 @@ use crate::DawClients;
 use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
     FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
-    FxParameter, FxPinMappings, FxRef, FxRoutingMode, FxStateChunk, FxTarget, FxTree,
-    MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
+    FxParameter, FxPinMappings, FxPresetIndex, FxRef, FxRoutingMode, FxStateChunk, FxTarget,
+    FxTree, MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
@@ -640,6 +640,18 @@ impl FxHandle {
     // =========================================================================
     // Presets
     // =========================================================================
+
+    /// Get the current preset index, total count, and name.
+    ///
+    /// Returns `None` if the FX doesn't support presets or isn't found.
+    pub async fn preset_index(&self) -> Result<Option<FxPresetIndex>> {
+        let result = self
+            .clients
+            .fx
+            .get_preset_index(self.project_context(), self.target())
+            .await?;
+        Ok(result)
+    }
 
     /// Navigate to the next preset
     pub async fn next_preset(&self) -> Result<()> {

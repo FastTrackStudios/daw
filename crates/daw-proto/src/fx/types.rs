@@ -374,6 +374,21 @@ pub struct SetContainerChannelConfigRequest {
 }
 
 // =============================================================================
+// Preset Types
+// =============================================================================
+
+/// Current preset position and total count for an FX plugin.
+#[derive(Clone, Debug, Default, Facet)]
+pub struct FxPresetIndex {
+    /// Current preset index (None if factory/no preset active).
+    pub index: Option<u32>,
+    /// Total number of presets available.
+    pub count: u32,
+    /// Current preset name (None if unnamed or factory default).
+    pub name: Option<String>,
+}
+
+// =============================================================================
 // FX Channel Config Types
 // =============================================================================
 

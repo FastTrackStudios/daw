@@ -2,6 +2,7 @@
 
 use daw_proto::live_midi::{
     LiveMidiEvent, LiveMidiService, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming,
+    StuffMidiTarget,
 };
 use roam::Context;
 
@@ -69,6 +70,15 @@ impl LiveMidiService for StandaloneLiveMidi {
     }
 
     async fn unsubscribe_input(&self, _cx: &Context, _device_id: u32) {
+        // No-op
+    }
+
+    async fn stuff_midi_message(
+        &self,
+        _cx: &Context,
+        _target: StuffMidiTarget,
+        _message: MidiMessage,
+    ) {
         // No-op
     }
 }

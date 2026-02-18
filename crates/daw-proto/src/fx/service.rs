@@ -15,7 +15,7 @@
 use super::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
     FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
-    FxParameter, FxPinMappings, FxRoutingMode, FxStateChunk, FxTarget, FxTree,
+    FxParameter, FxPinMappings, FxPresetIndex, FxRoutingMode, FxStateChunk, FxTarget, FxTree,
     MoveFromContainerRequest, MoveToContainerRequest, SetContainerChannelConfigRequest,
     SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
 };
@@ -135,6 +135,16 @@ pub trait FxService {
     // =========================================================================
     // Presets
     // =========================================================================
+
+    /// Get the current preset index, total count, and name.
+    ///
+    /// Returns the plugin's internal preset state — which factory/user
+    /// preset is active and how many are available for cycling.
+    async fn get_preset_index(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Option<FxPresetIndex>;
 
     /// Navigate to the next preset
     async fn next_preset(&self, project: ProjectContext, target: FxTarget) -> Result<(), String>;

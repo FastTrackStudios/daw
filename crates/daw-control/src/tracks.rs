@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use crate::{DawClients, Envelopes, FxChain, HardwareOutputs, Items, Receives, Sends};
-use daw_proto::{FxChainContext, ProjectContext, Track, TrackRef};
+use daw_proto::{
+    FxChainContext, InputMonitoringMode, ProjectContext, RecordInput, Track, TrackRef,
+};
 use eyre::Result;
 
 /// Tracks handle for a specific project
@@ -410,6 +412,24 @@ impl TrackHandle {
     /// Check if track is armed
     pub async fn is_armed(&self) -> Result<bool> {
         Ok(self.info().await?.armed)
+    }
+
+    /// Set the input monitoring mode.
+    pub async fn set_input_monitoring(&self, mode: InputMonitoringMode) -> Result<()> {
+        self.clients
+            .track
+            .set_input_monitoring(self.context(), self.track_ref(), mode)
+            .await?;
+        Ok(())
+    }
+
+    /// Set the record input source.
+    pub async fn set_record_input(&self, input: RecordInput) -> Result<()> {
+        self.clients
+            .track
+            .set_record_input(self.context(), self.track_ref(), input)
+            .await?;
+        Ok(())
     }
 
     // =========================================================================

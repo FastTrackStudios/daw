@@ -3,8 +3,8 @@
 use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
     FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
-    FxParameter, FxPinMappings, FxRoutingMode, FxService, FxStateChunk, FxTarget, FxTree,
-    MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
+    FxParameter, FxPinMappings, FxPresetIndex, FxRoutingMode, FxService, FxStateChunk, FxTarget,
+    FxTree, MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
@@ -154,6 +154,15 @@ impl FxService for StandaloneFx {
         _request: SetParameterByNameRequest,
     ) -> Result<(), String> {
         Ok(())
+    }
+
+    async fn get_preset_index(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _target: FxTarget,
+    ) -> Option<FxPresetIndex> {
+        None
     }
 
     async fn next_preset(

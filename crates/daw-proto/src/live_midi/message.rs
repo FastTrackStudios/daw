@@ -107,6 +107,62 @@ impl MidiMessage {
     }
 }
 
+impl MidiMessage {
+    /// Convert to raw MIDI bytes (status, data1, data2).
+    ///
+    /// Returns None for SysEx and Raw messages (not short messages).
+    pub fn to_raw_bytes(&self) -> Option<(u8, u8, u8)> {
+        match *self {
+            Self::NoteOn {
+                channel,
+                note,
+                velocity,
+            } => Some((0x90 | channel, note, velocity)),
+            Self::NoteOff {
+                channel,
+                note,
+                velocity,
+            } => Some((0x80 | channel, note, velocity)),
+            Self::ControlChange {
+                channel,
+                controller,
+                value,
+            } => Some((0xB0 | channel, controller, value)),
+            Self::ProgramChange { channel, program } => Some((0xC0 | channel, program, 0)),
+            Self::PitchBend { channel, value } => {
+                let unsigned = (value + 8192) as u16;
+                Some((
+                    0xE0 | channel,
+                    (unsigned & 0x7F) as u8,
+                    (unsigned >> 7) as u8,
+                ))
+            }
+            Self::ChannelPressure { channel, pressure } => Some((0xD0 | channel, pressure, 0)),
+            Self::PolyPressure {
+                channel,
+                note,
+                pressure,
+            } => Some((0xA0 | channel, note, pressure)),
+            Self::SysEx(_) | Self::Raw(_) => None,
+        }
+    }
+}
+
+/// Target queue for StuffMIDIMessage injection.
+///
+/// Controls where injected MIDI is routed within REAPER.
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, Facet)]
+pub enum StuffMidiTarget {
+    /// Virtual MIDI keyboard queue — routes to armed tracks with VKB input.
+    #[default]
+    VirtualMidiKeyboard,
+    /// MIDI-as-control-input queue — routes to control surfaces / actions.
+    ControlInput,
+    /// Virtual MIDI keyboard on the currently selected channel.
+    VirtualMidiKeyboardCurrentChannel,
+}
+
 /// When to send a MIDI message
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Facet)]

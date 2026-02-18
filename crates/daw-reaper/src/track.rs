@@ -4,7 +4,7 @@
 //! using TaskSupport from reaper-high. Follows the same pattern as ReaperFx and
 //! ReaperTransport.
 
-use daw_proto::{ProjectContext, Track, TrackRef, TrackService};
+use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackRef, TrackService};
 use reaper_high::{GroupingBehavior, Reaper};
 use reaper_medium::GangBehavior;
 use roam::Context;
@@ -347,6 +347,68 @@ impl TrackService for ReaperTrack {
                     GroupingBehavior::PreventGrouping,
                 );
             }
+        });
+    }
+
+    async fn set_input_monitoring(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        track: TrackRef,
+        mode: InputMonitoringMode,
+    ) {
+        let Some(ts) = task_support() else { return };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some(t) = resolve_track(&proj, &track) else {
+                return;
+            };
+            let reaper_mode = match mode {
+                InputMonitoringMode::Off => reaper_medium::InputMonitoringMode::Off,
+                InputMonitoringMode::Normal => reaper_medium::InputMonitoringMode::Normal,
+                InputMonitoringMode::NotWhenPlaying => {
+                    reaper_medium::InputMonitoringMode::NotWhenPlaying
+                }
+            };
+            t.set_input_monitoring_mode(
+                reaper_mode,
+                GangBehavior::DenyGang,
+                GroupingBehavior::PreventGrouping,
+            );
+        });
+    }
+
+    async fn set_record_input(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        track: TrackRef,
+        input: RecordInput,
+    ) {
+        let Some(ts) = task_support() else { return };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some(t) = resolve_track(&proj, &track) else {
+                return;
+            };
+            let reaper_input = match input {
+                RecordInput::None => None,
+                RecordInput::Midi { device_id, channel } => {
+                    use reaper_medium::{MidiInputDeviceId, RecordingInput};
+                    Some(RecordingInput::Midi {
+                        device_id: device_id.map(MidiInputDeviceId::new),
+                        channel: channel.and_then(|ch| ch.try_into().ok()),
+                    })
+                }
+                RecordInput::Raw(raw) => reaper_medium::RecordingInput::from_raw(raw),
+            };
+            t.set_recording_input(reaper_input);
         });
     }
 
