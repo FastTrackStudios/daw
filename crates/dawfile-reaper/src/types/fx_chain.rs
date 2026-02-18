@@ -58,6 +58,12 @@ pub enum FxChainNode {
 pub struct FxPlugin {
     /// Plugin display name (from the block header, e.g. "VST: ReaEQ (Cockos)")
     pub name: String,
+    /// User-assigned custom display name (e.g. "EQ Block: Reagate - Relaxed").
+    /// This is the name shown in REAPER's FX chain UI when the user renames an FX.
+    /// For VST/AU: the 2nd quoted string in the header (after filename + flags).
+    /// For JS: the 2nd quoted string in the header (after the script path).
+    /// `None` if the user hasn't set a custom name (the quoted string is empty).
+    pub custom_name: Option<String>,
     /// Plugin type
     pub plugin_type: PluginType,
     /// File name / path (dll, dylib, component, script path, etc.)
@@ -437,7 +443,7 @@ fn parse_plugin_block(
     };
 
     // Parse header: <TYPE "Display Name" "file.dll" extra_params...
-    let (plugin_type, name, file) = parse_plugin_header(header);
+    let (plugin_type, name, file, custom_name) = parse_plugin_header(header);
 
     // State data = all lines between header and closing >
     let state_data: Vec<String> = if block_lines.len() > 2 {
@@ -452,6 +458,7 @@ fn parse_plugin_block(
 
     FxPlugin {
         name,
+        custom_name,
         plugin_type,
         file,
         bypassed,
@@ -479,7 +486,7 @@ fn parse_plugin_block(
 ///
 /// VST headers have an unquoted filename token after the quoted name:
 /// `<VST "display name" filename.dylib vendor_code "state" ...`
-fn parse_plugin_header(header: &str) -> (PluginType, String, String) {
+fn parse_plugin_header(header: &str) -> (PluginType, String, String, Option<String>) {
     let header = header.trim();
 
     // Remove leading '<'
@@ -512,25 +519,30 @@ fn parse_plugin_header(header: &str) -> (PluginType, String, String) {
 
     // Parse tokens from the rest of the header.
     // The structure is: "display name" <unquoted_file_or_second_quoted> ...
-    // VST: "name" filename.dylib 0 "" vendorcode<hex> ""
-    // JS:  "script/path" ""
+    // VST: "name" filename.dylib 0 "custom_name" vendorcode<hex> ""
+    // JS:  "script/path" "custom_name"
     // CLAP: "plugin.id" ...
-    let (name, file) = parse_header_name_file(rest, &plugin_type);
+    let (name, file, custom_name) = parse_header_name_file(rest, &plugin_type);
 
-    (plugin_type, name, file)
+    (plugin_type, name, file, custom_name)
 }
 
-/// Extract the display name and file from the header tokens after the type keyword.
+/// Extract the display name, file, and custom name from the header tokens.
 ///
-/// VST headers: `"VST: Name" filename.dylib 0 "" 12345<hex> ""`
-///   - First quoted string = display name
+/// VST headers: `"VST: Name" filename.dylib 0 "Custom Name" 12345<hex> ""`
+///   - First quoted string = default display name
 ///   - Next unquoted token = file
+///   - Second quoted string = user-assigned custom name (empty = no custom name)
 ///
-/// JS headers: `"script/path" ""`
+/// JS headers: `"script/path" "Custom Name"`
 ///   - First quoted string = both name and file (script path)
+///   - Second quoted string = user-assigned custom name
 ///
-/// Other types: first two quoted strings = name, file
-fn parse_header_name_file(rest: &str, plugin_type: &PluginType) -> (String, String) {
+/// Other types: first two quoted strings = name, file (no custom name support)
+fn parse_header_name_file(
+    rest: &str,
+    plugin_type: &PluginType,
+) -> (String, String, Option<String>) {
     let rest = rest.trim();
 
     // Extract the first quoted string (display name)
@@ -545,18 +557,33 @@ fn parse_header_name_file(rest: &str, plugin_type: &PluginType) -> (String, Stri
                 .next()
                 .unwrap_or("")
                 .to_string();
-            (name, file)
+            // Custom name is the second quoted string in the remaining text
+            // Format: filename flags "custom_name" vendorcode "..."
+            let (custom_raw, _) = extract_first_quoted(after_name);
+            let custom_name = if custom_raw.is_empty() {
+                None
+            } else {
+                Some(custom_raw)
+            };
+            (name, file, custom_name)
         }
         PluginType::Js => {
             // For JS, the name IS the script path (acts as both name and file)
-            (name.clone(), name)
+            // Custom name is the second quoted string
+            let (custom_raw, _) = extract_first_quoted(after_name);
+            let custom_name = if custom_raw.is_empty() {
+                None
+            } else {
+                Some(custom_raw)
+            };
+            (name.clone(), name, custom_name)
         }
         _ => {
             // For CLAP, Video, Other: try to extract second quoted string as file
             let quoted = extract_quoted_strings(rest);
             let name = quoted.first().cloned().unwrap_or_default();
             let file = quoted.get(1).cloned().unwrap_or_default();
-            (name, file)
+            (name, file, None)
         }
     }
 }
@@ -1068,7 +1095,8 @@ impl fmt::Display for FxPlugin {
             ""
         };
         let par = if self.parallel { " (parallel)" } else { "" };
-        writeln!(f, "{:?}: {}{}{}", self.plugin_type, self.name, status, par)
+        let display = self.custom_name.as_deref().unwrap_or(&self.name);
+        writeln!(f, "{:?}: {}{}{}", self.plugin_type, display, status, par)
     }
 }
 
@@ -1236,26 +1264,29 @@ impl FxPlugin {
             }
         } else {
             // Synthetic block for programmatic FX nodes that don't carry a raw block.
+            let custom = self.custom_name.as_deref().unwrap_or("");
             let header = match &self.plugin_type {
                 PluginType::Vst | PluginType::Vst3 => format!(
-                    "<VST \"{}\" {} 0 \"\" 0<00> \"\"",
+                    "<VST \"{}\" {} 0 \"{}\" 0<00> \"\"",
                     self.name,
                     if self.file.is_empty() {
                         "plugin.vst"
                     } else {
                         &self.file
-                    }
+                    },
+                    custom,
                 ),
                 PluginType::Au => format!(
-                    "<AU \"{}\" {}",
+                    "<AU \"{}\" {} 0 \"{}\"",
                     self.name,
                     if self.file.is_empty() {
                         "plugin.component"
                     } else {
                         &self.file
-                    }
+                    },
+                    custom,
                 ),
-                PluginType::Js => format!("<JS \"{}\" \"\"", self.name,),
+                PluginType::Js => format!("<JS \"{}\" \"{}\"", self.name, custom),
                 PluginType::Clap => format!(
                     "<CLAP \"{}\" {} \"\"",
                     self.name,

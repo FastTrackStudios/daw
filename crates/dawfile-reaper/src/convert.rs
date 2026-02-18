@@ -170,6 +170,7 @@ fn convert_tree_node(node: &FxNode, index: usize, routing: FxRoutingMode) -> FxC
             } else {
                 fx.name.clone()
             },
+            custom_name: None,
             plugin_type: convert_fx_type(fx.plugin_type),
             file: String::new(),
             bypassed: !node.enabled,
