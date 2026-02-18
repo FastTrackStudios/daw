@@ -1,0 +1,13 @@
+[package]
+name = "reaper-test-macro"
+version = "0.1.0"
+edition = "2021"
+description = "Proc-macro for #[reaper_test] attribute"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"

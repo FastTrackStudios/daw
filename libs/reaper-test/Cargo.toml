@@ -1,0 +1,15 @@
+[package]
+name = "reaper-test"
+version = "0.1.0"
+edition = "2021"
+description = "Runtime library for REAPER integration tests"
+
+[dependencies]
+daw-control = { path = "../../cells/daw/daw-control" }
+host-client = { path = "../../modules/host-client" }
+eyre = "0.6"
+tokio = { version = "1", features = ["time", "process", "rt"] }
+tracing = "0.1"
+
+# Re-export the proc-macro so users can do `use reaper_test::reaper_test;`
+reaper-test-macro = { path = "../reaper-test-macro" }
