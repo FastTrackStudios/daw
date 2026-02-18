@@ -14,10 +14,10 @@
 
 use super::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
-    FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation, FxParameter,
-    FxRoutingMode, FxStateChunk, FxTarget, FxTree, MoveFromContainerRequest,
-    MoveToContainerRequest, SetContainerChannelConfigRequest, SetNamedConfigRequest,
-    SetParameterByNameRequest, SetParameterRequest,
+    FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
+    FxParameter, FxPinMappings, FxRoutingMode, FxStateChunk, FxTarget, FxTree,
+    MoveFromContainerRequest, MoveToContainerRequest, SetContainerChannelConfigRequest,
+    SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
 };
 use crate::ProjectContext;
 use roam::Tx;
@@ -195,6 +195,66 @@ pub trait FxService {
         target: FxTarget,
         param_index: u32,
     ) -> Option<FxParamModulation>;
+
+    // =========================================================================
+    // FX Channel Configuration
+    //
+    // Per-FX channel count control via REAPER's `channel_config` named param.
+    // Used for gapless switching: silence an FX by setting channels to 0,
+    // activate by setting to 2 (stereo).
+    // =========================================================================
+
+    /// Get the channel configuration for a specific FX (non-container).
+    ///
+    /// Returns the requested channel count, channel mode, and supported flags.
+    /// Not supported for containers — use `get_container_channel_config` instead.
+    async fn get_fx_channel_config(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Option<FxChannelConfig>;
+
+    /// Set the channel configuration for a specific FX (non-container).
+    ///
+    /// Setting channel_count to 0 effectively silences the FX output (VST3 auto mode).
+    /// Setting it to 2 restores normal stereo output.
+    /// Not supported for containers — use `set_container_channel_config` instead.
+    async fn set_fx_channel_config(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+        config: FxChannelConfig,
+    ) -> Result<(), String>;
+
+    // =========================================================================
+    // Output Pin Mapping (Silence/Restore)
+    //
+    // Uses TrackFX_SetPinMappings to zero/restore output routing.
+    // This is the reliable mechanism for silencing non-container FX —
+    // `channel_config` via SetNamedConfigParm is read-only in REAPER.
+    // =========================================================================
+
+    /// Silence an FX by zeroing all output pin mappings.
+    ///
+    /// Returns the saved pin mappings so they can be restored later.
+    /// This is the correct mechanism for gapless loading — unlike
+    /// `channel_config`, pin mappings are reliably writable via REAPER's API.
+    async fn silence_fx_output(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+    ) -> Result<FxPinMappings, String>;
+
+    /// Restore an FX's output pin mappings from a previously saved state.
+    ///
+    /// If `saved` is empty (no prior non-zero mappings), restores default
+    /// stereo pass-through (pin 0 → ch 0, pin 1 → ch 1).
+    async fn restore_fx_output(
+        &self,
+        project: ProjectContext,
+        target: FxTarget,
+        saved: FxPinMappings,
+    ) -> Result<(), String>;
 
     // =========================================================================
     // State Chunks

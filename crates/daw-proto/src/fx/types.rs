@@ -374,6 +374,67 @@ pub struct SetContainerChannelConfigRequest {
 }
 
 // =============================================================================
+// FX Channel Config Types
+// =============================================================================
+
+/// Per-FX channel configuration (non-container).
+///
+/// REAPER's `channel_config` named config param returns 3 values:
+/// - requested channel count (0 = VST3 auto)
+/// - channel mode (0=multichannel, 1=multi-mono, 2=multi-stereo)
+/// - supported flags (&1=multichannel, &2=auto, &4=multi-mono, &8=multi-stereo)
+///
+/// Writing accepts 1 or 2 values: channel count, and optionally channel mode.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Facet)]
+pub struct FxChannelConfig {
+    /// Requested channel count (0 = VST3 auto, 2 = stereo, etc.)
+    pub channel_count: u32,
+    /// Channel mode: 0=multichannel, 1=multi-mono, 2=multi-stereo
+    pub channel_mode: u32,
+    /// Supported flags (read-only): &1=multichannel, &2=auto, &4=multi-mono, &8=multi-stereo
+    pub supported_flags: u32,
+}
+
+impl FxChannelConfig {
+    /// Standard stereo configuration.
+    pub fn stereo() -> Self {
+        Self {
+            channel_count: 2,
+            channel_mode: 0,
+            supported_flags: 0,
+        }
+    }
+
+    /// Silent configuration — zero output channels for gapless loading.
+    pub fn silent() -> Self {
+        Self {
+            channel_count: 0,
+            channel_mode: 0,
+            supported_flags: 0,
+        }
+    }
+}
+
+// =============================================================================
+// Pin Mapping Types
+// =============================================================================
+
+/// Saved output pin mappings for a single FX.
+///
+/// Captures the per-pin bitmasks so they can be restored after silencing.
+/// Each entry is `(pin_index, low32, high32)` — the 64-bit channel bitmask
+/// split into two 32-bit halves, matching REAPER's `TrackFX_GetPinMappings` format.
+///
+/// Pin mappings at the "second bank" level (pin + 0x1000000) are also captured
+/// when non-zero, stored with the original pin index + 0x1000000 offset.
+#[derive(Clone, Debug, Default, Facet)]
+pub struct FxPinMappings {
+    /// Output pin mappings: `(pin_index, low32_bits, high32_bits)`.
+    /// Only non-zero mappings are stored.
+    pub output_pins: Vec<(i32, i32, i32)>,
+}
+
+// =============================================================================
 // State Chunk Types
 // =============================================================================
 

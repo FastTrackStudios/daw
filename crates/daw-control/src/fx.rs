@@ -5,10 +5,11 @@ use std::sync::Arc;
 use crate::DawClients;
 use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
-    FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation, FxParameter, FxRef,
-    FxRoutingMode, FxStateChunk, FxTarget, FxTree, MoveFromContainerRequest,
-    MoveToContainerRequest, ProjectContext, SetContainerChannelConfigRequest,
-    SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
+    FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
+    FxParameter, FxPinMappings, FxRef, FxRoutingMode, FxStateChunk, FxTarget, FxTree,
+    MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
+    SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
+    SetParameterRequest,
 };
 use eyre::Result;
 
@@ -809,6 +810,63 @@ impl FxHandle {
         self.clients
             .fx
             .set_named_config(self.project_context(), request)
+            .await?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Channel Configuration
+    // =========================================================================
+
+    /// Get the channel configuration for this FX.
+    ///
+    /// Returns channel count, mode, and supported flags.
+    /// Not applicable to containers — use `FxChain::container_channel_config` instead.
+    pub async fn channel_config(&self) -> Result<FxChannelConfig> {
+        self.clients
+            .fx
+            .get_fx_channel_config(self.project_context(), self.target())
+            .await?
+            .ok_or_else(|| eyre::eyre!("FX channel config not available"))
+    }
+
+    /// Set the channel configuration for this FX.
+    ///
+    /// Use `FxChannelConfig::silent()` to zero output channels (for gapless loading).
+    /// Use `FxChannelConfig::stereo()` to restore normal stereo output.
+    pub async fn set_channel_config(&self, config: FxChannelConfig) -> Result<()> {
+        self.clients
+            .fx
+            .set_fx_channel_config(self.project_context(), self.target(), config)
+            .await?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Output Silence/Restore (Pin Mappings)
+    // =========================================================================
+
+    /// Silence this FX by zeroing all output pin mappings.
+    ///
+    /// Returns the saved pin mappings for later restoration.
+    /// This is the reliable mechanism for gapless loading — `channel_config`
+    /// via `SetNamedConfigParm` is read-only in REAPER.
+    pub async fn silence_output(&self) -> Result<FxPinMappings> {
+        let saved = self
+            .clients
+            .fx
+            .silence_fx_output(self.project_context(), self.target())
+            .await?;
+        Ok(saved)
+    }
+
+    /// Restore this FX's output pin mappings from a previously saved state.
+    ///
+    /// If `saved` has no entries, restores default stereo pass-through.
+    pub async fn restore_output(&self, saved: FxPinMappings) -> Result<()> {
+        self.clients
+            .fx
+            .restore_fx_output(self.project_context(), self.target(), saved)
             .await?;
         Ok(())
     }

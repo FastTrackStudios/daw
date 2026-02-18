@@ -272,6 +272,40 @@ impl TrackService for StandaloneTrack {
         }
     }
 
+    async fn add_track(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        name: String,
+        at_index: Option<u32>,
+    ) -> String {
+        let mut tracks = self.tracks.write().await;
+        let index = at_index.unwrap_or(tracks.len() as u32) as usize;
+        let guid = Uuid::new_v4().to_string();
+        tracks.insert(index, TrackState::new(guid.clone(), index as u32, name));
+        // Re-index all tracks after the insertion point
+        for (i, t) in tracks.iter_mut().enumerate() {
+            t.index = i as u32;
+        }
+        guid
+    }
+
+    async fn remove_track(&self, _cx: &Context, _project: ProjectContext, track: TrackRef) {
+        let mut tracks = self.tracks.write().await;
+        let pos = match &track {
+            TrackRef::Guid(guid) => tracks.iter().position(|t| &t.guid == guid),
+            TrackRef::Index(idx) => tracks.iter().position(|t| t.index == *idx),
+            TrackRef::Master => Some(0),
+        };
+        if let Some(i) = pos {
+            tracks.remove(i);
+            // Re-index remaining tracks
+            for (j, t) in tracks.iter_mut().enumerate() {
+                t.index = j as u32;
+            }
+        }
+    }
+
     async fn rename_track(
         &self,
         _cx: &Context,
@@ -322,5 +356,26 @@ impl TrackService for StandaloneTrack {
         if let Some(t) = Self::find_track(&mut tracks, &track) {
             t.visible_in_mixer = visible;
         }
+    }
+
+    async fn set_track_chunk(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _chunk: String,
+    ) -> Result<(), String> {
+        // Standalone implementation doesn't support chunk operations
+        Ok(())
+    }
+
+    async fn remove_all_tracks(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+    ) -> Result<(), String> {
+        let mut tracks = self.tracks.write().await;
+        tracks.clear();
+        Ok(())
     }
 }

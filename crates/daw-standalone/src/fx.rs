@@ -2,10 +2,11 @@
 
 use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
-    FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation, FxParameter,
-    FxRoutingMode, FxService, FxStateChunk, FxTarget, FxTree, MoveFromContainerRequest,
-    MoveToContainerRequest, ProjectContext, SetContainerChannelConfigRequest,
-    SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
+    FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
+    FxParameter, FxPinMappings, FxRoutingMode, FxService, FxStateChunk, FxTarget, FxTree,
+    MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
+    SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
+    SetParameterRequest,
 };
 use roam::{Context, Tx};
 use uuid::Uuid;
@@ -371,6 +372,44 @@ impl FxService for StandaloneFx {
         _cx: &Context,
         _project: ProjectContext,
         _request: SetContainerChannelConfigRequest,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn get_fx_channel_config(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _target: FxTarget,
+    ) -> Option<FxChannelConfig> {
+        None
+    }
+
+    async fn set_fx_channel_config(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _target: FxTarget,
+        _config: FxChannelConfig,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn silence_fx_output(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _target: FxTarget,
+    ) -> Result<FxPinMappings, String> {
+        Ok(FxPinMappings::default())
+    }
+
+    async fn restore_fx_output(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _target: FxTarget,
+        _saved: FxPinMappings,
     ) -> Result<(), String> {
         Ok(())
     }

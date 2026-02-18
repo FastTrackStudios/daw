@@ -161,6 +161,48 @@ impl Tracks {
         self.clients.track.clear_selection(self.context()).await?;
         Ok(())
     }
+
+    // =========================================================================
+    // Track Creation / Deletion
+    // =========================================================================
+
+    /// Add a new track to the project.
+    ///
+    /// If `at_index` is `Some(i)`, inserts at that position (0-based), shifting
+    /// existing tracks down. If `None`, appends at the end.
+    /// Returns a [`TrackHandle`] for the newly created track.
+    pub async fn add(&self, name: &str, at_index: Option<u32>) -> Result<TrackHandle> {
+        let guid = self
+            .clients
+            .track
+            .add_track(self.context(), name.to_string(), at_index)
+            .await?;
+        if guid.is_empty() {
+            return Err(eyre::eyre!(
+                "add_track returned empty GUID — REAPER may have refused the operation"
+            ));
+        }
+        Ok(TrackHandle::new(
+            guid,
+            self.project_id.clone(),
+            self.clients.clone(),
+        ))
+    }
+
+    /// Remove a track from the project by GUID, index, or master reference.
+    pub async fn remove(&self, track: daw_proto::TrackRef) -> Result<()> {
+        self.clients
+            .track
+            .remove_track(self.context(), track)
+            .await?;
+        Ok(())
+    }
+
+    /// Remove all tracks from the project (excluding master).
+    pub async fn remove_all(&self) -> Result<()> {
+        self.clients.track.remove_all_tracks(self.context()).await?;
+        Ok(())
+    }
 }
 
 impl std::fmt::Debug for Tracks {
@@ -451,6 +493,18 @@ impl TrackHandle {
         self.clients
             .track
             .set_track_color(self.context(), self.track_ref(), color)
+            .await?;
+        Ok(())
+    }
+
+    /// Set the full track state chunk (RPP format).
+    ///
+    /// This replaces the entire track state — useful for loading
+    /// `.RTrackTemplate` content into an existing track.
+    pub async fn set_chunk(&self, chunk: String) -> Result<()> {
+        self.clients
+            .track
+            .set_track_chunk(self.context(), self.track_ref(), chunk)
             .await?;
         Ok(())
     }

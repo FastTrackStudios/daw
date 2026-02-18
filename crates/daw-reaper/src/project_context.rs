@@ -5,20 +5,10 @@
 use daw_proto::ProjectContext;
 use reaper_high::{Project, Reaper};
 use reaper_medium::{ProjectContext as ReaperProjectContext, ProjectRef, ReaProject};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
-/// Hash a string to create a deterministic GUID (same algorithm used in project.rs)
-fn hash_string(s: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    s.hash(&mut hasher);
-    hasher.finish()
-}
-
-/// Get project info and generate GUID from a REAPER project
+/// Get the GUID for a project using its raw pointer (unique per tab).
 fn project_guid(project: &Project) -> String {
-    let path = project.file().map(|p| p.to_string()).unwrap_or_default();
-    format!("{:x}", hash_string(&path))
+    format!("reaper-ptr-{:x}", project.raw().as_ptr() as usize)
 }
 
 /// Find a REAPER project by its GUID

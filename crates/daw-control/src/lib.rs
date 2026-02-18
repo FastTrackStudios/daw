@@ -343,6 +343,43 @@ impl Daw {
         }
     }
 
+    /// Create a new empty project tab.
+    ///
+    /// Returns the newly created project handle.
+    pub async fn create_project(&self) -> eyre::Result<Project> {
+        let info = self
+            .clients
+            .project
+            .create()
+            .await?
+            .ok_or_else(|| eyre::eyre!("Failed to create new project"))?;
+
+        Ok(Project::new(info.guid, self.clients.clone()))
+    }
+
+    /// Close a specific project tab by GUID.
+    pub async fn close_project(&self, guid: impl Into<String>) -> eyre::Result<()> {
+        let guid = guid.into();
+        let success = self.clients.project.close(guid.clone()).await?;
+        if success {
+            Ok(())
+        } else {
+            Err(eyre::eyre!("Failed to close project: {}", guid))
+        }
+    }
+
+    /// Get a project by tab slot index (0-based).
+    pub async fn project_by_slot(&self, slot: u32) -> eyre::Result<Project> {
+        let info = self
+            .clients
+            .project
+            .get_by_slot(slot)
+            .await?
+            .ok_or_else(|| eyre::eyre!("No project at slot {}", slot))?;
+
+        Ok(Project::new(info.guid, self.clients.clone()))
+    }
+
     /// Subscribe to project changes (open, close, switch)
     ///
     /// Returns a receiver that streams project events:

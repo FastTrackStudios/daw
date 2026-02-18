@@ -98,9 +98,37 @@ pub trait TrackService {
     // Track Management
     // =========================================================================
 
+    /// Insert a new track. If `at_index` is Some, inserts at that position
+    /// (0-based, shifting existing tracks down); if None, appends at the end.
+    /// Returns the GUID of the newly created track.
+    async fn add_track(
+        &self,
+        project: ProjectContext,
+        name: String,
+        at_index: Option<u32>,
+    ) -> String;
+
+    /// Remove a track from the project
+    async fn remove_track(&self, project: ProjectContext, track: TrackRef);
+
     /// Rename a track
     async fn rename_track(&self, project: ProjectContext, track: TrackRef, name: String);
 
     /// Set track color (0xRRGGBB format, or 0 for default)
     async fn set_track_color(&self, project: ProjectContext, track: TrackRef, color: u32);
+
+    /// Set the full track state chunk (RPP format).
+    ///
+    /// This replaces the entire track state with the given chunk string,
+    /// which should be a valid REAPER track state chunk (the content of a
+    /// `<TRACK ...>` block from an RPP file or `.RTrackTemplate`).
+    async fn set_track_chunk(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        chunk: String,
+    ) -> Result<(), String>;
+
+    /// Remove all tracks from the project (excluding master).
+    async fn remove_all_tracks(&self, project: ProjectContext) -> Result<(), String>;
 }

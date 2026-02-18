@@ -152,6 +152,35 @@ impl ProjectService for StandaloneProject {
         }
     }
 
+    async fn create(&self, _cx: &Context) -> Option<ProjectInfo> {
+        info!("ProjectService::create() called (standalone stub)");
+        let guid = format!(
+            "project-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        Some(ProjectInfo {
+            guid,
+            name: "New Project".to_string(),
+            path: String::new(),
+        })
+    }
+
+    async fn close(&self, _cx: &Context, project_id: String) -> bool {
+        info!(
+            "ProjectService::close({}) called (standalone stub)",
+            project_id
+        );
+        true
+    }
+
+    async fn get_by_slot(&self, _cx: &Context, slot: u32) -> Option<ProjectInfo> {
+        info!("ProjectService::get_by_slot({}) called", slot);
+        self.projects.get(slot as usize).cloned()
+    }
+
     async fn subscribe(&self, _cx: &Context, tx: Tx<ProjectEvent>) {
         info!("ProjectService::subscribe() - starting project stream");
 

@@ -485,6 +485,47 @@ impl TrackService for ReaperTrack {
     // Track Management
     // =========================================================================
 
+    async fn add_track(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        name: String,
+        at_index: Option<u32>,
+    ) -> String {
+        let Some(ts) = task_support() else {
+            warn!("TaskSupport not set");
+            return String::new();
+        };
+
+        ts.main_thread_future(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return String::new();
+            };
+            let index = at_index.unwrap_or_else(|| proj.track_count());
+            let Ok(new_track) = proj.insert_track_at(index) else {
+                return String::new();
+            };
+            new_track.set_name(name.as_str());
+            new_track.guid().to_string_without_braces()
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    async fn remove_track(&self, _cx: &Context, project: ProjectContext, track: TrackRef) {
+        let Some(ts) = task_support() else { return };
+
+        let _ = ts.do_later_in_main_thread_asap(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some(t) = resolve_track(&proj, &track) else {
+                return;
+            };
+            proj.remove_track(&t);
+        });
+    }
+
     async fn rename_track(
         &self,
         _cx: &Context,
@@ -570,5 +611,51 @@ impl TrackService for ReaperTrack {
             };
             t.set_shown(reaper_medium::TrackArea::Mcp, visible);
         });
+    }
+
+    async fn set_track_chunk(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        track: TrackRef,
+        chunk: String,
+    ) -> Result<(), String> {
+        let Some(ts) = task_support() else {
+            return Err("TaskSupport not set".to_string());
+        };
+
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "Project not found".to_string())?;
+            let t = resolve_track(&proj, &track).ok_or_else(|| "Track not found".to_string())?;
+            let chunk_obj = reaper_high::Chunk::new(chunk);
+            t.set_chunk(chunk_obj)
+                .map_err(|e| format!("set_chunk failed: {e}"))
+        })
+        .await
+        .unwrap_or_else(|_| Err("main_thread_future cancelled".to_string()))
+    }
+
+    async fn remove_all_tracks(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+    ) -> Result<(), String> {
+        let Some(ts) = task_support() else {
+            return Err("TaskSupport not set".to_string());
+        };
+
+        ts.main_thread_future(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "Project not found".to_string())?;
+            // Delete from highest index to lowest to avoid index shifting
+            let count = proj.track_count();
+            for i in (0..count).rev() {
+                if let Some(t) = proj.track_by_index(i) {
+                    proj.remove_track(&t);
+                }
+            }
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|_| Err("main_thread_future cancelled".to_string()))
     }
 }

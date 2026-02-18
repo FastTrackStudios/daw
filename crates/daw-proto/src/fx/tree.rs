@@ -143,6 +143,18 @@ impl FxContainerChannelConfig {
             nch_out: 2,
         }
     }
+
+    /// Silent configuration — zero output channels for gapless container switching.
+    ///
+    /// Sets `nch_out = 0` to suppress all output routing from the container
+    /// without affecting its internal processing or input channels.
+    pub fn silent() -> Self {
+        Self {
+            nch: 0,
+            nch_in: 0,
+            nch_out: 0,
+        }
+    }
 }
 
 // =============================================================================

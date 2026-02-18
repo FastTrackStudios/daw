@@ -122,6 +122,24 @@ pub trait ProjectService {
     /// project was not found.
     async fn select(&self, project_id: String) -> bool;
 
+    /// Create a new empty project in a new tab
+    ///
+    /// Opens a fresh project tab. Returns the metadata of the newly created
+    /// project, or None if creation failed.
+    async fn create(&self) -> Option<ProjectInfo>;
+
+    /// Close a specific project tab by GUID
+    ///
+    /// Removes the project tab from the DAW. Returns true if the project
+    /// was found and closed, false otherwise.
+    async fn close(&self, project_id: String) -> bool;
+
+    /// Get a project by tab slot index (0-based)
+    ///
+    /// Directly addresses a project tab by its position. Useful for
+    /// enumerating tabs without GUID lookup overhead.
+    async fn get_by_slot(&self, slot: u32) -> Option<ProjectInfo>;
+
     // =========================================================================
     // Streaming
     // =========================================================================
