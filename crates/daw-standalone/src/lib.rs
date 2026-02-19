@@ -18,6 +18,7 @@
 #![deny(unsafe_code)]
 
 mod automation;
+mod ext_state;
 mod fx;
 mod item;
 mod live_midi;
@@ -27,12 +28,15 @@ mod midi_analysis;
 mod position_conversion;
 mod project;
 mod region;
+mod resource;
 mod routing;
 mod tempo_map;
 mod track;
 mod transport;
+mod ui;
 
 pub use automation::StandaloneAutomation;
+pub use ext_state::StandaloneExtState;
 pub use fx::StandaloneFx;
 pub use item::{StandaloneItem, StandaloneTake};
 pub use live_midi::StandaloneLiveMidi;
@@ -42,7 +46,9 @@ pub use midi_analysis::StandaloneMidiAnalysis;
 pub use position_conversion::StandalonePositionConversion;
 pub use project::StandaloneProject;
 pub use region::StandaloneRegion;
+pub use resource::StandaloneResource;
 pub use routing::StandaloneRouting;
 pub use tempo_map::StandaloneTempoMap;
 pub use track::StandaloneTrack;
 pub use transport::{SharedProjectState, StandaloneTransport};
+pub use ui::StandaloneUi;

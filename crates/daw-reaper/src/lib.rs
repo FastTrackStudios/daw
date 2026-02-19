@@ -32,6 +32,7 @@
 
 pub mod audio_engine;
 pub mod automation;
+pub mod ext_state;
 pub mod fx;
 pub mod item;
 pub mod live_midi;
@@ -39,23 +40,29 @@ pub mod main_thread;
 pub mod marker;
 pub mod midi;
 pub mod midi_analysis;
+pub mod position_conversion;
 pub mod project;
 pub mod project_context;
+pub mod ptr_validation;
 pub mod region;
+pub mod resource;
 pub mod routing;
 pub mod tempo_map;
 pub mod track;
 pub mod transport;
+pub mod ui;
 
 // Re-export the main types
 pub use audio_engine::ReaperAudioEngine;
 pub use automation::ReaperAutomation;
+pub use ext_state::ReaperExtState;
 pub use fx::ReaperFx;
 pub use item::{ReaperItem, ReaperTake};
 pub use live_midi::ReaperLiveMidi;
 pub use marker::ReaperMarker;
 pub use midi::ReaperMidi;
 pub use midi_analysis::ReaperMidiAnalysis;
+pub use position_conversion::ReaperPositionConversion;
 pub use project::ReaperProject;
 pub use region::ReaperRegion;
 pub use routing::ReaperRouting;

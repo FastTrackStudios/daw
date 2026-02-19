@@ -9,7 +9,7 @@ use facet::Facet;
 /// Result of converting time to beats
 ///
 /// Includes the full beat position, measure information, and time signature context
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet, Default)]
 pub struct TimeToBeatsResult {
     /// Position in beats since project start
     pub full_beats: PositionInBeats,
@@ -24,7 +24,7 @@ pub struct TimeToBeatsResult {
 /// Result of converting quarter notes to measure information
 ///
 /// Provides the measure index and the start/end positions in quarter notes
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet, Default)]
 pub struct QuarterNotesToMeasureResult {
     /// Measure index in project (0-based)
     pub measure_index: i32,
@@ -37,7 +37,7 @@ pub struct QuarterNotesToMeasureResult {
 }
 
 /// Result of converting time to quarter notes with measure context
-#[derive(Debug, Clone, PartialEq, Facet)]
+#[derive(Debug, Clone, PartialEq, Facet, Default)]
 pub struct TimeToQuarterNotesResult {
     /// Position in quarter notes since project start
     pub quarter_notes: PositionInQuarterNotes,
