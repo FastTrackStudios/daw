@@ -10,6 +10,7 @@
 //!
 //! All DAWs MUST implement the core Project service behaviors.
 
+use crate::UndoScope;
 use facet::Facet;
 use roam::{Tx, service};
 
@@ -158,7 +159,15 @@ pub trait ProjectService {
     ///
     /// Must be paired with a preceding `begin_undo_block`. If no block is
     /// active, this is a no-op.
-    async fn end_undo_block(&self, project: ProjectContext, label: String);
+    ///
+    /// The `scope` parameter defines what parts of the project were affected
+    /// by this undoable operation. If `None`, defaults to `UndoScope::All`.
+    async fn end_undo_block(
+        &self,
+        project: ProjectContext,
+        label: String,
+        scope: Option<UndoScope>,
+    );
 
     /// Trigger undo for the given project.
     ///

@@ -196,6 +196,7 @@ impl ProjectService for StandaloneProject {
         _cx: &Context,
         _project: daw_proto::ProjectContext,
         _label: String,
+        _scope: Option<daw_proto::UndoScope>,
     ) {
     }
 

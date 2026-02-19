@@ -5,7 +5,7 @@
 
 use daw_proto::{ProjectEvent, ProjectInfo, ProjectService};
 use reaper_high::{Project, Reaper};
-use reaper_medium::{CommandId, ProjectContext, ProjectRef, UndoScope};
+use reaper_medium::{CommandId, ProjectContext, ProjectPart, ProjectRef, UndoScope};
 use roam::{Context, Tx};
 use std::time::Duration;
 use tracing::{debug, info};
@@ -69,6 +69,29 @@ fn project_to_info(project: &Project) -> ProjectInfo {
     let guid = project_guid(project);
 
     ProjectInfo { guid, name, path }
+}
+
+/// Convert daw_proto::UndoScope to reaper_medium::UndoScope
+fn convert_undo_scope(scope: &daw_proto::UndoScope) -> UndoScope {
+    use enumflags2::BitFlags;
+
+    match scope {
+        daw_proto::UndoScope::All => UndoScope::All,
+        daw_proto::UndoScope::Scoped(parts) => {
+            let mut flags = BitFlags::empty();
+            for part in parts {
+                let reaper_part = match part {
+                    daw_proto::ProjectPart::Freeze => ProjectPart::Freeze,
+                    daw_proto::ProjectPart::Fx => ProjectPart::Fx,
+                    daw_proto::ProjectPart::Items => ProjectPart::Items,
+                    daw_proto::ProjectPart::MiscCfg => ProjectPart::MiscCfg,
+                    daw_proto::ProjectPart::TrackCfg => ProjectPart::TrackCfg,
+                };
+                flags |= reaper_part;
+            }
+            UndoScope::Scoped(flags)
+        }
+    }
 }
 
 impl ProjectService for ReaperProject {
@@ -376,6 +399,7 @@ impl ProjectService for ReaperProject {
         _cx: &Context,
         project: daw_proto::ProjectContext,
         label: String,
+        scope: Option<daw_proto::UndoScope>,
     ) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
@@ -389,10 +413,17 @@ impl ProjectService for ReaperProject {
                     .with(|cell| cell.take())
                     .unwrap_or_else(|| "FTS action".to_string())
             };
+
+            // Convert daw_proto::UndoScope to reaper_medium::UndoScope
+            let reaper_scope = scope
+                .as_ref()
+                .map(convert_undo_scope)
+                .unwrap_or(UndoScope::All);
+
             Reaper::get().medium_reaper().undo_end_block_2(
                 reaper_medium::ProjectContext::Proj(proj.raw()),
                 final_label.as_str(),
-                UndoScope::All,
+                reaper_scope,
             );
         });
     }

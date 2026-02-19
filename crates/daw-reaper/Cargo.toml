@@ -24,6 +24,7 @@ dawfile-reaper.workspace = true
 reaper-high.workspace = true
 reaper-medium.workspace = true
 reaper-low.workspace = true
+enumflags2.workspace = true
 
 [dev-dependencies]
 daw-control.workspace = true

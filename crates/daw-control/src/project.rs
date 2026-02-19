@@ -312,6 +312,7 @@ impl Project {
             .end_undo_block(
                 daw_proto::ProjectContext::project(&self.guid),
                 label.to_string(),
+                None, // Use default UndoScope::All
             )
             .await?;
         Ok(())
