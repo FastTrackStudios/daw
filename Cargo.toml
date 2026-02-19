@@ -5,7 +5,7 @@ members = [
     "crates/daw-reaper",
     "crates/daw-standalone",
     "crates/dawfile-reaper",
-    # "crates/daw-ui",  # TODO: add when dock crates are extracted to their own repo
+    "crates/daw-ui",
 ]
 resolver = "2"
 
@@ -36,9 +36,9 @@ roam-wire = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
 keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
 
-# Dock UI (not yet extracted — use [patch] or local path for development)
-# dock-dioxus = { git = "https://github.com/FastTrackStudios/dock.git", branch = "master" }
-# dock-proto  = { git = "https://github.com/FastTrackStudios/dock.git", branch = "master" }
+# Dock UI
+dock-dioxus = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "master" }
+dock-proto = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "master" }
 
 # REAPER bindings
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
