@@ -303,7 +303,7 @@ impl RegionService for ReaperRegion {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        tokio::spawn(async move {
+        peeps::spawn_tracked!("reaper-region-subscribe", async move {
             // Send initial state
             let regions = this.get_regions(&cx, project.clone()).await;
             if tx

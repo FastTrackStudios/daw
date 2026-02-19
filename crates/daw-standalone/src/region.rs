@@ -431,7 +431,7 @@ impl RegionService for StandaloneRegion {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        tokio::spawn(async move {
+        peeps::spawn_tracked!("region-subscribe", async move {
             // Send initial state: all regions for this project
             let regions = {
                 let state = state.read().await;

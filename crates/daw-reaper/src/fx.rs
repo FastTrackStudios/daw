@@ -3542,7 +3542,7 @@ impl FxService for ReaperFx {
 
         // Spawn a forwarding loop that filters events for this specific chain
         let target_context = context;
-        tokio::spawn(async move {
+        peeps::spawn_tracked!("reaper-fx-subscribe", async move {
             loop {
                 match rx.recv().await {
                     Ok(event) => {

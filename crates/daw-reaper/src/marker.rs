@@ -317,7 +317,7 @@ impl MarkerService for ReaperMarker {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        tokio::spawn(async move {
+        peeps::spawn_tracked!("reaper-marker-subscribe", async move {
             // Send initial state
             let markers = this.get_markers(&cx, project.clone()).await;
             if tx

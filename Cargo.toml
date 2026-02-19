@@ -59,6 +59,7 @@ thiserror = "2.0"
 
 # Observability
 tracing = { version = "0.1", features = ["std"] }
+peeps = { git = "https://github.com/bearcove/peeps", branch = "main", features = ["diagnostics"] }
 
 # Utilities
 eyre = "0.6"

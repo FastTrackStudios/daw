@@ -915,7 +915,7 @@ impl TransportService for ReaperTransport {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        tokio::spawn(async move {
+        peeps::spawn_tracked!("reaper-transport-subscribe", async move {
             loop {
                 // Wait for the next state update from the broadcaster
                 match rx.recv().await {
@@ -960,7 +960,7 @@ impl TransportService for ReaperTransport {
         };
 
         // Spawn the streaming loop so this method returns immediately
-        tokio::spawn(async move {
+        peeps::spawn_tracked!("reaper-transport-subscribe-all", async move {
             // Buffer to collect updates within a small window
             // This batches multiple project updates into a single message
             let mut pending_updates: HashMap<String, Transport> = HashMap::new();

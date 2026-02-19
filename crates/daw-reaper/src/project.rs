@@ -378,7 +378,7 @@ impl ProjectService for ReaperProject {
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
         let this = self.clone();
-        tokio::spawn(async move {
+        peeps::spawn_tracked!("reaper-project-subscribe", async move {
             this.subscribe_impl(tx).await;
         });
     }

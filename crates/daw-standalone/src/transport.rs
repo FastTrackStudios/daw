@@ -603,7 +603,7 @@ impl TransportService for StandaloneTransport {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        tokio::spawn(async move {
+        peeps::spawn_tracked!("transport-subscribe-state", async move {
             // ~16ms for 60Hz
             let interval = Duration::from_micros(16667);
             let mut last_send = Instant::now();
@@ -649,7 +649,7 @@ impl TransportService for StandaloneTransport {
         let states = self.states.clone();
 
         // Spawn the streaming loop so this method returns immediately
-        tokio::spawn(async move {
+        peeps::spawn_tracked!("transport-subscribe-all", async move {
             // ~16ms for 60Hz batched updates
             let interval = Duration::from_millis(16);
             let mut ticker = tokio::time::interval(interval);
