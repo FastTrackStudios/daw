@@ -14,7 +14,7 @@ daw-proto.workspace = true
 roam.workspace = true
 tracing.workspace = true
 tokio.workspace = true
-keyflow = { path = "../../keyflow/keyflow", features = ["engraver", "midi-import"] }
+keyflow = { workspace = true, features = ["engraver", "midi-import"] }
 
 # RPP chunk parsing/serialization for chunk-based FX manipulation
 dawfile-reaper.workspace = true

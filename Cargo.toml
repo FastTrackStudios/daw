@@ -1,0 +1,65 @@
+[workspace]
+members = [
+    "crates/daw-control",
+    "crates/daw-proto",
+    "crates/daw-reaper",
+    "crates/daw-standalone",
+    "crates/dawfile-reaper",
+    # "crates/daw-ui",  # TODO: add when dock crates are extracted to their own repo
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# Internal crates
+daw-proto = { path = "crates/daw-proto" }
+daw-control = { path = "crates/daw-control" }
+daw-standalone = { path = "crates/daw-standalone" }
+daw-reaper = { path = "crates/daw-reaper" }
+daw-ui = { path = "crates/daw-ui" }
+dawfile-reaper = { path = "crates/dawfile-reaper" }
+
+# Facet reflection framework
+facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
+
+# ROAM service framework
+roam = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-telemetry = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-wire = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+
+# Extracted FastTrackStudio crates
+actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
+keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
+
+# Dock UI (not yet extracted — use [patch] or local path for development)
+# dock-dioxus = { git = "https://github.com/FastTrackStudios/dock.git", branch = "master" }
+# dock-proto  = { git = "https://github.com/FastTrackStudios/dock.git", branch = "master" }
+
+# REAPER bindings
+reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+reaper-high = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+
+# UI
+dioxus = "0.7.2"
+
+# Async runtime
+tokio = { version = "1.48", features = ["full"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+anyhow = "1.0"
+thiserror = "2.0"
+
+# Observability
+tracing = { version = "0.1", features = ["std"] }
+
+# Utilities
+eyre = "0.6"
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }

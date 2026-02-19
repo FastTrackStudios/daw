@@ -4,17 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-cell-runtime = { workspace = true }
 daw-proto = { path = "../daw-proto" }
 roam = { workspace = true }
 roam-telemetry = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
-keyflow = { path = "../../keyflow/keyflow", features = ["engraver", "midi-import"] }
+keyflow = { workspace = true, features = ["engraver", "midi-import"] }
 
 [dev-dependencies]
-integration-tests = { workspace = true }
 daw-proto = { path = "../daw-proto" }
 daw-control = { workspace = true }
 eyre = { workspace = true }
