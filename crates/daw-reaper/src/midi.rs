@@ -1,7 +1,7 @@
 //! REAPER MIDI editing/reading implementation.
 
+use crate::main_thread;
 use crate::project_context::resolve_project_context;
-use crate::transport::task_support;
 use daw_proto::{
     HumanizeParams, ItemRef, MidiCC, MidiCCCreate, MidiNote, MidiNoteCreate, MidiPitchBend,
     MidiPitchBendCreate, MidiProgramChange, MidiService, MidiSysEx, MidiTakeLocation, PpqRange,
@@ -166,10 +166,7 @@ impl Default for ReaperMidi {
 
 impl MidiService for ReaperMidi {
     async fn get_notes(&self, _cx: &Context, location: MidiTakeLocation) -> Vec<MidiNote> {
-        let Some(ts) = task_support() else {
-            return Vec::new();
-        };
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let medium = reaper_high::Reaper::get().medium_reaper();
             let Some(take) = Self::resolve_take_for_location(medium, &location) else {
                 return Vec::new();

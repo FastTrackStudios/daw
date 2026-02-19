@@ -148,6 +148,30 @@ pub trait TrackService {
         chunk: String,
     ) -> Result<(), String>;
 
+    /// Get the full track state chunk (RPP format).
+    ///
+    /// Returns the complete track state as an RPP chunk string, suitable for
+    /// round-tripping with `set_track_chunk` or parsing with `dawfile-reaper`.
+    async fn get_track_chunk(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+    ) -> Result<String, String>;
+
+    /// Set the folder depth change for a track.
+    ///
+    /// REAPER encodes folder hierarchy as depth deltas on each track:
+    /// - `1` = folder start (this track is a folder)
+    /// - `0` = normal track (no folder change)
+    /// - `-1` = close one folder level
+    /// - `-N` = close N folder levels
+    async fn set_folder_depth(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        depth: i32,
+    ) -> Result<(), String>;
+
     /// Remove all tracks from the project (excluding master).
     async fn remove_all_tracks(&self, project: ProjectContext) -> Result<(), String>;
 }

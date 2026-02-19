@@ -1,7 +1,7 @@
 //! REAPER project-level MIDI analysis service.
 
+use crate::main_thread;
 use crate::project_context::find_project_by_guid;
-use crate::transport::task_support;
 use daw_proto::{
     MidiAnalysisService, MidiChartData, MidiChartRequest, MidiDetectedChord, ProjectContext,
 };
@@ -297,10 +297,7 @@ impl MidiAnalysisService for ReaperMidiAnalysis {
         _cx: &Context,
         request: MidiChartRequest,
     ) -> Result<String, String> {
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not available".to_string());
-        };
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let Some(project) = Self::resolve_project(&request.project) else {
                 return Err("Project not found".to_string());
             };
@@ -330,7 +327,7 @@ impl MidiAnalysisService for ReaperMidiAnalysis {
             ))
         })
         .await
-        .unwrap_or_else(|_| Err("Failed to execute MIDI analysis on main thread".to_string()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn generate_chart_data(
@@ -338,10 +335,7 @@ impl MidiAnalysisService for ReaperMidiAnalysis {
         _cx: &Context,
         request: MidiChartRequest,
     ) -> Result<MidiChartData, String> {
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not available".to_string());
-        };
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let Some(project) = Self::resolve_project(&request.project) else {
                 return Err("Project not found".to_string());
             };
@@ -361,6 +355,6 @@ impl MidiAnalysisService for ReaperMidiAnalysis {
             Self::build_chart_data(project, track_name, notes, item_start_time)
         })
         .await
-        .unwrap_or_else(|_| Err("Failed to execute MIDI analysis on main thread".to_string()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 }

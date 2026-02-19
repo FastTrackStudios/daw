@@ -3,7 +3,7 @@
 //! Implements LiveMidiService for REAPER, including StuffMIDIMessage injection
 //! for routing MIDI to armed tracks via the virtual keyboard queue.
 
-use crate::transport::task_support;
+use crate::main_thread;
 use daw_proto::live_midi::{
     LiveMidiEvent, LiveMidiService, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming,
     StuffMidiTarget,
@@ -101,12 +101,7 @@ impl LiveMidiService for ReaperLiveMidi {
             mode, status, data1, data2
         );
 
-        let Some(ts) = task_support() else {
-            warn!("stuff_midi_message: TaskSupport not set");
-            return;
-        };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let reaper = reaper_high::Reaper::get();
             reaper.medium_reaper().low().StuffMIDIMessage(
                 mode,

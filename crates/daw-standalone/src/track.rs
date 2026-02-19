@@ -389,6 +389,25 @@ impl TrackService for StandaloneTrack {
         Ok(())
     }
 
+    async fn get_track_chunk(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _track: TrackRef,
+    ) -> Result<String, String> {
+        Ok(String::new())
+    }
+
+    async fn set_folder_depth(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _depth: i32,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
     async fn remove_all_tracks(
         &self,
         _cx: &Context,

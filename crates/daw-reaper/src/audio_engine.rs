@@ -4,14 +4,14 @@
 //!
 //! # Main Thread Safety
 //!
-//! REAPER audio APIs can be called from any thread, but we use the same TaskSupport
-//! pattern as other services for consistency and to ensure proper initialization.
+//! REAPER audio APIs can be called from any thread, but we dispatch to the main
+//! thread for consistency and to ensure proper initialization.
 
-use crate::transport::task_support;
+use crate::main_thread;
 use daw_proto::{AudioEngineService, AudioEngineState, AudioLatency};
 use reaper_high::Reaper;
 use roam::Context;
-use tracing::{debug, info};
+use tracing::debug;
 
 /// REAPER audio engine implementation
 #[derive(Clone)]
@@ -32,90 +32,73 @@ impl Default for ReaperAudioEngine {
 impl AudioEngineService for ReaperAudioEngine {
     async fn get_state(&self, _cx: &Context) -> AudioEngineState {
         debug!("ReaperAudioEngine: get_state called");
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                let is_running = medium.audio_is_running();
-                let is_prebuffer = medium.low().Audio_IsPreBuffer() != 0;
+            let is_running = medium.audio_is_running();
+            let is_prebuffer = medium.low().Audio_IsPreBuffer() != 0;
 
-                // Always try to get latency info - REAPER reports configured latency
-                // even when audio engine isn't actively running
-                let latency = get_audio_latency_internal(medium);
+            // Always try to get latency info - REAPER reports configured latency
+            // even when audio engine isn't actively running
+            let latency = get_audio_latency_internal(medium);
 
-                debug!(
-                    "AudioEngineState: running={}, prebuffer={}, in={}, out={}, rate={}",
-                    is_running,
-                    is_prebuffer,
-                    latency.input_samples,
-                    latency.output_samples,
-                    latency.sample_rate
-                );
+            debug!(
+                "AudioEngineState: running={}, prebuffer={}, in={}, out={}, rate={}",
+                is_running,
+                is_prebuffer,
+                latency.input_samples,
+                latency.output_samples,
+                latency.sample_rate
+            );
 
-                AudioEngineState {
-                    is_running,
-                    is_prebuffer,
-                    latency,
-                }
-            })
-            .await
-            .unwrap_or_default()
-        } else {
-            info!("ReaperAudioEngine: no task_support available!");
-            AudioEngineState::default()
-        }
+            AudioEngineState {
+                is_running,
+                is_prebuffer,
+                latency,
+            }
+        })
+        .await
+        .unwrap_or_default()
     }
 
     async fn get_latency(&self, _cx: &Context) -> AudioLatency {
         debug!("ReaperAudioEngine: get_latency");
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                get_audio_latency_internal(medium)
-            })
-            .await
-            .unwrap_or_default()
-        } else {
-            AudioLatency::default()
-        }
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            get_audio_latency_internal(medium)
+        })
+        .await
+        .unwrap_or_default()
     }
 
     async fn get_output_latency_seconds(&self, _cx: &Context) -> f64 {
         debug!("ReaperAudioEngine: get_output_latency_seconds");
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                // Check if audio is running first
-                if !medium.audio_is_running() {
-                    return 0.0;
-                }
+            // Check if audio is running first
+            if !medium.audio_is_running() {
+                return 0.0;
+            }
 
-                // GetOutputLatency returns seconds directly
-                medium.low().GetOutputLatency()
-            })
-            .await
-            .unwrap_or(0.0)
-        } else {
-            0.0
-        }
+            // GetOutputLatency returns seconds directly
+            medium.low().GetOutputLatency()
+        })
+        .await
+        .unwrap_or(0.0)
     }
 
     async fn is_running(&self, _cx: &Context) -> bool {
         debug!("ReaperAudioEngine: is_running");
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                reaper.medium_reaper().audio_is_running()
-            })
-            .await
-            .unwrap_or(false)
-        } else {
-            false
-        }
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            reaper.medium_reaper().audio_is_running()
+        })
+        .await
+        .unwrap_or(false)
     }
 }
 

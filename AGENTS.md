@@ -31,3 +31,6 @@ btca resources   # list all available resources
 | `tracey` | bearcove/tracey | Traceability tool linking requirements/specs to code implementations via annotations |
 | `figue` | bearcove/figue | Config parsing from CLI args, env vars, and config files using facet reflection |
 | `styx` | bearcove/styx | Cleaner serialization format — alternative to JSON/YAML with schema support |
+| `reaper-rs` | helgoboss/reaper-rs | Low/medium/high-level Rust bindings for the REAPER DAW API (reaper-low, reaper-medium, reaper-high) |
+| `rea-rs` | Levitanus/rea-rs | Higher-level idiomatic Rust wrapper around the REAPER C++ API |
+| `helgobox` | helgoboss/helgobox | Full REAPER extension (ReaLearn/Playtime) — reference for building complex REAPER plugins in Rust |

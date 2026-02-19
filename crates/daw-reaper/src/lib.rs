@@ -35,6 +35,7 @@ pub mod automation;
 pub mod fx;
 pub mod item;
 pub mod live_midi;
+pub mod main_thread;
 pub mod marker;
 pub mod midi;
 pub mod midi_analysis;
@@ -62,8 +63,9 @@ pub use tempo_map::ReaperTempoMap;
 pub use track::ReaperTrack;
 pub use transport::ReaperTransport;
 
-// Re-export the TaskSupport setter and transport broadcaster functions
-pub use transport::{init_transport_broadcaster, poll_and_broadcast, set_task_support};
+// Re-export the main thread bridge and transport broadcaster functions
+pub use main_thread::set_task_support;
+pub use transport::{init_transport_broadcaster, poll_and_broadcast};
 
 // Re-export FX broadcaster functions
 pub use fx::{init_fx_broadcaster, poll_and_broadcast_fx};

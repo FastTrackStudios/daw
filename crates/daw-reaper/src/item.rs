@@ -1,9 +1,9 @@
 //! REAPER Item and Take Implementation
 //!
 //! Implements ItemService and TakeService by dispatching REAPER API calls to the main thread
-//! using TaskSupport from reaper-high.
+//! via [`crate::main_thread`].
 
-use crate::transport::task_support;
+use crate::main_thread;
 use daw_proto::{
     BeatAttachMode, Duration, FadeShape, Item, ItemRef, ItemService, PositionInSeconds,
     ProjectContext, SourceType, Take, TakeRef, TakeService, TrackRef,
@@ -18,7 +18,7 @@ use tracing::debug;
 
 /// REAPER item implementation.
 ///
-/// All methods dispatch to the main thread via TaskSupport.
+/// All methods dispatch to the main thread via [`crate::main_thread`].
 #[derive(Clone)]
 pub struct ReaperItem;
 
@@ -212,47 +212,43 @@ impl ItemService for ReaperItem {
         _project: ProjectContext,
         track: TrackRef,
     ) -> Vec<Item> {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                let mut items = Vec::new();
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            let mut items = Vec::new();
 
-                // Resolve track
-                let track_ptr = match track {
-                    TrackRef::Master => {
-                        Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
-                    }
-                    TrackRef::Index(idx) => {
-                        medium.get_track(ReaperProjectContext::CurrentProject, idx as u32)
-                    }
-                    TrackRef::Guid(_) => {
-                        // GUID lookup not directly supported
-                        None
-                    }
-                };
+            // Resolve track
+            let track_ptr = match track {
+                TrackRef::Master => {
+                    Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
+                }
+                TrackRef::Index(idx) => {
+                    medium.get_track(ReaperProjectContext::CurrentProject, idx as u32)
+                }
+                TrackRef::Guid(_) => {
+                    // GUID lookup not directly supported
+                    None
+                }
+            };
 
-                if let Some(track) = track_ptr {
-                    unsafe {
-                        let count = medium.count_track_media_items(track);
-                        for i in 0..count {
-                            if let Some(item) = medium.get_track_media_item(track, i) {
-                                if let Some(mut item_data) = Self::media_item_to_item(item) {
-                                    item_data.index = i as u32;
-                                    items.push(item_data);
-                                }
+            if let Some(track) = track_ptr {
+                unsafe {
+                    let count = medium.count_track_media_items(track);
+                    for i in 0..count {
+                        if let Some(item) = medium.get_track_media_item(track, i) {
+                            if let Some(mut item_data) = Self::media_item_to_item(item) {
+                                item_data.index = i as u32;
+                                items.push(item_data);
                             }
                         }
                     }
                 }
+            }
 
-                items
-            })
-            .await
-            .unwrap_or_default()
-        } else {
-            Vec::new()
-        }
+            items
+        })
+        .await
+        .unwrap_or_default()
     }
 
     async fn get_item(
@@ -261,100 +257,82 @@ impl ItemService for ReaperItem {
         _project: ProjectContext,
         item: ItemRef,
     ) -> Option<Item> {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let item_ptr = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
-                Self::media_item_to_item(item_ptr)
-            })
-            .await
-            .unwrap_or(None)
-        } else {
-            None
-        }
+        main_thread::query(move || {
+            let item_ptr = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+            Self::media_item_to_item(item_ptr)
+        })
+        .await
+        .unwrap_or(None)
     }
 
     async fn get_all_items(&self, _cx: &Context, _project: ProjectContext) -> Vec<Item> {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                let mut items = Vec::new();
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            let mut items = Vec::new();
 
-                let count = medium.count_media_items(ReaperProjectContext::CurrentProject);
-                for i in 0..count {
-                    if let Some(item) =
-                        medium.get_media_item(ReaperProjectContext::CurrentProject, i)
-                    {
-                        if let Some(mut item_data) = Self::media_item_to_item(item) {
-                            item_data.index = i as u32;
-                            items.push(item_data);
-                        }
+            let count = medium.count_media_items(ReaperProjectContext::CurrentProject);
+            for i in 0..count {
+                if let Some(item) = medium.get_media_item(ReaperProjectContext::CurrentProject, i) {
+                    if let Some(mut item_data) = Self::media_item_to_item(item) {
+                        item_data.index = i as u32;
+                        items.push(item_data);
                     }
                 }
+            }
 
-                items
-            })
-            .await
-            .unwrap_or_default()
-        } else {
-            Vec::new()
-        }
+            items
+        })
+        .await
+        .unwrap_or_default()
     }
 
     async fn get_selected_items(&self, _cx: &Context, _project: ProjectContext) -> Vec<Item> {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                let mut items = Vec::new();
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            let mut items = Vec::new();
 
-                let count = medium.count_selected_media_items(ReaperProjectContext::CurrentProject);
-                for i in 0..count {
-                    if let Some(item) =
-                        medium.get_selected_media_item(ReaperProjectContext::CurrentProject, i)
-                    {
-                        if let Some(item_data) = Self::media_item_to_item(item) {
-                            items.push(item_data);
-                        }
+            let count = medium.count_selected_media_items(ReaperProjectContext::CurrentProject);
+            for i in 0..count {
+                if let Some(item) =
+                    medium.get_selected_media_item(ReaperProjectContext::CurrentProject, i)
+                {
+                    if let Some(item_data) = Self::media_item_to_item(item) {
+                        items.push(item_data);
                     }
                 }
+            }
 
-                items
-            })
-            .await
-            .unwrap_or_default()
-        } else {
-            Vec::new()
-        }
+            items
+        })
+        .await
+        .unwrap_or_default()
     }
 
     async fn item_count(&self, _cx: &Context, _project: ProjectContext, track: TrackRef) -> u32 {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                let track_ptr = match track {
-                    TrackRef::Master => {
-                        Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
-                    }
-                    TrackRef::Index(idx) => {
-                        medium.get_track(ReaperProjectContext::CurrentProject, idx as u32)
-                    }
-                    TrackRef::Guid(_) => None,
-                };
-
-                if let Some(track) = track_ptr {
-                    unsafe { medium.count_track_media_items(track) as u32 }
-                } else {
-                    0
+            let track_ptr = match track {
+                TrackRef::Master => {
+                    Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
                 }
-            })
-            .await
-            .unwrap_or(0)
-        } else {
-            0
-        }
+                TrackRef::Index(idx) => {
+                    medium.get_track(ReaperProjectContext::CurrentProject, idx as u32)
+                }
+                TrackRef::Guid(_) => None,
+            };
+
+            if let Some(track) = track_ptr {
+                unsafe { medium.count_track_media_items(track) as u32 }
+            } else {
+                0
+            }
+        })
+        .await
+        .unwrap_or(0)
     }
 
     // =========================================================================
@@ -374,66 +352,59 @@ impl ItemService for ReaperItem {
             position.as_seconds(),
             length.as_seconds()
         );
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                let track_ptr = match track {
-                    TrackRef::Master => {
-                        Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
-                    }
-                    TrackRef::Index(idx) => {
-                        medium.get_track(ReaperProjectContext::CurrentProject, idx as u32)
-                    }
-                    TrackRef::Guid(_) => None,
-                }?;
-
-                unsafe {
-                    let item = medium.add_media_item_to_track(track_ptr).ok()?;
-
-                    // Set position and length
-                    medium.set_media_item_position(
-                        item,
-                        reaper_medium::PositionInSeconds::new(position.as_seconds()).ok()?,
-                        UiRefreshBehavior::NoRefresh,
-                    );
-                    medium.set_media_item_length(
-                        item,
-                        DurationInSeconds::new(length.as_seconds()).ok()?,
-                        UiRefreshBehavior::NoRefresh,
-                    );
-
-                    // GUID extraction not available in reaper_medium
-                    // Use pointer address as temporary ID
-                    Some(format!("{:p}", item.as_ptr()))
+            let track_ptr = match track {
+                TrackRef::Master => {
+                    Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
                 }
-            })
-            .await
-            .unwrap_or(None)
-        } else {
-            None
-        }
+                TrackRef::Index(idx) => {
+                    medium.get_track(ReaperProjectContext::CurrentProject, idx as u32)
+                }
+                TrackRef::Guid(_) => None,
+            }?;
+
+            unsafe {
+                let item = medium.add_media_item_to_track(track_ptr).ok()?;
+
+                // Set position and length
+                medium.set_media_item_position(
+                    item,
+                    reaper_medium::PositionInSeconds::new(position.as_seconds()).ok()?,
+                    UiRefreshBehavior::NoRefresh,
+                );
+                medium.set_media_item_length(
+                    item,
+                    DurationInSeconds::new(length.as_seconds()).ok()?,
+                    UiRefreshBehavior::NoRefresh,
+                );
+
+                // GUID extraction not available in reaper_medium
+                // Use pointer address as temporary ID
+                Some(format!("{:p}", item.as_ptr()))
+            }
+        })
+        .await
+        .unwrap_or(None)
     }
 
     async fn delete_item(&self, _cx: &Context, _project: ProjectContext, item: ItemRef) {
         debug!("ReaperItem: delete_item");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    unsafe {
-                        if let Some(track) = medium.get_media_item_track(item_ptr) {
-                            medium.delete_track_media_item(track, item_ptr);
-                        }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                unsafe {
+                    if let Some(track) = medium.get_media_item_track(item_ptr) {
+                        medium.delete_track_media_item(track, item_ptr);
                     }
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn duplicate_item(
@@ -443,45 +414,38 @@ impl ItemService for ReaperItem {
         item: ItemRef,
     ) -> Option<String> {
         debug!("ReaperItem: duplicate_item");
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                let item_ptr = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+            let item_ptr = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
 
-                unsafe {
-                    // First select only this item
-                    medium.select_all_media_items(ReaperProjectContext::CurrentProject, false);
-                    medium.set_media_item_selected(item_ptr, true);
+            unsafe {
+                // First select only this item
+                medium.select_all_media_items(ReaperProjectContext::CurrentProject, false);
+                medium.set_media_item_selected(item_ptr, true);
 
-                    // Duplicate using action
-                    medium.main_on_command_ex(
-                        reaper_medium::CommandId::new(41295), // Item: Duplicate items
-                        0,
-                        ReaperProjectContext::CurrentProject,
-                    );
+                // Duplicate using action
+                medium.main_on_command_ex(
+                    reaper_medium::CommandId::new(41295), // Item: Duplicate items
+                    0,
+                    ReaperProjectContext::CurrentProject,
+                );
 
-                    // Get the newly duplicated item (should be the last selected)
-                    let count =
-                        medium.count_selected_media_items(ReaperProjectContext::CurrentProject);
-                    if count > 0 {
-                        let new_item = medium.get_selected_media_item(
-                            ReaperProjectContext::CurrentProject,
-                            count - 1,
-                        )?;
-                        // Use pointer as temporary ID
-                        Some(format!("{:p}", new_item.as_ptr()))
-                    } else {
-                        None
-                    }
+                // Get the newly duplicated item (should be the last selected)
+                let count = medium.count_selected_media_items(ReaperProjectContext::CurrentProject);
+                if count > 0 {
+                    let new_item = medium
+                        .get_selected_media_item(ReaperProjectContext::CurrentProject, count - 1)?;
+                    // Use pointer as temporary ID
+                    Some(format!("{:p}", new_item.as_ptr()))
+                } else {
+                    None
                 }
-            })
-            .await
-            .unwrap_or(None)
-        } else {
-            None
-        }
+            }
+        })
+        .await
+        .unwrap_or(None)
     }
 
     // =========================================================================
@@ -496,26 +460,19 @@ impl ItemService for ReaperItem {
         position: PositionInSeconds,
     ) {
         debug!("ReaperItem: set_position to {}", position.as_seconds());
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    if let Ok(pos) = reaper_medium::PositionInSeconds::new(position.as_seconds()) {
-                        unsafe {
-                            medium.set_media_item_position(
-                                item_ptr,
-                                pos,
-                                UiRefreshBehavior::Refresh,
-                            );
-                        }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                if let Ok(pos) = reaper_medium::PositionInSeconds::new(position.as_seconds()) {
+                    unsafe {
+                        medium.set_media_item_position(item_ptr, pos, UiRefreshBehavior::Refresh);
                     }
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn set_length(
@@ -526,22 +483,19 @@ impl ItemService for ReaperItem {
         length: Duration,
     ) {
         debug!("ReaperItem: set_length to {}", length.as_seconds());
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    if let Ok(len) = DurationInSeconds::new(length.as_seconds()) {
-                        unsafe {
-                            medium.set_media_item_length(item_ptr, len, UiRefreshBehavior::Refresh);
-                        }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                if let Ok(len) = DurationInSeconds::new(length.as_seconds()) {
+                    unsafe {
+                        medium.set_media_item_length(item_ptr, len, UiRefreshBehavior::Refresh);
                     }
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn move_to_track(
@@ -552,35 +506,32 @@ impl ItemService for ReaperItem {
         track: TrackRef,
     ) {
         debug!("ReaperItem: move_to_track");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    let track_ptr = match track {
-                        TrackRef::Master => {
-                            Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
-                        }
-                        TrackRef::Index(idx) => {
-                            medium.get_track(ReaperProjectContext::CurrentProject, idx as u32)
-                        }
-                        TrackRef::Guid(_) => None,
-                    };
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                let track_ptr = match track {
+                    TrackRef::Master => {
+                        Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
+                    }
+                    TrackRef::Index(idx) => {
+                        medium.get_track(ReaperProjectContext::CurrentProject, idx as u32)
+                    }
+                    TrackRef::Guid(_) => None,
+                };
 
-                    if let Some(new_track) = track_ptr {
-                        unsafe {
-                            // Use low-level API
-                            medium
-                                .low()
-                                .MoveMediaItemToTrack(item_ptr.as_ptr(), new_track.as_ptr());
-                        }
+                if let Some(new_track) = track_ptr {
+                    unsafe {
+                        // Use low-level API
+                        medium
+                            .low()
+                            .MoveMediaItemToTrack(item_ptr.as_ptr(), new_track.as_ptr());
                     }
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn set_snap_offset(
@@ -591,24 +542,21 @@ impl ItemService for ReaperItem {
         offset: Duration,
     ) {
         debug!("ReaperItem: set_snap_offset to {}", offset.as_seconds());
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    unsafe {
-                        medium.set_media_item_info_value(
-                            item_ptr,
-                            ItemAttributeKey::SnapOffset,
-                            offset.as_seconds(),
-                        );
-                    }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                unsafe {
+                    medium.set_media_item_info_value(
+                        item_ptr,
+                        ItemAttributeKey::SnapOffset,
+                        offset.as_seconds(),
+                    );
                 }
-            });
-        }
+            }
+        });
     }
 
     // =========================================================================
@@ -617,24 +565,21 @@ impl ItemService for ReaperItem {
 
     async fn set_muted(&self, _cx: &Context, _project: ProjectContext, item: ItemRef, muted: bool) {
         debug!("ReaperItem: set_muted to {}", muted);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    unsafe {
-                        medium.set_media_item_info_value(
-                            item_ptr,
-                            ItemAttributeKey::Mute,
-                            if muted { 1.0 } else { 0.0 },
-                        );
-                    }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                unsafe {
+                    medium.set_media_item_info_value(
+                        item_ptr,
+                        ItemAttributeKey::Mute,
+                        if muted { 1.0 } else { 0.0 },
+                    );
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn set_selected(
@@ -645,20 +590,17 @@ impl ItemService for ReaperItem {
         selected: bool,
     ) {
         debug!("ReaperItem: set_selected to {}", selected);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    unsafe {
-                        medium.set_media_item_selected(item_ptr, selected);
-                    }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                unsafe {
+                    medium.set_media_item_selected(item_ptr, selected);
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn set_locked(
@@ -669,27 +611,23 @@ impl ItemService for ReaperItem {
         locked: bool,
     ) {
         debug!("ReaperItem: set_locked to {}", locked);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                // Lock attribute not available in reaper_medium
-                // Would need chunk manipulation or low-level API
-                let _ = (item, locked, medium, reaper);
-            });
-        }
+            // Lock attribute not available in reaper_medium
+            // Would need chunk manipulation or low-level API
+            let _ = (item, locked, medium, reaper);
+        });
     }
 
     async fn select_all_items(&self, _cx: &Context, _project: ProjectContext, selected: bool) {
         debug!("ReaperItem: select_all_items to {}", selected);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                medium.select_all_media_items(ReaperProjectContext::CurrentProject, selected);
-            });
-        }
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            medium.select_all_media_items(ReaperProjectContext::CurrentProject, selected);
+        });
     }
 
     // =========================================================================
@@ -704,20 +642,17 @@ impl ItemService for ReaperItem {
         volume: f64,
     ) {
         debug!("ReaperItem: set_volume to {}", volume);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    unsafe {
-                        medium.set_media_item_info_value(item_ptr, ItemAttributeKey::Vol, volume);
-                    }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                unsafe {
+                    medium.set_media_item_info_value(item_ptr, ItemAttributeKey::Vol, volume);
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn set_fade_in(
@@ -733,29 +668,26 @@ impl ItemService for ReaperItem {
             length.as_seconds(),
             shape
         );
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    unsafe {
-                        medium.set_media_item_info_value(
-                            item_ptr,
-                            ItemAttributeKey::FadeInLen,
-                            length.as_seconds(),
-                        );
-                        medium.set_media_item_info_value(
-                            item_ptr,
-                            ItemAttributeKey::FadeInShape,
-                            proto_fade_to_reaper(shape) as f64,
-                        );
-                    }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                unsafe {
+                    medium.set_media_item_info_value(
+                        item_ptr,
+                        ItemAttributeKey::FadeInLen,
+                        length.as_seconds(),
+                    );
+                    medium.set_media_item_info_value(
+                        item_ptr,
+                        ItemAttributeKey::FadeInShape,
+                        proto_fade_to_reaper(shape) as f64,
+                    );
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn set_fade_out(
@@ -771,29 +703,26 @@ impl ItemService for ReaperItem {
             length.as_seconds(),
             shape
         );
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    unsafe {
-                        medium.set_media_item_info_value(
-                            item_ptr,
-                            ItemAttributeKey::FadeOutLen,
-                            length.as_seconds(),
-                        );
-                        medium.set_media_item_info_value(
-                            item_ptr,
-                            ItemAttributeKey::FadeOutShape,
-                            proto_fade_to_reaper(shape) as f64,
-                        );
-                    }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                unsafe {
+                    medium.set_media_item_info_value(
+                        item_ptr,
+                        ItemAttributeKey::FadeOutLen,
+                        length.as_seconds(),
+                    );
+                    medium.set_media_item_info_value(
+                        item_ptr,
+                        ItemAttributeKey::FadeOutShape,
+                        proto_fade_to_reaper(shape) as f64,
+                    );
                 }
-            });
-        }
+            }
+        });
     }
 
     // =========================================================================
@@ -808,24 +737,21 @@ impl ItemService for ReaperItem {
         loop_source: bool,
     ) {
         debug!("ReaperItem: set_loop_source to {}", loop_source);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    unsafe {
-                        medium.set_media_item_info_value(
-                            item_ptr,
-                            ItemAttributeKey::LoopSrc,
-                            if loop_source { 1.0 } else { 0.0 },
-                        );
-                    }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                unsafe {
+                    medium.set_media_item_info_value(
+                        item_ptr,
+                        ItemAttributeKey::LoopSrc,
+                        if loop_source { 1.0 } else { 0.0 },
+                    );
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn set_beat_attach_mode(
@@ -836,31 +762,28 @@ impl ItemService for ReaperItem {
         mode: BeatAttachMode,
     ) {
         debug!("ReaperItem: set_beat_attach_mode to {:?}", mode);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    // REAPER uses TimeBase attribute
-                    // 0 = time, 1 = beats (position, length, rate), 2 = beats (position only)
-                    let timebase = match mode {
-                        BeatAttachMode::Time => 0.0,
-                        BeatAttachMode::Beats => 1.0,
-                        BeatAttachMode::BeatsPositionOnly => 2.0,
-                    };
-                    unsafe {
-                        medium.set_media_item_info_value(
-                            item_ptr,
-                            ItemAttributeKey::BeatAttachMode,
-                            timebase,
-                        );
-                    }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                // REAPER uses TimeBase attribute
+                // 0 = time, 1 = beats (position, length, rate), 2 = beats (position only)
+                let timebase = match mode {
+                    BeatAttachMode::Time => 0.0,
+                    BeatAttachMode::Beats => 1.0,
+                    BeatAttachMode::BeatsPositionOnly => 2.0,
+                };
+                unsafe {
+                    medium.set_media_item_info_value(
+                        item_ptr,
+                        ItemAttributeKey::BeatAttachMode,
+                        timebase,
+                    );
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn set_auto_stretch(
@@ -871,24 +794,21 @@ impl ItemService for ReaperItem {
         auto_stretch: bool,
     ) {
         debug!("ReaperItem: set_auto_stretch to {}", auto_stretch);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    unsafe {
-                        medium.set_media_item_info_value(
-                            item_ptr,
-                            ItemAttributeKey::AutoStretch,
-                            if auto_stretch { 1.0 } else { 0.0 },
-                        );
-                    }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                unsafe {
+                    medium.set_media_item_info_value(
+                        item_ptr,
+                        ItemAttributeKey::AutoStretch,
+                        if auto_stretch { 1.0 } else { 0.0 },
+                    );
                 }
-            });
-        }
+            }
+        });
     }
 
     // =========================================================================
@@ -903,25 +823,22 @@ impl ItemService for ReaperItem {
         color: Option<u32>,
     ) {
         debug!("ReaperItem: set_color to {:?}", color);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    let color_value = color.map(|c| c as i32).unwrap_or(0);
-                    unsafe {
-                        medium.set_media_item_info_value(
-                            item_ptr,
-                            ItemAttributeKey::CustomColor,
-                            color_value as f64,
-                        );
-                    }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                let color_value = color.map(|c| c as i32).unwrap_or(0);
+                unsafe {
+                    medium.set_media_item_info_value(
+                        item_ptr,
+                        ItemAttributeKey::CustomColor,
+                        color_value as f64,
+                    );
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn set_group_id(
@@ -932,25 +849,22 @@ impl ItemService for ReaperItem {
         group_id: Option<u32>,
     ) {
         debug!("ReaperItem: set_group_id to {:?}", group_id);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                if let Some(item_ptr) =
-                    Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    let group_value = group_id.map(|g| g as i32).unwrap_or(0);
-                    unsafe {
-                        medium.set_media_item_info_value(
-                            item_ptr,
-                            ItemAttributeKey::GroupId,
-                            group_value as f64,
-                        );
-                    }
+            if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                let group_value = group_id.map(|g| g as i32).unwrap_or(0);
+                unsafe {
+                    medium.set_media_item_info_value(
+                        item_ptr,
+                        ItemAttributeKey::GroupId,
+                        group_value as f64,
+                    );
                 }
-            });
-        }
+            }
+        });
     }
 }
 
@@ -1166,38 +1080,32 @@ impl TakeService for ReaperTake {
     // =========================================================================
 
     async fn get_takes(&self, _cx: &Context, _project: ProjectContext, item: ItemRef) -> Vec<Take> {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let item_ptr =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                let mut takes = Vec::new();
+        main_thread::query(move || {
+            let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            let mut takes = Vec::new();
 
-                unsafe {
-                    // Use low-level API for counting and getting takes
-                    let count = medium.low().CountTakes(item_ptr.as_ptr());
+            unsafe {
+                // Use low-level API for counting and getting takes
+                let count = medium.low().CountTakes(item_ptr.as_ptr());
 
-                    for i in 0..count {
-                        let take_ptr = medium.low().GetTake(item_ptr.as_ptr(), i);
-                        if let Some(take) = MediaItemTake::new(take_ptr) {
-                            if let Some(take_data) =
-                                Self::media_take_to_take(item_ptr, take, i as u32)
-                            {
-                                takes.push(take_data);
-                            }
+                for i in 0..count {
+                    let take_ptr = medium.low().GetTake(item_ptr.as_ptr(), i);
+                    if let Some(take) = MediaItemTake::new(take_ptr) {
+                        if let Some(take_data) = Self::media_take_to_take(item_ptr, take, i as u32)
+                        {
+                            takes.push(take_data);
                         }
                     }
                 }
+            }
 
-                Some(takes)
-            })
-            .await
-            .unwrap_or(None)
-            .unwrap_or_default()
-        } else {
-            Vec::new()
-        }
+            Some(takes)
+        })
+        .await
+        .unwrap_or(None)
+        .unwrap_or_default()
     }
 
     async fn get_take(
@@ -1207,38 +1115,33 @@ impl TakeService for ReaperTake {
         item: ItemRef,
         take: TakeRef,
     ) -> Option<Take> {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let item_ptr =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
-                let take_ptr = Self::resolve_take(item_ptr, &take)?;
-                let index = match take {
-                    TakeRef::Index(idx) => idx,
-                    _ => {
-                        // Find index by comparing pointers
-                        let reaper = Reaper::get();
-                        let medium = reaper.medium_reaper();
-                        let mut found_index = 0;
-                        unsafe {
-                            let count = medium.low().CountTakes(item_ptr.as_ptr());
-                            for i in 0..count {
-                                let t = medium.low().GetTake(item_ptr.as_ptr(), i);
-                                if t == take_ptr.as_ptr() {
-                                    found_index = i as u32;
-                                    break;
-                                }
+        main_thread::query(move || {
+            let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+            let take_ptr = Self::resolve_take(item_ptr, &take)?;
+            let index = match take {
+                TakeRef::Index(idx) => idx,
+                _ => {
+                    // Find index by comparing pointers
+                    let reaper = Reaper::get();
+                    let medium = reaper.medium_reaper();
+                    let mut found_index = 0;
+                    unsafe {
+                        let count = medium.low().CountTakes(item_ptr.as_ptr());
+                        for i in 0..count {
+                            let t = medium.low().GetTake(item_ptr.as_ptr(), i);
+                            if t == take_ptr.as_ptr() {
+                                found_index = i as u32;
+                                break;
                             }
                         }
-                        found_index
                     }
-                };
-                Self::media_take_to_take(item_ptr, take_ptr, index)
-            })
-            .await
-            .unwrap_or(None)
-        } else {
-            None
-        }
+                    found_index
+                }
+            };
+            Self::media_take_to_take(item_ptr, take_ptr, index)
+        })
+        .await
+        .unwrap_or(None)
     }
 
     async fn get_active_take(
@@ -1247,50 +1150,40 @@ impl TakeService for ReaperTake {
         _project: ProjectContext,
         item: ItemRef,
     ) -> Option<Take> {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let item_ptr =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::query(move || {
+            let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                unsafe {
-                    let take_ptr = medium.get_active_take(item_ptr)?;
-                    // Find index by comparing pointers
-                    let mut index = 0;
-                    let count = medium.low().CountTakes(item_ptr.as_ptr());
-                    for i in 0..count {
-                        let t = medium.low().GetTake(item_ptr.as_ptr(), i);
-                        if t == take_ptr.as_ptr() {
-                            index = i as u32;
-                            break;
-                        }
+            unsafe {
+                let take_ptr = medium.get_active_take(item_ptr)?;
+                // Find index by comparing pointers
+                let mut index = 0;
+                let count = medium.low().CountTakes(item_ptr.as_ptr());
+                for i in 0..count {
+                    let t = medium.low().GetTake(item_ptr.as_ptr(), i);
+                    if t == take_ptr.as_ptr() {
+                        index = i as u32;
+                        break;
                     }
-                    Self::media_take_to_take(item_ptr, take_ptr, index)
                 }
-            })
-            .await
-            .unwrap_or(None)
-        } else {
-            None
-        }
+                Self::media_take_to_take(item_ptr, take_ptr, index)
+            }
+        })
+        .await
+        .unwrap_or(None)
     }
 
     async fn take_count(&self, _cx: &Context, _project: ProjectContext, item: ItemRef) -> u32 {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let item_ptr =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                unsafe { Some(medium.low().CountTakes(item_ptr.as_ptr()) as u32) }
-            })
-            .await
-            .unwrap_or(None)
-            .unwrap_or(0)
-        } else {
-            0
-        }
+        main_thread::query(move || {
+            let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            unsafe { Some(medium.low().CountTakes(item_ptr.as_ptr()) as u32) }
+        })
+        .await
+        .unwrap_or(None)
+        .unwrap_or(0)
     }
 
     // =========================================================================
@@ -1304,24 +1197,19 @@ impl TakeService for ReaperTake {
         item: ItemRef,
     ) -> Option<String> {
         debug!("ReaperTake: add_take");
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let item_ptr =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::query(move || {
+            let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                unsafe {
-                    let take = medium.add_take_to_media_item(item_ptr).ok()?;
-                    let chunk = Self::_get_take_state_chunk(medium, take, 1024).ok()?;
-                    extract_guid_from_chunk(&chunk)
-                }
-            })
-            .await
-            .unwrap_or(None)
-        } else {
-            None
-        }
+            unsafe {
+                let take = medium.add_take_to_media_item(item_ptr).ok()?;
+                let chunk = Self::_get_take_state_chunk(medium, take, 1024).ok()?;
+                extract_guid_from_chunk(&chunk)
+            }
+        })
+        .await
+        .unwrap_or(None)
     }
 
     async fn delete_take(
@@ -1332,29 +1220,27 @@ impl TakeService for ReaperTake {
         take: TakeRef,
     ) {
         debug!("ReaperTake: delete_take");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let item_ptr = if let Some(ptr) =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    ptr
-                } else {
-                    return;
-                };
+        main_thread::run(move || {
+            let item_ptr = if let Some(ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                ptr
+            } else {
+                return;
+            };
 
-                let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
-                    ptr
-                } else {
-                    return;
-                };
+            let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
+                ptr
+            } else {
+                return;
+            };
 
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                unsafe {
-                    Self::_delete_take_from_media_item_raw(medium, item_ptr, take_ptr);
-                }
-            });
-        }
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            unsafe {
+                Self::_delete_take_from_media_item_raw(medium, item_ptr, take_ptr);
+            }
+        });
     }
 
     async fn set_active_take(
@@ -1365,29 +1251,27 @@ impl TakeService for ReaperTake {
         take: TakeRef,
     ) {
         debug!("ReaperTake: set_active_take");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let item_ptr = if let Some(ptr) =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    ptr
-                } else {
-                    return;
-                };
+        main_thread::run(move || {
+            let item_ptr = if let Some(ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                ptr
+            } else {
+                return;
+            };
 
-                let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
-                    ptr
-                } else {
-                    return;
-                };
+            let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
+                ptr
+            } else {
+                return;
+            };
 
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                unsafe {
-                    Self::_set_active_take_raw(medium, take_ptr);
-                }
-            });
-        }
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            unsafe {
+                Self::_set_active_take_raw(medium, take_ptr);
+            }
+        });
     }
 
     // =========================================================================
@@ -1403,29 +1287,27 @@ impl TakeService for ReaperTake {
         name: String,
     ) {
         debug!("ReaperTake: set_name to '{}'", name);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let item_ptr = if let Some(ptr) =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    ptr
-                } else {
-                    return;
-                };
+        main_thread::run(move || {
+            let item_ptr = if let Some(ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                ptr
+            } else {
+                return;
+            };
 
-                let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
-                    ptr
-                } else {
-                    return;
-                };
+            let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
+                ptr
+            } else {
+                return;
+            };
 
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                unsafe {
-                    Self::_set_take_name_raw(medium, take_ptr, &name);
-                }
-            });
-        }
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            unsafe {
+                Self::_set_take_name_raw(medium, take_ptr, &name);
+            }
+        });
     }
 
     async fn set_color(
@@ -1453,29 +1335,27 @@ impl TakeService for ReaperTake {
         volume: f64,
     ) {
         debug!("ReaperTake: set_volume to {}", volume);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let item_ptr = if let Some(ptr) =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    ptr
-                } else {
-                    return;
-                };
+        main_thread::run(move || {
+            let item_ptr = if let Some(ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                ptr
+            } else {
+                return;
+            };
 
-                let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
-                    ptr
-                } else {
-                    return;
-                };
+            let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
+                ptr
+            } else {
+                return;
+            };
 
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                unsafe {
-                    medium.set_media_item_take_info_value(take_ptr, TakeAttributeKey::Vol, volume);
-                }
-            });
-        }
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            unsafe {
+                medium.set_media_item_take_info_value(take_ptr, TakeAttributeKey::Vol, volume);
+            }
+        });
     }
 
     async fn set_play_rate(
@@ -1487,33 +1367,27 @@ impl TakeService for ReaperTake {
         rate: f64,
     ) {
         debug!("ReaperTake: set_play_rate to {}", rate);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let item_ptr = if let Some(ptr) =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    ptr
-                } else {
-                    return;
-                };
+        main_thread::run(move || {
+            let item_ptr = if let Some(ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                ptr
+            } else {
+                return;
+            };
 
-                let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
-                    ptr
-                } else {
-                    return;
-                };
+            let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
+                ptr
+            } else {
+                return;
+            };
 
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                unsafe {
-                    medium.set_media_item_take_info_value(
-                        take_ptr,
-                        TakeAttributeKey::PlayRate,
-                        rate,
-                    );
-                }
-            });
-        }
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            unsafe {
+                medium.set_media_item_take_info_value(take_ptr, TakeAttributeKey::PlayRate, rate);
+            }
+        });
     }
 
     async fn set_pitch(
@@ -1525,31 +1399,29 @@ impl TakeService for ReaperTake {
         semitones: f64,
     ) {
         debug!("ReaperTake: set_pitch to {} semitones", semitones);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let item_ptr = if let Some(ptr) =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    ptr
-                } else {
-                    return;
-                };
+        main_thread::run(move || {
+            let item_ptr = if let Some(ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                ptr
+            } else {
+                return;
+            };
 
-                let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
-                    ptr
-                } else {
-                    return;
-                };
+            let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
+                ptr
+            } else {
+                return;
+            };
 
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                if let Ok(pitch) = Semitones::new(semitones) {
-                    unsafe {
-                        medium.get_set_media_item_take_info_set_pitch(take_ptr, pitch);
-                    }
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            if let Ok(pitch) = Semitones::new(semitones) {
+                unsafe {
+                    medium.get_set_media_item_take_info_set_pitch(take_ptr, pitch);
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn set_preserve_pitch(
@@ -1561,28 +1433,26 @@ impl TakeService for ReaperTake {
         preserve: bool,
     ) {
         debug!("ReaperTake: set_preserve_pitch to {}", preserve);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let item_ptr = if let Some(ptr) =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    ptr
-                } else {
-                    return;
-                };
+        main_thread::run(move || {
+            let item_ptr = if let Some(ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                ptr
+            } else {
+                return;
+            };
 
-                let _take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
-                    ptr
-                } else {
-                    return;
-                };
+            let _take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
+                ptr
+            } else {
+                return;
+            };
 
-                // PitchMode values:
-                // TODO: Implement proper pitch mode setting
-                // For now, stub this out as it requires FullPitchShiftMode which is more complex
-                let _preserve = preserve; // Silence unused warning
-            });
-        }
+            // PitchMode values:
+            // TODO: Implement proper pitch mode setting
+            // For now, stub this out as it requires FullPitchShiftMode which is more complex
+            let _preserve = preserve; // Silence unused warning
+        });
     }
 
     async fn set_start_offset(
@@ -1594,33 +1464,31 @@ impl TakeService for ReaperTake {
         offset: Duration,
     ) {
         debug!("ReaperTake: set_start_offset to {}", offset.as_seconds());
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let item_ptr = if let Some(ptr) =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    ptr
-                } else {
-                    return;
-                };
+        main_thread::run(move || {
+            let item_ptr = if let Some(ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                ptr
+            } else {
+                return;
+            };
 
-                let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
-                    ptr
-                } else {
-                    return;
-                };
+            let take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
+                ptr
+            } else {
+                return;
+            };
 
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                unsafe {
-                    medium.set_media_item_take_info_value(
-                        take_ptr,
-                        TakeAttributeKey::StartOffs,
-                        offset.as_seconds(),
-                    );
-                }
-            });
-        }
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            unsafe {
+                medium.set_media_item_take_info_value(
+                    take_ptr,
+                    TakeAttributeKey::StartOffs,
+                    offset.as_seconds(),
+                );
+            }
+        });
     }
 
     // =========================================================================
@@ -1636,28 +1504,26 @@ impl TakeService for ReaperTake {
         path: String,
     ) {
         debug!("ReaperTake: set_source_file to '{}'", path);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let item_ptr = if let Some(ptr) =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
-                {
-                    ptr
-                } else {
-                    return;
-                };
+        main_thread::run(move || {
+            let item_ptr = if let Some(ptr) =
+                ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            {
+                ptr
+            } else {
+                return;
+            };
 
-                let _take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
-                    ptr
-                } else {
-                    return;
-                };
+            let _take_ptr = if let Some(ptr) = Self::resolve_take(item_ptr, &take) {
+                ptr
+            } else {
+                return;
+            };
 
-                // TODO: Create a new PCM source from file
-                // Need to use pcm_source_create_from_file_ex or low-level API
-                // For now, this is a stub
-                let _path = path; // Silence unused warning
-            });
-        }
+            // TODO: Create a new PCM source from file
+            // Need to use pcm_source_create_from_file_ex or low-level API
+            // For now, this is a stub
+            let _path = path; // Silence unused warning
+        });
     }
 
     async fn get_source_type(
@@ -1667,28 +1533,23 @@ impl TakeService for ReaperTake {
         item: ItemRef,
         take: TakeRef,
     ) -> SourceType {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let item_ptr =
-                    ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
-                let take_ptr = Self::resolve_take(item_ptr, &take)?;
+        main_thread::query(move || {
+            let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+            let take_ptr = Self::resolve_take(item_ptr, &take)?;
 
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                unsafe {
-                    // TODO: Implement source type detection using low-level API
-                    let _source = medium.get_media_item_take_source(take_ptr)?;
-                    // For now, return Audio as default
-                    Some(SourceType::Audio)
-                }
-            })
-            .await
-            .unwrap_or(None)
-            .unwrap_or(SourceType::Unknown)
-        } else {
-            SourceType::Unknown
-        }
+            unsafe {
+                // TODO: Implement source type detection using low-level API
+                let _source = medium.get_media_item_take_source(take_ptr)?;
+                // For now, return Audio as default
+                Some(SourceType::Audio)
+            }
+        })
+        .await
+        .unwrap_or(None)
+        .unwrap_or(SourceType::Unknown)
     }
 }
 

@@ -35,7 +35,7 @@
 //! - Flooding with updates for projects that aren't playing
 //! - SHM slot exhaustion from constant polling
 
-use crate::project_context::find_project_by_guid;
+use crate::project_context::{find_project_by_guid, project_guid as project_guid_from};
 use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport, TransportService};
 use reaper_high::{PlayRate, Project, Reaper, TaskSupport, Tempo as ReaperTempo};
 use reaper_medium::{
@@ -48,8 +48,7 @@ use std::sync::{Mutex, OnceLock};
 use tokio::sync::broadcast;
 use tracing::{debug, info};
 
-/// Global TaskSupport instance - set by the extension during initialization
-static TASK_SUPPORT: OnceLock<&'static TaskSupport> = OnceLock::new();
+use crate::main_thread;
 
 /// Per-project transport update - includes project GUID so subscribers know which project changed
 #[derive(Clone, Debug)]
@@ -71,15 +70,12 @@ static LEGACY_TRANSPORT_BROADCASTER: OnceLock<broadcast::Sender<Transport>> = On
 /// Only broadcasts when state actually changes (reactive pattern)
 static PROJECT_TRANSPORT_CACHE: OnceLock<Mutex<HashMap<String, Transport>>> = OnceLock::new();
 
-/// Set the global TaskSupport reference.
-/// Called by the extension during initialization.
-pub fn set_task_support(task_support: &'static TaskSupport) {
-    let _ = TASK_SUPPORT.set(task_support);
-}
-
 /// Get the global TaskSupport reference.
+///
+/// Delegates to [`main_thread::task_support`]. Kept for use by transport-internal
+/// code (polling, broadcasting) that needs direct TaskSupport access.
 pub(crate) fn task_support() -> Option<&'static TaskSupport> {
-    TASK_SUPPORT.get().copied()
+    main_thread::task_support()
 }
 
 /// Initialize the transport broadcaster.
@@ -114,19 +110,9 @@ fn transport_receiver() -> Option<broadcast::Receiver<Transport>> {
     LEGACY_TRANSPORT_BROADCASTER.get().map(|tx| tx.subscribe())
 }
 
-/// Hash a string to create a deterministic GUID (same algorithm used in project.rs)
-fn hash_string(s: &str) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    s.hash(&mut hasher);
-    hasher.finish()
-}
-
-/// Get project GUID from a REAPER project
+/// Get project GUID from a REAPER project (delegates to shared implementation).
 fn project_guid(project: &Project) -> String {
-    let path = project.file().map(|p| p.to_string()).unwrap_or_default();
-    format!("{:x}", hash_string(&path))
+    project_guid_from(project)
 }
 
 /// Threshold for position change detection (in seconds)
@@ -408,77 +394,67 @@ impl TransportService for ReaperTransport {
 
     async fn play(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperTransport: play");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = Reaper::get();
-                // 1007: Transport: Play
-                reaper.medium_reaper().main_on_command_ex(
-                    CommandId::new(1007),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = Reaper::get();
+            // 1007: Transport: Play
+            reaper.medium_reaper().main_on_command_ex(
+                CommandId::new(1007),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     async fn pause(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperTransport: pause");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = Reaper::get();
-                // 1008: Transport: Pause
-                reaper.medium_reaper().main_on_command_ex(
-                    CommandId::new(1008),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = Reaper::get();
+            // 1008: Transport: Pause
+            reaper.medium_reaper().main_on_command_ex(
+                CommandId::new(1008),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     async fn stop(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperTransport: stop");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = Reaper::get();
-                // 1016: Transport: Stop
-                reaper.medium_reaper().main_on_command_ex(
-                    CommandId::new(1016),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = Reaper::get();
+            // 1016: Transport: Stop
+            reaper.medium_reaper().main_on_command_ex(
+                CommandId::new(1016),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     async fn play_pause(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperTransport: play_pause");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = Reaper::get();
-                // 40073: Transport: Play/pause
-                reaper.medium_reaper().main_on_command_ex(
-                    CommandId::new(40073),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = Reaper::get();
+            // 40073: Transport: Play/pause
+            reaper.medium_reaper().main_on_command_ex(
+                CommandId::new(40073),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     async fn play_stop(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperTransport: play_stop");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = Reaper::get();
-                // 40044: Transport: Play/stop
-                reaper.medium_reaper().main_on_command_ex(
-                    CommandId::new(40044),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = Reaper::get();
+            // 40044: Transport: Play/stop
+            reaper.medium_reaper().main_on_command_ex(
+                CommandId::new(40044),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     async fn play_from_last_start_position(&self, _cx: &Context, project: ProjectContext) {
@@ -492,47 +468,41 @@ impl TransportService for ReaperTransport {
 
     async fn record(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperTransport: record");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = Reaper::get();
-                // 1013: Transport: Record
-                reaper.medium_reaper().main_on_command_ex(
-                    CommandId::new(1013),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = Reaper::get();
+            // 1013: Transport: Record
+            reaper.medium_reaper().main_on_command_ex(
+                CommandId::new(1013),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     async fn stop_recording(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperTransport: stop_recording");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = Reaper::get();
-                // Stop is also stop recording
-                reaper.medium_reaper().main_on_command_ex(
-                    CommandId::new(1016),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = Reaper::get();
+            // Stop is also stop recording
+            reaper.medium_reaper().main_on_command_ex(
+                CommandId::new(1016),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     async fn toggle_recording(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperTransport: toggle_recording");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = Reaper::get();
-                // 1013: Transport: Record (toggles)
-                reaper.medium_reaper().main_on_command_ex(
-                    CommandId::new(1013),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = Reaper::get();
+            // 1013: Transport: Record (toggles)
+            reaper.medium_reaper().main_on_command_ex(
+                CommandId::new(1013),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     // =========================================================================
@@ -541,67 +511,57 @@ impl TransportService for ReaperTransport {
 
     async fn set_position(&self, _cx: &Context, _project: ProjectContext, seconds: f64) {
         debug!("ReaperTransport: set_position to {} seconds", seconds);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                if let Ok(pos) = PositionInSeconds::new(seconds) {
-                    reaper.current_project().set_edit_cursor_position(
-                        pos,
-                        SetEditCurPosOptions {
-                            move_view: false,
-                            seek_play: true,
-                        },
-                    );
-                }
-            });
-        }
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            if let Ok(pos) = PositionInSeconds::new(seconds) {
+                reaper.current_project().set_edit_cursor_position(
+                    pos,
+                    SetEditCurPosOptions {
+                        move_view: false,
+                        seek_play: true,
+                    },
+                );
+            }
+        });
     }
 
     async fn get_position(&self, _cx: &Context, _project: ProjectContext) -> f64 {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                reaper
-                    .current_project()
-                    .play_or_edit_cursor_position()
-                    .map(|p| p.get())
-                    .unwrap_or(0.0)
-            })
-            .await
-            .unwrap_or(0.0)
-        } else {
-            0.0
-        }
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            reaper
+                .current_project()
+                .play_or_edit_cursor_position()
+                .map(|p| p.get())
+                .unwrap_or(0.0)
+        })
+        .await
+        .unwrap_or(0.0)
     }
 
     async fn goto_start(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperTransport: goto_start");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = Reaper::get();
-                // 40042: Transport: Go to start of project
-                reaper.medium_reaper().main_on_command_ex(
-                    CommandId::new(40042),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = Reaper::get();
+            // 40042: Transport: Go to start of project
+            reaper.medium_reaper().main_on_command_ex(
+                CommandId::new(40042),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     async fn goto_end(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperTransport: goto_end");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = Reaper::get();
-                // 40043: Transport: Go to end of project
-                reaper.medium_reaper().main_on_command_ex(
-                    CommandId::new(40043),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = Reaper::get();
+            // 40043: Transport: Go to end of project
+            reaper.medium_reaper().main_on_command_ex(
+                CommandId::new(40043),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     // =========================================================================
@@ -609,82 +569,66 @@ impl TransportService for ReaperTransport {
     // =========================================================================
 
     async fn get_state(&self, _cx: &Context, project: ProjectContext) -> Transport {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                // Resolve the project context to find the correct REAPER project
-                let (rea_project, reaper_ctx) = match &project {
-                    ProjectContext::Current => {
+            // Resolve the project context to find the correct REAPER project
+            let (rea_project, reaper_ctx) = match &project {
+                ProjectContext::Current => {
+                    let proj = reaper.current_project();
+                    (proj, ReaperProjectContext::CurrentProject)
+                }
+                ProjectContext::Project(guid) => {
+                    // Find project by GUID
+                    if let Some(proj) = find_project_by_guid(guid) {
+                        let ctx = ReaperProjectContext::Proj(proj.raw());
+                        (proj, ctx)
+                    } else {
+                        // Fallback to current project if not found
                         let proj = reaper.current_project();
                         (proj, ReaperProjectContext::CurrentProject)
                     }
-                    ProjectContext::Project(guid) => {
-                        // Find project by GUID
-                        if let Some(proj) = find_project_by_guid(guid) {
-                            let ctx = ReaperProjectContext::Proj(proj.raw());
-                            (proj, ctx)
-                        } else {
-                            // Fallback to current project if not found
-                            let proj = reaper.current_project();
-                            (proj, ReaperProjectContext::CurrentProject)
-                        }
-                    }
-                };
+                }
+            };
 
-                read_transport_state_for_project(&rea_project, reaper_ctx, medium)
-            })
-            .await
-            .unwrap_or_else(|_| Transport::new())
-        } else {
-            Transport::new()
-        }
+            read_transport_state_for_project(&rea_project, reaper_ctx, medium)
+        })
+        .await
+        .unwrap_or_else(|| Transport::new())
     }
 
     async fn get_play_state(&self, _cx: &Context, _project: ProjectContext) -> PlayState {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                get_play_state_internal(reaper.medium_reaper())
-            })
-            .await
-            .unwrap_or(PlayState::Stopped)
-        } else {
-            PlayState::Stopped
-        }
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            get_play_state_internal(reaper.medium_reaper())
+        })
+        .await
+        .unwrap_or(PlayState::Stopped)
     }
 
     async fn is_playing(&self, _cx: &Context, _project: ProjectContext) -> bool {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                let state = reaper
-                    .medium_reaper()
-                    .get_play_state_ex(ReaperProjectContext::CurrentProject);
-                state.is_playing || state.is_recording
-            })
-            .await
-            .unwrap_or(false)
-        } else {
-            false
-        }
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            let state = reaper
+                .medium_reaper()
+                .get_play_state_ex(ReaperProjectContext::CurrentProject);
+            state.is_playing || state.is_recording
+        })
+        .await
+        .unwrap_or(false)
     }
 
     async fn is_recording(&self, _cx: &Context, _project: ProjectContext) -> bool {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                let state = reaper
-                    .medium_reaper()
-                    .get_play_state_ex(ReaperProjectContext::CurrentProject);
-                state.is_recording
-            })
-            .await
-            .unwrap_or(false)
-        } else {
-            false
-        }
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            let state = reaper
+                .medium_reaper()
+                .get_play_state_ex(ReaperProjectContext::CurrentProject);
+            state.is_recording
+        })
+        .await
+        .unwrap_or(false)
     }
 
     // =========================================================================
@@ -692,31 +636,25 @@ impl TransportService for ReaperTransport {
     // =========================================================================
 
     async fn get_tempo(&self, _cx: &Context, _project: ProjectContext) -> f64 {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                reaper.current_project().tempo().bpm().get()
-            })
-            .await
-            .unwrap_or(120.0)
-        } else {
-            120.0
-        }
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            reaper.current_project().tempo().bpm().get()
+        })
+        .await
+        .unwrap_or(120.0)
     }
 
     async fn set_tempo(&self, _cx: &Context, _project: ProjectContext, bpm: f64) {
         debug!("ReaperTransport: set_tempo to {} BPM", bpm);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                if let Ok(bpm_value) = reaper_medium::Bpm::new(bpm) {
-                    let tempo = ReaperTempo::from_bpm(bpm_value);
-                    let _ = reaper
-                        .current_project()
-                        .set_tempo(tempo, UndoBehavior::OmitUndoPoint);
-                }
-            });
-        }
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            if let Ok(bpm_value) = reaper_medium::Bpm::new(bpm) {
+                let tempo = ReaperTempo::from_bpm(bpm_value);
+                let _ = reaper
+                    .current_project()
+                    .set_tempo(tempo, UndoBehavior::OmitUndoPoint);
+            }
+        });
     }
 
     // =========================================================================
@@ -725,44 +663,36 @@ impl TransportService for ReaperTransport {
 
     async fn toggle_loop(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperTransport: toggle_loop");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = Reaper::get();
-                // 1068: Transport: Toggle repeat
-                reaper.medium_reaper().main_on_command_ex(
-                    CommandId::new(1068),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = Reaper::get();
+            // 1068: Transport: Toggle repeat
+            reaper.medium_reaper().main_on_command_ex(
+                CommandId::new(1068),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     async fn is_looping(&self, _cx: &Context, _project: ProjectContext) -> bool {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                reaper
-                    .medium_reaper()
-                    .get_set_repeat_ex_get(ReaperProjectContext::CurrentProject)
-            })
-            .await
-            .unwrap_or(false)
-        } else {
-            false
-        }
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            reaper
+                .medium_reaper()
+                .get_set_repeat_ex_get(ReaperProjectContext::CurrentProject)
+        })
+        .await
+        .unwrap_or(false)
     }
 
     async fn set_loop(&self, _cx: &Context, _project: ProjectContext, enabled: bool) {
         debug!("ReaperTransport: set_loop to {}", enabled);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                reaper
-                    .medium_reaper()
-                    .get_set_repeat_ex_set(ReaperProjectContext::CurrentProject, enabled);
-            });
-        }
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            reaper
+                .medium_reaper()
+                .get_set_repeat_ex_set(ReaperProjectContext::CurrentProject, enabled);
+        });
     }
 
     // =========================================================================
@@ -770,34 +700,28 @@ impl TransportService for ReaperTransport {
     // =========================================================================
 
     async fn get_playrate(&self, _cx: &Context, _project: ProjectContext) -> f64 {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                reaper
-                    .current_project()
-                    .play_rate()
-                    .playback_speed_factor()
-                    .get()
-            })
-            .await
-            .unwrap_or(1.0)
-        } else {
-            1.0
-        }
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            reaper
+                .current_project()
+                .play_rate()
+                .playback_speed_factor()
+                .get()
+        })
+        .await
+        .unwrap_or(1.0)
     }
 
     async fn set_playrate(&self, _cx: &Context, _project: ProjectContext, rate: f64) {
         debug!("ReaperTransport: set_playrate to {}", rate);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                // Clamp to valid range (0.25 to 4.0)
-                let clamped = rate.clamp(0.25, 4.0);
-                let factor = reaper_medium::PlaybackSpeedFactor::new(clamped);
-                let play_rate = PlayRate::from_playback_speed_factor(factor);
-                reaper.current_project().set_play_rate(play_rate);
-            });
-        }
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            // Clamp to valid range (0.25 to 4.0)
+            let clamped = rate.clamp(0.25, 4.0);
+            let factor = reaper_medium::PlaybackSpeedFactor::new(clamped);
+            let play_rate = PlayRate::from_playback_speed_factor(factor);
+            reaper.current_project().set_play_rate(play_rate);
+        });
     }
 
     // =========================================================================
@@ -805,18 +729,14 @@ impl TransportService for ReaperTransport {
     // =========================================================================
 
     async fn get_time_signature(&self, _cx: &Context, _project: ProjectContext) -> TimeSignature {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(|| {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
-                let (num, denom) = get_time_signature_internal(medium);
-                TimeSignature::new(num as u32, denom as u32)
-            })
-            .await
-            .unwrap_or_else(|_| TimeSignature::default())
-        } else {
-            TimeSignature::default()
-        }
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            let (num, denom) = get_time_signature_internal(medium);
+            TimeSignature::new(num as u32, denom as u32)
+        })
+        .await
+        .unwrap_or_else(|| TimeSignature::default())
     }
 
     // =========================================================================
@@ -835,67 +755,63 @@ impl TransportService for ReaperTransport {
             "ReaperTransport: set_position_musical to {}.{}.{}",
             measure, beat, subdivision
         );
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                // Convert beat and subdivision to PositionInBeats
-                // beat is 0-indexed within measure, subdivision is 0-999
-                let beats_within_measure = beat as f64 + subdivision as f64 / 1000.0;
-                let Ok(beats) = reaper_medium::PositionInBeats::new(beats_within_measure) else {
-                    return;
-                };
+            // Convert beat and subdivision to PositionInBeats
+            // beat is 0-indexed within measure, subdivision is 0-999
+            let beats_within_measure = beat as f64 + subdivision as f64 / 1000.0;
+            let Ok(beats) = reaper_medium::PositionInBeats::new(beats_within_measure) else {
+                return;
+            };
 
-                // Use TimeMap2_beatsToTime with MeasureMode to convert to time
-                // MeasureMode::FromMeasureAtIndex uses 0-indexed measures
-                let time_seconds = medium.time_map_2_beats_to_time(
-                    ReaperProjectContext::CurrentProject,
-                    reaper_medium::MeasureMode::FromMeasureAtIndex(measure),
-                    beats,
+            // Use TimeMap2_beatsToTime with MeasureMode to convert to time
+            // MeasureMode::FromMeasureAtIndex uses 0-indexed measures
+            let time_seconds = medium.time_map_2_beats_to_time(
+                ReaperProjectContext::CurrentProject,
+                reaper_medium::MeasureMode::FromMeasureAtIndex(measure),
+                beats,
+            );
+
+            if let Ok(pos) = PositionInSeconds::new(time_seconds.get()) {
+                reaper.current_project().set_edit_cursor_position(
+                    pos,
+                    SetEditCurPosOptions {
+                        move_view: false,
+                        seek_play: true,
+                    },
                 );
-
-                if let Ok(pos) = PositionInSeconds::new(time_seconds.get()) {
-                    reaper.current_project().set_edit_cursor_position(
-                        pos,
-                        SetEditCurPosOptions {
-                            move_view: false,
-                            seek_play: true,
-                        },
-                    );
-                }
-            });
-        }
+            }
+        });
     }
 
     async fn goto_measure(&self, _cx: &Context, _project: ProjectContext, measure: i32) {
         debug!("ReaperTransport: goto_measure {}", measure);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = Reaper::get();
-                let medium = reaper.medium_reaper();
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
 
-                // Convert measure to time using TimeMap2_beatsToTime
-                // MeasureMode::FromMeasureAtIndex uses 0-indexed measures
-                // Beat 0 = start of the measure
-                let beats = reaper_medium::PositionInBeats::new(0.0).unwrap();
-                let time_seconds = medium.time_map_2_beats_to_time(
-                    ReaperProjectContext::CurrentProject,
-                    reaper_medium::MeasureMode::FromMeasureAtIndex(measure),
-                    beats,
+            // Convert measure to time using TimeMap2_beatsToTime
+            // MeasureMode::FromMeasureAtIndex uses 0-indexed measures
+            // Beat 0 = start of the measure
+            let beats = reaper_medium::PositionInBeats::new(0.0).unwrap();
+            let time_seconds = medium.time_map_2_beats_to_time(
+                ReaperProjectContext::CurrentProject,
+                reaper_medium::MeasureMode::FromMeasureAtIndex(measure),
+                beats,
+            );
+
+            if let Ok(pos) = PositionInSeconds::new(time_seconds.get()) {
+                reaper.current_project().set_edit_cursor_position(
+                    pos,
+                    SetEditCurPosOptions {
+                        move_view: false,
+                        seek_play: true,
+                    },
                 );
-
-                if let Ok(pos) = PositionInSeconds::new(time_seconds.get()) {
-                    reaper.current_project().set_edit_cursor_position(
-                        pos,
-                        SetEditCurPosOptions {
-                            move_view: false,
-                            seek_play: true,
-                        },
-                    );
-                }
-            });
-        }
+            }
+        });
     }
 
     // =========================================================================
@@ -1039,16 +955,20 @@ fn get_play_state_for_project(
     }
 }
 
-fn get_time_signature_internal(_medium: &reaper_medium::Reaper) -> (i32, i32) {
-    get_time_signature_for_project(_medium, ReaperProjectContext::CurrentProject)
+fn get_time_signature_internal(medium: &reaper_medium::Reaper) -> (i32, i32) {
+    get_time_signature_for_project(medium, ReaperProjectContext::CurrentProject)
 }
 
 fn get_time_signature_for_project(
-    _medium: &reaper_medium::Reaper,
-    _reaper_ctx: ReaperProjectContext,
+    medium: &reaper_medium::Reaper,
+    reaper_ctx: ReaperProjectContext,
 ) -> (i32, i32) {
-    // Default to 4/4 for now
-    // A more complete implementation would query the tempo map at the current position
-    // using GetTempoTimeSigMarker or similar APIs
-    (4, 4)
+    // Query the tempo map at the current play/edit cursor position
+    // to get the time signature that's actually active
+    let pos = medium.get_play_position_ex(reaper_ctx);
+    let result = medium.time_map_2_time_to_beats(reaper_ctx, pos);
+    (
+        result.time_signature.numerator.get() as i32,
+        result.time_signature.denominator.get() as i32,
+    )
 }

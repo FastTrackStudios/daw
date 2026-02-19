@@ -6,9 +6,25 @@ use daw_proto::ProjectContext;
 use reaper_high::{Project, Reaper};
 use reaper_medium::{ProjectContext as ReaperProjectContext, ProjectRef, ReaProject};
 
-/// Get the GUID for a project using its raw pointer (unique per tab).
-fn project_guid(project: &Project) -> String {
-    format!("reaper-ptr-{:x}", project.raw().as_ptr() as usize)
+/// Get a stable identifier for a REAPER project tab.
+///
+/// Uses a hash of the project file path for saved projects (stable across
+/// REAPER restarts). Falls back to the raw pointer for unsaved projects
+/// (stable for the lifetime of the tab).
+///
+/// This must match the scheme used in `transport.rs` and `fx.rs`.
+pub fn project_guid(project: &Project) -> String {
+    let path = project.file().map(|p| p.to_string()).unwrap_or_default();
+    if path.is_empty() {
+        // Unsaved project — use raw pointer as fallback
+        format!("reaper-ptr-{:x}", project.raw().as_ptr() as usize)
+    } else {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        path.hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    }
 }
 
 /// Find a REAPER project by its GUID

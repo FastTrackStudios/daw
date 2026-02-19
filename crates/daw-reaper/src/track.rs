@@ -8,10 +8,9 @@ use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackRe
 use reaper_high::{GroupingBehavior, Reaper};
 use reaper_medium::GangBehavior;
 use roam::Context;
-use tracing::warn;
 
+use crate::main_thread;
 use crate::project_context::find_project_by_guid;
-use crate::transport::task_support;
 
 /// REAPER track service implementation.
 ///
@@ -106,9 +105,8 @@ fn build_track_info(track: &reaper_high::Track) -> Track {
     let fx_count = track.normal_fx_chain().fx_count();
     let input_fx_count = track.input_fx_chain().fx_count();
 
-    // Parent GUID: walk backwards to find the enclosing folder
-    // This is expensive to compute for every track, so skip it for now.
-    // The UI uses folder_depth for indentation instead.
+    // Parent GUID is computed in a post-processing pass over the full track list
+    // (see `assign_parent_guids`). Set to None here; `get_tracks` fills it in.
     let parent_guid = None;
 
     // Visibility
@@ -136,6 +134,35 @@ fn build_track_info(track: &reaper_high::Track) -> Track {
     }
 }
 
+/// Walk the flat track list and assign `parent_guid` using folder depth changes.
+///
+/// REAPER's folder hierarchy is encoded as depth deltas on each track:
+/// - `folder_depth > 0` (typically 1) means "this track starts a folder"
+/// - `folder_depth < 0` means "close N folder levels after this track"
+///
+/// We maintain a stack of folder GUIDs. When we encounter a folder start,
+/// we push its GUID. Children between a folder start and its close inherit
+/// the top of the stack as their parent. Negative depth pops the stack.
+fn assign_parent_guids(tracks: &mut [Track]) {
+    let mut folder_stack: Vec<String> = Vec::new();
+
+    for i in 0..tracks.len() {
+        // Current track's parent is whatever is on top of the stack
+        tracks[i].parent_guid = folder_stack.last().cloned();
+
+        let depth = tracks[i].folder_depth;
+        if depth > 0 {
+            // This track starts a folder — push it as the new parent
+            folder_stack.push(tracks[i].guid.clone());
+        } else if depth < 0 {
+            // Close |depth| folder levels
+            for _ in 0..depth.unsigned_abs() {
+                folder_stack.pop();
+            }
+        }
+    }
+}
+
 // =============================================================================
 // TrackService Implementation
 // =============================================================================
@@ -146,18 +173,14 @@ impl TrackService for ReaperTrack {
     // =========================================================================
 
     async fn get_tracks(&self, _cx: &Context, project: ProjectContext) -> Vec<Track> {
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return vec![];
-        };
-
-        ts.main_thread_future(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return vec![];
-            };
-            proj.tracks().map(|t| build_track_info(&t)).collect()
+        main_thread::query(move || {
+            let proj = resolve_project(&project)?;
+            let mut tracks: Vec<Track> = proj.tracks().map(|t| build_track_info(&t)).collect();
+            assign_parent_guids(&mut tracks);
+            Some(tracks)
         })
         .await
+        .flatten()
         .unwrap_or_default()
     }
 
@@ -167,27 +190,17 @@ impl TrackService for ReaperTrack {
         project: ProjectContext,
         track: TrackRef,
     ) -> Option<Track> {
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let t = resolve_track(&proj, &track)?;
             Some(build_track_info(&t))
         })
         .await
-        .unwrap_or(None)
+        .flatten()
     }
 
     async fn track_count(&self, _cx: &Context, project: ProjectContext) -> u32 {
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return 0;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             resolve_project(&project)
                 .map(|p| p.track_count())
                 .unwrap_or(0)
@@ -197,37 +210,28 @@ impl TrackService for ReaperTrack {
     }
 
     async fn get_selected_tracks(&self, _cx: &Context, project: ProjectContext) -> Vec<Track> {
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return vec![];
-        };
-
-        ts.main_thread_future(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return vec![];
-            };
-            proj.tracks()
-                .filter(|t| t.is_selected())
-                .map(|t| build_track_info(&t))
-                .collect()
+        main_thread::query(move || {
+            let proj = resolve_project(&project)?;
+            Some(
+                proj.tracks()
+                    .filter(|t| t.is_selected())
+                    .map(|t| build_track_info(&t))
+                    .collect::<Vec<_>>(),
+            )
         })
         .await
+        .flatten()
         .unwrap_or_default()
     }
 
     async fn get_master_track(&self, _cx: &Context, project: ProjectContext) -> Option<Track> {
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let master = proj.master_track().ok()?;
             Some(build_track_info(&master))
         })
         .await
-        .unwrap_or(None)
+        .flatten()
     }
 
     // =========================================================================
@@ -241,9 +245,7 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         muted: bool,
     ) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -265,9 +267,7 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         soloed: bool,
     ) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -283,19 +283,15 @@ impl TrackService for ReaperTrack {
     }
 
     async fn set_solo_exclusive(&self, _cx: &Context, project: ProjectContext, track: TrackRef) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
-            // Unsolo all first
             for t in proj.tracks() {
                 if t.is_solo() {
                     t.unsolo(GangBehavior::DenyGang, GroupingBehavior::PreventGrouping);
                 }
             }
-            // Solo the target
             let Some(t) = resolve_track(&proj, &track) else {
                 return;
             };
@@ -304,9 +300,7 @@ impl TrackService for ReaperTrack {
     }
 
     async fn clear_all_solo(&self, _cx: &Context, project: ProjectContext) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -325,9 +319,7 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         armed: bool,
     ) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -357,9 +349,7 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         mode: InputMonitoringMode,
     ) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -388,9 +378,7 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         input: RecordInput,
     ) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -423,9 +411,7 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         volume: f64,
     ) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -438,9 +424,7 @@ impl TrackService for ReaperTrack {
     }
 
     async fn set_pan(&self, _cx: &Context, project: ProjectContext, track: TrackRef, pan: f64) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -463,9 +447,7 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         selected: bool,
     ) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -481,9 +463,7 @@ impl TrackService for ReaperTrack {
     }
 
     async fn select_exclusive(&self, _cx: &Context, project: ProjectContext, track: TrackRef) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -495,9 +475,7 @@ impl TrackService for ReaperTrack {
     }
 
     async fn clear_selection(&self, _cx: &Context, project: ProjectContext) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -514,9 +492,7 @@ impl TrackService for ReaperTrack {
     // =========================================================================
 
     async fn mute_all(&self, _cx: &Context, project: ProjectContext) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -529,9 +505,7 @@ impl TrackService for ReaperTrack {
     }
 
     async fn unmute_all(&self, _cx: &Context, project: ProjectContext) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -554,30 +528,20 @@ impl TrackService for ReaperTrack {
         name: String,
         at_index: Option<u32>,
     ) -> String {
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return String::new();
-        };
-
-        ts.main_thread_future(move || {
-            let Some(proj) = resolve_project(&project) else {
-                return String::new();
-            };
+        main_thread::query(move || {
+            let proj = resolve_project(&project)?;
             let index = at_index.unwrap_or_else(|| proj.track_count());
-            let Ok(new_track) = proj.insert_track_at(index) else {
-                return String::new();
-            };
+            let new_track = proj.insert_track_at(index).ok()?;
             new_track.set_name(name.as_str());
-            new_track.guid().to_string_without_braces()
+            Some(new_track.guid().to_string_without_braces())
         })
         .await
+        .flatten()
         .unwrap_or_default()
     }
 
     async fn remove_track(&self, _cx: &Context, project: ProjectContext, track: TrackRef) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -595,9 +559,7 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         name: String,
     ) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -615,9 +577,7 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         color: u32,
     ) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -642,9 +602,7 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         visible: bool,
     ) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -662,9 +620,7 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         visible: bool,
     ) {
-        let Some(ts) = task_support() else { return };
-
-        let _ = ts.do_later_in_main_thread_asap(move || {
+        main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
             };
@@ -682,11 +638,7 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         chunk: String,
     ) -> Result<(), String> {
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".to_string());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| "Project not found".to_string())?;
             let t = resolve_track(&proj, &track).ok_or_else(|| "Track not found".to_string())?;
             let chunk_obj = reaper_high::Chunk::new(chunk);
@@ -694,7 +646,54 @@ impl TrackService for ReaperTrack {
                 .map_err(|e| format!("set_chunk failed: {e}"))
         })
         .await
-        .unwrap_or_else(|_| Err("main_thread_future cancelled".to_string()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
+    }
+
+    async fn get_track_chunk(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        track: TrackRef,
+    ) -> Result<String, String> {
+        main_thread::query(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "Project not found".to_string())?;
+            let t = resolve_track(&proj, &track).ok_or_else(|| "Track not found".to_string())?;
+            let chunk = t
+                .chunk(1_000_000, reaper_medium::ChunkCacheHint::NormalMode)
+                .map_err(|e| format!("get_chunk failed: {e}"))?;
+            let s: String = chunk
+                .try_into()
+                .map_err(|_| "chunk to string conversion failed".to_string())?;
+            Ok(s)
+        })
+        .await
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
+    }
+
+    async fn set_folder_depth(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        track: TrackRef,
+        depth: i32,
+    ) -> Result<(), String> {
+        main_thread::query(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "Project not found".to_string())?;
+            let t = resolve_track(&proj, &track).ok_or_else(|| "Track not found".to_string())?;
+            let raw = t.raw().map_err(|e| format!("raw track failed: {e}"))?;
+            unsafe {
+                Reaper::get()
+                    .medium_reaper()
+                    .set_media_track_info_value(
+                        raw,
+                        reaper_medium::TrackAttributeKey::FolderDepth,
+                        depth as f64,
+                    )
+                    .map_err(|e| format!("set_folder_depth failed: {e}"))
+            }
+        })
+        .await
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn remove_all_tracks(
@@ -702,13 +701,8 @@ impl TrackService for ReaperTrack {
         _cx: &Context,
         project: ProjectContext,
     ) -> Result<(), String> {
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".to_string());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| "Project not found".to_string())?;
-            // Delete from highest index to lowest to avoid index shifting
             let count = proj.track_count();
             for i in (0..count).rev() {
                 if let Some(t) = proj.track_by_index(i) {
@@ -718,6 +712,6 @@ impl TrackService for ReaperTrack {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main_thread_future cancelled".to_string()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 }

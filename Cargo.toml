@@ -40,6 +40,9 @@ keyflow = { path = "../keyflow/crates/keyflow" }
 dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus", default-features = false }
 dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
+# Testing
+reaper-test = { path = "../FTS-Extensions/crates/reaper-test" }
+
 # REAPER bindings
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
 reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }

@@ -1,10 +1,10 @@
 //! REAPER Marker Implementation
 //!
 //! Implements MarkerService by dispatching REAPER API calls to the main thread
-//! using TaskSupport from reaper-high.
+//! using `crate::main_thread`.
 
+use crate::main_thread;
 use crate::project_context::resolve_project_context;
-use crate::transport::task_support;
 use daw_proto::{Marker, MarkerEvent, MarkerService, Position, ProjectContext, TimePosition};
 use reaper_medium::{BookmarkRef, MarkerOrRegionPosition, ProjectContext as ReaperProjectContext};
 use roam::{Context, Tx};
@@ -14,7 +14,7 @@ use tracing::{debug, info};
 
 /// REAPER marker implementation.
 ///
-/// All methods dispatch to the main thread via TaskSupport.
+/// All methods dispatch to the main thread via `main_thread`.
 #[derive(Clone)]
 pub struct ReaperMarker;
 
@@ -36,56 +36,52 @@ impl MarkerService for ReaperMarker {
     // =========================================================================
 
     async fn get_markers(&self, _cx: &Context, project: ProjectContext) -> Vec<Marker> {
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let reaper = reaper_high::Reaper::get();
-                let medium = reaper.medium_reaper();
-                let mut markers = Vec::new();
+        main_thread::query(move || {
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            let mut markers = Vec::new();
 
-                // Resolve the project context to a REAPER project context
-                let reaper_ctx = resolve_project_context(&project);
+            // Resolve the project context to a REAPER project context
+            let reaper_ctx = resolve_project_context(&project);
 
-                // Get total count of markers and regions
-                let count_result = medium.count_project_markers(reaper_ctx);
-                let total_count = count_result.total_count;
+            // Get total count of markers and regions
+            let count_result = medium.count_project_markers(reaper_ctx);
+            let total_count = count_result.total_count;
 
-                // Enumerate all markers/regions
-                for idx in 0..total_count {
-                    medium.enum_project_markers_3(reaper_ctx, idx, |result| {
-                        if let Some(info) = result {
-                            // region_end_position is None for markers, Some for regions
-                            if info.region_end_position.is_none() {
-                                markers.push(Marker {
-                                    id: Some(info.id.get() as u32),
-                                    position: Position::from_time(TimePosition::from_seconds(
-                                        info.position.get(),
-                                    )),
-                                    name: info.name.to_string(),
-                                    color: {
-                                        let c = info.color.to_raw();
-                                        if c != 0 { Some(c as u32) } else { None }
-                                    },
-                                    guid: None,
-                                });
-                            }
+            // Enumerate all markers/regions
+            for idx in 0..total_count {
+                medium.enum_project_markers_3(reaper_ctx, idx, |result| {
+                    if let Some(info) = result {
+                        // region_end_position is None for markers, Some for regions
+                        if info.region_end_position.is_none() {
+                            markers.push(Marker {
+                                id: Some(info.id.get() as u32),
+                                position: Position::from_time(TimePosition::from_seconds(
+                                    info.position.get(),
+                                )),
+                                name: info.name.to_string(),
+                                color: {
+                                    let c = info.color.to_raw();
+                                    if c != 0 { Some(c as u32) } else { None }
+                                },
+                                guid: None,
+                            });
                         }
-                    });
-                }
-
-                // Sort by position
-                markers.sort_by(|a, b| {
-                    a.position_seconds()
-                        .partial_cmp(&b.position_seconds())
-                        .unwrap_or(std::cmp::Ordering::Equal)
+                    }
                 });
+            }
 
-                markers
-            })
-            .await
-            .unwrap_or_default()
-        } else {
-            Vec::new()
-        }
+            // Sort by position
+            markers.sort_by(|a, b| {
+                a.position_seconds()
+                    .partial_cmp(&b.position_seconds())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            markers
+        })
+        .await
+        .unwrap_or_default()
     }
 
     async fn get_marker(&self, cx: &Context, project: ProjectContext, id: u32) -> Option<Marker> {
@@ -157,105 +153,89 @@ impl MarkerService for ReaperMarker {
         name: String,
     ) -> u32 {
         debug!("ReaperMarker: add_marker '{}' at {}", name, position);
-        if let Some(ts) = task_support() {
-            ts.main_thread_future(move || {
-                let reaper = reaper_high::Reaper::get();
-                let medium = reaper.medium_reaper();
-                if let Ok(pos) = reaper_medium::PositionInSeconds::new(position) {
-                    medium
-                        .add_project_marker_2(
-                            ReaperProjectContext::CurrentProject,
-                            MarkerOrRegionPosition::Marker(pos),
-                            name.as_str(),
-                            None,
-                            None,
-                        )
-                        .unwrap_or(0)
-                } else {
-                    0
-                }
-            })
-            .await
-            .unwrap_or(0)
-        } else {
-            0
-        }
+        main_thread::query(move || {
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            if let Ok(pos) = reaper_medium::PositionInSeconds::new(position) {
+                medium
+                    .add_project_marker_2(
+                        ReaperProjectContext::CurrentProject,
+                        MarkerOrRegionPosition::Marker(pos),
+                        name.as_str(),
+                        None,
+                        None,
+                    )
+                    .unwrap_or(0)
+            } else {
+                0
+            }
+        })
+        .await
+        .unwrap_or(0)
     }
 
     async fn remove_marker(&self, _cx: &Context, _project: ProjectContext, id: u32) {
         debug!("ReaperMarker: remove_marker {}", id);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = reaper_high::Reaper::get();
-                let medium = reaper.medium_reaper();
-                unsafe {
-                    medium.low().DeleteProjectMarker(
-                        ReaperProjectContext::CurrentProject.to_raw(),
-                        id as i32,
-                        false,
-                    );
-                }
-            });
-        }
+        main_thread::run(move || {
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            unsafe {
+                medium.low().DeleteProjectMarker(
+                    ReaperProjectContext::CurrentProject.to_raw(),
+                    id as i32,
+                    false,
+                );
+            }
+        });
     }
 
     async fn move_marker(&self, _cx: &Context, _project: ProjectContext, id: u32, position: f64) {
         debug!("ReaperMarker: move_marker {} to {}", id, position);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = reaper_high::Reaper::get();
-                let medium = reaper.medium_reaper();
-                unsafe {
-                    medium.low().SetProjectMarker(
-                        id as i32,
-                        false,
-                        position,
-                        0.0,
-                        std::ptr::null(),
-                    );
-                }
-            });
-        }
+        main_thread::run(move || {
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            unsafe {
+                medium
+                    .low()
+                    .SetProjectMarker(id as i32, false, position, 0.0, std::ptr::null());
+            }
+        });
     }
 
     async fn rename_marker(&self, _cx: &Context, _project: ProjectContext, id: u32, name: String) {
         debug!("ReaperMarker: rename_marker {} to '{}'", id, name);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = reaper_high::Reaper::get();
-                let medium = reaper.medium_reaper();
-                if let Ok(cname) = CString::new(name) {
-                    unsafe {
-                        medium
-                            .low()
-                            .SetProjectMarker(id as i32, false, -1.0, 0.0, cname.as_ptr());
-                    }
+        main_thread::run(move || {
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            if let Ok(cname) = CString::new(name) {
+                unsafe {
+                    medium
+                        .low()
+                        .SetProjectMarker(id as i32, false, -1.0, 0.0, cname.as_ptr());
                 }
-            });
-        }
+            }
+        });
     }
 
     async fn set_marker_color(&self, _cx: &Context, _project: ProjectContext, id: u32, color: u32) {
         debug!("ReaperMarker: set_marker_color {} to {}", id, color);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = reaper_high::Reaper::get();
-                let medium = reaper.medium_reaper();
-                unsafe {
-                    medium.low().SetProjectMarkerByIndex2(
-                        ReaperProjectContext::CurrentProject.to_raw(),
-                        id as i32,
-                        false,
-                        -1.0,
-                        0.0,
-                        -1,
-                        std::ptr::null(),
-                        color as i32,
-                        0,
-                    );
-                }
-            });
-        }
+        main_thread::run(move || {
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            unsafe {
+                medium.low().SetProjectMarkerByIndex2(
+                    ReaperProjectContext::CurrentProject.to_raw(),
+                    id as i32,
+                    false,
+                    -1.0,
+                    0.0,
+                    -1,
+                    std::ptr::null(),
+                    color as i32,
+                    0,
+                );
+            }
+        });
     }
 
     // =========================================================================
@@ -264,48 +244,42 @@ impl MarkerService for ReaperMarker {
 
     async fn goto_next_marker(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperMarker: goto_next_marker");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = reaper_high::Reaper::get();
-                let medium = reaper.medium_reaper();
-                // 40173: Markers: Go to next marker/project end
-                medium.main_on_command_ex(
-                    reaper_medium::CommandId::new(40173),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            // 40173: Markers: Go to next marker/project end
+            medium.main_on_command_ex(
+                reaper_medium::CommandId::new(40173),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     async fn goto_previous_marker(&self, _cx: &Context, _project: ProjectContext) {
         debug!("ReaperMarker: goto_previous_marker");
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(|| {
-                let reaper = reaper_high::Reaper::get();
-                let medium = reaper.medium_reaper();
-                // 40172: Markers: Go to previous marker/project start
-                medium.main_on_command_ex(
-                    reaper_medium::CommandId::new(40172),
-                    0,
-                    ReaperProjectContext::CurrentProject,
-                );
-            });
-        }
+        main_thread::run(|| {
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            // 40172: Markers: Go to previous marker/project start
+            medium.main_on_command_ex(
+                reaper_medium::CommandId::new(40172),
+                0,
+                ReaperProjectContext::CurrentProject,
+            );
+        });
     }
 
     async fn goto_marker(&self, _cx: &Context, _project: ProjectContext, id: u32) {
         debug!("ReaperMarker: goto_marker {}", id);
-        if let Some(ts) = task_support() {
-            let _ = ts.do_later_in_main_thread_asap(move || {
-                let reaper = reaper_high::Reaper::get();
-                let medium = reaper.medium_reaper();
-                medium.go_to_marker(
-                    ReaperProjectContext::CurrentProject,
-                    BookmarkRef::Id(reaper_medium::BookmarkId::new(id as _)),
-                );
-            });
-        }
+        main_thread::run(move || {
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            medium.go_to_marker(
+                ReaperProjectContext::CurrentProject,
+                BookmarkRef::Id(reaper_medium::BookmarkId::new(id as _)),
+            );
+        });
     }
 
     async fn subscribe(&self, cx: &Context, project: ProjectContext, tx: Tx<MarkerEvent>) {

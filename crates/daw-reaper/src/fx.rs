@@ -1,7 +1,7 @@
 //! REAPER FX Service Implementation
 //!
 //! Implements FxService for REAPER by dispatching operations to the main thread
-//! using TaskSupport from reaper-high.
+//! using `crate::main_thread`.
 //!
 //! ## Reference Implementations
 //!
@@ -31,8 +31,8 @@ use std::sync::{Mutex, OnceLock};
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
-use crate::project_context::find_project_by_guid;
-use crate::transport::task_support;
+use crate::main_thread;
+use crate::project_context::{find_project_by_guid, project_guid};
 
 // =============================================================================
 // FX Event Broadcasting Infrastructure
@@ -131,18 +131,9 @@ fn register_monitored_chain(project: ProjectContext, context: FxChainContext) {
     }
 }
 
-/// Hash a string for project GUID (same as transport.rs)
-fn hash_string(s: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    s.hash(&mut hasher);
-    hasher.finish()
-}
-
-/// Get project GUID from a REAPER project (same algorithm as transport.rs)
+/// Get project GUID from a REAPER project (delegates to shared implementation).
 fn project_guid_string(project: &reaper_high::Project) -> String {
-    let path = project.file().map(|p| p.to_string()).unwrap_or_default();
-    format!("{:x}", hash_string(&path))
+    project_guid(project)
 }
 
 /// Parameter value change threshold (avoid flooding with micro-changes from automation)
@@ -492,11 +483,11 @@ fn diff_containers(
     }
 }
 
-/// REAPER FX service implementation that dispatches to the main thread via TaskSupport.
+/// REAPER FX service implementation that dispatches to the main thread via `main_thread`.
 ///
 /// Follows the same pattern as ReaperTransport and ReaperRouting:
-/// zero-field struct, all state lives in REAPER itself, queries via `main_thread_future()`,
-/// commands via `do_later_in_main_thread_asap()`.
+/// zero-field struct, all state lives in REAPER itself, queries via `main_thread::query()`,
+/// commands via `main_thread::run()`.
 #[derive(Clone)]
 pub struct ReaperFx;
 
@@ -1289,12 +1280,7 @@ impl FxService for ReaperFx {
     ) -> Vec<Fx> {
         debug!("ReaperFx::get_fx_list({:?})", context);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return vec![];
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let Some(proj) = resolve_project(&project) else {
                 warn!("get_fx_list: project not found ({:?})", project);
                 return vec![];
@@ -1317,12 +1303,7 @@ impl FxService for ReaperFx {
     async fn get_fx(&self, _cx: &Context, project: ProjectContext, target: FxTarget) -> Option<Fx> {
         debug!("ReaperFx::get_fx({:?})", target);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
@@ -1342,12 +1323,7 @@ impl FxService for ReaperFx {
     ) -> u32 {
         debug!("ReaperFx::fx_count({:?})", context);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return 0;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &context)?;
             Some(chain.fx_count())
@@ -1370,11 +1346,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::set_fx_enabled({:?}, {})", target, enabled);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)
                 .ok_or_else(|| format!("FX chain not found for {:?}", target.context))?;
@@ -1389,7 +1361,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn set_fx_offline(
@@ -1401,11 +1373,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::set_fx_offline({:?}, {})", target, offline);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)
                 .ok_or_else(|| format!("FX chain not found for {:?}", target.context))?;
@@ -1417,7 +1385,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     // =========================================================================
@@ -1433,12 +1401,7 @@ impl FxService for ReaperFx {
     ) -> Option<String> {
         debug!("ReaperFx::add_fx({:?}, {:?})", context, name);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &context)?;
             let fx = chain.add_fx_by_original_name(name.as_str())?;
@@ -1457,12 +1420,7 @@ impl FxService for ReaperFx {
     ) -> Option<String> {
         debug!("ReaperFx::add_fx_at({:?})", request);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &request.context)?;
             // Add to end first, then move to requested position
@@ -1496,11 +1454,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::remove_fx({:?})", target);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
             let (track, chain) = resolve_fx_chain(&proj, &target.context)
                 .ok_or_else(|| format!("FX chain not found for {:?}", target.context))?;
@@ -1519,7 +1473,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn move_fx(
@@ -1531,11 +1485,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::move_fx({:?}, {})", target, new_index);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
             let (track, chain) = resolve_fx_chain(&proj, &target.context)
                 .ok_or_else(|| format!("FX chain not found for {:?}", target.context))?;
@@ -1555,7 +1505,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     // =========================================================================
@@ -1573,12 +1523,7 @@ impl FxService for ReaperFx {
     ) -> Vec<FxParameter> {
         debug!("ReaperFx::get_parameters({:?})", target);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return vec![];
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
@@ -1604,12 +1549,7 @@ impl FxService for ReaperFx {
     ) -> Option<FxParameter> {
         debug!("ReaperFx::get_parameter({:?}, {})", target, index);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let fx_idx = resolve_fx_index(&chain, &target.fx)?;
@@ -1636,49 +1576,44 @@ impl FxService for ReaperFx {
             request.target.fx, request.index, request.value
         );
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
+        let result = main_thread::query(move || {
+            let proj = resolve_project(&project).ok_or_else(|| {
+                warn!("set_parameter: project not found");
+                "project not found".to_string()
+            })?;
+            let (_track, chain) =
+                resolve_fx_chain(&proj, &request.target.context).ok_or_else(|| {
+                    warn!(
+                        "set_parameter: FX chain not found for {:?}",
+                        request.target.context
+                    );
+                    format!("FX chain not found for {:?}", request.target.context)
+                })?;
+            let fx_idx = resolve_fx_index(&chain, &request.target.fx).ok_or_else(|| {
+                warn!("set_parameter: FX not found for {:?}", request.target.fx);
+                format!("FX not found for {:?}", request.target.fx)
+            })?;
+            // Use reaper-high FxParameter directly — handles track/location
+            // resolution internally via track_and_location()
+            let fx = chain.fx_by_index(fx_idx).ok_or_else(|| {
+                warn!("set_parameter: fx_by_index({}) returned None", fx_idx);
+                format!("fx_by_index({}) returned None", fx_idx)
+            })?;
+            let param = fx.parameter_by_index(request.index);
+            let norm_val = reaper_medium::ReaperNormalizedFxParamValue::new(request.value);
 
-        let result = ts
-            .main_thread_future(move || {
-                let proj = resolve_project(&project).ok_or_else(|| {
-                    warn!("set_parameter: project not found");
-                    "project not found".to_string()
-                })?;
-                let (_track, chain) =
-                    resolve_fx_chain(&proj, &request.target.context).ok_or_else(|| {
-                        warn!(
-                            "set_parameter: FX chain not found for {:?}",
-                            request.target.context
-                        );
-                        format!("FX chain not found for {:?}", request.target.context)
-                    })?;
-                let fx_idx = resolve_fx_index(&chain, &request.target.fx).ok_or_else(|| {
-                    warn!("set_parameter: FX not found for {:?}", request.target.fx);
-                    format!("FX not found for {:?}", request.target.fx)
-                })?;
-                // Use reaper-high FxParameter directly — handles track/location
-                // resolution internally via track_and_location()
-                let fx = chain.fx_by_index(fx_idx).ok_or_else(|| {
-                    warn!("set_parameter: fx_by_index({}) returned None", fx_idx);
-                    format!("fx_by_index({}) returned None", fx_idx)
-                })?;
-                let param = fx.parameter_by_index(request.index);
-                let norm_val = reaper_medium::ReaperNormalizedFxParamValue::new(request.value);
-
-                param.set_reaper_normalized_value(norm_val).map_err(|e| {
-                    warn!("set_parameter: set_reaper_normalized_value failed: {e}");
-                    format!("set_reaper_normalized_value failed: {e}")
-                })?;
-                // Note: CLAP plugins apply parameter changes asynchronously
-                // (via the next process() or flush() cycle), so immediate
-                // read-back may not reflect the new value yet. Trust the
-                // return value from set_reaper_normalized_value().
-                Ok(())
-            })
-            .await
-            .unwrap_or_else(|_| Err("main thread future cancelled".into()));
+            param.set_reaper_normalized_value(norm_val).map_err(|e| {
+                warn!("set_parameter: set_reaper_normalized_value failed: {e}");
+                format!("set_reaper_normalized_value failed: {e}")
+            })?;
+            // Note: CLAP plugins apply parameter changes asynchronously
+            // (via the next process() or flush() cycle), so immediate
+            // read-back may not reflect the new value yet. Trust the
+            // return value from set_reaper_normalized_value().
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()));
 
         if let Err(ref e) = result {
             warn!("set_parameter failed: {}", e);
@@ -1695,12 +1630,7 @@ impl FxService for ReaperFx {
     ) -> Option<FxParameter> {
         debug!("ReaperFx::get_parameter_by_name({:?}, {:?})", target, name);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let fx_idx = resolve_fx_index(&chain, &target.fx)?;
@@ -1731,11 +1661,7 @@ impl FxService for ReaperFx {
             request.target, request.name, request.value
         );
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| {
                 format!("set_parameter_by_name: project not found ({:?})", project)
             })?;
@@ -1765,7 +1691,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     // =========================================================================
@@ -1780,12 +1706,7 @@ impl FxService for ReaperFx {
     ) -> Option<FxPresetIndex> {
         debug!("ReaperFx::get_preset_index({:?})", target);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
@@ -1823,11 +1744,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::next_preset({:?})", target);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("next_preset: project not found ({:?})", project))?;
             let (track, chain) = resolve_fx_chain(&proj, &target.context)
@@ -1846,7 +1763,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn prev_preset(
@@ -1857,11 +1774,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::prev_preset({:?})", target);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("prev_preset: project not found ({:?})", project))?;
             let (track, chain) = resolve_fx_chain(&proj, &target.context)
@@ -1880,7 +1793,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn set_preset(
@@ -1892,11 +1805,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::set_preset({:?}, {})", target, index);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("set_preset: project not found ({:?})", project))?;
             let (track, chain) = resolve_fx_chain(&proj, &target.context)
@@ -1917,7 +1826,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     // =========================================================================
@@ -1932,11 +1841,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::open_fx_ui({:?})", target);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("open_fx_ui: project not found ({:?})", project))?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)
@@ -1948,7 +1853,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn close_fx_ui(
@@ -1959,11 +1864,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::close_fx_ui({:?})", target);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("close_fx_ui: project not found ({:?})", project))?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)
@@ -1975,7 +1876,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn toggle_fx_ui(
@@ -1986,11 +1887,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::toggle_fx_ui({:?})", target);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("toggle_fx_ui: project not found ({:?})", project))?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context).ok_or_else(|| {
@@ -2007,7 +1904,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     // =========================================================================
@@ -2023,12 +1920,7 @@ impl FxService for ReaperFx {
     ) -> Option<String> {
         debug!("ReaperFx::get_named_config({:?}, {:?})", target, key);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
@@ -2051,11 +1943,7 @@ impl FxService for ReaperFx {
             request.target, request.key
         );
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("set_named_config: project not found ({:?})", project))?;
             let (_track, chain) =
@@ -2077,7 +1965,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn get_fx_latency(
@@ -2088,12 +1976,7 @@ impl FxService for ReaperFx {
     ) -> Option<FxLatency> {
         debug!("ReaperFx::get_fx_latency({:?})", target);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
@@ -2125,12 +2008,7 @@ impl FxService for ReaperFx {
             target, param_index
         );
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
@@ -2175,12 +2053,7 @@ impl FxService for ReaperFx {
     ) -> Option<Vec<u8>> {
         debug!("ReaperFx::get_fx_state_chunk({:?})", target);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
@@ -2200,11 +2073,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::set_fx_state_chunk({:?})", target);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)
                 .ok_or_else(|| format!("FX chain not found for {:?}", target.context))?;
@@ -2216,7 +2085,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn get_fx_state_chunk_encoded(
@@ -2227,12 +2096,7 @@ impl FxService for ReaperFx {
     ) -> Option<String> {
         debug!("ReaperFx::get_fx_state_chunk_encoded({:?})", target);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
@@ -2252,11 +2116,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::set_fx_state_chunk_encoded({:?})", target);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| {
                 format!(
                     "set_fx_state_chunk_encoded: project not found ({:?})",
@@ -2278,7 +2138,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn get_fx_chain_state(
@@ -2289,12 +2149,7 @@ impl FxService for ReaperFx {
     ) -> Vec<FxStateChunk> {
         debug!("ReaperFx::get_fx_chain_state({:?})", context);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return vec![];
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &context)?;
 
@@ -2361,12 +2216,8 @@ impl FxService for ReaperFx {
             chunks.len()
         );
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
         // Apply all chunks in a single main-thread operation for atomicity
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("set_fx_chain_state: project not found ({:?})", project))?;
             let (_track, chain) = resolve_fx_chain(&proj, &context)
@@ -2428,7 +2279,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     // =========================================================================
@@ -2446,12 +2297,7 @@ impl FxService for ReaperFx {
     ) -> FxTree {
         debug!("ReaperFx::get_fx_tree({:?})", context);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return FxTree::new();
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let Some(proj) = resolve_project(&project) else {
                 warn!("get_fx_tree: project not found ({:?})", project);
                 return FxTree::new();
@@ -2487,12 +2333,7 @@ impl FxService for ReaperFx {
     ) -> Option<FxNodeId> {
         debug!("ReaperFx::create_container({:?})", request.name);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &request.context)?;
             let is_input = chain.is_input_fx();
@@ -2546,11 +2387,7 @@ impl FxService for ReaperFx {
             request.node_id, request.container_id
         );
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
             let (_track, chain) = resolve_fx_chain(&proj, &request.context)
                 .ok_or_else(|| format!("FX chain not found for {:?}", request.context))?;
@@ -2640,7 +2477,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn move_from_container(
@@ -2654,11 +2491,7 @@ impl FxService for ReaperFx {
             request.node_id, request.target_index
         );
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
             let (_track, chain) = resolve_fx_chain(&proj, &request.context)
                 .ok_or_else(|| format!("FX chain not found for {:?}", request.context))?;
@@ -2698,7 +2531,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn set_routing_mode(
@@ -2711,11 +2544,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::set_routing_mode({:?}, {:?})", node_id, mode);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("set_routing_mode: project not found ({:?})", project))?;
             let (_track, chain) = resolve_fx_chain(&proj, &context)
@@ -2736,7 +2565,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn get_container_channel_config(
@@ -2748,12 +2577,7 @@ impl FxService for ReaperFx {
     ) -> Option<FxContainerChannelConfig> {
         debug!("ReaperFx::get_container_channel_config({:?})", container_id);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &context)?;
 
@@ -2781,11 +2605,7 @@ impl FxService for ReaperFx {
             request.container_id
         );
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| {
                 format!(
                     "set_container_channel_config: project not found ({:?})",
@@ -2824,7 +2644,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     // =========================================================================
@@ -2839,12 +2659,7 @@ impl FxService for ReaperFx {
     ) -> Option<FxChannelConfig> {
         debug!("ReaperFx::get_fx_channel_config({:?})", target);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
@@ -2882,11 +2697,7 @@ impl FxService for ReaperFx {
             target, config.channel_count, config.channel_mode
         );
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| {
                 format!("set_fx_channel_config: project not found ({:?})", project)
             })?;
@@ -2910,7 +2721,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn silence_fx_output(
@@ -2921,11 +2732,7 @@ impl FxService for ReaperFx {
     ) -> Result<FxPinMappings, String> {
         debug!("ReaperFx::silence_fx_output({:?})", target);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("silence_fx_output: project not found ({:?})", project))?;
             let (track, chain) = resolve_fx_chain(&proj, &target.context).ok_or_else(|| {
@@ -3001,7 +2808,7 @@ impl FxService for ReaperFx {
             Ok(FxPinMappings { output_pins: saved })
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn restore_fx_output(
@@ -3013,11 +2820,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::restore_fx_output({:?})", target);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("restore_fx_output: project not found ({:?})", project))?;
             let (track, chain) = resolve_fx_chain(&proj, &target.context).ok_or_else(|| {
@@ -3073,7 +2876,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn enclose_in_container(
@@ -3087,12 +2890,7 @@ impl FxService for ReaperFx {
             request.node_ids, request.name
         );
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (_track, chain) = resolve_fx_chain(&proj, &request.context)?;
             let track = chain.track()?;
@@ -3243,11 +3041,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::explode_container({:?})", container_id);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
             let (_track, chain) = resolve_fx_chain(&proj, &context)
                 .ok_or_else(|| format!("FX chain not found for {:?}", context))?;
@@ -3379,7 +3173,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     async fn rename_container(
@@ -3392,11 +3186,7 @@ impl FxService for ReaperFx {
     ) -> Result<(), String> {
         debug!("ReaperFx::rename_container({:?}, {:?})", container_id, name);
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("rename_container: project not found ({:?})", project))?;
             let (_track, chain) = resolve_fx_chain(&proj, &context)
@@ -3416,7 +3206,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     // =========================================================================
@@ -3435,12 +3225,7 @@ impl FxService for ReaperFx {
     ) -> Option<String> {
         debug!("ReaperFx::get_fx_chain_chunk_text({:?})", context);
 
-        let Some(ts) = task_support() else {
-            warn!("TaskSupport not set");
-            return None;
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let (track, _chain) = resolve_fx_chain(&proj, &context)?;
 
@@ -3474,11 +3259,7 @@ impl FxService for ReaperFx {
             chunk_text.len()
         );
 
-        let Some(ts) = task_support() else {
-            return Err("TaskSupport not set".into());
-        };
-
-        ts.main_thread_future(move || {
+        main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| "insert_fx_chain_chunk: project not found".to_string())?;
             let (track, _chain) = resolve_fx_chain(&proj, &context)
@@ -3515,7 +3296,7 @@ impl FxService for ReaperFx {
             Ok(())
         })
         .await
-        .unwrap_or_else(|_| Err("main thread future cancelled".into()))
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
     // =========================================================================

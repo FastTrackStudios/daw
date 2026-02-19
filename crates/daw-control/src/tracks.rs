@@ -517,6 +517,17 @@ impl TrackHandle {
         Ok(())
     }
 
+    /// Get the full track state chunk (RPP format).
+    ///
+    /// Returns the complete track state as an RPP chunk string.
+    pub async fn get_chunk(&self) -> Result<String> {
+        self.clients
+            .track
+            .get_track_chunk(self.context(), self.track_ref())
+            .await
+            .map_err(|e| eyre::eyre!(e))
+    }
+
     /// Set the full track state chunk (RPP format).
     ///
     /// This replaces the entire track state — useful for loading
@@ -527,6 +538,18 @@ impl TrackHandle {
             .set_track_chunk(self.context(), self.track_ref(), chunk)
             .await?;
         Ok(())
+    }
+
+    /// Set the folder depth change for this track.
+    ///
+    /// Controls folder hierarchy: `1` = folder start, `0` = normal,
+    /// `-1` = close one level, `-N` = close N levels.
+    pub async fn set_folder_depth(&self, depth: i32) -> Result<()> {
+        self.clients
+            .track
+            .set_folder_depth(self.context(), self.track_ref(), depth)
+            .await
+            .map_err(|e| eyre::eyre!(e))
     }
 
     // =========================================================================
@@ -630,6 +653,22 @@ impl TrackHandle {
             self.project_id.clone(),
             self.clients.clone(),
         )
+    }
+
+    // =========================================================================
+    // Parent Send (folder routing)
+    // =========================================================================
+
+    /// Enable or disable the parent send (folder bus routing).
+    ///
+    /// When disabled, audio from this track does not flow to the parent
+    /// folder track — it only flows through explicit sends.
+    pub async fn set_parent_send(&self, enabled: bool) -> Result<()> {
+        self.clients
+            .routing
+            .set_parent_send_enabled(self.context(), self.track_ref(), enabled)
+            .await?;
+        Ok(())
     }
 
     // =========================================================================

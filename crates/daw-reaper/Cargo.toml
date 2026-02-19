@@ -24,3 +24,14 @@ dawfile-reaper.workspace = true
 reaper-high.workspace = true
 reaper-medium.workspace = true
 reaper-low.workspace = true
+
+[dev-dependencies]
+daw-control.workspace = true
+daw-proto.workspace = true
+signal = { path = "../../../FastTrackStudio/crates/signal/signal", features = ["daw"] }
+signal-live = { path = "../../../FastTrackStudio/crates/signal/signal-live" }
+signal-proto = { path = "../../../FastTrackStudio/crates/signal/signal-proto" }
+reaper-test.workspace = true
+eyre.workspace = true
+serde_json = "1.0"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
