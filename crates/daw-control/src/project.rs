@@ -3,7 +3,8 @@
 use std::sync::Arc;
 
 use crate::{
-    DawClients, FxChain, Markers, MidiAnalysis, ProjectItems, Regions, TempoMap, Tracks, Transport,
+    DawClients, FxChain, Markers, MidiAnalysis, ProjectItems, Regions, TempoMap, TrackHandle,
+    Tracks, Transport,
 };
 use daw_proto::FxChainContext;
 
@@ -183,6 +184,173 @@ impl Project {
     /// ```
     pub fn tracks(&self) -> Tracks {
         Tracks::new(self.guid.clone(), self.clients.clone())
+    }
+
+    // =========================================================================
+    // rea-rs-style Track Convenience Methods
+    //
+    // These flatten the project.tracks().method() indirection into direct
+    // project.method() calls, matching rea-rs's ergonomic patterns:
+    //   project.n_tracks()      → track count
+    //   project.get_track(i)    → track by index
+    //   project.iter_tracks()   → all tracks as TrackHandles
+    //   project.master_track()  → master track handle
+    // =========================================================================
+
+    /// Get the number of tracks in this project.
+    ///
+    /// Equivalent to `project.tracks().count()`.
+    pub async fn n_tracks(&self) -> eyre::Result<u32> {
+        self.tracks().count().await
+    }
+
+    /// Get a track by index.
+    ///
+    /// Equivalent to `project.tracks().by_index(index)`.
+    pub async fn get_track(&self, index: u32) -> eyre::Result<Option<TrackHandle>> {
+        self.tracks().by_index(index).await
+    }
+
+    /// Get a track by GUID.
+    ///
+    /// Equivalent to `project.tracks().by_guid(guid)`.
+    pub async fn get_track_by_guid(&self, guid: &str) -> eyre::Result<Option<TrackHandle>> {
+        self.tracks().by_guid(guid).await
+    }
+
+    /// Get a track by name.
+    ///
+    /// Equivalent to `project.tracks().by_name(name)`.
+    pub async fn get_track_by_name(&self, name: &str) -> eyre::Result<Option<TrackHandle>> {
+        self.tracks().by_name(name).await
+    }
+
+    /// Get all tracks as TrackHandles.
+    ///
+    /// Returns a Vec of TrackHandles that can be iterated over. Each handle
+    /// is a lightweight reference that can query/mutate the track via RPC.
+    ///
+    /// Equivalent to rea-rs's `project.iter_tracks()`, but returns a Vec
+    /// since our API is async (can't return a lazy iterator over RPC).
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example(project: daw_control::Project) -> eyre::Result<()> {
+    /// for track in project.iter_tracks().await? {
+    ///     let info = track.info().await?;
+    ///     println!("{}: {}", info.index, info.name);
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn iter_tracks(&self) -> eyre::Result<Vec<TrackHandle>> {
+        let tracks = self.tracks().all().await?;
+        Ok(tracks
+            .into_iter()
+            .map(|t| TrackHandle::new(t.guid, self.guid.clone(), self.clients.clone()))
+            .collect())
+    }
+
+    /// Get the master track handle.
+    ///
+    /// Equivalent to `project.tracks().master()`.
+    pub async fn master_track(&self) -> eyre::Result<TrackHandle> {
+        self.tracks().master().await
+    }
+
+    /// Get all currently selected tracks.
+    ///
+    /// Equivalent to `project.tracks().selected()`.
+    pub async fn selected_tracks(&self) -> eyre::Result<Vec<TrackHandle>> {
+        self.tracks().selected().await
+    }
+
+    /// Add a new track to this project.
+    ///
+    /// Equivalent to `project.tracks().add(name, at_index)`.
+    pub async fn add_track(&self, name: &str, at_index: Option<u32>) -> eyre::Result<TrackHandle> {
+        self.tracks().add(name, at_index).await
+    }
+
+    // =========================================================================
+    // Undo
+    // =========================================================================
+
+    /// Begin an undo block.
+    ///
+    /// All state changes until `end_undo_block` are grouped into a single
+    /// entry in the DAW's undo history.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # async fn example(project: daw_control::Project) -> eyre::Result<()> {
+    /// project.begin_undo_block("Batch rename tracks").await?;
+    /// for track in project.iter_tracks().await? {
+    ///     track.rename("New Name").await?;
+    /// }
+    /// project.end_undo_block("Batch rename tracks").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn begin_undo_block(&self, label: &str) -> eyre::Result<()> {
+        self.clients
+            .project
+            .begin_undo_block(
+                daw_proto::ProjectContext::project(&self.guid),
+                label.to_string(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// End the current undo block.
+    pub async fn end_undo_block(&self, label: &str) -> eyre::Result<()> {
+        self.clients
+            .project
+            .end_undo_block(
+                daw_proto::ProjectContext::project(&self.guid),
+                label.to_string(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Trigger undo. Returns true if an action was undone.
+    pub async fn undo(&self) -> eyre::Result<bool> {
+        Ok(self
+            .clients
+            .project
+            .undo(daw_proto::ProjectContext::project(&self.guid))
+            .await?)
+    }
+
+    /// Trigger redo. Returns true if an action was redone.
+    pub async fn redo(&self) -> eyre::Result<bool> {
+        Ok(self
+            .clients
+            .project
+            .redo(daw_proto::ProjectContext::project(&self.guid))
+            .await?)
+    }
+
+    /// Get the label of the last undoable action.
+    pub async fn last_undo_label(&self) -> eyre::Result<Option<String>> {
+        Ok(self
+            .clients
+            .project
+            .last_undo_label(daw_proto::ProjectContext::project(&self.guid))
+            .await?)
+    }
+
+    /// Get the label of the last redoable action.
+    pub async fn last_redo_label(&self) -> eyre::Result<Option<String>> {
+        Ok(self
+            .clients
+            .project
+            .last_redo_label(daw_proto::ProjectContext::project(&self.guid))
+            .await?)
     }
 
     /// Get project-level MIDI analysis accessor.

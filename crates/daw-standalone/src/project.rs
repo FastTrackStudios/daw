@@ -181,6 +181,48 @@ impl ProjectService for StandaloneProject {
         self.projects.get(slot as usize).cloned()
     }
 
+    // Undo stubs (no-op for standalone mock)
+
+    async fn begin_undo_block(
+        &self,
+        _cx: &Context,
+        _project: daw_proto::ProjectContext,
+        _label: String,
+    ) {
+    }
+
+    async fn end_undo_block(
+        &self,
+        _cx: &Context,
+        _project: daw_proto::ProjectContext,
+        _label: String,
+    ) {
+    }
+
+    async fn undo(&self, _cx: &Context, _project: daw_proto::ProjectContext) -> bool {
+        false
+    }
+
+    async fn redo(&self, _cx: &Context, _project: daw_proto::ProjectContext) -> bool {
+        false
+    }
+
+    async fn last_undo_label(
+        &self,
+        _cx: &Context,
+        _project: daw_proto::ProjectContext,
+    ) -> Option<String> {
+        None
+    }
+
+    async fn last_redo_label(
+        &self,
+        _cx: &Context,
+        _project: daw_proto::ProjectContext,
+    ) -> Option<String> {
+        None
+    }
+
     async fn subscribe(&self, _cx: &Context, tx: Tx<ProjectEvent>) {
         info!("ProjectService::subscribe() - starting project stream");
 
