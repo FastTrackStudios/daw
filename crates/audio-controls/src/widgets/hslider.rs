@@ -100,7 +100,7 @@ pub fn HSlider(
     // Configuration
     let scroll_sens = ScrollSensitivity::DEFAULT;
     let kb_steps = keyboard_steps.unwrap_or_default();
-    let value_step = stepping.clone().unwrap_or_default();
+    let value_step = stepping.unwrap_or_default();
 
     // Handle stepped variant
     let value_step = match &variant {

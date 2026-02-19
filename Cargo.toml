@@ -29,18 +29,16 @@ dawfile-reaper = { path = "crates/dawfile-reaper" }
 # Facet reflection framework
 facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
 
-# ROAM service framework
-roam = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-telemetry = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-wire = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+# ROAM service framework (pinned — latest main needs peeps sub-crates not yet published)
+roam = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-telemetry = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-wire = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
 
-# Extracted FastTrackStudio crates
-actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "master" }
-keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "master" }
-
-# Dock UI
-dock-dioxus = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "master" }
-dock-proto = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "master" }
+# Sibling repos (local paths)
+actions-proto = { path = "../input_actions/crates/actions-proto" }
+keyflow = { path = "../keyflow/crates/keyflow" }
+dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus", default-features = false }
+dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
 # REAPER bindings
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
@@ -65,3 +63,7 @@ tracing = { version = "0.1", features = ["std"] }
 # Utilities
 eyre = "0.6"
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+
+[workspace.lints.rust]
+
+[workspace.lints.clippy]

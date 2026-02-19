@@ -4,6 +4,7 @@ use facet::Facet;
 
 /// A MIDI input device
 #[derive(Clone, Debug, Facet)]
+#[derive(Default)]
 pub struct MidiInputDevice {
     /// Device ID
     pub id: u32,
@@ -19,6 +20,7 @@ pub struct MidiInputDevice {
 
 /// A MIDI output device
 #[derive(Clone, Debug, Facet)]
+#[derive(Default)]
 pub struct MidiOutputDevice {
     /// Device ID
     pub id: u32,
@@ -32,26 +34,4 @@ pub struct MidiOutputDevice {
     pub is_connected: bool,
 }
 
-impl Default for MidiInputDevice {
-    fn default() -> Self {
-        Self {
-            id: 0,
-            name: String::new(),
-            is_available: false,
-            is_open: false,
-            is_connected: false,
-        }
-    }
-}
 
-impl Default for MidiOutputDevice {
-    fn default() -> Self {
-        Self {
-            id: 0,
-            name: String::new(),
-            is_available: false,
-            is_open: false,
-            is_connected: false,
-        }
-    }
-}

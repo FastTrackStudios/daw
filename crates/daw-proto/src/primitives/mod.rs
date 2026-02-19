@@ -129,6 +129,7 @@ impl Default for Position {
 
 /// Time range with start and end positions
 #[derive(Debug, Clone, PartialEq, facet::Facet)]
+#[derive(Default)]
 pub struct TimeRange {
     pub start: Position,
     pub end: Position,
@@ -182,11 +183,3 @@ impl TimeRange {
     }
 }
 
-impl Default for TimeRange {
-    fn default() -> Self {
-        Self {
-            start: Position::start(),
-            end: Position::start(),
-        }
-    }
-}

@@ -1646,7 +1646,7 @@ impl FxService for ReaperFx {
                     warn!("set_parameter: project not found");
                     "project not found".to_string()
                 })?;
-                let (track, chain) =
+                let (_track, chain) =
                     resolve_fx_chain(&proj, &request.target.context).ok_or_else(|| {
                         warn!(
                             "set_parameter: FX chain not found for {:?}",

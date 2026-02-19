@@ -915,12 +915,11 @@ fn unquote(s: &str) -> String {
 }
 
 fn parse_int(s: &str) -> Option<i32> {
-    s.trim().split_whitespace().next()?.parse().ok()
+    s.split_whitespace().next()?.parse().ok()
 }
 
 fn parse_4_ints(s: &str) -> Option<[i32; 4]> {
     let parts: Vec<i32> = s
-        .trim()
         .split_whitespace()
         .filter_map(|p| p.parse().ok())
         .collect();
@@ -933,7 +932,6 @@ fn parse_4_ints(s: &str) -> Option<[i32; 4]> {
 
 fn parse_2_ints(s: &str) -> Option<[i32; 2]> {
     let parts: Vec<i32> = s
-        .trim()
         .split_whitespace()
         .filter_map(|p| p.parse().ok())
         .collect();

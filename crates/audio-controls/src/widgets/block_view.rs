@@ -197,7 +197,7 @@ fn BlockCompactView(props: LodViewProps) -> Element {
                                 show_value: false,
                                 on_change: {
                                     let param_id = param.id.clone();
-                                    let on_param_change = props.on_param_change.clone();
+                                    let on_param_change = props.on_param_change;
                                     move |v| {
                                         if let Some(cb) = &on_param_change {
                                             cb.call((param_id.clone(), v));
@@ -290,7 +290,7 @@ fn BlockCompactView(props: LodViewProps) -> Element {
                                 show_value: false,
                                 on_change: {
                                     let param_id = param.id.clone();
-                                    let on_param_change = props.on_param_change.clone();
+                                    let on_param_change = props.on_param_change;
                                     move |v| {
                                         if let Some(cb) = &on_param_change {
                                             cb.call((param_id.clone(), v));
@@ -314,7 +314,7 @@ fn BlockCompactView(props: LodViewProps) -> Element {
                                 show_value: false,
                                 on_change: {
                                     let param_id = param.id.clone();
-                                    let on_param_change = props.on_param_change.clone();
+                                    let on_param_change = props.on_param_change;
                                     move |v| {
                                         if let Some(cb) = &on_param_change {
                                             cb.call((param_id.clone(), v));
@@ -337,7 +337,7 @@ fn BlockCompactView(props: LodViewProps) -> Element {
                                 show_value: false,
                                 on_change: {
                                     let param_id = param.id.clone();
-                                    let on_param_change = props.on_param_change.clone();
+                                    let on_param_change = props.on_param_change;
                                     move |v| {
                                         if let Some(cb) = &on_param_change {
                                             cb.call((param_id.clone(), v));
@@ -433,7 +433,7 @@ fn BlockStandardView(props: LodViewProps) -> Element {
                         show_value: true,
                         on_change: {
                             let param_id = param.id.clone();
-                            let on_param_change = props.on_param_change.clone();
+                            let on_param_change = props.on_param_change;
                             move |v| {
                                 if let Some(cb) = &on_param_change {
                                     cb.call((param_id.clone(), v));
@@ -556,7 +556,7 @@ fn BlockFullView(props: LodViewProps) -> Element {
                                 show_value: true,
                                 on_change: {
                                     let param_id = param.id.clone();
-                                    let on_param_change = props.on_param_change.clone();
+                                    let on_param_change = props.on_param_change;
                                     move |v| {
                                         if let Some(cb) = &on_param_change {
                                             cb.call((param_id.clone(), v));
@@ -582,7 +582,7 @@ fn BlockFullView(props: LodViewProps) -> Element {
                                 show_value: true,
                                 on_change: {
                                     let param_id = param.id.clone();
-                                    let on_param_change = props.on_param_change.clone();
+                                    let on_param_change = props.on_param_change;
                                     move |v| {
                                         if let Some(cb) = &on_param_change {
                                             cb.call((param_id.clone(), v));

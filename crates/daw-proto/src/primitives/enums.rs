@@ -5,10 +5,12 @@ use facet::Facet;
 /// Time display mode (how time is shown in the UI)
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[derive(Default)]
 pub enum TimeMode {
     /// Display as seconds (e.g., "123.456")
     Time,
     /// Display as measures.beats.time (e.g., "4.2.75")
+    #[default]
     MeasuresBeatsTime,
     /// Display as measures.beats (e.g., "4.2")
     MeasuresBeats,
@@ -24,17 +26,14 @@ pub enum TimeMode {
     AbsoluteFrames,
 }
 
-impl Default for TimeMode {
-    fn default() -> Self {
-        Self::MeasuresBeatsTime
-    }
-}
 
 /// How items/regions attach to timeline (affects time stretch behavior)
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[derive(Default)]
 pub enum BeatAttachMode {
     /// Fixed to time (doesn't move with tempo changes)
+    #[default]
     Time,
     /// Fixed to beats (position, length, and rate follow tempo)
     Beats,
@@ -42,59 +41,45 @@ pub enum BeatAttachMode {
     BeatsPositionOnly,
 }
 
-impl Default for BeatAttachMode {
-    fn default() -> Self {
-        Self::Time
-    }
-}
 
 /// How beats are calculated in time mapping
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[derive(Default)]
 pub enum MeasureMode {
     /// Pure beat counting (ignore measure boundaries)
+    #[default]
     IgnoreMeasure,
     /// Start from specific measure, stop at next tempo/time sig marker
     FromMeasureAtIndex(i32),
 }
 
-impl Default for MeasureMode {
-    fn default() -> Self {
-        Self::IgnoreMeasure
-    }
-}
 
 /// Time mode override (for specific contexts)
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[derive(Default)]
 pub enum TimeModeOverride {
     /// Use the project's default time mode
+    #[default]
     ProjectDefault,
     /// Override with a specific time mode
     Mode(TimeMode),
 }
 
-impl Default for TimeModeOverride {
-    fn default() -> Self {
-        Self::ProjectDefault
-    }
-}
 
 /// MIDI event timing
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
+#[derive(Default)]
 pub enum SendMidiTime {
     /// Send MIDI event immediately
+    #[default]
     Instantly,
     /// Send MIDI event at specific frame offset
     AtFrameOffset(u32),
 }
 
-impl Default for SendMidiTime {
-    fn default() -> Self {
-        Self::Instantly
-    }
-}
 
 /// Automation playback/recording mode
 #[repr(u8)]

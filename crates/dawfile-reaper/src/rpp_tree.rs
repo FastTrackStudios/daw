@@ -413,12 +413,12 @@ impl RChunk {
             .collect()
     }
 
-    pub fn find_all_nodes_by_filter<'a, F>(
-        &'a self,
+    pub fn find_all_nodes_by_filter<F>(
+        &self,
         filter: F,
         start_index: Option<usize>,
         end_index: Option<usize>,
-    ) -> Vec<&'a RNodeTree>
+    ) -> Vec<&RNodeTree>
     where
         F: Fn(&RNodeTree) -> bool,
     {
@@ -439,12 +439,12 @@ impl RChunk {
             .collect()
     }
 
-    pub fn find_all_chunks_by_filter<'a, F>(
-        &'a self,
+    pub fn find_all_chunks_by_filter<F>(
+        &self,
         filter: F,
         start_index: Option<usize>,
         end_index: Option<usize>,
-    ) -> Vec<&'a RChunk>
+    ) -> Vec<&RChunk>
     where
         F: Fn(&RChunk) -> bool,
     {
@@ -594,12 +594,12 @@ impl RChunk {
     }
 
     #[allow(non_snake_case)]
-    pub fn findAllNodesByFilter<'a, F>(
-        &'a self,
+    pub fn findAllNodesByFilter<F>(
+        &self,
         filter: F,
         start_index: Option<usize>,
         end_index: Option<usize>,
-    ) -> Vec<&'a RNodeTree>
+    ) -> Vec<&RNodeTree>
     where
         F: Fn(&RNodeTree) -> bool,
     {
@@ -607,12 +607,12 @@ impl RChunk {
     }
 
     #[allow(non_snake_case)]
-    pub fn findAllChunksByFilter<'a, F>(
-        &'a self,
+    pub fn findAllChunksByFilter<F>(
+        &self,
         filter: F,
         start_index: Option<usize>,
         end_index: Option<usize>,
-    ) -> Vec<&'a RChunk>
+    ) -> Vec<&RChunk>
     where
         F: Fn(&RChunk) -> bool,
     {

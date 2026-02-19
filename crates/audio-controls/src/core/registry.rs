@@ -131,11 +131,10 @@ impl BlockRegistry {
         // Try keyword matching
         for (keywords, type_id) in NAME_HINTS {
             for keyword in *keywords {
-                if name_lower.contains(keyword) {
-                    if let Some(def) = self.by_type_id.get(*type_id) {
+                if name_lower.contains(keyword)
+                    && let Some(def) = self.by_type_id.get(*type_id) {
                         return def.clone();
                     }
-                }
             }
         }
 

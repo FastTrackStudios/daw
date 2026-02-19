@@ -655,11 +655,10 @@ pub fn EqGraph(
                             let bx = freq_to_x(band.frequency as f64);
                             let by = db_to_y(band.gain as f64);
                             let dist = ((x - bx).powi(2) + (y - by).powi(2)).sqrt();
-                            if dist < focus_radius {
-                                if closest.is_none() || dist < closest.unwrap().1 {
+                            if dist < focus_radius
+                                && (closest.is_none() || dist < closest.unwrap().1) {
                                     closest = Some((idx, dist));
                                 }
-                            }
                         }
                     }
                     closest
@@ -759,11 +758,10 @@ pub fn EqGraph(
                     let outside = !is_inside_graph(x, y);
 
                     // If released outside graph area, remove the band
-                    if outside {
-                        if let Some(cb) = &on_band_remove {
+                    if outside
+                        && let Some(cb) = &on_band_remove {
                             cb.call(band_idx);
                         }
-                    }
 
                     dragging_band.set(None);
                     drag_start.set(None);
@@ -1104,7 +1102,7 @@ pub fn EqGraph(
                                 },
 
                                 onmousedown: {
-                                    let on_begin = on_begin.clone();
+                                    let on_begin = on_begin;
                                     move |evt: MouseEvent| {
                                         if disabled {
                                             return;
@@ -1169,7 +1167,7 @@ pub fn EqGraph(
 
                                 // Double-click on band resets gain to 0
                                 ondoubleclick: {
-                                    let on_band_change = on_band_change.clone();
+                                    let on_band_change = on_band_change;
                                     move |evt: MouseEvent| {
                                         if disabled {
                                             return;
@@ -1339,7 +1337,7 @@ pub fn EqGraph(
                                 // Bypass button
                                 g {
                                     onclick: {
-                                        let on_band_change = on_band_change.clone();
+                                        let on_band_change = on_band_change;
                                         move |evt: MouseEvent| {
                                             evt.stop_propagation();
                                             let updated = {
@@ -1374,7 +1372,7 @@ pub fn EqGraph(
                                 // Solo button
                                 g {
                                     onclick: {
-                                        let on_band_change = on_band_change.clone();
+                                        let on_band_change = on_band_change;
                                         move |evt: MouseEvent| {
                                             evt.stop_propagation();
                                             let updated = {
@@ -1440,7 +1438,7 @@ pub fn EqGraph(
                                 // Delete button
                                 g {
                                     onclick: {
-                                        let on_band_remove = on_band_remove.clone();
+                                        let on_band_remove = on_band_remove;
                                         move |evt: MouseEvent| {
                                             evt.stop_propagation();
                                             if let Some(cb) = &on_band_remove {
@@ -1493,7 +1491,7 @@ pub fn EqGraph(
                                                 rsx! {
                                                     g {
                                                         onclick: {
-                                                            let on_band_change = on_band_change.clone();
+                                                            let on_band_change = on_band_change;
                                                             move |evt: MouseEvent| {
                                                                 evt.stop_propagation();
                                                                 let updated = {
@@ -1603,8 +1601,8 @@ fn generate_all_eq_curves(
     let (combined_stroke, combined_fill) = build_curve_paths(
         &frequencies,
         &combined_response,
-        &freq_to_x,
-        &db_to_y,
+        freq_to_x,
+        db_to_y,
         zero_y,
     );
 
@@ -1621,7 +1619,7 @@ fn generate_all_eq_curves(
             .collect();
 
         let (stroke, fill) =
-            build_curve_paths(&frequencies, &band_response, &freq_to_x, &db_to_y, zero_y);
+            build_curve_paths(&frequencies, &band_response, freq_to_x, db_to_y, zero_y);
         band_curves.push((stroke, fill));
     }
 

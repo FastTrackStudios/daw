@@ -620,8 +620,8 @@ pub fn CompressorGraph(props: CompressorGraphProps) -> Element {
 
     let onmousemove = {
         let threshold_f32 = props.params.threshold;
-        let on_threshold_change = props.on_threshold_change.clone();
-        let on_ratio_change = props.on_ratio_change.clone();
+        let on_threshold_change = props.on_threshold_change;
+        let on_ratio_change = props.on_ratio_change;
         move |evt: MouseEvent| {
             let target = { *drag_target.read() };
             if target.is_none() {
@@ -677,7 +677,7 @@ pub fn CompressorGraph(props: CompressorGraphProps) -> Element {
 
     let onwheel = {
         let knee_f32 = props.params.knee;
-        let on_knee_change = props.on_knee_change.clone();
+        let on_knee_change = props.on_knee_change;
         let interactive = props.interactive;
         move |evt: WheelEvent| {
             if !interactive {
