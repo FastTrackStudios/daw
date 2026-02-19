@@ -9,7 +9,6 @@
 
 use daw_control::{Daw, Project, TrackHandle};
 use eyre::Result;
-use host_client::HostConnector;
 use std::{
     fs::{self, File},
     future::Future,
@@ -302,38 +301,14 @@ async fn release_batch_tab(daw: &Daw, batch: &Arc<BatchTab>) {
 //  Connection
 // ─────────────────────────────────────────────────────────────
 
-/// Connect to a running REAPER instance via Unix socket, polling until
-/// a project with a non-empty GUID is available.
+/// Connect to a running REAPER instance, polling until a project with a
+/// non-empty GUID is available.
+///
+/// TODO: Re-implement connection mechanism (old host_client/HostConnector removed)
 pub async fn connect_daw() -> Result<Daw> {
-    let connector = HostConnector::unix(SOCKET_PATH);
-    let connection = tokio::time::timeout(CONNECT_TIMEOUT, connector.connect())
-        .await
-        .map_err(|_| eyre::eyre!("Timed out connecting to REAPER at {SOCKET_PATH}"))?
-        .map_err(|e| eyre::eyre!("Failed to connect to REAPER: {e}"))?;
-    let daw = Daw::new(connection.handle().clone());
-
-    print!("  Waiting for project");
-    for _ in 0..60 {
-        if let Ok(project) = daw.current_project().await {
-            if let Ok(info) = project.info().await {
-                if !info.guid.is_empty() {
-                    println!(
-                        " OK ({})",
-                        if info.name.is_empty() {
-                            info.guid.as_str()
-                        } else {
-                            info.name.as_str()
-                        }
-                    );
-                    return Ok(daw);
-                }
-            }
-        }
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        print!(".");
-    }
-    println!();
-    Err(eyre::eyre!("Timed out waiting for project to load"))
+    Err(eyre::eyre!(
+        "connect_daw: host_client infrastructure removed — needs new connection mechanism"
+    ))
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -600,6 +575,48 @@ pub fn run_reaper_test(
 
         result
     })
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Final cleanup
+// ─────────────────────────────────────────────────────────────
+
+/// Remove all tracks and close all project tabs except the initial one.
+///
+/// Call this after all tests complete to leave REAPER in a clean state.
+/// Useful when running a subset of tests against an already-open REAPER
+/// instance where the batch system doesn't reach `BATCH_SIZE` and
+/// therefore never triggers its own cleanup.
+pub async fn cleanup_all_projects(daw: &Daw) -> Result<()> {
+    let projects = daw.projects().await?;
+    println!("  Cleaning up {} project tab(s)...", projects.len());
+
+    for (i, project) in projects.iter().enumerate() {
+        let track_count = project.tracks().count().await.unwrap_or(0);
+        if track_count > 0 {
+            println!("    Tab {}: removing {} tracks", i, track_count);
+            let _ = project.tracks().remove_all().await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        // Close all tabs except the first (REAPER's initial tab)
+        if i > 0 {
+            println!(
+                "    Closing tab {} (guid: {})",
+                i,
+                &project.guid()[..8.min(project.guid().len())]
+            );
+            let _ = daw.close_project(&project.guid().to_string()).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    // Drain the batch pool so it doesn't hold stale references
+    let mut pool = BATCH_POOL.lock().unwrap();
+    *pool = None;
+
+    println!("  Cleanup complete");
+    Ok(())
 }
 
 #[cfg(test)]

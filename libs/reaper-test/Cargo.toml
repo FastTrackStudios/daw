@@ -6,7 +6,6 @@ description = "Runtime library for REAPER integration tests"
 
 [dependencies]
 daw-control = { path = "../../cells/daw/daw-control" }
-host-client = { path = "../../modules/host-client" }
 eyre = "0.6"
 tokio = { version = "1", features = ["time", "process", "rt"] }
 tracing = "0.1"
