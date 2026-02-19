@@ -1,0 +1,16 @@
+[package]
+name = "audio-controls"
+description = "Professional audio parameter control widgets for Dioxus"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# UI framework
+dioxus = { workspace = true, optional = true }
+
+[features]
+default = ["web"]
+web = ["dep:dioxus"]
+
+[lints]
+workspace = true

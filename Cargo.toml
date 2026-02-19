@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "crates/audio-controls",
     "crates/daw-control",
     "crates/daw-proto",
     "crates/daw-reaper",
@@ -17,6 +18,7 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 # Internal crates
+audio-controls = { path = "crates/audio-controls" }
 daw-proto = { path = "crates/daw-proto" }
 daw-control = { path = "crates/daw-control" }
 daw-standalone = { path = "crates/daw-standalone" }
