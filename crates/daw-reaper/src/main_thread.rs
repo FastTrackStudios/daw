@@ -40,7 +40,7 @@
 //! }
 //! ```
 
-use reaper_high::TaskSupport;
+use reaper_high::{Reaper, TaskSupport};
 use std::sync::OnceLock;
 
 /// Global TaskSupport instance — set by the extension during initialization.
@@ -96,4 +96,122 @@ where
     if let Some(ts) = task_support() {
         let _ = ts.do_later_in_main_thread_asap(f);
     }
+}
+
+// =============================================================================
+// Undo Block Scoping
+//
+// Wraps mutations in REAPER undo blocks so multiple changes appear as a single
+// undoable action. Uses reaper-high's `Project::undoable()` which handles
+// RAII begin/end and nesting guards.
+// =============================================================================
+
+/// Execute a mutation on the main thread wrapped in an undo block.
+///
+/// The `label` appears in REAPER's Edit > Undo History. The closure receives
+/// the resolved project so it can operate on it directly.
+///
+/// Fire-and-forget — use this for mutations that don't return a value.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// main_thread::run_undoable(project_ctx, "Rename track", move |proj| {
+///     if let Some(t) = resolve_track(&proj, &track_ref) {
+///         t.set_name("New Name");
+///     }
+/// });
+/// ```
+pub fn run_undoable<F>(project: daw_proto::ProjectContext, label: &'static str, f: F)
+where
+    F: FnOnce(reaper_high::Project) + Send + 'static,
+{
+    run(move || {
+        let Some(proj) = resolve_project_for_undo(&project) else {
+            return;
+        };
+        proj.undoable(label, || f(proj));
+    });
+}
+
+/// Execute a query on the main thread wrapped in an undo block, returning a value.
+///
+/// Use this for mutations that need to return a result (e.g., adding a track
+/// returns its GUID). The undo block groups all changes inside the closure.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let guid = main_thread::query_undoable(project_ctx, "Add track", move |proj| {
+///     let track = proj.insert_track_at(0).ok()?;
+///     Some(track.guid().to_string_without_braces())
+/// }).await.flatten().unwrap_or_default();
+/// ```
+pub async fn query_undoable<F, R>(
+    project: daw_proto::ProjectContext,
+    label: &'static str,
+    f: F,
+) -> Option<R>
+where
+    F: FnOnce(reaper_high::Project) -> R + Send + 'static,
+    R: Send + 'static,
+{
+    query(move || {
+        let proj = resolve_project_for_undo(&project)?;
+        Some(proj.undoable(label, || f(proj)))
+    })
+    .await
+    .flatten()
+}
+
+/// Resolve a ProjectContext to a reaper_high::Project (for undo helpers).
+fn resolve_project_for_undo(ctx: &daw_proto::ProjectContext) -> Option<reaper_high::Project> {
+    match ctx {
+        daw_proto::ProjectContext::Current => Some(Reaper::get().current_project()),
+        daw_proto::ProjectContext::Project(guid) => {
+            crate::project_context::find_project_by_guid(guid)
+        }
+    }
+}
+
+// =============================================================================
+// Pointer Validation
+//
+// REAPER uses raw C pointers for tracks, items, etc. These can become dangling
+// if the user deletes an object between when we resolve it and when we use it.
+// ValidatePtr2 checks if a pointer is still valid within a project.
+// =============================================================================
+
+/// Validate that a track pointer is still valid within its project.
+///
+/// Returns `true` if the track's raw MediaTrack pointer is still recognized
+/// by REAPER for the given project. Returns `false` if the track was deleted
+/// or if the pointer cannot be obtained.
+pub fn is_track_valid(project: &reaper_high::Project, track: &reaper_high::Track) -> bool {
+    let Ok(raw) = track.raw() else {
+        return false;
+    };
+    Reaper::get()
+        .medium_reaper()
+        .validate_ptr_2(reaper_medium::ProjectContext::Proj(project.raw()), raw)
+}
+
+/// Validate that a MediaItem pointer is still valid within a project.
+pub fn is_item_valid(
+    project_ctx: reaper_medium::ProjectContext,
+    item: reaper_medium::MediaItem,
+) -> bool {
+    Reaper::get()
+        .medium_reaper()
+        .validate_ptr_2(project_ctx, item)
+}
+
+/// Validate that a MediaItemTake pointer is still valid within a project.
+pub fn is_take_valid(
+    project_ctx: reaper_medium::ProjectContext,
+    take: reaper_medium::MediaItemTake,
+) -> bool {
+    Reaper::get()
+        .medium_reaper()
+        .validate_ptr_2(project_ctx, take)
 }

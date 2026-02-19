@@ -44,26 +44,37 @@ fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
     }
 }
 
-/// Resolve a TrackRef to a reaper-high Track within a project
+/// Resolve a TrackRef to a reaper-high Track within a project.
+///
+/// After resolving the track, validates that the raw MediaTrack pointer is
+/// still recognized by REAPER. This guards against stale pointers if a track
+/// was deleted between resolve and use.
 fn resolve_track(
     project: &reaper_high::Project,
     track_ref: &TrackRef,
 ) -> Option<reaper_high::Track> {
-    match track_ref {
+    let track = match track_ref {
         TrackRef::Guid(guid) => {
             // Linear scan to match GUID string
+            let mut found = None;
             for i in 0..project.track_count() {
                 if let Some(track) = project.track_by_index(i) {
                     if track.guid().to_string_without_braces() == *guid {
-                        return Some(track);
+                        found = Some(track);
+                        break;
                     }
                 }
             }
-            None
+            found?
         }
-        TrackRef::Index(idx) => project.track_by_index(*idx),
-        TrackRef::Master => project.master_track().ok(),
+        TrackRef::Index(idx) => project.track_by_index(*idx)?,
+        TrackRef::Master => project.master_track().ok()?,
+    };
+    // Validate the pointer is still live
+    if !main_thread::is_track_valid(project, &track) {
+        return None;
     }
+    Some(track)
 }
 
 /// Convert a reaper-high Track to our daw_proto::Track

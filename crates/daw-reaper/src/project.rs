@@ -5,13 +5,22 @@
 
 use daw_proto::{ProjectEvent, ProjectInfo, ProjectService};
 use reaper_high::{Project, Reaper};
-use reaper_medium::{CommandId, ProjectContext, ProjectRef};
+use reaper_medium::{CommandId, ProjectContext, ProjectRef, UndoScope};
 use roam::{Context, Tx};
 use std::time::Duration;
 use tracing::{debug, info};
 
 use crate::main_thread;
-use crate::project_context::project_guid;
+use crate::project_context::{find_project_by_guid, project_guid};
+
+/// Thread-local storage for the undo block label.
+///
+/// `begin_undo_block` and `end_undo_block` arrive as separate RPC calls, but
+/// REAPER's `Undo_EndBlock2` needs the label at end-time. We stash the label
+/// from `begin` and retrieve it in `end` as a fallback.
+thread_local! {
+    static UNDO_LABEL: std::cell::Cell<Option<String>> = const { std::cell::Cell::new(None) };
+}
 
 /// REAPER project implementation that dispatches to the main thread via `main_thread`.
 #[derive(Clone)]
@@ -26,6 +35,14 @@ impl ReaperProject {
 impl Default for ReaperProject {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Resolve a daw_proto::ProjectContext to a reaper_high::Project
+fn resolve_project(ctx: &daw_proto::ProjectContext) -> Option<Project> {
+    match ctx {
+        daw_proto::ProjectContext::Current => Some(Reaper::get().current_project()),
+        daw_proto::ProjectContext::Project(guid) => find_project_by_guid(guid),
     }
 }
 
@@ -331,6 +348,106 @@ impl ProjectService for ReaperProject {
         .await
         .flatten()
     }
+
+    // =========================================================================
+    // Undo
+    // =========================================================================
+
+    async fn begin_undo_block(
+        &self,
+        _cx: &Context,
+        project: daw_proto::ProjectContext,
+        label: String,
+    ) {
+        main_thread::run(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            Reaper::get()
+                .medium_reaper()
+                .undo_begin_block_2(reaper_medium::ProjectContext::Proj(proj.raw()));
+            // Stash label for end_undo_block fallback
+            UNDO_LABEL.with(|cell| cell.replace(Some(label)));
+        });
+    }
+
+    async fn end_undo_block(
+        &self,
+        _cx: &Context,
+        project: daw_proto::ProjectContext,
+        label: String,
+    ) {
+        main_thread::run(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            // Use the provided label, falling back to whatever was stashed at begin
+            let final_label = if !label.is_empty() {
+                label
+            } else {
+                UNDO_LABEL
+                    .with(|cell| cell.take())
+                    .unwrap_or_else(|| "FTS action".to_string())
+            };
+            Reaper::get().medium_reaper().undo_end_block_2(
+                reaper_medium::ProjectContext::Proj(proj.raw()),
+                final_label.as_str(),
+                UndoScope::All,
+            );
+        });
+    }
+
+    async fn undo(&self, _cx: &Context, project: daw_proto::ProjectContext) -> bool {
+        main_thread::query(move || {
+            let proj = resolve_project(&project)?;
+            Some(proj.undo())
+        })
+        .await
+        .flatten()
+        .unwrap_or(false)
+    }
+
+    async fn redo(&self, _cx: &Context, project: daw_proto::ProjectContext) -> bool {
+        main_thread::query(move || {
+            let proj = resolve_project(&project)?;
+            Some(proj.redo())
+        })
+        .await
+        .flatten()
+        .unwrap_or(false)
+    }
+
+    async fn last_undo_label(
+        &self,
+        _cx: &Context,
+        project: daw_proto::ProjectContext,
+    ) -> Option<String> {
+        main_thread::query(move || {
+            let proj = resolve_project(&project)?;
+            proj.label_of_last_undoable_action()
+                .map(|s| s.to_str().to_string())
+        })
+        .await
+        .flatten()
+    }
+
+    async fn last_redo_label(
+        &self,
+        _cx: &Context,
+        project: daw_proto::ProjectContext,
+    ) -> Option<String> {
+        main_thread::query(move || {
+            let proj = resolve_project(&project)?;
+            proj.label_of_last_redoable_action()
+                .map(|s| s.to_str().to_string())
+        })
+        .await
+        .flatten()
+    }
+
+    // =========================================================================
+    // Streaming
+    // =========================================================================
 
     async fn subscribe(&self, _cx: &Context, tx: Tx<ProjectEvent>) {
         // Spawn the streaming loop so this method returns immediately

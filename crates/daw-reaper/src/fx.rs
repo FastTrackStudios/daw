@@ -515,11 +515,17 @@ fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
     }
 }
 
-/// Resolve a TrackRef-like string (GUID) to a REAPER Track within a project
+/// Resolve a TrackRef-like string (GUID) to a REAPER Track within a project.
+///
+/// Validates the raw MediaTrack pointer after resolution to guard against
+/// stale pointers from deleted tracks.
 fn resolve_track_by_guid(project: &reaper_high::Project, guid: &str) -> Option<Track> {
     for i in 0..project.track_count() {
         if let Some(track) = project.track_by_index(i) {
             if track.guid().to_string_without_braces() == guid {
+                if !main_thread::is_track_valid(project, &track) {
+                    return None;
+                }
                 return Some(track);
             }
         }

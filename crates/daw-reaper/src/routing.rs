@@ -45,23 +45,31 @@ fn resolve_project(ctx: &ProjectContext) -> Option<Project> {
     }
 }
 
-/// Resolve a TrackRef to a REAPER Track within a project
+/// Resolve a TrackRef to a REAPER Track within a project.
+///
+/// Validates the raw MediaTrack pointer after resolution to guard against
+/// stale pointers from deleted tracks.
 fn resolve_track(project: &Project, track_ref: &TrackRef) -> Option<Track> {
-    match track_ref {
-        TrackRef::Master => project.master_track().ok(),
-        TrackRef::Index(idx) => project.track_by_index(*idx),
+    let track = match track_ref {
+        TrackRef::Master => project.master_track().ok()?,
+        TrackRef::Index(idx) => project.track_by_index(*idx)?,
         TrackRef::Guid(guid) => {
-            // Search for track by GUID
+            let mut found = None;
             for i in 0..project.track_count() {
                 if let Some(track) = project.track_by_index(i) {
                     if track.guid().to_string_without_braces() == *guid {
-                        return Some(track);
+                        found = Some(track);
+                        break;
                     }
                 }
             }
-            None
+            found?
         }
+    };
+    if !main_thread::is_track_valid(project, &track) {
+        return None;
     }
+    Some(track)
 }
 
 /// Find a track by name within a specific project

@@ -78,29 +78,30 @@ impl ReaperItem {
         unsafe { medium.low().IsMediaItemSelected(item.as_ptr()) }
     }
 
-    /// Resolve an ItemRef to a MediaItem pointer
+    /// Resolve an ItemRef to a MediaItem pointer.
+    ///
+    /// Validates the pointer after resolution to guard against stale items.
     fn resolve_item(item_ref: &ItemRef, project: ReaperProjectContext) -> Option<MediaItem> {
         let reaper = Reaper::get();
         let medium = reaper.medium_reaper();
 
-        match item_ref {
+        let item = match item_ref {
             ItemRef::Guid(_guid) => {
                 // GUID lookup not directly supported in reaper_medium
                 // Would need to iterate through all items and check GUIDs
                 // For now, return None
-                None
+                return None;
             }
             ItemRef::Index(idx) => {
-                // Get item by index within currently selected track (or first track)
-                // This is ambiguous - we'll use the first track for now
                 let track = medium.get_track(project, 0)?;
-                unsafe { medium.get_track_media_item(track, *idx) }
+                unsafe { medium.get_track_media_item(track, *idx)? }
             }
-            ItemRef::ProjectIndex(idx) => {
-                // Get item by global project index
-                medium.get_media_item(project, *idx)
-            }
+            ItemRef::ProjectIndex(idx) => medium.get_media_item(project, *idx)?,
+        };
+        if !main_thread::is_item_valid(project, item) {
+            return None;
         }
+        Some(item)
     }
 
     /// Convert MediaItem to Item struct

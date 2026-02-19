@@ -141,6 +141,48 @@ pub trait ProjectService {
     async fn get_by_slot(&self, slot: u32) -> Option<ProjectInfo>;
 
     // =========================================================================
+    // Undo
+    // =========================================================================
+
+    /// Begin an undo block for the given project.
+    ///
+    /// All state changes between `begin_undo_block` and `end_undo_block` are
+    /// grouped into a single entry in REAPER's undo history. The `label` is
+    /// what the user sees in Edit > Undo History.
+    ///
+    /// Undo blocks do not nest — if a block is already active, this is a no-op.
+    /// The outermost block's label wins.
+    async fn begin_undo_block(&self, project: ProjectContext, label: String);
+
+    /// End the current undo block for the given project.
+    ///
+    /// Must be paired with a preceding `begin_undo_block`. If no block is
+    /// active, this is a no-op.
+    async fn end_undo_block(&self, project: ProjectContext, label: String);
+
+    /// Trigger undo for the given project.
+    ///
+    /// Returns `true` if an undo action was performed, `false` if the undo
+    /// history is empty.
+    async fn undo(&self, project: ProjectContext) -> bool;
+
+    /// Trigger redo for the given project.
+    ///
+    /// Returns `true` if a redo action was performed, `false` if the redo
+    /// history is empty.
+    async fn redo(&self, project: ProjectContext) -> bool;
+
+    /// Get the label of the last undoable action (i.e., what Ctrl+Z would undo).
+    ///
+    /// Returns `None` if the undo history is empty.
+    async fn last_undo_label(&self, project: ProjectContext) -> Option<String>;
+
+    /// Get the label of the last redoable action (i.e., what Ctrl+Shift+Z would redo).
+    ///
+    /// Returns `None` if the redo history is empty.
+    async fn last_redo_label(&self, project: ProjectContext) -> Option<String>;
+
+    // =========================================================================
     // Streaming
     // =========================================================================
 
