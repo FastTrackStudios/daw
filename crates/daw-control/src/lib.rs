@@ -56,6 +56,9 @@ pub use daw_proto::{
     // FX types
     AddFxAtRequest,
     CreateContainerRequest,
+    // Error types
+    DawError,
+    DawResult,
     // Primitives
     Duration,
     EncloseInContainerRequest,
@@ -121,6 +124,7 @@ use std::sync::Arc;
 
 pub use daw_proto::AudioEngineServiceClient;
 pub use daw_proto::AutomationServiceClient;
+pub use daw_proto::ExtStateServiceClient;
 pub use daw_proto::FxServiceClient;
 pub use daw_proto::ItemServiceClient;
 pub use daw_proto::LiveMidiServiceClient;
@@ -138,6 +142,7 @@ pub use daw_proto::transport::transport::TransportServiceClient;
 use roam::session::ConnectionHandle;
 
 mod automation;
+mod ext_state;
 mod fx;
 mod items;
 mod markers;
@@ -151,6 +156,7 @@ mod tracks;
 mod transport;
 
 pub use self::automation::{EnvelopeHandle, Envelopes};
+pub use self::ext_state::ExtState;
 pub use self::fx::{FxChain, FxHandle, FxParamHandle};
 pub use self::items::{ItemHandle, Items, ProjectItems, TakeHandle, Takes};
 pub use self::markers::Markers;
@@ -182,6 +188,7 @@ pub struct DawClients {
     pub(crate) midi: MidiServiceClient,
     pub(crate) midi_analysis: MidiAnalysisServiceClient,
     pub(crate) audio_engine: AudioEngineServiceClient,
+    pub(crate) ext_state: ExtStateServiceClient,
 }
 
 impl DawClients {
@@ -203,7 +210,8 @@ impl DawClients {
             live_midi: LiveMidiServiceClient::new(handle.clone()),
             midi: MidiServiceClient::new(handle.clone()),
             midi_analysis: MidiAnalysisServiceClient::new(handle.clone()),
-            audio_engine: AudioEngineServiceClient::new(handle),
+            audio_engine: AudioEngineServiceClient::new(handle.clone()),
+            ext_state: ExtStateServiceClient::new(handle),
         }
     }
 }
@@ -433,6 +441,27 @@ impl Daw {
     /// ```
     pub fn audio_engine(&self) -> &AudioEngineServiceClient {
         &self.clients.audio_engine
+    }
+
+    /// Get a handle to the persistent key-value storage (ExtState).
+    ///
+    /// This provides access to REAPER's ExtState API for storing and retrieving
+    /// persistent values scoped by section and key.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use daw_control::Daw;
+    ///
+    /// # async fn example(daw: &Daw) -> eyre::Result<()> {
+    /// let ext = daw.ext_state();
+    /// ext.set("MyExt", "theme", "dark", true).await?;
+    /// let theme = ext.get("MyExt", "theme").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn ext_state(&self) -> ExtState {
+        ExtState::new(self.clients.clone())
     }
 
     /// Inject a MIDI message into REAPER's virtual keyboard queue.

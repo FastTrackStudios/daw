@@ -1397,6 +1397,8 @@ dependencies = [
  "facet",
  "futures",
  "roam",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1416,6 +1418,7 @@ dependencies = [
  "daw-control",
  "daw-proto",
  "dawfile-reaper",
+ "enumflags2",
  "eyre",
  "keyflow",
  "peeps",

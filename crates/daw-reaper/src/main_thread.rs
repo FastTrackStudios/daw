@@ -180,6 +180,9 @@ fn resolve_project_for_undo(ctx: &daw_proto::ProjectContext) -> Option<reaper_hi
 // REAPER uses raw C pointers for tracks, items, etc. These can become dangling
 // if the user deletes an object between when we resolve it and when we use it.
 // ValidatePtr2 checks if a pointer is still valid within a project.
+//
+// The full trait-based API is in `crate::ptr_validation` (WithReaperPtr trait).
+// These functions are thin wrappers for use in resolve functions.
 // =============================================================================
 
 /// Validate that a track pointer is still valid within its project.
@@ -187,13 +190,11 @@ fn resolve_project_for_undo(ctx: &daw_proto::ProjectContext) -> Option<reaper_hi
 /// Returns `true` if the track's raw MediaTrack pointer is still recognized
 /// by REAPER for the given project. Returns `false` if the track was deleted
 /// or if the pointer cannot be obtained.
+///
+/// For the trait-based API, see [`crate::ptr_validation::WithReaperPtr`].
 pub fn is_track_valid(project: &reaper_high::Project, track: &reaper_high::Track) -> bool {
-    let Ok(raw) = track.raw() else {
-        return false;
-    };
-    Reaper::get()
-        .medium_reaper()
-        .validate_ptr_2(reaper_medium::ProjectContext::Proj(project.raw()), raw)
+    use crate::ptr_validation::WithReaperPtr;
+    track.require_valid(project).is_ok()
 }
 
 /// Validate that a MediaItem pointer is still valid within a project.
@@ -201,9 +202,8 @@ pub fn is_item_valid(
     project_ctx: reaper_medium::ProjectContext,
     item: reaper_medium::MediaItem,
 ) -> bool {
-    Reaper::get()
-        .medium_reaper()
-        .validate_ptr_2(project_ctx, item)
+    use crate::ptr_validation::{ReaperPointer, validate_ptr_with_context};
+    validate_ptr_with_context(project_ctx, ReaperPointer::Item(item))
 }
 
 /// Validate that a MediaItemTake pointer is still valid within a project.
@@ -211,7 +211,6 @@ pub fn is_take_valid(
     project_ctx: reaper_medium::ProjectContext,
     take: reaper_medium::MediaItemTake,
 ) -> bool {
-    Reaper::get()
-        .medium_reaper()
-        .validate_ptr_2(project_ctx, take)
+    use crate::ptr_validation::{ReaperPointer, validate_ptr_with_context};
+    validate_ptr_with_context(project_ctx, ReaperPointer::Take(take))
 }
