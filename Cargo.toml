@@ -71,5 +71,7 @@ eyre = "0.6"
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 
 [workspace.lints.rust]
+dead_code = "allow"
+unused = "allow"
 
 [workspace.lints.clippy]
