@@ -49,8 +49,8 @@ async fn tracks_are_isolated(ctx: &ReaperTestContext) -> eyre::Result<()> {
     assert_eq!(initial.len(), 0, "fresh project should have no tracks");
 
     // Add tracks with unique names
-    let track_a = project.tracks().add("IsolationTestA", None).await?;
-    let track_b = project.tracks().add("IsolationTestB", None).await?;
+    let _track_a = project.tracks().add("IsolationTestA", None).await?;
+    let _track_b = project.tracks().add("IsolationTestB", None).await?;
 
     let after_add = project.tracks().all().await?;
     println!("After adding 2 tracks: {} tracks", after_add.len());
@@ -97,7 +97,7 @@ async fn fx_operations_in_isolated_project(ctx: &ReaperTestContext) -> eyre::Res
     // Read parameters
     let params = fx.parameters().await?;
     println!("FX has {} parameters", params.len());
-    assert!(params.len() > 0, "ReaEQ should have parameters");
+    assert!(!params.is_empty(), "ReaEQ should have parameters");
 
     // Set a parameter and read it back
     let param0 = fx.param(0);

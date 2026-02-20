@@ -66,10 +66,10 @@ impl ReaperMidi {
                     else {
                         continue;
                     };
-                    if let Some(item_guid) = Self::extract_guid_from_chunk(&chunk) {
-                        if &item_guid == guid {
-                            return Some(item);
-                        }
+                    if let Some(item_guid) = Self::extract_guid_from_chunk(&chunk)
+                        && &item_guid == guid
+                    {
+                        return Some(item);
                     }
                 }
                 None

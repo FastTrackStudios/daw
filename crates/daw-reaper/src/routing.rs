@@ -56,11 +56,11 @@ fn resolve_track(project: &Project, track_ref: &TrackRef) -> Option<Track> {
         TrackRef::Guid(guid) => {
             let mut found = None;
             for i in 0..project.track_count() {
-                if let Some(track) = project.track_by_index(i) {
-                    if track.guid().to_string_without_braces() == *guid {
-                        found = Some(track);
-                        break;
-                    }
+                if let Some(track) = project.track_by_index(i)
+                    && track.guid().to_string_without_braces() == *guid
+                {
+                    found = Some(track);
+                    break;
                 }
             }
             found?
@@ -76,10 +76,10 @@ fn resolve_track(project: &Project, track_ref: &TrackRef) -> Option<Track> {
 pub fn find_track_by_name(project: &Project, name: &str) -> Option<Track> {
     let name_lower = name.to_lowercase();
     for i in 0..project.track_count() {
-        if let Some(track) = project.track_by_index(i) {
-            if track.name().map(|n| n.to_str().to_lowercase()) == Some(name_lower.clone()) {
-                return Some(track);
-            }
+        if let Some(track) = project.track_by_index(i)
+            && track.name().map(|n| n.to_str().to_lowercase()) == Some(name_lower.clone())
+        {
+            return Some(track);
         }
     }
     None

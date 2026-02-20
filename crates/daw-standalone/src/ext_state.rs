@@ -5,6 +5,9 @@ use roam::Context;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+type GlobalStateMap = Arc<RwLock<HashMap<(String, String), String>>>;
+type ProjectStateMap = Arc<RwLock<HashMap<(String, String, String), String>>>;
+
 /// In-memory ext state for testing.
 ///
 /// Stores global values in `global_state: HashMap<(section, key), value>`.
@@ -12,8 +15,8 @@ use std::sync::{Arc, RwLock};
 /// The `persist` flag is accepted but ignored — all values are transient in the standalone mock.
 #[derive(Clone)]
 pub struct StandaloneExtState {
-    global_state: Arc<RwLock<HashMap<(String, String), String>>>,
-    project_state: Arc<RwLock<HashMap<(String, String, String), String>>>,
+    global_state: GlobalStateMap,
+    project_state: ProjectStateMap,
 }
 
 impl StandaloneExtState {

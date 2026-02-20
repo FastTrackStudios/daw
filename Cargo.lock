@@ -1415,6 +1415,7 @@ dependencies = [
 name = "daw-reaper"
 version = "0.1.0"
 dependencies = [
+ "camino",
  "daw-control",
  "daw-proto",
  "dawfile-reaper",

@@ -340,12 +340,12 @@ impl AutomationService for StandaloneAutomation {
         params: SetPointParams,
     ) {
         let mut envelopes = self.envelopes.write().await;
-        if let Some(e) = Self::find_envelope(&mut envelopes, &location) {
-            if let Some(p) = e.points.iter_mut().find(|p| p.index == params.index) {
-                p.time = params.time;
-                p.value = params.value;
-                p.shape = params.shape;
-            }
+        if let Some(e) = Self::find_envelope(&mut envelopes, &location)
+            && let Some(p) = e.points.iter_mut().find(|p| p.index == params.index)
+        {
+            p.time = params.time;
+            p.value = params.value;
+            p.shape = params.shape;
         }
     }
 

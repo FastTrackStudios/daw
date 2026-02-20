@@ -63,17 +63,13 @@ fn spawn_fx_mutation(
         // Brief delay for REAPER to process the change
         tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
         // Refresh tree
-        if let Some(daw) = daw_control::Daw::try_get() {
-            if let Some(guid) = track_guid.read().clone() {
-                if let Ok(project) = daw.current_project().await {
-                    if let Ok(Some(th)) = project.tracks().by_guid(&guid).await {
-                        if let Ok(new_tree) = th.fx_chain().tree().await {
+        if let Some(daw) = daw_control::Daw::try_get()
+            && let Some(guid) = track_guid.read().clone()
+                && let Ok(project) = daw.current_project().await
+                    && let Ok(Some(th)) = project.tracks().by_guid(&guid).await
+                        && let Ok(new_tree) = th.fx_chain().tree().await {
                             tree.set(new_tree);
                         }
-                    }
-                }
-            }
-        }
     });
 }
 
@@ -231,15 +227,12 @@ pub fn FxChainTree() -> Element {
                         let t = tree;
                         let count = node_count;
                         spawn_fx_mutation(tg, t, async move {
-                            if let Some(daw) = daw_control::Daw::try_get() {
-                                if let Some(guid) = tg.read().clone() {
-                                    if let Ok(project) = daw.current_project().await {
-                                        if let Ok(Some(th)) = project.tracks().by_guid(&guid).await {
+                            if let Some(daw) = daw_control::Daw::try_get()
+                                && let Some(guid) = tg.read().clone()
+                                    && let Ok(project) = daw.current_project().await
+                                        && let Ok(Some(th)) = project.tracks().by_guid(&guid).await {
                                             let _ = th.fx_chain().create_container(&name, count).await;
                                         }
-                                    }
-                                }
-                            }
                         });
                     },
                     on_cancel: move |_| {
@@ -260,15 +253,12 @@ pub fn FxChainTree() -> Element {
                             let t = tree;
                             let nid = node_id.clone();
                             spawn_fx_mutation(tg, t, async move {
-                                if let Some(daw) = daw_control::Daw::try_get() {
-                                    if let Some(guid) = tg.read().clone() {
-                                        if let Ok(project) = daw.current_project().await {
-                                            if let Ok(Some(th)) = project.tracks().by_guid(&guid).await {
+                                if let Some(daw) = daw_control::Daw::try_get()
+                                    && let Some(guid) = tg.read().clone()
+                                        && let Ok(project) = daw.current_project().await
+                                            && let Ok(Some(th)) = project.tracks().by_guid(&guid).await {
                                                 let _ = th.fx_chain().rename_container(&nid, &new_name).await;
                                             }
-                                        }
-                                    }
-                                }
                             });
                         }
                     },
@@ -294,9 +284,9 @@ pub fn FxChainTree() -> Element {
                             key: "{node.id.as_str()}",
                             node: node.clone(),
                             depth: 0,
-                            collapsed: collapsed.clone(),
-                            selected: selected.clone(),
-                            context_menu: context_menu.clone(),
+                            collapsed: collapsed,
+                            selected: selected,
+                            context_menu: context_menu,
                         }
                     }
                 }
@@ -483,14 +473,14 @@ fn FxContextMenuPopup(props: FxContextMenuPopupProps) -> Element {
         _ => None,
     };
 
-    let on_close = props.on_close.clone();
-    let on_close2 = props.on_close.clone();
-    let on_close3 = props.on_close.clone();
-    let on_close4 = props.on_close.clone();
-    let on_close5 = props.on_close.clone();
-    let on_close6 = props.on_close.clone();
-    let on_close7 = props.on_close.clone();
-    let on_rename = props.on_rename.clone();
+    let on_close = props.on_close;
+    let on_close2 = props.on_close;
+    let on_close3 = props.on_close;
+    let on_close4 = props.on_close;
+    let on_close5 = props.on_close;
+    let on_close6 = props.on_close;
+    let on_close7 = props.on_close;
+    let on_rename = props.on_rename;
 
     let nid_bypass = node_id.clone();
     let nid_delete = node_id.clone();
@@ -524,10 +514,10 @@ fn FxContextMenuPopup(props: FxContextMenuPopupProps) -> Element {
                         let guid = guid.clone();
                         let nid = nid_bypass.clone();
                         spawn_fx_mutation(track_guid, tree, async move {
-                            if let Some(daw) = daw_control::Daw::try_get() {
-                                if let Some(tguid) = track_guid.read().clone() {
-                                    if let Ok(project) = daw.current_project().await {
-                                        if let Ok(Some(th)) = project.tracks().by_guid(&tguid).await {
+                            if let Some(daw) = daw_control::Daw::try_get()
+                                && let Some(tguid) = track_guid.read().clone()
+                                    && let Ok(project) = daw.current_project().await
+                                        && let Ok(Some(th)) = project.tracks().by_guid(&tguid).await {
                                             if let Some(g) = &guid {
                                                 // Plugin: use FxHandle toggle
                                                 if let Ok(Some(fh)) = th.fx_chain().by_guid(g).await {
@@ -540,9 +530,6 @@ fn FxContextMenuPopup(props: FxContextMenuPopupProps) -> Element {
                                                 let _ = nid; // acknowledge
                                             }
                                         }
-                                    }
-                                }
-                            }
                         });
                     }
                 },
@@ -561,15 +548,12 @@ fn FxContextMenuPopup(props: FxContextMenuPopupProps) -> Element {
                             FxRoutingMode::Serial
                         };
                         spawn_fx_mutation(track_guid, tree, async move {
-                            if let Some(daw) = daw_control::Daw::try_get() {
-                                if let Some(tguid) = track_guid.read().clone() {
-                                    if let Ok(project) = daw.current_project().await {
-                                        if let Ok(Some(th)) = project.tracks().by_guid(&tguid).await {
+                            if let Some(daw) = daw_control::Daw::try_get()
+                                && let Some(tguid) = track_guid.read().clone()
+                                    && let Ok(project) = daw.current_project().await
+                                        && let Ok(Some(th)) = project.tracks().by_guid(&tguid).await {
                                             let _ = th.fx_chain().set_routing_mode(&nid, new_mode).await;
                                         }
-                                    }
-                                }
-                            }
                         });
                     },
                 }
@@ -600,15 +584,12 @@ fn FxContextMenuPopup(props: FxContextMenuPopupProps) -> Element {
                         on_close5.call(());
                         let nid = nid_enclose.clone();
                         spawn_fx_mutation(track_guid, tree, async move {
-                            if let Some(daw) = daw_control::Daw::try_get() {
-                                if let Some(tguid) = track_guid.read().clone() {
-                                    if let Ok(project) = daw.current_project().await {
-                                        if let Ok(Some(th)) = project.tracks().by_guid(&tguid).await {
+                            if let Some(daw) = daw_control::Daw::try_get()
+                                && let Some(tguid) = track_guid.read().clone()
+                                    && let Ok(project) = daw.current_project().await
+                                        && let Ok(Some(th)) = project.tracks().by_guid(&tguid).await {
                                             let _ = th.fx_chain().enclose_in_container(&[nid], "Container").await;
                                         }
-                                    }
-                                }
-                            }
                         });
                     },
                 }
@@ -622,15 +603,12 @@ fn FxContextMenuPopup(props: FxContextMenuPopupProps) -> Element {
                         on_close6.call(());
                         let nid = nid_explode.clone();
                         spawn_fx_mutation(track_guid, tree, async move {
-                            if let Some(daw) = daw_control::Daw::try_get() {
-                                if let Some(tguid) = track_guid.read().clone() {
-                                    if let Ok(project) = daw.current_project().await {
-                                        if let Ok(Some(th)) = project.tracks().by_guid(&tguid).await {
+                            if let Some(daw) = daw_control::Daw::try_get()
+                                && let Some(tguid) = track_guid.read().clone()
+                                    && let Ok(project) = daw.current_project().await
+                                        && let Ok(Some(th)) = project.tracks().by_guid(&tguid).await {
                                             let _ = th.fx_chain().explode_container(&nid).await;
                                         }
-                                    }
-                                }
-                            }
                         });
                     },
                 }
@@ -648,10 +626,10 @@ fn FxContextMenuPopup(props: FxContextMenuPopupProps) -> Element {
                     let guid = plugin_guid.clone();
                     let nid = nid_delete.clone();
                     spawn_fx_mutation(track_guid, tree, async move {
-                        if let Some(daw) = daw_control::Daw::try_get() {
-                            if let Some(tguid) = track_guid.read().clone() {
-                                if let Ok(project) = daw.current_project().await {
-                                    if let Ok(Some(th)) = project.tracks().by_guid(&tguid).await {
+                        if let Some(daw) = daw_control::Daw::try_get()
+                            && let Some(tguid) = track_guid.read().clone()
+                                && let Ok(project) = daw.current_project().await
+                                    && let Ok(Some(th)) = project.tracks().by_guid(&tguid).await {
                                         if let Some(g) = &guid {
                                             // Plugin: remove by GUID
                                             if let Ok(Some(fh)) = th.fx_chain().by_guid(g).await {
@@ -662,9 +640,6 @@ fn FxContextMenuPopup(props: FxContextMenuPopupProps) -> Element {
                                             let _ = th.fx_chain().explode_container(&nid).await;
                                         }
                                     }
-                                }
-                            }
-                        }
                     });
                 },
             }
@@ -833,9 +808,9 @@ fn FxTreeNode(props: FxTreeNodeProps) -> Element {
                                 key: "{child.id.as_str()}",
                                 node: child.clone(),
                                 depth: depth + 1,
-                                collapsed: collapsed.clone(),
-                                selected: selected.clone(),
-                                context_menu: context_menu.clone(),
+                                collapsed: collapsed,
+                                selected: selected,
+                                context_menu: context_menu,
                             }
                         }
                     }

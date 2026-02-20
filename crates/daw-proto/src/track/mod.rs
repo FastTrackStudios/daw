@@ -9,6 +9,7 @@ mod hierarchy;
 mod hierarchy_builder;
 mod service;
 mod test_utils;
+#[allow(clippy::module_inception)]
 mod track;
 
 pub use error::TrackError;

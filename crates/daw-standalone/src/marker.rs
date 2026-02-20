@@ -331,118 +331,111 @@ impl MarkerService for StandaloneMarker {
 
     async fn remove_marker(&self, _cx: &Context, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(markers) = state.markers_by_project.get_mut(proj_id) {
-                markers.retain(|m| m.id != Some(id));
-            }
+        if let Some(proj_id) = project_id(&project)
+            && let Some(markers) = state.markers_by_project.get_mut(proj_id)
+        {
+            markers.retain(|m| m.id != Some(id));
             debug!("Removed marker {} from project {}", id, proj_id);
         }
     }
 
     async fn move_marker(&self, _cx: &Context, project: ProjectContext, id: u32, position: f64) {
         let mut state = self.state.write().await;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(markers) = state.markers_by_project.get_mut(proj_id) {
-                if let Some(marker) = markers.iter_mut().find(|m| m.id == Some(id)) {
-                    marker.position = Position::from_time(TimePosition::from_seconds(position));
-                    debug!("Moved marker {} to {} in project {}", id, position, proj_id);
-                }
-                markers.sort_by(|a, b| {
-                    a.position_seconds()
-                        .partial_cmp(&b.position_seconds())
-                        .unwrap()
-                });
+        if let Some(proj_id) = project_id(&project)
+            && let Some(markers) = state.markers_by_project.get_mut(proj_id)
+        {
+            if let Some(marker) = markers.iter_mut().find(|m| m.id == Some(id)) {
+                marker.position = Position::from_time(TimePosition::from_seconds(position));
+                debug!("Moved marker {} to {} in project {}", id, position, proj_id);
             }
+            markers.sort_by(|a, b| {
+                a.position_seconds()
+                    .partial_cmp(&b.position_seconds())
+                    .unwrap()
+            });
         }
     }
 
     async fn rename_marker(&self, _cx: &Context, project: ProjectContext, id: u32, name: String) {
         let mut state = self.state.write().await;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(markers) = state.markers_by_project.get_mut(proj_id) {
-                if let Some(marker) = markers.iter_mut().find(|m| m.id == Some(id)) {
-                    marker.name = name.clone();
-                    debug!("Renamed marker {} to '{}' in project {}", id, name, proj_id);
-                }
-            }
+        if let Some(proj_id) = project_id(&project)
+            && let Some(markers) = state.markers_by_project.get_mut(proj_id)
+            && let Some(marker) = markers.iter_mut().find(|m| m.id == Some(id))
+        {
+            marker.name = name.clone();
+            debug!("Renamed marker {} to '{}' in project {}", id, name, proj_id);
         }
     }
 
     async fn set_marker_color(&self, _cx: &Context, project: ProjectContext, id: u32, color: u32) {
         let mut state = self.state.write().await;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(markers) = state.markers_by_project.get_mut(proj_id) {
-                if let Some(marker) = markers.iter_mut().find(|m| m.id == Some(id)) {
-                    marker.color = if color == 0 { None } else { Some(color) };
-                    debug!(
-                        "Set marker {} color to {:06x} in project {}",
-                        id, color, proj_id
-                    );
-                }
-            }
+        if let Some(proj_id) = project_id(&project)
+            && let Some(markers) = state.markers_by_project.get_mut(proj_id)
+            && let Some(marker) = markers.iter_mut().find(|m| m.id == Some(id))
+        {
+            marker.color = if color == 0 { None } else { Some(color) };
+            debug!(
+                "Set marker {} color to {:06x} in project {}",
+                id, color, proj_id
+            );
         }
     }
 
     async fn goto_next_marker(&self, _cx: &Context, project: ProjectContext) {
         let mut state = self.state.write().await;
         let current = state.position;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(markers) = state.markers_by_project.get(proj_id) {
-                if let Some(marker) = markers
-                    .iter()
-                    .filter(|m| m.position_seconds() > current + 0.001)
-                    .min_by(|a, b| {
-                        a.position_seconds()
-                            .partial_cmp(&b.position_seconds())
-                            .unwrap()
-                    })
-                {
-                    state.position = marker.position_seconds();
-                    debug!(
-                        "Navigated to next marker at {} in project {}",
-                        state.position, proj_id
-                    );
-                }
-            }
+        if let Some(proj_id) = project_id(&project)
+            && let Some(markers) = state.markers_by_project.get(proj_id)
+            && let Some(marker) = markers
+                .iter()
+                .filter(|m| m.position_seconds() > current + 0.001)
+                .min_by(|a, b| {
+                    a.position_seconds()
+                        .partial_cmp(&b.position_seconds())
+                        .unwrap()
+                })
+        {
+            state.position = marker.position_seconds();
+            debug!(
+                "Navigated to next marker at {} in project {}",
+                state.position, proj_id
+            );
         }
     }
 
     async fn goto_previous_marker(&self, _cx: &Context, project: ProjectContext) {
         let mut state = self.state.write().await;
         let current = state.position;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(markers) = state.markers_by_project.get(proj_id) {
-                if let Some(marker) = markers
-                    .iter()
-                    .filter(|m| m.position_seconds() < current - 0.001)
-                    .max_by(|a, b| {
-                        a.position_seconds()
-                            .partial_cmp(&b.position_seconds())
-                            .unwrap()
-                    })
-                {
-                    state.position = marker.position_seconds();
-                    debug!(
-                        "Navigated to previous marker at {} in project {}",
-                        state.position, proj_id
-                    );
-                }
-            }
+        if let Some(proj_id) = project_id(&project)
+            && let Some(markers) = state.markers_by_project.get(proj_id)
+            && let Some(marker) = markers
+                .iter()
+                .filter(|m| m.position_seconds() < current - 0.001)
+                .max_by(|a, b| {
+                    a.position_seconds()
+                        .partial_cmp(&b.position_seconds())
+                        .unwrap()
+                })
+        {
+            state.position = marker.position_seconds();
+            debug!(
+                "Navigated to previous marker at {} in project {}",
+                state.position, proj_id
+            );
         }
     }
 
     async fn goto_marker(&self, _cx: &Context, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(markers) = state.markers_by_project.get(proj_id) {
-                if let Some(marker) = markers.iter().find(|m| m.id == Some(id)) {
-                    state.position = marker.position_seconds();
-                    debug!(
-                        "Navigated to marker {} at {} in project {}",
-                        id, state.position, proj_id
-                    );
-                }
-            }
+        if let Some(proj_id) = project_id(&project)
+            && let Some(markers) = state.markers_by_project.get(proj_id)
+            && let Some(marker) = markers.iter().find(|m| m.id == Some(id))
+        {
+            state.position = marker.position_seconds();
+            debug!(
+                "Navigated to marker {} at {} in project {}",
+                id, state.position, proj_id
+            );
         }
     }
 

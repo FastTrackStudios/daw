@@ -1558,6 +1558,7 @@ struct AllEqCurves {
 }
 
 /// Generate all EQ curves (combined and per-band).
+#[allow(clippy::too_many_arguments)]
 fn generate_all_eq_curves(
     bands: &[EqBand],
     sample_rate: f64,
@@ -1672,7 +1673,7 @@ where
 /// Generate the SVG path for the EQ curve.
 ///
 /// Returns (stroke_path, fill_path)
-#[allow(dead_code)]
+#[allow(dead_code, clippy::too_many_arguments)]
 fn generate_eq_curve_path(
     bands: &[EqBand],
     sample_rate: f64,

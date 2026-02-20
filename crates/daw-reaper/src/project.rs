@@ -13,11 +13,11 @@ use tracing::{debug, info};
 use crate::main_thread;
 use crate::project_context::{find_project_by_guid, project_guid};
 
-/// Thread-local storage for the undo block label.
-///
-/// `begin_undo_block` and `end_undo_block` arrive as separate RPC calls, but
-/// REAPER's `Undo_EndBlock2` needs the label at end-time. We stash the label
-/// from `begin` and retrieve it in `end` as a fallback.
+// Thread-local storage for the undo block label.
+//
+// `begin_undo_block` and `end_undo_block` arrive as separate RPC calls, but
+// REAPER's `Undo_EndBlock2` needs the label at end-time. We stash the label
+// from `begin` and retrieve it in `end` as a fallback.
 thread_local! {
     static UNDO_LABEL: std::cell::Cell<Option<String>> = const { std::cell::Cell::new(None) };
 }
@@ -156,7 +156,7 @@ impl ProjectService for ReaperProject {
             projects
         })
         .await
-        .unwrap_or_else(|| vec![])
+        .unwrap_or_default()
     }
 
     async fn select(&self, _cx: &Context, project_id: String) -> bool {
@@ -275,6 +275,55 @@ impl ProjectService for ReaperProject {
         })
         .await
         .unwrap_or(false)
+    }
+
+    async fn open(&self, _cx: &Context, path: String) -> Option<ProjectInfo> {
+        info!("ReaperProject: open({})", path);
+
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+
+            // Snapshot existing tab pointers before opening
+            let mut existing_ptrs = std::collections::HashSet::new();
+            for tab in 0..128u32 {
+                match project_by_tab(reaper, tab) {
+                    Some(p) => {
+                        existing_ptrs.insert(p.raw().as_ptr() as usize);
+                    }
+                    None => break,
+                }
+            }
+
+            // Create a new tab first (action 41929 = "New project tab, ignore default template")
+            let action_new_tab = CommandId::new(41929);
+            medium.main_on_command_ex(action_new_tab, 0, ProjectContext::CurrentProject);
+
+            // Open the project file into the new tab (noprompt to skip save dialog)
+            let file_path = camino::Utf8Path::new(&path);
+            let mut behavior = reaper_medium::OpenProjectBehavior::default();
+            behavior.open_as_template = false;
+            behavior.prompt = false;
+            medium.main_open_project(file_path, behavior);
+
+            // Find the new tab by scanning for a pointer not in our snapshot
+            for tab in 0..128u32 {
+                if let Some(p) = project_by_tab(reaper, tab) {
+                    let ptr = p.raw().as_ptr() as usize;
+                    if !existing_ptrs.contains(&ptr) {
+                        debug!("Opened project in tab {} (ptr={:x}): {}", tab, ptr, path);
+                        return Some(project_to_info(&p));
+                    }
+                }
+            }
+
+            // Fallback: the project may have loaded into the current tab
+            let current = project_to_info(&reaper.current_project());
+            debug!("Opened project (current tab fallback): {}", current.name);
+            Some(current)
+        })
+        .await
+        .flatten()
     }
 
     async fn create(&self, _cx: &Context) -> Option<ProjectInfo> {
@@ -510,7 +559,7 @@ impl ReaperProject {
             projects
         })
         .await
-        .unwrap_or_else(|| vec![])
+        .unwrap_or_default()
     }
 
     /// Helper to get current project GUID

@@ -322,7 +322,7 @@ fn diff_and_broadcast(
         .collect();
 
     // Detect removed FX
-    for (guid, _prev_fx) in &prev_guids {
+    for guid in prev_guids.keys() {
         if !curr_guids.contains_key(guid) {
             let _ = tx.send(FxEvent::Removed {
                 context: context.clone(),
@@ -521,13 +521,13 @@ fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
 /// stale pointers from deleted tracks.
 fn resolve_track_by_guid(project: &reaper_high::Project, guid: &str) -> Option<Track> {
     for i in 0..project.track_count() {
-        if let Some(track) = project.track_by_index(i) {
-            if track.guid().to_string_without_braces() == guid {
-                if !main_thread::is_track_valid(project, &track) {
-                    return None;
-                }
-                return Some(track);
+        if let Some(track) = project.track_by_index(i)
+            && track.guid().to_string_without_braces() == guid
+        {
+            if !main_thread::is_track_valid(project, &track) {
+                return None;
             }
+            return Some(track);
         }
     }
     None
@@ -579,10 +579,10 @@ fn resolve_fx_index(chain: &FxChain, fx_ref: &FxRef) -> Option<u32> {
                 let fx_name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     fx.name().to_str().to_string()
                 }));
-                if let Ok(n) = fx_name {
-                    if n == *name {
-                        return Some(fx.index());
-                    }
+                if let Ok(n) = fx_name
+                    && n == *name
+                {
+                    return Some(fx.index());
                 }
             }
             None
@@ -740,7 +740,7 @@ fn build_fx_parameter(param: &reaper_high::FxParameter) -> FxParameter {
         if let reaper_medium::GetParameterStepSizesResult::Normal { normal_step, .. } = ss {
             if normal_step > 0.0 {
                 let n = (1.0 / normal_step).round() as u32;
-                if n >= 2 && n <= 256 { Some(n) } else { None }
+                if (2..=256).contains(&n) { Some(n) } else { None }
             } else {
                 None
             }
@@ -769,7 +769,7 @@ fn build_fx_parameter(param: &reaper_high::FxParameter) -> FxParameter {
                     }
                 }
             }
-            if count >= 2 && count <= 256 {
+            if (2..=256).contains(&count) {
                 debug!("    → discrete from character probe: {} steps", count);
                 Some(count)
             } else {
@@ -879,10 +879,10 @@ fn build_fx_tree_from_chain(chain: &FxChain, _is_input: bool, top_level_count: u
 /// 3. `info().sub_type_expression` == "Container" (uses the string-safe API)
 fn is_container_fx(fx: &reaper_high::Fx) -> bool {
     // Method 1: check fx_type via raw bytes
-    if let Some(ft) = read_config_str(fx, "fx_type") {
-        if ft == "Container" {
-            return true;
-        }
+    if let Some(ft) = read_config_str(fx, "fx_type")
+        && ft == "Container"
+    {
+        return true;
     }
 
     // Method 2: if container_count exists and is > 0, it's definitely a container
@@ -899,10 +899,10 @@ fn is_container_fx(fx: &reaper_high::Fx) -> bool {
     }
 
     // Method 3: use the higher-level info() API which handles string conversion properly
-    if let Ok(info) = fx.info() {
-        if info.sub_type_expression == "Container" {
-            return true;
-        }
+    if let Ok(info) = fx.info()
+        && info.sub_type_expression == "Container"
+    {
+        return true;
     }
 
     false
@@ -1148,10 +1148,10 @@ fn resolve_plugin_guid(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
 fn scan_containers_for_guid(chain: &FxChain, target_guid: &str, top_count: u32) -> Option<u32> {
     for i in 0..top_count {
         let fx = chain.fx_by_index_untracked(i);
-        if is_container_fx(&fx) {
-            if let Some(raw) = scan_children_for_guid(chain, &fx, target_guid) {
-                return Some(raw);
-            }
+        if is_container_fx(&fx)
+            && let Some(raw) = scan_children_for_guid(chain, &fx, target_guid)
+        {
+            return Some(raw);
         }
     }
     None
@@ -1193,6 +1193,7 @@ fn scan_children_for_guid(
 ///
 /// This is the reverse of `resolve_node_to_raw_index`. Walks the tree using
 /// `container_item.X` and matches against the target raw index.
+#[allow(dead_code)]
 fn raw_index_to_node_id(chain: &FxChain, raw_index: u32) -> Option<FxNodeId> {
     let top_count = chain.fx_count();
 
@@ -1211,10 +1212,10 @@ fn raw_index_to_node_id(chain: &FxChain, raw_index: u32) -> Option<FxNodeId> {
 
         // If this is a container, search its children
         let fx = chain.fx_by_index_untracked(i);
-        if is_container_fx(&fx) {
-            if let Some(id) = search_children_for_raw(chain, &fx, raw_index, &format!("{}", i)) {
-                return Some(id);
-            }
+        if is_container_fx(&fx)
+            && let Some(id) = search_children_for_raw(chain, &fx, raw_index, &format!("{}", i))
+        {
+            return Some(id);
         }
     }
 
@@ -1223,6 +1224,7 @@ fn raw_index_to_node_id(chain: &FxChain, raw_index: u32) -> Option<FxNodeId> {
 
 /// Recursively search children for a specific raw index, returning its FxNodeId.
 /// Uses `container_item.X` to get child FX IDs.
+#[allow(dead_code)]
 fn search_children_for_raw(
     chain: &FxChain,
     container_fx: &reaper_high::Fx,
@@ -1250,16 +1252,18 @@ fn search_children_for_raw(
 
         // If this child is a container, recurse
         let child_fx = chain.fx_by_index_untracked(child_raw);
-        if is_container_fx(&child_fx) {
-            if let Some(id) = search_children_for_raw(chain, &child_fx, target_raw, &child_path) {
-                return Some(id);
-            }
+        if is_container_fx(&child_fx)
+            && let Some(id) =
+                search_children_for_raw(chain, &child_fx, target_raw, &child_path)
+        {
+            return Some(id);
         }
     }
     None
 }
 
 /// Convenience: resolve an FxNodeId to a TrackFxLocation.
+#[allow(dead_code)]
 fn resolve_node_to_location(
     chain: &FxChain,
     node_id: &FxNodeId,
@@ -1644,10 +1648,10 @@ impl FxService for ReaperFx {
 
             // Search by name (linear scan — parameter lists are typically small)
             for param in fx.parameters() {
-                if let Ok(pname) = param.name() {
-                    if pname.to_str() == name {
-                        return Some(build_fx_parameter(&param));
-                    }
+                if let Ok(pname) = param.name()
+                    && pname.to_str() == name
+                {
+                    return Some(build_fx_parameter(&param));
                 }
             }
             None
@@ -1686,12 +1690,12 @@ impl FxService for ReaperFx {
             })?;
             let fx = chain.fx_by_index_untracked(fx_idx);
             for param in fx.parameters() {
-                if let Ok(pname) = param.name() {
-                    if pname.to_str() == request.name {
-                        let value = reaper_medium::ReaperNormalizedFxParamValue::new(request.value);
-                        let _ = param.set_reaper_normalized_value(value);
-                        return Ok(());
-                    }
+                if let Ok(pname) = param.name()
+                    && pname.to_str() == request.name
+                {
+                    let value = reaper_medium::ReaperNormalizedFxParamValue::new(request.value);
+                    let _ = param.set_reaper_normalized_value(value);
+                    return Ok(());
                 }
             }
             Ok(())
@@ -2021,13 +2025,13 @@ impl FxService for ReaperFx {
             let fx = chain.fx_by_index_untracked(index);
 
             let p = param_index;
-            let lfo_active =
-                read_config_str(&fx, &format!("param.{p}.lfo.active")).map_or(false, |s| s == "1");
+            let lfo_active = read_config_str(&fx, &format!("param.{p}.lfo.active"))
+                .is_some_and(|s| s == "1");
             let lfo_speed = read_config_f64(&fx, &format!("param.{p}.lfo.speed"));
             let lfo_strength = read_config_f64(&fx, &format!("param.{p}.lfo.strength"));
 
             let link_active = read_config_str(&fx, &format!("param.{p}.plink.active"))
-                .map_or(false, |s| s == "1");
+                .is_some_and(|s| s == "1");
             let link_fx_index = read_config_i32(&fx, &format!("param.{p}.plink.effect"));
             let link_param_index = read_config_i32(&fx, &format!("param.{p}.plink.param"));
 
@@ -3101,18 +3105,18 @@ impl FxService for ReaperFx {
                 .iter()
                 .position(|node| {
                     if let dawfile_reaper::types::FxChainNode::Container(c) = node {
-                        if let Some(ref target) = target_guid {
-                            if let Some(ref fxid) = c.fxid {
-                                let fxid_clean = fxid
-                                    .trim_start_matches('{')
-                                    .trim_end_matches('}')
-                                    .to_lowercase();
-                                let target_clean = target
-                                    .trim_start_matches('{')
-                                    .trim_end_matches('}')
-                                    .to_lowercase();
-                                return fxid_clean == target_clean;
-                            }
+                        if let Some(ref target) = target_guid
+                            && let Some(ref fxid) = c.fxid
+                        {
+                            let fxid_clean = fxid
+                                .trim_start_matches('{')
+                                .trim_end_matches('}')
+                                .to_lowercase();
+                            let target_clean = target
+                                .trim_start_matches('{')
+                                .trim_end_matches('}')
+                                .to_lowercase();
+                            return fxid_clean == target_clean;
                         }
                         // Fallback: match by index position if no GUID match
                         false
@@ -3350,11 +3354,11 @@ impl FxService for ReaperFx {
                             | FxEvent::TreeStructureChanged { context, .. } => context,
                         };
 
-                        if format!("{:?}", event_context) == format!("{:?}", target_context) {
-                            if let Err(e) = events.send(&event).await {
-                                debug!("FX event subscriber disconnected: {}", e);
-                                break;
-                            }
+                        if format!("{:?}", event_context) == format!("{:?}", target_context)
+                            && let Err(e) = events.send(&event).await
+                        {
+                            debug!("FX event subscriber disconnected: {}", e);
+                            break;
                         }
                     }
                     Err(broadcast::error::RecvError::Lagged(count)) => {

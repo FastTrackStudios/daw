@@ -25,6 +25,7 @@ reaper-high.workspace = true
 reaper-medium.workspace = true
 reaper-low.workspace = true
 enumflags2.workspace = true
+camino = "1"
 
 [dev-dependencies]
 daw-control.workspace = true

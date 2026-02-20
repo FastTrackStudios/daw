@@ -140,15 +140,12 @@ fn get_sample_rate(medium: &reaper_medium::Reaper) -> u32 {
         )
     };
 
-    if result {
-        // Parse the string result
-        if let Ok(s) = std::ffi::CStr::from_bytes_until_nul(&buffer) {
-            if let Ok(rate) = s.to_string_lossy().parse::<u32>() {
-                if rate > 0 {
-                    return rate;
-                }
-            }
-        }
+    if result
+        && let Ok(s) = std::ffi::CStr::from_bytes_until_nul(&buffer)
+        && let Ok(rate) = s.to_string_lossy().parse::<u32>()
+        && rate > 0
+    {
+        return rate;
     }
 
     // Fall back to project sample rate

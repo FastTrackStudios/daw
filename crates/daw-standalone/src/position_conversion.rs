@@ -15,6 +15,7 @@ use roam::Context;
 /// - Constant tempo (120 BPM by default)
 /// - Constant time signature (4/4 by default)
 /// - No tempo map changes
+#[derive(Default)]
 pub struct StandalonePositionConversion;
 
 impl StandalonePositionConversion {

@@ -509,14 +509,9 @@ impl RChunk {
         self.children.retain(|child| match child {
             RNodeTree::Node(node) => {
                 let mut clone = node.clone();
-                match (policy, clone.get_name().as_deref()) {
-                    (GuidStripPolicy::LuaCompat, Some("GUID" | "IGUID" | "TRACKID")) => false,
-                    (
-                        GuidStripPolicy::Extended,
-                        Some("GUID" | "IGUID" | "TRACKID" | "FXID" | "EGUID"),
-                    ) => false,
-                    _ => true,
-                }
+                !matches!((policy, clone.get_name().as_deref()),
+                    (GuidStripPolicy::LuaCompat, Some("GUID" | "IGUID" | "TRACKID"))
+                    | (GuidStripPolicy::Extended, Some("GUID" | "IGUID" | "TRACKID" | "FXID" | "EGUID")))
             }
             RNodeTree::Chunk(_) => true,
         });

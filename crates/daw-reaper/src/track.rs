@@ -58,11 +58,11 @@ fn resolve_track(
             // Linear scan to match GUID string
             let mut found = None;
             for i in 0..project.track_count() {
-                if let Some(track) = project.track_by_index(i) {
-                    if track.guid().to_string_without_braces() == *guid {
-                        found = Some(track);
-                        break;
-                    }
+                if let Some(track) = project.track_by_index(i)
+                    && track.guid().to_string_without_braces() == *guid
+                {
+                    found = Some(track);
+                    break;
                 }
             }
             found?
@@ -157,14 +157,14 @@ fn build_track_info(track: &reaper_high::Track) -> Track {
 fn assign_parent_guids(tracks: &mut [Track]) {
     let mut folder_stack: Vec<String> = Vec::new();
 
-    for i in 0..tracks.len() {
+    for track in tracks.iter_mut() {
         // Current track's parent is whatever is on top of the stack
-        tracks[i].parent_guid = folder_stack.last().cloned();
+        track.parent_guid = folder_stack.last().cloned();
 
-        let depth = tracks[i].folder_depth;
+        let depth = track.folder_depth;
         if depth > 0 {
             // This track starts a folder — push it as the new parent
-            folder_stack.push(tracks[i].guid.clone());
+            folder_stack.push(track.guid.clone());
         } else if depth < 0 {
             // Close |depth| folder levels
             for _ in 0..depth.unsigned_abs() {

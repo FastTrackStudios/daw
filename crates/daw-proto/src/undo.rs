@@ -6,12 +6,13 @@ use facet::Facet;
 
 /// When creating an undo point, this defines what parts of the project might have been affected by
 /// the undoable operation.
-#[derive(Clone, Debug, Facet, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Facet, PartialEq, Eq)]
 #[repr(u8)]
 pub enum UndoScope {
     /// Everything could have been affected.
     ///
     /// This is the safest variant but can lead to very large undo states.
+    #[default]
     All,
     /// A combination of the given project parts could have been affected.
     ///
@@ -46,11 +47,6 @@ impl UndoScope {
     }
 }
 
-impl Default for UndoScope {
-    fn default() -> Self {
-        Self::All
-    }
-}
 
 /// Parts of a REAPER project that can be affected by undoable operations
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Facet)]

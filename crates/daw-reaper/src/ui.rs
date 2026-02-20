@@ -119,9 +119,7 @@ impl UiService for ReaperUi {
     async fn set_prevent_ui_refresh(&self, _cx: &Context, prevent: bool) {
         main_thread::run(move || {
             let low = Reaper::get().medium_reaper().low();
-            unsafe {
-                low.PreventUIRefresh(if prevent { 1 } else { 0 });
-            }
+            low.PreventUIRefresh(if prevent { 1 } else { 0 });
         });
     }
 }

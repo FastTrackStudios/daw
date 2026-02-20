@@ -5,6 +5,7 @@
 
 mod error;
 mod event;
+#[allow(clippy::module_inception)]
 mod region;
 mod service;
 

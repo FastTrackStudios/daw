@@ -335,10 +335,10 @@ impl RegionService for StandaloneRegion {
 
     async fn remove_region(&self, _cx: &Context, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(regions) = state.regions_by_project.get_mut(proj_id) {
-                regions.retain(|r| r.id != Some(id));
-            }
+        if let Some(proj_id) = project_id(&project)
+            && let Some(regions) = state.regions_by_project.get_mut(proj_id)
+        {
+            regions.retain(|r| r.id != Some(id));
             debug!("Removed region {} from project {}", id, proj_id);
         }
     }
@@ -352,74 +352,70 @@ impl RegionService for StandaloneRegion {
         end: f64,
     ) {
         let mut state = self.state.write().await;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(regions) = state.regions_by_project.get_mut(proj_id) {
-                if let Some(region) = regions.iter_mut().find(|r| r.id == Some(id)) {
-                    region.time_range = TimeRange::from_seconds(start, end);
-                    debug!(
-                        "Set region {} bounds to {}-{} in project {}",
-                        id, start, end, proj_id
-                    );
-                }
-                regions.sort_by(|a, b| a.start_seconds().partial_cmp(&b.start_seconds()).unwrap());
+        if let Some(proj_id) = project_id(&project)
+            && let Some(regions) = state.regions_by_project.get_mut(proj_id)
+        {
+            if let Some(region) = regions.iter_mut().find(|r| r.id == Some(id)) {
+                region.time_range = TimeRange::from_seconds(start, end);
+                debug!(
+                    "Set region {} bounds to {}-{} in project {}",
+                    id, start, end, proj_id
+                );
             }
+            regions.sort_by(|a, b| a.start_seconds().partial_cmp(&b.start_seconds()).unwrap());
         }
     }
 
     async fn rename_region(&self, _cx: &Context, project: ProjectContext, id: u32, name: String) {
         let mut state = self.state.write().await;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(regions) = state.regions_by_project.get_mut(proj_id) {
-                if let Some(region) = regions.iter_mut().find(|r| r.id == Some(id)) {
-                    region.name = name.clone();
-                    debug!("Renamed region {} to '{}' in project {}", id, name, proj_id);
-                }
-            }
+        if let Some(proj_id) = project_id(&project)
+            && let Some(regions) = state.regions_by_project.get_mut(proj_id)
+            && let Some(region) = regions.iter_mut().find(|r| r.id == Some(id))
+        {
+            region.name = name.clone();
+            debug!("Renamed region {} to '{}' in project {}", id, name, proj_id);
         }
     }
 
     async fn set_region_color(&self, _cx: &Context, project: ProjectContext, id: u32, color: u32) {
         let mut state = self.state.write().await;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(regions) = state.regions_by_project.get_mut(proj_id) {
-                if let Some(region) = regions.iter_mut().find(|r| r.id == Some(id)) {
-                    region.color = if color == 0 { None } else { Some(color) };
-                    debug!(
-                        "Set region {} color to {:06x} in project {}",
-                        id, color, proj_id
-                    );
-                }
-            }
+        if let Some(proj_id) = project_id(&project)
+            && let Some(regions) = state.regions_by_project.get_mut(proj_id)
+            && let Some(region) = regions.iter_mut().find(|r| r.id == Some(id))
+        {
+            region.color = if color == 0 { None } else { Some(color) };
+            debug!(
+                "Set region {} color to {:06x} in project {}",
+                id, color, proj_id
+            );
         }
     }
 
     async fn goto_region_start(&self, _cx: &Context, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(regions) = state.regions_by_project.get(proj_id) {
-                if let Some(region) = regions.iter().find(|r| r.id == Some(id)) {
-                    state.position = region.start_seconds();
-                    debug!(
-                        "Navigated to region {} start at {} in project {}",
-                        id, state.position, proj_id
-                    );
-                }
-            }
+        if let Some(proj_id) = project_id(&project)
+            && let Some(regions) = state.regions_by_project.get(proj_id)
+            && let Some(region) = regions.iter().find(|r| r.id == Some(id))
+        {
+            state.position = region.start_seconds();
+            debug!(
+                "Navigated to region {} start at {} in project {}",
+                id, state.position, proj_id
+            );
         }
     }
 
     async fn goto_region_end(&self, _cx: &Context, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
-        if let Some(proj_id) = project_id(&project) {
-            if let Some(regions) = state.regions_by_project.get(proj_id) {
-                if let Some(region) = regions.iter().find(|r| r.id == Some(id)) {
-                    state.position = region.end_seconds();
-                    debug!(
-                        "Navigated to region {} end at {} in project {}",
-                        id, state.position, proj_id
-                    );
-                }
-            }
+        if let Some(proj_id) = project_id(&project)
+            && let Some(regions) = state.regions_by_project.get(proj_id)
+            && let Some(region) = regions.iter().find(|r| r.id == Some(id))
+        {
+            state.position = region.end_seconds();
+            debug!(
+                "Navigated to region {} end at {} in project {}",
+                id, state.position, proj_id
+            );
         }
     }
 

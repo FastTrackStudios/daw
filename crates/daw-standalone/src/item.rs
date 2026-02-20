@@ -435,6 +435,7 @@ pub struct StandaloneTake {
 }
 
 impl StandaloneTake {
+    #[allow(dead_code)]
     pub(crate) fn new(items: Arc<RwLock<Vec<ItemState>>>) -> Self {
         Self { items }
     }
@@ -533,10 +534,10 @@ impl TakeService for StandaloneTake {
             ItemRef::Guid(guid) => items.iter_mut().find(|i| &i.guid == guid),
             _ => None,
         };
-        if let Some(item_state) = item_state {
-            if let TakeRef::Guid(guid) = take {
-                item_state.takes.retain(|t| t.guid != guid);
-            }
+        if let Some(item_state) = item_state
+            && let TakeRef::Guid(guid) = take
+        {
+            item_state.takes.retain(|t| t.guid != guid);
         }
     }
 

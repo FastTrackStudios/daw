@@ -3,9 +3,8 @@
 //! This tests if roam-telemetry middleware is working correctly
 
 use roam::service;
-use roam::session::{Context, MethodOutcome, Middleware, Rejection, SendPeek};
+use roam::session::Context;
 use roam_telemetry::{LoggingExporter, TelemetryMiddleware};
-use std::pin::Pin;
 
 #[service]
 trait TestService {
@@ -35,14 +34,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Created TelemetryMiddleware");
 
     // Create dispatcher with middleware
-    let dispatcher = TestServiceDispatcher::new(TestServiceImpl).with_middleware(telemetry);
+    let _dispatcher = TestServiceDispatcher::new(TestServiceImpl).with_middleware(telemetry);
     println!("Created dispatcher with middleware\n");
 
     // Test: Try to invoke a method through the dispatcher
     println!("Testing middleware invocation...");
 
     // Create a dummy context
-    let cx = Context::new(
+    let _cx = Context::new(
         roam::wire::ConnectionId::new(1),
         roam::wire::RequestId::new(1),
         roam::wire::MethodId::new(1), // echo method

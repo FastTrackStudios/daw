@@ -57,7 +57,7 @@ impl RegionService for ReaperRegion {
                         // region_end_position is Some for regions, None for markers
                         if let Some(end_pos) = info.region_end_position {
                             regions.push(Region {
-                                id: Some(info.id.get() as u32),
+                                id: Some(info.id.get()),
                                 time_range: TimeRange::from_seconds(
                                     info.position.get(),
                                     end_pos.get(),

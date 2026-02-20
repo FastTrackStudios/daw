@@ -168,6 +168,11 @@ impl ProjectService for StandaloneProject {
         })
     }
 
+    async fn open(&self, _cx: &Context, path: String) -> Option<ProjectInfo> {
+        info!("ProjectService::open({}) called (standalone stub)", path);
+        None
+    }
+
     async fn close(&self, _cx: &Context, project_id: String) -> bool {
         info!(
             "ProjectService::close({}) called (standalone stub)",

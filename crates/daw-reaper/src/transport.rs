@@ -74,6 +74,7 @@ static PROJECT_TRANSPORT_CACHE: OnceLock<Mutex<HashMap<String, Transport>>> = On
 ///
 /// Delegates to [`main_thread::task_support`]. Kept for use by transport-internal
 /// code (polling, broadcasting) that needs direct TaskSupport access.
+#[allow(dead_code)]
 pub(crate) fn task_support() -> Option<&'static TaskSupport> {
     main_thread::task_support()
 }
@@ -198,10 +199,10 @@ pub fn poll_and_broadcast() {
             }
 
             // Also broadcast to legacy channel if this is the current project
-            if guid == current_guid {
-                if let Some(legacy_tx) = legacy_tx {
-                    let _ = legacy_tx.send(state);
-                }
+            if guid == current_guid
+                && let Some(legacy_tx) = legacy_tx
+            {
+                let _ = legacy_tx.send(state);
             }
         }
     }
@@ -595,7 +596,7 @@ impl TransportService for ReaperTransport {
             read_transport_state_for_project(&rea_project, reaper_ctx, medium)
         })
         .await
-        .unwrap_or_else(|| Transport::new())
+        .unwrap_or_default()
     }
 
     async fn get_play_state(&self, _cx: &Context, _project: ProjectContext) -> PlayState {
@@ -736,7 +737,7 @@ impl TransportService for ReaperTransport {
             TimeSignature::new(num as u32, denom as u32)
         })
         .await
-        .unwrap_or_else(|| TimeSignature::default())
+        .unwrap_or_default()
     }
 
     // =========================================================================

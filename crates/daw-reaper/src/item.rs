@@ -61,7 +61,7 @@ impl ReaperItem {
         unsafe {
             medium.low().GetSetMediaTrackInfo_String(
                 track.as_ptr(),
-                b"GUID\0".as_ptr() as *const i8,
+                c"GUID".as_ptr(),
                 buf.as_mut_ptr() as *mut i8,
                 false,
             );
@@ -224,7 +224,7 @@ impl ItemService for ReaperItem {
                     Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
                 }
                 TrackRef::Index(idx) => {
-                    medium.get_track(ReaperProjectContext::CurrentProject, idx as u32)
+                    medium.get_track(ReaperProjectContext::CurrentProject, idx)
                 }
                 TrackRef::Guid(_) => {
                     // GUID lookup not directly supported
@@ -236,11 +236,11 @@ impl ItemService for ReaperItem {
                 unsafe {
                     let count = medium.count_track_media_items(track);
                     for i in 0..count {
-                        if let Some(item) = medium.get_track_media_item(track, i) {
-                            if let Some(mut item_data) = Self::media_item_to_item(item) {
-                                item_data.index = i as u32;
-                                items.push(item_data);
-                            }
+                        if let Some(item) = medium.get_track_media_item(track, i)
+                            && let Some(mut item_data) = Self::media_item_to_item(item)
+                        {
+                            item_data.index = i;
+                            items.push(item_data);
                         }
                     }
                 }
@@ -274,11 +274,11 @@ impl ItemService for ReaperItem {
 
             let count = medium.count_media_items(ReaperProjectContext::CurrentProject);
             for i in 0..count {
-                if let Some(item) = medium.get_media_item(ReaperProjectContext::CurrentProject, i) {
-                    if let Some(mut item_data) = Self::media_item_to_item(item) {
-                        item_data.index = i as u32;
-                        items.push(item_data);
-                    }
+                if let Some(item) = medium.get_media_item(ReaperProjectContext::CurrentProject, i)
+                    && let Some(mut item_data) = Self::media_item_to_item(item)
+                {
+                    item_data.index = i;
+                    items.push(item_data);
                 }
             }
 
@@ -298,10 +298,9 @@ impl ItemService for ReaperItem {
             for i in 0..count {
                 if let Some(item) =
                     medium.get_selected_media_item(ReaperProjectContext::CurrentProject, i)
+                    && let Some(item_data) = Self::media_item_to_item(item)
                 {
-                    if let Some(item_data) = Self::media_item_to_item(item) {
-                        items.push(item_data);
-                    }
+                    items.push(item_data);
                 }
             }
 
@@ -321,13 +320,13 @@ impl ItemService for ReaperItem {
                     Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
                 }
                 TrackRef::Index(idx) => {
-                    medium.get_track(ReaperProjectContext::CurrentProject, idx as u32)
+                    medium.get_track(ReaperProjectContext::CurrentProject, idx)
                 }
                 TrackRef::Guid(_) => None,
             };
 
             if let Some(track) = track_ptr {
-                unsafe { medium.count_track_media_items(track) as u32 }
+                unsafe { medium.count_track_media_items(track) }
             } else {
                 0
             }
@@ -362,7 +361,7 @@ impl ItemService for ReaperItem {
                     Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
                 }
                 TrackRef::Index(idx) => {
-                    medium.get_track(ReaperProjectContext::CurrentProject, idx as u32)
+                    medium.get_track(ReaperProjectContext::CurrentProject, idx)
                 }
                 TrackRef::Guid(_) => None,
             }?;
@@ -371,12 +370,12 @@ impl ItemService for ReaperItem {
                 let item = medium.add_media_item_to_track(track_ptr).ok()?;
 
                 // Set position and length
-                medium.set_media_item_position(
+                let _ = medium.set_media_item_position(
                     item,
                     reaper_medium::PositionInSeconds::new(position.as_seconds()).ok()?,
                     UiRefreshBehavior::NoRefresh,
                 );
-                medium.set_media_item_length(
+                let _ = medium.set_media_item_length(
                     item,
                     DurationInSeconds::new(length.as_seconds()).ok()?,
                     UiRefreshBehavior::NoRefresh,
@@ -401,7 +400,7 @@ impl ItemService for ReaperItem {
             {
                 unsafe {
                     if let Some(track) = medium.get_media_item_track(item_ptr) {
-                        medium.delete_track_media_item(track, item_ptr);
+                        let _ = medium.delete_track_media_item(track, item_ptr);
                     }
                 }
             }
@@ -466,11 +465,10 @@ impl ItemService for ReaperItem {
             let medium = reaper.medium_reaper();
 
             if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+                && let Ok(pos) = reaper_medium::PositionInSeconds::new(position.as_seconds())
             {
-                if let Ok(pos) = reaper_medium::PositionInSeconds::new(position.as_seconds()) {
-                    unsafe {
-                        medium.set_media_item_position(item_ptr, pos, UiRefreshBehavior::Refresh);
-                    }
+                unsafe {
+                    let _ = medium.set_media_item_position(item_ptr, pos, UiRefreshBehavior::Refresh);
                 }
             }
         });
@@ -489,11 +487,10 @@ impl ItemService for ReaperItem {
             let medium = reaper.medium_reaper();
 
             if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
+                && let Ok(len) = DurationInSeconds::new(length.as_seconds())
             {
-                if let Ok(len) = DurationInSeconds::new(length.as_seconds()) {
-                    unsafe {
-                        medium.set_media_item_length(item_ptr, len, UiRefreshBehavior::Refresh);
-                    }
+                unsafe {
+                    let _ = medium.set_media_item_length(item_ptr, len, UiRefreshBehavior::Refresh);
                 }
             }
         });
@@ -518,7 +515,7 @@ impl ItemService for ReaperItem {
                         Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
                     }
                     TrackRef::Index(idx) => {
-                        medium.get_track(ReaperProjectContext::CurrentProject, idx as u32)
+                        medium.get_track(ReaperProjectContext::CurrentProject, idx)
                     }
                     TrackRef::Guid(_) => None,
                 };
@@ -550,7 +547,7 @@ impl ItemService for ReaperItem {
             if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
             {
                 unsafe {
-                    medium.set_media_item_info_value(
+                    let _ = medium.set_media_item_info_value(
                         item_ptr,
                         ItemAttributeKey::SnapOffset,
                         offset.as_seconds(),
@@ -573,7 +570,7 @@ impl ItemService for ReaperItem {
             if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
             {
                 unsafe {
-                    medium.set_media_item_info_value(
+                    let _ = medium.set_media_item_info_value(
                         item_ptr,
                         ItemAttributeKey::Mute,
                         if muted { 1.0 } else { 0.0 },
@@ -650,7 +647,7 @@ impl ItemService for ReaperItem {
             if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
             {
                 unsafe {
-                    medium.set_media_item_info_value(item_ptr, ItemAttributeKey::Vol, volume);
+                    let _ = medium.set_media_item_info_value(item_ptr, ItemAttributeKey::Vol, volume);
                 }
             }
         });
@@ -676,12 +673,12 @@ impl ItemService for ReaperItem {
             if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
             {
                 unsafe {
-                    medium.set_media_item_info_value(
+                    let _ = medium.set_media_item_info_value(
                         item_ptr,
                         ItemAttributeKey::FadeInLen,
                         length.as_seconds(),
                     );
-                    medium.set_media_item_info_value(
+                    let _ = medium.set_media_item_info_value(
                         item_ptr,
                         ItemAttributeKey::FadeInShape,
                         proto_fade_to_reaper(shape) as f64,
@@ -711,12 +708,12 @@ impl ItemService for ReaperItem {
             if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
             {
                 unsafe {
-                    medium.set_media_item_info_value(
+                    let _ = medium.set_media_item_info_value(
                         item_ptr,
                         ItemAttributeKey::FadeOutLen,
                         length.as_seconds(),
                     );
-                    medium.set_media_item_info_value(
+                    let _ = medium.set_media_item_info_value(
                         item_ptr,
                         ItemAttributeKey::FadeOutShape,
                         proto_fade_to_reaper(shape) as f64,
@@ -745,7 +742,7 @@ impl ItemService for ReaperItem {
             if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
             {
                 unsafe {
-                    medium.set_media_item_info_value(
+                    let _ = medium.set_media_item_info_value(
                         item_ptr,
                         ItemAttributeKey::LoopSrc,
                         if loop_source { 1.0 } else { 0.0 },
@@ -777,7 +774,7 @@ impl ItemService for ReaperItem {
                     BeatAttachMode::BeatsPositionOnly => 2.0,
                 };
                 unsafe {
-                    medium.set_media_item_info_value(
+                    let _ = medium.set_media_item_info_value(
                         item_ptr,
                         ItemAttributeKey::BeatAttachMode,
                         timebase,
@@ -802,7 +799,7 @@ impl ItemService for ReaperItem {
             if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
             {
                 unsafe {
-                    medium.set_media_item_info_value(
+                    let _ = medium.set_media_item_info_value(
                         item_ptr,
                         ItemAttributeKey::AutoStretch,
                         if auto_stretch { 1.0 } else { 0.0 },
@@ -832,7 +829,7 @@ impl ItemService for ReaperItem {
             {
                 let color_value = color.map(|c| c as i32).unwrap_or(0);
                 unsafe {
-                    medium.set_media_item_info_value(
+                    let _ = medium.set_media_item_info_value(
                         item_ptr,
                         ItemAttributeKey::CustomColor,
                         color_value as f64,
@@ -858,7 +855,7 @@ impl ItemService for ReaperItem {
             {
                 let group_value = group_id.map(|g| g as i32).unwrap_or(0);
                 unsafe {
-                    medium.set_media_item_info_value(
+                    let _ = medium.set_media_item_info_value(
                         item_ptr,
                         ItemAttributeKey::GroupId,
                         group_value as f64,
@@ -916,7 +913,7 @@ impl ReaperTake {
         unsafe {
             medium.low().GetSetMediaItemTakeInfo_String(
                 take.as_ptr(),
-                b"P_NAME\0".as_ptr() as *const i8,
+                c"P_NAME".as_ptr(),
                 name_cstr.as_ptr() as *mut i8,
                 true,
             );
@@ -951,7 +948,7 @@ impl ReaperTake {
         unsafe {
             medium.low().GetSetMediaItemTakeInfo_String(
                 take.as_ptr(),
-                b"P_NAME\0".as_ptr() as *const i8,
+                c"P_NAME".as_ptr(),
                 buf.as_mut_ptr() as *mut i8,
                 false,
             );
@@ -976,14 +973,12 @@ impl ReaperTake {
 
                     for i in 0..count {
                         let take_ptr = medium.low().GetTake(item.as_ptr(), i);
-                        if let Some(take) = MediaItemTake::new(take_ptr) {
-                            if let Ok(chunk) = Self::_get_take_state_chunk(medium, take, 1024) {
-                                if let Some(take_guid) = extract_guid_from_chunk(&chunk) {
-                                    if &take_guid == guid {
-                                        return Some(take);
-                                    }
-                                }
-                            }
+                        if let Some(take) = MediaItemTake::new(take_ptr)
+                            && let Ok(chunk) = Self::_get_take_state_chunk(medium, take, 1024)
+                            && let Some(take_guid) = extract_guid_from_chunk(&chunk)
+                            && &take_guid == guid
+                        {
+                            return Some(take);
                         }
                     }
                     None
@@ -1093,11 +1088,10 @@ impl TakeService for ReaperTake {
 
                 for i in 0..count {
                     let take_ptr = medium.low().GetTake(item_ptr.as_ptr(), i);
-                    if let Some(take) = MediaItemTake::new(take_ptr) {
-                        if let Some(take_data) = Self::media_take_to_take(item_ptr, take, i as u32)
-                        {
-                            takes.push(take_data);
-                        }
+                    if let Some(take) = MediaItemTake::new(take_ptr)
+                        && let Some(take_data) = Self::media_take_to_take(item_ptr, take, i as u32)
+                    {
+                        takes.push(take_data);
                     }
                 }
             }
@@ -1354,7 +1348,7 @@ impl TakeService for ReaperTake {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
             unsafe {
-                medium.set_media_item_take_info_value(take_ptr, TakeAttributeKey::Vol, volume);
+                let _ = medium.set_media_item_take_info_value(take_ptr, TakeAttributeKey::Vol, volume);
             }
         });
     }
@@ -1386,7 +1380,7 @@ impl TakeService for ReaperTake {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
             unsafe {
-                medium.set_media_item_take_info_value(take_ptr, TakeAttributeKey::PlayRate, rate);
+                let _ = medium.set_media_item_take_info_value(take_ptr, TakeAttributeKey::PlayRate, rate);
             }
         });
     }
@@ -1483,7 +1477,7 @@ impl TakeService for ReaperTake {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
             unsafe {
-                medium.set_media_item_take_info_value(
+                let _ = medium.set_media_item_take_info_value(
                     take_ptr,
                     TakeAttributeKey::StartOffs,
                     offset.as_seconds(),
@@ -1562,10 +1556,8 @@ impl TakeService for ReaperTake {
 fn extract_guid_from_chunk(chunk: &str) -> Option<String> {
     // Look for GUID line like: GUID {12345678-1234-1234-1234-123456789ABC}
     for line in chunk.lines() {
-        if line.starts_with("GUID ") {
-            if let Some(guid_part) = line.strip_prefix("GUID ") {
-                return Some(guid_part.trim().to_string());
-            }
+        if line.starts_with("GUID ") && let Some(guid_part) = line.strip_prefix("GUID ") {
+            return Some(guid_part.trim().to_string());
         }
     }
     None

@@ -55,7 +55,7 @@ impl MarkerService for ReaperMarker {
                         // region_end_position is None for markers, Some for regions
                         if info.region_end_position.is_none() {
                             markers.push(Marker {
-                                id: Some(info.id.get() as u32),
+                                id: Some(info.id.get()),
                                 position: Position::from_time(TimePosition::from_seconds(
                                     info.position.get(),
                                 )),

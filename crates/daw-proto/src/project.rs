@@ -123,6 +123,13 @@ pub trait ProjectService {
     /// project was not found.
     async fn select(&self, project_id: String) -> bool;
 
+    /// Open an existing project file (.rpp) in a new tab
+    ///
+    /// Creates a new project tab and loads the specified file into it,
+    /// similar to SWS's `Main_openProject` pattern. Returns the metadata
+    /// of the newly opened project, or None if the file could not be opened.
+    async fn open(&self, path: String) -> Option<ProjectInfo>;
+
     /// Create a new empty project in a new tab
     ///
     /// Opens a fresh project tab. Returns the metadata of the newly created

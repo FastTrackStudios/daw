@@ -300,29 +300,29 @@ fn parse_inner_lines(
             continue;
         }
 
-        if line.starts_with("WNDRECT ") {
-            chain.window_rect = parse_4_ints(&line[8..]);
+        if let Some(stripped) = line.strip_prefix("WNDRECT ") {
+            chain.window_rect = parse_4_ints(stripped);
             i += 1;
             continue;
         }
-        if line.starts_with("SHOW ") {
-            chain.show = parse_int(&line[5..]).unwrap_or(0);
+        if let Some(stripped) = line.strip_prefix("SHOW ") {
+            chain.show = parse_int(stripped).unwrap_or(0);
             i += 1;
             continue;
         }
-        if line.starts_with("LASTSEL ") {
-            chain.last_sel = parse_int(&line[8..]).unwrap_or(0);
+        if let Some(stripped) = line.strip_prefix("LASTSEL ") {
+            chain.last_sel = parse_int(stripped).unwrap_or(0);
             i += 1;
             continue;
         }
-        if line.starts_with("DOCKED ") {
-            chain.docked = parse_int(&line[7..]).unwrap_or(0) != 0;
+        if let Some(stripped) = line.strip_prefix("DOCKED ") {
+            chain.docked = parse_int(stripped).unwrap_or(0) != 0;
             i += 1;
             continue;
         }
 
-        if line.starts_with("BYPASS ") {
-            let parts: Vec<&str> = line[7..].split_whitespace().collect();
+        if let Some(stripped) = line.strip_prefix("BYPASS ") {
+            let parts: Vec<&str> = stripped.split_whitespace().collect();
             let bypassed = parts
                 .first()
                 .and_then(|s| s.parse::<i32>().ok())
@@ -338,8 +338,8 @@ fn parse_inner_lines(
             continue;
         }
 
-        if line.starts_with("PARALLEL ") {
-            pending_parallel = parse_int(&line[9..]).unwrap_or(0) != 0;
+        if let Some(stripped) = line.strip_prefix("PARALLEL ") {
+            pending_parallel = parse_int(stripped).unwrap_or(0) != 0;
             i += 1;
             continue;
         }
@@ -362,17 +362,17 @@ fn parse_inner_lines(
             let mut j = end_idx + 1;
             while j < lines.len() {
                 let meta = lines[j].trim();
-                if meta.starts_with("FLOATPOS ") {
-                    plugin.float_pos = parse_4_ints(&meta[9..]);
+                if let Some(stripped) = meta.strip_prefix("FLOATPOS ") {
+                    plugin.float_pos = parse_4_ints(stripped);
                     j += 1;
-                } else if meta.starts_with("FXID ") {
-                    plugin.fxid = Some(meta[5..].trim().to_string());
+                } else if let Some(stripped) = meta.strip_prefix("FXID ") {
+                    plugin.fxid = Some(stripped.trim().to_string());
                     j += 1;
-                } else if meta.starts_with("WAK ") {
-                    plugin.wak = parse_2_ints(&meta[4..]);
+                } else if let Some(stripped) = meta.strip_prefix("WAK ") {
+                    plugin.wak = parse_2_ints(stripped);
                     j += 1;
-                } else if meta.starts_with("PRESETNAME ") {
-                    plugin.preset_name = Some(unquote(&meta[11..]));
+                } else if let Some(stripped) = meta.strip_prefix("PRESETNAME ") {
+                    plugin.preset_name = Some(unquote(stripped));
                     j += 1;
                 } else if meta.starts_with("<PARMENV ") {
                     let (env_block, env_end) = extract_block(lines, j);
@@ -380,8 +380,8 @@ fn parse_inner_lines(
                         .param_envelopes
                         .push(parse_param_envelope(&env_block, preserve_raw_blocks));
                     j = env_end + 1;
-                } else if meta.starts_with("PARM_TCP ") {
-                    plugin.params_on_tcp.push(parse_param_ref(&meta[9..]));
+                } else if let Some(stripped) = meta.strip_prefix("PARM_TCP ") {
+                    plugin.params_on_tcp.push(parse_param_ref(stripped));
                     j += 1;
                 } else {
                     break;
@@ -406,11 +406,11 @@ fn parse_inner_lines(
             let mut j = end_idx + 1;
             while j < lines.len() {
                 let meta = lines[j].trim();
-                if meta.starts_with("FLOATPOS ") {
-                    container.float_pos = parse_4_ints(&meta[9..]);
+                if let Some(stripped) = meta.strip_prefix("FLOATPOS ") {
+                    container.float_pos = parse_4_ints(stripped);
                     j += 1;
-                } else if meta.starts_with("FXID ") {
-                    container.fxid = Some(meta[5..].trim().to_string());
+                } else if let Some(stripped) = meta.strip_prefix("FXID ") {
+                    container.fxid = Some(stripped.trim().to_string());
                     j += 1;
                 } else {
                     break;
@@ -490,11 +490,7 @@ fn parse_plugin_header(header: &str) -> (PluginType, String, String, Option<Stri
     let header = header.trim();
 
     // Remove leading '<'
-    let header = if header.starts_with('<') {
-        &header[1..]
-    } else {
-        header
-    };
+    let header = header.strip_prefix('<').unwrap_or(header);
 
     // Split on first space to get the type keyword
     let (type_keyword, rest) = header
@@ -653,30 +649,30 @@ fn parse_container_block(
         }
 
         // Container-level metadata
-        if line.starts_with("CONTAINER_CFG ") {
-            container.container_cfg = parse_4_ints(&line[14..]);
+        if let Some(stripped) = line.strip_prefix("CONTAINER_CFG ") {
+            container.container_cfg = parse_4_ints(stripped);
             i += 1;
             continue;
         }
-        if line.starts_with("SHOW ") {
-            container.show = parse_int(&line[5..]).unwrap_or(0);
+        if let Some(stripped) = line.strip_prefix("SHOW ") {
+            container.show = parse_int(stripped).unwrap_or(0);
             i += 1;
             continue;
         }
-        if line.starts_with("LASTSEL ") {
-            container.last_sel = parse_int(&line[8..]).unwrap_or(0);
+        if let Some(stripped) = line.strip_prefix("LASTSEL ") {
+            container.last_sel = parse_int(stripped).unwrap_or(0);
             i += 1;
             continue;
         }
-        if line.starts_with("DOCKED ") {
-            container.docked = parse_int(&line[7..]).unwrap_or(0) != 0;
+        if let Some(stripped) = line.strip_prefix("DOCKED ") {
+            container.docked = parse_int(stripped).unwrap_or(0) != 0;
             i += 1;
             continue;
         }
 
         // Per-child BYPASS
-        if line.starts_with("BYPASS ") {
-            let parts: Vec<&str> = line[7..].split_whitespace().collect();
+        if let Some(stripped) = line.strip_prefix("BYPASS ") {
+            let parts: Vec<&str> = stripped.split_whitespace().collect();
             let bp = parts
                 .first()
                 .and_then(|s| s.parse::<i32>().ok())
@@ -692,8 +688,8 @@ fn parse_container_block(
             continue;
         }
 
-        if line.starts_with("PARALLEL ") {
-            pending_parallel = parse_int(&line[9..]).unwrap_or(0) != 0;
+        if let Some(stripped) = line.strip_prefix("PARALLEL ") {
+            pending_parallel = parse_int(stripped).unwrap_or(0) != 0;
             i += 1;
             continue;
         }
@@ -717,17 +713,17 @@ fn parse_container_block(
             let mut j = end_idx + 1;
             while j < inner_lines.len() {
                 let meta = inner_lines[j].trim();
-                if meta.starts_with("FLOATPOS ") {
-                    plugin.float_pos = parse_4_ints(&meta[9..]);
+                if let Some(stripped) = meta.strip_prefix("FLOATPOS ") {
+                    plugin.float_pos = parse_4_ints(stripped);
                     j += 1;
-                } else if meta.starts_with("FXID ") {
-                    plugin.fxid = Some(meta[5..].trim().to_string());
+                } else if let Some(stripped) = meta.strip_prefix("FXID ") {
+                    plugin.fxid = Some(stripped.trim().to_string());
                     j += 1;
-                } else if meta.starts_with("WAK ") {
-                    plugin.wak = parse_2_ints(&meta[4..]);
+                } else if let Some(stripped) = meta.strip_prefix("WAK ") {
+                    plugin.wak = parse_2_ints(stripped);
                     j += 1;
-                } else if meta.starts_with("PRESETNAME ") {
-                    plugin.preset_name = Some(unquote(&meta[11..]));
+                } else if let Some(stripped) = meta.strip_prefix("PRESETNAME ") {
+                    plugin.preset_name = Some(unquote(stripped));
                     j += 1;
                 } else if meta.starts_with("<PARMENV ") {
                     let (env_block, env_end) = extract_block(&inner_lines, j);
@@ -735,8 +731,8 @@ fn parse_container_block(
                         .param_envelopes
                         .push(parse_param_envelope(&env_block, preserve_raw_blocks));
                     j = env_end + 1;
-                } else if meta.starts_with("PARM_TCP ") {
-                    plugin.params_on_tcp.push(parse_param_ref(&meta[9..]));
+                } else if let Some(stripped) = meta.strip_prefix("PARM_TCP ") {
+                    plugin.params_on_tcp.push(parse_param_ref(stripped));
                     j += 1;
                 } else {
                     break;
@@ -763,11 +759,11 @@ fn parse_container_block(
             let mut j = end_idx + 1;
             while j < inner_lines.len() {
                 let meta = inner_lines[j].trim();
-                if meta.starts_with("FLOATPOS ") {
-                    child_container.float_pos = parse_4_ints(&meta[9..]);
+                if let Some(stripped) = meta.strip_prefix("FLOATPOS ") {
+                    child_container.float_pos = parse_4_ints(stripped);
                     j += 1;
-                } else if meta.starts_with("FXID ") {
-                    child_container.fxid = Some(meta[5..].trim().to_string());
+                } else if let Some(stripped) = meta.strip_prefix("FXID ") {
+                    child_container.fxid = Some(stripped.trim().to_string());
                     j += 1;
                 } else {
                     break;
@@ -797,11 +793,7 @@ fn parse_container_block(
 /// Or `<CONTAINER Container DRIVE` → `"DRIVE"`
 fn parse_container_name(header: &str) -> String {
     let header = header.trim();
-    let header = if header.starts_with('<') {
-        &header[1..]
-    } else {
-        header
-    };
+    let header = header.strip_prefix('<').unwrap_or(header);
 
     // Skip "CONTAINER" keyword
     let rest = header.strip_prefix("CONTAINER").unwrap_or(header).trim();
@@ -1007,19 +999,19 @@ fn parse_param_envelope(block_lines: &[&str], preserve_raw_block: bool) -> FxPar
     // Parse inner lines
     for line in block_lines.iter().skip(1) {
         let line = line.trim();
-        if line.starts_with("EGUID ") {
-            env.eguid = Some(line[6..].trim().to_string());
-        } else if line.starts_with("ACT ") {
-            let val = parse_int(&line[4..]).unwrap_or(0);
+        if let Some(stripped) = line.strip_prefix("EGUID ") {
+            env.eguid = Some(stripped.trim().to_string());
+        } else if let Some(stripped) = line.strip_prefix("ACT ") {
+            let val = parse_int(stripped).unwrap_or(0);
             env.active = val != 0;
-        } else if line.starts_with("VIS ") {
-            let val = parse_int(&line[4..]).unwrap_or(0);
+        } else if let Some(stripped) = line.strip_prefix("VIS ") {
+            let val = parse_int(stripped).unwrap_or(0);
             env.visible = val != 0;
-        } else if line.starts_with("ARM ") {
-            let val = parse_int(&line[4..]).unwrap_or(0);
+        } else if let Some(stripped) = line.strip_prefix("ARM ") {
+            let val = parse_int(stripped).unwrap_or(0);
             env.armed = val != 0;
-        } else if line.starts_with("PT ") {
-            let parts: Vec<f64> = line[3..]
+        } else if let Some(stripped) = line.strip_prefix("PT ") {
+            let parts: Vec<f64> = stripped
                 .split_whitespace()
                 .filter_map(|s| s.parse().ok())
                 .collect();

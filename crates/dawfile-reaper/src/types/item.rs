@@ -1325,10 +1325,10 @@ impl Item {
                 if parts.len() >= 2 {
                     midi.cc_interp = parts[1].parse().ok();
                 }
-            } else if line.starts_with("POOLEDEVTS ") {
-                midi.pooled_evts_guid = Some(line[11..].trim().to_string());
-            } else if line.starts_with("GUID ") {
-                midi.guid = Some(line[5..].trim().to_string());
+            } else if let Some(stripped) = line.strip_prefix("POOLEDEVTS ") {
+                midi.pooled_evts_guid = Some(stripped.trim().to_string());
+            } else if let Some(stripped) = line.strip_prefix("GUID ") {
+                midi.guid = Some(stripped.trim().to_string());
             } else if line.starts_with("IGNTEMPO ") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 5 {
@@ -1348,30 +1348,30 @@ impl Item {
                         inline_editor_height: parts[3].parse().unwrap_or(0),
                     });
                 }
-            } else if line.starts_with("BANKPROGRAMFILE ") {
-                let mut v = line["BANKPROGRAMFILE ".len()..].trim().to_string();
+            } else if let Some(stripped) = line.strip_prefix("BANKPROGRAMFILE ") {
+                let mut v = stripped.trim().to_string();
                 if v.starts_with('"') && v.ends_with('"') && v.len() >= 2 {
                     v = v[1..v.len() - 1].to_string();
                 }
                 v = v.replace("\\\\", "\\");
                 midi.bank_program_file = Some(v);
-            } else if line.starts_with("CFGEDITVIEW ") {
+            } else if let Some(stripped) = line.strip_prefix("CFGEDITVIEW ") {
                 midi.cfg_edit_view = Some(
-                    line["CFGEDITVIEW ".len()..]
+                    stripped
                         .split_whitespace()
                         .map(|s| s.to_string())
                         .collect(),
                 );
-            } else if line.starts_with("CFGEDIT ") {
+            } else if let Some(stripped) = line.strip_prefix("CFGEDIT ") {
                 midi.cfg_edit = Some(
-                    line["CFGEDIT ".len()..]
+                    stripped
                         .split_whitespace()
                         .map(|s| s.to_string())
                         .collect(),
                 );
-            } else if line.starts_with("EVTFILTER ") {
+            } else if let Some(stripped) = line.strip_prefix("EVTFILTER ") {
                 midi.evt_filter = Some(
-                    line["EVTFILTER ".len()..]
+                    stripped
                         .split_whitespace()
                         .map(|s| s.to_string())
                         .collect(),

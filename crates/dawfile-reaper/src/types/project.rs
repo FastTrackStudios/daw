@@ -232,6 +232,10 @@ impl DecodeOptions {
     }
 }
 
+type GridSettings = Option<(i32, i32, i32, i32, i32, i32, i32, i32)>;
+type SmpteSyncSettings = Option<(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)>;
+type MasterHwOut = Option<(i32, i32, i32, i32, i32, i32, i32, i32)>;
+
 /// Project-level properties and settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProjectProperties {
@@ -252,7 +256,7 @@ pub struct ProjectProperties {
     // Project settings
     pub proj_offs: Option<(i32, i32, i32)>, // PROJOFFS 0 0 0
     pub max_proj_len: Option<(i32, i32)>,   // MAXPROJLEN 0 0
-    pub grid: Option<(i32, i32, i32, i32, i32, i32, i32, i32)>, // GRID 3199 8 1 8 1 0 0 0
+    pub grid: GridSettings, // GRID 3199 8 1 8 1 0 0 0
     pub time_mode: Option<(i32, i32, i32, i32, i32, i32, i32)>, // TIMEMODE 1 5 -1 30 0 0 -1
     pub video_config: Option<(i32, i32, i32)>, // VIDEO_CONFIG 0 0 65792
     pub pan_mode: Option<i32>,              // PANMODE 3
@@ -266,7 +270,7 @@ pub struct ProjectProperties {
     // Recording settings
     pub use_rec_cfg: Option<i32>, // USE_REC_CFG 0
     pub rec_mode: Option<i32>,    // RECMODE 1
-    pub smpte_sync: Option<(i32, i32, i32, i32, i32, i32, i32, i32, i32, i32, i32)>, // SMPTESYNC 0 30 100 40 1000 300 0 0 1 0 0
+    pub smpte_sync: SmpteSyncSettings, // SMPTESYNC 0 30 100 40 1000 300 0 0 1 0 0
     pub r#loop: Option<i32>,                                                         // LOOP 0
     pub loop_gran: Option<(i32, i32)>,                                               // LOOPGRAN 0 4
     pub record_path: Option<(String, String)>, // RECORD_PATH "Media" ""
@@ -304,7 +308,7 @@ pub struct ProjectProperties {
     pub master_peak_col: Option<i32>,            // MASTERPEAKCOL 16576
     pub master_mute_solo: Option<i32>,           // MASTERMUTESOLO 0
     pub master_track_view: Option<MasterTrackView>, // MASTERTRACKVIEW 0 0.6667 0.5 0.5 0 0 0 0 0 0 0 0 0 0
-    pub master_hw_out: Option<(i32, i32, i32, i32, i32, i32, i32, i32)>, // MASTERHWOUT 0 0 1 0 0 0 0 -1
+    pub master_hw_out: MasterHwOut, // MASTERHWOUT 0 0 1 0 0 0 0 -1
     pub master_nch: Option<(i32, i32)>,                                  // MASTER_NCH 2 2
     pub master_volume: Option<(i32, i32, i32, i32, i32)>, // MASTER_VOLUME 1 0 -1 -1 1
     pub master_pan_mode: Option<i32>,                     // MASTER_PANMODE 3

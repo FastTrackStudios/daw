@@ -54,7 +54,7 @@ impl ResourceService for ReaperResource {
             let low = reaper.medium_reaper().low();
 
             // GetLastColorThemeFile returns a C string pointer
-            let ptr = unsafe { low.GetLastColorThemeFile() };
+            let ptr = low.GetLastColorThemeFile();
 
             if ptr.is_null() {
                 return None;

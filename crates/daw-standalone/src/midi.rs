@@ -310,10 +310,10 @@ impl MidiService for StandaloneMidi {
     ) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
-        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
-            if let Some(note) = take.notes.iter_mut().find(|n| n.index == index) {
-                note.pitch = pitch & 0x7F;
-            }
+        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
+            && let Some(note) = take.notes.iter_mut().find(|n| n.index == index)
+        {
+            note.pitch = pitch & 0x7F;
         }
     }
 
@@ -326,10 +326,10 @@ impl MidiService for StandaloneMidi {
     ) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
-        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
-            if let Some(note) = take.notes.iter_mut().find(|n| n.index == index) {
-                note.velocity = velocity.clamp(1, 127);
-            }
+        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
+            && let Some(note) = take.notes.iter_mut().find(|n| n.index == index)
+        {
+            note.velocity = velocity.clamp(1, 127);
         }
     }
 
@@ -342,10 +342,10 @@ impl MidiService for StandaloneMidi {
     ) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
-        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
-            if let Some(note) = take.notes.iter_mut().find(|n| n.index == index) {
-                note.start_ppq = start_ppq;
-            }
+        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
+            && let Some(note) = take.notes.iter_mut().find(|n| n.index == index)
+        {
+            note.start_ppq = start_ppq;
         }
     }
 
@@ -358,10 +358,10 @@ impl MidiService for StandaloneMidi {
     ) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
-        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
-            if let Some(note) = take.notes.iter_mut().find(|n| n.index == index) {
-                note.length_ppq = length_ppq;
-            }
+        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
+            && let Some(note) = take.notes.iter_mut().find(|n| n.index == index)
+        {
+            note.length_ppq = length_ppq;
         }
     }
 
@@ -374,10 +374,10 @@ impl MidiService for StandaloneMidi {
     ) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
-        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
-            if let Some(note) = take.notes.iter_mut().find(|n| n.index == index) {
-                note.channel = channel & 0x0F;
-            }
+        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
+            && let Some(note) = take.notes.iter_mut().find(|n| n.index == index)
+        {
+            note.channel = channel & 0x0F;
         }
     }
 
@@ -390,10 +390,10 @@ impl MidiService for StandaloneMidi {
     ) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
-        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
-            if let Some(note) = take.notes.iter_mut().find(|n| n.index == index) {
-                note.selected = selected;
-            }
+        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
+            && let Some(note) = take.notes.iter_mut().find(|n| n.index == index)
+        {
+            note.selected = selected;
         }
     }
 
@@ -406,10 +406,10 @@ impl MidiService for StandaloneMidi {
     ) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
-        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
-            if let Some(note) = take.notes.iter_mut().find(|n| n.index == index) {
-                note.muted = muted;
-            }
+        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
+            && let Some(note) = take.notes.iter_mut().find(|n| n.index == index)
+        {
+            note.muted = muted;
         }
     }
 
@@ -481,7 +481,7 @@ impl MidiService for StandaloneMidi {
                 if should_humanize {
                     // Simple random variation (using index as seed for determinism)
                     let timing_offset =
-                        ((note.index as f64 * 0.1).sin() * params.timing_range_ppq) as f64;
+                        (note.index as f64 * 0.1).sin() * params.timing_range_ppq;
                     let velocity_offset =
                         ((note.index as f64 * 0.2).cos() * params.velocity_range as f64) as i8;
                     note.start_ppq += timing_offset;
@@ -544,10 +544,10 @@ impl MidiService for StandaloneMidi {
     async fn set_cc_value(&self, _cx: &Context, location: MidiTakeLocation, index: u32, value: u8) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
-        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
-            if let Some(cc) = take.ccs.iter_mut().find(|c| c.index == index) {
-                cc.value = value & 0x7F;
-            }
+        if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
+            && let Some(cc) = take.ccs.iter_mut().find(|c| c.index == index)
+        {
+            cc.value = value & 0x7F;
         }
     }
 

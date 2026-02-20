@@ -365,6 +365,21 @@ impl Daw {
         Ok(Project::new(info.guid, self.clients.clone()))
     }
 
+    /// Open a project file (.rpp) in a new tab.
+    ///
+    /// Uses REAPER's `Main_openProject` API to properly load the project,
+    /// avoiding proxy rendering issues that can occur with CLI arguments.
+    pub async fn open_project(&self, path: impl Into<String>) -> eyre::Result<Project> {
+        let info = self
+            .clients
+            .project
+            .open(path.into())
+            .await?
+            .ok_or_else(|| eyre::eyre!("Failed to open project"))?;
+
+        Ok(Project::new(info.guid, self.clients.clone()))
+    }
+
     /// Close a specific project tab by GUID.
     pub async fn close_project(&self, guid: impl Into<String>) -> eyre::Result<()> {
         let guid = guid.into();

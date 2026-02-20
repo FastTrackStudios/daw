@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Test helpers that bridge `daw-control` types into the `signal-live` param bridge.
 //!
 //! This module sits at the intersection of the two worlds:
@@ -166,10 +167,10 @@ pub async fn find_leaf_plugin_with_params(
 ) -> Result<(u32, String)> {
     let tree = track.fx_chain().tree().await?;
     for (_depth, node) in tree.iter_depth_first() {
-        if let FxNodeKind::Plugin(fx) = &node.kind {
-            if fx.parameter_count >= min_params {
-                return Ok((fx.index, fx.name.clone()));
-            }
+        if let FxNodeKind::Plugin(fx) = &node.kind
+            && fx.parameter_count >= min_params
+        {
+            return Ok((fx.index, fx.name.clone()));
         }
     }
     Err(eyre::eyre!(
