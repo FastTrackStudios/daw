@@ -480,8 +480,7 @@ impl MidiService for StandaloneMidi {
                     || params.indices.contains(&note.index);
                 if should_humanize {
                     // Simple random variation (using index as seed for determinism)
-                    let timing_offset =
-                        (note.index as f64 * 0.1).sin() * params.timing_range_ppq;
+                    let timing_offset = (note.index as f64 * 0.1).sin() * params.timing_range_ppq;
                     let velocity_offset =
                         ((note.index as f64 * 0.2).cos() * params.velocity_range as f64) as i8;
                     note.start_ppq += timing_offset;
