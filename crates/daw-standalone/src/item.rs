@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 /// Internal item state
 #[derive(Clone)]
-struct ItemState {
+pub(crate) struct ItemState {
     guid: String,
     track_guid: String,
     index: u32,
@@ -435,7 +435,7 @@ pub struct StandaloneTake {
 }
 
 impl StandaloneTake {
-    pub fn new(items: Arc<RwLock<Vec<ItemState>>>) -> Self {
+    pub(crate) fn new(items: Arc<RwLock<Vec<ItemState>>>) -> Self {
         Self { items }
     }
 
