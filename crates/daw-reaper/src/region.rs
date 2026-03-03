@@ -14,6 +14,52 @@ use std::ffi::CString;
 use std::time::Duration;
 use tracing::{debug, info};
 
+// =============================================================================
+// Public sync helper — callable directly from the main thread
+// =============================================================================
+
+/// Read all regions from the current project, sorted by start position.
+///
+/// Must be called from the main thread.
+pub fn get_regions_on_main_thread() -> Vec<Region> {
+    let reaper = reaper_high::Reaper::get();
+    let medium = reaper.medium_reaper();
+    let mut regions = Vec::new();
+
+    let count_result = medium.count_project_markers(ReaperProjectContext::CurrentProject);
+    let total_count = count_result.total_count;
+
+    for idx in 0..total_count {
+        medium.enum_project_markers_3(ReaperProjectContext::CurrentProject, idx, |result| {
+            if let Some(info) = result {
+                if let Some(end_pos) = info.region_end_position {
+                    regions.push(Region {
+                        id: Some(info.id.get()),
+                        time_range: TimeRange::from_seconds(
+                            info.position.get(),
+                            end_pos.get(),
+                        ),
+                        name: info.name.to_string(),
+                        color: {
+                            let c = info.color.to_raw();
+                            if c != 0 { Some(c as u32) } else { None }
+                        },
+                        guid: None,
+                    });
+                }
+            }
+        });
+    }
+
+    regions.sort_by(|a, b| {
+        a.start_seconds()
+            .partial_cmp(&b.start_seconds())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    regions
+}
+
 /// REAPER region implementation.
 ///
 /// All methods dispatch to the main thread via main_thread.
@@ -39,22 +85,22 @@ impl RegionService for ReaperRegion {
 
     async fn get_regions(&self, _cx: &Context, project: ProjectContext) -> Vec<Region> {
         main_thread::query(move || {
+            // For non-current projects we still need to resolve the context
+            let reaper_ctx = resolve_project_context(&project);
+            if matches!(reaper_ctx, ReaperProjectContext::CurrentProject) {
+                return get_regions_on_main_thread();
+            }
+
             let reaper = reaper_high::Reaper::get();
             let medium = reaper.medium_reaper();
             let mut regions = Vec::new();
 
-            // Resolve the project context to a REAPER project context
-            let reaper_ctx = resolve_project_context(&project);
-
-            // Get total count of markers and regions
             let count_result = medium.count_project_markers(reaper_ctx);
             let total_count = count_result.total_count;
 
-            // Enumerate all markers/regions
             for idx in 0..total_count {
                 medium.enum_project_markers_3(reaper_ctx, idx, |result| {
                     if let Some(info) = result {
-                        // region_end_position is Some for regions, None for markers
                         if let Some(end_pos) = info.region_end_position {
                             regions.push(Region {
                                 id: Some(info.id.get()),
@@ -74,7 +120,6 @@ impl RegionService for ReaperRegion {
                 });
             }
 
-            // Sort by start position
             regions.sort_by(|a, b| {
                 a.start_seconds()
                     .partial_cmp(&b.start_seconds())

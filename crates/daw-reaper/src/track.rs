@@ -49,6 +49,15 @@ fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
 /// After resolving the track, validates that the raw MediaTrack pointer is
 /// still recognized by REAPER. This guards against stale pointers if a track
 /// was deleted between resolve and use.
+///
+/// Public alias for use from other daw-reaper modules (e.g. midi.rs).
+pub fn resolve_track_pub(
+    project: &reaper_high::Project,
+    track_ref: &TrackRef,
+) -> Option<reaper_high::Track> {
+    resolve_track(project, track_ref)
+}
+
 fn resolve_track(
     project: &reaper_high::Project,
     track_ref: &TrackRef,
@@ -171,6 +180,41 @@ fn assign_parent_guids(tracks: &mut [Track]) {
                 folder_stack.pop();
             }
         }
+    }
+}
+
+// =============================================================================
+// Public sync helpers — callable directly from the main thread
+// =============================================================================
+
+/// Insert a track in the current project, returning its GUID string.
+///
+/// Must be called from the main thread.
+pub fn add_track_on_main_thread(name: &str, at_index: Option<u32>) -> Option<String> {
+    let proj = Reaper::get().current_project();
+    let index = at_index.unwrap_or_else(|| proj.track_count());
+    let new_track = proj.insert_track_at(index).ok()?;
+    new_track.set_name(name);
+    Some(new_track.guid().to_string_without_braces())
+}
+
+/// Set the folder depth on a track identified by its GUID.
+///
+/// Must be called from the main thread.
+pub fn set_folder_depth_on_main_thread(track_guid: &str, depth: i32) -> Result<(), String> {
+    let proj = Reaper::get().current_project();
+    let track = resolve_track(&proj, &TrackRef::Guid(track_guid.to_string()))
+        .ok_or_else(|| format!("Track not found: {track_guid}"))?;
+    let raw = track.raw().map_err(|e| format!("raw track failed: {e}"))?;
+    unsafe {
+        Reaper::get()
+            .medium_reaper()
+            .set_media_track_info_value(
+                raw,
+                reaper_medium::TrackAttributeKey::FolderDepth,
+                depth as f64,
+            )
+            .map_err(|e| format!("set_folder_depth failed: {e}"))
     }
 }
 

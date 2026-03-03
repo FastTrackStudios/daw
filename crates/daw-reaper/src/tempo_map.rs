@@ -13,6 +13,47 @@ use roam::Context;
 use std::ptr::null_mut;
 use tracing::debug;
 
+// =============================================================================
+// Public sync helpers — callable directly from the main thread
+// =============================================================================
+
+/// Convert a time position (seconds) to quarter-note position.
+///
+/// Must be called from the main thread.
+pub fn time_to_qn_on_main_thread(seconds: f64) -> f64 {
+    let low = Reaper::get().medium_reaper().low();
+    unsafe { low.TimeMap2_timeToQN(null_mut(), seconds) }
+}
+
+/// Convert a quarter-note position to time position (seconds).
+///
+/// Must be called from the main thread.
+pub fn qn_to_time_on_main_thread(qn: f64) -> f64 {
+    let low = Reaper::get().medium_reaper().low();
+    low.TimeMap_QNToTime(qn)
+}
+
+/// Get the tempo (BPM) and time signature (numerator, denominator) at a given
+/// time position.
+///
+/// Must be called from the main thread.
+pub fn get_tempo_and_time_sig_at_on_main_thread(seconds: f64) -> (f64, i32, i32) {
+    let low = Reaper::get().medium_reaper().low();
+    let mut num: i32 = 4;
+    let mut denom: i32 = 4;
+    let mut tempo: f64 = 120.0;
+    unsafe {
+        low.TimeMap_GetTimeSigAtTime(
+            null_mut(),
+            seconds,
+            &mut num,
+            &mut denom,
+            &mut tempo,
+        );
+    }
+    (tempo, num, denom)
+}
+
 /// REAPER tempo map implementation.
 ///
 /// Provides full access to REAPER's tempo envelope and time signature markers
@@ -202,6 +243,18 @@ impl TempoMapService for ReaperTempoMap {
         })
         .await
         .unwrap_or((4, 4))
+    }
+
+    async fn time_to_qn(&self, _cx: &Context, _project: ProjectContext, seconds: f64) -> f64 {
+        main_thread::query(move || time_to_qn_on_main_thread(seconds))
+            .await
+            .unwrap_or(0.0)
+    }
+
+    async fn qn_to_time(&self, _cx: &Context, _project: ProjectContext, qn: f64) -> f64 {
+        main_thread::query(move || qn_to_time_on_main_thread(qn))
+            .await
+            .unwrap_or(0.0)
     }
 
     async fn time_to_musical(

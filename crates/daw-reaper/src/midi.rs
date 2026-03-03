@@ -4,12 +4,72 @@ use crate::main_thread;
 use crate::project_context::resolve_project_context;
 use daw_proto::{
     HumanizeParams, ItemRef, MidiCC, MidiCCCreate, MidiNote, MidiNoteCreate, MidiPitchBend,
-    MidiPitchBendCreate, MidiProgramChange, MidiService, MidiSysEx, MidiTakeLocation, PpqRange,
-    QuantizeParams, TakeRef,
+    MidiPitchBendCreate, MidiProgramChange, MidiService, MidiSysEx, MidiTakeLocation,
+    ProjectContext, PpqRange, QuantizeParams, TakeRef, TrackRef,
 };
 use reaper_medium::{MediaItem, MediaItemTake, ProjectContext as ReaperProjectContext};
 use roam::Context;
 use tracing::warn;
+
+// =============================================================================
+// Public sync helpers — callable directly from the main thread
+// =============================================================================
+
+/// Create a new empty MIDI item on a track, returning the active take.
+///
+/// Must be called from the main thread.
+pub fn create_midi_item_on_main_thread(
+    track: *mut reaper_low::raw::MediaTrack,
+    start_seconds: f64,
+    end_seconds: f64,
+) -> Option<MediaItemTake> {
+    let low = reaper_high::Reaper::get().medium_reaper().low();
+    unsafe {
+        let item = low.CreateNewMIDIItemInProj(track, start_seconds, end_seconds, std::ptr::null_mut());
+        if item.is_null() {
+            return None;
+        }
+        let take = low.GetActiveTake(item);
+        MediaItemTake::new(take)
+    }
+}
+
+/// Insert MIDI notes into a take, converting quarter-note positions to PPQ.
+///
+/// Each `MidiNoteCreate` contains `start_ppq` and `length_ppq`, but here we
+/// treat `start_ppq` as a project quarter-note position and convert it to PPQ
+/// using `MIDI_GetPPQPosFromProjQN`. This matches the guide_track use-case
+/// where note positions are in quarter-notes.
+///
+/// Must be called from the main thread.
+pub fn add_notes_to_take_on_main_thread(
+    take: MediaItemTake,
+    notes: &[MidiNoteCreate],
+) {
+    let low = reaper_high::Reaper::get().medium_reaper().low();
+
+    for note in notes {
+        let start_ppq = unsafe { low.MIDI_GetPPQPosFromProjQN(take.as_ptr(), note.start_ppq) };
+        let end_ppq = start_ppq + note.length_ppq;
+
+        unsafe {
+            low.MIDI_InsertNote(
+                take.as_ptr(),
+                false,                    // selected
+                false,                    // muted
+                start_ppq,                // startppqpos
+                end_ppq,                  // endppqpos
+                note.channel as i32,      // channel
+                note.pitch as i32,        // pitch
+                note.velocity as i32,     // velocity
+                std::ptr::null_mut(),     // noSortInOptional
+            );
+        }
+    }
+
+    // Sort notes after bulk insertion
+    unsafe { low.MIDI_Sort(take.as_ptr()) };
+}
 
 #[derive(Clone)]
 pub struct ReaperMidi;
@@ -202,6 +262,57 @@ impl MidiService for ReaperMidi {
         self.get_notes(cx, location).await.len() as u32
     }
 
+    async fn create_midi_item(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        track: TrackRef,
+        start_seconds: f64,
+        end_seconds: f64,
+    ) -> Option<MidiTakeLocation> {
+        main_thread::query(move || {
+            let reaper = reaper_high::Reaper::get();
+            let proj = match &project {
+                ProjectContext::Current => reaper.current_project(),
+                ProjectContext::Project(guid) => {
+                    crate::project_context::find_project_by_guid(guid)?
+                }
+            };
+            let track_obj = crate::track::resolve_track_pub(&proj, &track)?;
+            let raw_track = track_obj.raw().ok()?.as_ptr();
+            let take = create_midi_item_on_main_thread(raw_track, start_seconds, end_seconds)?;
+
+            // Build a MidiTakeLocation from the item/take we just created
+            let low = reaper.medium_reaper().low();
+            let item_ptr = unsafe { low.GetMediaItemTake_Item(take.as_ptr()) };
+            let item = MediaItem::new(item_ptr)?;
+
+            // Get the item index in the project
+            let item_count = reaper.medium_reaper().count_media_items(
+                resolve_project_context(&project),
+            );
+            let mut item_index = None;
+            for i in 0..item_count {
+                if let Some(candidate) = reaper.medium_reaper().get_media_item(
+                    resolve_project_context(&project),
+                    i,
+                ) {
+                    if candidate.as_ptr() == item.as_ptr() {
+                        item_index = Some(i);
+                        break;
+                    }
+                }
+            }
+
+            Some(MidiTakeLocation::active(
+                project,
+                ItemRef::Index(item_index.unwrap_or(0)),
+            ))
+        })
+        .await
+        .flatten()
+    }
+
     async fn add_note(
         &self,
         _cx: &Context,
@@ -215,11 +326,21 @@ impl MidiService for ReaperMidi {
     async fn add_notes(
         &self,
         _cx: &Context,
-        _location: MidiTakeLocation,
-        _notes: Vec<MidiNoteCreate>,
+        location: MidiTakeLocation,
+        notes: Vec<MidiNoteCreate>,
     ) -> Vec<u32> {
-        Self::readonly_warn("add_notes");
-        Vec::new()
+        main_thread::query(move || {
+            let medium = reaper_high::Reaper::get().medium_reaper();
+            let Some(take) = Self::resolve_take_for_location(medium, &location) else {
+                return Vec::new();
+            };
+            let count_before = Self::read_notes(medium, take).len() as u32;
+            add_notes_to_take_on_main_thread(take, &notes);
+            // Return indices of newly added notes
+            (count_before..count_before + notes.len() as u32).collect()
+        })
+        .await
+        .unwrap_or_default()
     }
 
     async fn delete_note(&self, _cx: &Context, _location: MidiTakeLocation, _index: u32) {

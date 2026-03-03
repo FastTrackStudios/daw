@@ -32,6 +32,12 @@ pub trait TempoMapService {
     /// Get the time signature at a specific time position
     async fn get_time_signature_at(&self, project: ProjectContext, seconds: f64) -> (i32, i32);
 
+    /// Convert a time position (seconds) to quarter-note position
+    async fn time_to_qn(&self, project: ProjectContext, seconds: f64) -> f64;
+
+    /// Convert a quarter-note position to time position (seconds)
+    async fn qn_to_time(&self, project: ProjectContext, qn: f64) -> f64;
+
     /// Convert time position to musical position (measure, beat, fraction)
     async fn time_to_musical(&self, project: ProjectContext, seconds: f64) -> (i32, i32, f64);
 

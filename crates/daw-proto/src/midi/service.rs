@@ -3,6 +3,7 @@
 use super::{MidiCC, MidiNote, MidiNoteCreate, MidiPitchBend, MidiProgramChange, MidiSysEx};
 use crate::item::{ItemRef, TakeRef};
 use crate::project::ProjectContext;
+use crate::TrackRef;
 use facet::Facet;
 use roam::service;
 
@@ -143,6 +144,15 @@ pub trait MidiService {
     async fn note_count(&self, location: MidiTakeLocation) -> u32;
 
     // === Note CRUD ===
+
+    /// Create a new empty MIDI item on a track, returning the take location
+    async fn create_midi_item(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        start_seconds: f64,
+        end_seconds: f64,
+    ) -> Option<MidiTakeLocation>;
 
     /// Add a note, returns the note index
     async fn add_note(&self, location: MidiTakeLocation, note: MidiNoteCreate) -> u32;
