@@ -4,7 +4,7 @@ use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
     FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
     FxParameter, FxPinMappings, FxPresetIndex, FxRoutingMode, FxService, FxStateChunk, FxTarget,
-    FxTree, MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
+    FxTree, InstalledFx, MoveFromContainerRequest, MoveToContainerRequest, ProjectContext,
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
@@ -24,6 +24,10 @@ impl StandaloneFx {
 }
 
 impl FxService for StandaloneFx {
+    async fn list_installed_fx(&self, _cx: &Context) -> Vec<InstalledFx> {
+        vec![]
+    }
+
     async fn get_fx_list(
         &self,
         _cx: &Context,

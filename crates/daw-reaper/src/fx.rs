@@ -19,9 +19,9 @@ use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
     FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNode, FxNodeId,
     FxParamModulation, FxParameter, FxPinMappings, FxPresetIndex, FxRef, FxRoutingMode, FxService,
-    FxStateChunk, FxTarget, FxTree, FxType, MoveFromContainerRequest, MoveToContainerRequest,
-    ProjectContext, SetContainerChannelConfigRequest, SetNamedConfigRequest,
-    SetParameterByNameRequest, SetParameterRequest,
+    FxStateChunk, FxTarget, FxTree, FxType, InstalledFx, MoveFromContainerRequest,
+    MoveToContainerRequest, ProjectContext, SetContainerChannelConfigRequest,
+    SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
 };
 use reaper_high::{FxChain, MAX_TRACK_CHUNK_SIZE, Reaper, Track};
 use reaper_medium::{ChunkCacheHint, FxPresetRef, TrackFxLocation, TransferBehavior};
@@ -624,6 +624,66 @@ fn find_block_end(block_text: &str) -> Option<usize> {
         offset += line.len() + 1; // +1 for newline
     }
     None
+}
+
+/// Get the raw RPP block text for a specific FX by chain index,
+/// using dawfile-reaper to parse the full track chunk.
+/// Fallback for when tag_chunk() doesn't work (CLAP plugins).
+fn get_fx_block_via_track_chunk(track: &Track, fx_index: u32) -> Option<String> {
+    let chunk = track
+        .chunk(MAX_TRACK_CHUNK_SIZE, ChunkCacheHint::NormalMode)
+        .ok()?;
+    let chunk_str = chunk.to_string();
+    let fxchain_text = dawfile_reaper::chunk_ops::extract_fxchain_block(&chunk_str)?;
+    let chain = dawfile_reaper::FxChain::parse(fxchain_text).ok()?;
+    let node = chain.nodes.get(fx_index as usize)?;
+    match node {
+        dawfile_reaper::types::FxChainNode::Plugin(plugin) => {
+            if plugin.raw_block.is_empty() {
+                None
+            } else {
+                Some(plugin.raw_block.clone())
+            }
+        }
+        dawfile_reaper::types::FxChainNode::Container(_) => None,
+    }
+}
+
+/// Replace the raw RPP block text for a specific FX by chain index.
+/// Gets the full track chunk, finds/replaces the FX block, writes it back.
+fn set_fx_block_via_track_chunk(
+    track: &Track,
+    fx_index: u32,
+    new_block: &str,
+) -> Result<(), String> {
+    let chunk = track
+        .chunk(MAX_TRACK_CHUNK_SIZE, ChunkCacheHint::NormalMode)
+        .map_err(|e| format!("get chunk: {e}"))?;
+    let chunk_str = chunk.to_string();
+    let fxchain_text = dawfile_reaper::chunk_ops::extract_fxchain_block(&chunk_str)
+        .ok_or("no FXCHAIN block")?;
+    let chain = dawfile_reaper::FxChain::parse(fxchain_text)
+        .map_err(|e| format!("parse fxchain: {e}"))?;
+    let node = chain
+        .nodes
+        .get(fx_index as usize)
+        .ok_or_else(|| format!("FX index {} out of range", fx_index))?;
+    let old_block = match node {
+        dawfile_reaper::types::FxChainNode::Plugin(plugin) => {
+            if plugin.raw_block.is_empty() {
+                return Err("plugin raw_block is empty".to_string());
+            }
+            &plugin.raw_block
+        }
+        dawfile_reaper::types::FxChainNode::Container(_) => {
+            return Err("FX at index is a container, not a plugin".to_string());
+        }
+    };
+    let new_chunk_str = chunk_str.replace(old_block, new_block);
+    let new_chunk = reaper_high::Chunk::new(new_chunk_str);
+    track
+        .set_chunk(new_chunk)
+        .map_err(|e| format!("set chunk: {e}"))
 }
 
 /// Convert reaper-high FxInfo sub_type_expression to our FxType
@@ -1279,6 +1339,44 @@ fn resolve_node_to_location(
 
 impl FxService for ReaperFx {
     // =========================================================================
+    // Installed Plugins
+    // =========================================================================
+
+    async fn list_installed_fx(&self, _cx: &Context) -> Vec<InstalledFx> {
+        use std::ffi::{CStr, c_char};
+
+        debug!("ReaperFx::list_installed_fx()");
+
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let low = reaper.medium_reaper().low();
+            let mut results = Vec::new();
+            let mut index = 0i32;
+            loop {
+                let mut name_ptr: *const c_char = std::ptr::null();
+                let mut ident_ptr: *const c_char = std::ptr::null();
+                let ok = unsafe {
+                    low.EnumInstalledFX(index, &mut name_ptr, &mut ident_ptr)
+                };
+                if !ok {
+                    break;
+                }
+                let name = unsafe { CStr::from_ptr(name_ptr) }
+                    .to_string_lossy()
+                    .into_owned();
+                let ident = unsafe { CStr::from_ptr(ident_ptr) }
+                    .to_string_lossy()
+                    .into_owned();
+                results.push(InstalledFx { name, ident });
+                index += 1;
+            }
+            results
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    // =========================================================================
     // Chain Queries
     // =========================================================================
 
@@ -1587,39 +1685,34 @@ impl FxService for ReaperFx {
         );
 
         let result = main_thread::query(move || {
-            let proj = resolve_project(&project).ok_or_else(|| {
-                warn!("set_parameter: project not found");
-                "project not found".to_string()
-            })?;
+            // CLAP plugins only receive parameter changes during audio processing.
+            // If the audio engine isn't running, set_reaper_normalized_value will
+            // appear to succeed but the plugin will never see the change.
+            let reaper = Reaper::get();
+            if !reaper.medium_reaper().audio_is_running() {
+                return Err(
+                    "audio engine is not running — parameter changes won't reach CLAP plugins. \
+                     Start playback or enable monitoring first."
+                        .to_string(),
+                );
+            }
+
+            let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
             let (_track, chain) =
                 resolve_fx_chain(&proj, &request.target.context).ok_or_else(|| {
-                    warn!(
-                        "set_parameter: FX chain not found for {:?}",
-                        request.target.context
-                    );
                     format!("FX chain not found for {:?}", request.target.context)
                 })?;
             let fx_idx = resolve_fx_index(&chain, &request.target.fx).ok_or_else(|| {
-                warn!("set_parameter: FX not found for {:?}", request.target.fx);
                 format!("FX not found for {:?}", request.target.fx)
             })?;
-            // Use reaper-high FxParameter directly — handles track/location
-            // resolution internally via track_and_location()
             let fx = chain.fx_by_index(fx_idx).ok_or_else(|| {
-                warn!("set_parameter: fx_by_index({}) returned None", fx_idx);
                 format!("fx_by_index({}) returned None", fx_idx)
             })?;
             let param = fx.parameter_by_index(request.index);
             let norm_val = reaper_medium::ReaperNormalizedFxParamValue::new(request.value);
-
             param.set_reaper_normalized_value(norm_val).map_err(|e| {
-                warn!("set_parameter: set_reaper_normalized_value failed: {e}");
                 format!("set_reaper_normalized_value failed: {e}")
             })?;
-            // Note: CLAP plugins apply parameter changes asynchronously
-            // (via the next process() or flush() cycle), so immediate
-            // read-back may not reflect the new value yet. Trust the
-            // return value from set_reaper_normalized_value().
             Ok(())
         })
         .await
@@ -1672,6 +1765,16 @@ impl FxService for ReaperFx {
         );
 
         main_thread::query(move || {
+            // CLAP plugins only receive parameter changes during audio processing.
+            let reaper = Reaper::get();
+            if !reaper.medium_reaper().audio_is_running() {
+                return Err(
+                    "audio engine is not running — parameter changes won't reach CLAP plugins. \
+                     Start playback or enable monitoring first."
+                        .to_string(),
+                );
+            }
+
             let proj = resolve_project(&project).ok_or_else(|| {
                 format!("set_parameter_by_name: project not found ({:?})", project)
             })?;
@@ -1688,17 +1791,21 @@ impl FxService for ReaperFx {
                     request.target.fx
                 )
             })?;
-            let fx = chain.fx_by_index_untracked(fx_idx);
+            let fx = chain.fx_by_index(fx_idx).ok_or_else(|| {
+                format!("fx_by_index({}) returned None", fx_idx)
+            })?;
             for param in fx.parameters() {
                 if let Ok(pname) = param.name()
                     && pname.to_str() == request.name
                 {
                     let value = reaper_medium::ReaperNormalizedFxParamValue::new(request.value);
-                    let _ = param.set_reaper_normalized_value(value);
+                    param.set_reaper_normalized_value(value).map_err(|e| {
+                        format!("set_reaper_normalized_value failed for {:?}: {e}", request.name)
+                    })?;
                     return Ok(());
                 }
             }
-            Ok(())
+            Err(format!("parameter {:?} not found", request.name))
         })
         .await
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
@@ -2065,10 +2172,18 @@ impl FxService for ReaperFx {
 
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
-            let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
+            let (track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
             let fx = chain.fx_by_index_untracked(index);
-            fx.vst_chunk().ok()
+
+            // Try tag_chunk first (works for VST/VST3), fallback to dawfile-reaper (for CLAP)
+            match fx.tag_chunk() {
+                Ok(tag) => Some(tag.content().to_string().into_bytes()),
+                Err(_) => {
+                    debug!("tag_chunk failed, falling back to track chunk parse");
+                    get_fx_block_via_track_chunk(&track, index).map(|s| s.into_bytes())
+                }
+            }
         })
         .await
         .unwrap_or(None)
@@ -2085,14 +2200,23 @@ impl FxService for ReaperFx {
 
         main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
-            let (_track, chain) = resolve_fx_chain(&proj, &target.context)
+            let (track, chain) = resolve_fx_chain(&proj, &target.context)
                 .ok_or_else(|| format!("FX chain not found for {:?}", target.context))?;
             let index = resolve_fx_index(&chain, &target.fx)
                 .ok_or_else(|| format!("FX not found for {:?}", target.fx))?;
             let fx = chain.fx_by_index_untracked(index);
-            fx.set_vst_chunk(&chunk)
-                .map_err(|e| format!("set_vst_chunk failed: {}", e))?;
-            Ok(())
+
+            let chunk_str = String::from_utf8(chunk)
+                .map_err(|e| format!("chunk is not valid UTF-8: {e}"))?;
+
+            // Try set_tag_chunk first (works for VST/VST3), fallback to dawfile-reaper (for CLAP)
+            match fx.set_tag_chunk(&chunk_str) {
+                Ok(()) => Ok(()),
+                Err(_) => {
+                    debug!("set_tag_chunk failed, falling back to track chunk replacement");
+                    set_fx_block_via_track_chunk(&track, index, &chunk_str)
+                }
+            }
         })
         .await
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
@@ -2108,10 +2232,18 @@ impl FxService for ReaperFx {
 
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
-            let (_track, chain) = resolve_fx_chain(&proj, &target.context)?;
+            let (track, chain) = resolve_fx_chain(&proj, &target.context)?;
             let index = resolve_fx_index(&chain, &target.fx)?;
             let fx = chain.fx_by_index_untracked(index);
-            fx.vst_chunk_encoded().ok().map(|s| s.to_str().to_string())
+
+            // Try tag_chunk first (works for VST/VST3), fallback to dawfile-reaper (for CLAP)
+            match fx.tag_chunk() {
+                Ok(tag) => Some(tag.content().to_string()),
+                Err(_) => {
+                    debug!("tag_chunk failed, falling back to track chunk parse");
+                    get_fx_block_via_track_chunk(&track, index)
+                }
+            }
         })
         .await
         .unwrap_or(None)
@@ -2133,7 +2265,7 @@ impl FxService for ReaperFx {
                     project
                 )
             })?;
-            let (_track, chain) = resolve_fx_chain(&proj, &target.context).ok_or_else(|| {
+            let (track, chain) = resolve_fx_chain(&proj, &target.context).ok_or_else(|| {
                 format!(
                     "set_fx_state_chunk_encoded: FX chain not found ({:?})",
                     target.context
@@ -2143,9 +2275,15 @@ impl FxService for ReaperFx {
                 format!("set_fx_state_chunk_encoded: FX not found ({:?})", target.fx)
             })?;
             let fx = chain.fx_by_index_untracked(index);
-            fx.set_vst_chunk_encoded(encoded)
-                .map_err(|e| format!("set_vst_chunk_encoded failed: {}", e))?;
-            Ok(())
+
+            // Try set_tag_chunk first (works for VST/VST3), fallback to dawfile-reaper (for CLAP)
+            match fx.set_tag_chunk(&encoded) {
+                Ok(()) => Ok(()),
+                Err(_) => {
+                    debug!("set_tag_chunk failed, falling back to track chunk replacement");
+                    set_fx_block_via_track_chunk(&track, index, &encoded)
+                }
+            }
         })
         .await
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
@@ -2161,7 +2299,7 @@ impl FxService for ReaperFx {
 
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
-            let (_track, chain) = resolve_fx_chain(&proj, &context)?;
+            let (track, chain) = resolve_fx_chain(&proj, &context)?;
 
             let fx_count = chain.fx_count();
             debug!("get_fx_chain_state: chain has {} FX", fx_count);
@@ -2178,25 +2316,32 @@ impl FxService for ReaperFx {
                 .unwrap_or_else(|_| "(unknown)".to_string());
                 let index = fx.index();
 
-                // Get the base64-encoded VST chunk
-                match fx.vst_chunk_encoded() {
-                    Ok(encoded) => {
-                        let chunk_len = encoded.to_str().len();
+                // Try tag_chunk first (works for VST/VST3), fallback to dawfile-reaper (for CLAP)
+                let chunk_str = match fx.tag_chunk() {
+                    Ok(tag) => Some(tag.content().to_string()),
+                    Err(_) => {
+                        debug!("  FX[{}] tag_chunk failed, trying track chunk fallback", index);
+                        get_fx_block_via_track_chunk(&track, index)
+                    }
+                };
+
+                match chunk_str {
+                    Some(s) => {
                         debug!(
                             "  FX[{}] '{}' (GUID {}) — chunk captured ({} bytes)",
-                            index, plugin_name, guid, chunk_len
+                            index, plugin_name, guid, s.len()
                         );
                         chunks.push(FxStateChunk {
                             fx_guid: guid,
                             fx_index: index,
                             plugin_name,
-                            encoded_chunk: encoded.to_str().to_string(),
+                            encoded_chunk: s,
                         });
                     }
-                    Err(e) => {
+                    None => {
                         warn!(
-                            "  FX[{}] '{}' (GUID {}) — vst_chunk_encoded FAILED: {}",
-                            index, plugin_name, guid, e
+                            "  FX[{}] '{}' (GUID {}) — chunk capture FAILED (both methods)",
+                            index, plugin_name, guid
                         );
                     }
                 }
@@ -2230,7 +2375,7 @@ impl FxService for ReaperFx {
         main_thread::query(move || {
             let proj = resolve_project(&project)
                 .ok_or_else(|| format!("set_fx_chain_state: project not found ({:?})", project))?;
-            let (_track, chain) = resolve_fx_chain(&proj, &context)
+            let (track, chain) = resolve_fx_chain(&proj, &context)
                 .ok_or_else(|| format!("set_fx_chain_state: FX chain not found ({:?})", context))?;
 
             // Build a GUID → FX index lookup (like Snapshooter's hashmap approach)
@@ -2252,13 +2397,26 @@ impl FxService for ReaperFx {
             let mut name_consumed: std::collections::HashMap<String, usize> =
                 std::collections::HashMap::new();
 
+            // Helper: set chunk on an FX with dawfile-reaper fallback for CLAP
+            let set_chunk_with_fallback = |fx_index: u32, encoded: &str| {
+                if let Some(fx) = chain.fx_by_index(fx_index) {
+                    match fx.set_tag_chunk(encoded) {
+                        Ok(()) => {}
+                        Err(_) => {
+                            debug!("set_tag_chunk failed for FX[{}], trying track chunk fallback", fx_index);
+                            if let Err(e) = set_fx_block_via_track_chunk(&track, fx_index, encoded) {
+                                warn!("set_fx_block_via_track_chunk also failed for FX[{}]: {}", fx_index, e);
+                            }
+                        }
+                    }
+                }
+            };
+
             // Apply each chunk: try GUID match first, then fall back to plugin name
             for chunk in &chunks {
                 if let Some(&fx_index) = guid_to_index.get(&chunk.fx_guid) {
                     // GUID match (same track recall)
-                    if let Some(fx) = chain.fx_by_index(fx_index) {
-                        let _ = fx.set_vst_chunk_encoded(chunk.encoded_chunk.clone());
-                    }
+                    set_chunk_with_fallback(fx_index, &chunk.encoded_chunk);
                 } else {
                     // Cross-track fallback: match by plugin name (positional for duplicates)
                     let consumed = name_consumed.entry(chunk.plugin_name.clone()).or_insert(0);
@@ -2268,9 +2426,7 @@ impl FxService for ReaperFx {
                                 "Cross-track match: '{}' GUID {} → index {} (by name, pos {})",
                                 chunk.plugin_name, chunk.fx_guid, fx_index, consumed
                             );
-                            if let Some(fx) = chain.fx_by_index(fx_index) {
-                                let _ = fx.set_vst_chunk_encoded(chunk.encoded_chunk.clone());
-                            }
+                            set_chunk_with_fallback(fx_index, &chunk.encoded_chunk);
                             *consumed += 1;
                         } else {
                             warn!(

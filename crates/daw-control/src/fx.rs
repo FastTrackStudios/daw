@@ -812,6 +812,14 @@ impl FxHandle {
         Ok(value)
     }
 
+    /// Rename this FX instance (overrides the default plugin name in the FX chain).
+    ///
+    /// Sets REAPER's `renamed_name` config parameter. Pass an empty string to
+    /// revert to the default plugin name.
+    pub async fn rename(&self, name: &str) -> Result<()> {
+        self.set_config("renamed_name", name).await
+    }
+
     /// Set a named configuration parameter
     pub async fn set_config(&self, key: &str, value: &str) -> Result<()> {
         let request = SetNamedConfigRequest {

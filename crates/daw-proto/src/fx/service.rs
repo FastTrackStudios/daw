@@ -16,8 +16,9 @@ use super::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
     FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
     FxParameter, FxPinMappings, FxPresetIndex, FxRoutingMode, FxStateChunk, FxTarget, FxTree,
-    MoveFromContainerRequest, MoveToContainerRequest, SetContainerChannelConfigRequest,
-    SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
+    InstalledFx, MoveFromContainerRequest, MoveToContainerRequest,
+    SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
+    SetParameterRequest,
 };
 use crate::ProjectContext;
 use roam::Tx;
@@ -29,6 +30,17 @@ use roam::service;
 /// inserted into track FX chains for processing audio.
 #[service]
 pub trait FxService {
+    // =========================================================================
+    // Installed Plugins
+    // =========================================================================
+
+    /// List all installed FX plugins in the DAW.
+    ///
+    /// Returns every plugin known to REAPER (VST2, VST3, CLAP, AU, JS, etc.)
+    /// with its display name and full identifier string. No project context
+    /// is needed — installed plugins are global.
+    async fn list_installed_fx(&self) -> Vec<InstalledFx>;
+
     // =========================================================================
     // Chain Queries
     // =========================================================================

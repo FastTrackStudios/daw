@@ -88,6 +88,19 @@ impl From<String> for FxRef {
     }
 }
 
+/// An installed FX plugin known to the DAW.
+///
+/// Returned by `FxService::list_installed_fx` — includes every plugin
+/// REAPER has discovered (VST2, VST3, CLAP, AU, JS, etc.) with its
+/// display name and the full identifier string needed for `add_fx`.
+#[derive(Clone, Debug, Facet)]
+pub struct InstalledFx {
+    /// Human-readable display name (e.g. "Pro-Q 4")
+    pub name: String,
+    /// Full identifier string (e.g. "CLAP: Pro-Q 4 (FabFilter)")
+    pub ident: String,
+}
+
 /// FX plugin type
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Facet)]

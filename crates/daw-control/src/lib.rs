@@ -76,6 +76,7 @@ pub use daw_proto::{
     FxRef,
     FxRoutingMode,
     FxTarget,
+    InstalledFx,
     FxTree,
     FxType,
     // Marker types
@@ -126,6 +127,7 @@ pub use daw_proto::AudioEngineServiceClient;
 pub use daw_proto::AutomationServiceClient;
 pub use daw_proto::ExtStateServiceClient;
 pub use daw_proto::FxServiceClient;
+pub use daw_proto::HealthServiceClient;
 pub use daw_proto::ItemServiceClient;
 pub use daw_proto::LiveMidiServiceClient;
 pub use daw_proto::MarkerServiceClient;
@@ -189,6 +191,7 @@ pub struct DawClients {
     pub(crate) midi_analysis: MidiAnalysisServiceClient,
     pub(crate) audio_engine: AudioEngineServiceClient,
     pub(crate) ext_state: ExtStateServiceClient,
+    pub(crate) health: HealthServiceClient,
 }
 
 impl DawClients {
@@ -211,7 +214,8 @@ impl DawClients {
             midi: MidiServiceClient::new(handle.clone()),
             midi_analysis: MidiAnalysisServiceClient::new(handle.clone()),
             audio_engine: AudioEngineServiceClient::new(handle.clone()),
-            ext_state: ExtStateServiceClient::new(handle),
+            ext_state: ExtStateServiceClient::new(handle.clone()),
+            health: HealthServiceClient::new(handle),
         }
     }
 }
@@ -477,6 +481,22 @@ impl Daw {
     /// ```
     pub fn ext_state(&self) -> ExtState {
         ExtState::new(self.clients.clone())
+    }
+
+    /// List all installed FX plugins in the DAW.
+    ///
+    /// Returns every plugin known to REAPER (VST2, VST3, CLAP, AU, JS, etc.)
+    /// with its display name and full identifier string.
+    pub async fn installed_plugins(&self) -> eyre::Result<Vec<InstalledFx>> {
+        Ok(self.clients.fx.list_installed_fx().await?)
+    }
+
+    /// Lightweight health check — pings the DAW and returns `true` if reachable.
+    ///
+    /// Returns `false` if the RPC fails (connection dead). Used by the
+    /// health-check loop in `daw_registry` for fast disconnect detection.
+    pub async fn healthcheck(&self) -> bool {
+        self.clients.health.ping().await.unwrap_or(false)
     }
 
     /// Inject a MIDI message into REAPER's virtual keyboard queue.
