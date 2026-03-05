@@ -34,6 +34,7 @@ btca resources   # list all available resources
 | `reaper-rs` | helgoboss/reaper-rs | Low/medium/high-level Rust bindings for the REAPER DAW API (reaper-low, reaper-medium, reaper-high) |
 | `rea-rs` | Levitanus/rea-rs | Higher-level idiomatic Rust wrapper around the REAPER C++ API |
 | `helgobox` | helgoboss/helgobox | Full REAPER extension (ReaLearn/Playtime) — reference for building complex REAPER plugins in Rust |
+| `sws` | reaper-oss/sws | SWS/S&M Extension — large open-source REAPER extension with actions, snapshots, and API extensions |
 
 ## Landing the Plane (Session Completion)
 

@@ -1,6 +1,8 @@
 [workspace]
 members = [
+    "apps/daw",
     "crates/audio-controls",
+    "crates/daw",
     "crates/daw-control",
     "crates/daw-proto",
     "crates/daw-reaper",
@@ -18,7 +20,9 @@ license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
 # Internal crates
+daw-cli = { path = "apps/daw" }
 audio-controls = { path = "crates/audio-controls" }
+daw = { path = "crates/daw" }
 daw-proto = { path = "crates/daw-proto" }
 daw-control = { path = "crates/daw-control" }
 daw-standalone = { path = "crates/daw-standalone" }
@@ -31,8 +35,13 @@ facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
 
 # ROAM service framework (pinned — latest main needs peeps sub-crates not yet published)
 roam = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-session = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam-stream = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
 roam-telemetry = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
 roam-wire = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
 
 # Sibling repos (local paths)
 actions-proto = { path = "../input_actions/crates/actions-proto" }

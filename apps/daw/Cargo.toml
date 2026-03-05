@@ -1,0 +1,26 @@
+[package]
+name = "daw-cli"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "daw_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "daw"
+path = "src/main.rs"
+
+[dependencies]
+daw-control.workspace = true
+daw-proto.workspace = true
+roam.workspace = true
+roam-stream.workspace = true
+roam-session.workspace = true
+tokio.workspace = true
+clap.workspace = true
+eyre.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde_json.workspace = true
+libc = "0.2"
