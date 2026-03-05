@@ -163,6 +163,26 @@ impl InputProcessor {
         &self.modes
     }
 
+    /// Read-only access to keymaps for all modes.
+    pub fn keymaps(&self) -> &HashMap<ModeId, KeyTrie> {
+        &self.keymaps
+    }
+
+    /// Read-only access to context-conditional keymaps for all modes.
+    pub fn context_keymaps(&self) -> &HashMap<ModeId, Vec<(WhenExpr, KeyTrie)>> {
+        &self.context_keymaps
+    }
+
+    /// Read-only access to mouse bindings for all modes.
+    pub fn mouse_bindings(&self) -> &HashMap<ModeId, MouseBindingTable> {
+        &self.mouse_bindings
+    }
+
+    /// Read-only access to scroll bindings for all modes.
+    pub fn scroll_bindings(&self) -> &HashMap<ModeId, ScrollBindingTable> {
+        &self.scroll_bindings
+    }
+
     pub fn is_recording_macro(&self) -> bool {
         self.macro_recorder.is_recording()
     }

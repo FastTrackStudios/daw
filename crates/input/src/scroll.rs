@@ -55,6 +55,11 @@ impl ScrollBindingTable {
         self.bindings.push((pattern, when, action));
     }
 
+    /// Read-only access to the raw binding entries.
+    pub fn bindings(&self) -> &[(ScrollPattern, WhenExpr, ActionId)] {
+        &self.bindings
+    }
+
     pub fn match_event(&self, event: &ScrollEvent, ctx: &ActionContext) -> Option<ActionId> {
         for (pattern, when, action) in &self.bindings {
             if pattern.matches(event) && when.evaluate(ctx) {

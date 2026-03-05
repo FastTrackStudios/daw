@@ -50,6 +50,11 @@ impl MouseBindingTable {
         self.bindings.push((pattern, when, action));
     }
 
+    /// Read-only access to the raw binding entries.
+    pub fn bindings(&self) -> &[(MousePattern, WhenExpr, ActionId)] {
+        &self.bindings
+    }
+
     pub fn match_event(&self, event: &MouseEvent, ctx: &ActionContext) -> Option<ActionId> {
         for (pattern, when, action) in &self.bindings {
             if pattern.matches(event) && when.evaluate(ctx) {
