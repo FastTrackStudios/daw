@@ -235,6 +235,58 @@ impl TempoMapService for StandaloneTempoMap {
         Self::get_active_time_signature(&state.tempo_points, seconds, state.default_time_sig)
     }
 
+    async fn time_to_qn(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        seconds: f64,
+    ) -> f64 {
+        let state = self.state.read().await;
+        let points = &state.tempo_points;
+        let mut total_qn = 0.0;
+        let mut prev_time = 0.0;
+        let mut prev_tempo = state.default_tempo;
+
+        for point in points {
+            let point_time = point.position_seconds();
+            if point_time >= seconds {
+                break;
+            }
+            let qn_in_segment = (point_time - prev_time) * prev_tempo / 60.0;
+            total_qn += qn_in_segment;
+            prev_time = point_time;
+            prev_tempo = point.bpm;
+        }
+
+        total_qn + (seconds - prev_time) * prev_tempo / 60.0
+    }
+
+    async fn qn_to_time(
+        &self,
+        _cx: &Context,
+        _project: ProjectContext,
+        qn: f64,
+    ) -> f64 {
+        let state = self.state.read().await;
+        let points = &state.tempo_points;
+        let mut total_qn = 0.0;
+        let mut prev_time = 0.0;
+        let mut prev_tempo = state.default_tempo;
+
+        for point in points {
+            let point_time = point.position_seconds();
+            let qn_at_point = total_qn + (point_time - prev_time) * prev_tempo / 60.0;
+            if qn_at_point >= qn {
+                break;
+            }
+            total_qn = qn_at_point;
+            prev_time = point_time;
+            prev_tempo = point.bpm;
+        }
+
+        prev_time + (qn - total_qn) * 60.0 / prev_tempo
+    }
+
     async fn time_to_musical(
         &self,
         _cx: &Context,

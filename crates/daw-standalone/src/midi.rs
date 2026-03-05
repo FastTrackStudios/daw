@@ -5,6 +5,7 @@ use daw_proto::midi::{
     MidiPitchBendCreate, MidiProgramChange, MidiService, MidiSysEx, MidiTakeLocation, PpqRange,
     QuantizeParams,
 };
+use daw_proto::track::TrackRef;
 use daw_proto::{ItemRef, ProjectContext, TakeRef};
 use roam::Context;
 use std::sync::Arc;
@@ -594,5 +595,28 @@ impl MidiService for StandaloneMidi {
 
     async fn get_sysex(&self, _cx: &Context, _location: MidiTakeLocation) -> Vec<MidiSysEx> {
         vec![]
+    }
+
+    async fn create_midi_item(
+        &self,
+        _cx: &Context,
+        project: ProjectContext,
+        track: TrackRef,
+        _start_seconds: f64,
+        _end_seconds: f64,
+    ) -> Option<MidiTakeLocation> {
+        let track_key = match &track {
+            TrackRef::Guid(guid) => format!("guid:{guid}"),
+            TrackRef::Index(index) => format!("index:{index}"),
+            TrackRef::Master => "master".to_string(),
+        };
+        let item_key = format!("midi-item:{track_key}:{}", self.takes.read().await.len());
+        let location = MidiTakeLocation {
+            project,
+            item: ItemRef::Guid(item_key),
+            take: TakeRef::Active,
+        };
+        self.get_or_create_take(&location).await;
+        Some(location)
     }
 }
