@@ -8,7 +8,9 @@
 //! thread for consistency and to ensure proper initialization.
 
 use crate::main_thread;
-use daw_proto::{AudioEngineService, AudioEngineState, AudioLatency};
+use daw_proto::{
+    AudioEngineService, AudioEngineState, AudioInputChannel, AudioInputInfo, AudioLatency,
+};
 use reaper_high::Reaper;
 use roam::Context;
 use tracing::debug;
@@ -99,6 +101,79 @@ impl AudioEngineService for ReaperAudioEngine {
         })
         .await
         .unwrap_or(false)
+    }
+
+    async fn get_audio_inputs(&self, _cx: &Context) -> AudioInputInfo {
+        debug!("ReaperAudioEngine: get_audio_inputs");
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            let low = medium.low();
+
+            // Get device name via GetAudioDeviceInfo("IDENT_IN")
+            let device_name = {
+                let mut buf = [0u8; 256];
+                let ok = unsafe {
+                    low.GetAudioDeviceInfo(
+                        c"IDENT_IN".as_ptr(),
+                        buf.as_mut_ptr() as *mut i8,
+                        buf.len() as i32,
+                    )
+                };
+                if ok {
+                    std::ffi::CStr::from_bytes_until_nul(&buf)
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                } else {
+                    String::new()
+                }
+            };
+
+            // Get number of audio inputs
+            let num_inputs = low.GetNumAudioInputs() as u32;
+
+            // Enumerate each channel name
+            let channels: Vec<AudioInputChannel> = (0..num_inputs)
+                .map(|i| {
+                    let name = medium.get_input_channel_name(i, |cstr| {
+                        cstr.map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| format!("Input {}", i + 1))
+                    });
+                    AudioInputChannel { index: i, name }
+                })
+                .collect();
+
+            debug!(
+                "Audio inputs: device='{}', {} channels",
+                device_name,
+                channels.len()
+            );
+
+            AudioInputInfo {
+                device_name,
+                channels,
+            }
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    async fn init(&self, _cx: &Context) {
+        debug!("ReaperAudioEngine: init (Audio_Init)");
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            reaper.medium_reaper().low().Audio_Init();
+        })
+        .await;
+    }
+
+    async fn quit(&self, _cx: &Context) {
+        debug!("ReaperAudioEngine: quit (Audio_Quit)");
+        main_thread::query(|| {
+            let reaper = Reaper::get();
+            reaper.medium_reaper().low().Audio_Quit();
+        })
+        .await;
     }
 }
 

@@ -33,6 +33,24 @@ pub struct AudioEngineState {
     pub latency: AudioLatency,
 }
 
+/// A single audio input channel on the current audio device.
+#[derive(Clone, Debug, Facet)]
+pub struct AudioInputChannel {
+    /// 0-based channel index (matches REAPER's I_RECINPUT for mono).
+    pub index: u32,
+    /// Human-readable name from the audio driver (e.g. "In 5 - Guitar").
+    pub name: String,
+}
+
+/// Summary of the current audio device's input capabilities.
+#[derive(Clone, Debug, Default, Facet)]
+pub struct AudioInputInfo {
+    /// Audio device identifier (e.g. "Galaxy 32").
+    pub device_name: String,
+    /// All available input channels.
+    pub channels: Vec<AudioInputChannel>,
+}
+
 /// Audio engine service for querying audio device state and latency
 ///
 /// This service provides read-only access to the audio engine's current state,
@@ -68,4 +86,24 @@ pub trait AudioEngineService {
     /// Returns true if audio is actively processing, false if stopped
     /// or in an error state.
     async fn is_running(&self) -> bool;
+
+    /// Enumerate available audio input channels on the current device.
+    ///
+    /// Returns the device name and a list of all input channels with their
+    /// driver-reported names. Returns an empty `AudioInputInfo` if no audio
+    /// device is open.
+    async fn get_audio_inputs(&self) -> AudioInputInfo;
+
+    /// Open all audio and MIDI devices.
+    ///
+    /// Calls the DAW's audio initialization routine. If devices are already
+    /// open this is a no-op in most DAWs. After calling this, `is_running()`
+    /// should return `true` (assuming a valid audio device is configured).
+    async fn init(&self);
+
+    /// Close all audio and MIDI devices.
+    ///
+    /// Shuts down the audio engine. After calling this, `is_running()` will
+    /// return `false` until `init()` is called again.
+    async fn quit(&self);
 }
