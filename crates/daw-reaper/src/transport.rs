@@ -512,18 +512,36 @@ impl TransportService for ReaperTransport {
 
     async fn set_position(&self, _cx: &Context, _project: ProjectContext, seconds: f64) {
         debug!("ReaperTransport: set_position to {} seconds", seconds);
-        main_thread::run(move || {
+        let _ = main_thread::query(move || {
             let reaper = Reaper::get();
-            if let Ok(pos) = PositionInSeconds::new(seconds) {
-                reaper.current_project().set_edit_cursor_position(
-                    pos,
-                    SetEditCurPosOptions {
-                        move_view: false,
-                        seek_play: true,
-                    },
-                );
+            match PositionInSeconds::new(seconds) {
+                Ok(pos) => {
+                    reaper.current_project().set_edit_cursor_position(
+                        pos,
+                        SetEditCurPosOptions {
+                            move_view: false,
+                            seek_play: true,
+                        },
+                    );
+                    let actual = reaper
+                        .current_project()
+                        .play_or_edit_cursor_position()
+                        .map(|p| p.get())
+                        .unwrap_or(f64::NAN);
+                    debug!(
+                        "ReaperTransport: set_position requested={:.3}, actual={:.3}",
+                        seconds, actual
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "ReaperTransport: set_position failed — PositionInSeconds::new({}) error: {:?}",
+                        seconds, e
+                    );
+                }
             }
-        });
+        })
+        .await;
     }
 
     async fn get_position(&self, _cx: &Context, _project: ProjectContext) -> f64 {
