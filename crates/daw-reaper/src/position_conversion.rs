@@ -3,6 +3,7 @@
 //! Uses REAPER's TimeMap APIs for accurate position conversions based on the
 //! project's tempo map and time signature changes.
 
+use crate::safe_wrappers::time_map as sw;
 use daw_proto::{
     MeasureMode, PositionConversionService, PositionInBeats, PositionInQuarterNotes,
     PositionInSeconds, ProjectContext, QuarterNotesToMeasureResult, TimeSignature,
@@ -54,48 +55,24 @@ impl PositionConversionService for ReaperPositionConversion {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let low = Reaper::get().medium_reaper().low();
+            let proj_ptr = proj.raw().as_ptr();
 
-            let mut measure_index: i32 = 0;
-            let mut beats_since_measure: i32 = 0;
-            let mut full_beats: f64 = 0.0;
-            let mut denom: i32 = 0;
-
-            let beats_frac = unsafe {
-                low.TimeMap2_timeToBeats(
-                    proj.raw().as_ptr(),
-                    time,
-                    &mut measure_index,
-                    &mut beats_since_measure,
-                    &mut full_beats,
-                    &mut denom,
-                )
-            };
+            let result = sw::time_to_beats(low, proj_ptr, time);
 
             // Apply measure mode
             let final_measure = match measure_mode {
                 MeasureMode::IgnoreMeasure => 0,
-                MeasureMode::FromMeasureAtIndex(idx) => idx - measure_index,
+                MeasureMode::FromMeasureAtIndex(idx) => idx - result.measure_index,
             };
 
             // Get time signature at this position
-            let mut num: i32 = 4;
-            let mut denom: i32 = 4;
-            let mut tempo: f64 = 120.0;
-            unsafe {
-                low.TimeMap_GetTimeSigAtTime(
-                    proj.raw().as_ptr(),
-                    time,
-                    &mut num,
-                    &mut denom,
-                    &mut tempo,
-                );
-            }
+            let ts = sw::get_time_sig_at_time(low, proj_ptr, time);
 
             Some(TimeToBeatsResult {
-                full_beats: PositionInBeats::from_beats(full_beats),
+                full_beats: PositionInBeats::from_beats(result.full_beats),
                 measure_index: final_measure,
-                beats_since_measure: PositionInBeats::from_beats(beats_frac),
-                time_signature: TimeSignature::new(num as u32, denom as u32),
+                beats_since_measure: PositionInBeats::from_beats(result.beats_frac),
+                time_signature: TimeSignature::new(ts.num as u32, ts.denom as u32),
             })
         })
         .await
@@ -115,41 +92,21 @@ impl PositionConversionService for ReaperPositionConversion {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let low = Reaper::get().medium_reaper().low();
+            let proj_ptr = proj.raw().as_ptr();
 
             // Adjust beats based on measure mode
             let adjusted_beats = match measure_mode {
                 MeasureMode::IgnoreMeasure => full_beats,
                 MeasureMode::FromMeasureAtIndex(measure_idx) => {
                     // Get the beat position at the start of this measure
-                    let measure_start_time = unsafe {
-                        low.TimeMap_GetMeasureInfo(
-                            proj.raw().as_ptr(),
-                            measure_idx,
-                            std::ptr::null_mut(), // qn_startOut
-                            std::ptr::null_mut(), // qn_endOut
-                            std::ptr::null_mut(), // timesig_numOut
-                            std::ptr::null_mut(), // timesig_denomOut
-                            std::ptr::null_mut(), // tempoOut
-                        )
-                    };
-                    let mut measure_start_beats = 0.0;
-                    unsafe {
-                        low.TimeMap2_timeToBeats(
-                            proj.raw().as_ptr(),
-                            measure_start_time,
-                            std::ptr::null_mut(),
-                            std::ptr::null_mut(),
-                            &mut measure_start_beats,
-                            std::ptr::null_mut(),
-                        );
-                    }
-                    measure_start_beats + full_beats
+                    let measure_start_time =
+                        sw::get_measure_info(low, proj_ptr, measure_idx);
+                    let tb = sw::time_to_beats(low, proj_ptr, measure_start_time);
+                    tb.full_beats + full_beats
                 }
             };
 
-            let time = unsafe {
-                low.TimeMap2_beatsToTime(proj.raw().as_ptr(), adjusted_beats, std::ptr::null())
-            };
+            let time = sw::beats_to_time(low, proj_ptr, adjusted_beats, std::ptr::null());
 
             Some(PositionInSeconds::from_seconds(time))
         })
@@ -169,44 +126,24 @@ impl PositionConversionService for ReaperPositionConversion {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let low = Reaper::get().medium_reaper().low();
+            let proj_ptr = proj.raw().as_ptr();
 
-            let qn_position = unsafe { low.TimeMap2_timeToQN(proj.raw().as_ptr(), time) };
+            let qn_position = sw::time_to_qn(low, proj_ptr, time);
 
             // Get measure info
-            let mut qn_measure_start: f64 = 0.0;
-            let mut qn_measure_end: f64 = 0.0;
-            let measure_index = unsafe {
-                low.TimeMap_QNToMeasures(
-                    proj.raw().as_ptr(),
-                    qn_position,
-                    &mut qn_measure_start,
-                    &mut qn_measure_end,
-                )
-            };
-
-            let qn_since_measure = qn_position - qn_measure_start;
+            let minfo = sw::qn_to_measures(low, proj_ptr, qn_position);
+            let qn_since_measure = qn_position - minfo.qn_start;
 
             // Get time signature
-            let mut num: i32 = 4;
-            let mut denom: i32 = 4;
-            let mut tempo: f64 = 120.0;
-            unsafe {
-                low.TimeMap_GetTimeSigAtTime(
-                    proj.raw().as_ptr(),
-                    time,
-                    &mut num,
-                    &mut denom,
-                    &mut tempo,
-                );
-            }
+            let ts = sw::get_time_sig_at_time(low, proj_ptr, time);
 
             Some(TimeToQuarterNotesResult {
                 quarter_notes: PositionInQuarterNotes::from_quarter_notes(qn_position),
-                measure_index,
+                measure_index: minfo.measure_index,
                 quarter_notes_since_measure: PositionInQuarterNotes::from_quarter_notes(
                     qn_since_measure,
                 ),
-                time_signature: TimeSignature::new(num as u32, denom as u32),
+                time_signature: TimeSignature::new(ts.num as u32, ts.denom as u32),
             })
         })
         .await
@@ -226,7 +163,7 @@ impl PositionConversionService for ReaperPositionConversion {
             let proj = resolve_project(&project)?;
             let low = Reaper::get().medium_reaper().low();
 
-            let time = unsafe { low.TimeMap2_QNToTime(proj.raw().as_ptr(), qn) };
+            let time = sw::qn_to_time(low, proj.raw().as_ptr(), qn);
 
             Some(PositionInSeconds::from_seconds(time))
         })
@@ -246,39 +183,19 @@ impl PositionConversionService for ReaperPositionConversion {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let low = Reaper::get().medium_reaper().low();
+            let proj_ptr = proj.raw().as_ptr();
 
-            let mut qn_measure_start: f64 = 0.0;
-            let mut qn_measure_end: f64 = 0.0;
-
-            let measure_index = unsafe {
-                low.TimeMap_QNToMeasures(
-                    proj.raw().as_ptr(),
-                    qn,
-                    &mut qn_measure_start,
-                    &mut qn_measure_end,
-                )
-            };
+            let minfo = sw::qn_to_measures(low, proj_ptr, qn);
 
             // Get time signature at this position
-            let time = unsafe { low.TimeMap2_QNToTime(proj.raw().as_ptr(), qn) };
-            let mut num: i32 = 4;
-            let mut denom: i32 = 4;
-            let mut tempo: f64 = 120.0;
-            unsafe {
-                low.TimeMap_GetTimeSigAtTime(
-                    proj.raw().as_ptr(),
-                    time,
-                    &mut num,
-                    &mut denom,
-                    &mut tempo,
-                );
-            }
+            let time = sw::qn_to_time(low, proj_ptr, qn);
+            let ts = sw::get_time_sig_at_time(low, proj_ptr, time);
 
             Some(QuarterNotesToMeasureResult {
-                measure_index,
-                start: PositionInQuarterNotes::from_quarter_notes(qn_measure_start),
-                end: PositionInQuarterNotes::from_quarter_notes(qn_measure_end),
-                time_signature: TimeSignature::new(num as u32, denom as u32),
+                measure_index: minfo.measure_index,
+                start: PositionInQuarterNotes::from_quarter_notes(minfo.qn_start),
+                end: PositionInQuarterNotes::from_quarter_notes(minfo.qn_end),
+                time_signature: TimeSignature::new(ts.num as u32, ts.denom as u32),
             })
         })
         .await

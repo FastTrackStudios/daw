@@ -4,6 +4,8 @@
 //! Uses low-level REAPER APIs via medium_reaper().low() for tempo marker access.
 
 use crate::main_thread;
+use crate::safe_wrappers::tempo as sw;
+use crate::safe_wrappers::time_map as tw;
 use daw_proto::{
     Position, ProjectContext, TempoMapService, TempoPoint, TimePosition, TimeSignature,
 };
@@ -22,7 +24,7 @@ use tracing::debug;
 /// Must be called from the main thread.
 pub fn time_to_qn_on_main_thread(seconds: f64) -> f64 {
     let low = Reaper::get().medium_reaper().low();
-    unsafe { low.TimeMap2_timeToQN(null_mut(), seconds) }
+    tw::time_to_qn(low, null_mut(), seconds)
 }
 
 /// Convert a quarter-note position to time position (seconds).
@@ -30,7 +32,7 @@ pub fn time_to_qn_on_main_thread(seconds: f64) -> f64 {
 /// Must be called from the main thread.
 pub fn qn_to_time_on_main_thread(qn: f64) -> f64 {
     let low = Reaper::get().medium_reaper().low();
-    low.TimeMap_QNToTime(qn)
+    tw::qn_to_time_current(low, qn)
 }
 
 /// Get the tempo (BPM) and time signature (numerator, denominator) at a given
@@ -39,19 +41,8 @@ pub fn qn_to_time_on_main_thread(qn: f64) -> f64 {
 /// Must be called from the main thread.
 pub fn get_tempo_and_time_sig_at_on_main_thread(seconds: f64) -> (f64, i32, i32) {
     let low = Reaper::get().medium_reaper().low();
-    let mut num: i32 = 4;
-    let mut denom: i32 = 4;
-    let mut tempo: f64 = 120.0;
-    unsafe {
-        low.TimeMap_GetTimeSigAtTime(
-            null_mut(),
-            seconds,
-            &mut num,
-            &mut denom,
-            &mut tempo,
-        );
-    }
-    (tempo, num, denom)
+    let ts = tw::get_time_sig_at_time(low, null_mut(), seconds);
+    (ts.tempo, ts.num, ts.denom)
 }
 
 /// REAPER tempo map implementation.
@@ -73,6 +64,25 @@ impl Default for ReaperTempoMap {
     }
 }
 
+/// Convert a `TempoMarkerRaw` to a `TempoPoint`.
+fn marker_to_point(m: &sw::TempoMarkerRaw) -> TempoPoint {
+    let time_sig = if m.timesig_num > 0 && m.timesig_denom > 0 {
+        Some(TimeSignature::new(m.timesig_num as u32, m.timesig_denom as u32))
+    } else {
+        None
+    };
+
+    TempoPoint {
+        position: Position::from_time(TimePosition::from_seconds(m.timepos)),
+        bpm: m.bpm,
+        time_signature: time_sig,
+        shape: None,
+        bezier_tension: None,
+        selected: None,
+        linear: Some(m.lineartempo),
+    }
+}
+
 impl TempoMapService for ReaperTempoMap {
     // =========================================================================
     // Query Methods
@@ -88,44 +98,8 @@ impl TempoMapService for ReaperTempoMap {
             let mut points = Vec::with_capacity(count as usize);
 
             for i in 0..count {
-                let mut timepos: f64 = 0.0;
-                let mut measurepos: i32 = 0;
-                let mut beatpos: f64 = 0.0;
-                let mut bpm: f64 = 120.0;
-                let mut timesig_num: i32 = 0;
-                let mut timesig_denom: i32 = 0;
-                let mut lineartempo: bool = false;
-
-                let exists = unsafe {
-                    low.GetTempoTimeSigMarker(
-                        null_mut(), // current project
-                        i as i32,
-                        &mut timepos,
-                        &mut measurepos,
-                        &mut beatpos,
-                        &mut bpm,
-                        &mut timesig_num,
-                        &mut timesig_denom,
-                        &mut lineartempo,
-                    )
-                };
-
-                if exists {
-                    let time_sig = if timesig_num > 0 && timesig_denom > 0 {
-                        Some(TimeSignature::new(timesig_num as u32, timesig_denom as u32))
-                    } else {
-                        None
-                    };
-
-                    points.push(TempoPoint {
-                        position: Position::from_time(TimePosition::from_seconds(timepos)),
-                        bpm,
-                        time_signature: time_sig,
-                        shape: None,
-                        bezier_tension: None,
-                        selected: None,
-                        linear: Some(lineartempo),
-                    });
+                if let Some(m) = sw::get_tempo_marker(low, null_mut(), i as i32) {
+                    points.push(marker_to_point(&m));
                 }
             }
 
@@ -142,50 +116,8 @@ impl TempoMapService for ReaperTempoMap {
         index: u32,
     ) -> Option<TempoPoint> {
         main_thread::query(move || {
-            let reaper = Reaper::get();
-            let low = reaper.medium_reaper().low();
-
-            let mut timepos: f64 = 0.0;
-            let mut measurepos: i32 = 0;
-            let mut beatpos: f64 = 0.0;
-            let mut bpm: f64 = 120.0;
-            let mut timesig_num: i32 = 0;
-            let mut timesig_denom: i32 = 0;
-            let mut lineartempo: bool = false;
-
-            let exists = unsafe {
-                low.GetTempoTimeSigMarker(
-                    null_mut(),
-                    index as i32,
-                    &mut timepos,
-                    &mut measurepos,
-                    &mut beatpos,
-                    &mut bpm,
-                    &mut timesig_num,
-                    &mut timesig_denom,
-                    &mut lineartempo,
-                )
-            };
-
-            if exists {
-                let time_sig = if timesig_num > 0 && timesig_denom > 0 {
-                    Some(TimeSignature::new(timesig_num as u32, timesig_denom as u32))
-                } else {
-                    None
-                };
-
-                Some(TempoPoint {
-                    position: Position::from_time(TimePosition::from_seconds(timepos)),
-                    bpm,
-                    time_signature: time_sig,
-                    shape: None,
-                    bezier_tension: None,
-                    selected: None,
-                    linear: Some(lineartempo),
-                })
-            } else {
-                None
-            }
+            let low = Reaper::get().medium_reaper().low();
+            sw::get_tempo_marker(low, null_mut(), index as i32).map(|m| marker_to_point(&m))
         })
         .await
         .unwrap_or(None)
@@ -332,23 +264,20 @@ impl TempoMapService for ReaperTempoMap {
             let reaper = Reaper::get();
             let low = reaper.medium_reaper().low();
 
-            // -1 means add new marker
-            let result = unsafe {
-                low.SetTempoTimeSigMarker(
-                    null_mut(), // current project
-                    -1,         // -1 = add new
-                    seconds,
-                    -1,   // measurepos (-1 = auto)
-                    -1.0, // beatpos (-1 = auto)
-                    bpm,
-                    0,     // timesig_num (0 = don't change)
-                    0,     // timesig_denom (0 = don't change)
-                    false, // lineartempo
-                )
-            };
+            let result = sw::set_tempo_marker(
+                low,
+                null_mut(),
+                -1,         // add new
+                seconds,
+                -1,         // measurepos (auto)
+                -1.0,       // beatpos (auto)
+                bpm,
+                0,          // timesig_num (don't change)
+                0,          // timesig_denom (don't change)
+                false,      // lineartempo
+            );
 
             if result {
-                // Return the new marker count - 1 as the index
                 let count = reaper
                     .medium_reaper()
                     .count_tempo_time_sig_markers(ReaperProjectContext::CurrentProject);
@@ -364,12 +293,8 @@ impl TempoMapService for ReaperTempoMap {
     async fn remove_tempo_point(&self, _cx: &Context, _project: ProjectContext, index: u32) {
         debug!("ReaperTempoMap: remove_tempo_point at index {}", index);
         main_thread::run(move || {
-            let reaper = Reaper::get();
-            let low = reaper.medium_reaper().low();
-
-            unsafe {
-                low.DeleteTempoTimeSigMarker(null_mut(), index as i32);
-            }
+            let low = Reaper::get().medium_reaper().low();
+            sw::delete_tempo_marker(low, null_mut(), index as i32);
         });
     }
 
@@ -385,46 +310,21 @@ impl TempoMapService for ReaperTempoMap {
             index, bpm
         );
         main_thread::run(move || {
-            let reaper = Reaper::get();
-            let low = reaper.medium_reaper().low();
+            let low = Reaper::get().medium_reaper().low();
 
-            // First get existing marker info
-            let mut timepos: f64 = 0.0;
-            let mut measurepos: i32 = 0;
-            let mut beatpos: f64 = 0.0;
-            let mut _old_bpm: f64 = 120.0;
-            let mut timesig_num: i32 = 0;
-            let mut timesig_denom: i32 = 0;
-            let mut lineartempo: bool = false;
-
-            let exists = unsafe {
-                low.GetTempoTimeSigMarker(
+            if let Some(m) = sw::get_tempo_marker(low, null_mut(), index as i32) {
+                sw::set_tempo_marker(
+                    low,
                     null_mut(),
                     index as i32,
-                    &mut timepos,
-                    &mut measurepos,
-                    &mut beatpos,
-                    &mut _old_bpm,
-                    &mut timesig_num,
-                    &mut timesig_denom,
-                    &mut lineartempo,
-                )
-            };
-
-            if exists {
-                unsafe {
-                    low.SetTempoTimeSigMarker(
-                        null_mut(),
-                        index as i32,
-                        timepos,
-                        measurepos,
-                        beatpos,
-                        bpm,
-                        timesig_num,
-                        timesig_denom,
-                        lineartempo,
-                    );
-                }
+                    m.timepos,
+                    m.measurepos,
+                    m.beatpos,
+                    bpm,
+                    m.timesig_num,
+                    m.timesig_denom,
+                    m.lineartempo,
+                );
             }
         });
     }
@@ -442,46 +342,21 @@ impl TempoMapService for ReaperTempoMap {
             index, numerator, denominator
         );
         main_thread::run(move || {
-            let reaper = Reaper::get();
-            let low = reaper.medium_reaper().low();
+            let low = Reaper::get().medium_reaper().low();
 
-            // First get existing marker info
-            let mut timepos: f64 = 0.0;
-            let mut measurepos: i32 = 0;
-            let mut beatpos: f64 = 0.0;
-            let mut bpm: f64 = 120.0;
-            let mut _timesig_num: i32 = 0;
-            let mut _timesig_denom: i32 = 0;
-            let mut lineartempo: bool = false;
-
-            let exists = unsafe {
-                low.GetTempoTimeSigMarker(
+            if let Some(m) = sw::get_tempo_marker(low, null_mut(), index as i32) {
+                sw::set_tempo_marker(
+                    low,
                     null_mut(),
                     index as i32,
-                    &mut timepos,
-                    &mut measurepos,
-                    &mut beatpos,
-                    &mut bpm,
-                    &mut _timesig_num,
-                    &mut _timesig_denom,
-                    &mut lineartempo,
-                )
-            };
-
-            if exists {
-                unsafe {
-                    low.SetTempoTimeSigMarker(
-                        null_mut(),
-                        index as i32,
-                        timepos,
-                        measurepos,
-                        beatpos,
-                        bpm,
-                        numerator,
-                        denominator,
-                        lineartempo,
-                    );
-                }
+                    m.timepos,
+                    m.measurepos,
+                    m.beatpos,
+                    m.bpm,
+                    numerator,
+                    denominator,
+                    m.lineartempo,
+                );
             }
         });
     }
@@ -498,46 +373,21 @@ impl TempoMapService for ReaperTempoMap {
             index, seconds
         );
         main_thread::run(move || {
-            let reaper = Reaper::get();
-            let low = reaper.medium_reaper().low();
+            let low = Reaper::get().medium_reaper().low();
 
-            // First get existing marker info
-            let mut _timepos: f64 = 0.0;
-            let mut measurepos: i32 = 0;
-            let mut beatpos: f64 = 0.0;
-            let mut bpm: f64 = 120.0;
-            let mut timesig_num: i32 = 0;
-            let mut timesig_denom: i32 = 0;
-            let mut lineartempo: bool = false;
-
-            let exists = unsafe {
-                low.GetTempoTimeSigMarker(
+            if let Some(m) = sw::get_tempo_marker(low, null_mut(), index as i32) {
+                sw::set_tempo_marker(
+                    low,
                     null_mut(),
                     index as i32,
-                    &mut _timepos,
-                    &mut measurepos,
-                    &mut beatpos,
-                    &mut bpm,
-                    &mut timesig_num,
-                    &mut timesig_denom,
-                    &mut lineartempo,
-                )
-            };
-
-            if exists {
-                unsafe {
-                    low.SetTempoTimeSigMarker(
-                        null_mut(),
-                        index as i32,
-                        seconds, // new position
-                        -1,      // auto measure
-                        -1.0,    // auto beat
-                        bpm,
-                        timesig_num,
-                        timesig_denom,
-                        lineartempo,
-                    );
-                }
+                    seconds,    // new position
+                    -1,         // auto measure
+                    -1.0,       // auto beat
+                    m.bpm,
+                    m.timesig_num,
+                    m.timesig_denom,
+                    m.lineartempo,
+                );
             }
         });
     }
@@ -613,63 +463,41 @@ impl TempoMapService for ReaperTempoMap {
 
             let mut found_at_zero = false;
             for i in 0..count {
-                let mut timepos: f64 = 0.0;
-                let mut measurepos: i32 = 0;
-                let mut beatpos: f64 = 0.0;
-                let mut marker_bpm: f64 = 120.0;
-                let mut timesig_num: i32 = 0;
-                let mut timesig_denom: i32 = 0;
-                let mut lineartempo: bool = false;
-
-                let exists = unsafe {
-                    low.GetTempoTimeSigMarker(
-                        null_mut(),
-                        i as i32,
-                        &mut timepos,
-                        &mut measurepos,
-                        &mut beatpos,
-                        &mut marker_bpm,
-                        &mut timesig_num,
-                        &mut timesig_denom,
-                        &mut lineartempo,
-                    )
-                };
-
-                if exists && timepos < 0.001 {
-                    // Update existing marker at position 0
-                    unsafe {
-                        low.SetTempoTimeSigMarker(
+                if let Some(m) = sw::get_tempo_marker(low, null_mut(), i as i32) {
+                    if m.timepos < 0.001 {
+                        // Update existing marker at position 0
+                        sw::set_tempo_marker(
+                            low,
                             null_mut(),
                             i as i32,
                             0.0,
                             0,
                             0.0,
-                            marker_bpm,
+                            m.bpm,
                             numerator,
                             denominator,
-                            lineartempo,
+                            m.lineartempo,
                         );
+                        found_at_zero = true;
+                        break;
                     }
-                    found_at_zero = true;
-                    break;
                 }
             }
 
             if !found_at_zero {
                 // Add new marker at position 0
-                unsafe {
-                    low.SetTempoTimeSigMarker(
-                        null_mut(),
-                        -1, // add new
-                        0.0,
-                        0,
-                        0.0,
-                        bpm,
-                        numerator,
-                        denominator,
-                        false,
-                    );
-                }
+                sw::set_tempo_marker(
+                    low,
+                    null_mut(),
+                    -1, // add new
+                    0.0,
+                    0,
+                    0.0,
+                    bpm,
+                    numerator,
+                    denominator,
+                    false,
+                );
             }
         });
     }

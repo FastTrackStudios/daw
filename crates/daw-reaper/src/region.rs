@@ -5,6 +5,7 @@
 
 use crate::main_thread;
 use crate::project_context::resolve_project_context;
+use crate::safe_wrappers::markers as sw;
 use daw_proto::{ProjectContext, Region, RegionEvent, RegionService, TimeRange};
 use reaper_medium::{
     MarkerOrRegionPosition, PositionInSeconds, ProjectContext as ReaperProjectContext,
@@ -207,15 +208,13 @@ impl RegionService for ReaperRegion {
     async fn remove_region(&self, _cx: &Context, _project: ProjectContext, id: u32) {
         debug!("ReaperRegion: remove_region {}", id);
         main_thread::run(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            unsafe {
-                medium.low().DeleteProjectMarker(
-                    ReaperProjectContext::CurrentProject.to_raw(),
-                    id as i32,
-                    true, // is a region
-                );
-            }
+            let low = reaper_high::Reaper::get().medium_reaper().low();
+            sw::delete_project_marker(
+                low,
+                ReaperProjectContext::CurrentProject.to_raw(),
+                id as i32,
+                true, // is a region
+            );
         });
     }
 
@@ -232,31 +231,24 @@ impl RegionService for ReaperRegion {
             id, start, end
         );
         main_thread::run(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            unsafe {
-                medium.low().SetProjectMarker(
-                    id as i32,
-                    true, // is a region
-                    start,
-                    end,
-                    std::ptr::null(),
-                );
-            }
+            let low = reaper_high::Reaper::get().medium_reaper().low();
+            sw::set_project_marker(
+                low,
+                id as i32,
+                true, // is a region
+                start,
+                end,
+                std::ptr::null(),
+            );
         });
     }
 
     async fn rename_region(&self, _cx: &Context, _project: ProjectContext, id: u32, name: String) {
         debug!("ReaperRegion: rename_region {} to '{}'", id, name);
         main_thread::run(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
+            let low = reaper_high::Reaper::get().medium_reaper().low();
             if let Ok(cname) = CString::new(name) {
-                unsafe {
-                    medium
-                        .low()
-                        .SetProjectMarker(id as i32, true, -1.0, -1.0, cname.as_ptr());
-                }
+                sw::set_project_marker(low, id as i32, true, -1.0, -1.0, cname.as_ptr());
             }
         });
     }
@@ -264,21 +256,19 @@ impl RegionService for ReaperRegion {
     async fn set_region_color(&self, _cx: &Context, _project: ProjectContext, id: u32, color: u32) {
         debug!("ReaperRegion: set_region_color {} to {}", id, color);
         main_thread::run(move || {
-            let reaper = reaper_high::Reaper::get();
-            let medium = reaper.medium_reaper();
-            unsafe {
-                medium.low().SetProjectMarkerByIndex2(
-                    ReaperProjectContext::CurrentProject.to_raw(),
-                    id as i32,
-                    true, // is a region
-                    -1.0,
-                    -1.0,
-                    -1,
-                    std::ptr::null(),
-                    color as i32,
-                    0,
-                );
-            }
+            let low = reaper_high::Reaper::get().medium_reaper().low();
+            sw::set_project_marker_by_index2(
+                low,
+                ReaperProjectContext::CurrentProject.to_raw(),
+                id as i32,
+                true, // is a region
+                -1.0,
+                -1.0,
+                -1,
+                std::ptr::null(),
+                color as i32,
+                0,
+            );
         });
     }
 

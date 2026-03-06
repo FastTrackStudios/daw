@@ -5,8 +5,9 @@
 //! reaper-rs bindings (the pinned reaper-rs version doesn't expose ext state
 //! in the medium/high layers).
 
-use std::ffi::{CStr, CString};
+use std::ffi::CString;
 
+use crate::safe_wrappers::ext_state as sw;
 use crate::{main_thread, project_context::resolve_project_context};
 use daw_proto::{ExtStateService, ProjectContext};
 use reaper_high::Reaper;
@@ -40,21 +41,7 @@ impl ExtStateService for ReaperExtState {
             let section_c = CString::new(section).ok()?;
             let key_c = CString::new(key).ok()?;
             let low = Reaper::get().medium_reaper().low();
-
-            // Safety: CString args are valid NUL-terminated pointers, and we're
-            // on the main thread. GetExtState returns a pointer to REAPER-owned
-            // memory that remains valid until the next SetExtState/DeleteExtState
-            // call for this section+key — we immediately copy it into a String.
-            let ptr = unsafe { low.GetExtState(section_c.as_ptr(), key_c.as_ptr()) };
-
-            if ptr.is_null() {
-                return None;
-            }
-
-            let value = unsafe { CStr::from_ptr(ptr) }
-                .to_string_lossy()
-                .into_owned();
-            if value.is_empty() { None } else { Some(value) }
+            sw::get_ext_state(low, &section_c, &key_c)
         })
         .await
         .flatten()
@@ -84,16 +71,7 @@ impl ExtStateService for ReaperExtState {
                 return;
             };
             let low = Reaper::get().medium_reaper().low();
-
-            // Safety: all CString args are valid NUL-terminated pointers, main thread.
-            unsafe {
-                low.SetExtState(
-                    section_c.as_ptr(),
-                    key_c.as_ptr(),
-                    value_c.as_ptr(),
-                    persist,
-                );
-            }
+            sw::set_ext_state(low, &section_c, &key_c, &value_c, persist);
         });
     }
 
@@ -111,11 +89,7 @@ impl ExtStateService for ReaperExtState {
                 return;
             };
             let low = Reaper::get().medium_reaper().low();
-
-            // Safety: CString args are valid NUL-terminated pointers, main thread.
-            unsafe {
-                low.DeleteExtState(section_c.as_ptr(), key_c.as_ptr(), persist);
-            }
+            sw::delete_ext_state(low, &section_c, &key_c, persist);
         });
     }
 
@@ -126,9 +100,7 @@ impl ExtStateService for ReaperExtState {
             let section_c = CString::new(section).ok()?;
             let key_c = CString::new(key).ok()?;
             let low = Reaper::get().medium_reaper().low();
-
-            // Safety: CString args are valid NUL-terminated pointers, main thread.
-            Some(unsafe { low.HasExtState(section_c.as_ptr(), key_c.as_ptr()) })
+            Some(sw::has_ext_state(low, &section_c, &key_c))
         })
         .await
         .flatten()
@@ -154,26 +126,7 @@ impl ExtStateService for ReaperExtState {
             let key_c = CString::new(key).ok()?;
             let low = Reaper::get().medium_reaper().low();
             let proj_ctx = resolve_project_context(&project);
-
-            let mut buf = vec![0u8; 4096]; // Buffer for the value
-            let len_read = unsafe {
-                low.GetProjExtState(
-                    proj_ctx.to_raw(),
-                    section_c.as_ptr(),
-                    key_c.as_ptr(),
-                    buf.as_mut_ptr() as *mut i8,
-                    buf.len() as i32,
-                )
-            };
-
-            if len_read <= 0 {
-                return None;
-            }
-
-            // Find actual length (null-terminated)
-            let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
-            let value = String::from_utf8_lossy(&buf[..len]).into_owned();
-            if value.is_empty() { None } else { Some(value) }
+            sw::get_proj_ext_state(low, proj_ctx.to_raw(), &section_c, &key_c, 4096)
         })
         .await
         .flatten()
@@ -204,15 +157,7 @@ impl ExtStateService for ReaperExtState {
             };
             let low = Reaper::get().medium_reaper().low();
             let proj_ctx = resolve_project_context(&project);
-
-            unsafe {
-                low.SetProjExtState(
-                    proj_ctx.to_raw(),
-                    section_c.as_ptr(),
-                    key_c.as_ptr(),
-                    value_c.as_ptr(),
-                );
-            }
+            sw::set_proj_ext_state(low, proj_ctx.to_raw(), &section_c, &key_c, &value_c);
         });
     }
 

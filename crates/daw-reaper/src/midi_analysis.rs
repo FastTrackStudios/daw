@@ -2,6 +2,9 @@
 
 use crate::main_thread;
 use crate::project_context::find_project_by_guid;
+use crate::safe_wrappers::markers as markers_sw;
+use crate::safe_wrappers::midi as midi_sw;
+use crate::safe_wrappers::time_map as time_sw;
 use daw_proto::{
     MidiAnalysisService, MidiChartData, MidiChartRequest, MidiDetectedChord, ProjectContext,
 };
@@ -14,7 +17,6 @@ use reaper_high::{Project, Reaper, Track};
 use reaper_medium::MediaItemTake;
 use roam::Context;
 use std::collections::hash_map::DefaultHasher;
-use std::ffi::CStr;
 use std::hash::{Hash, Hasher};
 
 const REAPER_PPQ: u32 = 960;
@@ -57,64 +59,38 @@ impl ReaperMidiAnalysis {
 
         for item in track.items() {
             let raw_item = item.raw();
-            let take = unsafe { medium.get_active_take(raw_item) }?;
-            let is_midi = unsafe { low.TakeIsMIDI(take.as_ptr()) };
-            if !is_midi {
+            let take = crate::safe_wrappers::item::get_active_take(medium, raw_item)?;
+            if !midi_sw::take_is_midi(low, take) {
                 continue;
             }
-            let item_start_time =
-                unsafe { low.GetMediaItemInfo_Value(raw_item.as_ptr(), c"D_POSITION".as_ptr()) };
+            let item_start_time = crate::safe_wrappers::item::get_media_item_info_value(
+                low,
+                raw_item.as_ptr(),
+                c"D_POSITION".as_ptr(),
+            );
             return Some((take, item_start_time));
         }
         None
     }
 
     fn read_keyflow_notes(take: MediaItemTake) -> Vec<KeyflowMidiNote> {
-        let reaper = Reaper::get();
-        let low = reaper.medium_reaper().low();
-        let mut note_count: i32 = 0;
-        let mut cc_count: i32 = 0;
-        let mut text_sysex_count: i32 = 0;
-        unsafe {
-            low.MIDI_CountEvts(
-                take.as_ptr(),
-                &mut note_count,
-                &mut cc_count,
-                &mut text_sysex_count,
-            );
-        }
+        let low = Reaper::get().medium_reaper().low();
+        let counts = midi_sw::count_events(low, take);
 
-        let mut notes = Vec::with_capacity(note_count.max(0) as usize);
-        for i in 0..note_count {
-            let mut selected = false;
-            let mut muted = false;
-            let mut start_ppq = 0.0;
-            let mut end_ppq = 0.0;
-            let mut channel = 0;
-            let mut pitch = 0;
-            let mut velocity = 0;
-            let ok = unsafe {
-                low.MIDI_GetNote(
-                    take.as_ptr(),
-                    i,
-                    &mut selected,
-                    &mut muted,
-                    &mut start_ppq,
-                    &mut end_ppq,
-                    &mut channel,
-                    &mut pitch,
-                    &mut velocity,
-                )
+        let mut notes = Vec::with_capacity(counts.notes.max(0) as usize);
+        for i in 0..counts.notes {
+            let Some(n) = midi_sw::get_note(low, take, i) else {
+                continue;
             };
-            if !ok || muted {
+            if n.muted {
                 continue;
             }
             notes.push(KeyflowMidiNote::new(
-                pitch as u8,
-                start_ppq.round() as i64,
-                end_ppq.round() as i64,
-                channel as u8,
-                velocity as u8,
+                n.pitch as u8,
+                n.start_ppq.round() as i64,
+                n.end_ppq.round() as i64,
+                n.channel as u8,
+                n.velocity as u8,
             ));
         }
         notes
@@ -122,21 +98,8 @@ impl ReaperMidiAnalysis {
 
     fn get_beats_at_time(project: Project, time_seconds: f64) -> f64 {
         let low = Reaper::get().medium_reaper().low();
-        let mut measures = 0;
-        let mut cml = 0;
-        let mut fullbeats = 0.0;
-        let mut cdenom = 0;
-        unsafe {
-            low.TimeMap2_timeToBeats(
-                project.context().to_raw(),
-                time_seconds,
-                &mut measures,
-                &mut cml,
-                &mut fullbeats,
-                &mut cdenom,
-            );
-        }
-        fullbeats
+        let result = time_sw::time_to_beats(low, project.context().to_raw(), time_seconds);
+        result.full_beats
     }
 
     fn time_to_tick(project: Project, time_seconds: f64) -> u32 {
@@ -149,37 +112,16 @@ impl ReaperMidiAnalysis {
         let mut markers = Vec::new();
         let mut idx = 0;
         loop {
-            let mut is_region = false;
-            let mut pos = 0.0;
-            let mut end = 0.0;
-            let mut name_ptr: *const std::os::raw::c_char = std::ptr::null();
-            let mut marker_idx = 0;
-            let result = unsafe {
-                low.EnumProjectMarkers(
-                    idx,
-                    &mut is_region,
-                    &mut pos,
-                    &mut end,
-                    &mut name_ptr,
-                    &mut marker_idx,
-                )
-            };
-            if result == 0 {
+            let Some(result) = markers_sw::enum_project_markers(low, idx) else {
                 break;
-            }
+            };
             idx += 1;
-            if name_ptr.is_null() {
-                continue;
-            }
-            let name = unsafe { CStr::from_ptr(name_ptr) }
-                .to_string_lossy()
-                .to_string();
-            if name.is_empty() {
+            if result.name.is_empty() {
                 continue;
             }
             markers.push(MarkerEvent {
-                tick: Self::time_to_tick(project, pos),
-                text: name,
+                tick: Self::time_to_tick(project, result.pos),
+                text: result.name,
                 marker_type: MarkerType::Marker,
             });
         }

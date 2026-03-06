@@ -3,6 +3,9 @@
 //! Implements RoutingService for REAPER by dispatching operations to the main thread
 //! using `crate::main_thread`.
 
+use crate::main_thread;
+use crate::project_context::find_project_by_guid;
+use crate::safe_wrappers::routing as routing_sw;
 use daw_proto::{
     AutomationMode, ChannelMapping, ProjectContext, RouteLocation, RouteRef, RouteType,
     RoutingService, SendMode, TrackRef, TrackRoute,
@@ -13,9 +16,6 @@ use reaper_medium::{
 };
 use roam::Context;
 use tracing::{debug, warn};
-
-use crate::main_thread;
-use crate::project_context::find_project_by_guid;
 
 /// REAPER routing implementation that dispatches to the main thread via `main_thread`.
 #[derive(Clone)]
@@ -211,14 +211,13 @@ fn read_send_mode(reaper_route: &ReaperTrackRoute, route_type: RouteType) -> Sen
         return SendMode::PostFader;
     };
 
-    let raw_mode = unsafe {
-        Reaper::get().medium_reaper().get_track_send_info_value(
-            media_track,
-            category,
-            cat_index,
-            TrackSendAttributeKey::SendMode,
-        )
-    } as i32;
+    let raw_mode = routing_sw::get_track_send_info_value(
+        Reaper::get().medium_reaper(),
+        media_track,
+        category,
+        cat_index,
+        TrackSendAttributeKey::SendMode,
+    ) as i32;
 
     match raw_mode {
         1 => SendMode::PreFx,
@@ -412,26 +411,20 @@ impl RoutingService for ReaperRouting {
             let raw_track = reaper_track.raw().ok()?;
 
             // CreateTrackSend with HardwareOutput target creates a hardware output
-            let result = unsafe {
-                Reaper::get()
-                    .medium_reaper()
-                    .create_track_send(raw_track, SendTarget::HardwareOutput)
-            };
-
-            match result {
+            let medium = Reaper::get().medium_reaper();
+            match routing_sw::create_track_send(medium, raw_track, SendTarget::HardwareOutput) {
                 Ok(index) => {
                     // Set the destination channel for the hardware output
                     // hw_output is typically the stereo pair index (0 = 1-2, 1 = 3-4, etc.)
-                    let dst_chan = (hw_output * 2) as f64; // Convert to channel index
-                    unsafe {
-                        let _ = Reaper::get().medium_reaper().set_track_send_info_value(
-                            raw_track,
-                            TrackSendCategory::HardwareOutput,
-                            index,
-                            TrackSendAttributeKey::DstChan,
-                            dst_chan,
-                        );
-                    }
+                    let dst_chan = (hw_output * 2) as f64;
+                    routing_sw::set_track_send_info_value(
+                        medium,
+                        raw_track,
+                        TrackSendCategory::HardwareOutput,
+                        index,
+                        TrackSendAttributeKey::DstChan,
+                        dst_chan,
+                    );
                     Some(index)
                 }
                 Err(e) => {
@@ -478,13 +471,12 @@ impl RoutingService for ReaperRouting {
                 RouteType::HardwareOutput => (TrackSendCategory::HardwareOutput, route_index),
             };
 
-            unsafe {
-                let _ = Reaper::get().medium_reaper().remove_track_send(
-                    raw_track,
-                    category,
-                    actual_index,
-                );
-            }
+            routing_sw::remove_track_send(
+                Reaper::get().medium_reaper(),
+                raw_track,
+                category,
+                actual_index,
+            );
         });
     }
 
@@ -802,15 +794,14 @@ impl RoutingService for ReaperRouting {
                 (TrackSendCategory::Send, route_index - hw_count)
             };
 
-            unsafe {
-                let _ = Reaper::get().medium_reaper().set_track_send_info_value(
-                    raw_track,
-                    category,
-                    actual_index,
-                    TrackSendAttributeKey::SendMode,
-                    send_mode_to_raw(mode) as f64,
-                );
-            }
+            routing_sw::set_track_send_info_value(
+                Reaper::get().medium_reaper(),
+                raw_track,
+                category,
+                actual_index,
+                TrackSendAttributeKey::SendMode,
+                send_mode_to_raw(mode) as f64,
+            );
         });
     }
 
@@ -833,12 +824,11 @@ impl RoutingService for ReaperRouting {
             let raw_track = reaper_track.raw().ok()?;
 
             // B_MAINSEND: true if track sends to parent (or master if no parent)
-            let value = unsafe {
-                Reaper::get().medium_reaper().get_media_track_info_value(
-                    raw_track,
-                    reaper_medium::TrackAttributeKey::MainSend,
-                )
-            };
+            let value = routing_sw::get_media_track_info_value(
+                Reaper::get().medium_reaper(),
+                raw_track,
+                reaper_medium::TrackAttributeKey::MainSend,
+            );
             Some(value > 0.0)
         })
         .await
@@ -869,13 +859,12 @@ impl RoutingService for ReaperRouting {
                 return;
             };
 
-            unsafe {
-                let _ = Reaper::get().medium_reaper().set_media_track_info_value(
-                    raw_track,
-                    reaper_medium::TrackAttributeKey::MainSend,
-                    if enabled { 1.0 } else { 0.0 },
-                );
-            }
+            routing_sw::set_media_track_info_value(
+                Reaper::get().medium_reaper(),
+                raw_track,
+                reaper_medium::TrackAttributeKey::MainSend,
+                if enabled { 1.0 } else { 0.0 },
+            );
         });
     }
 }

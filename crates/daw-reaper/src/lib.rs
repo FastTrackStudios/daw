@@ -30,6 +30,8 @@
 //! );
 //! ```
 
+pub mod safe_wrappers;
+
 pub mod audio_engine;
 pub mod automation;
 pub mod ext_state;

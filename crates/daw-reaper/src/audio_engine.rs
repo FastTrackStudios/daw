@@ -8,6 +8,7 @@
 //! thread for consistency and to ensure proper initialization.
 
 use crate::main_thread;
+use crate::safe_wrappers::audio as sw;
 use daw_proto::{
     AudioEngineService, AudioEngineState, AudioInputChannel, AudioInputInfo, AudioLatency,
 };
@@ -111,23 +112,8 @@ impl AudioEngineService for ReaperAudioEngine {
             let low = medium.low();
 
             // Get device name via GetAudioDeviceInfo("IDENT_IN")
-            let device_name = {
-                let mut buf = [0u8; 256];
-                let ok = unsafe {
-                    low.GetAudioDeviceInfo(
-                        c"IDENT_IN".as_ptr(),
-                        buf.as_mut_ptr() as *mut i8,
-                        buf.len() as i32,
-                    )
-                };
-                if ok {
-                    std::ffi::CStr::from_bytes_until_nul(&buf)
-                        .map(|s| s.to_string_lossy().into_owned())
-                        .unwrap_or_default()
-                } else {
-                    String::new()
-                }
-            };
+            let device_name =
+                sw::get_audio_device_info(low, c"IDENT_IN".as_ptr(), 256).unwrap_or_default();
 
             // Get number of audio inputs
             let num_inputs = low.GetNumAudioInputs() as u32;
@@ -204,20 +190,11 @@ fn get_audio_latency_internal(medium: &reaper_medium::Reaper) -> AudioLatency {
 /// Get the current sample rate from REAPER.
 /// Tries audio device first, falls back to project sample rate.
 fn get_sample_rate(medium: &reaper_medium::Reaper) -> u32 {
-    // First try to get audio device sample rate (most accurate when audio is running)
-    // GetAudioDeviceInfo returns the actual hardware sample rate
-    let mut buffer = [0u8; 64];
-    let result = unsafe {
-        medium.low().GetAudioDeviceInfo(
-            c"SRATE".as_ptr(),
-            buffer.as_mut_ptr() as *mut i8,
-            buffer.len() as i32,
-        )
-    };
+    let low = medium.low();
 
-    if result
-        && let Ok(s) = std::ffi::CStr::from_bytes_until_nul(&buffer)
-        && let Ok(rate) = s.to_string_lossy().parse::<u32>()
+    // First try to get audio device sample rate (most accurate when audio is running)
+    if let Some(srate_str) = sw::get_audio_device_info(low, c"SRATE".as_ptr(), 64)
+        && let Ok(rate) = srate_str.parse::<u32>()
         && rate > 0
     {
         return rate;
@@ -227,25 +204,22 @@ fn get_sample_rate(medium: &reaper_medium::Reaper) -> u32 {
     let reaper = Reaper::get();
     let project = reaper.current_project();
 
-    // Check if project has a custom sample rate set
-    let use_custom = unsafe {
-        medium.low().GetSetProjectInfo(
-            project.raw().as_ptr(),
-            c"PROJECT_SRATE_USE".as_ptr(),
-            0.0,
-            false,
-        )
-    };
+    let use_custom = sw::get_set_project_info(
+        low,
+        project.raw().as_ptr(),
+        c"PROJECT_SRATE_USE".as_ptr(),
+        0.0,
+        false,
+    );
 
     if use_custom > 0.0 {
-        let rate = unsafe {
-            medium.low().GetSetProjectInfo(
-                project.raw().as_ptr(),
-                c"PROJECT_SRATE".as_ptr(),
-                0.0,
-                false,
-            )
-        };
+        let rate = sw::get_set_project_info(
+            low,
+            project.raw().as_ptr(),
+            c"PROJECT_SRATE".as_ptr(),
+            0.0,
+            false,
+        );
         if rate > 0.0 {
             return rate as u32;
         }

@@ -2,6 +2,8 @@
 
 use crate::main_thread;
 use crate::project_context::resolve_project_context;
+use crate::safe_wrappers::item as item_sw;
+use crate::safe_wrappers::midi as sw;
 use daw_proto::{
     HumanizeParams, ItemRef, MidiCC, MidiCCCreate, MidiNote, MidiNoteCreate, MidiPitchBend,
     MidiPitchBendCreate, MidiProgramChange, MidiService, MidiSysEx, MidiTakeLocation,
@@ -24,14 +26,12 @@ pub fn create_midi_item_on_main_thread(
     end_seconds: f64,
 ) -> Option<MediaItemTake> {
     let low = reaper_high::Reaper::get().medium_reaper().low();
-    unsafe {
-        let item = low.CreateNewMIDIItemInProj(track, start_seconds, end_seconds, std::ptr::null_mut());
-        if item.is_null() {
-            return None;
-        }
-        let take = low.GetActiveTake(item);
-        MediaItemTake::new(take)
+    let item = sw::create_new_midi_item(low, track, start_seconds, end_seconds);
+    if item.is_null() {
+        return None;
     }
+    let take = sw::get_active_take(low, item);
+    MediaItemTake::new(take)
 }
 
 /// Insert MIDI notes into a take, converting quarter-note positions to PPQ.
@@ -49,26 +49,24 @@ pub fn add_notes_to_take_on_main_thread(
     let low = reaper_high::Reaper::get().medium_reaper().low();
 
     for note in notes {
-        let start_ppq = unsafe { low.MIDI_GetPPQPosFromProjQN(take.as_ptr(), note.start_ppq) };
+        let start_ppq = sw::get_ppq_pos_from_proj_qn(low, take, note.start_ppq);
         let end_ppq = start_ppq + note.length_ppq;
 
-        unsafe {
-            low.MIDI_InsertNote(
-                take.as_ptr(),
-                false,                    // selected
-                false,                    // muted
-                start_ppq,                // startppqpos
-                end_ppq,                  // endppqpos
-                note.channel as i32,      // channel
-                note.pitch as i32,        // pitch
-                note.velocity as i32,     // velocity
-                std::ptr::null_mut(),     // noSortInOptional
-            );
-        }
+        sw::insert_note(
+            low,
+            take,
+            false,                   // selected
+            false,                   // muted
+            start_ppq,               // startppqpos
+            end_ppq,                 // endppqpos
+            note.channel as i32,     // channel
+            note.pitch as i32,       // pitch
+            note.velocity as i32,    // velocity
+        );
     }
 
     // Sort notes after bulk insertion
-    unsafe { low.MIDI_Sort(take.as_ptr()) };
+    sw::sort(low, take);
 }
 
 #[derive(Clone)]
@@ -79,24 +77,12 @@ impl ReaperMidi {
         Self
     }
 
-    unsafe fn get_item_state_chunk(
+    fn get_item_state_chunk(
         medium: &reaper_medium::Reaper,
         item: MediaItem,
         buffer_size: usize,
     ) -> Option<String> {
-        let mut buf = vec![0u8; buffer_size];
-        let ok = unsafe {
-            medium.low().GetSetItemState(
-                item.as_ptr(),
-                buf.as_mut_ptr() as *mut i8,
-                buffer_size as i32,
-            )
-        };
-        if !ok {
-            return None;
-        }
-        let len = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
-        Some(String::from_utf8_lossy(&buf[..len]).into_owned())
+        item_sw::get_item_state_chunk(medium.low(), item, buffer_size)
     }
 
     fn extract_guid_from_chunk(chunk: &str) -> Option<String> {
@@ -122,8 +108,7 @@ impl ReaperMidi {
                     let Some(item) = medium.get_media_item(project_ctx, i) else {
                         continue;
                     };
-                    let Some(chunk) = (unsafe { Self::get_item_state_chunk(medium, item, 2048) })
-                    else {
+                    let Some(chunk) = Self::get_item_state_chunk(medium, item, 2048) else {
                         continue;
                     };
                     if let Some(item_guid) = Self::extract_guid_from_chunk(&chunk)
@@ -142,13 +127,17 @@ impl ReaperMidi {
         item: MediaItem,
         take_ref: &TakeRef,
     ) -> Option<MediaItemTake> {
+        let low = medium.low();
         match take_ref {
-            TakeRef::Active => unsafe { medium.get_active_take(item) },
+            TakeRef::Active => {
+                // Use medium's get_active_take which handles this properly
+                crate::safe_wrappers::item::get_active_take(medium, item)
+            }
             TakeRef::Index(index) => {
-                let take_ptr = unsafe { medium.low().GetTake(item.as_ptr(), *index as i32) };
+                let take_ptr = item_sw::get_take(low, item, *index as i32);
                 MediaItemTake::new(take_ptr)
             }
-            TakeRef::Guid(_) => unsafe { medium.get_active_take(item) },
+            TakeRef::Guid(_) => crate::safe_wrappers::item::get_active_take(medium, item),
         }
     }
 
@@ -162,52 +151,23 @@ impl ReaperMidi {
     }
 
     fn read_notes(medium: &reaper_medium::Reaper, take: MediaItemTake) -> Vec<MidiNote> {
-        let mut note_count: i32 = 0;
-        let mut cc_count: i32 = 0;
-        let mut text_sysex_count: i32 = 0;
-        unsafe {
-            medium.low().MIDI_CountEvts(
-                take.as_ptr(),
-                &mut note_count,
-                &mut cc_count,
-                &mut text_sysex_count,
-            );
-        }
+        let low = medium.low();
+        let counts = sw::count_events(low, take);
 
-        let mut notes = Vec::with_capacity(note_count.max(0) as usize);
-        for index in 0..note_count {
-            let mut selected = false;
-            let mut muted = false;
-            let mut start_ppq = 0.0;
-            let mut end_ppq = 0.0;
-            let mut channel = 0;
-            let mut pitch = 0;
-            let mut velocity = 0;
-            let success = unsafe {
-                medium.low().MIDI_GetNote(
-                    take.as_ptr(),
-                    index,
-                    &mut selected,
-                    &mut muted,
-                    &mut start_ppq,
-                    &mut end_ppq,
-                    &mut channel,
-                    &mut pitch,
-                    &mut velocity,
-                )
-            };
-            if !success {
+        let mut notes = Vec::with_capacity(counts.notes.max(0) as usize);
+        for index in 0..counts.notes {
+            let Some(n) = sw::get_note(low, take, index) else {
                 continue;
-            }
+            };
             notes.push(MidiNote {
                 index: index as u32,
-                channel: channel.clamp(0, 15) as u8,
-                pitch: pitch.clamp(0, 127) as u8,
-                velocity: velocity.clamp(1, 127) as u8,
-                start_ppq,
-                length_ppq: (end_ppq - start_ppq).max(0.0),
-                selected,
-                muted,
+                channel: n.channel.clamp(0, 15) as u8,
+                pitch: n.pitch.clamp(0, 127) as u8,
+                velocity: n.velocity.clamp(1, 127) as u8,
+                start_ppq: n.start_ppq,
+                length_ppq: (n.end_ppq - n.start_ppq).max(0.0),
+                selected: n.selected,
+                muted: n.muted,
             });
         }
         notes
@@ -284,7 +244,7 @@ impl MidiService for ReaperMidi {
 
             // Build a MidiTakeLocation from the item/take we just created
             let low = reaper.medium_reaper().low();
-            let item_ptr = unsafe { low.GetMediaItemTake_Item(take.as_ptr()) };
+            let item_ptr = item_sw::get_take_item(low, take);
             let item = MediaItem::new(item_ptr)?;
 
             // Get the item index in the project
