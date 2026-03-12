@@ -5,6 +5,7 @@
 #![deny(unsafe_code)]
 
 pub mod actions;
+pub mod audio_accessor;
 pub mod audio_engine;
 pub mod automation;
 pub mod error;
@@ -31,6 +32,7 @@ pub mod ui;
 pub mod undo;
 
 pub use actions::*;
+pub use audio_accessor::*;
 pub use audio_engine::*;
 pub use automation::*;
 pub use error::*;

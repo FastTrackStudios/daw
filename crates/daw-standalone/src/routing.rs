@@ -46,6 +46,7 @@ impl RouteState {
             automation_mode: AutomationMode::TrimRead,
             source_channels: ChannelMapping::default(),
             dest_channels: ChannelMapping::default(),
+            midi_channel_mapping: None,
         }
     }
 }

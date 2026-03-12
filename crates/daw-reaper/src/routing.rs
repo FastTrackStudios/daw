@@ -7,8 +7,9 @@ use crate::main_thread;
 use crate::project_context::find_project_by_guid;
 use crate::safe_wrappers::routing as routing_sw;
 use daw_proto::{
-    AutomationMode, ChannelMapping, ProjectContext, RouteLocation, RouteRef, RouteType,
-    RoutingService, SendMode, TrackRef, TrackRoute,
+    AutomationMode, ChannelMapping, MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel,
+    ProjectContext, RouteLocation, RouteRef, RouteType, RoutingService, SendMode, TrackRef,
+    TrackRoute,
 };
 use reaper_high::{Project, Reaper, SendPartnerType, Track, TrackRoute as ReaperTrackRoute};
 use reaper_medium::{
@@ -165,6 +166,7 @@ fn convert_track_route(
         reaper_medium::AutomationMode::Latch => AutomationMode::Latch,
         _ => AutomationMode::TrimRead,
     };
+    let midi_channel_mapping = read_midi_channel_mapping(reaper_route, route_type);
 
     TrackRoute {
         index,
@@ -183,6 +185,7 @@ fn convert_track_route(
         automation_mode,
         source_channels: ChannelMapping::default(),
         dest_channels: ChannelMapping::default(),
+        midi_channel_mapping,
     }
 }
 
@@ -223,6 +226,58 @@ fn read_send_mode(reaper_route: &ReaperTrackRoute, route_type: RouteType) -> Sen
         1 => SendMode::PreFx,
         3 => SendMode::PostFx,
         _ => SendMode::PostFader, // 0 and any unknown
+    }
+}
+
+fn read_midi_channel_mapping(
+    reaper_route: &ReaperTrackRoute,
+    route_type: RouteType,
+) -> Option<MidiChannelMapping> {
+    let track = reaper_route.track();
+    let (category, cat_index) = match route_type {
+        RouteType::Send => {
+            let hw_count = track.typed_send_count(SendPartnerType::HardwareOutput);
+            let route_idx = reaper_route.index();
+            if route_idx < hw_count {
+                return None;
+            }
+            (TrackSendCategory::Send, route_idx - hw_count)
+        }
+        RouteType::Receive => (TrackSendCategory::Receive, reaper_route.index()),
+        RouteType::HardwareOutput => return None,
+    };
+
+    let Ok(media_track) = track.raw() else {
+        return None;
+    };
+
+    let raw_flags = routing_sw::get_track_send_info_value(
+        Reaper::get().medium_reaper(),
+        media_track,
+        category,
+        cat_index,
+        TrackSendAttributeKey::MidiFlags,
+    ) as i32;
+
+    Some(parse_midi_channel_mapping(raw_flags))
+}
+
+fn parse_midi_channel_mapping(raw_flags: i32) -> MidiChannelMapping {
+    let src_bits = raw_flags & 0x1f;
+    let dst_bits = (raw_flags >> 5) & 0x1f;
+
+    let source = match src_bits {
+        1..=16 => MidiSourceChannel::Channel(src_bits as u8),
+        _ => MidiSourceChannel::All,
+    };
+    let destination = match dst_bits {
+        1..=16 => MidiDestinationChannel::Channel(dst_bits as u8),
+        _ => MidiDestinationChannel::Original,
+    };
+
+    MidiChannelMapping {
+        source,
+        destination,
     }
 }
 

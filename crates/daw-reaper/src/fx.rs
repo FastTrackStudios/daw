@@ -33,6 +33,7 @@ use tracing::{debug, info, warn};
 
 use crate::main_thread;
 use crate::project_context::{find_project_by_guid, project_guid};
+use crate::safe_wrappers::fx as fx_sw;
 
 // =============================================================================
 // FX Event Broadcasting Infrastructure
@@ -629,6 +630,89 @@ fn find_block_end(block_text: &str) -> Option<usize> {
 /// Get the raw RPP block text for a specific FX by chain index,
 /// using dawfile-reaper to parse the full track chunk.
 /// Fallback for when tag_chunk() doesn't work (CLAP plugins).
+/// Recursively capture FX state chunks for all plugins, including nested ones
+/// inside REAPER FX containers.
+///
+/// Top-level containers are skipped (they have no meaningful state), but their
+/// children (actual plugins) are captured using `container_child_fx_id` to get
+/// the correct encoded FX index for each child.
+fn capture_fx_state_recursive(
+    chain: &FxChain,
+    track: &Track,
+    top_level_count: u32,
+    chunks: &mut Vec<FxStateChunk>,
+) {
+    for i in 0..top_level_count {
+        let fx = chain.fx_by_index_untracked(i);
+        if is_container_fx(&fx) {
+            // Recurse into container children
+            let child_count = read_config_u32(&fx, "container_count");
+            for c in 0..child_count {
+                if let Some(child_raw) = container_child_fx_id(&fx, c) {
+                    let child_fx = chain.fx_by_index_untracked(child_raw);
+                    if is_container_fx(&child_fx) {
+                        // Sub-container: skip (multi-FX blocks have no single state)
+                        debug!("  skipping sub-container at child {} of container {}", c, i);
+                    } else {
+                        capture_single_fx(chain, track, &child_fx, child_raw, chunks);
+                    }
+                }
+            }
+        } else {
+            // Top-level standalone plugin
+            capture_single_fx(chain, track, &fx, i, chunks);
+        }
+    }
+}
+
+/// Capture state for a single FX plugin.
+fn capture_single_fx(
+    _chain: &FxChain,
+    track: &Track,
+    fx: &reaper_high::Fx,
+    raw_index: u32,
+    chunks: &mut Vec<FxStateChunk>,
+) {
+    let guid = fx
+        .get_or_query_guid()
+        .map(|g| g.to_string_without_braces())
+        .unwrap_or_default();
+    let plugin_name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        fx.name().to_str().to_string()
+    }))
+    .unwrap_or_else(|_| "(unknown)".to_string());
+
+    // Try tag_chunk first (works for VST/VST3), fallback to dawfile-reaper (for CLAP)
+    let chunk_str = match fx.tag_chunk() {
+        Ok(tag) => Some(tag.content().to_string()),
+        Err(_) => {
+            debug!("  FX[{}] tag_chunk failed, trying track chunk fallback", raw_index);
+            get_fx_block_via_track_chunk(track, raw_index)
+        }
+    };
+
+    match chunk_str {
+        Some(s) => {
+            debug!(
+                "  FX[{}] '{}' (GUID {}) — chunk captured ({} bytes)",
+                raw_index, plugin_name, guid, s.len()
+            );
+            chunks.push(FxStateChunk {
+                fx_guid: guid,
+                fx_index: raw_index,
+                plugin_name,
+                encoded_chunk: s,
+            });
+        }
+        None => {
+            warn!(
+                "  FX[{}] '{}' (GUID {}) — chunk capture FAILED (both methods)",
+                raw_index, plugin_name, guid
+            );
+        }
+    }
+}
+
 fn get_fx_block_via_track_chunk(track: &Track, fx_index: u32) -> Option<String> {
     let chunk = track
         .chunk(MAX_TRACK_CHUNK_SIZE, ChunkCacheHint::NormalMode)
@@ -1343,8 +1427,6 @@ impl FxService for ReaperFx {
     // =========================================================================
 
     async fn list_installed_fx(&self, _cx: &Context) -> Vec<InstalledFx> {
-        use std::ffi::{CStr, c_char};
-
         debug!("ReaperFx::list_installed_fx()");
 
         main_thread::query(move || {
@@ -1353,20 +1435,9 @@ impl FxService for ReaperFx {
             let mut results = Vec::new();
             let mut index = 0i32;
             loop {
-                let mut name_ptr: *const c_char = std::ptr::null();
-                let mut ident_ptr: *const c_char = std::ptr::null();
-                let ok = unsafe {
-                    low.EnumInstalledFX(index, &mut name_ptr, &mut ident_ptr)
-                };
-                if !ok {
+                let Some((name, ident)) = fx_sw::enum_installed_fx(low, index) else {
                     break;
-                }
-                let name = unsafe { CStr::from_ptr(name_ptr) }
-                    .to_string_lossy()
-                    .into_owned();
-                let ident = unsafe { CStr::from_ptr(ident_ptr) }
-                    .to_string_lossy()
-                    .into_owned();
+                };
                 results.push(InstalledFx { name, ident });
                 index += 1;
             }
@@ -1540,13 +1611,12 @@ impl FxService for ReaperFx {
                 let is_input = chain.is_input_fx();
                 let track = chain.track()?;
                 let raw_track = track.raw().ok()?;
-                unsafe {
-                    Reaper::get().medium_reaper().track_fx_copy_to_track(
-                        (raw_track, fx_location(current_index, is_input)),
-                        (raw_track, fx_location(request.index, is_input)),
-                        TransferBehavior::Move,
-                    );
-                }
+                fx_sw::track_fx_copy_to_track(
+                    Reaper::get().medium_reaper(),
+                    (raw_track, fx_location(current_index, is_input)),
+                    (raw_track, fx_location(request.index, is_input)),
+                    TransferBehavior::Move,
+                );
             }
             Some(guid.to_string_without_braces())
         })
@@ -1572,12 +1642,8 @@ impl FxService for ReaperFx {
                 .raw()
                 .map_err(|e| format!("raw track failed: {}", e))?;
             let location = fx_location(index, chain.is_input_fx());
-            unsafe {
-                Reaper::get()
-                    .medium_reaper()
-                    .track_fx_delete(raw_track, location)
-                    .map_err(|e| format!("track_fx_delete failed: {}", e))?;
-            }
+            fx_sw::track_fx_delete(Reaper::get().medium_reaper(), raw_track, location)
+                .map_err(|e| format!("track_fx_delete failed: {}", e))?;
             Ok(())
         })
         .await
@@ -1603,13 +1669,12 @@ impl FxService for ReaperFx {
                 .raw()
                 .map_err(|e| format!("raw track failed: {}", e))?;
             let is_input = chain.is_input_fx();
-            unsafe {
-                Reaper::get().medium_reaper().track_fx_copy_to_track(
-                    (raw_track, fx_location(index, is_input)),
-                    (raw_track, fx_location(new_index, is_input)),
-                    TransferBehavior::Move,
-                );
-            }
+            fx_sw::track_fx_copy_to_track(
+                Reaper::get().medium_reaper(),
+                (raw_track, fx_location(index, is_input)),
+                (raw_track, fx_location(new_index, is_input)),
+                TransferBehavior::Move,
+            );
             Ok(())
         })
         .await
@@ -1872,11 +1937,12 @@ impl FxService for ReaperFx {
                 .raw()
                 .map_err(|_| "next_preset: raw track not available".to_string())?;
             let location = fx_location(index, chain.is_input_fx());
-            unsafe {
-                let _ = Reaper::get()
-                    .medium_reaper()
-                    .track_fx_navigate_presets(raw_track, location, 1);
-            }
+            fx_sw::track_fx_navigate_presets(
+                Reaper::get().medium_reaper(),
+                raw_track,
+                location,
+                1,
+            );
             Ok(())
         })
         .await
@@ -1902,11 +1968,12 @@ impl FxService for ReaperFx {
                 .raw()
                 .map_err(|_| "prev_preset: raw track not available".to_string())?;
             let location = fx_location(index, chain.is_input_fx());
-            unsafe {
-                let _ = Reaper::get()
-                    .medium_reaper()
-                    .track_fx_navigate_presets(raw_track, location, -1);
-            }
+            fx_sw::track_fx_navigate_presets(
+                Reaper::get().medium_reaper(),
+                raw_track,
+                location,
+                -1,
+            );
             Ok(())
         })
         .await
@@ -1933,13 +2000,12 @@ impl FxService for ReaperFx {
                 .raw()
                 .map_err(|e| format!("set_preset: raw track failed: {}", e))?;
             let location = fx_location(fx_idx, chain.is_input_fx());
-            unsafe {
-                let _ = Reaper::get().medium_reaper().track_fx_set_preset_by_index(
-                    raw_track,
-                    location,
-                    FxPresetRef::Preset(index),
-                );
-            }
+            fx_sw::track_fx_set_preset_by_index(
+                Reaper::get().medium_reaper(),
+                raw_track,
+                location,
+                FxPresetRef::Preset(index),
+            );
             Ok(())
         })
         .await
@@ -2074,11 +2140,7 @@ impl FxService for ReaperFx {
                 format!("set_named_config: FX not found ({:?})", request.target.fx)
             })?;
             let fx = chain.fx_by_index_untracked(index);
-            let c_string = std::ffi::CString::new(request.value)
-                .map_err(|e| format!("set_named_config: invalid value: {}", e))?;
-            unsafe {
-                let _ = fx.set_named_config_param(&*request.key, c_string.as_ptr());
-            }
+            fx_sw::fx_set_named_config_param(&fx, &request.key, &request.value)?;
             Ok(())
         })
         .await
@@ -2302,54 +2364,15 @@ impl FxService for ReaperFx {
             let (track, chain) = resolve_fx_chain(&proj, &context)?;
 
             let fx_count = chain.fx_count();
-            debug!("get_fx_chain_state: chain has {} FX", fx_count);
+            debug!("get_fx_chain_state: chain has {} FX (top-level)", fx_count);
 
             let mut chunks = Vec::new();
-            for fx in chain.fxs() {
-                let guid = fx
-                    .get_or_query_guid()
-                    .map(|g| g.to_string_without_braces())
-                    .unwrap_or_default();
-                let plugin_name = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    fx.name().to_str().to_string()
-                }))
-                .unwrap_or_else(|_| "(unknown)".to_string());
-                let index = fx.index();
+            // Recursively capture state for all FX including those inside containers.
+            capture_fx_state_recursive(&chain, &track, fx_count, &mut chunks);
 
-                // Try tag_chunk first (works for VST/VST3), fallback to dawfile-reaper (for CLAP)
-                let chunk_str = match fx.tag_chunk() {
-                    Ok(tag) => Some(tag.content().to_string()),
-                    Err(_) => {
-                        debug!("  FX[{}] tag_chunk failed, trying track chunk fallback", index);
-                        get_fx_block_via_track_chunk(&track, index)
-                    }
-                };
-
-                match chunk_str {
-                    Some(s) => {
-                        debug!(
-                            "  FX[{}] '{}' (GUID {}) — chunk captured ({} bytes)",
-                            index, plugin_name, guid, s.len()
-                        );
-                        chunks.push(FxStateChunk {
-                            fx_guid: guid,
-                            fx_index: index,
-                            plugin_name,
-                            encoded_chunk: s,
-                        });
-                    }
-                    None => {
-                        warn!(
-                            "  FX[{}] '{}' (GUID {}) — chunk capture FAILED (both methods)",
-                            index, plugin_name, guid
-                        );
-                    }
-                }
-            }
             debug!(
-                "get_fx_chain_state: captured {}/{} FX chunks",
-                chunks.len(),
-                fx_count
+                "get_fx_chain_state: captured {} FX chunks total",
+                chunks.len()
             );
             Some(chunks)
         })
@@ -2512,13 +2535,12 @@ impl FxService for ReaperFx {
 
             // Move to requested position if not already there
             if container_index != request.index && request.index < chain.fx_count() {
-                unsafe {
-                    Reaper::get().medium_reaper().track_fx_copy_to_track(
-                        (raw_track, fx_location(container_index, is_input)),
-                        (raw_track, fx_location(request.index, is_input)),
-                        TransferBehavior::Move,
-                    );
-                }
+                fx_sw::track_fx_copy_to_track(
+                    Reaper::get().medium_reaper(),
+                    (raw_track, fx_location(container_index, is_input)),
+                    (raw_track, fx_location(request.index, is_input)),
+                    TransferBehavior::Move,
+                );
             }
 
             // Set the container name
@@ -2529,11 +2551,7 @@ impl FxService for ReaperFx {
                     container_index
                 };
             let container_fx = chain.fx_by_index_untracked(final_index);
-            if let Ok(c_name) = std::ffi::CString::new(request.name) {
-                unsafe {
-                    let _ = container_fx.set_named_config_param("renamed_name", c_name.as_ptr());
-                }
-            }
+            let _ = fx_sw::fx_set_named_config_param(&container_fx, "renamed_name", &request.name);
 
             // Return the new container's node ID
             Some(FxNodeId::container(format!("{}", final_index)))
@@ -2598,13 +2616,12 @@ impl FxService for ReaperFx {
                 CONTAINER_BASE + container_raw + stride
             };
 
-            unsafe {
-                Reaper::get().medium_reaper().track_fx_copy_to_track(
-                    (raw_track, fx_location(source_raw, is_input)),
-                    (raw_track, fx_location(first_slot, is_input)),
-                    TransferBehavior::Move,
-                );
-            }
+            fx_sw::track_fx_copy_to_track(
+                Reaper::get().medium_reaper(),
+                (raw_track, fx_location(source_raw, is_input)),
+                (raw_track, fx_location(first_slot, is_input)),
+                TransferBehavior::Move,
+            );
 
             // Verify the move succeeded (child count should have increased).
             verify_container_child_count(&chain, container_raw, child_count + 1)?;
@@ -2628,13 +2645,12 @@ impl FxService for ReaperFx {
                 let dest = container_child_fx_id(&container_fx, target_pos)
                     .ok_or_else(|| format!("container_item.{} not found", target_pos))?;
 
-                unsafe {
-                    Reaper::get().medium_reaper().track_fx_copy_to_track(
-                        (raw_track, fx_location(src, is_input)),
-                        (raw_track, fx_location(dest, is_input)),
-                        TransferBehavior::Move,
-                    );
-                }
+                fx_sw::track_fx_copy_to_track(
+                    Reaper::get().medium_reaper(),
+                    (raw_track, fx_location(src, is_input)),
+                    (raw_track, fx_location(dest, is_input)),
+                    TransferBehavior::Move,
+                );
 
                 // Verify child count is unchanged after the shuffle.
                 verify_container_child_count(&chain, container_raw, child_count + 1)?;
@@ -2675,13 +2691,12 @@ impl FxService for ReaperFx {
             let top_count_before = chain.fx_count();
 
             // Move to top-level position
-            unsafe {
-                Reaper::get().medium_reaper().track_fx_copy_to_track(
-                    (raw_track, fx_location(source_raw, is_input)),
-                    (raw_track, fx_location(request.target_index, is_input)),
-                    TransferBehavior::Move,
-                );
-            }
+            fx_sw::track_fx_copy_to_track(
+                Reaper::get().medium_reaper(),
+                (raw_track, fx_location(source_raw, is_input)),
+                (raw_track, fx_location(request.target_index, is_input)),
+                TransferBehavior::Move,
+            );
 
             // Verify: top-level count should have increased by 1 (child moved out)
             let top_count_after = chain.fx_count();
@@ -2723,11 +2738,7 @@ impl FxService for ReaperFx {
             })?;
             let container_fx = chain.fx_by_index_untracked(raw_index);
             let value = mode.to_reaper_param();
-            let c_value = std::ffi::CString::new(value)
-                .map_err(|e| format!("set_routing_mode: invalid value: {}", e))?;
-            unsafe {
-                let _ = container_fx.set_named_config_param("parallel", c_value.as_ptr());
-            }
+            fx_sw::fx_set_named_config_param(&container_fx, "parallel", &value)?;
             Ok(())
         })
         .await
@@ -2801,11 +2812,7 @@ impl FxService for ReaperFx {
             ];
 
             for (key, value) in &params {
-                let c_value = std::ffi::CString::new(value.to_string())
-                    .map_err(|e| format!("set_container_channel_config: invalid value: {}", e))?;
-                unsafe {
-                    let _ = container_fx.set_named_config_param(*key, c_value.as_ptr());
-                }
+                fx_sw::fx_set_named_config_param(&container_fx, key, &value.to_string())?;
             }
             Ok(())
         })
@@ -2879,11 +2886,7 @@ impl FxService for ReaperFx {
 
             // Write "count mode" — REAPER accepts 1 or 2 values
             let value = format!("{} {}", config.channel_count, config.channel_mode);
-            let c_value = std::ffi::CString::new(value)
-                .map_err(|e| format!("set_fx_channel_config: invalid value: {}", e))?;
-            unsafe {
-                let _ = fx.set_named_config_param("channel_config", c_value.as_ptr());
-            }
+            fx_sw::fx_set_named_config_param(&fx, "channel_config", &value)?;
             Ok(())
         })
         .await
@@ -2923,51 +2926,36 @@ impl FxService for ReaperFx {
             const SECOND_BANK: i32 = 0x1000000;
             let mut saved = Vec::new();
 
-            unsafe {
-                // Scan first bank
-                for pin in 0..MAX_PINS {
-                    let mut high32: i32 = 0;
-                    let low32 = low.TrackFX_GetPinMappings(
-                        raw_track.as_ptr(),
-                        raw_fx,
-                        1, // isoutput
-                        pin,
-                        &mut high32,
-                    );
-                    if low32 != 0 || high32 != 0 {
-                        saved.push((pin, low32, high32));
-                        // Zero this pin
-                        low.TrackFX_SetPinMappings(
-                            raw_track.as_ptr(),
-                            raw_fx,
-                            1, // isoutput
-                            pin,
-                            0,
-                            0,
-                        );
-                    }
+            // Scan first bank
+            for pin in 0..MAX_PINS {
+                let (low32, high32) =
+                    fx_sw::track_fx_get_pin_mappings(low, raw_track, raw_fx, 1, pin);
+                if low32 != 0 || high32 != 0 {
+                    saved.push((pin, low32, high32));
+                    // Zero this pin
+                    fx_sw::track_fx_set_pin_mappings(low, raw_track, raw_fx, 1, pin, 0, 0);
                 }
-                // Scan second bank
-                for pin in 0..MAX_PINS {
-                    let mut high32: i32 = 0;
-                    let low32 = low.TrackFX_GetPinMappings(
-                        raw_track.as_ptr(),
+            }
+            // Scan second bank
+            for pin in 0..MAX_PINS {
+                let (low32, high32) = fx_sw::track_fx_get_pin_mappings(
+                    low,
+                    raw_track,
+                    raw_fx,
+                    1,
+                    pin + SECOND_BANK,
+                );
+                if low32 != 0 || high32 != 0 {
+                    saved.push((pin + SECOND_BANK, low32, high32));
+                    fx_sw::track_fx_set_pin_mappings(
+                        low,
+                        raw_track,
                         raw_fx,
-                        1, // isoutput
+                        1,
                         pin + SECOND_BANK,
-                        &mut high32,
+                        0,
+                        0,
                     );
-                    if low32 != 0 || high32 != 0 {
-                        saved.push((pin + SECOND_BANK, low32, high32));
-                        low.TrackFX_SetPinMappings(
-                            raw_track.as_ptr(),
-                            raw_fx,
-                            1, // isoutput
-                            pin + SECOND_BANK,
-                            0,
-                            0,
-                        );
-                    }
                 }
             }
 
@@ -3005,37 +2993,14 @@ impl FxService for ReaperFx {
             let raw_fx = fx_location(index, is_input).to_raw();
             let low = Reaper::get().medium_reaper().low();
 
-            unsafe {
-                if saved.output_pins.is_empty() {
-                    // No saved mappings — restore default stereo pass-through.
-                    // Pin 0 → channel 0 (bit 0 = 0x1), Pin 1 → channel 1 (bit 1 = 0x2).
-                    low.TrackFX_SetPinMappings(
-                        raw_track.as_ptr(),
-                        raw_fx,
-                        1, // isoutput
-                        0, // pin 0
-                        1, // low32: bit 0
-                        0,
-                    );
-                    low.TrackFX_SetPinMappings(
-                        raw_track.as_ptr(),
-                        raw_fx,
-                        1, // isoutput
-                        1, // pin 1
-                        2, // low32: bit 1
-                        0,
-                    );
-                } else {
-                    for &(pin, low32, high32) in &saved.output_pins {
-                        low.TrackFX_SetPinMappings(
-                            raw_track.as_ptr(),
-                            raw_fx,
-                            1, // isoutput
-                            pin,
-                            low32,
-                            high32,
-                        );
-                    }
+            if saved.output_pins.is_empty() {
+                // No saved mappings — restore default stereo pass-through.
+                // Pin 0 → channel 0 (bit 0 = 0x1), Pin 1 → channel 1 (bit 1 = 0x2).
+                fx_sw::track_fx_set_pin_mappings(low, raw_track, raw_fx, 1, 0, 1, 0);
+                fx_sw::track_fx_set_pin_mappings(low, raw_track, raw_fx, 1, 1, 2, 0);
+            } else {
+                for &(pin, low32, high32) in &saved.output_pins {
+                    fx_sw::track_fx_set_pin_mappings(low, raw_track, raw_fx, 1, pin, low32, high32);
                 }
             }
 
@@ -3364,11 +3329,7 @@ impl FxService for ReaperFx {
                 )
             })?;
             let container_fx = chain.fx_by_index_untracked(raw_index);
-            let c_name = std::ffi::CString::new(name)
-                .map_err(|e| format!("rename_container: invalid name: {}", e))?;
-            unsafe {
-                let _ = container_fx.set_named_config_param("renamed_name", c_name.as_ptr());
-            }
+            fx_sw::fx_set_named_config_param(&container_fx, "renamed_name", &name)?;
             Ok(())
         })
         .await

@@ -130,6 +130,47 @@ pub fn kill_reaper(pid: u32) -> bool {
         .unwrap_or(false)
 }
 
+/// Spawn REAPER and wait for its Unix socket to appear, then connect.
+///
+/// Returns `(Daw, pid, socket_path)` on success. The caller is responsible
+/// for calling `teardown_owned(pid, socket_path)` when done.
+pub async fn launch_and_connect(config_id: &str) -> Result<(Daw, u32, PathBuf)> {
+    let config = config_by_id(config_id)
+        .ok_or_else(|| eyre::eyre!("Unknown REAPER config: {config_id}"))?;
+
+    eprintln!("Spawning REAPER ({})...", config.label);
+    let pid = spawn_reaper(config)?;
+    let socket_path = PathBuf::from(format!("/tmp/fts-daw-{pid}.sock"));
+    let _ = std::fs::remove_file(&socket_path); // remove any stale
+
+    // Wait up to 30s for socket to appear
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    eprint!("  Waiting for socket");
+    loop {
+        if socket_path.exists() {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            eprintln!();
+            kill_reaper(pid);
+            return Err(eyre::eyre!("Timed out waiting for REAPER socket after 30s"));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        eprint!(".");
+    }
+    eprintln!("\n  Socket ready: {}", socket_path.display());
+
+    let daw = connect(Some(socket_path.clone())).await?;
+    Ok((daw, pid, socket_path))
+}
+
+/// Kill an owned REAPER instance and remove its socket file.
+pub fn teardown_owned(pid: u32, socket: &PathBuf) {
+    kill_reaper(pid);
+    let _ = std::fs::remove_file(socket);
+    eprintln!("REAPER (PID {pid}) stopped.");
+}
+
 // ============================================================================
 // Connection
 // ============================================================================

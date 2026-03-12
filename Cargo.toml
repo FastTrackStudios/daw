@@ -50,7 +50,7 @@ dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus", default-features = f
 dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
 # Testing
-reaper-test = { path = "../FTS-Extensions/crates/reaper-test" }
+reaper-test = { path = "../FastTrackStudio/crates/reaper/reaper-test" }
 
 # REAPER bindings
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }

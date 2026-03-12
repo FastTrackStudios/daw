@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+use daw_proto::routing::{MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel};
+
 use crate::primitives::{BlockType, RppBlock, Token};
 use crate::types::envelope::Envelope;
 use crate::types::fx_chain::FxChain;
@@ -516,6 +518,28 @@ pub struct ReceiveSettings {
     pub pan_law: f64,            // field 10 - pan law
     pub midi_channels: i32,      // field 11 - midi channels
     pub automation_mode: i32,    // field 12 - automation mode (-1 = use track mode)
+}
+
+impl ReceiveSettings {
+    /// Decode REAPER's packed MIDI routing flags into a typed channel mapping.
+    pub fn midi_channel_mapping(&self) -> MidiChannelMapping {
+        let src_bits = self.midi_channels & 0x1f;
+        let dst_bits = (self.midi_channels >> 5) & 0x1f;
+
+        let source = match src_bits {
+            1..=16 => MidiSourceChannel::Channel(src_bits as u8),
+            _ => MidiSourceChannel::All,
+        };
+        let destination = match dst_bits {
+            1..=16 => MidiDestinationChannel::Channel(dst_bits as u8),
+            _ => MidiDestinationChannel::Original,
+        };
+
+        MidiChannelMapping {
+            source,
+            destination,
+        }
+    }
 }
 
 /// MIDI note name

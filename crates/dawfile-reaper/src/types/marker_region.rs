@@ -36,6 +36,14 @@ pub struct MarkerRegion {
 }
 
 impl MarkerRegion {
+    fn token_text(token: &crate::primitives::Token) -> Option<String> {
+        match token {
+            crate::primitives::Token::String(value, _) => Some(value.clone()),
+            crate::primitives::Token::Identifier(value) => Some(value.clone()),
+            _ => None,
+        }
+    }
+
     /// Create a MarkerRegion from already-parsed tokenized marker content.
     pub fn from_marker_tokens(tokens: &[crate::primitives::Token]) -> Result<Self, String> {
         if tokens.len() < 5 {
@@ -51,14 +59,14 @@ impl MarkerRegion {
 
         let id = tokens[1].as_number().ok_or("Invalid marker ID")? as i32;
         let position = tokens[2].as_number().ok_or("Invalid marker position")?;
-        let name = tokens[3].as_string().unwrap_or("").to_string();
+        let name = Self::token_text(&tokens[3]).unwrap_or_default();
 
-        let color = if tokens.len() > 4 {
+        let flags = if tokens.len() > 4 {
             tokens[4].as_number().unwrap_or(0.0) as i32
         } else {
             0
         };
-        let flags = if tokens.len() > 5 {
+        let color = if tokens.len() > 5 {
             tokens[5].as_number().unwrap_or(0.0) as i32
         } else {
             0
@@ -69,7 +77,7 @@ impl MarkerRegion {
             0
         };
         let guid = if tokens.len() > 8 {
-            tokens[8].as_string().unwrap_or("").to_string()
+            Self::token_text(&tokens[8]).unwrap_or_default()
         } else {
             "".to_string()
         };
@@ -79,11 +87,8 @@ impl MarkerRegion {
             0
         };
         let end_position = if tokens.len() > 10 {
-            Some(
-                tokens[10]
-                    .as_number()
-                    .ok_or("Invalid region end position")?,
-            )
+            let candidate = tokens[10].as_number().ok_or("Invalid region end position")?;
+            (candidate > position).then_some(candidate)
         } else {
             None
         };
@@ -336,10 +341,11 @@ impl MarkerRegionCollection {
     /// 1. First marker: has the region name
     /// 2. Second marker: has an empty name ""
     pub fn process_regions(&mut self) {
-        // Group markers by ID
+        // Group all entries by ID so we can repair compact REAPER region pairs even if
+        // the first line was initially classified as a region.
         let mut markers_by_id: std::collections::HashMap<i32, Vec<MarkerRegion>> =
             std::collections::HashMap::new();
-        for marker in self.markers.iter() {
+        for marker in self.all.iter() {
             markers_by_id
                 .entry(marker.id)
                 .or_default()
@@ -356,16 +362,26 @@ impl MarkerRegionCollection {
                         .unwrap_or(std::cmp::Ordering::Equal)
                 });
 
-                // Look for pairs where the second marker has an empty name
+                // Look for pairs where the second marker has an empty name.
+                // When found, the empty-name entry provides the real region end.
+                let mut consumed_end_positions = std::collections::HashSet::new();
+
                 for i in 0..markers.len() - 1 {
                     let start = &markers[i];
-                    let end = &markers[i + 1];
+                    if start.name.is_empty() || (start.flags & 1) == 0 {
+                        continue;
+                    }
+
+                    let Some(end) = markers.iter().skip(i + 1).find(|candidate| {
+                        candidate.name.is_empty()
+                            && candidate.position > start.position
+                            && !consumed_end_positions.contains(&candidate.position.to_bits())
+                    }) else {
+                        continue;
+                    };
 
                     // Check if this is a region pair (start has name, end has empty name)
-                    if !start.name.is_empty()
-                        && end.name.is_empty()
-                        && start.position < end.position
-                    {
+                    if start.position < end.position {
                         // Create a region from this pair
                         let region = MarkerRegion {
                             id: start.id,
@@ -389,13 +405,15 @@ impl MarkerRegionCollection {
                             (m.id != start.id || m.position != start.position)
                                 && (m.id != end.id || m.position != end.position)
                         });
+                        self.regions.retain(|r| {
+                            (r.id != start.id || r.position != start.position)
+                                && (r.id != end.id || r.position != end.position)
+                        });
 
                         // Add the region
                         self.all.push(region.clone());
                         self.regions.push(region);
-
-                        // Skip the next marker since we used it as the end
-                        break;
+                        consumed_end_positions.insert(end.position.to_bits());
                     }
                 }
             }
@@ -612,8 +630,24 @@ mod tests {
         assert_eq!(marker.id, 1);
         assert_eq!(marker.position, 5.90433787995042);
         assert_eq!(marker.name, "");
-        assert_eq!(marker.color, 1);
+        assert_eq!(marker.flags, 1);
+        assert_eq!(marker.color, 0);
         assert!(marker.is_marker());
+    }
+
+    #[test]
+    fn test_parse_marker_with_trailing_field_stays_marker() {
+        let line = r#"MARKER 4 15.42857142857143 COUNT-IN 0 0 1 B {5FF23F09-0052-514C-A31A-0FFC208784AF} 0 2"#;
+        let marker = MarkerRegion::from_marker_line(line).unwrap();
+
+        assert_eq!(marker.id, 4);
+        assert_eq!(marker.position, 15.42857142857143);
+        assert_eq!(marker.name, "COUNT-IN");
+        assert_eq!(marker.color, 0);
+        assert_eq!(marker.flags, 0);
+        assert!(marker.is_marker());
+        assert!(!marker.is_region());
+        assert_eq!(marker.end_position, None);
     }
 
     #[test]
@@ -644,6 +678,62 @@ mod tests {
         assert_eq!(all_sorted.len(), 2);
         assert_eq!(all_sorted[0].id, 1); // marker at position 0.0
         assert_eq!(all_sorted[1].id, 2); // region at position 1.0
+    }
+
+    #[test]
+    fn test_process_regions_repairs_compact_region_pairs() {
+        let mut collection = MarkerRegionCollection::new();
+
+        collection
+            .add(
+                MarkerRegion::from_marker_line(
+                    r#"MARKER 1 1.71428571428571 Intro 1 0 1 B {260ECFBC-59BF-5B4C-AC23-F34A2C7DBC25} 0 1"#,
+                )
+                .unwrap(),
+            );
+        collection
+            .add(MarkerRegion::from_marker_line(r#"MARKER 1 18.85714285714286 "" 1"#).unwrap());
+
+        collection.process_regions();
+
+        let regions = collection.regions_sorted();
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].name, "Intro");
+        assert_eq!(regions[0].position, 1.71428571428571);
+        assert_eq!(regions[0].end_position, Some(18.85714285714286));
+    }
+
+    #[test]
+    fn test_process_regions_skips_intervening_named_markers() {
+        let mut collection = MarkerRegionCollection::new();
+
+        collection
+            .add(
+                MarkerRegion::from_marker_line(
+                    r#"MARKER 1 1.71428571428571 Intro 1 0 1 B {260ECFBC-59BF-5B4C-AC23-F34A2C7DBC25} 0 1"#,
+                )
+                .unwrap(),
+            );
+        collection
+            .add(
+                MarkerRegion::from_marker_line(
+                    r#"MARKER 1 15.42857142857143 COUNT-IN 0 0 1 B {5FF23F09-0052-514C-A31A-0FFC208784AF} 0 2"#,
+                )
+                .unwrap(),
+            );
+        collection
+            .add(MarkerRegion::from_marker_line(r#"MARKER 1 18.85714285714286 "" 1"#).unwrap());
+
+        collection.process_regions();
+
+        let regions = collection.regions_sorted();
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].name, "Intro");
+        assert_eq!(regions[0].end_position, Some(18.85714285714286));
+
+        let markers = collection.markers_sorted();
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].name, "COUNT-IN");
     }
 
     #[test]

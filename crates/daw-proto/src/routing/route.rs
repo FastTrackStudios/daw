@@ -49,6 +49,47 @@ pub struct ChannelMapping {
     pub num_channels: u32,
 }
 
+/// MIDI source-channel selection for a route.
+#[repr(C, u8)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Facet)]
+pub enum MidiSourceChannel {
+    /// Forward all MIDI channels.
+    All,
+    /// Forward only a specific 1-based MIDI channel.
+    Channel(u8),
+}
+
+impl Default for MidiSourceChannel {
+    fn default() -> Self {
+        Self::All
+    }
+}
+
+/// MIDI destination-channel remapping for a route.
+#[repr(C, u8)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Facet)]
+pub enum MidiDestinationChannel {
+    /// Preserve the original MIDI channel.
+    Original,
+    /// Force output to a specific 1-based MIDI channel.
+    Channel(u8),
+}
+
+impl Default for MidiDestinationChannel {
+    fn default() -> Self {
+        Self::Original
+    }
+}
+
+/// Typed MIDI channel mapping for REAPER's MIDI send flags.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Facet)]
+pub struct MidiChannelMapping {
+    /// Source MIDI channel filter.
+    pub source: MidiSourceChannel,
+    /// Destination MIDI channel remapping.
+    pub destination: MidiDestinationChannel,
+}
+
 /// Complete route state (send, receive, or hardware output)
 #[derive(Clone, Debug, Facet)]
 pub struct TrackRoute {
@@ -96,6 +137,8 @@ pub struct TrackRoute {
     pub source_channels: ChannelMapping,
     /// Destination channel mapping
     pub dest_channels: ChannelMapping,
+    /// MIDI channel mapping, when the route supports MIDI.
+    pub midi_channel_mapping: Option<MidiChannelMapping>,
 }
 
 impl TrackRoute {
@@ -141,6 +184,7 @@ impl Default for TrackRoute {
             automation_mode: AutomationMode::TrimRead,
             source_channels: ChannelMapping::default(),
             dest_channels: ChannelMapping::default(),
+            midi_channel_mapping: None,
         }
     }
 }

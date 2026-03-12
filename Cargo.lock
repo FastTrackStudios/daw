@@ -4809,6 +4809,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "nam-manager"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "signal-proto",
+ "thiserror 2.0.18",
+ "walkdir",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7259,7 +7273,9 @@ dependencies = [
  "daw-control",
  "daw-proto",
  "eyre",
+ "futures",
  "macromod",
+ "nam-manager",
  "roam",
  "serde",
  "serde_json",

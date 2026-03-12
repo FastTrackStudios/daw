@@ -6,6 +6,7 @@ use roam::Context;
 use std::path::PathBuf;
 
 use crate::main_thread;
+use crate::safe_wrappers::cstring;
 
 /// REAPER resource path service implementation
 #[derive(Clone)]
@@ -55,20 +56,7 @@ impl ResourceService for ReaperResource {
 
             // GetLastColorThemeFile returns a C string pointer
             let ptr = low.GetLastColorThemeFile();
-
-            if ptr.is_null() {
-                return None;
-            }
-
-            // Convert C string to Rust string
-            let c_str = unsafe { std::ffi::CStr::from_ptr(ptr) };
-            let path_str = c_str.to_str().ok()?;
-
-            if path_str.is_empty() {
-                None
-            } else {
-                Some(PathBuf::from(path_str))
-            }
+            cstring::read_cstr(ptr).map(PathBuf::from)
         })
         .await
         .flatten()

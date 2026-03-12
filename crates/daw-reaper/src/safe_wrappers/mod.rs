@@ -11,12 +11,15 @@
 //! keeping all `unsafe` in one auditable location.
 
 pub mod audio;
+pub mod audio_accessor;
 pub mod buffer;
 pub mod cstring;
 pub mod ext_state;
+pub mod fx;
 pub mod item;
 pub mod markers;
 pub mod midi;
+pub mod peak;
 pub mod routing;
 pub mod tempo;
 pub mod time_map;

@@ -32,6 +32,7 @@
 
 pub mod safe_wrappers;
 
+pub mod audio_accessor;
 pub mod audio_engine;
 pub mod automation;
 pub mod ext_state;
@@ -43,6 +44,7 @@ pub mod main_thread;
 pub mod marker;
 pub mod midi;
 pub mod midi_analysis;
+pub mod peak;
 pub mod position_conversion;
 pub mod project;
 pub mod project_context;
@@ -56,6 +58,7 @@ pub mod transport;
 pub mod ui;
 
 // Re-export the main types
+pub use audio_accessor::ReaperAudioAccessor;
 pub use audio_engine::ReaperAudioEngine;
 pub use automation::ReaperAutomation;
 pub use ext_state::ReaperExtState;
@@ -66,6 +69,7 @@ pub use live_midi::ReaperLiveMidi;
 pub use marker::ReaperMarker;
 pub use midi::ReaperMidi;
 pub use midi_analysis::ReaperMidiAnalysis;
+pub use peak::ReaperPeak;
 pub use position_conversion::ReaperPositionConversion;
 pub use project::ReaperProject;
 pub use region::ReaperRegion;

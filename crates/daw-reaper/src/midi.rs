@@ -94,7 +94,7 @@ impl ReaperMidi {
         None
     }
 
-    fn resolve_item(
+    pub fn resolve_item(
         medium: &reaper_medium::Reaper,
         project_ctx: ReaperProjectContext,
         item_ref: &ItemRef,
@@ -122,7 +122,7 @@ impl ReaperMidi {
         }
     }
 
-    fn resolve_take(
+    pub fn resolve_take(
         medium: &reaper_medium::Reaper,
         item: MediaItem,
         take_ref: &TakeRef,

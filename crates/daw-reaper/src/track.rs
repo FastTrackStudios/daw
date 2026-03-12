@@ -11,6 +11,7 @@ use roam::Context;
 
 use crate::main_thread;
 use crate::project_context::find_project_by_guid;
+use crate::safe_wrappers::routing as routing_sw;
 
 /// REAPER track service implementation.
 ///
@@ -206,16 +207,13 @@ pub fn set_folder_depth_on_main_thread(track_guid: &str, depth: i32) -> Result<(
     let track = resolve_track(&proj, &TrackRef::Guid(track_guid.to_string()))
         .ok_or_else(|| format!("Track not found: {track_guid}"))?;
     let raw = track.raw().map_err(|e| format!("raw track failed: {e}"))?;
-    unsafe {
-        Reaper::get()
-            .medium_reaper()
-            .set_media_track_info_value(
-                raw,
-                reaper_medium::TrackAttributeKey::FolderDepth,
-                depth as f64,
-            )
-            .map_err(|e| format!("set_folder_depth failed: {e}"))
-    }
+    routing_sw::set_media_track_info_value(
+        Reaper::get().medium_reaper(),
+        raw,
+        reaper_medium::TrackAttributeKey::FolderDepth,
+        depth as f64,
+    );
+    Ok(())
 }
 
 // =============================================================================
@@ -736,16 +734,13 @@ impl TrackService for ReaperTrack {
             let proj = resolve_project(&project).ok_or_else(|| "Project not found".to_string())?;
             let t = resolve_track(&proj, &track).ok_or_else(|| "Track not found".to_string())?;
             let raw = t.raw().map_err(|e| format!("raw track failed: {e}"))?;
-            unsafe {
-                Reaper::get()
-                    .medium_reaper()
-                    .set_media_track_info_value(
-                        raw,
-                        reaper_medium::TrackAttributeKey::FolderDepth,
-                        depth as f64,
-                    )
-                    .map_err(|e| format!("set_folder_depth failed: {e}"))
-            }
+            routing_sw::set_media_track_info_value(
+                Reaper::get().medium_reaper(),
+                raw,
+                reaper_medium::TrackAttributeKey::FolderDepth,
+                depth as f64,
+            );
+            Ok(())
         })
         .await
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
