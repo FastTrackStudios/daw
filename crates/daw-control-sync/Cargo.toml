@@ -1,0 +1,22 @@
+[package]
+name = "daw-control-sync"
+version = "0.1.0"
+edition = "2021"
+authors = ["FastTrack Studio"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+# Async runtime for background processing
+tokio = { version = "1", features = ["rt", "sync", "time"] }
+
+# DAW control protocol
+daw-control = { path = "../daw-control" }
+daw-proto = { path = "../daw-proto" }
+roam = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+
+# Error handling
+eyre = "0.6"
+thiserror = "1.0"
+
+# Logging
+tracing = { version = "0.1", features = ["std"] }

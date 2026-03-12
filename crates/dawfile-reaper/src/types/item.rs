@@ -399,6 +399,8 @@ pub struct MidiSource {
     pub events: Vec<MidiEvent>,
     /// Extended `X/x` event blocks (base64 payload blocks)
     pub extended_events: Vec<MidiExtendedEvent>,
+    /// MIDI source events in original file order, preserving timing deltas from both `E` and `<X>` lines.
+    pub event_stream: Vec<MidiSourceEvent>,
     /// Ignore project tempo override (`IGNTEMPO`)
     pub ignore_tempo: Option<MidiIgnoreTempo>,
     /// MIDI editor velocity/CC lanes (`VELLANE`)
@@ -441,6 +443,13 @@ pub struct MidiExtendedEvent {
     pub fields: Vec<String>,
     /// Base64 payload lines contained by this block.
     pub data_lines: Vec<String>,
+}
+
+/// A MIDI source event preserving the original interleaving of standard `E` and extended `<X>` events.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum MidiSourceEvent {
+    Midi(MidiEvent),
+    Extended(MidiExtendedEvent),
 }
 
 /// `IGNTEMPO` override for MIDI sources.
@@ -491,6 +500,26 @@ impl MidiEvent {
     /// Get the MIDI channel (0-15, from lower nibble of status byte).
     pub fn channel(&self) -> u8 {
         self.status() & 0x0F
+    }
+}
+
+impl MidiExtendedEvent {
+    /// Delta time in ticks from the previous source event.
+    pub fn delta_ticks(&self) -> u32 {
+        self.fields
+            .first()
+            .and_then(|field| field.parse::<u32>().ok())
+            .unwrap_or(0)
+    }
+}
+
+impl MidiSourceEvent {
+    /// Delta time in ticks from the previous source event.
+    pub fn delta_ticks(&self) -> u32 {
+        match self {
+            Self::Midi(event) => event.delta_ticks,
+            Self::Extended(event) => event.delta_ticks(),
+        }
     }
 }
 
@@ -1294,6 +1323,7 @@ impl Item {
             pooled_evts_guid: None,
             events: Vec::new(),
             extended_events: Vec::new(),
+            event_stream: Vec::new(),
             ignore_tempo: None,
             vel_lanes: Vec::new(),
             bank_program_file: None,
@@ -1394,11 +1424,13 @@ impl Item {
                     }
                     i += 1;
                 }
-                midi.extended_events.push(MidiExtendedEvent {
+                let event = MidiExtendedEvent {
                     selected,
                     fields,
                     data_lines,
-                });
+                };
+                midi.extended_events.push(event.clone());
+                midi.event_stream.push(MidiSourceEvent::Extended(event));
             } else if line.starts_with("E ") || line.starts_with("e ") {
                 // MIDI event: E <delta_ticks> <status_hex> <data1_hex> [data2_hex ...]
                 let parts: Vec<&str> = line[2..].split_whitespace().collect();
@@ -1409,7 +1441,9 @@ impl Item {
                         .filter_map(|s| u8::from_str_radix(s, 16).ok())
                         .collect();
                     if !bytes.is_empty() {
-                        midi.events.push(MidiEvent { delta_ticks, bytes });
+                        let event = MidiEvent { delta_ticks, bytes };
+                        midi.events.push(event.clone());
+                        midi.event_stream.push(MidiSourceEvent::Midi(event));
                     }
                 }
             } else if !line.is_empty() {

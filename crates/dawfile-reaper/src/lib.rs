@@ -162,7 +162,7 @@ pub use rpp_tree::{
 pub use types::{
     parse_js_params, DecodeOptions, Envelope, FxChain, FxChainNode, FxContainer, FxEnvelopePoint,
     FxParamEnvelope, FxParamRef, FxPlugin, Item, JsParamValue, MarkerRegion,
-    MarkerRegionCollection, MidiEvent, MidiEventType, MidiSource, PluginType, ReaperProject,
+    MarkerRegionCollection, MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, PluginType, ReaperProject,
     SourceBlock, SourceType, StretchMarker, TempoTimeEnvelope, TempoTimePoint, Track,
     TrackParseOptions,
 };

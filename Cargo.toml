@@ -4,6 +4,7 @@ members = [
     "crates/audio-controls",
     "crates/daw",
     "crates/daw-control",
+    "crates/daw-control-sync",
     "crates/daw-proto",
     "crates/daw-reaper",
     "crates/daw-standalone",
@@ -25,6 +26,7 @@ audio-controls = { path = "crates/audio-controls" }
 daw = { path = "crates/daw" }
 daw-proto = { path = "crates/daw-proto" }
 daw-control = { path = "crates/daw-control" }
+daw-control-sync = { path = "crates/daw-control-sync" }
 daw-standalone = { path = "crates/daw-standalone" }
 daw-reaper = { path = "crates/daw-reaper" }
 daw-ui = { path = "crates/daw-ui" }

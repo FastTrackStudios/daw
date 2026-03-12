@@ -1493,6 +1493,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-control-sync"
+version = "0.1.0"
+dependencies = [
+ "daw-control",
+ "daw-proto",
+ "eyre",
+ "roam",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "daw-proto"
 version = "0.1.0"
 dependencies = [

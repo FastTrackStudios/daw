@@ -55,7 +55,8 @@ pub use fx_chain::{
     FxParamRef, FxPlugin, JsParamValue, PluginType,
 };
 pub use item::{
-    Item, MidiEvent, MidiEventType, MidiSource, SourceBlock, SourceType, StretchMarker,
+    Item, MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, SourceBlock, SourceType,
+    StretchMarker,
 };
 pub use marker_region::{MarkerRegion, MarkerRegionCollection};
 pub use project::{DecodeOptions, ReaperProject};
