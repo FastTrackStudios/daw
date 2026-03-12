@@ -47,6 +47,40 @@ pub struct DawSync {
 }
 
 impl DawSync {
+    /// Create a new synchronous DAW interface from environment or default socket
+    ///
+    /// Tries to connect to the DAW service socket specified by:
+    /// 1. `FTS_DAW_SOCKET` environment variable
+    /// 2. Default socket path (platform-specific)
+    ///
+    /// # Errors
+    /// Returns an error if the socket path is invalid or connection fails
+    pub async fn connect_to_service() -> Result<Self> {
+        // Try to get socket path from environment or use default
+        let socket_path = std::env::var("FTS_DAW_SOCKET")
+            .unwrap_or_else(|_| {
+                // Platform-specific defaults
+                #[cfg(unix)]
+                {
+                    "unix:///tmp/fts-daw.sock".to_string()
+                }
+                #[cfg(windows)]
+                {
+                    "np://fts-daw".to_string()
+                }
+                #[cfg(not(any(unix, windows)))]
+                {
+                    "unix:///tmp/fts-daw.sock".to_string()
+                }
+            });
+
+        let handle = roam::session::connect(&socket_path)
+            .await
+            .context(format!("Failed to connect to DAW service at {}", socket_path))?;
+
+        Self::new(handle)
+    }
+
     /// Create a new synchronous DAW interface
     ///
     /// Spawns a background tokio runtime that will process queued requests.
