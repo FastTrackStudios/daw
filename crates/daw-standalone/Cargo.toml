@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 daw-proto = { path = "../daw-proto" }
 roam = { workspace = true }
-roam-telemetry = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 peeps = { workspace = true }
@@ -17,5 +16,4 @@ keyflow = { workspace = true, features = ["engraver", "midi-import"] }
 daw-proto = { path = "../daw-proto" }
 daw-control = { workspace = true }
 eyre = { workspace = true }
-roam-wire = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

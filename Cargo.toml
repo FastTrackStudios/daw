@@ -32,15 +32,13 @@ daw-reaper = { path = "crates/daw-reaper" }
 daw-ui = { path = "crates/daw-ui" }
 dawfile-reaper = { path = "crates/dawfile-reaper" }
 
-# Facet reflection framework
-facet = { git = "https://github.com/facet-rs/facet", branch = "main" }
+# Facet reflection - use crates.io 0.44.x
+facet = { version = "0.44" }
 
-# ROAM service framework (pinned — latest main needs peeps sub-crates not yet published)
-roam = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-session = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-stream = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-telemetry = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
-roam-wire = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+# ROAM service framework (v7.3.0 main branch)
+roam = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-inprocess = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+roam-stream = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
