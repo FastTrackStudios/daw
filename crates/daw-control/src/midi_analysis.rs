@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::DawClients;
 use daw_proto::{MidiChartData, MidiChartRequest, ProjectContext};
-use eyre::Result;
+use crate::Result;
 
 /// Read-only project MIDI analysis access.
 #[derive(Clone)]

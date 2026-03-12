@@ -9,7 +9,7 @@
 //! use daw_control::Daw;
 //!
 //! #[tokio::main]
-//! async fn main() -> eyre::Result<()> {
+//! async fn main() -> crate::Result<()> {
 //!     // Initialize global connection
 //!     let handle = roam::connect("unix:///tmp/fts-daw.sock").await?;
 //!     Daw::init(handle)?;
@@ -29,7 +29,7 @@
 //! use host_manager::HostManager;
 //!
 //! #[tokio::main]
-//! async fn main() -> eyre::Result<()> {
+//! async fn main() -> crate::Result<()> {
 //!     let mut manager = HostManager::new();
 //!     manager.connect("/tmp/guitar1.sock", 0).await?;
 //!     manager.connect("/tmp/guitar2.sock", 0).await?;
@@ -141,7 +141,10 @@ pub use daw_proto::TakeServiceClient;
 pub use daw_proto::TempoMapServiceClient;
 pub use daw_proto::TrackServiceClient;
 pub use daw_proto::transport::transport::TransportServiceClient;
-use roam::session::ConnectionHandle;
+pub use roam::ErasedCaller;
+
+pub mod error;
+pub use error::{Error, Result};
 
 mod automation;
 mod ext_state;
@@ -196,7 +199,7 @@ pub struct DawClients {
 
 impl DawClients {
     /// Create service clients from a connection handle
-    pub fn new(handle: ConnectionHandle) -> Self {
+    pub fn new(handle: ErasedCaller) -> Self {
         Self {
             transport: TransportServiceClient::new(handle.clone()),
             project: ProjectServiceClient::new(handle.clone()),
@@ -232,7 +235,7 @@ impl DawClients {
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+/// # async fn example(handle: roam::ErasedCaller) -> crate::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// project.transport().play().await?;
@@ -255,13 +258,13 @@ impl Daw {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// daw.current_project().await?.transport().play().await?;
     /// # Ok(())
     /// # }
     /// ```
-    pub fn new(handle: ConnectionHandle) -> Self {
+    pub fn new(handle: ErasedCaller) -> Self {
         Self {
             clients: Arc::new(DawClients::new(handle)),
         }
@@ -274,13 +277,13 @@ impl Daw {
     /// # Errors
     ///
     /// Returns an error if no current project is available or RPC fails.
-    pub async fn current_project(&self) -> eyre::Result<Project> {
+    pub async fn current_project(&self) -> crate::Result<Project> {
         let info = self
             .clients
             .project
             .get_current()
             .await?
-            .ok_or_else(|| eyre::eyre!("No current project"))?;
+            .ok_or_else(|| Error::NoCurrentProject)?;
 
         Ok(Project::new(info.guid, self.clients.clone()))
     }
@@ -290,7 +293,7 @@ impl Daw {
     /// # Errors
     ///
     /// Returns an error if the project doesn't exist or RPC fails.
-    pub async fn project(&self, guid: impl Into<String>) -> eyre::Result<Project> {
+    pub async fn project(&self, guid: impl Into<String>) -> crate::Result<Project> {
         let guid = guid.into();
 
         // Verify the project exists
@@ -298,13 +301,13 @@ impl Daw {
             .project
             .get(guid.clone())
             .await?
-            .ok_or_else(|| eyre::eyre!("Project not found: {}", guid))?;
+            .ok_or_else(|| Error::ProjectNotFound(guid.clone()))?;
 
         Ok(Project::new(guid, self.clients.clone()))
     }
 
     /// List all open projects
-    pub async fn projects(&self) -> eyre::Result<Vec<Project>> {
+    pub async fn projects(&self) -> crate::Result<Vec<Project>> {
         let infos = self.clients.project.list().await?;
 
         Ok(infos
@@ -336,14 +339,14 @@ impl Daw {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(daw: &Daw) -> eyre::Result<()> {
+    /// # async fn example(daw: &Daw) -> crate::Result<()> {
     /// // Switch to a specific project
     /// let project = daw.select_project("project-guid-123").await?;
     /// println!("Now on project: {}", project.guid());
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn select_project(&self, guid: impl Into<String>) -> eyre::Result<Project> {
+    pub async fn select_project(&self, guid: impl Into<String>) -> crate::Result<Project> {
         let guid = guid.into();
 
         let success = self.clients.project.select(guid.clone()).await?;
@@ -351,20 +354,20 @@ impl Daw {
         if success {
             Ok(Project::new(guid, self.clients.clone()))
         } else {
-            Err(eyre::eyre!("Failed to select project: {}", guid))
+            Err(Error::InvalidOperation(format!("Failed to select project: {}", guid)))
         }
     }
 
     /// Create a new empty project tab.
     ///
     /// Returns the newly created project handle.
-    pub async fn create_project(&self) -> eyre::Result<Project> {
+    pub async fn create_project(&self) -> crate::Result<Project> {
         let info = self
             .clients
             .project
             .create()
             .await?
-            .ok_or_else(|| eyre::eyre!("Failed to create new project"))?;
+            .ok_or_else(|| Error::InvalidOperation("Failed to create new project".to_string()))?;
 
         Ok(Project::new(info.guid, self.clients.clone()))
     }
@@ -373,36 +376,36 @@ impl Daw {
     ///
     /// Uses REAPER's `Main_openProject` API to properly load the project,
     /// avoiding proxy rendering issues that can occur with CLI arguments.
-    pub async fn open_project(&self, path: impl Into<String>) -> eyre::Result<Project> {
+    pub async fn open_project(&self, path: impl Into<String>) -> crate::Result<Project> {
         let info = self
             .clients
             .project
             .open(path.into())
             .await?
-            .ok_or_else(|| eyre::eyre!("Failed to open project"))?;
+            .ok_or_else(|| Error::InvalidOperation("Failed to open project".to_string()))?;
 
         Ok(Project::new(info.guid, self.clients.clone()))
     }
 
     /// Close a specific project tab by GUID.
-    pub async fn close_project(&self, guid: impl Into<String>) -> eyre::Result<()> {
+    pub async fn close_project(&self, guid: impl Into<String>) -> crate::Result<()> {
         let guid = guid.into();
         let success = self.clients.project.close(guid.clone()).await?;
         if success {
             Ok(())
         } else {
-            Err(eyre::eyre!("Failed to close project: {}", guid))
+            Err(Error::InvalidOperation(format!("Failed to close project: {}", guid)))
         }
     }
 
     /// Get a project by tab slot index (0-based).
-    pub async fn project_by_slot(&self, slot: u32) -> eyre::Result<Project> {
+    pub async fn project_by_slot(&self, slot: u32) -> crate::Result<Project> {
         let info = self
             .clients
             .project
             .get_by_slot(slot)
             .await?
-            .ok_or_else(|| eyre::eyre!("No project at slot {}", slot))?;
+            .ok_or_else(|| Error::InvalidOperation(format!("No project at slot {}", slot)))?;
 
         Ok(Project::new(info.guid, self.clients.clone()))
     }
@@ -420,7 +423,7 @@ impl Daw {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(daw: &Daw) -> eyre::Result<()> {
+    /// # async fn example(daw: &Daw) -> crate::Result<()> {
     /// let mut rx = daw.subscribe_projects().await?;
     /// while let Ok(Some(event)) = rx.recv().await {
     ///     match event {
@@ -436,7 +439,7 @@ impl Daw {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn subscribe_projects(&self) -> eyre::Result<roam::Rx<ProjectEvent>> {
+    pub async fn subscribe_projects(&self) -> crate::Result<roam::Rx<ProjectEvent>> {
         let (tx, rx) = roam::channel::<ProjectEvent>();
         self.clients.project.subscribe(tx).await?;
         Ok(rx)
@@ -452,7 +455,7 @@ impl Daw {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(daw: &Daw) -> eyre::Result<()> {
+    /// # async fn example(daw: &Daw) -> crate::Result<()> {
     /// let latency = daw.audio_engine().get_output_latency_seconds().await?;
     /// println!("Audio output latency: {}ms", latency * 1000.0);
     /// # Ok(())
@@ -472,7 +475,7 @@ impl Daw {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(daw: &Daw) -> eyre::Result<()> {
+    /// # async fn example(daw: &Daw) -> crate::Result<()> {
     /// let ext = daw.ext_state();
     /// ext.set("MyExt", "theme", "dark", true).await?;
     /// let theme = ext.get("MyExt", "theme").await?;
@@ -487,7 +490,7 @@ impl Daw {
     ///
     /// Returns every plugin known to REAPER (VST2, VST3, CLAP, AU, JS, etc.)
     /// with its display name and full identifier string.
-    pub async fn installed_plugins(&self) -> eyre::Result<Vec<InstalledFx>> {
+    pub async fn installed_plugins(&self) -> crate::Result<Vec<InstalledFx>> {
         Ok(self.clients.fx.list_installed_fx().await?)
     }
 
@@ -507,7 +510,7 @@ impl Daw {
         &self,
         target: daw_proto::StuffMidiTarget,
         message: daw_proto::MidiMessage,
-    ) -> eyre::Result<()> {
+    ) -> crate::Result<()> {
         self.clients
             .live_midi
             .stuff_midi_message(target, message)
@@ -532,10 +535,10 @@ impl Daw {
     /// # Errors
     ///
     /// Returns an error if already initialized.
-    pub fn init(handle: ConnectionHandle) -> eyre::Result<()> {
+    pub fn init(handle: ErasedCaller) -> crate::Result<()> {
         GLOBAL_DAW
             .set(Daw::new(handle))
-            .map_err(|_| eyre::eyre!("DAW already initialized"))
+            .map_err(|_| Error::InvalidOperation("DAW already initialized".to_string()))
     }
 
     /// Get the global DAW instance
@@ -562,3 +565,4 @@ impl Daw {
         GLOBAL_DAW.get().is_some()
     }
 }
+

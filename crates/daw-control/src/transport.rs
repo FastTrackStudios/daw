@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::DawClients;
 use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport as TransportState};
-use eyre::Result;
+use crate::Result;
 use roam::Rx;
 
 /// Transport handle for a specific project
@@ -19,7 +19,7 @@ use roam::Rx;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// let transport = project.transport();
@@ -278,7 +278,7 @@ impl Transport {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(transport: daw_control::Transport) -> eyre::Result<()> {
+    /// # async fn example(transport: daw_control::Transport) -> crate::Result<()> {
     /// // Go to measure 5, beat 1 (0-indexed: measure 4, beat 0)
     /// transport.set_position_musical(4, 0, 0).await?;
     ///
@@ -314,7 +314,7 @@ impl Transport {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     /// let transport = project.transport();
@@ -351,7 +351,7 @@ impl Transport {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     /// let transport = project.transport();
@@ -393,7 +393,7 @@ impl Transport {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     /// let transport = project.transport();

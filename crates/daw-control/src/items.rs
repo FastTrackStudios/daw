@@ -2,14 +2,14 @@
 
 use std::sync::Arc;
 
-use crate::{DawClients, MidiEditor};
+use crate::{DawClients, Error, MidiEditor};
 use daw_proto::{
     ProjectContext,
     item::{FadeShape, Item, ItemRef, Take, TakeRef},
     primitives::{Duration, PositionInSeconds},
     track::TrackRef,
 };
-use eyre::Result;
+use crate::Result;
 
 /// Items handle for a specific track
 ///
@@ -113,7 +113,7 @@ impl Items {
             .item
             .add_item(self.context(), self.track_ref(), position, length)
             .await?
-            .ok_or_else(|| eyre::eyre!("Failed to create item"))?;
+            .ok_or_else(|| Error::Other("Failed to create item".to_string()))?;
 
         Ok(ItemHandle::new(
             guid,
@@ -282,7 +282,7 @@ impl ItemHandle {
             .item
             .get_item(self.context(), self.item_ref())
             .await?
-            .ok_or_else(|| eyre::eyre!("Item not found: {}", self.item_guid))
+            .ok_or_else(|| Error::Other(format!("Item not found: {}", self.item_guid)))
     }
 
     // =========================================================================
@@ -431,7 +431,7 @@ impl ItemHandle {
             .item
             .duplicate_item(self.context(), self.item_ref())
             .await?
-            .ok_or_else(|| eyre::eyre!("Failed to duplicate item"))?;
+            .ok_or_else(|| Error::Other("Failed to duplicate item".to_string()))?;
 
         Ok(ItemHandle::new(
             guid,
@@ -542,7 +542,7 @@ impl Takes {
             .take
             .get_active_take(self.context(), self.item_ref())
             .await?
-            .ok_or_else(|| eyre::eyre!("No active take"))?;
+            .ok_or_else(|| Error::Other("No active take".to_string()))?;
 
         Ok(TakeHandle::new(
             self.item_guid.clone(),
@@ -559,7 +559,7 @@ impl Takes {
             .take
             .add_take(self.context(), self.item_ref())
             .await?
-            .ok_or_else(|| eyre::eyre!("Failed to create take"))?;
+            .ok_or_else(|| Error::Other("Failed to create take".to_string()))?;
 
         Ok(TakeHandle::new(
             self.item_guid.clone(),
@@ -628,7 +628,7 @@ impl TakeHandle {
             .take
             .get_take(self.context(), self.item_ref(), self.take_ref.clone())
             .await?
-            .ok_or_else(|| eyre::eyre!("Take not found"))
+            .ok_or_else(|| Error::Other("Take not found".to_string()))
     }
 
     // =========================================================================
@@ -760,7 +760,7 @@ impl TakeHandle {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///

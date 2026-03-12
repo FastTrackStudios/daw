@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::DawClients;
+use crate::{DawClients, Error};
 use daw_proto::{
     ProjectContext,
     automation::{
@@ -12,7 +12,7 @@ use daw_proto::{
     primitives::{AutomationMode, PositionInSeconds},
     track::TrackRef,
 };
-use eyre::Result;
+use crate::Result;
 
 /// Envelopes accessor for a track
 #[derive(Clone)]
@@ -166,7 +166,7 @@ impl EnvelopeHandle {
             .automation
             .get_envelope(self.context(), self.location())
             .await?
-            .ok_or_else(|| eyre::eyre!("Envelope not found"))
+            .ok_or_else(|| Error::Other("Envelope not found".to_string()))
     }
 
     // =========================================================================

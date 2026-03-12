@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
-use crate::DawClients;
+use crate::{DawClients, Error};
 use daw_proto::{
     ProjectContext,
     routing::{RouteLocation, RouteRef, RouteType, SendMode, TrackRoute},
     track::TrackRef,
 };
-use eyre::Result;
+use crate::Result;
 
 /// Sends accessor for a track
 #[derive(Clone)]
@@ -79,7 +79,7 @@ impl Sends {
                 TrackRef::Guid(dest_track_guid.to_string()),
             )
             .await?
-            .ok_or_else(|| eyre::eyre!("Failed to create send"))?;
+            .ok_or_else(|| Error::Other("Failed to create send".to_string()))?;
 
         Ok(RouteHandle::new(
             self.track_guid.clone(),
@@ -233,7 +233,7 @@ impl HardwareOutputs {
             .routing
             .add_hardware_output(self.context(), self.track_ref(), hw_output_index)
             .await?
-            .ok_or_else(|| eyre::eyre!("Failed to create hardware output"))?;
+            .ok_or_else(|| Error::Other("Failed to create hardware output".to_string()))?;
 
         Ok(RouteHandle::new(
             self.track_guid.clone(),
@@ -310,7 +310,7 @@ impl RouteHandle {
             .routing
             .get_route(self.context(), self.location())
             .await?
-            .ok_or_else(|| eyre::eyre!("Route not found"))
+            .ok_or_else(|| Error::Other("Route not found".to_string()))
     }
 
     // =========================================================================
@@ -397,7 +397,7 @@ impl RouteHandle {
     /// Set send mode (only for sends)
     pub async fn set_send_mode(&self, mode: SendMode) -> Result<()> {
         if self.route_type != RouteType::Send {
-            return Err(eyre::eyre!("Send mode only applies to sends"));
+            return Err(Error::Other("Send mode only applies to sends".to_string()));
         }
         self.clients
             .routing

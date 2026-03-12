@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use crate::{DawClients, Envelopes, FxChain, HardwareOutputs, Items, Receives, Sends};
+use crate::{DawClients, Envelopes, Error, FxChain, HardwareOutputs, Items, Receives, Sends};
 use daw_proto::{
     FxChainContext, InputMonitoringMode, ProjectContext, RecordInput, Track, TrackRef,
 };
-use eyre::Result;
+use crate::Result;
 
 /// Tracks handle for a specific project
 ///
@@ -18,7 +18,7 @@ use eyre::Result;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// let tracks = project.tracks();
@@ -107,7 +107,7 @@ impl Tracks {
             .track
             .get_master_track(self.context())
             .await?
-            .ok_or_else(|| eyre::eyre!("No master track found"))?;
+            .ok_or_else(|| Error::Other("No master track found".to_string()))?;
 
         Ok(TrackHandle::new(
             track.guid,
@@ -180,8 +180,8 @@ impl Tracks {
             .add_track(self.context(), name.to_string(), at_index)
             .await?;
         if guid.is_empty() {
-            return Err(eyre::eyre!(
-                "add_track returned empty GUID — REAPER may have refused the operation"
+            return Err(Error::InvalidOperation(
+                "add_track returned empty GUID — REAPER may have refused the operation".to_string()
             ));
         }
         Ok(TrackHandle::new(
@@ -229,7 +229,7 @@ impl std::fmt::Debug for Tracks {
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 ///
@@ -291,7 +291,7 @@ impl TrackHandle {
             .track
             .get_track(self.context(), self.track_ref())
             .await?
-            .ok_or_else(|| eyre::eyre!("Track not found: {}", self.track_guid))
+            .ok_or_else(|| Error::Other(format!("Track not found: {}", self.track_guid)))
     }
 
     // =========================================================================
@@ -525,7 +525,7 @@ impl TrackHandle {
             .track
             .get_track_chunk(self.context(), self.track_ref())
             .await
-            .map_err(|e| eyre::eyre!(e))
+            .map_err(|e| Error::Other(format!("{:?}", e)))
     }
 
     /// Set the full track state chunk (RPP format).
@@ -549,7 +549,7 @@ impl TrackHandle {
             .track
             .set_folder_depth(self.context(), self.track_ref(), depth)
             .await
-            .map_err(|e| eyre::eyre!(e))
+            .map_err(|e| Error::Other(format!("{:?}", e)))
     }
 
     // =========================================================================

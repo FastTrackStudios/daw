@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::DawClients;
 use daw_proto::{ProjectContext, Region};
-use eyre::Result;
+use crate::Result;
 
 /// Regions handle for a specific project
 ///
@@ -16,7 +16,7 @@ use eyre::Result;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// let regions = project.regions();

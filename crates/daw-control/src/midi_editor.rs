@@ -12,7 +12,7 @@ use daw_proto::{
         QuantizeParams,
     },
 };
-use eyre::Result;
+use crate::Result;
 
 /// MIDI editor for a take
 ///

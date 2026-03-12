@@ -6,7 +6,7 @@
 //! # Example
 //!
 //! ```no_run
-//! # async fn example(daw: &daw_control::Daw) -> eyre::Result<()> {
+//! # async fn example(daw: &daw_control::Daw) -> crate::Result<()> {
 //! let ext = daw.ext_state();
 //!
 //! // Store a value (persistent across REAPER restarts)
@@ -30,7 +30,7 @@
 
 use std::sync::Arc;
 
-use crate::DawClients;
+use crate::{DawClients, Error};
 
 /// Handle for persistent key-value storage (REAPER's ExtState API).
 ///
@@ -48,7 +48,7 @@ impl ExtState {
     /// Get a value by section and key.
     ///
     /// Returns `None` if the key doesn't exist or is empty.
-    pub async fn get(&self, section: &str, key: &str) -> eyre::Result<Option<String>> {
+    pub async fn get(&self, section: &str, key: &str) -> crate::Result<Option<String>> {
         Ok(self
             .clients
             .ext_state
@@ -63,7 +63,7 @@ impl ExtState {
         key: &str,
         value: &str,
         persist: bool,
-    ) -> eyre::Result<()> {
+    ) -> crate::Result<()> {
         self.clients
             .ext_state
             .set_ext_state(
@@ -77,7 +77,7 @@ impl ExtState {
     }
 
     /// Delete a value. If `persist` is true, also removes from persistent storage.
-    pub async fn delete(&self, section: &str, key: &str, persist: bool) -> eyre::Result<()> {
+    pub async fn delete(&self, section: &str, key: &str, persist: bool) -> crate::Result<()> {
         self.clients
             .ext_state
             .delete_ext_state(section.to_string(), key.to_string(), persist)
@@ -86,7 +86,7 @@ impl ExtState {
     }
 
     /// Check if a value exists for the given section and key.
-    pub async fn has(&self, section: &str, key: &str) -> eyre::Result<bool> {
+    pub async fn has(&self, section: &str, key: &str) -> crate::Result<bool> {
         Ok(self
             .clients
             .ext_state
@@ -102,7 +102,7 @@ impl ExtState {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(ext: &daw_control::ExtState) -> eyre::Result<()> {
+    /// # async fn example(ext: &daw_control::ExtState) -> crate::Result<()> {
     /// #[derive(serde::Deserialize)]
     /// struct Config {
     ///     volume: f32,
@@ -119,19 +119,19 @@ impl ExtState {
         &self,
         section: &str,
         key: &str,
-    ) -> eyre::Result<Option<T>> {
+    ) -> crate::Result<Option<T>> {
         let Some(json_str) = self.get(section, key).await? else {
             return Ok(None);
         };
 
         match serde_json::from_str(&json_str) {
             Ok(value) => Ok(Some(value)),
-            Err(e) => Err(eyre::eyre!(
+            Err(e) => Err(Error::Other(format!(
                 "Failed to deserialize ExtState value for {}/{}: {}",
                 section,
                 key,
                 e
-            )),
+            ))),
         }
     }
 
@@ -142,7 +142,7 @@ impl ExtState {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(ext: &daw_control::ExtState) -> eyre::Result<()> {
+    /// # async fn example(ext: &daw_control::ExtState) -> crate::Result<()> {
     /// #[derive(serde::Serialize)]
     /// struct Config {
     ///     volume: f32,
@@ -164,9 +164,9 @@ impl ExtState {
         key: &str,
         value: &T,
         persist: bool,
-    ) -> eyre::Result<()> {
+    ) -> crate::Result<()> {
         let json_str = serde_json::to_string(value)
-            .map_err(|e| eyre::eyre!("Failed to serialize value for {}/{}: {}", section, key, e))?;
+            .map_err(|e| Error::Other(format!("Failed to serialize value for {}/{}: {}", section, key, e)))?;
 
         self.set(section, key, &json_str, persist).await
     }

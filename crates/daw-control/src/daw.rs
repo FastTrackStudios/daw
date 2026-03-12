@@ -1,7 +1,7 @@
 //! Top-level DAW API entry point
 
 use crate::{DawConnection, Project};
-use eyre::Result;
+use crate::Result;
 
 /// Main DAW API entry point (like `Reaper`)
 ///
@@ -14,7 +14,7 @@ use eyre::Result;
 /// use daw_proto::client::Daw;
 ///
 /// #[tokio::main]
-/// async fn main() -> eyre::Result<()> {
+/// async fn main() -> crate::Result<()> {
 ///     // Initialize the global connection
 ///     let handle = roam::connect("unix:///tmp/fts-daw.sock").await?;
 ///     Daw::init(handle)?;
@@ -48,7 +48,7 @@ impl Daw {
     /// # };
     /// ```
     pub fn init(handle: roam::session::ConnectionHandle) -> Result<()> {
-        DawConnection::init_globally(handle).map_err(|_| eyre::eyre!("DAW already initialized"))
+        DawConnection::init_globally(handle).map_err(|_| Error::Other("DAW already initialized".to_string()))
     }
 
     /// Get the current/active project
@@ -79,7 +79,7 @@ impl Daw {
             .project
             .get_current()
             .await?
-            .ok_or_else(|| eyre::eyre!("No current project"))?;
+            .ok_or_else(|| Error::Other("No current project".to_string()))?;
 
         Ok(Project::new(info.guid))
     }
@@ -111,7 +111,7 @@ impl Daw {
             .project
             .get(guid.clone())
             .await?
-            .ok_or_else(|| eyre::eyre!("Project not found: {}", guid))?;
+            .ok_or_else(|| Error::Other(format!("Project not found: {}", guid)))?;
 
         Ok(Project::new(guid))
     }

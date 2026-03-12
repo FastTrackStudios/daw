@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::DawClients;
+use crate::{DawClients, Error};
 use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
     FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
@@ -11,7 +11,7 @@ use daw_proto::{
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
-use eyre::Result;
+use crate::Result;
 
 /// Handle to an FX chain
 ///
@@ -23,7 +23,7 @@ use eyre::Result;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 ///
@@ -161,7 +161,7 @@ impl FxChain {
     ///
     /// ```no_run
     /// # use daw_control::FxChain;
-    /// # async fn example(chain: FxChain) -> eyre::Result<()> {
+    /// # async fn example(chain: FxChain) -> crate::Result<()> {
     /// chain.add("ReaComp").await?;
     /// chain.add("VST3: FabFilter Pro-C 2").await?;
     /// chain.add("JS: 1175 Compressor").await?;
@@ -178,7 +178,7 @@ impl FxChain {
                 fx_name.to_string(),
             )
             .await?
-            .ok_or_else(|| eyre::eyre!("Failed to add FX: {}", fx_name))?;
+            .ok_or_else(|| Error::Other(format!("Failed to add FX: {}", fx_name)))?;
 
         Ok(FxHandle::new(
             self.context.clone(),
@@ -226,7 +226,7 @@ impl FxChain {
     ///
     /// ```no_run
     /// # use daw_control::FxChain;
-    /// # async fn example(chain: FxChain) -> eyre::Result<()> {
+    /// # async fn example(chain: FxChain) -> crate::Result<()> {
     /// let mut rx = chain.subscribe_events().await?;
     /// while let Some(event) = rx.recv().await? {
     ///     println!("FX event: {:?}", event);
@@ -260,7 +260,7 @@ impl FxChain {
             .fx
             .add_fx_at(self.project_context(), request)
             .await?
-            .ok_or_else(|| eyre::eyre!("Failed to add FX at index {}: {}", index, fx_name))?;
+            .ok_or_else(|| Error::Other(format!("Failed to add FX at index {}: {}", index, fx_name)))?;
 
         Ok(FxHandle::new(
             self.context.clone(),
@@ -295,7 +295,7 @@ impl FxChain {
             .fx
             .create_container(self.project_context(), request)
             .await?
-            .ok_or_else(|| eyre::eyre!("Failed to create container: {}", name))
+            .ok_or_else(|| Error::Other(format!("Failed to create container: {}", name)))
     }
 
     /// Move an FX node into a container at the specified child position.
@@ -364,7 +364,7 @@ impl FxChain {
                 container_id.clone(),
             )
             .await?
-            .ok_or_else(|| eyre::eyre!("Container channel config not found"))?;
+            .ok_or_else(|| Error::Other("Container channel config not found".to_string()))?;
         Ok(config)
     }
 
@@ -401,7 +401,7 @@ impl FxChain {
             .fx
             .enclose_in_container(self.project_context(), request)
             .await?
-            .ok_or_else(|| eyre::eyre!("Failed to enclose FX in container"))
+            .ok_or_else(|| Error::Other("Failed to enclose FX in container".to_string()))
     }
 
     /// Explode a container: move all children to the parent level, then delete it.
@@ -444,7 +444,7 @@ impl FxChain {
             .fx
             .get_fx_chain_chunk_text(self.project_context(), self.context.clone())
             .await?
-            .ok_or_else(|| eyre::eyre!("No FX chain chunk found"))
+            .ok_or_else(|| Error::Other("No FX chain chunk found".to_string()))
     }
 
     /// Insert a raw RPP chunk block into this FX chain.
@@ -488,7 +488,7 @@ impl std::fmt::Debug for FxChain {
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// let track = project.tracks().by_name("Vocals").await?.unwrap();
@@ -561,7 +561,7 @@ impl FxHandle {
             .fx
             .get_fx(self.project_context(), self.target())
             .await?
-            .ok_or_else(|| eyre::eyre!("FX not found: {}", self.fx_guid))
+            .ok_or_else(|| Error::Other(format!("FX not found: {}", self.fx_guid)))
     }
 
     // =========================================================================
@@ -744,7 +744,7 @@ impl FxHandle {
             .fx
             .get_fx_latency(self.project_context(), self.target())
             .await?
-            .ok_or_else(|| eyre::eyre!("FX latency not available"))?;
+            .ok_or_else(|| Error::Other("FX latency not available".to_string()))?;
         Ok(latency)
     }
 
@@ -847,7 +847,7 @@ impl FxHandle {
             .fx
             .get_fx_channel_config(self.project_context(), self.target())
             .await?
-            .ok_or_else(|| eyre::eyre!("FX channel config not available"))
+            .ok_or_else(|| Error::Other("FX channel config not available".to_string()))
     }
 
     /// Set the channel configuration for this FX.
@@ -916,7 +916,7 @@ impl std::fmt::Debug for FxHandle {
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// let track = project.tracks().by_name("Vocals").await?.unwrap();
@@ -1010,13 +1010,13 @@ impl FxParamHandle {
                 .fx
                 .get_parameter(self.project_context(), self.target(), *index)
                 .await?
-                .ok_or_else(|| eyre::eyre!("Parameter not found at index {}", index)),
+                .ok_or_else(|| Error::Other(format!("Parameter not found at index {}", index))),
             ParamRef::Name(name) => self
                 .clients
                 .fx
                 .get_parameter_by_name(self.project_context(), self.target(), name.clone())
                 .await?
-                .ok_or_else(|| eyre::eyre!("Parameter not found: {}", name)),
+                .ok_or_else(|| Error::Other(format!("Parameter not found: {}", name))),
         }
     }
 
@@ -1076,7 +1076,7 @@ impl FxParamHandle {
             .fx
             .get_param_modulation(self.project_context(), self.target(), index)
             .await?
-            .ok_or_else(|| eyre::eyre!("Parameter modulation not available"))?;
+            .ok_or_else(|| Error::Other("Parameter modulation not available".to_string()))?;
         Ok(mod_state)
     }
 }

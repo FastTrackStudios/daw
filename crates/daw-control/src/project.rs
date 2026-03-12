@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::{
-    DawClients, FxChain, Markers, MidiAnalysis, ProjectItems, Regions, TempoMap, TrackHandle,
+    DawClients, Error, FxChain, Markers, MidiAnalysis, ProjectItems, Regions, TempoMap, TrackHandle,
     Tracks, Transport,
 };
 use daw_proto::FxChainContext;
@@ -20,7 +20,7 @@ use daw_proto::FxChainContext;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// println!("Project GUID: {}", project.guid());
@@ -50,12 +50,12 @@ impl Project {
     /// Get the project info (name, path, etc.)
     ///
     /// Fetches the full project information from the DAW.
-    pub async fn info(&self) -> eyre::Result<daw_proto::ProjectInfo> {
+    pub async fn info(&self) -> crate::Result<daw_proto::ProjectInfo> {
         self.clients
             .project
             .get(self.guid.clone())
             .await?
-            .ok_or_else(|| eyre::eyre!("Project not found: {}", self.guid))
+            .ok_or_else(|| Error::Other(format!("Project not found: {}", self.guid)))
     }
 
     /// Get transport accessor for this project
@@ -68,7 +68,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -91,7 +91,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -114,7 +114,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -138,7 +138,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -162,7 +162,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -200,28 +200,28 @@ impl Project {
     /// Get the number of tracks in this project.
     ///
     /// Equivalent to `project.tracks().count()`.
-    pub async fn n_tracks(&self) -> eyre::Result<u32> {
+    pub async fn n_tracks(&self) -> crate::Result<u32> {
         self.tracks().count().await
     }
 
     /// Get a track by index.
     ///
     /// Equivalent to `project.tracks().by_index(index)`.
-    pub async fn get_track(&self, index: u32) -> eyre::Result<Option<TrackHandle>> {
+    pub async fn get_track(&self, index: u32) -> crate::Result<Option<TrackHandle>> {
         self.tracks().by_index(index).await
     }
 
     /// Get a track by GUID.
     ///
     /// Equivalent to `project.tracks().by_guid(guid)`.
-    pub async fn get_track_by_guid(&self, guid: &str) -> eyre::Result<Option<TrackHandle>> {
+    pub async fn get_track_by_guid(&self, guid: &str) -> crate::Result<Option<TrackHandle>> {
         self.tracks().by_guid(guid).await
     }
 
     /// Get a track by name.
     ///
     /// Equivalent to `project.tracks().by_name(name)`.
-    pub async fn get_track_by_name(&self, name: &str) -> eyre::Result<Option<TrackHandle>> {
+    pub async fn get_track_by_name(&self, name: &str) -> crate::Result<Option<TrackHandle>> {
         self.tracks().by_name(name).await
     }
 
@@ -236,7 +236,7 @@ impl Project {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(project: daw_control::Project) -> eyre::Result<()> {
+    /// # async fn example(project: daw_control::Project) -> crate::Result<()> {
     /// for track in project.iter_tracks().await? {
     ///     let info = track.info().await?;
     ///     println!("{}: {}", info.index, info.name);
@@ -244,7 +244,7 @@ impl Project {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn iter_tracks(&self) -> eyre::Result<Vec<TrackHandle>> {
+    pub async fn iter_tracks(&self) -> crate::Result<Vec<TrackHandle>> {
         let tracks = self.tracks().all().await?;
         Ok(tracks
             .into_iter()
@@ -255,21 +255,21 @@ impl Project {
     /// Get the master track handle.
     ///
     /// Equivalent to `project.tracks().master()`.
-    pub async fn master_track(&self) -> eyre::Result<TrackHandle> {
+    pub async fn master_track(&self) -> crate::Result<TrackHandle> {
         self.tracks().master().await
     }
 
     /// Get all currently selected tracks.
     ///
     /// Equivalent to `project.tracks().selected()`.
-    pub async fn selected_tracks(&self) -> eyre::Result<Vec<TrackHandle>> {
+    pub async fn selected_tracks(&self) -> crate::Result<Vec<TrackHandle>> {
         self.tracks().selected().await
     }
 
     /// Add a new track to this project.
     ///
     /// Equivalent to `project.tracks().add(name, at_index)`.
-    pub async fn add_track(&self, name: &str, at_index: Option<u32>) -> eyre::Result<TrackHandle> {
+    pub async fn add_track(&self, name: &str, at_index: Option<u32>) -> crate::Result<TrackHandle> {
         self.tracks().add(name, at_index).await
     }
 
@@ -285,7 +285,7 @@ impl Project {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(project: daw_control::Project) -> eyre::Result<()> {
+    /// # async fn example(project: daw_control::Project) -> crate::Result<()> {
     /// project.begin_undo_block("Batch rename tracks").await?;
     /// for track in project.iter_tracks().await? {
     ///     track.rename("New Name").await?;
@@ -294,7 +294,7 @@ impl Project {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn begin_undo_block(&self, label: &str) -> eyre::Result<()> {
+    pub async fn begin_undo_block(&self, label: &str) -> crate::Result<()> {
         self.clients
             .project
             .begin_undo_block(
@@ -306,7 +306,7 @@ impl Project {
     }
 
     /// End the current undo block.
-    pub async fn end_undo_block(&self, label: &str) -> eyre::Result<()> {
+    pub async fn end_undo_block(&self, label: &str) -> crate::Result<()> {
         self.clients
             .project
             .end_undo_block(
@@ -319,7 +319,7 @@ impl Project {
     }
 
     /// Trigger undo. Returns true if an action was undone.
-    pub async fn undo(&self) -> eyre::Result<bool> {
+    pub async fn undo(&self) -> crate::Result<bool> {
         Ok(self
             .clients
             .project
@@ -328,7 +328,7 @@ impl Project {
     }
 
     /// Trigger redo. Returns true if an action was redone.
-    pub async fn redo(&self) -> eyre::Result<bool> {
+    pub async fn redo(&self) -> crate::Result<bool> {
         Ok(self
             .clients
             .project
@@ -337,7 +337,7 @@ impl Project {
     }
 
     /// Get the label of the last undoable action.
-    pub async fn last_undo_label(&self) -> eyre::Result<Option<String>> {
+    pub async fn last_undo_label(&self) -> crate::Result<Option<String>> {
         Ok(self
             .clients
             .project
@@ -346,7 +346,7 @@ impl Project {
     }
 
     /// Get the label of the last redoable action.
-    pub async fn last_redo_label(&self) -> eyre::Result<Option<String>> {
+    pub async fn last_redo_label(&self) -> crate::Result<Option<String>> {
         Ok(self
             .clients
             .project
@@ -369,7 +369,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -409,7 +409,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::{PositionInSeconds, MeasureMode};
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -423,7 +423,7 @@ impl Project {
         &self,
         position: daw_proto::PositionInSeconds,
         measure_mode: daw_proto::MeasureMode,
-    ) -> eyre::Result<daw_proto::TimeToBeatsResult> {
+    ) -> crate::Result<daw_proto::TimeToBeatsResult> {
         let result = self
             .clients
             .position_conversion
@@ -446,7 +446,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::{PositionInBeats, MeasureMode};
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -460,7 +460,7 @@ impl Project {
         &self,
         position: daw_proto::PositionInBeats,
         measure_mode: daw_proto::MeasureMode,
-    ) -> eyre::Result<daw_proto::PositionInSeconds> {
+    ) -> crate::Result<daw_proto::PositionInSeconds> {
         let result = self
             .clients
             .position_conversion
@@ -484,7 +484,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInSeconds;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -497,7 +497,7 @@ impl Project {
     pub async fn time_to_quarter_notes(
         &self,
         position: daw_proto::PositionInSeconds,
-    ) -> eyre::Result<daw_proto::TimeToQuarterNotesResult> {
+    ) -> crate::Result<daw_proto::TimeToQuarterNotesResult> {
         let result = self
             .clients
             .position_conversion
@@ -516,7 +516,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInQuarterNotes;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -529,7 +529,7 @@ impl Project {
     pub async fn quarter_notes_to_time(
         &self,
         position: daw_proto::PositionInQuarterNotes,
-    ) -> eyre::Result<daw_proto::PositionInSeconds> {
+    ) -> crate::Result<daw_proto::PositionInSeconds> {
         let result = self
             .clients
             .position_conversion
@@ -548,7 +548,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInQuarterNotes;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -565,7 +565,7 @@ impl Project {
     pub async fn quarter_notes_to_measure(
         &self,
         position: daw_proto::PositionInQuarterNotes,
-    ) -> eyre::Result<daw_proto::QuarterNotesToMeasureResult> {
+    ) -> crate::Result<daw_proto::QuarterNotesToMeasureResult> {
         let result = self
             .clients
             .position_conversion
@@ -584,7 +584,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInBeats;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -597,7 +597,7 @@ impl Project {
     pub async fn beats_to_quarter_notes(
         &self,
         position: daw_proto::PositionInBeats,
-    ) -> eyre::Result<daw_proto::PositionInQuarterNotes> {
+    ) -> crate::Result<daw_proto::PositionInQuarterNotes> {
         let result = self
             .clients
             .position_conversion
@@ -616,7 +616,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInQuarterNotes;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -629,7 +629,7 @@ impl Project {
     pub async fn quarter_notes_to_beats(
         &self,
         position: daw_proto::PositionInQuarterNotes,
-    ) -> eyre::Result<daw_proto::PositionInBeats> {
+    ) -> crate::Result<daw_proto::PositionInBeats> {
         let result = self
             .clients
             .position_conversion
@@ -652,7 +652,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> eyre::Result<()> {
+    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
