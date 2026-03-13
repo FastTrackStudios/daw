@@ -1510,11 +1510,9 @@ name = "daw-control-sync"
 version = "0.1.0"
 dependencies = [
  "daw-control",
- "daw-proto",
  "eyre",
  "roam",
  "roam-stream",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]

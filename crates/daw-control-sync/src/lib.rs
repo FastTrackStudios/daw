@@ -1,267 +1,212 @@
 //! Synchronous DAW control API for real-time audio contexts
 //!
-//! Provides a thread-safe, non-blocking interface to the async DAW control layer.
-//! Designed for use in real-time audio processing loops and other time-sensitive contexts
-//! where async/await cannot be used.
+//! Provides a thread-safe, blocking interface to the async DAW control layer.
+//! Designed for use in audio plugins and other contexts where async/await is
+//! not available.
 //!
 //! # Architecture
 //!
-//! - **Background Runtime**: Spawns a dedicated tokio runtime in a background thread
-//! - **Request Queue**: Non-blocking MPSC channel for queuing DAW operations
-//! - **Real-time Safe**: Audio loop only sends messages (never blocks)
-//! - **DAW Agnostic**: Works with any DAW service (REAPER, Logic, Ableton, etc.)
+//! ```text
+//! Audio Plugin / Sync Context
+//!        │
+//!        ▼
+//!    DawSync (blocking API)
+//!        │  runtime.block_on(daw.method())
+//!        ▼
+//!    Daw (async API, from daw-control)
+//!        │
+//!        ▼
+//!    ErasedCaller ← from LocalCaller or socket connection
+//!        │
+//!        ▼
+//!    Handler → DAW service dispatchers → REAPER API
+//! ```
 //!
-//! # Example
+//! # In-Process Usage (LocalCaller)
 //!
 //! ```ignore
-//! use daw_control_sync::DawSync;
+//! use daw_control_sync::{DawSync, LocalCaller};
 //!
-//! // Initialize (once per plugin/application)
-//! let daw_sync = DawSync::new(connection_handle)?;
+//! let local = LocalCaller::new(my_handler).await?;
+//! let daw_sync = DawSync::from_local(local)?;
+//! let value = daw_sync.get_param(0, 1, 2)?;
+//! daw_sync.set_param(0, 1, 2, 0.75);
+//! ```
 //!
-//! // Use in real-time audio loop (never blocks)
-//! daw_sync.queue_set_param(track_idx, fx_idx, param_idx, value)?;
+//! # Out-of-Process Usage (socket)
+//!
+//! ```ignore
+//! let daw_sync = DawSync::connect_to_service().await?;
 //! ```
 
-use std::sync::Arc;
-use tokio::sync::mpsc;
-use tracing::{debug, error};
-use eyre::{Result, Context};
+mod local_caller;
+pub use local_caller::LocalCaller;
+
+use daw_control::Daw;
+use eyre::{Context, Result};
 use roam::ErasedCaller;
-use daw_control::DawClients;
+use std::sync::Arc;
+use tracing::error;
 
-mod requests;
-
-pub use requests::{DawRequest, FxParamRequest};
-
-/// Thread-safe synchronous interface to async DAW control
+/// Thread-safe synchronous interface to the async DAW API.
 ///
-/// Maintains a background tokio runtime that processes DAW requests
-/// queued from real-time audio processing contexts.
+/// Wraps a `Daw` instance and a dedicated tokio runtime. Blocking reads use
+/// `runtime.block_on()`, fire-and-forget writes use `runtime.spawn()`.
 #[derive(Clone)]
 pub struct DawSync {
-    /// Request sender (can be cloned and sent across threads)
-    request_tx: mpsc::UnboundedSender<DawRequest>,
-    /// Handle for clean shutdown (optional)
-    _runtime_handle: Arc<tokio::runtime::Runtime>,
+    daw: Daw,
+    runtime: Arc<tokio::runtime::Runtime>,
+    /// Keep LocalCaller alive (if using in-process mode)
+    _local_caller: Option<LocalCaller>,
 }
 
 impl DawSync {
-    /// Create a new synchronous DAW interface from environment or default socket
+    /// Create from an existing `ErasedCaller` (e.g. from socket or LocalCaller).
+    pub fn from_caller(caller: ErasedCaller) -> Result<Self> {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .context("Failed to create tokio runtime for DawSync")?;
+
+        Ok(Self {
+            daw: Daw::new(caller),
+            runtime: Arc::new(runtime),
+            _local_caller: None,
+        })
+    }
+
+    /// Create from a `LocalCaller` (in-process, no network).
+    pub fn from_local(local: LocalCaller) -> Result<Self> {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(1)
+            .enable_all()
+            .build()
+            .context("Failed to create tokio runtime for DawSync")?;
+
+        Ok(Self {
+            daw: Daw::new(local.erased_caller()),
+            runtime: Arc::new(runtime),
+            _local_caller: Some(local),
+        })
+    }
+
+    /// Connect to the DAW service via Unix socket (out-of-process).
     ///
-    /// Tries to connect to the DAW service socket specified by:
-    /// 1. `FTS_DAW_SOCKET` environment variable
-    /// 2. Default socket path (platform-specific)
-    ///
-    /// # Errors
-    /// Returns an error if the socket path is invalid or connection fails
+    /// Tries `FTS_DAW_SOCKET` env var, then platform default.
     pub async fn connect_to_service() -> Result<Self> {
-        // Try to get socket path from environment or use default
-        let socket_path = std::env::var("FTS_DAW_SOCKET")
-            .unwrap_or_else(|_| {
-                // Platform-specific defaults
-                #[cfg(unix)]
-                {
-                    "unix:///tmp/fts-daw.sock".to_string()
-                }
-                #[cfg(windows)]
-                {
-                    "np://fts-daw".to_string()
-                }
-                #[cfg(not(any(unix, windows)))]
-                {
-                    "unix:///tmp/fts-daw.sock".to_string()
-                }
-            });
+        let socket_path = std::env::var("FTS_DAW_SOCKET").unwrap_or_else(|_| {
+            #[cfg(unix)]
+            {
+                "unix:///tmp/fts-daw.sock".to_string()
+            }
+            #[cfg(windows)]
+            {
+                "np://fts-daw".to_string()
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                "unix:///tmp/fts-daw.sock".to_string()
+            }
+        });
 
         let path = socket_path.strip_prefix("unix://").unwrap_or(&socket_path);
         let stream = tokio::net::UnixStream::connect(path)
             .await
-            .context(format!("Failed to connect to DAW service at {}", socket_path))?;
+            .context(format!(
+                "Failed to connect to DAW service at {}",
+                socket_path
+            ))?;
         let link = roam_stream::StreamLink::unix(stream);
         let (caller, _session) = roam::initiator(link)
             .establish::<roam::DriverCaller>(())
             .await
             .context("Failed to establish roam session")?;
 
-        Self::new(ErasedCaller::new(caller))
+        Self::from_caller(ErasedCaller::new(caller))
     }
 
-    /// Create a new synchronous DAW interface
+    /// Get the underlying async `Daw` instance.
+    pub fn daw(&self) -> &Daw {
+        &self.daw
+    }
+
+    /// Get a handle to the tokio runtime (for custom async operations).
+    pub fn runtime(&self) -> &tokio::runtime::Runtime {
+        &self.runtime
+    }
+
+    /// Blocking read: get an FX parameter value.
     ///
-    /// Spawns a background tokio runtime that will process queued requests.
-    /// The runtime continues running until this instance is dropped.
-    ///
-    /// # Arguments
-    /// * `connection_handle` - RPC connection to the DAW service
-    ///
-    /// # Errors
-    /// Returns an error if the tokio runtime cannot be created
-    pub fn new(connection_handle: ErasedCaller) -> Result<Self> {
-        // Create a dedicated runtime for background processing
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .context("Failed to create background tokio runtime")?;
-
-        // Create the request queue
-        let (request_tx, request_rx) = mpsc::unbounded_channel();
-
-        // Create DAW clients
-        let clients = Arc::new(DawClients::new(connection_handle));
-
-        // Spawn the background task that processes requests
-        let clients_clone = clients.clone();
-        runtime.spawn(Self::request_handler(clients_clone, request_rx));
-
-        debug!("DawSync initialized with background tokio runtime");
-
-        Ok(Self {
-            request_tx,
-            _runtime_handle: Arc::new(runtime),
+    /// Blocks the calling thread until the value is returned from the DAW.
+    /// Do NOT call from a tokio async context (will panic).
+    pub fn get_param(&self, track_idx: u32, fx_idx: u32, param_idx: u32) -> Result<f64> {
+        self.runtime.block_on(async {
+            let project = self.daw.current_project().await?;
+            let track = project
+                .tracks()
+                .by_index(track_idx)
+                .await?
+                .ok_or_else(|| eyre::eyre!("Track {} not found", track_idx))?;
+            let fx = track
+                .fx_chain()
+                .by_index(fx_idx)
+                .await?
+                .ok_or_else(|| eyre::eyre!("FX {} not found on track {}", fx_idx, track_idx))?;
+            let value = fx.param(param_idx).get().await?;
+            Ok(value)
         })
     }
 
-    /// Queue an FX parameter value change
+    /// Fire-and-forget: set an FX parameter value.
     ///
-    /// **Real-time safe**: This method never blocks and is safe to call from
-    /// audio processing loops. The actual parameter change happens asynchronously
-    /// on the background runtime.
-    ///
-    /// # Arguments
-    /// * `track_idx` - Track index
-    /// * `fx_idx` - FX/plugin index in the track's FX chain
-    /// * `param_idx` - Parameter index in the FX plugin
-    /// * `value` - Parameter value (typically 0.0-1.0, but depends on parameter)
-    ///
-    /// # Errors
-    /// Returns an error if the request queue is disconnected (runtime shutdown)
-    pub fn queue_set_param(
-        &self,
-        track_idx: u32,
-        fx_idx: u32,
-        param_idx: u32,
-        value: f32,
-    ) -> Result<()> {
-        let request = DawRequest::SetFxParam(FxParamRequest {
-            track_idx,
-            fx_idx,
-            param_idx,
-            value,
-        });
-
-        self.request_tx
-            .send(request)
-            .context("Failed to queue parameter change: runtime may have shut down")?;
-
-        Ok(())
-    }
-
-    /// Queue getting an FX parameter value
-    ///
-    /// **Note**: This is queued for background execution. For reading parameter values,
-    /// consider using the async `daw-control` API directly or polling with a separate
-    /// background task.
-    pub fn queue_get_param(
-        &self,
-        track_idx: u32,
-        fx_idx: u32,
-        param_idx: u32,
-    ) -> Result<()> {
-        let request = DawRequest::GetFxParam {
-            track_idx,
-            fx_idx,
-            param_idx,
-        };
-
-        self.request_tx
-            .send(request)
-            .context("Failed to queue parameter read")?;
-
-        Ok(())
-    }
-
-    /// Background task that processes queued DAW requests
-    async fn request_handler(
-        clients: Arc<DawClients>,
-        mut request_rx: mpsc::UnboundedReceiver<DawRequest>,
-    ) {
-        debug!("DAW request handler started");
-
-        while let Some(request) = request_rx.recv().await {
-            match request {
-                DawRequest::SetFxParam(param_req) => {
-                    if let Err(e) = Self::handle_set_param(&clients, param_req).await {
-                        error!(
-                            "Failed to set FX parameter: track={}, fx={}, param={}: {}",
-                            param_req.track_idx, param_req.fx_idx, param_req.param_idx, e
-                        );
-                    }
-                }
-                DawRequest::GetFxParam {
-                    track_idx,
-                    fx_idx,
-                    param_idx,
-                } => {
-                    debug!(
-                        "GetFxParam request: track={}, fx={}, param={}",
-                        track_idx, fx_idx, param_idx
-                    );
-                    // TODO: Implement parameter reading
-                }
+    /// Queues the set operation on the runtime. Does not block.
+    /// Errors are logged but not returned.
+    pub fn set_param(&self, track_idx: u32, fx_idx: u32, param_idx: u32, value: f64) {
+        let daw = self.daw.clone();
+        self.runtime.spawn(async move {
+            let result: eyre::Result<()> = async {
+                let project = daw.current_project().await?;
+                let track = project
+                    .tracks()
+                    .by_index(track_idx)
+                    .await?
+                    .ok_or_else(|| eyre::eyre!("Track {} not found", track_idx))?;
+                let fx = track
+                    .fx_chain()
+                    .by_index(fx_idx)
+                    .await?
+                    .ok_or_else(|| {
+                        eyre::eyre!("FX {} not found on track {}", fx_idx, track_idx)
+                    })?;
+                fx.param(param_idx).set(value).await?;
+                Ok(())
             }
-        }
+            .await;
 
-        debug!("DAW request handler shutdown");
+            if let Err(e) = result {
+                error!(
+                    "Failed to set param (track={}, fx={}, param={}, value={}): {}",
+                    track_idx, fx_idx, param_idx, value, e
+                );
+            }
+        });
     }
 
-    /// Handle a SetFxParam request
-    async fn handle_set_param(_clients: &Arc<DawClients>, req: FxParamRequest) -> Result<()> {
-        // TODO: Implement using public DAW API
-        // For now, this is a placeholder since DawClients.fx is private
-        // We need to either:
-        // 1. Make DawClients methods public in daw-control
-        // 2. Use the Daw struct's public API (requires async)
-        // 3. Access raw RPC clients through a public interface
-
-        debug!(
-            "FX parameter queued: track={}, fx={}, param={}, value={}",
-            req.track_idx, req.fx_idx, req.param_idx, req.value
-        );
-
-        // For now, just queue successful - actual implementation depends on daw-control API
-        Ok(())
-    }
-
-    /// Check if the request queue is still connected
+    /// Blocking: execute an arbitrary async operation on the Daw.
     ///
-    /// Returns `false` if the background runtime has shut down
-    pub fn is_alive(&self) -> bool {
-        !self.request_tx.is_closed()
+    /// For operations beyond get/set param, use this to run any async
+    /// closure that takes a `&Daw`.
+    pub fn block_on<F, T>(&self, f: F) -> T
+    where
+        F: std::future::Future<Output = T>,
+    {
+        self.runtime.block_on(f)
     }
 }
 
 impl std::fmt::Debug for DawSync {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DawSync")
-            .field("alive", &self.is_alive())
-            .finish()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_daw_sync_creation() {
-        // This would require a real connection handle in integration tests
-        // For now we just verify the API exists
-        let _ = std::mem::size_of::<DawSync>();
-    }
-
-    #[test]
-    fn test_queue_size_initially_zero() {
-        // Demonstrates the API but requires actual initialization
-        // See integration tests for real usage
+        f.debug_struct("DawSync").finish()
     }
 }
