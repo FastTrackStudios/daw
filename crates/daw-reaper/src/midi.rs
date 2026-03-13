@@ -10,7 +10,6 @@ use daw_proto::{
     ProjectContext, PpqRange, QuantizeParams, TakeRef, TrackRef,
 };
 use reaper_medium::{MediaItem, MediaItemTake, ProjectContext as ReaperProjectContext};
-use roam::Context;
 use tracing::warn;
 
 // =============================================================================
@@ -185,7 +184,7 @@ impl Default for ReaperMidi {
 }
 
 impl MidiService for ReaperMidi {
-    async fn get_notes(&self, _cx: &Context, location: MidiTakeLocation) -> Vec<MidiNote> {
+    async fn get_notes(&self, location: MidiTakeLocation) -> Vec<MidiNote> {
         main_thread::query(move || {
             let medium = reaper_high::Reaper::get().medium_reaper();
             let Some(take) = Self::resolve_take_for_location(medium, &location) else {
@@ -199,32 +198,30 @@ impl MidiService for ReaperMidi {
 
     async fn get_notes_in_range(
         &self,
-        cx: &Context,
         location: MidiTakeLocation,
         range: PpqRange,
     ) -> Vec<MidiNote> {
-        self.get_notes(cx, location)
+        self.get_notes(location)
             .await
             .into_iter()
             .filter(|note| note.overlaps(range.start, range.end))
             .collect()
     }
 
-    async fn get_selected_notes(&self, cx: &Context, location: MidiTakeLocation) -> Vec<MidiNote> {
-        self.get_notes(cx, location)
+    async fn get_selected_notes(&self, location: MidiTakeLocation) -> Vec<MidiNote> {
+        self.get_notes(location)
             .await
             .into_iter()
             .filter(|note| note.selected)
             .collect()
     }
 
-    async fn note_count(&self, cx: &Context, location: MidiTakeLocation) -> u32 {
-        self.get_notes(cx, location).await.len() as u32
+    async fn note_count(&self, location: MidiTakeLocation) -> u32 {
+        self.get_notes(location).await.len() as u32
     }
 
     async fn create_midi_item(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         start_seconds: f64,
@@ -275,7 +272,6 @@ impl MidiService for ReaperMidi {
 
     async fn add_note(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _note: MidiNoteCreate,
     ) -> u32 {
@@ -285,7 +281,6 @@ impl MidiService for ReaperMidi {
 
     async fn add_notes(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         notes: Vec<MidiNoteCreate>,
     ) -> Vec<u32> {
@@ -303,21 +298,20 @@ impl MidiService for ReaperMidi {
         .unwrap_or_default()
     }
 
-    async fn delete_note(&self, _cx: &Context, _location: MidiTakeLocation, _index: u32) {
+    async fn delete_note(&self, _location: MidiTakeLocation, _index: u32) {
         Self::readonly_warn("delete_note");
     }
 
-    async fn delete_notes(&self, _cx: &Context, _location: MidiTakeLocation, _indices: Vec<u32>) {
+    async fn delete_notes(&self, _location: MidiTakeLocation, _indices: Vec<u32>) {
         Self::readonly_warn("delete_notes");
     }
 
-    async fn delete_selected_notes(&self, _cx: &Context, _location: MidiTakeLocation) {
+    async fn delete_selected_notes(&self, _location: MidiTakeLocation) {
         Self::readonly_warn("delete_selected_notes");
     }
 
     async fn set_note_pitch(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _index: u32,
         _pitch: u8,
@@ -327,7 +321,6 @@ impl MidiService for ReaperMidi {
 
     async fn set_note_velocity(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _index: u32,
         _velocity: u8,
@@ -337,7 +330,6 @@ impl MidiService for ReaperMidi {
 
     async fn set_note_position(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _index: u32,
         _start_ppq: f64,
@@ -347,7 +339,6 @@ impl MidiService for ReaperMidi {
 
     async fn set_note_length(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _index: u32,
         _length_ppq: f64,
@@ -357,7 +348,6 @@ impl MidiService for ReaperMidi {
 
     async fn set_note_channel(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _index: u32,
         _channel: u8,
@@ -367,7 +357,6 @@ impl MidiService for ReaperMidi {
 
     async fn set_note_selected(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _index: u32,
         _selected: bool,
@@ -377,7 +366,6 @@ impl MidiService for ReaperMidi {
 
     async fn set_note_muted(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _index: u32,
         _muted: bool,
@@ -385,13 +373,12 @@ impl MidiService for ReaperMidi {
         Self::readonly_warn("set_note_muted");
     }
 
-    async fn select_all_notes(&self, _cx: &Context, _location: MidiTakeLocation, _selected: bool) {
+    async fn select_all_notes(&self, _location: MidiTakeLocation, _selected: bool) {
         Self::readonly_warn("select_all_notes");
     }
 
     async fn transpose_notes(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _indices: Vec<u32>,
         _semitones: i8,
@@ -401,7 +388,6 @@ impl MidiService for ReaperMidi {
 
     async fn quantize_notes(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _params: QuantizeParams,
     ) {
@@ -410,7 +396,6 @@ impl MidiService for ReaperMidi {
 
     async fn humanize_notes(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _params: HumanizeParams,
     ) {
@@ -419,25 +404,23 @@ impl MidiService for ReaperMidi {
 
     async fn get_ccs(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _controller: Option<u8>,
     ) -> Vec<MidiCC> {
         Vec::new()
     }
 
-    async fn add_cc(&self, _cx: &Context, _location: MidiTakeLocation, _cc: MidiCCCreate) -> u32 {
+    async fn add_cc(&self, _location: MidiTakeLocation, _cc: MidiCCCreate) -> u32 {
         Self::readonly_warn("add_cc");
         0
     }
 
-    async fn delete_cc(&self, _cx: &Context, _location: MidiTakeLocation, _index: u32) {
+    async fn delete_cc(&self, _location: MidiTakeLocation, _index: u32) {
         Self::readonly_warn("delete_cc");
     }
 
     async fn set_cc_value(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _index: u32,
         _value: u8,
@@ -447,7 +430,6 @@ impl MidiService for ReaperMidi {
 
     async fn get_pitch_bends(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
     ) -> Vec<MidiPitchBend> {
         Vec::new()
@@ -455,7 +437,6 @@ impl MidiService for ReaperMidi {
 
     async fn add_pitch_bend(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
         _pb: MidiPitchBendCreate,
     ) -> u32 {
@@ -465,13 +446,12 @@ impl MidiService for ReaperMidi {
 
     async fn get_program_changes(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
     ) -> Vec<MidiProgramChange> {
         Vec::new()
     }
 
-    async fn get_sysex(&self, _cx: &Context, _location: MidiTakeLocation) -> Vec<MidiSysEx> {
+    async fn get_sysex(&self, _location: MidiTakeLocation) -> Vec<MidiSysEx> {
         Vec::new()
     }
 }

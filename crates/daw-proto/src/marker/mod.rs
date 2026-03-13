@@ -12,4 +12,6 @@ mod service;
 pub use error::MarkerError;
 pub use event::MarkerEvent;
 pub use marker::Marker;
-pub use service::{MarkerService, MarkerServiceClient, MarkerServiceDispatcher};
+pub use service::{
+    MarkerService, MarkerServiceClient, MarkerServiceDispatcher, marker_service_service_descriptor,
+};

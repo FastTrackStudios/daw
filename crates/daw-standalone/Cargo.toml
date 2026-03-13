@@ -8,7 +8,7 @@ daw-proto = { path = "../daw-proto" }
 roam = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-peeps = { workspace = true }
+moire = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 keyflow = { workspace = true, features = ["engraver", "midi-import"] }
 

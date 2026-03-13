@@ -10,5 +10,8 @@ mod tempo_point;
 
 pub use error::*;
 pub use event::*;
-pub use service::{TempoMapService, TempoMapServiceClient, TempoMapServiceDispatcher};
+pub use service::{
+    TempoMapService, TempoMapServiceClient, TempoMapServiceDispatcher,
+    tempo_map_service_service_descriptor,
+};
 pub use tempo_point::*;

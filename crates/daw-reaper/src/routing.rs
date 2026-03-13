@@ -15,7 +15,6 @@ use reaper_high::{Project, Reaper, SendPartnerType, Track, TrackRoute as ReaperT
 use reaper_medium::{
     EditMode, ReaperVolumeValue, SendTarget, TrackSendAttributeKey, TrackSendCategory,
 };
-use roam::Context;
 use tracing::{debug, warn};
 
 /// REAPER routing implementation that dispatches to the main thread via `main_thread`.
@@ -299,7 +298,6 @@ impl RoutingService for ReaperRouting {
 
     async fn get_sends(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
     ) -> Vec<TrackRoute> {
@@ -327,7 +325,6 @@ impl RoutingService for ReaperRouting {
 
     async fn get_receives(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
     ) -> Vec<TrackRoute> {
@@ -353,7 +350,6 @@ impl RoutingService for ReaperRouting {
 
     async fn get_hardware_outputs(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
     ) -> Vec<TrackRoute> {
@@ -382,7 +378,6 @@ impl RoutingService for ReaperRouting {
 
     async fn get_route(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         location: RouteLocation,
     ) -> Option<TrackRoute> {
@@ -425,7 +420,6 @@ impl RoutingService for ReaperRouting {
 
     async fn add_send(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         source: TrackRef,
         dest: TrackRef,
@@ -450,7 +444,6 @@ impl RoutingService for ReaperRouting {
 
     async fn add_hardware_output(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         hw_output: u32,
@@ -492,7 +485,7 @@ impl RoutingService for ReaperRouting {
         .flatten()
     }
 
-    async fn remove_route(&self, _cx: &Context, project: ProjectContext, location: RouteLocation) {
+    async fn remove_route(&self, project: ProjectContext, location: RouteLocation) {
         debug!("ReaperRouting::remove_route({:?}, {:?})", project, location);
 
         main_thread::run(move || {
@@ -539,7 +532,6 @@ impl RoutingService for ReaperRouting {
 
     async fn set_volume(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         location: RouteLocation,
         volume: f64,
@@ -594,7 +586,6 @@ impl RoutingService for ReaperRouting {
 
     async fn set_pan(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         location: RouteLocation,
         pan: f64,
@@ -650,7 +641,6 @@ impl RoutingService for ReaperRouting {
 
     async fn set_muted(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         location: RouteLocation,
         muted: bool,
@@ -707,7 +697,6 @@ impl RoutingService for ReaperRouting {
 
     async fn set_mono(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         location: RouteLocation,
         mono: bool,
@@ -760,7 +749,6 @@ impl RoutingService for ReaperRouting {
 
     async fn set_phase(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         location: RouteLocation,
         inverted: bool,
@@ -815,7 +803,6 @@ impl RoutingService for ReaperRouting {
 
     async fn set_send_mode(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         route: RouteRef,
@@ -864,7 +851,6 @@ impl RoutingService for ReaperRouting {
 
     async fn get_parent_send_enabled(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
     ) -> bool {
@@ -893,7 +879,6 @@ impl RoutingService for ReaperRouting {
 
     async fn set_parent_send_enabled(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         enabled: bool,
@@ -968,17 +953,16 @@ impl ReaperRouting {
     /// 2. Adds a hardware output to the specified stereo pair
     pub async fn route_to_hardware_output(
         &self,
-        cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         stereo_pair: u32,
     ) -> bool {
         // First disable parent send
-        self.set_parent_send_enabled(cx, project.clone(), track.clone(), false)
+        self.set_parent_send_enabled(project.clone(), track.clone(), false)
             .await;
 
         // Then add hardware output
-        self.add_hardware_output(cx, project, track, stereo_pair)
+        self.add_hardware_output(project, track, stereo_pair)
             .await
             .is_some()
     }

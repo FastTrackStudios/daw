@@ -8,7 +8,6 @@ use daw_proto::{
     TrackRef,
 };
 use reaper_high::Reaper;
-use roam::Context;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use tracing::warn;
@@ -91,7 +90,6 @@ fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
 impl AudioAccessorService for ReaperAudioAccessor {
     async fn create_track_accessor(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
     ) -> Option<String> {
@@ -111,7 +109,6 @@ impl AudioAccessorService for ReaperAudioAccessor {
 
     async fn create_take_accessor(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -142,7 +139,7 @@ impl AudioAccessorService for ReaperAudioAccessor {
         self.store(ptr)
     }
 
-    async fn has_state_changed(&self, _cx: &Context, accessor_id: String) -> bool {
+    async fn has_state_changed(&self, accessor_id: String) -> bool {
         let Some(ptr) = self.get_ptr(&accessor_id) else {
             warn!("has_state_changed: unknown accessor ID '{}'", accessor_id);
             return false;
@@ -158,7 +155,6 @@ impl AudioAccessorService for ReaperAudioAccessor {
 
     async fn get_samples(
         &self,
-        _cx: &Context,
         request: GetSamplesRequest,
     ) -> AudioSampleData {
         let Some(ptr) = self.get_ptr(&request.accessor_id) else {
@@ -206,7 +202,7 @@ impl AudioAccessorService for ReaperAudioAccessor {
         .unwrap_or_default()
     }
 
-    async fn destroy_accessor(&self, _cx: &Context, accessor_id: String) {
+    async fn destroy_accessor(&self, accessor_id: String) {
         let Some(ptr) = self.remove_ptr(&accessor_id) else {
             warn!("destroy_accessor: unknown accessor ID '{}'", accessor_id);
             return;

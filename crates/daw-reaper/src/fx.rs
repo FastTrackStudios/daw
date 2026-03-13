@@ -25,7 +25,7 @@ use daw_proto::{
 };
 use reaper_high::{FxChain, MAX_TRACK_CHUNK_SIZE, Reaper, Track};
 use reaper_medium::{ChunkCacheHint, FxPresetRef, TrackFxLocation, TransferBehavior};
-use roam::{Context, Tx};
+use roam::Tx;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::broadcast;
@@ -1426,7 +1426,7 @@ impl FxService for ReaperFx {
     // Installed Plugins
     // =========================================================================
 
-    async fn list_installed_fx(&self, _cx: &Context) -> Vec<InstalledFx> {
+    async fn list_installed_fx(&self) -> Vec<InstalledFx> {
         debug!("ReaperFx::list_installed_fx()");
 
         main_thread::query(move || {
@@ -1453,7 +1453,6 @@ impl FxService for ReaperFx {
 
     async fn get_fx_list(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
     ) -> Vec<Fx> {
@@ -1479,7 +1478,7 @@ impl FxService for ReaperFx {
         .unwrap_or_default()
     }
 
-    async fn get_fx(&self, _cx: &Context, project: ProjectContext, target: FxTarget) -> Option<Fx> {
+    async fn get_fx(&self, project: ProjectContext, target: FxTarget) -> Option<Fx> {
         debug!("ReaperFx::get_fx({:?})", target);
 
         main_thread::query(move || {
@@ -1496,7 +1495,6 @@ impl FxService for ReaperFx {
 
     async fn fx_count(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
     ) -> u32 {
@@ -1518,7 +1516,6 @@ impl FxService for ReaperFx {
 
     async fn set_fx_enabled(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
         enabled: bool,
@@ -1545,7 +1542,6 @@ impl FxService for ReaperFx {
 
     async fn set_fx_offline(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
         offline: bool,
@@ -1573,7 +1569,6 @@ impl FxService for ReaperFx {
 
     async fn add_fx(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
         name: String,
@@ -1593,7 +1588,6 @@ impl FxService for ReaperFx {
 
     async fn add_fx_at(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         request: AddFxAtRequest,
     ) -> Option<String> {
@@ -1626,7 +1620,6 @@ impl FxService for ReaperFx {
 
     async fn remove_fx(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Result<(), String> {
@@ -1652,7 +1645,6 @@ impl FxService for ReaperFx {
 
     async fn move_fx(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
         new_index: u32,
@@ -1690,7 +1682,6 @@ impl FxService for ReaperFx {
 
     async fn get_parameters(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Vec<FxParameter> {
@@ -1715,7 +1706,6 @@ impl FxService for ReaperFx {
 
     async fn get_parameter(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
         index: u32,
@@ -1740,7 +1730,6 @@ impl FxService for ReaperFx {
 
     async fn set_parameter(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         request: SetParameterRequest,
     ) -> Result<(), String> {
@@ -1791,7 +1780,6 @@ impl FxService for ReaperFx {
 
     async fn get_parameter_by_name(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
         name: String,
@@ -1820,7 +1808,6 @@ impl FxService for ReaperFx {
 
     async fn set_parameter_by_name(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         request: SetParameterByNameRequest,
     ) -> Result<(), String> {
@@ -1882,7 +1869,6 @@ impl FxService for ReaperFx {
 
     async fn get_preset_index(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Option<FxPresetIndex> {
@@ -1920,7 +1906,6 @@ impl FxService for ReaperFx {
 
     async fn next_preset(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Result<(), String> {
@@ -1951,7 +1936,6 @@ impl FxService for ReaperFx {
 
     async fn prev_preset(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Result<(), String> {
@@ -1982,7 +1966,6 @@ impl FxService for ReaperFx {
 
     async fn set_preset(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
         index: u32,
@@ -2018,7 +2001,6 @@ impl FxService for ReaperFx {
 
     async fn open_fx_ui(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Result<(), String> {
@@ -2041,7 +2023,6 @@ impl FxService for ReaperFx {
 
     async fn close_fx_ui(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Result<(), String> {
@@ -2064,7 +2045,6 @@ impl FxService for ReaperFx {
 
     async fn toggle_fx_ui(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Result<(), String> {
@@ -2096,7 +2076,6 @@ impl FxService for ReaperFx {
 
     async fn get_named_config(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
         key: String,
@@ -2117,7 +2096,6 @@ impl FxService for ReaperFx {
 
     async fn set_named_config(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         request: SetNamedConfigRequest,
     ) -> Result<(), String> {
@@ -2149,7 +2127,6 @@ impl FxService for ReaperFx {
 
     async fn get_fx_latency(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Option<FxLatency> {
@@ -2177,7 +2154,6 @@ impl FxService for ReaperFx {
 
     async fn get_param_modulation(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
         param_index: u32,
@@ -2226,7 +2202,6 @@ impl FxService for ReaperFx {
 
     async fn get_fx_state_chunk(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Option<Vec<u8>> {
@@ -2253,7 +2228,6 @@ impl FxService for ReaperFx {
 
     async fn set_fx_state_chunk(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
         chunk: Vec<u8>,
@@ -2286,7 +2260,6 @@ impl FxService for ReaperFx {
 
     async fn get_fx_state_chunk_encoded(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Option<String> {
@@ -2313,7 +2286,6 @@ impl FxService for ReaperFx {
 
     async fn set_fx_state_chunk_encoded(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
         encoded: String,
@@ -2353,7 +2325,6 @@ impl FxService for ReaperFx {
 
     async fn get_fx_chain_state(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
     ) -> Vec<FxStateChunk> {
@@ -2383,7 +2354,6 @@ impl FxService for ReaperFx {
 
     async fn set_fx_chain_state(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
         chunks: Vec<FxStateChunk>,
@@ -2480,7 +2450,6 @@ impl FxService for ReaperFx {
 
     async fn get_fx_tree(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
     ) -> FxTree {
@@ -2516,7 +2485,6 @@ impl FxService for ReaperFx {
 
     async fn create_container(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         request: CreateContainerRequest,
     ) -> Option<FxNodeId> {
@@ -2562,7 +2530,6 @@ impl FxService for ReaperFx {
 
     async fn move_to_container(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         request: MoveToContainerRequest,
     ) -> Result<(), String> {
@@ -2664,7 +2631,6 @@ impl FxService for ReaperFx {
 
     async fn move_from_container(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         request: MoveFromContainerRequest,
     ) -> Result<(), String> {
@@ -2717,7 +2683,6 @@ impl FxService for ReaperFx {
 
     async fn set_routing_mode(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
         node_id: FxNodeId,
@@ -2747,7 +2712,6 @@ impl FxService for ReaperFx {
 
     async fn get_container_channel_config(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
         container_id: FxNodeId,
@@ -2773,7 +2737,6 @@ impl FxService for ReaperFx {
 
     async fn set_container_channel_config(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         request: SetContainerChannelConfigRequest,
     ) -> Result<(), String> {
@@ -2826,7 +2789,6 @@ impl FxService for ReaperFx {
 
     async fn get_fx_channel_config(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Option<FxChannelConfig> {
@@ -2860,7 +2822,6 @@ impl FxService for ReaperFx {
 
     async fn set_fx_channel_config(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
         config: FxChannelConfig,
@@ -2895,7 +2856,6 @@ impl FxService for ReaperFx {
 
     async fn silence_fx_output(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
     ) -> Result<FxPinMappings, String> {
@@ -2967,7 +2927,6 @@ impl FxService for ReaperFx {
 
     async fn restore_fx_output(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         target: FxTarget,
         saved: FxPinMappings,
@@ -3012,7 +2971,6 @@ impl FxService for ReaperFx {
 
     async fn enclose_in_container(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         request: EncloseInContainerRequest,
     ) -> Option<FxNodeId> {
@@ -3165,7 +3123,6 @@ impl FxService for ReaperFx {
 
     async fn explode_container(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
         container_id: FxNodeId,
@@ -3309,7 +3266,6 @@ impl FxService for ReaperFx {
 
     async fn rename_container(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
         container_id: FxNodeId,
@@ -3346,7 +3302,6 @@ impl FxService for ReaperFx {
 
     async fn get_fx_chain_chunk_text(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
     ) -> Option<String> {
@@ -3375,7 +3330,6 @@ impl FxService for ReaperFx {
 
     async fn insert_fx_chain_chunk(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
         chunk_text: String,
@@ -3432,7 +3386,6 @@ impl FxService for ReaperFx {
 
     async fn subscribe_fx_events(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         context: FxChainContext,
         events: Tx<FxEvent>,
@@ -3450,7 +3403,7 @@ impl FxService for ReaperFx {
 
         // Spawn a forwarding loop that filters events for this specific chain
         let target_context = context;
-        peeps::spawn_tracked!("reaper-fx-subscribe", async move {
+        moire::task::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(event) => {
@@ -3472,7 +3425,7 @@ impl FxService for ReaperFx {
                         };
 
                         if format!("{:?}", event_context) == format!("{:?}", target_context)
-                            && let Err(e) = events.send(&event).await
+                            && let Err(e) = events.send(event).await
                         {
                             debug!("FX event subscriber disconnected: {}", e);
                             break;

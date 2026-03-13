@@ -14,7 +14,6 @@ use reaper_medium::{
     DurationInSeconds, ItemAttributeKey, MediaItem, MediaItemTake,
     ProjectContext as ReaperProjectContext, Semitones, TakeAttributeKey, UiRefreshBehavior,
 };
-use roam::Context;
 use tracing::debug;
 
 /// REAPER item implementation.
@@ -156,7 +155,6 @@ impl ItemService for ReaperItem {
 
     async fn get_items(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
     ) -> Vec<Item> {
@@ -199,7 +197,6 @@ impl ItemService for ReaperItem {
 
     async fn get_item(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
     ) -> Option<Item> {
@@ -211,7 +208,7 @@ impl ItemService for ReaperItem {
         .unwrap_or(None)
     }
 
-    async fn get_all_items(&self, _cx: &Context, _project: ProjectContext) -> Vec<Item> {
+    async fn get_all_items(&self, _project: ProjectContext) -> Vec<Item> {
         main_thread::query(|| {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -233,7 +230,7 @@ impl ItemService for ReaperItem {
         .unwrap_or_default()
     }
 
-    async fn get_selected_items(&self, _cx: &Context, _project: ProjectContext) -> Vec<Item> {
+    async fn get_selected_items(&self, _project: ProjectContext) -> Vec<Item> {
         main_thread::query(|| {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -255,7 +252,7 @@ impl ItemService for ReaperItem {
         .unwrap_or_default()
     }
 
-    async fn item_count(&self, _cx: &Context, _project: ProjectContext, track: TrackRef) -> u32 {
+    async fn item_count(&self, _project: ProjectContext, track: TrackRef) -> u32 {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -286,7 +283,6 @@ impl ItemService for ReaperItem {
 
     async fn add_item(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         position: PositionInSeconds,
@@ -335,7 +331,7 @@ impl ItemService for ReaperItem {
         .unwrap_or(None)
     }
 
-    async fn delete_item(&self, _cx: &Context, _project: ProjectContext, item: ItemRef) {
+    async fn delete_item(&self, _project: ProjectContext, item: ItemRef) {
         debug!("ReaperItem: delete_item");
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -352,7 +348,6 @@ impl ItemService for ReaperItem {
 
     async fn duplicate_item(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
     ) -> Option<String> {
@@ -396,7 +391,6 @@ impl ItemService for ReaperItem {
 
     async fn set_position(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         position: PositionInSeconds,
@@ -416,7 +410,6 @@ impl ItemService for ReaperItem {
 
     async fn set_length(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         length: Duration,
@@ -436,7 +429,6 @@ impl ItemService for ReaperItem {
 
     async fn move_to_track(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         track: TrackRef,
@@ -467,7 +459,6 @@ impl ItemService for ReaperItem {
 
     async fn set_snap_offset(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         offset: Duration,
@@ -493,7 +484,7 @@ impl ItemService for ReaperItem {
     // State
     // =========================================================================
 
-    async fn set_muted(&self, _cx: &Context, _project: ProjectContext, item: ItemRef, muted: bool) {
+    async fn set_muted(&self, _project: ProjectContext, item: ItemRef, muted: bool) {
         debug!("ReaperItem: set_muted to {}", muted);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -513,7 +504,6 @@ impl ItemService for ReaperItem {
 
     async fn set_selected(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         selected: bool,
@@ -532,7 +522,6 @@ impl ItemService for ReaperItem {
 
     async fn set_locked(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         locked: bool,
@@ -548,7 +537,7 @@ impl ItemService for ReaperItem {
         });
     }
 
-    async fn select_all_items(&self, _cx: &Context, _project: ProjectContext, selected: bool) {
+    async fn select_all_items(&self, _project: ProjectContext, selected: bool) {
         debug!("ReaperItem: select_all_items to {}", selected);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -563,7 +552,6 @@ impl ItemService for ReaperItem {
 
     async fn set_volume(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         volume: f64,
@@ -582,7 +570,6 @@ impl ItemService for ReaperItem {
 
     async fn set_fade_in(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         length: Duration,
@@ -617,7 +604,6 @@ impl ItemService for ReaperItem {
 
     async fn set_fade_out(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         length: Duration,
@@ -656,7 +642,6 @@ impl ItemService for ReaperItem {
 
     async fn set_loop_source(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         loop_source: bool,
@@ -680,7 +665,6 @@ impl ItemService for ReaperItem {
 
     async fn set_beat_attach_mode(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         mode: BeatAttachMode,
@@ -711,7 +695,6 @@ impl ItemService for ReaperItem {
 
     async fn set_auto_stretch(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         auto_stretch: bool,
@@ -739,7 +722,6 @@ impl ItemService for ReaperItem {
 
     async fn set_color(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         color: Option<u32>,
@@ -764,7 +746,6 @@ impl ItemService for ReaperItem {
 
     async fn set_group_id(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         group_id: Option<u32>,
@@ -921,7 +902,7 @@ impl TakeService for ReaperTake {
     // Queries
     // =========================================================================
 
-    async fn get_takes(&self, _cx: &Context, _project: ProjectContext, item: ItemRef) -> Vec<Take> {
+    async fn get_takes(&self, _project: ProjectContext, item: ItemRef) -> Vec<Take> {
         main_thread::query(move || {
             let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
             let reaper = Reaper::get();
@@ -946,7 +927,6 @@ impl TakeService for ReaperTake {
 
     async fn get_take(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -980,7 +960,6 @@ impl TakeService for ReaperTake {
 
     async fn get_active_take(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
     ) -> Option<Take> {
@@ -1007,7 +986,7 @@ impl TakeService for ReaperTake {
         .unwrap_or(None)
     }
 
-    async fn take_count(&self, _cx: &Context, _project: ProjectContext, item: ItemRef) -> u32 {
+    async fn take_count(&self, _project: ProjectContext, item: ItemRef) -> u32 {
         main_thread::query(move || {
             let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
             let low = Reaper::get().medium_reaper().low();
@@ -1024,7 +1003,6 @@ impl TakeService for ReaperTake {
 
     async fn add_take(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
     ) -> Option<String> {
@@ -1043,7 +1021,6 @@ impl TakeService for ReaperTake {
 
     async fn delete_take(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -1065,7 +1042,6 @@ impl TakeService for ReaperTake {
 
     async fn set_active_take(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -1091,7 +1067,6 @@ impl TakeService for ReaperTake {
 
     async fn set_name(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -1116,7 +1091,6 @@ impl TakeService for ReaperTake {
 
     async fn set_color(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _item: ItemRef,
         _take: TakeRef,
@@ -1132,7 +1106,6 @@ impl TakeService for ReaperTake {
 
     async fn set_volume(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -1155,7 +1128,6 @@ impl TakeService for ReaperTake {
 
     async fn set_play_rate(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -1178,7 +1150,6 @@ impl TakeService for ReaperTake {
 
     async fn set_pitch(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -1203,7 +1174,6 @@ impl TakeService for ReaperTake {
 
     async fn set_preserve_pitch(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -1226,7 +1196,6 @@ impl TakeService for ReaperTake {
 
     async fn set_start_offset(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -1258,7 +1227,6 @@ impl TakeService for ReaperTake {
 
     async fn set_source_file(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -1281,7 +1249,6 @@ impl TakeService for ReaperTake {
 
     async fn get_source_type(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,

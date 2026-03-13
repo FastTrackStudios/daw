@@ -5,7 +5,6 @@
 
 use daw_proto::{ItemRef, PeakService, ProjectContext, TakePeakData, TakeRef, TrackPeak, TrackRef};
 use reaper_high::Reaper;
-use roam::Context;
 
 use crate::main_thread;
 use crate::project_context::find_project_by_guid;
@@ -41,7 +40,6 @@ fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
 impl PeakService for ReaperPeak {
     async fn get_track_peak(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         channel: u32,
@@ -74,7 +72,6 @@ impl PeakService for ReaperPeak {
 
     async fn get_take_peaks(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         item: ItemRef,
         take: TakeRef,

@@ -7,7 +7,6 @@ use daw_proto::{
     PositionInSeconds, ProjectContext, QuarterNotesToMeasureResult, TimeSignature,
     TimeToBeatsResult, TimeToQuarterNotesResult,
 };
-use roam::Context;
 
 /// Standalone position conversion implementation
 ///
@@ -37,7 +36,6 @@ impl StandalonePositionConversion {
 impl PositionConversionService for StandalonePositionConversion {
     async fn time_to_beats(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         position: PositionInSeconds,
         _measure_mode: MeasureMode,
@@ -63,7 +61,6 @@ impl PositionConversionService for StandalonePositionConversion {
 
     async fn beats_to_time(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         position: PositionInBeats,
         _measure_mode: MeasureMode,
@@ -78,7 +75,6 @@ impl PositionConversionService for StandalonePositionConversion {
 
     async fn time_to_quarter_notes(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         position: PositionInSeconds,
     ) -> TimeToQuarterNotesResult {
@@ -105,7 +101,6 @@ impl PositionConversionService for StandalonePositionConversion {
 
     async fn quarter_notes_to_time(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         position: PositionInQuarterNotes,
     ) -> PositionInSeconds {
@@ -119,7 +114,6 @@ impl PositionConversionService for StandalonePositionConversion {
 
     async fn quarter_notes_to_measure(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         position: PositionInQuarterNotes,
     ) -> QuarterNotesToMeasureResult {
@@ -141,7 +135,6 @@ impl PositionConversionService for StandalonePositionConversion {
 
     async fn beats_to_quarter_notes(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         position: PositionInBeats,
     ) -> PositionInQuarterNotes {
@@ -152,7 +145,6 @@ impl PositionConversionService for StandalonePositionConversion {
 
     async fn quarter_notes_to_beats(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         position: PositionInQuarterNotes,
     ) -> PositionInBeats {

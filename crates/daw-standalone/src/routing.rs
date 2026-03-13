@@ -8,7 +8,6 @@ use daw_proto::{
     },
     track::TrackRef,
 };
-use roam::Context;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -68,7 +67,6 @@ impl StandaloneRouting {
 impl RoutingService for StandaloneRouting {
     async fn get_sends(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
     ) -> Vec<TrackRoute> {
@@ -86,7 +84,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn get_receives(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
     ) -> Vec<TrackRoute> {
@@ -107,7 +104,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn get_hardware_outputs(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
     ) -> Vec<TrackRoute> {
@@ -127,7 +123,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn get_route(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: RouteLocation,
     ) -> Option<TrackRoute> {
@@ -154,7 +149,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn add_send(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         source: TrackRef,
         dest: TrackRef,
@@ -186,7 +180,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn add_hardware_output(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         _hw_output: u32,
@@ -212,7 +205,7 @@ impl RoutingService for StandaloneRouting {
         Some(index)
     }
 
-    async fn remove_route(&self, _cx: &Context, _project: ProjectContext, location: RouteLocation) {
+    async fn remove_route(&self, _project: ProjectContext, location: RouteLocation) {
         let track_guid = match &location.track {
             TrackRef::Guid(g) => g.clone(),
             _ => return,
@@ -230,7 +223,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn set_volume(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: RouteLocation,
         volume: f64,
@@ -254,7 +246,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn set_pan(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: RouteLocation,
         pan: f64,
@@ -278,7 +269,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn set_muted(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: RouteLocation,
         muted: bool,
@@ -302,7 +292,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn set_mono(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: RouteLocation,
         mono: bool,
@@ -326,7 +315,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn set_phase(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: RouteLocation,
         inverted: bool,
@@ -350,7 +338,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn set_send_mode(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         route: RouteRef,
@@ -375,7 +362,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn get_parent_send_enabled(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _track: TrackRef,
     ) -> bool {
@@ -384,7 +370,6 @@ impl RoutingService for StandaloneRouting {
 
     async fn set_parent_send_enabled(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _track: TrackRef,
         _enabled: bool,

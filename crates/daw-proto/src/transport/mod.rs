@@ -14,4 +14,6 @@ pub use transport::{
     AllProjectsTransport, LoopRegion, PlayState, ProjectTransportState, RecordMode, Transport,
     TransportService,
 };
-pub use transport::{TransportServiceClient, TransportServiceDispatcher};
+pub use transport::{
+    TransportServiceClient, TransportServiceDispatcher, transport_service_service_descriptor,
+};

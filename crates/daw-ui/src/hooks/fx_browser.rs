@@ -146,34 +146,38 @@ pub fn use_fx_browser_subscription() {
 
                 loop {
                     match rx.recv().await {
-                        Ok(Some(FxEvent::ParameterChanged {
-                            fx_guid: event_guid,
-                            param_index,
-                            value,
-                            ..
-                        })) => {
-                            if event_guid == selected_guid {
-                                // Check if this FX is still selected before writing
-                                let still_selected = FX_SELECTED_FX
-                                    .read()
-                                    .as_ref()
-                                    .map(|g| g == &selected_guid)
-                                    .unwrap_or(false);
-                                if !still_selected {
-                                    tracing::debug!(
-                                        "FX browser: FX deselected, stopping event loop"
-                                    );
-                                    break;
-                                }
-                                FX_PARAMETERS.write().iter_mut().for_each(|p| {
-                                    if p.index == param_index {
-                                        p.value = value;
+                        Ok(Some(event_ref)) => {
+                            match &*event_ref {
+                                FxEvent::ParameterChanged {
+                                    fx_guid: event_guid,
+                                    param_index,
+                                    value,
+                                    ..
+                                } => {
+                                    if *event_guid == selected_guid {
+                                        // Check if this FX is still selected before writing
+                                        let still_selected = FX_SELECTED_FX
+                                            .read()
+                                            .as_ref()
+                                            .map(|g| g == &selected_guid)
+                                            .unwrap_or(false);
+                                        if !still_selected {
+                                            tracing::debug!(
+                                                "FX browser: FX deselected, stopping event loop"
+                                            );
+                                            break;
+                                        }
+                                        FX_PARAMETERS.write().iter_mut().for_each(|p| {
+                                            if p.index == *param_index {
+                                                p.value = *value;
+                                            }
+                                        });
                                     }
-                                });
+                                }
+                                _ => {
+                                    // Other FX events (added, removed, enabled, etc.)
+                                }
                             }
-                        }
-                        Ok(Some(_)) => {
-                            // Other FX events (added, removed, enabled, etc.)
                         }
                         Ok(None) => {
                             tracing::debug!("FX browser: event channel closed");

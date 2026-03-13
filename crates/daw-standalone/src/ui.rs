@@ -1,7 +1,6 @@
 //! Standalone UI Service Implementation (Mock)
 
 use daw_proto::{UiService, UserInputResult};
-use roam::Context;
 use std::path::PathBuf;
 
 /// Standalone UI service (returns mock/empty results for testing)
@@ -23,7 +22,6 @@ impl Default for StandaloneUi {
 impl UiService for StandaloneUi {
     async fn get_user_inputs(
         &self,
-        _cx: &Context,
         _title: String,
         _prompts: Vec<String>,
         defaults: Vec<String>,
@@ -37,7 +35,6 @@ impl UiService for StandaloneUi {
 
     async fn browse_for_file(
         &self,
-        _cx: &Context,
         _title: String,
         _initial_dir: Option<PathBuf>,
         _filter: Option<String>,
@@ -48,7 +45,6 @@ impl UiService for StandaloneUi {
 
     async fn browse_for_save_file(
         &self,
-        _cx: &Context,
         _title: String,
         _initial_dir: Option<PathBuf>,
         default_name: String,
@@ -60,7 +56,6 @@ impl UiService for StandaloneUi {
 
     async fn browse_for_directory(
         &self,
-        _cx: &Context,
         _title: String,
         _initial_dir: Option<PathBuf>,
     ) -> Option<PathBuf> {
@@ -68,7 +63,7 @@ impl UiService for StandaloneUi {
         Some(PathBuf::from("/mock/directory"))
     }
 
-    async fn set_prevent_ui_refresh(&self, _cx: &Context, _prevent: bool) {
+    async fn set_prevent_ui_refresh(&self, _prevent: bool) {
         // No-op in standalone mode
     }
 }

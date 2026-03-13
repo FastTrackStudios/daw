@@ -27,7 +27,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tracing::{debug, error};
 use eyre::{Result, Context};
-use roam::session::ConnectionHandle;
+use roam::ErasedCaller;
 use daw_control::DawClients;
 
 mod requests;
@@ -74,11 +74,17 @@ impl DawSync {
                 }
             });
 
-        let handle = roam::session::connect(&socket_path)
+        let path = socket_path.strip_prefix("unix://").unwrap_or(&socket_path);
+        let stream = tokio::net::UnixStream::connect(path)
             .await
             .context(format!("Failed to connect to DAW service at {}", socket_path))?;
+        let link = roam_stream::StreamLink::unix(stream);
+        let (caller, _session) = roam::initiator(link)
+            .establish::<roam::DriverCaller>(())
+            .await
+            .context("Failed to establish roam session")?;
 
-        Self::new(handle)
+        Self::new(ErasedCaller::new(caller))
     }
 
     /// Create a new synchronous DAW interface
@@ -91,7 +97,7 @@ impl DawSync {
     ///
     /// # Errors
     /// Returns an error if the tokio runtime cannot be created
-    pub fn new(connection_handle: ConnectionHandle) -> Result<Self> {
+    pub fn new(connection_handle: ErasedCaller) -> Result<Self> {
         // Create a dedicated runtime for background processing
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()

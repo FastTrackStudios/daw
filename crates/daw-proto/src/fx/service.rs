@@ -46,13 +46,13 @@ pub trait FxService {
     // =========================================================================
 
     /// Get all FX in a chain
-    async fn get_fx_list(&self, project: ProjectContext, context: FxChainContext) -> Vec<Fx>;
+    async fn get_fx_list(&self, project: ProjectContext, chain: FxChainContext) -> Vec<Fx>;
 
     /// Get a specific FX by reference
     async fn get_fx(&self, project: ProjectContext, target: FxTarget) -> Option<Fx>;
 
     /// Get the number of FX in a chain
-    async fn fx_count(&self, project: ProjectContext, context: FxChainContext) -> u32;
+    async fn fx_count(&self, project: ProjectContext, chain: FxChainContext) -> u32;
 
     // =========================================================================
     // FX State
@@ -89,7 +89,7 @@ pub trait FxService {
     async fn add_fx(
         &self,
         project: ProjectContext,
-        context: FxChainContext,
+        chain: FxChainContext,
         name: String,
     ) -> Option<String>;
 
@@ -335,7 +335,7 @@ pub trait FxService {
     async fn get_fx_chain_state(
         &self,
         project: ProjectContext,
-        context: FxChainContext,
+        chain: FxChainContext,
     ) -> Vec<FxStateChunk>;
 
     /// Restore state chunks for all FX in a chain.
@@ -345,7 +345,7 @@ pub trait FxService {
     async fn set_fx_chain_state(
         &self,
         project: ProjectContext,
-        context: FxChainContext,
+        chain: FxChainContext,
         chunks: Vec<FxStateChunk>,
     ) -> Result<(), String>;
 
@@ -363,7 +363,7 @@ pub trait FxService {
     /// Returns the complete hierarchy including containers, their children,
     /// routing modes, and channel configurations. This is the primary method
     /// for reading container-aware FX chain state.
-    async fn get_fx_tree(&self, project: ProjectContext, context: FxChainContext) -> FxTree;
+    async fn get_fx_tree(&self, project: ProjectContext, chain: FxChainContext) -> FxTree;
 
     /// Create a new empty container at a position in the chain.
     ///
@@ -392,7 +392,7 @@ pub trait FxService {
     async fn set_routing_mode(
         &self,
         project: ProjectContext,
-        context: FxChainContext,
+        chain: FxChainContext,
         node_id: FxNodeId,
         mode: FxRoutingMode,
     ) -> Result<(), String>;
@@ -401,7 +401,7 @@ pub trait FxService {
     async fn get_container_channel_config(
         &self,
         project: ProjectContext,
-        context: FxChainContext,
+        chain: FxChainContext,
         container_id: FxNodeId,
     ) -> Option<FxContainerChannelConfig>;
 
@@ -428,7 +428,7 @@ pub trait FxService {
     async fn explode_container(
         &self,
         project: ProjectContext,
-        context: FxChainContext,
+        chain: FxChainContext,
         container_id: FxNodeId,
     ) -> Result<(), String>;
 
@@ -436,7 +436,7 @@ pub trait FxService {
     async fn rename_container(
         &self,
         project: ProjectContext,
-        context: FxChainContext,
+        chain: FxChainContext,
         container_id: FxNodeId,
         name: String,
     ) -> Result<(), String>;
@@ -456,7 +456,7 @@ pub trait FxService {
     async fn get_fx_chain_chunk_text(
         &self,
         project: ProjectContext,
-        context: FxChainContext,
+        chain: FxChainContext,
     ) -> Option<String>;
 
     /// Insert a raw RPP chunk block into the FX chain.
@@ -467,7 +467,7 @@ pub trait FxService {
     async fn insert_fx_chain_chunk(
         &self,
         project: ProjectContext,
-        context: FxChainContext,
+        chain: FxChainContext,
         chunk_text: String,
     ) -> Result<(), String>;
 
@@ -489,7 +489,7 @@ pub trait FxService {
     async fn subscribe_fx_events(
         &self,
         project: ProjectContext,
-        context: FxChainContext,
+        chain: FxChainContext,
         events: Tx<FxEvent>,
     );
 }

@@ -15,7 +15,7 @@
 //! # Before
 //!
 //! ```rust,ignore
-//! async fn get_tracks(&self, _cx: &Context, project: ProjectContext) -> Vec<Track> {
+//! async fn get_tracks(&self, project: ProjectContext) -> Vec<Track> {
 //!     let Some(ts) = task_support() else {
 //!         warn!("TaskSupport not set");
 //!         return vec![];
@@ -31,7 +31,7 @@
 //! # After
 //!
 //! ```rust,ignore
-//! async fn get_tracks(&self, _cx: &Context, project: ProjectContext) -> Vec<Track> {
+//! async fn get_tracks(&self, project: ProjectContext) -> Vec<Track> {
 //!     main_thread::query(|| {
 //!         // ... actual work ...
 //!     })

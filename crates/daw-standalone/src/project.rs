@@ -2,7 +2,7 @@
 
 use crate::transport::SharedProjectState;
 use daw_proto::{ProjectEvent, ProjectInfo, ProjectService};
-use roam::{Context, Tx};
+use roam::Tx;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -101,7 +101,7 @@ impl StandaloneProject {
 }
 
 impl ProjectService for StandaloneProject {
-    async fn get_current(&self, _cx: &Context) -> Option<ProjectInfo> {
+    async fn get_current(&self) -> Option<ProjectInfo> {
         let index = *self.shared_state.current_index.read().await;
         info!(
             "ProjectService::get_current() called - returning project at index {}",
@@ -110,7 +110,7 @@ impl ProjectService for StandaloneProject {
         self.projects.get(index).cloned()
     }
 
-    async fn get(&self, _cx: &Context, project_id: String) -> Option<ProjectInfo> {
+    async fn get(&self, project_id: String) -> Option<ProjectInfo> {
         info!(
             "ProjectService::get() called with project_id: {}",
             project_id
@@ -118,7 +118,7 @@ impl ProjectService for StandaloneProject {
         self.projects.iter().find(|p| p.guid == project_id).cloned()
     }
 
-    async fn list(&self, _cx: &Context) -> Vec<ProjectInfo> {
+    async fn list(&self) -> Vec<ProjectInfo> {
         info!(
             "ProjectService::list() called - returning {} projects",
             self.projects.len()
@@ -126,7 +126,7 @@ impl ProjectService for StandaloneProject {
         self.projects.as_ref().clone()
     }
 
-    async fn select(&self, _cx: &Context, project_id: String) -> bool {
+    async fn select(&self, project_id: String) -> bool {
         tracing::debug!(
             "ProjectService::select() called with project_id: {}",
             project_id
@@ -152,7 +152,7 @@ impl ProjectService for StandaloneProject {
         }
     }
 
-    async fn create(&self, _cx: &Context) -> Option<ProjectInfo> {
+    async fn create(&self) -> Option<ProjectInfo> {
         info!("ProjectService::create() called (standalone stub)");
         let guid = format!(
             "project-test-{}",
@@ -168,12 +168,12 @@ impl ProjectService for StandaloneProject {
         })
     }
 
-    async fn open(&self, _cx: &Context, path: String) -> Option<ProjectInfo> {
+    async fn open(&self, path: String) -> Option<ProjectInfo> {
         info!("ProjectService::open({}) called (standalone stub)", path);
         None
     }
 
-    async fn close(&self, _cx: &Context, project_id: String) -> bool {
+    async fn close(&self, project_id: String) -> bool {
         info!(
             "ProjectService::close({}) called (standalone stub)",
             project_id
@@ -181,7 +181,7 @@ impl ProjectService for StandaloneProject {
         true
     }
 
-    async fn get_by_slot(&self, _cx: &Context, slot: u32) -> Option<ProjectInfo> {
+    async fn get_by_slot(&self, slot: u32) -> Option<ProjectInfo> {
         info!("ProjectService::get_by_slot({}) called", slot);
         self.projects.get(slot as usize).cloned()
     }
@@ -190,7 +190,6 @@ impl ProjectService for StandaloneProject {
 
     async fn begin_undo_block(
         &self,
-        _cx: &Context,
         _project: daw_proto::ProjectContext,
         _label: String,
     ) {
@@ -198,24 +197,22 @@ impl ProjectService for StandaloneProject {
 
     async fn end_undo_block(
         &self,
-        _cx: &Context,
         _project: daw_proto::ProjectContext,
         _label: String,
         _scope: Option<daw_proto::UndoScope>,
     ) {
     }
 
-    async fn undo(&self, _cx: &Context, _project: daw_proto::ProjectContext) -> bool {
+    async fn undo(&self, _project: daw_proto::ProjectContext) -> bool {
         false
     }
 
-    async fn redo(&self, _cx: &Context, _project: daw_proto::ProjectContext) -> bool {
+    async fn redo(&self, _project: daw_proto::ProjectContext) -> bool {
         false
     }
 
     async fn last_undo_label(
         &self,
-        _cx: &Context,
         _project: daw_proto::ProjectContext,
     ) -> Option<String> {
         None
@@ -223,13 +220,12 @@ impl ProjectService for StandaloneProject {
 
     async fn last_redo_label(
         &self,
-        _cx: &Context,
         _project: daw_proto::ProjectContext,
     ) -> Option<String> {
         None
     }
 
-    async fn subscribe(&self, _cx: &Context, tx: Tx<ProjectEvent>) {
+    async fn subscribe(&self, tx: Tx<ProjectEvent>) {
         info!("ProjectService::subscribe() - starting project stream");
 
         // Clone self for the spawned task
@@ -237,11 +233,11 @@ impl ProjectService for StandaloneProject {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        peeps::spawn_tracked!("project-subscribe", async move {
+        moire::task::spawn(async move {
             // Send initial state: all projects
             let projects = this.projects.as_ref().clone();
             if tx
-                .send(&ProjectEvent::ProjectsChanged(projects))
+                .send(ProjectEvent::ProjectsChanged(projects))
                 .await
                 .is_err()
             {
@@ -255,7 +251,7 @@ impl ProjectService for StandaloneProject {
                 this.projects.get(index).map(|p| p.guid.clone())
             };
             if tx
-                .send(&ProjectEvent::CurrentChanged(current_guid.clone()))
+                .send(ProjectEvent::CurrentChanged(current_guid.clone()))
                 .await
                 .is_err()
             {
@@ -275,7 +271,7 @@ impl ProjectService for StandaloneProject {
                     last_index = current_index;
                     let new_guid = this.projects.get(current_index).map(|p| p.guid.clone());
                     if tx
-                        .send(&ProjectEvent::CurrentChanged(new_guid))
+                        .send(ProjectEvent::CurrentChanged(new_guid))
                         .await
                         .is_err()
                     {

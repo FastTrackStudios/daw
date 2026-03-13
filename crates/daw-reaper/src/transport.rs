@@ -42,7 +42,7 @@ use reaper_medium::{
     CommandId, PositionInSeconds, ProjectContext as ReaperProjectContext, ProjectRef,
     SetEditCurPosOptions, TimeRangeType, UndoBehavior,
 };
-use roam::{Context, Tx};
+use roam::Tx;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::broadcast;
@@ -393,7 +393,7 @@ impl TransportService for ReaperTransport {
     // Playback Control
     // =========================================================================
 
-    async fn play(&self, _cx: &Context, _project: ProjectContext) {
+    async fn play(&self, _project: ProjectContext) {
         debug!("ReaperTransport: play");
         main_thread::run(|| {
             let reaper = Reaper::get();
@@ -406,7 +406,7 @@ impl TransportService for ReaperTransport {
         });
     }
 
-    async fn pause(&self, _cx: &Context, _project: ProjectContext) {
+    async fn pause(&self, _project: ProjectContext) {
         debug!("ReaperTransport: pause");
         main_thread::run(|| {
             let reaper = Reaper::get();
@@ -419,7 +419,7 @@ impl TransportService for ReaperTransport {
         });
     }
 
-    async fn stop(&self, _cx: &Context, _project: ProjectContext) {
+    async fn stop(&self, _project: ProjectContext) {
         debug!("ReaperTransport: stop");
         main_thread::run(|| {
             let reaper = Reaper::get();
@@ -432,7 +432,7 @@ impl TransportService for ReaperTransport {
         });
     }
 
-    async fn play_pause(&self, _cx: &Context, _project: ProjectContext) {
+    async fn play_pause(&self, _project: ProjectContext) {
         debug!("ReaperTransport: play_pause");
         main_thread::run(|| {
             let reaper = Reaper::get();
@@ -445,7 +445,7 @@ impl TransportService for ReaperTransport {
         });
     }
 
-    async fn play_stop(&self, _cx: &Context, _project: ProjectContext) {
+    async fn play_stop(&self, _project: ProjectContext) {
         debug!("ReaperTransport: play_stop");
         main_thread::run(|| {
             let reaper = Reaper::get();
@@ -458,16 +458,16 @@ impl TransportService for ReaperTransport {
         });
     }
 
-    async fn play_from_last_start_position(&self, _cx: &Context, project: ProjectContext) {
+    async fn play_from_last_start_position(&self, project: ProjectContext) {
         debug!("ReaperTransport: play_from_last_start_position (fallback to play)");
-        self.play(_cx, project).await;
+        self.play(project).await;
     }
 
     // =========================================================================
     // Recording Control
     // =========================================================================
 
-    async fn record(&self, _cx: &Context, _project: ProjectContext) {
+    async fn record(&self, _project: ProjectContext) {
         debug!("ReaperTransport: record");
         main_thread::run(|| {
             let reaper = Reaper::get();
@@ -480,7 +480,7 @@ impl TransportService for ReaperTransport {
         });
     }
 
-    async fn stop_recording(&self, _cx: &Context, _project: ProjectContext) {
+    async fn stop_recording(&self, _project: ProjectContext) {
         debug!("ReaperTransport: stop_recording");
         main_thread::run(|| {
             let reaper = Reaper::get();
@@ -493,7 +493,7 @@ impl TransportService for ReaperTransport {
         });
     }
 
-    async fn toggle_recording(&self, _cx: &Context, _project: ProjectContext) {
+    async fn toggle_recording(&self, _project: ProjectContext) {
         debug!("ReaperTransport: toggle_recording");
         main_thread::run(|| {
             let reaper = Reaper::get();
@@ -510,7 +510,7 @@ impl TransportService for ReaperTransport {
     // Position Control
     // =========================================================================
 
-    async fn set_position(&self, _cx: &Context, _project: ProjectContext, seconds: f64) {
+    async fn set_position(&self, _project: ProjectContext, seconds: f64) {
         debug!("ReaperTransport: set_position to {} seconds", seconds);
         let _ = main_thread::query(move || {
             let reaper = Reaper::get();
@@ -544,7 +544,7 @@ impl TransportService for ReaperTransport {
         .await;
     }
 
-    async fn get_position(&self, _cx: &Context, _project: ProjectContext) -> f64 {
+    async fn get_position(&self, _project: ProjectContext) -> f64 {
         main_thread::query(|| {
             let reaper = Reaper::get();
             reaper
@@ -557,7 +557,7 @@ impl TransportService for ReaperTransport {
         .unwrap_or(0.0)
     }
 
-    async fn goto_start(&self, _cx: &Context, _project: ProjectContext) {
+    async fn goto_start(&self, _project: ProjectContext) {
         debug!("ReaperTransport: goto_start");
         main_thread::run(|| {
             let reaper = Reaper::get();
@@ -570,7 +570,7 @@ impl TransportService for ReaperTransport {
         });
     }
 
-    async fn goto_end(&self, _cx: &Context, _project: ProjectContext) {
+    async fn goto_end(&self, _project: ProjectContext) {
         debug!("ReaperTransport: goto_end");
         main_thread::run(|| {
             let reaper = Reaper::get();
@@ -587,7 +587,7 @@ impl TransportService for ReaperTransport {
     // State Queries
     // =========================================================================
 
-    async fn get_state(&self, _cx: &Context, project: ProjectContext) -> Transport {
+    async fn get_state(&self, project: ProjectContext) -> Transport {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -617,7 +617,7 @@ impl TransportService for ReaperTransport {
         .unwrap_or_default()
     }
 
-    async fn get_play_state(&self, _cx: &Context, _project: ProjectContext) -> PlayState {
+    async fn get_play_state(&self, _project: ProjectContext) -> PlayState {
         main_thread::query(|| {
             let reaper = Reaper::get();
             get_play_state_internal(reaper.medium_reaper())
@@ -626,7 +626,7 @@ impl TransportService for ReaperTransport {
         .unwrap_or(PlayState::Stopped)
     }
 
-    async fn is_playing(&self, _cx: &Context, _project: ProjectContext) -> bool {
+    async fn is_playing(&self, _project: ProjectContext) -> bool {
         main_thread::query(|| {
             let reaper = Reaper::get();
             let state = reaper
@@ -638,7 +638,7 @@ impl TransportService for ReaperTransport {
         .unwrap_or(false)
     }
 
-    async fn is_recording(&self, _cx: &Context, _project: ProjectContext) -> bool {
+    async fn is_recording(&self, _project: ProjectContext) -> bool {
         main_thread::query(|| {
             let reaper = Reaper::get();
             let state = reaper
@@ -654,7 +654,7 @@ impl TransportService for ReaperTransport {
     // Tempo Control
     // =========================================================================
 
-    async fn get_tempo(&self, _cx: &Context, _project: ProjectContext) -> f64 {
+    async fn get_tempo(&self, _project: ProjectContext) -> f64 {
         main_thread::query(|| {
             let reaper = Reaper::get();
             reaper.current_project().tempo().bpm().get()
@@ -663,7 +663,7 @@ impl TransportService for ReaperTransport {
         .unwrap_or(120.0)
     }
 
-    async fn set_tempo(&self, _cx: &Context, _project: ProjectContext, bpm: f64) {
+    async fn set_tempo(&self, _project: ProjectContext, bpm: f64) {
         debug!("ReaperTransport: set_tempo to {} BPM", bpm);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -680,7 +680,7 @@ impl TransportService for ReaperTransport {
     // Loop Control
     // =========================================================================
 
-    async fn toggle_loop(&self, _cx: &Context, _project: ProjectContext) {
+    async fn toggle_loop(&self, _project: ProjectContext) {
         debug!("ReaperTransport: toggle_loop");
         main_thread::run(|| {
             let reaper = Reaper::get();
@@ -693,7 +693,7 @@ impl TransportService for ReaperTransport {
         });
     }
 
-    async fn is_looping(&self, _cx: &Context, _project: ProjectContext) -> bool {
+    async fn is_looping(&self, _project: ProjectContext) -> bool {
         main_thread::query(|| {
             let reaper = Reaper::get();
             reaper
@@ -704,7 +704,7 @@ impl TransportService for ReaperTransport {
         .unwrap_or(false)
     }
 
-    async fn set_loop(&self, _cx: &Context, _project: ProjectContext, enabled: bool) {
+    async fn set_loop(&self, _project: ProjectContext, enabled: bool) {
         debug!("ReaperTransport: set_loop to {}", enabled);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -718,7 +718,7 @@ impl TransportService for ReaperTransport {
     // Playrate Control
     // =========================================================================
 
-    async fn get_playrate(&self, _cx: &Context, _project: ProjectContext) -> f64 {
+    async fn get_playrate(&self, _project: ProjectContext) -> f64 {
         main_thread::query(|| {
             let reaper = Reaper::get();
             reaper
@@ -731,7 +731,7 @@ impl TransportService for ReaperTransport {
         .unwrap_or(1.0)
     }
 
-    async fn set_playrate(&self, _cx: &Context, _project: ProjectContext, rate: f64) {
+    async fn set_playrate(&self, _project: ProjectContext, rate: f64) {
         debug!("ReaperTransport: set_playrate to {}", rate);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -747,7 +747,7 @@ impl TransportService for ReaperTransport {
     // Time Signature
     // =========================================================================
 
-    async fn get_time_signature(&self, _cx: &Context, _project: ProjectContext) -> TimeSignature {
+    async fn get_time_signature(&self, _project: ProjectContext) -> TimeSignature {
         main_thread::query(|| {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -764,7 +764,6 @@ impl TransportService for ReaperTransport {
 
     async fn set_position_musical(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         measure: i32,
         beat: i32,
@@ -805,7 +804,7 @@ impl TransportService for ReaperTransport {
         });
     }
 
-    async fn goto_measure(&self, _cx: &Context, _project: ProjectContext, measure: i32) {
+    async fn goto_measure(&self, _project: ProjectContext, measure: i32) {
         debug!("ReaperTransport: goto_measure {}", measure);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -837,7 +836,7 @@ impl TransportService for ReaperTransport {
     // Streaming
     // =========================================================================
 
-    async fn subscribe_state(&self, _cx: &Context, _project: ProjectContext, tx: Tx<Transport>) {
+    async fn subscribe_state(&self, _project: ProjectContext, tx: Tx<Transport>) {
         info!("ReaperTransport: subscribe_state - subscribing to broadcast channel");
 
         // Get a receiver for the broadcast channel
@@ -850,13 +849,13 @@ impl TransportService for ReaperTransport {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        peeps::spawn_tracked!("reaper-transport-subscribe", async move {
+        moire::task::spawn(async move {
             loop {
                 // Wait for the next state update from the broadcaster
                 match rx.recv().await {
                     Ok(state) => {
                         // Forward state to the RPC stream
-                        if let Err(e) = tx.send(&state).await {
+                        if let Err(e) = tx.send(state).await {
                             debug!("ReaperTransport: subscribe_state stream closed: {}", e);
                             break;
                         }
@@ -881,7 +880,7 @@ impl TransportService for ReaperTransport {
         });
     }
 
-    async fn subscribe_all_projects(&self, _cx: &Context, tx: Tx<daw_proto::AllProjectsTransport>) {
+    async fn subscribe_all_projects(&self, tx: Tx<daw_proto::AllProjectsTransport>) {
         info!(
             "ReaperTransport: subscribe_all_projects - subscribing to per-project broadcast channel"
         );
@@ -895,7 +894,7 @@ impl TransportService for ReaperTransport {
         };
 
         // Spawn the streaming loop so this method returns immediately
-        peeps::spawn_tracked!("reaper-transport-subscribe-all", async move {
+        moire::task::spawn(async move {
             // Buffer to collect updates within a small window
             // This batches multiple project updates into a single message
             let mut pending_updates: HashMap<String, Transport> = HashMap::new();
@@ -936,7 +935,7 @@ impl TransportService for ReaperTransport {
 
                             let update = daw_proto::AllProjectsTransport { projects };
 
-                            if let Err(e) = tx.send(&update).await {
+                            if let Err(e) = tx.send(update).await {
                                 debug!("ReaperTransport: subscribe_all_projects stream closed: {}", e);
                                 break;
                             }

@@ -6,7 +6,6 @@ use daw_proto::{
     primitives::{BeatAttachMode, Duration, PositionInSeconds},
     track::TrackRef,
 };
-use roam::Context;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -154,7 +153,6 @@ impl StandaloneItem {
 impl ItemService for StandaloneItem {
     async fn get_items(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
     ) -> Vec<Item> {
@@ -172,7 +170,6 @@ impl ItemService for StandaloneItem {
 
     async fn get_item(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
     ) -> Option<Item> {
@@ -183,12 +180,12 @@ impl ItemService for StandaloneItem {
         }
     }
 
-    async fn get_all_items(&self, _cx: &Context, _project: ProjectContext) -> Vec<Item> {
+    async fn get_all_items(&self, _project: ProjectContext) -> Vec<Item> {
         let items = self.items.read().await;
         items.iter().map(|i| i.to_item()).collect()
     }
 
-    async fn get_selected_items(&self, _cx: &Context, _project: ProjectContext) -> Vec<Item> {
+    async fn get_selected_items(&self, _project: ProjectContext) -> Vec<Item> {
         let items = self.items.read().await;
         items
             .iter()
@@ -197,7 +194,7 @@ impl ItemService for StandaloneItem {
             .collect()
     }
 
-    async fn item_count(&self, _cx: &Context, _project: ProjectContext, track: TrackRef) -> u32 {
+    async fn item_count(&self, _project: ProjectContext, track: TrackRef) -> u32 {
         let items = self.items.read().await;
         let track_guid = match track {
             TrackRef::Guid(g) => g,
@@ -208,7 +205,6 @@ impl ItemService for StandaloneItem {
 
     async fn add_item(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         position: PositionInSeconds,
@@ -226,7 +222,7 @@ impl ItemService for StandaloneItem {
         Some(guid)
     }
 
-    async fn delete_item(&self, _cx: &Context, _project: ProjectContext, item: ItemRef) {
+    async fn delete_item(&self, _project: ProjectContext, item: ItemRef) {
         let mut items = self.items.write().await;
         if let ItemRef::Guid(guid) = item {
             items.retain(|i| i.guid != guid);
@@ -235,7 +231,6 @@ impl ItemService for StandaloneItem {
 
     async fn duplicate_item(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
     ) -> Option<String> {
@@ -251,7 +246,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_position(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         position: PositionInSeconds,
@@ -264,7 +258,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_length(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         length: Duration,
@@ -277,7 +270,6 @@ impl ItemService for StandaloneItem {
 
     async fn move_to_track(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         track: TrackRef,
@@ -292,7 +284,7 @@ impl ItemService for StandaloneItem {
         }
     }
 
-    async fn set_muted(&self, _cx: &Context, _project: ProjectContext, item: ItemRef, muted: bool) {
+    async fn set_muted(&self, _project: ProjectContext, item: ItemRef, muted: bool) {
         let mut items = self.items.write().await;
         if let Some(i) = Self::find_item(&mut items, &item) {
             i.muted = muted;
@@ -301,7 +293,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_selected(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         selected: bool,
@@ -314,7 +305,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_locked(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         locked: bool,
@@ -325,7 +315,7 @@ impl ItemService for StandaloneItem {
         }
     }
 
-    async fn select_all_items(&self, _cx: &Context, _project: ProjectContext, selected: bool) {
+    async fn select_all_items(&self, _project: ProjectContext, selected: bool) {
         let mut items = self.items.write().await;
         for i in items.iter_mut() {
             i.selected = selected;
@@ -334,7 +324,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_volume(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         volume: f64,
@@ -347,7 +336,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_fade_in(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _item: ItemRef,
         _length: Duration,
@@ -358,7 +346,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_fade_out(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _item: ItemRef,
         _length: Duration,
@@ -369,7 +356,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_loop_source(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _item: ItemRef,
         _loop_source: bool,
@@ -379,7 +365,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_beat_attach_mode(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _item: ItemRef,
         _mode: BeatAttachMode,
@@ -389,7 +374,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_snap_offset(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _item: ItemRef,
         _offset: Duration,
@@ -399,7 +383,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_auto_stretch(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _item: ItemRef,
         _auto_stretch: bool,
@@ -409,7 +392,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_color(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _item: ItemRef,
         _color: Option<u32>,
@@ -419,7 +401,6 @@ impl ItemService for StandaloneItem {
 
     async fn set_group_id(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _item: ItemRef,
         _group_id: Option<u32>,
@@ -449,7 +430,7 @@ impl StandaloneTake {
 }
 
 impl TakeService for StandaloneTake {
-    async fn get_takes(&self, _cx: &Context, _project: ProjectContext, item: ItemRef) -> Vec<Take> {
+    async fn get_takes(&self, _project: ProjectContext, item: ItemRef) -> Vec<Take> {
         let items = self.items.read().await;
         let item_state = match &item {
             ItemRef::Guid(guid) => items.iter().find(|i| &i.guid == guid),
@@ -472,7 +453,6 @@ impl TakeService for StandaloneTake {
 
     async fn get_take(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -496,16 +476,14 @@ impl TakeService for StandaloneTake {
 
     async fn get_active_take(
         &self,
-        cx: &Context,
         project: ProjectContext,
         item: ItemRef,
     ) -> Option<Take> {
-        self.get_take(cx, project, item, TakeRef::Active).await
+        self.get_take(project, item, TakeRef::Active).await
     }
 
     async fn add_take(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
     ) -> Option<String> {
@@ -524,7 +502,6 @@ impl TakeService for StandaloneTake {
 
     async fn delete_take(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -543,7 +520,6 @@ impl TakeService for StandaloneTake {
 
     async fn set_active_take(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -571,7 +547,6 @@ impl TakeService for StandaloneTake {
 
     async fn set_name(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -598,7 +573,6 @@ impl TakeService for StandaloneTake {
 
     async fn set_color(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _item: ItemRef,
         _take: TakeRef,
@@ -609,7 +583,6 @@ impl TakeService for StandaloneTake {
 
     async fn set_volume(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -636,7 +609,6 @@ impl TakeService for StandaloneTake {
 
     async fn set_play_rate(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -663,7 +635,6 @@ impl TakeService for StandaloneTake {
 
     async fn set_pitch(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -690,7 +661,6 @@ impl TakeService for StandaloneTake {
 
     async fn set_preserve_pitch(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,
@@ -717,7 +687,6 @@ impl TakeService for StandaloneTake {
 
     async fn set_start_offset(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _item: ItemRef,
         _take: TakeRef,
@@ -728,7 +697,6 @@ impl TakeService for StandaloneTake {
 
     async fn set_source_file(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _item: ItemRef,
         _take: TakeRef,
@@ -737,7 +705,7 @@ impl TakeService for StandaloneTake {
         // Stub - no-op
     }
 
-    async fn take_count(&self, _cx: &Context, _project: ProjectContext, item: ItemRef) -> u32 {
+    async fn take_count(&self, _project: ProjectContext, item: ItemRef) -> u32 {
         let items = self.items.read().await;
         match &item {
             ItemRef::Guid(guid) => items
@@ -751,7 +719,6 @@ impl TakeService for StandaloneTake {
 
     async fn get_source_type(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         item: ItemRef,
         take: TakeRef,

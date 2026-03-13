@@ -13,7 +13,6 @@ use daw_proto::{
     AudioEngineService, AudioEngineState, AudioInputChannel, AudioInputInfo, AudioLatency,
 };
 use reaper_high::Reaper;
-use roam::Context;
 use tracing::debug;
 
 /// REAPER audio engine implementation
@@ -33,7 +32,7 @@ impl Default for ReaperAudioEngine {
 }
 
 impl AudioEngineService for ReaperAudioEngine {
-    async fn get_state(&self, _cx: &Context) -> AudioEngineState {
+    async fn get_state(&self) -> AudioEngineState {
         debug!("ReaperAudioEngine: get_state called");
         main_thread::query(|| {
             let reaper = Reaper::get();
@@ -65,7 +64,7 @@ impl AudioEngineService for ReaperAudioEngine {
         .unwrap_or_default()
     }
 
-    async fn get_latency(&self, _cx: &Context) -> AudioLatency {
+    async fn get_latency(&self) -> AudioLatency {
         debug!("ReaperAudioEngine: get_latency");
         main_thread::query(|| {
             let reaper = Reaper::get();
@@ -76,7 +75,7 @@ impl AudioEngineService for ReaperAudioEngine {
         .unwrap_or_default()
     }
 
-    async fn get_output_latency_seconds(&self, _cx: &Context) -> f64 {
+    async fn get_output_latency_seconds(&self) -> f64 {
         debug!("ReaperAudioEngine: get_output_latency_seconds");
         main_thread::query(|| {
             let reaper = Reaper::get();
@@ -94,7 +93,7 @@ impl AudioEngineService for ReaperAudioEngine {
         .unwrap_or(0.0)
     }
 
-    async fn is_running(&self, _cx: &Context) -> bool {
+    async fn is_running(&self) -> bool {
         debug!("ReaperAudioEngine: is_running");
         main_thread::query(|| {
             let reaper = Reaper::get();
@@ -104,7 +103,7 @@ impl AudioEngineService for ReaperAudioEngine {
         .unwrap_or(false)
     }
 
-    async fn get_audio_inputs(&self, _cx: &Context) -> AudioInputInfo {
+    async fn get_audio_inputs(&self) -> AudioInputInfo {
         debug!("ReaperAudioEngine: get_audio_inputs");
         main_thread::query(|| {
             let reaper = Reaper::get();
@@ -144,7 +143,7 @@ impl AudioEngineService for ReaperAudioEngine {
         .unwrap_or_default()
     }
 
-    async fn init(&self, _cx: &Context) {
+    async fn init(&self) {
         debug!("ReaperAudioEngine: init (Audio_Init)");
         main_thread::query(|| {
             let reaper = Reaper::get();
@@ -153,7 +152,7 @@ impl AudioEngineService for ReaperAudioEngine {
         .await;
     }
 
-    async fn quit(&self, _cx: &Context) {
+    async fn quit(&self) {
         debug!("ReaperAudioEngine: quit (Audio_Quit)");
         main_thread::query(|| {
             let reaper = Reaper::get();

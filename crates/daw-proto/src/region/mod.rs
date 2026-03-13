@@ -12,4 +12,6 @@ mod service;
 pub use error::RegionError;
 pub use event::RegionEvent;
 pub use region::Region;
-pub use service::{RegionService, RegionServiceClient, RegionServiceDispatcher};
+pub use service::{
+    RegionService, RegionServiceClient, RegionServiceDispatcher, region_service_service_descriptor,
+};

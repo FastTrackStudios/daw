@@ -2,7 +2,6 @@
 
 use daw_proto::{UiService, UserInputResult};
 use reaper_high::Reaper;
-use roam::Context;
 use std::path::PathBuf;
 
 use crate::main_thread;
@@ -26,7 +25,6 @@ impl Default for ReaperUi {
 impl UiService for ReaperUi {
     async fn get_user_inputs(
         &self,
-        _cx: &Context,
         title: String,
         prompts: Vec<String>,
         defaults: Vec<String>,
@@ -82,7 +80,6 @@ impl UiService for ReaperUi {
 
     async fn browse_for_file(
         &self,
-        _cx: &Context,
         _title: String,
         _initial_dir: Option<PathBuf>,
         _filter: Option<String>,
@@ -94,7 +91,6 @@ impl UiService for ReaperUi {
 
     async fn browse_for_save_file(
         &self,
-        _cx: &Context,
         _title: String,
         _initial_dir: Option<PathBuf>,
         _default_name: String,
@@ -107,7 +103,6 @@ impl UiService for ReaperUi {
 
     async fn browse_for_directory(
         &self,
-        _cx: &Context,
         _title: String,
         _initial_dir: Option<PathBuf>,
     ) -> Option<PathBuf> {
@@ -116,7 +111,7 @@ impl UiService for ReaperUi {
         None
     }
 
-    async fn set_prevent_ui_refresh(&self, _cx: &Context, prevent: bool) {
+    async fn set_prevent_ui_refresh(&self, prevent: bool) {
         main_thread::run(move || {
             let low = Reaper::get().medium_reaper().low();
             low.PreventUIRefresh(if prevent { 1 } else { 0 });

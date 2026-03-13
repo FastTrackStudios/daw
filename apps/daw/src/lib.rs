@@ -11,7 +11,7 @@ use std::process::{Command, Stdio};
 use daw_control::Daw;
 use daw_proto::FxType;
 use eyre::{Result, bail};
-use roam_session::HandshakeConfig;
+use roam::ErasedCaller;
 use serde_json::json;
 
 // ============================================================================
@@ -175,27 +175,6 @@ pub fn teardown_owned(pid: u32, socket: &PathBuf) {
 // Connection
 // ============================================================================
 
-struct DawConnector {
-    path: PathBuf,
-}
-
-impl roam_stream::Connector for DawConnector {
-    type Transport = tokio::net::UnixStream;
-
-    async fn connect(&self) -> std::io::Result<Self::Transport> {
-        tokio::net::UnixStream::connect(&self.path).await
-    }
-}
-
-fn handshake_config() -> HandshakeConfig {
-    HandshakeConfig {
-        max_payload_size: 1024 * 1024,
-        initial_channel_credit: 16 * 1024 * 1024,
-        max_concurrent_requests: 64,
-        ..Default::default()
-    }
-}
-
 pub async fn connect(socket: Option<PathBuf>) -> Result<Daw> {
     let path = match socket {
         Some(p) => p,
@@ -205,19 +184,21 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<Daw> {
 
     eprintln!("Connecting to {}", path.display());
 
-    let connector = DawConnector { path: path.clone() };
-    let config = handshake_config();
-    let client = roam_stream::connect(connector, config, roam_session::NoDispatcher);
-
-    let handle = tokio::time::timeout(
+    let stream = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        client.handle(),
+        tokio::net::UnixStream::connect(&path),
     )
     .await
     .map_err(|_| eyre::eyre!("Timed out connecting to {}", path.display()))?
     .map_err(|e| eyre::eyre!("Failed to connect to {}: {}", path.display(), e))?;
 
-    Ok(Daw::new(handle))
+    let link = roam_stream::StreamLink::unix(stream);
+    let (caller, _session) = roam::initiator(link)
+        .establish::<roam::DriverCaller>(())
+        .await
+        .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
+
+    Ok(Daw::new(ErasedCaller::new(caller)))
 }
 
 // ============================================================================

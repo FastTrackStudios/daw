@@ -7,7 +7,6 @@ use daw_proto::midi::{
 };
 use daw_proto::track::TrackRef;
 use daw_proto::{ItemRef, ProjectContext, TakeRef};
-use roam::Context;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -159,7 +158,7 @@ impl StandaloneMidi {
 }
 
 impl MidiService for StandaloneMidi {
-    async fn get_notes(&self, _cx: &Context, location: MidiTakeLocation) -> Vec<MidiNote> {
+    async fn get_notes(&self, location: MidiTakeLocation) -> Vec<MidiNote> {
         let take_guid = Self::get_take_guid(&location);
         let takes = self.takes.read().await;
         takes
@@ -171,7 +170,6 @@ impl MidiService for StandaloneMidi {
 
     async fn get_notes_in_range(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         range: PpqRange,
     ) -> Vec<MidiNote> {
@@ -190,7 +188,7 @@ impl MidiService for StandaloneMidi {
             .unwrap_or_default()
     }
 
-    async fn get_selected_notes(&self, _cx: &Context, location: MidiTakeLocation) -> Vec<MidiNote> {
+    async fn get_selected_notes(&self, location: MidiTakeLocation) -> Vec<MidiNote> {
         let take_guid = Self::get_take_guid(&location);
         let takes = self.takes.read().await;
         takes
@@ -206,7 +204,7 @@ impl MidiService for StandaloneMidi {
             .unwrap_or_default()
     }
 
-    async fn note_count(&self, _cx: &Context, location: MidiTakeLocation) -> u32 {
+    async fn note_count(&self, location: MidiTakeLocation) -> u32 {
         let take_guid = Self::get_take_guid(&location);
         let takes = self.takes.read().await;
         takes
@@ -218,7 +216,6 @@ impl MidiService for StandaloneMidi {
 
     async fn add_note(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         note: MidiNoteCreate,
     ) -> u32 {
@@ -241,7 +238,6 @@ impl MidiService for StandaloneMidi {
 
     async fn add_notes(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         notes: Vec<MidiNoteCreate>,
     ) -> Vec<u32> {
@@ -266,7 +262,7 @@ impl MidiService for StandaloneMidi {
         indices
     }
 
-    async fn delete_note(&self, _cx: &Context, location: MidiTakeLocation, index: u32) {
+    async fn delete_note(&self, location: MidiTakeLocation, index: u32) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
@@ -278,7 +274,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn delete_notes(&self, _cx: &Context, location: MidiTakeLocation, indices: Vec<u32>) {
+    async fn delete_notes(&self, location: MidiTakeLocation, indices: Vec<u32>) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
@@ -290,7 +286,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn delete_selected_notes(&self, _cx: &Context, location: MidiTakeLocation) {
+    async fn delete_selected_notes(&self, location: MidiTakeLocation) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
@@ -304,7 +300,6 @@ impl MidiService for StandaloneMidi {
 
     async fn set_note_pitch(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         index: u32,
         pitch: u8,
@@ -320,7 +315,6 @@ impl MidiService for StandaloneMidi {
 
     async fn set_note_velocity(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         index: u32,
         velocity: u8,
@@ -336,7 +330,6 @@ impl MidiService for StandaloneMidi {
 
     async fn set_note_position(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         index: u32,
         start_ppq: f64,
@@ -352,7 +345,6 @@ impl MidiService for StandaloneMidi {
 
     async fn set_note_length(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         index: u32,
         length_ppq: f64,
@@ -368,7 +360,6 @@ impl MidiService for StandaloneMidi {
 
     async fn set_note_channel(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         index: u32,
         channel: u8,
@@ -384,7 +375,6 @@ impl MidiService for StandaloneMidi {
 
     async fn set_note_selected(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         index: u32,
         selected: bool,
@@ -400,7 +390,6 @@ impl MidiService for StandaloneMidi {
 
     async fn set_note_muted(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         index: u32,
         muted: bool,
@@ -414,7 +403,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn select_all_notes(&self, _cx: &Context, location: MidiTakeLocation, selected: bool) {
+    async fn select_all_notes(&self, location: MidiTakeLocation, selected: bool) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
@@ -426,7 +415,6 @@ impl MidiService for StandaloneMidi {
 
     async fn transpose_notes(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         indices: Vec<u32>,
         semitones: i8,
@@ -447,7 +435,6 @@ impl MidiService for StandaloneMidi {
 
     async fn quantize_notes(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         params: QuantizeParams,
     ) {
@@ -469,7 +456,6 @@ impl MidiService for StandaloneMidi {
 
     async fn humanize_notes(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         params: HumanizeParams,
     ) {
@@ -494,7 +480,6 @@ impl MidiService for StandaloneMidi {
 
     async fn get_ccs(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         controller: Option<u8>,
     ) -> Vec<MidiCC> {
@@ -513,7 +498,7 @@ impl MidiService for StandaloneMidi {
             .unwrap_or_default()
     }
 
-    async fn add_cc(&self, _cx: &Context, location: MidiTakeLocation, cc: MidiCCCreate) -> u32 {
+    async fn add_cc(&self, location: MidiTakeLocation, cc: MidiCCCreate) -> u32 {
         let take_guid = self.get_or_create_take(&location).await;
         let mut takes = self.takes.write().await;
         let take = takes.iter_mut().find(|t| t.take_guid == take_guid).unwrap();
@@ -529,7 +514,7 @@ impl MidiService for StandaloneMidi {
         index
     }
 
-    async fn delete_cc(&self, _cx: &Context, location: MidiTakeLocation, index: u32) {
+    async fn delete_cc(&self, location: MidiTakeLocation, index: u32) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
@@ -541,7 +526,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn set_cc_value(&self, _cx: &Context, location: MidiTakeLocation, index: u32, value: u8) {
+    async fn set_cc_value(&self, location: MidiTakeLocation, index: u32, value: u8) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
@@ -553,7 +538,6 @@ impl MidiService for StandaloneMidi {
 
     async fn get_pitch_bends(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
     ) -> Vec<MidiPitchBend> {
         let take_guid = Self::get_take_guid(&location);
@@ -567,7 +551,6 @@ impl MidiService for StandaloneMidi {
 
     async fn add_pitch_bend(
         &self,
-        _cx: &Context,
         location: MidiTakeLocation,
         pb: MidiPitchBendCreate,
     ) -> u32 {
@@ -587,19 +570,17 @@ impl MidiService for StandaloneMidi {
 
     async fn get_program_changes(
         &self,
-        _cx: &Context,
         _location: MidiTakeLocation,
     ) -> Vec<MidiProgramChange> {
         vec![]
     }
 
-    async fn get_sysex(&self, _cx: &Context, _location: MidiTakeLocation) -> Vec<MidiSysEx> {
+    async fn get_sysex(&self, _location: MidiTakeLocation) -> Vec<MidiSysEx> {
         vec![]
     }
 
     async fn create_midi_item(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         _start_seconds: f64,

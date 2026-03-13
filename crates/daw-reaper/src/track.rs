@@ -7,7 +7,6 @@
 use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackRef, TrackService};
 use reaper_high::{GroupingBehavior, Reaper};
 use reaper_medium::GangBehavior;
-use roam::Context;
 
 use crate::main_thread;
 use crate::project_context::find_project_by_guid;
@@ -225,7 +224,7 @@ impl TrackService for ReaperTrack {
     // Query Methods
     // =========================================================================
 
-    async fn get_tracks(&self, _cx: &Context, project: ProjectContext) -> Vec<Track> {
+    async fn get_tracks(&self, project: ProjectContext) -> Vec<Track> {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let mut tracks: Vec<Track> = proj.tracks().map(|t| build_track_info(&t)).collect();
@@ -239,7 +238,6 @@ impl TrackService for ReaperTrack {
 
     async fn get_track(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
     ) -> Option<Track> {
@@ -252,7 +250,7 @@ impl TrackService for ReaperTrack {
         .flatten()
     }
 
-    async fn track_count(&self, _cx: &Context, project: ProjectContext) -> u32 {
+    async fn track_count(&self, project: ProjectContext) -> u32 {
         main_thread::query(move || {
             resolve_project(&project)
                 .map(|p| p.track_count())
@@ -262,7 +260,7 @@ impl TrackService for ReaperTrack {
         .unwrap_or(0)
     }
 
-    async fn get_selected_tracks(&self, _cx: &Context, project: ProjectContext) -> Vec<Track> {
+    async fn get_selected_tracks(&self, project: ProjectContext) -> Vec<Track> {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             Some(
@@ -277,7 +275,7 @@ impl TrackService for ReaperTrack {
         .unwrap_or_default()
     }
 
-    async fn get_master_track(&self, _cx: &Context, project: ProjectContext) -> Option<Track> {
+    async fn get_master_track(&self, project: ProjectContext) -> Option<Track> {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let master = proj.master_track().ok()?;
@@ -293,7 +291,6 @@ impl TrackService for ReaperTrack {
 
     async fn set_muted(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         muted: bool,
@@ -315,7 +312,6 @@ impl TrackService for ReaperTrack {
 
     async fn set_soloed(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         soloed: bool,
@@ -335,7 +331,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn set_solo_exclusive(&self, _cx: &Context, project: ProjectContext, track: TrackRef) {
+    async fn set_solo_exclusive(&self, project: ProjectContext, track: TrackRef) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -352,7 +348,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn clear_all_solo(&self, _cx: &Context, project: ProjectContext) {
+    async fn clear_all_solo(&self, project: ProjectContext) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -367,7 +363,6 @@ impl TrackService for ReaperTrack {
 
     async fn set_armed(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         armed: bool,
@@ -397,7 +392,6 @@ impl TrackService for ReaperTrack {
 
     async fn set_input_monitoring(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         mode: InputMonitoringMode,
@@ -426,7 +420,6 @@ impl TrackService for ReaperTrack {
 
     async fn set_record_input(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         input: RecordInput,
@@ -459,7 +452,6 @@ impl TrackService for ReaperTrack {
 
     async fn set_volume(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         volume: f64,
@@ -476,7 +468,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn set_pan(&self, _cx: &Context, project: ProjectContext, track: TrackRef, pan: f64) {
+    async fn set_pan(&self, project: ProjectContext, track: TrackRef, pan: f64) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -495,7 +487,6 @@ impl TrackService for ReaperTrack {
 
     async fn set_selected(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         selected: bool,
@@ -515,7 +506,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn select_exclusive(&self, _cx: &Context, project: ProjectContext, track: TrackRef) {
+    async fn select_exclusive(&self, project: ProjectContext, track: TrackRef) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -527,7 +518,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn clear_selection(&self, _cx: &Context, project: ProjectContext) {
+    async fn clear_selection(&self, project: ProjectContext) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -544,7 +535,7 @@ impl TrackService for ReaperTrack {
     // Batch Operations
     // =========================================================================
 
-    async fn mute_all(&self, _cx: &Context, project: ProjectContext) {
+    async fn mute_all(&self, project: ProjectContext) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -557,7 +548,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn unmute_all(&self, _cx: &Context, project: ProjectContext) {
+    async fn unmute_all(&self, project: ProjectContext) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -576,7 +567,6 @@ impl TrackService for ReaperTrack {
 
     async fn add_track(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         name: String,
         at_index: Option<u32>,
@@ -593,7 +583,7 @@ impl TrackService for ReaperTrack {
         .unwrap_or_default()
     }
 
-    async fn remove_track(&self, _cx: &Context, project: ProjectContext, track: TrackRef) {
+    async fn remove_track(&self, project: ProjectContext, track: TrackRef) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -607,7 +597,6 @@ impl TrackService for ReaperTrack {
 
     async fn rename_track(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         name: String,
@@ -625,7 +614,6 @@ impl TrackService for ReaperTrack {
 
     async fn set_track_color(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         color: u32,
@@ -650,7 +638,6 @@ impl TrackService for ReaperTrack {
 
     async fn set_visible_in_tcp(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         visible: bool,
@@ -668,7 +655,6 @@ impl TrackService for ReaperTrack {
 
     async fn set_visible_in_mixer(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         visible: bool,
@@ -686,7 +672,6 @@ impl TrackService for ReaperTrack {
 
     async fn set_track_chunk(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         chunk: String,
@@ -704,7 +689,6 @@ impl TrackService for ReaperTrack {
 
     async fn get_track_chunk(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
     ) -> Result<String, String> {
@@ -725,7 +709,6 @@ impl TrackService for ReaperTrack {
 
     async fn set_folder_depth(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         track: TrackRef,
         depth: i32,
@@ -748,7 +731,6 @@ impl TrackService for ReaperTrack {
 
     async fn remove_all_tracks(
         &self,
-        _cx: &Context,
         project: ProjectContext,
     ) -> Result<(), String> {
         main_thread::query(move || {

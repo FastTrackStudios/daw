@@ -8,7 +8,7 @@ use daw_proto::{
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
-use roam::{Context, Tx};
+use roam::Tx;
 use uuid::Uuid;
 
 /// Standalone FX service implementation.
@@ -24,13 +24,12 @@ impl StandaloneFx {
 }
 
 impl FxService for StandaloneFx {
-    async fn list_installed_fx(&self, _cx: &Context) -> Vec<InstalledFx> {
+    async fn list_installed_fx(&self) -> Vec<InstalledFx> {
         vec![]
     }
 
     async fn get_fx_list(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
     ) -> Vec<Fx> {
@@ -39,7 +38,6 @@ impl FxService for StandaloneFx {
 
     async fn get_fx(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Option<Fx> {
@@ -48,7 +46,6 @@ impl FxService for StandaloneFx {
 
     async fn fx_count(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
     ) -> u32 {
@@ -57,7 +54,6 @@ impl FxService for StandaloneFx {
 
     async fn set_fx_enabled(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
         _enabled: bool,
@@ -67,7 +63,6 @@ impl FxService for StandaloneFx {
 
     async fn set_fx_offline(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
         _offline: bool,
@@ -77,7 +72,6 @@ impl FxService for StandaloneFx {
 
     async fn add_fx(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
         _name: String,
@@ -87,7 +81,6 @@ impl FxService for StandaloneFx {
 
     async fn add_fx_at(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _request: AddFxAtRequest,
     ) -> Option<String> {
@@ -96,7 +89,6 @@ impl FxService for StandaloneFx {
 
     async fn remove_fx(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Result<(), String> {
@@ -105,7 +97,6 @@ impl FxService for StandaloneFx {
 
     async fn move_fx(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
         _new_index: u32,
@@ -115,7 +106,6 @@ impl FxService for StandaloneFx {
 
     async fn get_parameters(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Vec<FxParameter> {
@@ -124,7 +114,6 @@ impl FxService for StandaloneFx {
 
     async fn get_parameter(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
         _index: u32,
@@ -134,7 +123,6 @@ impl FxService for StandaloneFx {
 
     async fn set_parameter(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _request: SetParameterRequest,
     ) -> Result<(), String> {
@@ -143,7 +131,6 @@ impl FxService for StandaloneFx {
 
     async fn get_parameter_by_name(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
         _name: String,
@@ -153,7 +140,6 @@ impl FxService for StandaloneFx {
 
     async fn set_parameter_by_name(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _request: SetParameterByNameRequest,
     ) -> Result<(), String> {
@@ -162,7 +148,6 @@ impl FxService for StandaloneFx {
 
     async fn get_preset_index(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Option<FxPresetIndex> {
@@ -171,7 +156,6 @@ impl FxService for StandaloneFx {
 
     async fn next_preset(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Result<(), String> {
@@ -180,7 +164,6 @@ impl FxService for StandaloneFx {
 
     async fn prev_preset(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Result<(), String> {
@@ -189,7 +172,6 @@ impl FxService for StandaloneFx {
 
     async fn set_preset(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
         _index: u32,
@@ -199,7 +181,6 @@ impl FxService for StandaloneFx {
 
     async fn open_fx_ui(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Result<(), String> {
@@ -208,7 +189,6 @@ impl FxService for StandaloneFx {
 
     async fn close_fx_ui(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Result<(), String> {
@@ -217,7 +197,6 @@ impl FxService for StandaloneFx {
 
     async fn toggle_fx_ui(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Result<(), String> {
@@ -226,7 +205,6 @@ impl FxService for StandaloneFx {
 
     async fn get_named_config(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
         _key: String,
@@ -236,7 +214,6 @@ impl FxService for StandaloneFx {
 
     async fn set_named_config(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _request: SetNamedConfigRequest,
     ) -> Result<(), String> {
@@ -245,7 +222,6 @@ impl FxService for StandaloneFx {
 
     async fn get_fx_latency(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Option<FxLatency> {
@@ -254,7 +230,6 @@ impl FxService for StandaloneFx {
 
     async fn get_param_modulation(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
         _param_index: u32,
@@ -264,7 +239,6 @@ impl FxService for StandaloneFx {
 
     async fn get_fx_state_chunk(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Option<Vec<u8>> {
@@ -273,7 +247,6 @@ impl FxService for StandaloneFx {
 
     async fn set_fx_state_chunk(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
         _chunk: Vec<u8>,
@@ -283,7 +256,6 @@ impl FxService for StandaloneFx {
 
     async fn get_fx_state_chunk_encoded(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Option<String> {
@@ -292,7 +264,6 @@ impl FxService for StandaloneFx {
 
     async fn set_fx_state_chunk_encoded(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
         _encoded: String,
@@ -302,7 +273,6 @@ impl FxService for StandaloneFx {
 
     async fn get_fx_chain_state(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
     ) -> Vec<FxStateChunk> {
@@ -311,7 +281,6 @@ impl FxService for StandaloneFx {
 
     async fn set_fx_chain_state(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
         _chunks: Vec<FxStateChunk>,
@@ -325,7 +294,6 @@ impl FxService for StandaloneFx {
 
     async fn get_fx_tree(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
     ) -> FxTree {
@@ -334,7 +302,6 @@ impl FxService for StandaloneFx {
 
     async fn create_container(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _request: CreateContainerRequest,
     ) -> Option<FxNodeId> {
@@ -343,7 +310,6 @@ impl FxService for StandaloneFx {
 
     async fn move_to_container(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _request: MoveToContainerRequest,
     ) -> Result<(), String> {
@@ -352,7 +318,6 @@ impl FxService for StandaloneFx {
 
     async fn move_from_container(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _request: MoveFromContainerRequest,
     ) -> Result<(), String> {
@@ -361,7 +326,6 @@ impl FxService for StandaloneFx {
 
     async fn set_routing_mode(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
         _node_id: FxNodeId,
@@ -372,7 +336,6 @@ impl FxService for StandaloneFx {
 
     async fn get_container_channel_config(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
         _container_id: FxNodeId,
@@ -382,7 +345,6 @@ impl FxService for StandaloneFx {
 
     async fn set_container_channel_config(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _request: SetContainerChannelConfigRequest,
     ) -> Result<(), String> {
@@ -391,7 +353,6 @@ impl FxService for StandaloneFx {
 
     async fn get_fx_channel_config(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Option<FxChannelConfig> {
@@ -400,7 +361,6 @@ impl FxService for StandaloneFx {
 
     async fn set_fx_channel_config(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
         _config: FxChannelConfig,
@@ -410,7 +370,6 @@ impl FxService for StandaloneFx {
 
     async fn silence_fx_output(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
     ) -> Result<FxPinMappings, String> {
@@ -419,7 +378,6 @@ impl FxService for StandaloneFx {
 
     async fn restore_fx_output(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _target: FxTarget,
         _saved: FxPinMappings,
@@ -429,7 +387,6 @@ impl FxService for StandaloneFx {
 
     async fn enclose_in_container(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _request: EncloseInContainerRequest,
     ) -> Option<FxNodeId> {
@@ -438,7 +395,6 @@ impl FxService for StandaloneFx {
 
     async fn explode_container(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
         _container_id: FxNodeId,
@@ -448,7 +404,6 @@ impl FxService for StandaloneFx {
 
     async fn rename_container(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
         _container_id: FxNodeId,
@@ -463,7 +418,6 @@ impl FxService for StandaloneFx {
 
     async fn get_fx_chain_chunk_text(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
     ) -> Option<String> {
@@ -472,7 +426,6 @@ impl FxService for StandaloneFx {
 
     async fn insert_fx_chain_chunk(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
         _chunk_text: String,
@@ -486,7 +439,6 @@ impl FxService for StandaloneFx {
 
     async fn subscribe_fx_events(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _context: FxChainContext,
         _events: Tx<FxEvent>,

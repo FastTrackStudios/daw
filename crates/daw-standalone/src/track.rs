@@ -1,7 +1,6 @@
 //! Standalone track implementation
 
 use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackRef, TrackService};
-use roam::Context;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -107,14 +106,13 @@ impl StandaloneTrack {
 }
 
 impl TrackService for StandaloneTrack {
-    async fn get_tracks(&self, _cx: &Context, _project: ProjectContext) -> Vec<Track> {
+    async fn get_tracks(&self, _project: ProjectContext) -> Vec<Track> {
         let tracks = self.tracks.read().await;
         tracks.iter().map(|t| t.to_track()).collect()
     }
 
     async fn get_track(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
     ) -> Option<Track> {
@@ -132,11 +130,11 @@ impl TrackService for StandaloneTrack {
         }
     }
 
-    async fn track_count(&self, _cx: &Context, _project: ProjectContext) -> u32 {
+    async fn track_count(&self, _project: ProjectContext) -> u32 {
         self.tracks.read().await.len() as u32
     }
 
-    async fn get_selected_tracks(&self, _cx: &Context, _project: ProjectContext) -> Vec<Track> {
+    async fn get_selected_tracks(&self, _project: ProjectContext) -> Vec<Track> {
         let tracks = self.tracks.read().await;
         tracks
             .iter()
@@ -145,14 +143,13 @@ impl TrackService for StandaloneTrack {
             .collect()
     }
 
-    async fn get_master_track(&self, _cx: &Context, _project: ProjectContext) -> Option<Track> {
+    async fn get_master_track(&self, _project: ProjectContext) -> Option<Track> {
         let tracks = self.tracks.read().await;
         tracks.first().map(|t| t.to_track())
     }
 
     async fn set_muted(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         muted: bool,
@@ -165,7 +162,6 @@ impl TrackService for StandaloneTrack {
 
     async fn set_soloed(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         soloed: bool,
@@ -176,7 +172,7 @@ impl TrackService for StandaloneTrack {
         }
     }
 
-    async fn set_solo_exclusive(&self, _cx: &Context, _project: ProjectContext, track: TrackRef) {
+    async fn set_solo_exclusive(&self, _project: ProjectContext, track: TrackRef) {
         let mut tracks = self.tracks.write().await;
         // Unsolo all first
         for t in tracks.iter_mut() {
@@ -188,7 +184,7 @@ impl TrackService for StandaloneTrack {
         }
     }
 
-    async fn clear_all_solo(&self, _cx: &Context, _project: ProjectContext) {
+    async fn clear_all_solo(&self, _project: ProjectContext) {
         let mut tracks = self.tracks.write().await;
         for t in tracks.iter_mut() {
             t.soloed = false;
@@ -197,7 +193,6 @@ impl TrackService for StandaloneTrack {
 
     async fn set_armed(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         armed: bool,
@@ -210,7 +205,6 @@ impl TrackService for StandaloneTrack {
 
     async fn set_input_monitoring(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _track: TrackRef,
         _mode: InputMonitoringMode,
@@ -220,7 +214,6 @@ impl TrackService for StandaloneTrack {
 
     async fn set_record_input(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _track: TrackRef,
         _input: RecordInput,
@@ -230,7 +223,6 @@ impl TrackService for StandaloneTrack {
 
     async fn set_volume(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         volume: f64,
@@ -241,7 +233,7 @@ impl TrackService for StandaloneTrack {
         }
     }
 
-    async fn set_pan(&self, _cx: &Context, _project: ProjectContext, track: TrackRef, pan: f64) {
+    async fn set_pan(&self, _project: ProjectContext, track: TrackRef, pan: f64) {
         let mut tracks = self.tracks.write().await;
         if let Some(t) = Self::find_track(&mut tracks, &track) {
             t.pan = pan.clamp(-1.0, 1.0);
@@ -250,7 +242,6 @@ impl TrackService for StandaloneTrack {
 
     async fn set_selected(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         selected: bool,
@@ -261,7 +252,7 @@ impl TrackService for StandaloneTrack {
         }
     }
 
-    async fn select_exclusive(&self, _cx: &Context, _project: ProjectContext, track: TrackRef) {
+    async fn select_exclusive(&self, _project: ProjectContext, track: TrackRef) {
         let mut tracks = self.tracks.write().await;
         for t in tracks.iter_mut() {
             t.selected = false;
@@ -271,21 +262,21 @@ impl TrackService for StandaloneTrack {
         }
     }
 
-    async fn clear_selection(&self, _cx: &Context, _project: ProjectContext) {
+    async fn clear_selection(&self, _project: ProjectContext) {
         let mut tracks = self.tracks.write().await;
         for t in tracks.iter_mut() {
             t.selected = false;
         }
     }
 
-    async fn mute_all(&self, _cx: &Context, _project: ProjectContext) {
+    async fn mute_all(&self, _project: ProjectContext) {
         let mut tracks = self.tracks.write().await;
         for t in tracks.iter_mut() {
             t.muted = true;
         }
     }
 
-    async fn unmute_all(&self, _cx: &Context, _project: ProjectContext) {
+    async fn unmute_all(&self, _project: ProjectContext) {
         let mut tracks = self.tracks.write().await;
         for t in tracks.iter_mut() {
             t.muted = false;
@@ -294,7 +285,6 @@ impl TrackService for StandaloneTrack {
 
     async fn add_track(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         name: String,
         at_index: Option<u32>,
@@ -310,7 +300,7 @@ impl TrackService for StandaloneTrack {
         guid
     }
 
-    async fn remove_track(&self, _cx: &Context, _project: ProjectContext, track: TrackRef) {
+    async fn remove_track(&self, _project: ProjectContext, track: TrackRef) {
         let mut tracks = self.tracks.write().await;
         let pos = match &track {
             TrackRef::Guid(guid) => tracks.iter().position(|t| &t.guid == guid),
@@ -328,7 +318,6 @@ impl TrackService for StandaloneTrack {
 
     async fn rename_track(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         name: String,
@@ -341,7 +330,6 @@ impl TrackService for StandaloneTrack {
 
     async fn set_track_color(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         color: u32,
@@ -354,7 +342,6 @@ impl TrackService for StandaloneTrack {
 
     async fn set_visible_in_tcp(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         visible: bool,
@@ -367,7 +354,6 @@ impl TrackService for StandaloneTrack {
 
     async fn set_visible_in_mixer(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
         visible: bool,
@@ -380,7 +366,6 @@ impl TrackService for StandaloneTrack {
 
     async fn set_track_chunk(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _track: TrackRef,
         _chunk: String,
@@ -391,7 +376,6 @@ impl TrackService for StandaloneTrack {
 
     async fn get_track_chunk(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _track: TrackRef,
     ) -> Result<String, String> {
@@ -400,7 +384,6 @@ impl TrackService for StandaloneTrack {
 
     async fn set_folder_depth(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _track: TrackRef,
         _depth: i32,
@@ -410,7 +393,6 @@ impl TrackService for StandaloneTrack {
 
     async fn remove_all_tracks(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
     ) -> Result<(), String> {
         let mut tracks = self.tracks.write().await;

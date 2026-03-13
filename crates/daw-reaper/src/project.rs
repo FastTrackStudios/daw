@@ -6,7 +6,7 @@
 use daw_proto::{ProjectEvent, ProjectInfo, ProjectService};
 use reaper_high::{Project, Reaper};
 use reaper_medium::{CommandId, ProjectContext, ProjectPart, ProjectRef, UndoScope};
-use roam::{Context, Tx};
+use roam::Tx;
 use std::time::Duration;
 use tracing::{debug, info};
 
@@ -95,7 +95,7 @@ fn convert_undo_scope(scope: &daw_proto::UndoScope) -> UndoScope {
 }
 
 impl ProjectService for ReaperProject {
-    async fn get_current(&self, _cx: &Context) -> Option<ProjectInfo> {
+    async fn get_current(&self) -> Option<ProjectInfo> {
         debug!("ReaperProject: get_current");
 
         main_thread::query(|| {
@@ -107,7 +107,7 @@ impl ProjectService for ReaperProject {
         .flatten()
     }
 
-    async fn get(&self, _cx: &Context, project_id: String) -> Option<ProjectInfo> {
+    async fn get(&self, project_id: String) -> Option<ProjectInfo> {
         debug!("ReaperProject: get({})", project_id);
 
         main_thread::query(move || {
@@ -131,7 +131,7 @@ impl ProjectService for ReaperProject {
         .flatten()
     }
 
-    async fn list(&self, _cx: &Context) -> Vec<ProjectInfo> {
+    async fn list(&self) -> Vec<ProjectInfo> {
         debug!("ReaperProject: list");
 
         main_thread::query(|| {
@@ -159,7 +159,7 @@ impl ProjectService for ReaperProject {
         .unwrap_or_default()
     }
 
-    async fn select(&self, _cx: &Context, project_id: String) -> bool {
+    async fn select(&self, project_id: String) -> bool {
         info!("ReaperProject: select({})", project_id);
 
         main_thread::query(move || {
@@ -277,7 +277,7 @@ impl ProjectService for ReaperProject {
         .unwrap_or(false)
     }
 
-    async fn open(&self, _cx: &Context, path: String) -> Option<ProjectInfo> {
+    async fn open(&self, path: String) -> Option<ProjectInfo> {
         info!("ReaperProject: open({})", path);
 
         main_thread::query(move || {
@@ -326,7 +326,7 @@ impl ProjectService for ReaperProject {
         .flatten()
     }
 
-    async fn create(&self, _cx: &Context) -> Option<ProjectInfo> {
+    async fn create(&self) -> Option<ProjectInfo> {
         info!("ReaperProject: create");
 
         main_thread::query(|| {
@@ -373,7 +373,7 @@ impl ProjectService for ReaperProject {
         .flatten()
     }
 
-    async fn close(&self, _cx: &Context, project_id: String) -> bool {
+    async fn close(&self, project_id: String) -> bool {
         info!("ReaperProject: close({})", project_id);
 
         main_thread::query(move || {
@@ -410,7 +410,7 @@ impl ProjectService for ReaperProject {
         .unwrap_or(false)
     }
 
-    async fn get_by_slot(&self, _cx: &Context, slot: u32) -> Option<ProjectInfo> {
+    async fn get_by_slot(&self, slot: u32) -> Option<ProjectInfo> {
         debug!("ReaperProject: get_by_slot({})", slot);
 
         main_thread::query(move || {
@@ -427,7 +427,6 @@ impl ProjectService for ReaperProject {
 
     async fn begin_undo_block(
         &self,
-        _cx: &Context,
         project: daw_proto::ProjectContext,
         label: String,
     ) {
@@ -445,7 +444,6 @@ impl ProjectService for ReaperProject {
 
     async fn end_undo_block(
         &self,
-        _cx: &Context,
         project: daw_proto::ProjectContext,
         label: String,
         scope: Option<daw_proto::UndoScope>,
@@ -477,7 +475,7 @@ impl ProjectService for ReaperProject {
         });
     }
 
-    async fn undo(&self, _cx: &Context, project: daw_proto::ProjectContext) -> bool {
+    async fn undo(&self, project: daw_proto::ProjectContext) -> bool {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             Some(proj.undo())
@@ -487,7 +485,7 @@ impl ProjectService for ReaperProject {
         .unwrap_or(false)
     }
 
-    async fn redo(&self, _cx: &Context, project: daw_proto::ProjectContext) -> bool {
+    async fn redo(&self, project: daw_proto::ProjectContext) -> bool {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             Some(proj.redo())
@@ -499,7 +497,6 @@ impl ProjectService for ReaperProject {
 
     async fn last_undo_label(
         &self,
-        _cx: &Context,
         project: daw_proto::ProjectContext,
     ) -> Option<String> {
         main_thread::query(move || {
@@ -513,7 +510,6 @@ impl ProjectService for ReaperProject {
 
     async fn last_redo_label(
         &self,
-        _cx: &Context,
         project: daw_proto::ProjectContext,
     ) -> Option<String> {
         main_thread::query(move || {
@@ -529,11 +525,11 @@ impl ProjectService for ReaperProject {
     // Streaming
     // =========================================================================
 
-    async fn subscribe(&self, _cx: &Context, tx: Tx<ProjectEvent>) {
+    async fn subscribe(&self, tx: Tx<ProjectEvent>) {
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
         let this = self.clone();
-        peeps::spawn_tracked!("reaper-project-subscribe", async move {
+        moire::task::spawn(async move {
             this.subscribe_impl(tx).await;
         });
     }
@@ -579,7 +575,7 @@ impl ReaperProject {
         // Send initial state: all projects
         let projects = self.get_project_list().await;
         if tx
-            .send(&ProjectEvent::ProjectsChanged(projects.clone()))
+            .send(ProjectEvent::ProjectsChanged(projects.clone()))
             .await
             .is_err()
         {
@@ -590,7 +586,7 @@ impl ReaperProject {
         // Send current project
         let current_guid = self.get_current_guid().await;
         if tx
-            .send(&ProjectEvent::CurrentChanged(current_guid.clone()))
+            .send(ProjectEvent::CurrentChanged(current_guid.clone()))
             .await
             .is_err()
         {
@@ -609,7 +605,7 @@ impl ReaperProject {
             let current_projects = self.get_project_list().await;
             if current_projects != last_projects {
                 if tx
-                    .send(&ProjectEvent::ProjectsChanged(current_projects.clone()))
+                    .send(ProjectEvent::ProjectsChanged(current_projects.clone()))
                     .await
                     .is_err()
                 {
@@ -623,7 +619,7 @@ impl ReaperProject {
             let current_guid = self.get_current_guid().await;
             if current_guid != last_guid {
                 if tx
-                    .send(&ProjectEvent::CurrentChanged(current_guid.clone()))
+                    .send(ProjectEvent::CurrentChanged(current_guid.clone()))
                     .await
                     .is_err()
                 {

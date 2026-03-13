@@ -10,7 +10,7 @@ use daw_proto::{ProjectContext, Region, RegionEvent, RegionService, TimeRange};
 use reaper_medium::{
     MarkerOrRegionPosition, PositionInSeconds, ProjectContext as ReaperProjectContext,
 };
-use roam::{Context, Tx};
+use roam::Tx;
 use std::ffi::CString;
 use std::time::Duration;
 use tracing::{debug, info};
@@ -84,7 +84,7 @@ impl RegionService for ReaperRegion {
     // Query Methods
     // =========================================================================
 
-    async fn get_regions(&self, _cx: &Context, project: ProjectContext) -> Vec<Region> {
+    async fn get_regions(&self, project: ProjectContext) -> Vec<Region> {
         main_thread::query(move || {
             // For non-current projects we still need to resolve the context
             let reaper_ctx = resolve_project_context(&project);
@@ -133,19 +133,18 @@ impl RegionService for ReaperRegion {
         .unwrap_or_default()
     }
 
-    async fn get_region(&self, cx: &Context, project: ProjectContext, id: u32) -> Option<Region> {
-        let regions = self.get_regions(cx, project).await;
+    async fn get_region(&self, project: ProjectContext, id: u32) -> Option<Region> {
+        let regions = self.get_regions(project).await;
         regions.into_iter().find(|r| r.id == Some(id))
     }
 
     async fn get_regions_in_range(
         &self,
-        cx: &Context,
         project: ProjectContext,
         start: f64,
         end: f64,
     ) -> Vec<Region> {
-        let regions = self.get_regions(cx, project).await;
+        let regions = self.get_regions(project).await;
         regions
             .into_iter()
             .filter(|r| r.intersects_range(start, end))
@@ -154,16 +153,15 @@ impl RegionService for ReaperRegion {
 
     async fn get_region_at(
         &self,
-        cx: &Context,
         project: ProjectContext,
         position: f64,
     ) -> Option<Region> {
-        let regions = self.get_regions(cx, project).await;
+        let regions = self.get_regions(project).await;
         regions.into_iter().find(|r| r.contains_position(position))
     }
 
-    async fn region_count(&self, cx: &Context, project: ProjectContext) -> usize {
-        self.get_regions(cx, project).await.len()
+    async fn region_count(&self, project: ProjectContext) -> usize {
+        self.get_regions(project).await.len()
     }
 
     // =========================================================================
@@ -172,7 +170,6 @@ impl RegionService for ReaperRegion {
 
     async fn add_region(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         start: f64,
         end: f64,
@@ -205,7 +202,7 @@ impl RegionService for ReaperRegion {
         .unwrap_or(0)
     }
 
-    async fn remove_region(&self, _cx: &Context, _project: ProjectContext, id: u32) {
+    async fn remove_region(&self, _project: ProjectContext, id: u32) {
         debug!("ReaperRegion: remove_region {}", id);
         main_thread::run(move || {
             let low = reaper_high::Reaper::get().medium_reaper().low();
@@ -220,7 +217,6 @@ impl RegionService for ReaperRegion {
 
     async fn set_region_bounds(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         id: u32,
         start: f64,
@@ -243,7 +239,7 @@ impl RegionService for ReaperRegion {
         });
     }
 
-    async fn rename_region(&self, _cx: &Context, _project: ProjectContext, id: u32, name: String) {
+    async fn rename_region(&self, _project: ProjectContext, id: u32, name: String) {
         debug!("ReaperRegion: rename_region {} to '{}'", id, name);
         main_thread::run(move || {
             let low = reaper_high::Reaper::get().medium_reaper().low();
@@ -253,7 +249,7 @@ impl RegionService for ReaperRegion {
         });
     }
 
-    async fn set_region_color(&self, _cx: &Context, _project: ProjectContext, id: u32, color: u32) {
+    async fn set_region_color(&self, _project: ProjectContext, id: u32, color: u32) {
         debug!("ReaperRegion: set_region_color {} to {}", id, color);
         main_thread::run(move || {
             let low = reaper_high::Reaper::get().medium_reaper().low();
@@ -276,7 +272,7 @@ impl RegionService for ReaperRegion {
     // Navigation Methods
     // =========================================================================
 
-    async fn goto_region_start(&self, _cx: &Context, _project: ProjectContext, id: u32) {
+    async fn goto_region_start(&self, _project: ProjectContext, id: u32) {
         debug!("ReaperRegion: goto_region_start {}", id);
         main_thread::run(move || {
             let reaper = reaper_high::Reaper::get();
@@ -289,10 +285,10 @@ impl RegionService for ReaperRegion {
         });
     }
 
-    async fn goto_region_end(&self, cx: &Context, project: ProjectContext, id: u32) {
+    async fn goto_region_end(&self, project: ProjectContext, id: u32) {
         debug!("ReaperRegion: goto_region_end {}", id);
         // Get the region's end position and set cursor there
-        if let Some(region) = self.get_region(cx, project, id).await {
+        if let Some(region) = self.get_region(project, id).await {
             let end_pos = region.end_seconds();
             main_thread::run(move || {
                 let reaper = reaper_high::Reaper::get();
@@ -309,20 +305,19 @@ impl RegionService for ReaperRegion {
         }
     }
 
-    async fn subscribe(&self, cx: &Context, project: ProjectContext, tx: Tx<RegionEvent>) {
+    async fn subscribe(&self, project: ProjectContext, tx: Tx<RegionEvent>) {
         info!("ReaperRegion::subscribe() - starting region stream");
 
         // Clone self for the spawned task
         let this = self.clone();
-        let cx = cx.clone();
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        peeps::spawn_tracked!("reaper-region-subscribe", async move {
+        moire::task::spawn(async move {
             // Send initial state
-            let regions = this.get_regions(&cx, project.clone()).await;
+            let regions = this.get_regions(project.clone()).await;
             if tx
-                .send(&RegionEvent::RegionsChanged(regions.clone()))
+                .send(RegionEvent::RegionsChanged(regions.clone()))
                 .await
                 .is_err()
             {
@@ -336,10 +331,10 @@ impl RegionService for ReaperRegion {
             loop {
                 tokio::time::sleep(Duration::from_micros(16667)).await;
 
-                let current_regions = this.get_regions(&cx, project.clone()).await;
+                let current_regions = this.get_regions(project.clone()).await;
                 if current_regions != last_regions {
                     if tx
-                        .send(&RegionEvent::RegionsChanged(current_regions.clone()))
+                        .send(RegionEvent::RegionsChanged(current_regions.clone()))
                         .await
                         .is_err()
                     {

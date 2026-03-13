@@ -1,7 +1,6 @@
 //! Standalone ExtState implementation (in-memory mock)
 
 use daw_proto::{ExtStateService, ProjectContext};
-use roam::Context;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -35,14 +34,13 @@ impl Default for StandaloneExtState {
 }
 
 impl ExtStateService for StandaloneExtState {
-    async fn get_ext_state(&self, _cx: &Context, section: String, key: String) -> Option<String> {
+    async fn get_ext_state(&self, section: String, key: String) -> Option<String> {
         let state = self.global_state.read().unwrap();
         state.get(&(section, key)).cloned()
     }
 
     async fn set_ext_state(
         &self,
-        _cx: &Context,
         section: String,
         key: String,
         value: String,
@@ -52,12 +50,12 @@ impl ExtStateService for StandaloneExtState {
         state.insert((section, key), value);
     }
 
-    async fn delete_ext_state(&self, _cx: &Context, section: String, key: String, _persist: bool) {
+    async fn delete_ext_state(&self, section: String, key: String, _persist: bool) {
         let mut state = self.global_state.write().unwrap();
         state.remove(&(section, key));
     }
 
-    async fn has_ext_state(&self, _cx: &Context, section: String, key: String) -> bool {
+    async fn has_ext_state(&self, section: String, key: String) -> bool {
         let state = self.global_state.read().unwrap();
         state.contains_key(&(section, key))
     }
@@ -66,7 +64,6 @@ impl ExtStateService for StandaloneExtState {
 
     async fn get_project_ext_state(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         section: String,
         key: String,
@@ -81,7 +78,6 @@ impl ExtStateService for StandaloneExtState {
 
     async fn set_project_ext_state(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         section: String,
         key: String,
@@ -97,7 +93,6 @@ impl ExtStateService for StandaloneExtState {
 
     async fn delete_project_ext_state(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         section: String,
         key: String,
@@ -112,7 +107,6 @@ impl ExtStateService for StandaloneExtState {
 
     async fn has_project_ext_state(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         section: String,
         key: String,

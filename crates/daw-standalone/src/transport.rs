@@ -8,7 +8,7 @@ use daw_proto::{
     PlayState, ProjectContext, Transport, TransportService,
     primitives::{Position, PositionInSeconds, Tempo, TimeSignature},
 };
-use roam::{Context, Tx};
+use roam::Tx;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -214,7 +214,7 @@ impl TransportService for StandaloneTransport {
     // Playback Control
     // =========================================================================
 
-    async fn play(&self, _cx: &Context, project: ProjectContext) {
+    async fn play(&self, project: ProjectContext) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::play - could not resolve project");
             return;
@@ -224,7 +224,7 @@ impl TransportService for StandaloneTransport {
             .await;
     }
 
-    async fn pause(&self, _cx: &Context, project: ProjectContext) {
+    async fn pause(&self, project: ProjectContext) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::pause - could not resolve project");
             return;
@@ -234,7 +234,7 @@ impl TransportService for StandaloneTransport {
             .await;
     }
 
-    async fn stop(&self, _cx: &Context, project: ProjectContext) {
+    async fn stop(&self, project: ProjectContext) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::stop - could not resolve project");
             return;
@@ -244,7 +244,7 @@ impl TransportService for StandaloneTransport {
             .await;
     }
 
-    async fn play_pause(&self, _cx: &Context, project: ProjectContext) {
+    async fn play_pause(&self, project: ProjectContext) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::play_pause - could not resolve project");
             return;
@@ -257,7 +257,7 @@ impl TransportService for StandaloneTransport {
         .await;
     }
 
-    async fn play_stop(&self, _cx: &Context, project: ProjectContext) {
+    async fn play_stop(&self, project: ProjectContext) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::play_stop - could not resolve project");
             return;
@@ -270,7 +270,7 @@ impl TransportService for StandaloneTransport {
         .await;
     }
 
-    async fn play_from_last_start_position(&self, _cx: &Context, project: ProjectContext) {
+    async fn play_from_last_start_position(&self, project: ProjectContext) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::play_from_last_start_position - could not resolve project");
             return;
@@ -287,7 +287,7 @@ impl TransportService for StandaloneTransport {
     // Recording Control
     // =========================================================================
 
-    async fn record(&self, _cx: &Context, project: ProjectContext) {
+    async fn record(&self, project: ProjectContext) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::record - could not resolve project");
             return;
@@ -300,7 +300,7 @@ impl TransportService for StandaloneTransport {
         .await;
     }
 
-    async fn stop_recording(&self, _cx: &Context, project: ProjectContext) {
+    async fn stop_recording(&self, project: ProjectContext) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::stop_recording - could not resolve project");
             return;
@@ -310,7 +310,7 @@ impl TransportService for StandaloneTransport {
             .await;
     }
 
-    async fn toggle_recording(&self, _cx: &Context, project: ProjectContext) {
+    async fn toggle_recording(&self, project: ProjectContext) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::toggle_recording - could not resolve project");
             return;
@@ -330,7 +330,7 @@ impl TransportService for StandaloneTransport {
     // Position Control
     // =========================================================================
 
-    async fn set_position(&self, _cx: &Context, project: ProjectContext, seconds: f64) {
+    async fn set_position(&self, project: ProjectContext, seconds: f64) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::set_position - could not resolve project");
             return;
@@ -343,7 +343,7 @@ impl TransportService for StandaloneTransport {
             .await;
     }
 
-    async fn get_position(&self, _cx: &Context, project: ProjectContext) -> f64 {
+    async fn get_position(&self, project: ProjectContext) -> f64 {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::get_position - could not resolve project");
             return 0.0;
@@ -353,7 +353,7 @@ impl TransportService for StandaloneTransport {
             .current_position_seconds()
     }
 
-    async fn goto_start(&self, _cx: &Context, project: ProjectContext) {
+    async fn goto_start(&self, project: ProjectContext) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::goto_start - could not resolve project");
             return;
@@ -362,7 +362,7 @@ impl TransportService for StandaloneTransport {
         self.with_state_mut(&guid, |state| state.seek_to(0.0)).await;
     }
 
-    async fn goto_end(&self, _cx: &Context, project: ProjectContext) {
+    async fn goto_end(&self, project: ProjectContext) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::goto_end - could not resolve project");
             return;
@@ -377,7 +377,7 @@ impl TransportService for StandaloneTransport {
     // State Queries
     // =========================================================================
 
-    async fn get_state(&self, _cx: &Context, project: ProjectContext) -> Transport {
+    async fn get_state(&self, project: ProjectContext) -> Transport {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::get_state - could not resolve project");
             return Transport::new();
@@ -385,7 +385,7 @@ impl TransportService for StandaloneTransport {
         self.get_or_create_state(&guid).await.snapshot()
     }
 
-    async fn get_play_state(&self, _cx: &Context, project: ProjectContext) -> PlayState {
+    async fn get_play_state(&self, project: ProjectContext) -> PlayState {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::get_play_state - could not resolve project");
             return PlayState::Stopped;
@@ -393,7 +393,7 @@ impl TransportService for StandaloneTransport {
         self.get_or_create_state(&guid).await.transport.play_state
     }
 
-    async fn is_playing(&self, _cx: &Context, project: ProjectContext) -> bool {
+    async fn is_playing(&self, project: ProjectContext) -> bool {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::is_playing - could not resolve project");
             return false;
@@ -401,7 +401,7 @@ impl TransportService for StandaloneTransport {
         self.get_or_create_state(&guid).await.transport.is_playing()
     }
 
-    async fn is_recording(&self, _cx: &Context, project: ProjectContext) -> bool {
+    async fn is_recording(&self, project: ProjectContext) -> bool {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::is_recording - could not resolve project");
             return false;
@@ -416,7 +416,7 @@ impl TransportService for StandaloneTransport {
     // Tempo Control
     // =========================================================================
 
-    async fn get_tempo(&self, _cx: &Context, project: ProjectContext) -> f64 {
+    async fn get_tempo(&self, project: ProjectContext) -> f64 {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::get_tempo - could not resolve project");
             return 120.0;
@@ -424,7 +424,7 @@ impl TransportService for StandaloneTransport {
         self.get_or_create_state(&guid).await.transport.tempo.bpm()
     }
 
-    async fn set_tempo(&self, _cx: &Context, project: ProjectContext, bpm: f64) {
+    async fn set_tempo(&self, project: ProjectContext, bpm: f64) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::set_tempo - could not resolve project");
             return;
@@ -443,7 +443,7 @@ impl TransportService for StandaloneTransport {
     // Loop Control
     // =========================================================================
 
-    async fn toggle_loop(&self, _cx: &Context, project: ProjectContext) {
+    async fn toggle_loop(&self, project: ProjectContext) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::toggle_loop - could not resolve project");
             return;
@@ -455,7 +455,7 @@ impl TransportService for StandaloneTransport {
         .await;
     }
 
-    async fn is_looping(&self, _cx: &Context, project: ProjectContext) -> bool {
+    async fn is_looping(&self, project: ProjectContext) -> bool {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::is_looping - could not resolve project");
             return false;
@@ -463,7 +463,7 @@ impl TransportService for StandaloneTransport {
         self.get_or_create_state(&guid).await.transport.looping
     }
 
-    async fn set_loop(&self, _cx: &Context, project: ProjectContext, enabled: bool) {
+    async fn set_loop(&self, project: ProjectContext, enabled: bool) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::set_loop - could not resolve project");
             return;
@@ -482,7 +482,7 @@ impl TransportService for StandaloneTransport {
     // Playrate Control
     // =========================================================================
 
-    async fn get_playrate(&self, _cx: &Context, project: ProjectContext) -> f64 {
+    async fn get_playrate(&self, project: ProjectContext) -> f64 {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::get_playrate - could not resolve project");
             return 1.0;
@@ -490,7 +490,7 @@ impl TransportService for StandaloneTransport {
         self.get_or_create_state(&guid).await.transport.playrate
     }
 
-    async fn set_playrate(&self, _cx: &Context, project: ProjectContext, rate: f64) {
+    async fn set_playrate(&self, project: ProjectContext, rate: f64) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::set_playrate - could not resolve project");
             return;
@@ -514,7 +514,7 @@ impl TransportService for StandaloneTransport {
     // Time Signature
     // =========================================================================
 
-    async fn get_time_signature(&self, _cx: &Context, project: ProjectContext) -> TimeSignature {
+    async fn get_time_signature(&self, project: ProjectContext) -> TimeSignature {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::get_time_signature - could not resolve project");
             return TimeSignature::default();
@@ -531,7 +531,6 @@ impl TransportService for StandaloneTransport {
 
     async fn set_position_musical(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         measure: i32,
         beat: i32,
@@ -556,7 +555,7 @@ impl TransportService for StandaloneTransport {
         .await;
     }
 
-    async fn goto_measure(&self, _cx: &Context, project: ProjectContext, measure: i32) {
+    async fn goto_measure(&self, project: ProjectContext, measure: i32) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::goto_measure - could not resolve project");
             return;
@@ -587,7 +586,7 @@ impl TransportService for StandaloneTransport {
     // Streaming
     // =========================================================================
 
-    async fn subscribe_state(&self, _cx: &Context, project: ProjectContext, tx: Tx<Transport>) {
+    async fn subscribe_state(&self, project: ProjectContext, tx: Tx<Transport>) {
         let Some(guid) = self.resolve_project(&project).await else {
             warn!("StandaloneTransport::subscribe_state - could not resolve project");
             return;
@@ -603,7 +602,7 @@ impl TransportService for StandaloneTransport {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        peeps::spawn_tracked!("transport-subscribe-state", async move {
+        moire::task::spawn(async move {
             // ~16ms for 60Hz
             let interval = Duration::from_micros(16667);
             let mut last_send = Instant::now();
@@ -626,7 +625,7 @@ impl TransportService for StandaloneTransport {
                 };
 
                 // Send the state - exit loop when client disconnects
-                if let Err(e) = tx.send(&snapshot).await {
+                if let Err(e) = tx.send(snapshot).await {
                     debug!(
                         "StandaloneTransport: subscribe_state stream closed for project {}: {}",
                         guid, e
@@ -642,14 +641,14 @@ impl TransportService for StandaloneTransport {
         });
     }
 
-    async fn subscribe_all_projects(&self, _cx: &Context, tx: Tx<daw_proto::AllProjectsTransport>) {
+    async fn subscribe_all_projects(&self, tx: Tx<daw_proto::AllProjectsTransport>) {
         info!("StandaloneTransport: subscribe_all_projects - starting stream for all projects");
 
         // Clone states for the spawned task
         let states = self.states.clone();
 
         // Spawn the streaming loop so this method returns immediately
-        peeps::spawn_tracked!("transport-subscribe-all", async move {
+        moire::task::spawn(async move {
             // ~16ms for 60Hz batched updates
             let interval = Duration::from_millis(16);
             let mut ticker = tokio::time::interval(interval);
@@ -676,7 +675,7 @@ impl TransportService for StandaloneTransport {
                 let update = daw_proto::AllProjectsTransport { projects };
 
                 // Send the state - exit loop when client disconnects
-                if let Err(e) = tx.send(&update).await {
+                if let Err(e) = tx.send(update).await {
                     debug!(
                         "StandaloneTransport: subscribe_all_projects stream closed: {}",
                         e

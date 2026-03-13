@@ -15,7 +15,6 @@ use keyflow::engraver::import::{
 };
 use reaper_high::{Project, Reaper, Track};
 use reaper_medium::MediaItemTake;
-use roam::Context;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
@@ -236,7 +235,6 @@ impl Default for ReaperMidiAnalysis {
 impl MidiAnalysisService for ReaperMidiAnalysis {
     async fn source_fingerprint(
         &self,
-        _cx: &Context,
         request: MidiChartRequest,
     ) -> Result<String, String> {
         main_thread::query(move || {
@@ -274,7 +272,6 @@ impl MidiAnalysisService for ReaperMidiAnalysis {
 
     async fn generate_chart_data(
         &self,
-        _cx: &Context,
         request: MidiChartRequest,
     ) -> Result<MidiChartData, String> {
         main_thread::query(move || {

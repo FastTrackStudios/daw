@@ -6,7 +6,6 @@ use daw_proto::{
     Position, ProjectContext, TimePosition, TimeSignature,
     tempo_map::{TempoMapService, TempoPoint},
 };
-use roam::Context;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::debug;
@@ -200,13 +199,12 @@ impl StandaloneTempoMap {
 }
 
 impl TempoMapService for StandaloneTempoMap {
-    async fn get_tempo_points(&self, _cx: &Context, _project: ProjectContext) -> Vec<TempoPoint> {
+    async fn get_tempo_points(&self, _project: ProjectContext) -> Vec<TempoPoint> {
         self.state.read().await.tempo_points.clone()
     }
 
     async fn get_tempo_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         index: u32,
     ) -> Option<TempoPoint> {
@@ -214,11 +212,11 @@ impl TempoMapService for StandaloneTempoMap {
         state.tempo_points.get(index as usize).cloned()
     }
 
-    async fn tempo_point_count(&self, _cx: &Context, _project: ProjectContext) -> usize {
+    async fn tempo_point_count(&self, _project: ProjectContext) -> usize {
         self.state.read().await.tempo_points.len()
     }
 
-    async fn get_tempo_at(&self, _cx: &Context, _project: ProjectContext, seconds: f64) -> f64 {
+    async fn get_tempo_at(&self, _project: ProjectContext, seconds: f64) -> f64 {
         let state = self.state.read().await;
         Self::get_active_tempo_point(&state.tempo_points, seconds)
             .map(|p| p.bpm)
@@ -227,7 +225,6 @@ impl TempoMapService for StandaloneTempoMap {
 
     async fn get_time_signature_at(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         seconds: f64,
     ) -> (i32, i32) {
@@ -237,7 +234,6 @@ impl TempoMapService for StandaloneTempoMap {
 
     async fn time_to_qn(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         seconds: f64,
     ) -> f64 {
@@ -263,7 +259,6 @@ impl TempoMapService for StandaloneTempoMap {
 
     async fn qn_to_time(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         qn: f64,
     ) -> f64 {
@@ -289,7 +284,6 @@ impl TempoMapService for StandaloneTempoMap {
 
     async fn time_to_musical(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         seconds: f64,
     ) -> (i32, i32, f64) {
@@ -304,7 +298,6 @@ impl TempoMapService for StandaloneTempoMap {
 
     async fn musical_to_time(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         measure: i32,
         beat: i32,
@@ -323,7 +316,6 @@ impl TempoMapService for StandaloneTempoMap {
 
     async fn add_tempo_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         seconds: f64,
         bpm: f64,
@@ -351,7 +343,7 @@ impl TempoMapService for StandaloneTempoMap {
         index
     }
 
-    async fn remove_tempo_point(&self, _cx: &Context, _project: ProjectContext, index: u32) {
+    async fn remove_tempo_point(&self, _project: ProjectContext, index: u32) {
         let mut state = self.state.write().await;
         if (index as usize) < state.tempo_points.len() {
             state.tempo_points.remove(index as usize);
@@ -361,7 +353,6 @@ impl TempoMapService for StandaloneTempoMap {
 
     async fn set_tempo_at_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         index: u32,
         bpm: f64,
@@ -375,7 +366,6 @@ impl TempoMapService for StandaloneTempoMap {
 
     async fn set_time_signature_at_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         index: u32,
         numerator: i32,
@@ -393,7 +383,6 @@ impl TempoMapService for StandaloneTempoMap {
 
     async fn move_tempo_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         index: u32,
         seconds: f64,
@@ -410,18 +399,17 @@ impl TempoMapService for StandaloneTempoMap {
         });
     }
 
-    async fn get_default_tempo(&self, _cx: &Context, _project: ProjectContext) -> f64 {
+    async fn get_default_tempo(&self, _project: ProjectContext) -> f64 {
         self.state.read().await.default_tempo
     }
 
-    async fn set_default_tempo(&self, _cx: &Context, _project: ProjectContext, bpm: f64) {
+    async fn set_default_tempo(&self, _project: ProjectContext, bpm: f64) {
         self.state.write().await.default_tempo = bpm;
         debug!("Set default tempo to {} BPM", bpm);
     }
 
     async fn get_default_time_signature(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
     ) -> (i32, i32) {
         self.state.read().await.default_time_sig
@@ -429,7 +417,6 @@ impl TempoMapService for StandaloneTempoMap {
 
     async fn set_default_time_signature(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         numerator: i32,
         denominator: i32,

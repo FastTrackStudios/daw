@@ -10,7 +10,6 @@ use daw_proto::{
     TimeToBeatsResult, TimeToQuarterNotesResult,
 };
 use reaper_high::Reaper;
-use roam::Context;
 
 use crate::main_thread;
 
@@ -45,7 +44,6 @@ fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
 impl PositionConversionService for ReaperPositionConversion {
     async fn time_to_beats(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         position: PositionInSeconds,
         measure_mode: MeasureMode,
@@ -82,7 +80,6 @@ impl PositionConversionService for ReaperPositionConversion {
 
     async fn beats_to_time(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         position: PositionInBeats,
         measure_mode: MeasureMode,
@@ -117,7 +114,6 @@ impl PositionConversionService for ReaperPositionConversion {
 
     async fn time_to_quarter_notes(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         position: PositionInSeconds,
     ) -> TimeToQuarterNotesResult {
@@ -153,7 +149,6 @@ impl PositionConversionService for ReaperPositionConversion {
 
     async fn quarter_notes_to_time(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         position: PositionInQuarterNotes,
     ) -> PositionInSeconds {
@@ -174,7 +169,6 @@ impl PositionConversionService for ReaperPositionConversion {
 
     async fn quarter_notes_to_measure(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         position: PositionInQuarterNotes,
     ) -> QuarterNotesToMeasureResult {
@@ -205,30 +199,28 @@ impl PositionConversionService for ReaperPositionConversion {
 
     async fn beats_to_quarter_notes(
         &self,
-        cx: &Context,
         project: ProjectContext,
         position: PositionInBeats,
     ) -> PositionInQuarterNotes {
         // Convert beats → time → quarter notes
         let time = self
-            .beats_to_time(cx, project.clone(), position, MeasureMode::IgnoreMeasure)
+            .beats_to_time(project.clone(), position, MeasureMode::IgnoreMeasure)
             .await;
-        let result = self.time_to_quarter_notes(cx, project, time).await;
+        let result = self.time_to_quarter_notes(project, time).await;
         result.quarter_notes
     }
 
     async fn quarter_notes_to_beats(
         &self,
-        cx: &Context,
         project: ProjectContext,
         position: PositionInQuarterNotes,
     ) -> PositionInBeats {
         // Convert quarter notes → time → beats
         let time = self
-            .quarter_notes_to_time(cx, project.clone(), position)
+            .quarter_notes_to_time(project.clone(), position)
             .await;
         let result = self
-            .time_to_beats(cx, project, time, MeasureMode::IgnoreMeasure)
+            .time_to_beats(project, time, MeasureMode::IgnoreMeasure)
             .await;
         result.full_beats
     }

@@ -11,7 +11,6 @@ use daw_proto::{
 };
 use reaper_high::Reaper;
 use reaper_medium::{MeasureMode, ProjectContext as ReaperProjectContext};
-use roam::Context;
 use std::ptr::null_mut;
 use tracing::debug;
 
@@ -88,7 +87,7 @@ impl TempoMapService for ReaperTempoMap {
     // Query Methods
     // =========================================================================
 
-    async fn get_tempo_points(&self, _cx: &Context, _project: ProjectContext) -> Vec<TempoPoint> {
+    async fn get_tempo_points(&self, _project: ProjectContext) -> Vec<TempoPoint> {
         main_thread::query(|| {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -111,7 +110,6 @@ impl TempoMapService for ReaperTempoMap {
 
     async fn get_tempo_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         index: u32,
     ) -> Option<TempoPoint> {
@@ -123,7 +121,7 @@ impl TempoMapService for ReaperTempoMap {
         .unwrap_or(None)
     }
 
-    async fn tempo_point_count(&self, _cx: &Context, _project: ProjectContext) -> usize {
+    async fn tempo_point_count(&self, _project: ProjectContext) -> usize {
         main_thread::query(|| {
             let reaper = Reaper::get();
             reaper
@@ -135,7 +133,7 @@ impl TempoMapService for ReaperTempoMap {
         .unwrap_or(0)
     }
 
-    async fn get_tempo_at(&self, _cx: &Context, _project: ProjectContext, seconds: f64) -> f64 {
+    async fn get_tempo_at(&self, _project: ProjectContext, seconds: f64) -> f64 {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -154,7 +152,6 @@ impl TempoMapService for ReaperTempoMap {
 
     async fn get_time_signature_at(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         seconds: f64,
     ) -> (i32, i32) {
@@ -177,13 +174,13 @@ impl TempoMapService for ReaperTempoMap {
         .unwrap_or((4, 4))
     }
 
-    async fn time_to_qn(&self, _cx: &Context, _project: ProjectContext, seconds: f64) -> f64 {
+    async fn time_to_qn(&self, _project: ProjectContext, seconds: f64) -> f64 {
         main_thread::query(move || time_to_qn_on_main_thread(seconds))
             .await
             .unwrap_or(0.0)
     }
 
-    async fn qn_to_time(&self, _cx: &Context, _project: ProjectContext, qn: f64) -> f64 {
+    async fn qn_to_time(&self, _project: ProjectContext, qn: f64) -> f64 {
         main_thread::query(move || qn_to_time_on_main_thread(qn))
             .await
             .unwrap_or(0.0)
@@ -191,7 +188,6 @@ impl TempoMapService for ReaperTempoMap {
 
     async fn time_to_musical(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         seconds: f64,
     ) -> (i32, i32, f64) {
@@ -217,7 +213,6 @@ impl TempoMapService for ReaperTempoMap {
 
     async fn musical_to_time(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         measure: i32,
         beat: i32,
@@ -251,7 +246,6 @@ impl TempoMapService for ReaperTempoMap {
 
     async fn add_tempo_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         seconds: f64,
         bpm: f64,
@@ -290,7 +284,7 @@ impl TempoMapService for ReaperTempoMap {
         .unwrap_or(0)
     }
 
-    async fn remove_tempo_point(&self, _cx: &Context, _project: ProjectContext, index: u32) {
+    async fn remove_tempo_point(&self, _project: ProjectContext, index: u32) {
         debug!("ReaperTempoMap: remove_tempo_point at index {}", index);
         main_thread::run(move || {
             let low = Reaper::get().medium_reaper().low();
@@ -300,7 +294,6 @@ impl TempoMapService for ReaperTempoMap {
 
     async fn set_tempo_at_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         index: u32,
         bpm: f64,
@@ -331,7 +324,6 @@ impl TempoMapService for ReaperTempoMap {
 
     async fn set_time_signature_at_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         index: u32,
         numerator: i32,
@@ -363,7 +355,6 @@ impl TempoMapService for ReaperTempoMap {
 
     async fn move_tempo_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         index: u32,
         seconds: f64,
@@ -396,7 +387,7 @@ impl TempoMapService for ReaperTempoMap {
     // Project Defaults
     // =========================================================================
 
-    async fn get_default_tempo(&self, _cx: &Context, _project: ProjectContext) -> f64 {
+    async fn get_default_tempo(&self, _project: ProjectContext) -> f64 {
         main_thread::query(|| {
             let reaper = Reaper::get();
             reaper.current_project().tempo().bpm().get()
@@ -405,7 +396,7 @@ impl TempoMapService for ReaperTempoMap {
         .unwrap_or(120.0)
     }
 
-    async fn set_default_tempo(&self, _cx: &Context, _project: ProjectContext, bpm: f64) {
+    async fn set_default_tempo(&self, _project: ProjectContext, bpm: f64) {
         debug!("ReaperTempoMap: set_default_tempo to {} BPM", bpm);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -420,7 +411,6 @@ impl TempoMapService for ReaperTempoMap {
 
     async fn get_default_time_signature(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
     ) -> (i32, i32) {
         main_thread::query(|| {
@@ -440,7 +430,6 @@ impl TempoMapService for ReaperTempoMap {
 
     async fn set_default_time_signature(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         numerator: i32,
         denominator: i32,

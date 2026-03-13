@@ -9,7 +9,6 @@ use daw_proto::{
     primitives::{AutomationMode, PositionInSeconds},
     track::TrackRef,
 };
-use roam::Context;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -100,7 +99,6 @@ impl StandaloneAutomation {
 impl AutomationService for StandaloneAutomation {
     async fn get_envelopes(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         track: TrackRef,
     ) -> Vec<Envelope> {
@@ -118,7 +116,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn get_envelope(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: EnvelopeLocation,
     ) -> Option<Envelope> {
@@ -142,7 +139,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn set_visible(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: EnvelopeLocation,
         visible: bool,
@@ -155,7 +151,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn set_armed(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: EnvelopeLocation,
         armed: bool,
@@ -168,7 +163,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn set_automation_mode(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: EnvelopeLocation,
         mode: AutomationMode,
@@ -181,7 +175,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn get_points(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: EnvelopeLocation,
     ) -> Vec<EnvelopePoint> {
@@ -206,7 +199,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn get_points_in_range(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: EnvelopeLocation,
         range: TimeRangeParams,
@@ -241,7 +233,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn get_value_at(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: EnvelopeLocation,
         time: PositionInSeconds,
@@ -283,7 +274,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn add_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: EnvelopeLocation,
         params: AddPointParams,
@@ -317,7 +307,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn delete_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: EnvelopeLocation,
         index: u32,
@@ -334,7 +323,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn set_point(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: EnvelopeLocation,
         params: SetPointParams,
@@ -351,7 +339,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn delete_points_in_range(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         location: EnvelopeLocation,
         range: TimeRangeParams,
@@ -371,7 +358,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn get_global_automation_override(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
     ) -> Option<AutomationMode> {
         None
@@ -379,7 +365,6 @@ impl AutomationService for StandaloneAutomation {
 
     async fn set_global_automation_override(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         _mode: Option<AutomationMode>,
     ) {

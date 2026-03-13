@@ -11,7 +11,6 @@ use crate::safe_wrappers::ext_state as sw;
 use crate::{main_thread, project_context::resolve_project_context};
 use daw_proto::{ExtStateService, ProjectContext};
 use reaper_high::Reaper;
-use roam::Context;
 use tracing::debug;
 
 /// REAPER ext state implementation.
@@ -34,7 +33,7 @@ impl Default for ReaperExtState {
 }
 
 impl ExtStateService for ReaperExtState {
-    async fn get_ext_state(&self, _cx: &Context, section: String, key: String) -> Option<String> {
+    async fn get_ext_state(&self, section: String, key: String) -> Option<String> {
         debug!("ReaperExtState::get({}, {})", section, key);
 
         main_thread::query(move || {
@@ -49,7 +48,6 @@ impl ExtStateService for ReaperExtState {
 
     async fn set_ext_state(
         &self,
-        _cx: &Context,
         section: String,
         key: String,
         value: String,
@@ -75,7 +73,7 @@ impl ExtStateService for ReaperExtState {
         });
     }
 
-    async fn delete_ext_state(&self, _cx: &Context, section: String, key: String, persist: bool) {
+    async fn delete_ext_state(&self, section: String, key: String, persist: bool) {
         debug!(
             "ReaperExtState::delete({}, {}, persist={})",
             section, key, persist
@@ -93,7 +91,7 @@ impl ExtStateService for ReaperExtState {
         });
     }
 
-    async fn has_ext_state(&self, _cx: &Context, section: String, key: String) -> bool {
+    async fn has_ext_state(&self, section: String, key: String) -> bool {
         debug!("ReaperExtState::has({}, {})", section, key);
 
         main_thread::query(move || {
@@ -111,7 +109,6 @@ impl ExtStateService for ReaperExtState {
 
     async fn get_project_ext_state(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         section: String,
         key: String,
@@ -134,7 +131,6 @@ impl ExtStateService for ReaperExtState {
 
     async fn set_project_ext_state(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         section: String,
         key: String,
@@ -163,7 +159,6 @@ impl ExtStateService for ReaperExtState {
 
     async fn delete_project_ext_state(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         section: String,
         key: String,
@@ -174,13 +169,12 @@ impl ExtStateService for ReaperExtState {
         );
 
         // Set to empty string to delete (REAPER API convention)
-        self.set_project_ext_state(_cx, project, section, key, String::new())
+        self.set_project_ext_state(project, section, key, String::new())
             .await;
     }
 
     async fn has_project_ext_state(
         &self,
-        cx: &Context,
         project: ProjectContext,
         section: String,
         key: String,
@@ -190,7 +184,7 @@ impl ExtStateService for ReaperExtState {
             section, key
         );
 
-        self.get_project_ext_state(cx, project, section, key)
+        self.get_project_ext_state(project, section, key)
             .await
             .is_some()
     }

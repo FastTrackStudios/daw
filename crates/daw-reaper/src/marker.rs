@@ -8,7 +8,7 @@ use crate::project_context::resolve_project_context;
 use crate::safe_wrappers::markers as sw;
 use daw_proto::{Marker, MarkerEvent, MarkerService, Position, ProjectContext, TimePosition};
 use reaper_medium::{BookmarkRef, MarkerOrRegionPosition, ProjectContext as ReaperProjectContext};
-use roam::{Context, Tx};
+use roam::Tx;
 use std::ffi::CString;
 use std::time::Duration;
 use tracing::{debug, info};
@@ -36,7 +36,7 @@ impl MarkerService for ReaperMarker {
     // Query Methods
     // =========================================================================
 
-    async fn get_markers(&self, _cx: &Context, project: ProjectContext) -> Vec<Marker> {
+    async fn get_markers(&self, project: ProjectContext) -> Vec<Marker> {
         main_thread::query(move || {
             let reaper = reaper_high::Reaper::get();
             let medium = reaper.medium_reaper();
@@ -85,19 +85,18 @@ impl MarkerService for ReaperMarker {
         .unwrap_or_default()
     }
 
-    async fn get_marker(&self, cx: &Context, project: ProjectContext, id: u32) -> Option<Marker> {
-        let markers = self.get_markers(cx, project).await;
+    async fn get_marker(&self, project: ProjectContext, id: u32) -> Option<Marker> {
+        let markers = self.get_markers(project).await;
         markers.into_iter().find(|m| m.id == Some(id))
     }
 
     async fn get_markers_in_range(
         &self,
-        cx: &Context,
         project: ProjectContext,
         start: f64,
         end: f64,
     ) -> Vec<Marker> {
-        let markers = self.get_markers(cx, project).await;
+        let markers = self.get_markers(project).await;
         markers
             .into_iter()
             .filter(|m| m.is_in_range(start, end))
@@ -106,11 +105,10 @@ impl MarkerService for ReaperMarker {
 
     async fn get_next_marker(
         &self,
-        cx: &Context,
         project: ProjectContext,
         after: f64,
     ) -> Option<Marker> {
-        let markers = self.get_markers(cx, project).await;
+        let markers = self.get_markers(project).await;
         markers
             .into_iter()
             .filter(|m| m.position_seconds() > after)
@@ -123,11 +121,10 @@ impl MarkerService for ReaperMarker {
 
     async fn get_previous_marker(
         &self,
-        cx: &Context,
         project: ProjectContext,
         before: f64,
     ) -> Option<Marker> {
-        let markers = self.get_markers(cx, project).await;
+        let markers = self.get_markers(project).await;
         markers
             .into_iter()
             .filter(|m| m.position_seconds() < before)
@@ -138,8 +135,8 @@ impl MarkerService for ReaperMarker {
             })
     }
 
-    async fn marker_count(&self, cx: &Context, project: ProjectContext) -> usize {
-        self.get_markers(cx, project).await.len()
+    async fn marker_count(&self, project: ProjectContext) -> usize {
+        self.get_markers(project).await.len()
     }
 
     // =========================================================================
@@ -148,7 +145,6 @@ impl MarkerService for ReaperMarker {
 
     async fn add_marker(
         &self,
-        _cx: &Context,
         _project: ProjectContext,
         position: f64,
         name: String,
@@ -175,7 +171,7 @@ impl MarkerService for ReaperMarker {
         .unwrap_or(0)
     }
 
-    async fn remove_marker(&self, _cx: &Context, _project: ProjectContext, id: u32) {
+    async fn remove_marker(&self, _project: ProjectContext, id: u32) {
         debug!("ReaperMarker: remove_marker {}", id);
         main_thread::run(move || {
             let low = reaper_high::Reaper::get().medium_reaper().low();
@@ -188,7 +184,7 @@ impl MarkerService for ReaperMarker {
         });
     }
 
-    async fn move_marker(&self, _cx: &Context, _project: ProjectContext, id: u32, position: f64) {
+    async fn move_marker(&self, _project: ProjectContext, id: u32, position: f64) {
         debug!("ReaperMarker: move_marker {} to {}", id, position);
         main_thread::run(move || {
             let low = reaper_high::Reaper::get().medium_reaper().low();
@@ -196,7 +192,7 @@ impl MarkerService for ReaperMarker {
         });
     }
 
-    async fn rename_marker(&self, _cx: &Context, _project: ProjectContext, id: u32, name: String) {
+    async fn rename_marker(&self, _project: ProjectContext, id: u32, name: String) {
         debug!("ReaperMarker: rename_marker {} to '{}'", id, name);
         main_thread::run(move || {
             let low = reaper_high::Reaper::get().medium_reaper().low();
@@ -206,7 +202,7 @@ impl MarkerService for ReaperMarker {
         });
     }
 
-    async fn set_marker_color(&self, _cx: &Context, _project: ProjectContext, id: u32, color: u32) {
+    async fn set_marker_color(&self, _project: ProjectContext, id: u32, color: u32) {
         debug!("ReaperMarker: set_marker_color {} to {}", id, color);
         main_thread::run(move || {
             let low = reaper_high::Reaper::get().medium_reaper().low();
@@ -229,7 +225,7 @@ impl MarkerService for ReaperMarker {
     // Navigation Methods
     // =========================================================================
 
-    async fn goto_next_marker(&self, _cx: &Context, _project: ProjectContext) {
+    async fn goto_next_marker(&self, _project: ProjectContext) {
         debug!("ReaperMarker: goto_next_marker");
         main_thread::run(|| {
             let reaper = reaper_high::Reaper::get();
@@ -243,7 +239,7 @@ impl MarkerService for ReaperMarker {
         });
     }
 
-    async fn goto_previous_marker(&self, _cx: &Context, _project: ProjectContext) {
+    async fn goto_previous_marker(&self, _project: ProjectContext) {
         debug!("ReaperMarker: goto_previous_marker");
         main_thread::run(|| {
             let reaper = reaper_high::Reaper::get();
@@ -257,7 +253,7 @@ impl MarkerService for ReaperMarker {
         });
     }
 
-    async fn goto_marker(&self, _cx: &Context, _project: ProjectContext, id: u32) {
+    async fn goto_marker(&self, _project: ProjectContext, id: u32) {
         debug!("ReaperMarker: goto_marker {}", id);
         main_thread::run(move || {
             let reaper = reaper_high::Reaper::get();
@@ -269,20 +265,19 @@ impl MarkerService for ReaperMarker {
         });
     }
 
-    async fn subscribe(&self, cx: &Context, project: ProjectContext, tx: Tx<MarkerEvent>) {
+    async fn subscribe(&self, project: ProjectContext, tx: Tx<MarkerEvent>) {
         info!("ReaperMarker::subscribe() - starting marker stream");
 
         // Clone self for the spawned task
         let this = self.clone();
-        let cx = cx.clone();
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        peeps::spawn_tracked!("reaper-marker-subscribe", async move {
+        moire::task::spawn(async move {
             // Send initial state
-            let markers = this.get_markers(&cx, project.clone()).await;
+            let markers = this.get_markers(project.clone()).await;
             if tx
-                .send(&MarkerEvent::MarkersChanged(markers.clone()))
+                .send(MarkerEvent::MarkersChanged(markers.clone()))
                 .await
                 .is_err()
             {
@@ -296,10 +291,10 @@ impl MarkerService for ReaperMarker {
             loop {
                 tokio::time::sleep(Duration::from_micros(16667)).await;
 
-                let current_markers = this.get_markers(&cx, project.clone()).await;
+                let current_markers = this.get_markers(project.clone()).await;
                 if current_markers != last_markers {
                     if tx
-                        .send(&MarkerEvent::MarkersChanged(current_markers.clone()))
+                        .send(MarkerEvent::MarkersChanged(current_markers.clone()))
                         .await
                         .is_err()
                     {

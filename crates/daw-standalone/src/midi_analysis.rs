@@ -10,7 +10,6 @@ use keyflow::engraver::import::{
     MidiChartConfig, MidiFile, MidiNote as ImportMidiNote, MidiTrack, TempoEvent,
     TimeSignatureEvent, generate_chart_text,
 };
-use roam::Context;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -77,7 +76,6 @@ impl StandaloneMidiAnalysis {
 impl MidiAnalysisService for StandaloneMidiAnalysis {
     async fn source_fingerprint(
         &self,
-        _cx: &Context,
         request: MidiChartRequest,
     ) -> Result<String, String> {
         if !Self::track_tag_matches(request.track_tag.as_deref()) {
@@ -100,7 +98,6 @@ impl MidiAnalysisService for StandaloneMidiAnalysis {
 
     async fn generate_chart_data(
         &self,
-        _cx: &Context,
         request: MidiChartRequest,
     ) -> Result<MidiChartData, String> {
         if !Self::track_tag_matches(request.track_tag.as_deref()) {

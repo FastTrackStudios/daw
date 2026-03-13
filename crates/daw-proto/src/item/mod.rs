@@ -15,6 +15,6 @@ pub use event::{ItemEvent, TakeEvent};
 pub use item::{FadeShape, Item, ItemRef};
 pub use service::{
     ItemService, ItemServiceClient, ItemServiceDispatcher, TakeService, TakeServiceClient,
-    TakeServiceDispatcher,
+    TakeServiceDispatcher, item_service_service_descriptor, take_service_service_descriptor,
 };
 pub use take::{SourceType, Take, TakeRef};

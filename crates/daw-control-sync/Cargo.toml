@@ -12,7 +12,8 @@ tokio = { version = "1", features = ["rt", "sync", "time"] }
 # DAW control protocol
 daw-control = { path = "../daw-control" }
 daw-proto = { path = "../daw-proto" }
-roam = { git = "https://github.com/bearcove/roam.git", rev = "30a8e10" }
+roam.workspace = true
+roam-stream.workspace = true
 
 # Error handling
 eyre = "0.6"

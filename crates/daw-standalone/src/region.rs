@@ -8,7 +8,7 @@ use daw_proto::{
     ProjectContext, TimeRange,
     region::{Region, RegionEvent, RegionService},
 };
-use roam::{Context, Tx};
+use roam::Tx;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -250,12 +250,12 @@ impl StandaloneRegion {
 }
 
 impl RegionService for StandaloneRegion {
-    async fn get_regions(&self, _cx: &Context, project: ProjectContext) -> Vec<Region> {
+    async fn get_regions(&self, project: ProjectContext) -> Vec<Region> {
         let state = self.state.read().await;
         Self::get_project_regions(&state, &project).to_vec()
     }
 
-    async fn get_region(&self, _cx: &Context, project: ProjectContext, id: u32) -> Option<Region> {
+    async fn get_region(&self, project: ProjectContext, id: u32) -> Option<Region> {
         let state = self.state.read().await;
         Self::get_project_regions(&state, &project)
             .iter()
@@ -265,7 +265,6 @@ impl RegionService for StandaloneRegion {
 
     async fn get_regions_in_range(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         start: f64,
         end: f64,
@@ -280,7 +279,6 @@ impl RegionService for StandaloneRegion {
 
     async fn get_region_at(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         position: f64,
     ) -> Option<Region> {
@@ -291,14 +289,13 @@ impl RegionService for StandaloneRegion {
             .cloned()
     }
 
-    async fn region_count(&self, _cx: &Context, project: ProjectContext) -> usize {
+    async fn region_count(&self, project: ProjectContext) -> usize {
         let state = self.state.read().await;
         Self::get_project_regions(&state, &project).len()
     }
 
     async fn add_region(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         start: f64,
         end: f64,
@@ -333,7 +330,7 @@ impl RegionService for StandaloneRegion {
         id
     }
 
-    async fn remove_region(&self, _cx: &Context, project: ProjectContext, id: u32) {
+    async fn remove_region(&self, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)
             && let Some(regions) = state.regions_by_project.get_mut(proj_id)
@@ -345,7 +342,6 @@ impl RegionService for StandaloneRegion {
 
     async fn set_region_bounds(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         id: u32,
         start: f64,
@@ -366,7 +362,7 @@ impl RegionService for StandaloneRegion {
         }
     }
 
-    async fn rename_region(&self, _cx: &Context, project: ProjectContext, id: u32, name: String) {
+    async fn rename_region(&self, project: ProjectContext, id: u32, name: String) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)
             && let Some(regions) = state.regions_by_project.get_mut(proj_id)
@@ -377,7 +373,7 @@ impl RegionService for StandaloneRegion {
         }
     }
 
-    async fn set_region_color(&self, _cx: &Context, project: ProjectContext, id: u32, color: u32) {
+    async fn set_region_color(&self, project: ProjectContext, id: u32, color: u32) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)
             && let Some(regions) = state.regions_by_project.get_mut(proj_id)
@@ -391,7 +387,7 @@ impl RegionService for StandaloneRegion {
         }
     }
 
-    async fn goto_region_start(&self, _cx: &Context, project: ProjectContext, id: u32) {
+    async fn goto_region_start(&self, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)
             && let Some(regions) = state.regions_by_project.get(proj_id)
@@ -405,7 +401,7 @@ impl RegionService for StandaloneRegion {
         }
     }
 
-    async fn goto_region_end(&self, _cx: &Context, project: ProjectContext, id: u32) {
+    async fn goto_region_end(&self, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)
             && let Some(regions) = state.regions_by_project.get(proj_id)
@@ -419,7 +415,7 @@ impl RegionService for StandaloneRegion {
         }
     }
 
-    async fn subscribe(&self, _cx: &Context, project: ProjectContext, tx: Tx<RegionEvent>) {
+    async fn subscribe(&self, project: ProjectContext, tx: Tx<RegionEvent>) {
         info!("RegionService::subscribe() - starting region stream");
 
         // Clone state for the spawned task
@@ -427,7 +423,7 @@ impl RegionService for StandaloneRegion {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        peeps::spawn_tracked!("region-subscribe", async move {
+        moire::task::spawn(async move {
             // Send initial state: all regions for this project
             let regions = {
                 let state = state.read().await;
@@ -435,7 +431,7 @@ impl RegionService for StandaloneRegion {
             };
 
             if tx
-                .send(&RegionEvent::RegionsChanged(regions.clone()))
+                .send(RegionEvent::RegionsChanged(regions.clone()))
                 .await
                 .is_err()
             {
@@ -459,7 +455,7 @@ impl RegionService for StandaloneRegion {
                     // Send full region list on change
                     // (A more sophisticated implementation would send granular events)
                     if tx
-                        .send(&RegionEvent::RegionsChanged(current_regions.clone()))
+                        .send(RegionEvent::RegionsChanged(current_regions.clone()))
                         .await
                         .is_err()
                     {

@@ -4,7 +4,6 @@
 //! in the RPC round-trip succeeding, not in the response payload.
 
 use daw_proto::HealthService;
-use roam::Context;
 
 /// REAPER health-check implementation.
 #[derive(Clone)]
@@ -23,7 +22,7 @@ impl Default for ReaperHealth {
 }
 
 impl HealthService for ReaperHealth {
-    async fn ping(&self, _cx: &Context) -> bool {
+    async fn ping(&self) -> bool {
         true
     }
 }

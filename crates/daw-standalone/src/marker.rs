@@ -8,7 +8,7 @@ use daw_proto::{
     Position, ProjectContext, TimePosition,
     marker::{Marker, MarkerEvent, MarkerService},
 };
-use roam::{Context, Tx};
+use roam::Tx;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -223,12 +223,12 @@ impl StandaloneMarker {
 }
 
 impl MarkerService for StandaloneMarker {
-    async fn get_markers(&self, _cx: &Context, project: ProjectContext) -> Vec<Marker> {
+    async fn get_markers(&self, project: ProjectContext) -> Vec<Marker> {
         let state = self.state.read().await;
         Self::get_project_markers(&state, &project).to_vec()
     }
 
-    async fn get_marker(&self, _cx: &Context, project: ProjectContext, id: u32) -> Option<Marker> {
+    async fn get_marker(&self, project: ProjectContext, id: u32) -> Option<Marker> {
         let state = self.state.read().await;
         Self::get_project_markers(&state, &project)
             .iter()
@@ -238,7 +238,6 @@ impl MarkerService for StandaloneMarker {
 
     async fn get_markers_in_range(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         start: f64,
         end: f64,
@@ -253,7 +252,6 @@ impl MarkerService for StandaloneMarker {
 
     async fn get_next_marker(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         after: f64,
     ) -> Option<Marker> {
@@ -271,7 +269,6 @@ impl MarkerService for StandaloneMarker {
 
     async fn get_previous_marker(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         before: f64,
     ) -> Option<Marker> {
@@ -287,14 +284,13 @@ impl MarkerService for StandaloneMarker {
             .cloned()
     }
 
-    async fn marker_count(&self, _cx: &Context, project: ProjectContext) -> usize {
+    async fn marker_count(&self, project: ProjectContext) -> usize {
         let state = self.state.read().await;
         Self::get_project_markers(&state, &project).len()
     }
 
     async fn add_marker(
         &self,
-        _cx: &Context,
         project: ProjectContext,
         position: f64,
         name: String,
@@ -329,7 +325,7 @@ impl MarkerService for StandaloneMarker {
         id
     }
 
-    async fn remove_marker(&self, _cx: &Context, project: ProjectContext, id: u32) {
+    async fn remove_marker(&self, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)
             && let Some(markers) = state.markers_by_project.get_mut(proj_id)
@@ -339,7 +335,7 @@ impl MarkerService for StandaloneMarker {
         }
     }
 
-    async fn move_marker(&self, _cx: &Context, project: ProjectContext, id: u32, position: f64) {
+    async fn move_marker(&self, project: ProjectContext, id: u32, position: f64) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)
             && let Some(markers) = state.markers_by_project.get_mut(proj_id)
@@ -356,7 +352,7 @@ impl MarkerService for StandaloneMarker {
         }
     }
 
-    async fn rename_marker(&self, _cx: &Context, project: ProjectContext, id: u32, name: String) {
+    async fn rename_marker(&self, project: ProjectContext, id: u32, name: String) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)
             && let Some(markers) = state.markers_by_project.get_mut(proj_id)
@@ -367,7 +363,7 @@ impl MarkerService for StandaloneMarker {
         }
     }
 
-    async fn set_marker_color(&self, _cx: &Context, project: ProjectContext, id: u32, color: u32) {
+    async fn set_marker_color(&self, project: ProjectContext, id: u32, color: u32) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)
             && let Some(markers) = state.markers_by_project.get_mut(proj_id)
@@ -381,7 +377,7 @@ impl MarkerService for StandaloneMarker {
         }
     }
 
-    async fn goto_next_marker(&self, _cx: &Context, project: ProjectContext) {
+    async fn goto_next_marker(&self, project: ProjectContext) {
         let mut state = self.state.write().await;
         let current = state.position;
         if let Some(proj_id) = project_id(&project)
@@ -403,7 +399,7 @@ impl MarkerService for StandaloneMarker {
         }
     }
 
-    async fn goto_previous_marker(&self, _cx: &Context, project: ProjectContext) {
+    async fn goto_previous_marker(&self, project: ProjectContext) {
         let mut state = self.state.write().await;
         let current = state.position;
         if let Some(proj_id) = project_id(&project)
@@ -425,7 +421,7 @@ impl MarkerService for StandaloneMarker {
         }
     }
 
-    async fn goto_marker(&self, _cx: &Context, project: ProjectContext, id: u32) {
+    async fn goto_marker(&self, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)
             && let Some(markers) = state.markers_by_project.get(proj_id)
@@ -439,7 +435,7 @@ impl MarkerService for StandaloneMarker {
         }
     }
 
-    async fn subscribe(&self, _cx: &Context, project: ProjectContext, tx: Tx<MarkerEvent>) {
+    async fn subscribe(&self, project: ProjectContext, tx: Tx<MarkerEvent>) {
         info!("MarkerService::subscribe() - starting marker stream");
 
         // Clone state for the spawned task
@@ -447,7 +443,7 @@ impl MarkerService for StandaloneMarker {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        peeps::spawn_tracked!("marker-subscribe", async move {
+        moire::task::spawn(async move {
             // Send initial state: all markers for this project
             let markers = {
                 let state = state.read().await;
@@ -455,7 +451,7 @@ impl MarkerService for StandaloneMarker {
             };
 
             if tx
-                .send(&MarkerEvent::MarkersChanged(markers.clone()))
+                .send(MarkerEvent::MarkersChanged(markers.clone()))
                 .await
                 .is_err()
             {
@@ -479,7 +475,7 @@ impl MarkerService for StandaloneMarker {
                     // Send full marker list on change
                     // (A more sophisticated implementation would send granular events)
                     if tx
-                        .send(&MarkerEvent::MarkersChanged(current_markers.clone()))
+                        .send(MarkerEvent::MarkersChanged(current_markers.clone()))
                         .await
                         .is_err()
                     {

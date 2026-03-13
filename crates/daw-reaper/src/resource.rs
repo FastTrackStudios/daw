@@ -2,7 +2,6 @@
 
 use daw_proto::resource::ResourceService;
 use reaper_high::Reaper;
-use roam::Context;
 use std::path::PathBuf;
 
 use crate::main_thread;
@@ -25,7 +24,7 @@ impl Default for ReaperResource {
 }
 
 impl ResourceService for ReaperResource {
-    async fn get_resource_path(&self, _cx: &Context) -> PathBuf {
+    async fn get_resource_path(&self) -> PathBuf {
         main_thread::query(|| {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -37,7 +36,7 @@ impl ResourceService for ReaperResource {
         .unwrap_or_else(|| PathBuf::from("."))
     }
 
-    async fn get_ini_file_path(&self, _cx: &Context) -> PathBuf {
+    async fn get_ini_file_path(&self) -> PathBuf {
         main_thread::query(|| {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -49,7 +48,7 @@ impl ResourceService for ReaperResource {
         .unwrap_or_else(|| PathBuf::from("reaper.ini"))
     }
 
-    async fn get_color_theme_path(&self, _cx: &Context) -> Option<PathBuf> {
+    async fn get_color_theme_path(&self) -> Option<PathBuf> {
         main_thread::query(|| {
             let reaper = Reaper::get();
             let low = reaper.medium_reaper().low();
