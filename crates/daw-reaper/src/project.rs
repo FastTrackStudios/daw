@@ -522,6 +522,45 @@ impl ProjectService for ReaperProject {
     }
 
     // =========================================================================
+    // Actions / Commands
+    // =========================================================================
+
+    async fn run_command(&self, project: daw_proto::ProjectContext, command: String) -> bool {
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+
+            // Resolve command string to CommandId (numeric or named)
+            let cmd_id = if let Ok(numeric_id) = command.parse::<u32>() {
+                CommandId::new(numeric_id)
+            } else if let Some(named_id) = medium.named_command_lookup(command.as_str()) {
+                named_id
+            } else {
+                // Try with underscore prefix (SWS convention)
+                let prefixed = format!("_{command}");
+                if let Some(named_id) = medium.named_command_lookup(prefixed.as_str()) {
+                    named_id
+                } else {
+                    debug!("run_command: command not found: {}", command);
+                    return false;
+                }
+            };
+
+            // Resolve project context
+            let proj_ctx = match resolve_project(&project) {
+                Some(p) => ProjectContext::Proj(p.raw()),
+                None => ProjectContext::CurrentProject,
+            };
+
+            medium.main_on_command_ex(cmd_id, 0, proj_ctx);
+            debug!("run_command: executed '{}'", command);
+            true
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    // =========================================================================
     // Streaming
     // =========================================================================
 

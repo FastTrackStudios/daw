@@ -202,6 +202,20 @@ pub trait ProjectService {
     // Streaming
     // =========================================================================
 
+    // =========================================================================
+    // Actions / Commands
+    // =========================================================================
+
+    /// Run a REAPER action/command by its string identifier.
+    ///
+    /// Accepts either a numeric command ID (as a string) or a named command
+    /// identifier (e.g. `"_S&M_WNTSHW1"` for SWS actions, `"40001"` for
+    /// built-in actions).
+    ///
+    /// Returns `true` if the command was found and executed, `false` if the
+    /// command identifier could not be resolved.
+    async fn run_command(&self, project: ProjectContext, command: String) -> bool;
+
     /// Subscribe to project state changes
     ///
     /// Streams events when:

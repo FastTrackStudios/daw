@@ -225,6 +225,10 @@ impl ProjectService for StandaloneProject {
         None
     }
 
+    async fn run_command(&self, _project: daw_proto::ProjectContext, _command: String) -> bool {
+        false
+    }
+
     async fn subscribe(&self, tx: Tx<ProjectEvent>) {
         info!("ProjectService::subscribe() - starting project stream");
 

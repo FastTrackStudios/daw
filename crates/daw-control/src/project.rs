@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::{
-    DawClients, Error, FxChain, Markers, MidiAnalysis, ProjectItems, Regions, TempoMap, TrackHandle,
-    Tracks, Transport,
+    DawClients, Error, ExtState, FxChain, Markers, MidiAnalysis, ProjectItems, Regions, TempoMap,
+    TrackHandle, Tracks, Transport,
 };
 use daw_proto::FxChainContext;
 
@@ -352,6 +352,30 @@ impl Project {
             .project
             .last_redo_label(daw_proto::ProjectContext::project(&self.guid))
             .await?)
+    }
+
+    /// Run a REAPER action/command by its string identifier.
+    ///
+    /// Accepts either a numeric command ID (e.g. `"40001"`) or a named
+    /// command identifier (e.g. `"_S&M_WNTSHW1"` for SWS actions).
+    ///
+    /// Returns `true` if the command was found and executed.
+    pub async fn run_command(&self, command: &str) -> crate::Result<bool> {
+        Ok(self
+            .clients
+            .project
+            .run_command(
+                daw_proto::ProjectContext::project(&self.guid),
+                command.to_string(),
+            )
+            .await?)
+    }
+
+    /// Get a handle to the persistent key-value storage (ExtState).
+    ///
+    /// Same API as `Daw::ext_state()` — lightweight, cheap to clone.
+    pub fn ext_state(&self) -> ExtState {
+        ExtState::new(self.clients.clone())
     }
 
     /// Get project-level MIDI analysis accessor.
