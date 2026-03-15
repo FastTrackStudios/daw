@@ -204,7 +204,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -215,7 +215,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -448,15 +448,6 @@ dependencies = [
  "num-bigint",
  "num-integer",
  "num-traits",
- "serde",
-]
-
-[[package]]
-name = "bincode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
-dependencies = [
  "serde",
 ]
 
@@ -974,7 +965,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -2110,7 +2101,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2354,7 +2345,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2840,12 +2831,6 @@ name = "fragile"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28dd6caf6059519a65843af8fe2a3ae298b14b80179855aeb4adc2c1934ee619"
-
-[[package]]
-name = "fst"
-version = "0.4.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ab85b9b05e3978cc9a9cf8fea7f01b494e1a09ed3037e16ba39edc7a29eb61a"
 
 [[package]]
 name = "funty"
@@ -3618,28 +3603,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
-name = "hyphenation"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcf4dd4c44ae85155502a52c48739c8a48185d1449fff1963cffee63c28a50f0"
-dependencies = [
- "bincode",
- "fst",
- "hyphenation_commons",
- "serde",
-]
-
-[[package]]
-name = "hyphenation_commons"
-version = "0.8.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5febe7a2ade5c7d98eb8b75f946c046b335324b06a14ea0998271504134c05bf"
-dependencies = [
- "fst",
- "serde",
-]
-
-[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3897,7 +3860,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3962,7 +3925,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4110,7 +4073,6 @@ dependencies = [
  "daw-control",
  "facet",
  "helgoboss-midi",
- "hyphenation",
  "roam",
  "serde",
  "thiserror 2.0.18",
@@ -5139,7 +5101,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6707,7 +6669,7 @@ dependencies = [
 [[package]]
 name = "roam"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#cb6ed614d385b854f8f8ed77b737bcace4575678"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "facet",
  "facet-postcard",
@@ -6721,7 +6683,7 @@ dependencies = [
 [[package]]
 name = "roam-core"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#cb6ed614d385b854f8f8ed77b737bcace4575678"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "facet",
  "facet-core",
@@ -6742,7 +6704,7 @@ dependencies = [
 [[package]]
 name = "roam-hash"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#cb6ed614d385b854f8f8ed77b737bcace4575678"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "blake3",
  "facet-core",
@@ -6753,7 +6715,7 @@ dependencies = [
 [[package]]
 name = "roam-macros-core"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#cb6ed614d385b854f8f8ed77b737bcace4575678"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
@@ -6765,7 +6727,7 @@ dependencies = [
 [[package]]
 name = "roam-macros-parse"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#cb6ed614d385b854f8f8ed77b737bcace4575678"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -6774,7 +6736,7 @@ dependencies = [
 [[package]]
 name = "roam-service-macros"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#cb6ed614d385b854f8f8ed77b737bcace4575678"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "proc-macro2",
  "roam-macros-core",
@@ -6783,7 +6745,7 @@ dependencies = [
 [[package]]
 name = "roam-stream"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#cb6ed614d385b854f8f8ed77b737bcace4575678"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "roam-types",
@@ -6793,7 +6755,7 @@ dependencies = [
 [[package]]
 name = "roam-types"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#cb6ed614d385b854f8f8ed77b737bcace4575678"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e9a214c4fb7b482a1d7b37519ad5f10922da4532"
 dependencies = [
  "bitflags 2.11.0",
  "facet",
@@ -6912,7 +6874,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7343,6 +7305,7 @@ dependencies = [
  "roam",
  "signal-live",
  "signal-proto",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
@@ -7396,6 +7359,8 @@ dependencies = [
  "macromod",
  "roam",
  "serde",
+ "thiserror 2.0.18",
+ "utils",
  "uuid",
 ]
 
@@ -7585,7 +7550,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -8140,7 +8105,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8769,6 +8734,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
+name = "utils"
+version = "0.1.0"
+dependencies = [
+ "facet",
+ "serde",
+ "uuid",
+]
+
+[[package]]
 name = "uuid"
 version = "1.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9371,7 +9345,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

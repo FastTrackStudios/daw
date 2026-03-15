@@ -4,7 +4,19 @@
 
 use super::{InputMonitoringMode, RecordInput, Track, TrackRef};
 use crate::ProjectContext;
+use facet::Facet;
 use roam::service;
+
+/// Request for track-scoped extended state operations.
+///
+/// Groups section + key (+ optional value) into a single Facet struct
+/// to stay within the 4-element tuple limit for service method params.
+#[derive(Clone, Debug, Facet)]
+pub struct TrackExtStateRequest {
+    pub section: String,
+    pub key: String,
+    pub value: String,
+}
 
 /// Service for managing tracks in a DAW project
 ///
@@ -174,4 +186,40 @@ pub trait TrackService {
 
     /// Remove all tracks from the project (excluding master).
     async fn remove_all_tracks(&self, project: ProjectContext) -> Result<(), String>;
+
+    // =========================================================================
+    // Track ExtState (P_EXT)
+    // =========================================================================
+
+    /// Get a track-scoped extended state value.
+    ///
+    /// Uses REAPER's `GetSetMediaTrackInfo_String` with `P_EXT:section:key`.
+    /// Values are saved in the .RPP project file and copy with the track.
+    async fn get_ext_state(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        request: TrackExtStateRequest,
+    ) -> Option<String>;
+
+    /// Set a track-scoped extended state value.
+    ///
+    /// Uses REAPER's `GetSetMediaTrackInfo_String` with `P_EXT:section:key`.
+    /// Values are saved in the .RPP project file and copy with the track.
+    async fn set_ext_state(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        request: TrackExtStateRequest,
+    );
+
+    /// Delete a track-scoped extended state value.
+    ///
+    /// Sets the value to empty string, which REAPER treats as deleted.
+    async fn delete_ext_state(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        request: TrackExtStateRequest,
+    );
 }

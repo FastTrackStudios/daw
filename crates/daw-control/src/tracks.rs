@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use crate::{DawClients, Envelopes, Error, FxChain, HardwareOutputs, Items, Receives, Sends};
 use daw_proto::{
-    FxChainContext, InputMonitoringMode, ProjectContext, RecordInput, Track, TrackRef,
+    FxChainContext, InputMonitoringMode, ProjectContext, RecordInput, Track, TrackExtStateRequest,
+    TrackRef,
 };
 use crate::Result;
 
@@ -723,6 +724,67 @@ impl TrackHandle {
     /// Get the pan envelope
     pub fn pan_envelope(&self) -> crate::EnvelopeHandle {
         self.envelopes().pan()
+    }
+
+    // =========================================================================
+    // Track ExtState (P_EXT)
+    // =========================================================================
+
+    /// Get a track-scoped extended state value.
+    ///
+    /// Uses REAPER's `P_EXT:section:key` mechanism. Values are saved in the
+    /// .RPP project file and copy with the track when duplicated.
+    pub async fn get_ext_state(&self, section: &str, key: &str) -> Result<Option<String>> {
+        Ok(self
+            .clients
+            .track
+            .get_ext_state(
+                self.context(),
+                self.track_ref(),
+                TrackExtStateRequest {
+                    section: section.to_string(),
+                    key: key.to_string(),
+                    value: String::new(),
+                },
+            )
+            .await?)
+    }
+
+    /// Set a track-scoped extended state value.
+    ///
+    /// Uses REAPER's `P_EXT:section:key` mechanism. Values are saved in the
+    /// .RPP project file and copy with the track when duplicated.
+    pub async fn set_ext_state(&self, section: &str, key: &str, value: &str) -> Result<()> {
+        self.clients
+            .track
+            .set_ext_state(
+                self.context(),
+                self.track_ref(),
+                TrackExtStateRequest {
+                    section: section.to_string(),
+                    key: key.to_string(),
+                    value: value.to_string(),
+                },
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Delete a track-scoped extended state value.
+    pub async fn delete_ext_state(&self, section: &str, key: &str) -> Result<()> {
+        self.clients
+            .track
+            .delete_ext_state(
+                self.context(),
+                self.track_ref(),
+                TrackExtStateRequest {
+                    section: section.to_string(),
+                    key: key.to_string(),
+                    value: String::new(),
+                },
+            )
+            .await?;
+        Ok(())
     }
 }
 

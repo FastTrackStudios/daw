@@ -1,6 +1,6 @@
 //! Standalone track implementation
 
-use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackRef, TrackService};
+use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackExtStateRequest, TrackRef, TrackService};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -398,5 +398,30 @@ impl TrackService for StandaloneTrack {
         let mut tracks = self.tracks.write().await;
         tracks.clear();
         Ok(())
+    }
+
+    async fn get_ext_state(
+        &self,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _request: TrackExtStateRequest,
+    ) -> Option<String> {
+        None
+    }
+
+    async fn set_ext_state(
+        &self,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _request: TrackExtStateRequest,
+    ) {
+    }
+
+    async fn delete_ext_state(
+        &self,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _request: TrackExtStateRequest,
+    ) {
     }
 }

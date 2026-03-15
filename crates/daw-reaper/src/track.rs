@@ -4,7 +4,7 @@
 //! using TaskSupport from reaper-high. Follows the same pattern as ReaperFx and
 //! ReaperTransport.
 
-use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackRef, TrackService};
+use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackExtStateRequest, TrackRef, TrackService};
 use reaper_high::{GroupingBehavior, Reaper};
 use reaper_medium::GangBehavior;
 
@@ -745,5 +745,95 @@ impl TrackService for ReaperTrack {
         })
         .await
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
+    }
+
+    // =========================================================================
+    // Track ExtState (P_EXT)
+    // =========================================================================
+
+    async fn get_ext_state(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        request: TrackExtStateRequest,
+    ) -> Option<String> {
+        main_thread::query(move || {
+            let proj = resolve_project(&project)?;
+            let t = resolve_track(&proj, &track)?;
+            let raw = t.raw().ok()?;
+            let low = Reaper::get().medium_reaper().low();
+            let attr = std::ffi::CString::new(format!(
+                "P_EXT:{}:{}", request.section, request.key
+            )).ok()?;
+            let mut buf = vec![0u8; 65536];
+            let ok = unsafe {
+                low.GetSetMediaTrackInfo_String(
+                    raw.as_ptr(),
+                    attr.as_ptr(),
+                    buf.as_mut_ptr() as *mut i8,
+                    false,
+                )
+            };
+            if !ok {
+                return None;
+            }
+            let val = crate::safe_wrappers::buffer::string_from_buffer(&buf);
+            if val.is_empty() {
+                None
+            } else {
+                Some(val)
+            }
+        })
+        .await
+        .flatten()
+    }
+
+    async fn set_ext_state(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        request: TrackExtStateRequest,
+    ) {
+        main_thread::run(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some(t) = resolve_track(&proj, &track) else {
+                return;
+            };
+            let Ok(raw) = t.raw() else { return };
+            let low = Reaper::get().medium_reaper().low();
+            let attr = match std::ffi::CString::new(format!(
+                "P_EXT:{}:{}", request.section, request.key
+            )) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            let val = match std::ffi::CString::new(request.value) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            unsafe {
+                low.GetSetMediaTrackInfo_String(
+                    raw.as_ptr(),
+                    attr.as_ptr(),
+                    val.as_ptr() as *mut i8,
+                    true,
+                );
+            }
+        });
+    }
+
+    async fn delete_ext_state(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        request: TrackExtStateRequest,
+    ) {
+        self.set_ext_state(project, track, TrackExtStateRequest {
+            section: request.section,
+            key: request.key,
+            value: String::new(),
+        }).await;
     }
 }

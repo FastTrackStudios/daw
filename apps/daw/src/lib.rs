@@ -12,7 +12,24 @@ use daw_control::Daw;
 use daw_proto::FxType;
 use eyre::{Result, bail};
 use roam::ErasedCaller;
+use roam::SessionHandle;
 use serde_json::json;
+
+/// A DAW connection that keeps the roam session alive.
+///
+/// The `SessionHandle` must be kept alive for the duration of use —
+/// dropping it closes the underlying roam session and all RPC calls will fail.
+pub struct DawConnection {
+    pub daw: Daw,
+    _session: SessionHandle,
+}
+
+impl std::ops::Deref for DawConnection {
+    type Target = Daw;
+    fn deref(&self) -> &Daw {
+        &self.daw
+    }
+}
 
 // ============================================================================
 // Socket Discovery
@@ -134,7 +151,7 @@ pub fn kill_reaper(pid: u32) -> bool {
 ///
 /// Returns `(Daw, pid, socket_path)` on success. The caller is responsible
 /// for calling `teardown_owned(pid, socket_path)` when done.
-pub async fn launch_and_connect(config_id: &str) -> Result<(Daw, u32, PathBuf)> {
+pub async fn launch_and_connect(config_id: &str) -> Result<(DawConnection, u32, PathBuf)> {
     let config = config_by_id(config_id)
         .ok_or_else(|| eyre::eyre!("Unknown REAPER config: {config_id}"))?;
 
@@ -175,7 +192,7 @@ pub fn teardown_owned(pid: u32, socket: &PathBuf) {
 // Connection
 // ============================================================================
 
-pub async fn connect(socket: Option<PathBuf>) -> Result<Daw> {
+pub async fn connect(socket: Option<PathBuf>) -> Result<DawConnection> {
     let path = match socket {
         Some(p) => p,
         None => discover_socket()
@@ -193,12 +210,15 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<Daw> {
     .map_err(|e| eyre::eyre!("Failed to connect to {}: {}", path.display(), e))?;
 
     let link = roam_stream::StreamLink::unix(stream);
-    let (caller, _session) = roam::initiator(link)
+    let (caller, session) = roam::initiator(link)
         .establish::<roam::DriverCaller>(())
         .await
         .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
 
-    Ok(Daw::new(ErasedCaller::new(caller)))
+    Ok(DawConnection {
+        daw: Daw::new(ErasedCaller::new(caller)),
+        _session: session,
+    })
 }
 
 // ============================================================================
