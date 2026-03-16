@@ -609,21 +609,14 @@ impl ItemService for ReaperItem {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
-            let low = reaper_low::Reaper::get();
 
-            // Resolve project and track
             let proj = resolve_project(&project)
                 .or_else(|| Some(reaper.current_project()))?;
             let reaper_track = resolve_track(&proj, &track)?;
             let track_ptr = reaper_track.raw().ok()?;
 
-            // Add item to track via low-level API
-            let raw_item = unsafe { low.AddMediaItemToTrack(track_ptr.as_ptr()) };
-            if raw_item.is_null() {
-                tracing::error!("AddMediaItemToTrack returned null for track {:?}", track);
-                return None;
-            }
-            let item = unsafe { MediaItem::new(raw_item) }?;
+            // Add item using safe wrapper
+            let item = unsafe { medium.add_media_item_to_track(track_ptr) }.ok()?;
 
             // Set position and length
             item_sw::set_media_item_position(
@@ -639,18 +632,8 @@ impl ItemService for ReaperItem {
                 UiRefreshBehavior::NoRefresh,
             );
 
-            // Add a take with MIDI source
-            if let Ok(take) = unsafe { medium.add_take_to_media_item(item) } {
-                let low = reaper_low::Reaper::get();
-                let pcm_source = unsafe {
-                    low.PCM_Source_CreateFromType(b"MIDI\0".as_ptr() as _)
-                };
-                if !pcm_source.is_null() {
-                    unsafe {
-                        low.SetMediaItemTake_Source(take.as_ptr() as _, pcm_source);
-                    }
-                }
-            }
+            // Add a take
+            let _ = unsafe { medium.add_take_to_media_item(item) };
 
             medium.update_timeline();
             Some(format!("{:p}", item.as_ptr()))
