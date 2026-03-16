@@ -1098,16 +1098,12 @@ impl RoutingService for ReaperRouting {
                 RouteRef::ByDestination(_) => return,
             };
 
+            // route_index for Send is already send-category-local
+            // (hw outputs already subtracted by track_route_index())
             let (category, actual_index) = match location.route_type {
-                RouteType::Send => {
-                    let hw_count =
-                        reaper_track.typed_send_count(SendPartnerType::HardwareOutput);
-                    (TrackSendCategory::Send, route_index - hw_count.min(route_index))
-                }
+                RouteType::Send => (TrackSendCategory::Send, route_index),
                 RouteType::Receive => (TrackSendCategory::Receive, route_index),
-                RouteType::HardwareOutput => {
-                    (TrackSendCategory::HardwareOutput, route_index)
-                }
+                RouteType::HardwareOutput => (TrackSendCategory::HardwareOutput, route_index),
             };
 
             // REAPER I_SRCCHAN: just start_channel for stereo (default 2ch)
@@ -1151,16 +1147,12 @@ impl RoutingService for ReaperRouting {
                 RouteRef::ByDestination(_) => return,
             };
 
+            // route_index for Send is already send-category-local
+            // (hw outputs already subtracted by track_route_index())
             let (category, actual_index) = match location.route_type {
-                RouteType::Send => {
-                    let hw_count =
-                        reaper_track.typed_send_count(SendPartnerType::HardwareOutput);
-                    (TrackSendCategory::Send, route_index - hw_count.min(route_index))
-                }
+                RouteType::Send => (TrackSendCategory::Send, route_index),
                 RouteType::Receive => (TrackSendCategory::Receive, route_index),
-                RouteType::HardwareOutput => {
-                    (TrackSendCategory::HardwareOutput, route_index)
-                }
+                RouteType::HardwareOutput => (TrackSendCategory::HardwareOutput, route_index),
             };
 
             // REAPER I_DSTCHAN: just start_channel for stereo (default 2ch)
