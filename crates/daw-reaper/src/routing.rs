@@ -1110,8 +1110,8 @@ impl RoutingService for ReaperRouting {
                 }
             };
 
-            // REAPER I_SRCCHAN encoding: start_channel | (num_channels << 10)
-            let value = start_channel as f64 + ((num_channels as f64) * 1024.0);
+            // REAPER I_SRCCHAN: just start_channel for stereo (default 2ch)
+            let value = start_channel as f64;
             routing_sw::set_track_send_info_value(
                 Reaper::get().medium_reaper(),
                 raw_track,
@@ -1163,8 +1163,8 @@ impl RoutingService for ReaperRouting {
                 }
             };
 
-            // REAPER I_DSTCHAN encoding: start_channel | (num_channels << 10)
-            let value = start_channel as f64 + ((num_channels as f64) * 1024.0);
+            // REAPER I_DSTCHAN: just start_channel for stereo (default 2ch)
+            let value = start_channel as f64;
             routing_sw::set_track_send_info_value(
                 Reaper::get().medium_reaper(),
                 raw_track,
