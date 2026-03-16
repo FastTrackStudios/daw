@@ -1,23 +1,25 @@
 //! Safe wrappers for REAPER marker and region APIs.
 
 use super::ReaperLow;
+use reaper_medium::ProjectContext;
+use std::ffi::CStr;
 use std::os::raw::c_char;
 
 /// Delete a project marker or region.
 pub fn delete_project_marker(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     id: i32,
     is_region: bool,
 ) {
     unsafe {
-        low.DeleteProjectMarker(project, id, is_region);
+        low.DeleteProjectMarker(project.to_raw(), id, is_region);
     }
 }
 
 /// Set a project marker/region position and name.
 ///
-/// Pass `name` as `std::ptr::null()` to keep the existing name, or `-1.0` for
+/// Pass `name` as `None` to keep the existing name, or `-1.0` for
 /// position/end to keep the existing values.
 pub fn set_project_marker(
     low: &ReaperLow,
@@ -25,32 +27,34 @@ pub fn set_project_marker(
     is_region: bool,
     pos: f64,
     end: f64,
-    name: *const c_char,
+    name: Option<&CStr>,
 ) {
+    let name_ptr = name.map_or(std::ptr::null(), |n| n.as_ptr());
     unsafe {
-        low.SetProjectMarker(id, is_region, pos, end, name);
+        low.SetProjectMarker(id, is_region, pos, end, name_ptr);
     }
 }
 
 /// Set a project marker/region by index with color.
 pub fn set_project_marker_by_index2(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     id: i32,
     is_region: bool,
     pos: f64,
     end: f64,
     name_idx: i32,
-    name: *const c_char,
+    name: Option<&CStr>,
     color: i32,
     flags: i32,
 ) {
+    let name_ptr = name.map_or(std::ptr::null(), |n| n.as_ptr());
     unsafe {
-        low.SetProjectMarkerByIndex2(project, id, is_region, pos, end, name_idx, name, color, flags);
+        low.SetProjectMarkerByIndex2(project.to_raw(), id, is_region, pos, end, name_idx, name_ptr, color, flags);
     }
 }
 
-/// Enumerate project markers. Returns 0 when no more markers exist.
+/// Enumerate project markers. Returns `None` when no more markers exist.
 pub fn enum_project_markers(
     low: &ReaperLow,
     idx: i32,

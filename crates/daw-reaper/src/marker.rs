@@ -177,7 +177,7 @@ impl MarkerService for ReaperMarker {
             let low = reaper_high::Reaper::get().medium_reaper().low();
             sw::delete_project_marker(
                 low,
-                ReaperProjectContext::CurrentProject.to_raw(),
+                ReaperProjectContext::CurrentProject,
                 id as i32,
                 false,
             );
@@ -188,7 +188,7 @@ impl MarkerService for ReaperMarker {
         debug!("ReaperMarker: move_marker {} to {}", id, position);
         main_thread::run(move || {
             let low = reaper_high::Reaper::get().medium_reaper().low();
-            sw::set_project_marker(low, id as i32, false, position, 0.0, std::ptr::null());
+            sw::set_project_marker(low, id as i32, false, position, 0.0, None);
         });
     }
 
@@ -197,7 +197,7 @@ impl MarkerService for ReaperMarker {
         main_thread::run(move || {
             let low = reaper_high::Reaper::get().medium_reaper().low();
             if let Ok(cname) = CString::new(name) {
-                sw::set_project_marker(low, id as i32, false, -1.0, 0.0, cname.as_ptr());
+                sw::set_project_marker(low, id as i32, false, -1.0, 0.0, Some(&cname));
             }
         });
     }
@@ -208,13 +208,13 @@ impl MarkerService for ReaperMarker {
             let low = reaper_high::Reaper::get().medium_reaper().low();
             sw::set_project_marker_by_index2(
                 low,
-                ReaperProjectContext::CurrentProject.to_raw(),
+                ReaperProjectContext::CurrentProject,
                 id as i32,
                 false,
                 -1.0,
                 0.0,
                 -1,
-                std::ptr::null(),
+                None,
                 color as i32,
                 0,
             );

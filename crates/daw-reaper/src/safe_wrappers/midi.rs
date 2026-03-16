@@ -1,7 +1,7 @@
 //! Safe wrappers for REAPER MIDI APIs.
 
 use super::ReaperLow;
-use reaper_medium::MediaItemTake;
+use reaper_medium::{MediaItem, MediaItemTake, MediaTrack};
 
 /// Counts of MIDI events in a take.
 pub struct MidiEventCounts {
@@ -106,21 +106,21 @@ pub fn take_is_midi(low: &ReaperLow, take: MediaItemTake) -> bool {
 }
 
 /// Create a new MIDI item in a project.
-///
-/// Returns the raw item pointer, or null if creation failed.
 pub fn create_new_midi_item(
     low: &ReaperLow,
-    track: *mut reaper_low::raw::MediaTrack,
+    track: MediaTrack,
     start: f64,
     end: f64,
-) -> *mut reaper_low::raw::MediaItem {
-    unsafe { low.CreateNewMIDIItemInProj(track, start, end, std::ptr::null_mut()) }
+) -> Option<MediaItem> {
+    let ptr = unsafe { low.CreateNewMIDIItemInProj(track.as_ptr(), start, end, std::ptr::null_mut()) };
+    MediaItem::new(ptr)
 }
 
-/// Get the active take of a media item.
+/// Get the active take of a media item (low-level).
 pub fn get_active_take(
     low: &ReaperLow,
-    item: *mut reaper_low::raw::MediaItem,
-) -> *mut reaper_low::raw::MediaItem_Take {
-    unsafe { low.GetActiveTake(item) }
+    item: MediaItem,
+) -> Option<MediaItemTake> {
+    let ptr = unsafe { low.GetActiveTake(item.as_ptr()) };
+    MediaItemTake::new(ptr)
 }

@@ -11,7 +11,6 @@ use daw_proto::{
 };
 use reaper_high::Reaper;
 use reaper_medium::{MeasureMode, ProjectContext as ReaperProjectContext};
-use std::ptr::null_mut;
 use tracing::debug;
 
 // =============================================================================
@@ -23,7 +22,7 @@ use tracing::debug;
 /// Must be called from the main thread.
 pub fn time_to_qn_on_main_thread(seconds: f64) -> f64 {
     let low = Reaper::get().medium_reaper().low();
-    tw::time_to_qn(low, null_mut(), seconds)
+    tw::time_to_qn(low, ReaperProjectContext::CurrentProject, seconds)
 }
 
 /// Convert a quarter-note position to time position (seconds).
@@ -40,7 +39,7 @@ pub fn qn_to_time_on_main_thread(qn: f64) -> f64 {
 /// Must be called from the main thread.
 pub fn get_tempo_and_time_sig_at_on_main_thread(seconds: f64) -> (f64, i32, i32) {
     let low = Reaper::get().medium_reaper().low();
-    let ts = tw::get_time_sig_at_time(low, null_mut(), seconds);
+    let ts = tw::get_time_sig_at_time(low, ReaperProjectContext::CurrentProject, seconds);
     (ts.tempo, ts.num, ts.denom)
 }
 
@@ -97,7 +96,7 @@ impl TempoMapService for ReaperTempoMap {
             let mut points = Vec::with_capacity(count as usize);
 
             for i in 0..count {
-                if let Some(m) = sw::get_tempo_marker(low, null_mut(), i as i32) {
+                if let Some(m) = sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, i as i32) {
                     points.push(marker_to_point(&m));
                 }
             }
@@ -115,7 +114,7 @@ impl TempoMapService for ReaperTempoMap {
     ) -> Option<TempoPoint> {
         main_thread::query(move || {
             let low = Reaper::get().medium_reaper().low();
-            sw::get_tempo_marker(low, null_mut(), index as i32).map(|m| marker_to_point(&m))
+            sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32).map(|m| marker_to_point(&m))
         })
         .await
         .unwrap_or(None)
@@ -260,7 +259,7 @@ impl TempoMapService for ReaperTempoMap {
 
             let result = sw::set_tempo_marker(
                 low,
-                null_mut(),
+                ReaperProjectContext::CurrentProject,
                 -1,         // add new
                 seconds,
                 -1,         // measurepos (auto)
@@ -288,7 +287,7 @@ impl TempoMapService for ReaperTempoMap {
         debug!("ReaperTempoMap: remove_tempo_point at index {}", index);
         main_thread::run(move || {
             let low = Reaper::get().medium_reaper().low();
-            sw::delete_tempo_marker(low, null_mut(), index as i32);
+            sw::delete_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32);
         });
     }
 
@@ -305,10 +304,10 @@ impl TempoMapService for ReaperTempoMap {
         main_thread::run(move || {
             let low = Reaper::get().medium_reaper().low();
 
-            if let Some(m) = sw::get_tempo_marker(low, null_mut(), index as i32) {
+            if let Some(m) = sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32) {
                 sw::set_tempo_marker(
                     low,
-                    null_mut(),
+                    ReaperProjectContext::CurrentProject,
                     index as i32,
                     m.timepos,
                     m.measurepos,
@@ -336,10 +335,10 @@ impl TempoMapService for ReaperTempoMap {
         main_thread::run(move || {
             let low = Reaper::get().medium_reaper().low();
 
-            if let Some(m) = sw::get_tempo_marker(low, null_mut(), index as i32) {
+            if let Some(m) = sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32) {
                 sw::set_tempo_marker(
                     low,
-                    null_mut(),
+                    ReaperProjectContext::CurrentProject,
                     index as i32,
                     m.timepos,
                     m.measurepos,
@@ -366,10 +365,10 @@ impl TempoMapService for ReaperTempoMap {
         main_thread::run(move || {
             let low = Reaper::get().medium_reaper().low();
 
-            if let Some(m) = sw::get_tempo_marker(low, null_mut(), index as i32) {
+            if let Some(m) = sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32) {
                 sw::set_tempo_marker(
                     low,
-                    null_mut(),
+                    ReaperProjectContext::CurrentProject,
                     index as i32,
                     seconds,    // new position
                     -1,         // auto measure
@@ -452,12 +451,12 @@ impl TempoMapService for ReaperTempoMap {
 
             let mut found_at_zero = false;
             for i in 0..count {
-                if let Some(m) = sw::get_tempo_marker(low, null_mut(), i as i32) {
+                if let Some(m) = sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, i as i32) {
                     if m.timepos < 0.001 {
                         // Update existing marker at position 0
                         sw::set_tempo_marker(
                             low,
-                            null_mut(),
+                            ReaperProjectContext::CurrentProject,
                             i as i32,
                             0.0,
                             0,
@@ -477,7 +476,7 @@ impl TempoMapService for ReaperTempoMap {
                 // Add new marker at position 0
                 sw::set_tempo_marker(
                     low,
-                    null_mut(),
+                    ReaperProjectContext::CurrentProject,
                     -1, // add new
                     0.0,
                     0,

@@ -1,6 +1,7 @@
 //! Safe wrappers for REAPER TimeMap APIs.
 
 use super::ReaperLow;
+use reaper_medium::ProjectContext;
 
 /// Result from `TimeMap2_timeToBeats`.
 pub struct TimeToBeatsResult {
@@ -14,7 +15,7 @@ pub struct TimeToBeatsResult {
 /// Convert time to beats using `TimeMap2_timeToBeats`.
 pub fn time_to_beats(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     time: f64,
 ) -> TimeToBeatsResult {
     let mut measure_index: i32 = 0;
@@ -24,7 +25,7 @@ pub fn time_to_beats(
 
     let beats_frac = unsafe {
         low.TimeMap2_timeToBeats(
-            project,
+            project.to_raw(),
             time,
             &mut measure_index,
             &mut beats_since_measure,
@@ -43,31 +44,37 @@ pub fn time_to_beats(
 }
 
 /// Convert beats to time using `TimeMap2_beatsToTime`.
+///
+/// `measures_in` optionally specifies the measure context. Pass `None` for the
+/// default behavior.
 pub fn beats_to_time(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     beats: f64,
-    measures_in: *const i32,
+    measures_in: Option<i32>,
 ) -> f64 {
-    unsafe { low.TimeMap2_beatsToTime(project, beats, measures_in) }
+    let ptr = measures_in
+        .as_ref()
+        .map_or(std::ptr::null(), |v| v as *const i32);
+    unsafe { low.TimeMap2_beatsToTime(project.to_raw(), beats, ptr) }
 }
 
 /// Convert time to quarter notes using `TimeMap2_timeToQN`.
 pub fn time_to_qn(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     time: f64,
 ) -> f64 {
-    unsafe { low.TimeMap2_timeToQN(project, time) }
+    unsafe { low.TimeMap2_timeToQN(project.to_raw(), time) }
 }
 
 /// Convert quarter notes to time using `TimeMap2_QNToTime`.
 pub fn qn_to_time(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     qn: f64,
 ) -> f64 {
-    unsafe { low.TimeMap2_QNToTime(project, qn) }
+    unsafe { low.TimeMap2_QNToTime(project.to_raw(), qn) }
 }
 
 /// Result from `TimeMap_QNToMeasures`.
@@ -80,13 +87,13 @@ pub struct QnToMeasuresResult {
 /// Convert quarter notes to measure info.
 pub fn qn_to_measures(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     qn: f64,
 ) -> QnToMeasuresResult {
     let mut qn_start: f64 = 0.0;
     let mut qn_end: f64 = 0.0;
     let measure_index = unsafe {
-        low.TimeMap_QNToMeasures(project, qn, &mut qn_start, &mut qn_end)
+        low.TimeMap_QNToMeasures(project.to_raw(), qn, &mut qn_start, &mut qn_end)
     };
     QnToMeasuresResult {
         measure_index,
@@ -105,14 +112,14 @@ pub struct TimeSigAtTime {
 /// Get the time signature and tempo at a given time position.
 pub fn get_time_sig_at_time(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     time: f64,
 ) -> TimeSigAtTime {
     let mut num: i32 = 4;
     let mut denom: i32 = 4;
     let mut tempo: f64 = 120.0;
     unsafe {
-        low.TimeMap_GetTimeSigAtTime(project, time, &mut num, &mut denom, &mut tempo);
+        low.TimeMap_GetTimeSigAtTime(project.to_raw(), time, &mut num, &mut denom, &mut tempo);
     }
     TimeSigAtTime { num, denom, tempo }
 }
@@ -122,12 +129,12 @@ pub fn get_time_sig_at_time(
 /// Returns the time position (seconds) of the measure start.
 pub fn get_measure_info(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     measure_index: i32,
 ) -> f64 {
     unsafe {
         low.TimeMap_GetMeasureInfo(
-            project,
+            project.to_raw(),
             measure_index,
             std::ptr::null_mut(),
             std::ptr::null_mut(),

@@ -105,10 +105,11 @@ impl ReaperItem {
         let active_take_index = if let Some(active) = active_take {
             let mut found_index = 0;
             for i in 0..take_count {
-                let take_ptr = item_sw::get_take(low, item, i as i32);
-                if take_ptr == active.as_ptr() {
-                    found_index = i;
-                    break;
+                if let Some(take) = item_sw::get_take(low, item, i as i32) {
+                    if take == active {
+                        found_index = i;
+                        break;
+                    }
                 }
             }
             found_index
@@ -803,7 +804,7 @@ impl ReaperTake {
                 let count = item_sw::count_takes(low, item);
 
                 for i in 0..count {
-                    if let Some(take) = item_sw::get_take_medium(low, item, i)
+                    if let Some(take) = item_sw::get_take(low, item, i)
                         && let Ok(chunk) = Self::_get_take_state_chunk(take, 1024)
                         && let Some(take_guid) = extract_guid_from_chunk(&chunk)
                         && &take_guid == guid
@@ -813,7 +814,7 @@ impl ReaperTake {
                 }
                 None
             }
-            TakeRef::Index(idx) => item_sw::get_take_medium(low, item, *idx as i32),
+            TakeRef::Index(idx) => item_sw::get_take(low, item, *idx as i32),
             TakeRef::Active => item_sw::get_active_take(medium, item),
         }
     }
@@ -911,7 +912,7 @@ impl TakeService for ReaperTake {
 
             let count = item_sw::count_takes(low, item_ptr);
             for i in 0..count {
-                if let Some(take) = item_sw::get_take_medium(low, item_ptr, i)
+                if let Some(take) = item_sw::get_take(low, item_ptr, i)
                     && let Some(take_data) = Self::media_take_to_take(item_ptr, take, i as u32)
                 {
                     takes.push(take_data);
@@ -943,8 +944,7 @@ impl TakeService for ReaperTake {
                     let mut found_index = 0;
                     let count = item_sw::count_takes(low, item_ptr);
                     for i in 0..count {
-                        let t = item_sw::get_take(low, item_ptr, i);
-                        if t == take_ptr.as_ptr() {
+                        if item_sw::get_take(low, item_ptr, i) == Some(take_ptr) {
                             found_index = i as u32;
                             break;
                         }
@@ -974,8 +974,7 @@ impl TakeService for ReaperTake {
             let mut index = 0;
             let count = item_sw::count_takes(low, item_ptr);
             for i in 0..count {
-                let t = item_sw::get_take(low, item_ptr, i);
-                if t == take_ptr.as_ptr() {
+                if item_sw::get_take(low, item_ptr, i) == Some(take_ptr) {
                     index = i as u32;
                     break;
                 }

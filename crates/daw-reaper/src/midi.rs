@@ -20,17 +20,13 @@ use tracing::warn;
 ///
 /// Must be called from the main thread.
 pub fn create_midi_item_on_main_thread(
-    track: *mut reaper_low::raw::MediaTrack,
+    track: reaper_medium::MediaTrack,
     start_seconds: f64,
     end_seconds: f64,
 ) -> Option<MediaItemTake> {
     let low = reaper_high::Reaper::get().medium_reaper().low();
-    let item = sw::create_new_midi_item(low, track, start_seconds, end_seconds);
-    if item.is_null() {
-        return None;
-    }
-    let take = sw::get_active_take(low, item);
-    MediaItemTake::new(take)
+    let item = sw::create_new_midi_item(low, track, start_seconds, end_seconds)?;
+    sw::get_active_take(low, item)
 }
 
 /// Insert MIDI notes into a take, converting quarter-note positions to PPQ.
@@ -133,8 +129,7 @@ impl ReaperMidi {
                 crate::safe_wrappers::item::get_active_take(medium, item)
             }
             TakeRef::Index(index) => {
-                let take_ptr = item_sw::get_take(low, item, *index as i32);
-                MediaItemTake::new(take_ptr)
+                item_sw::get_take(low, item, *index as i32)
             }
             TakeRef::Guid(_) => crate::safe_wrappers::item::get_active_take(medium, item),
         }
@@ -236,13 +231,12 @@ impl MidiService for ReaperMidi {
                 }
             };
             let track_obj = crate::track::resolve_track_pub(&proj, &track)?;
-            let raw_track = track_obj.raw().ok()?.as_ptr();
+            let raw_track = track_obj.raw().ok()?;
             let take = create_midi_item_on_main_thread(raw_track, start_seconds, end_seconds)?;
 
             // Build a MidiTakeLocation from the item/take we just created
             let low = reaper.medium_reaper().low();
-            let item_ptr = item_sw::get_take_item(low, take);
-            let item = MediaItem::new(item_ptr)?;
+            let item = item_sw::get_take_item(low, take)?;
 
             // Get the item index in the project
             let item_count = reaper.medium_reaper().count_media_items(

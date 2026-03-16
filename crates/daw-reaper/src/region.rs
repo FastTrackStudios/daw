@@ -208,7 +208,7 @@ impl RegionService for ReaperRegion {
             let low = reaper_high::Reaper::get().medium_reaper().low();
             sw::delete_project_marker(
                 low,
-                ReaperProjectContext::CurrentProject.to_raw(),
+                ReaperProjectContext::CurrentProject,
                 id as i32,
                 true, // is a region
             );
@@ -234,7 +234,7 @@ impl RegionService for ReaperRegion {
                 true, // is a region
                 start,
                 end,
-                std::ptr::null(),
+                None,
             );
         });
     }
@@ -244,7 +244,7 @@ impl RegionService for ReaperRegion {
         main_thread::run(move || {
             let low = reaper_high::Reaper::get().medium_reaper().low();
             if let Ok(cname) = CString::new(name) {
-                sw::set_project_marker(low, id as i32, true, -1.0, -1.0, cname.as_ptr());
+                sw::set_project_marker(low, id as i32, true, -1.0, -1.0, Some(&cname));
             }
         });
     }
@@ -255,13 +255,13 @@ impl RegionService for ReaperRegion {
             let low = reaper_high::Reaper::get().medium_reaper().low();
             sw::set_project_marker_by_index2(
                 low,
-                ReaperProjectContext::CurrentProject.to_raw(),
+                ReaperProjectContext::CurrentProject,
                 id as i32,
                 true, // is a region
                 -1.0,
                 -1.0,
                 -1,
-                std::ptr::null(),
+                None,
                 color as i32,
                 0,
             );

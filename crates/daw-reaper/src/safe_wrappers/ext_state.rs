@@ -1,6 +1,7 @@
 //! Safe wrappers for REAPER ExtState APIs.
 
 use super::ReaperLow;
+use reaper_medium::ProjectContext;
 use std::ffi::CString;
 
 /// Get a global ext state value.
@@ -31,25 +32,25 @@ pub fn has_ext_state(low: &ReaperLow, section: &CString, key: &CString) -> bool 
 /// Get a project-scoped ext state value.
 pub fn get_proj_ext_state(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     section: &CString,
     key: &CString,
     buf_size: usize,
 ) -> Option<String> {
     super::buffer::with_string_buffer_i32(buf_size, |buf, len| unsafe {
-        low.GetProjExtState(project, section.as_ptr(), key.as_ptr(), buf, len)
+        low.GetProjExtState(project.to_raw(), section.as_ptr(), key.as_ptr(), buf, len)
     })
 }
 
 /// Set a project-scoped ext state value.
 pub fn set_proj_ext_state(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     section: &CString,
     key: &CString,
     value: &CString,
 ) {
     unsafe {
-        low.SetProjExtState(project, section.as_ptr(), key.as_ptr(), value.as_ptr());
+        low.SetProjExtState(project.to_raw(), section.as_ptr(), key.as_ptr(), value.as_ptr());
     }
 }

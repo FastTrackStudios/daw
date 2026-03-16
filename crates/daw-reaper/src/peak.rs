@@ -105,8 +105,7 @@ impl PeakService for ReaperPeak {
             let source = crate::safe_wrappers::item::get_take_source(medium, midi_take)?;
 
             // Get source length and sample rate from the take's item
-            let take_item = crate::safe_wrappers::item::get_take_item(low, midi_take);
-            let item_medium = reaper_medium::MediaItem::new(take_item)?;
+            let item_medium = crate::safe_wrappers::item::get_take_item(low, midi_take)?;
             let length = crate::safe_wrappers::item::get_item_info_value(
                 medium,
                 item_medium,

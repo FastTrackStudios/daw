@@ -64,8 +64,8 @@ impl ReaperMidiAnalysis {
             }
             let item_start_time = crate::safe_wrappers::item::get_media_item_info_value(
                 low,
-                raw_item.as_ptr(),
-                c"D_POSITION".as_ptr(),
+                raw_item,
+                c"D_POSITION",
             );
             return Some((take, item_start_time));
         }
@@ -97,7 +97,7 @@ impl ReaperMidiAnalysis {
 
     fn get_beats_at_time(project: Project, time_seconds: f64) -> f64 {
         let low = Reaper::get().medium_reaper().low();
-        let result = time_sw::time_to_beats(low, project.context().to_raw(), time_seconds);
+        let result = time_sw::time_to_beats(low, project.context(), time_seconds);
         result.full_beats
     }
 
@@ -203,6 +203,7 @@ impl ReaperMidiAnalysis {
             }],
             markers,
             vec![Some(source_track_name.clone())],
+            None,
         );
         let chart_text = generate_chart_text(&midi_file, &MidiChartConfig::default());
 

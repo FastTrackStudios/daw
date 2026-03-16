@@ -123,7 +123,7 @@ impl ExtStateService for ReaperExtState {
             let key_c = CString::new(key).ok()?;
             let low = Reaper::get().medium_reaper().low();
             let proj_ctx = resolve_project_context(&project);
-            sw::get_proj_ext_state(low, proj_ctx.to_raw(), &section_c, &key_c, 4096)
+            sw::get_proj_ext_state(low, proj_ctx, &section_c, &key_c, 4096)
         })
         .await
         .flatten()
@@ -153,7 +153,7 @@ impl ExtStateService for ReaperExtState {
             };
             let low = Reaper::get().medium_reaper().low();
             let proj_ctx = resolve_project_context(&project);
-            sw::set_proj_ext_state(low, proj_ctx.to_raw(), &section_c, &key_c, &value_c);
+            sw::set_proj_ext_state(low, proj_ctx, &section_c, &key_c, &value_c);
         });
     }
 

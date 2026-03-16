@@ -3,6 +3,8 @@
 //! Covers both low-level (`medium.low()`) and unsafe medium-level calls
 //! so that service code in `item.rs` can be 100% safe Rust.
 
+use std::ffi::CStr;
+
 use super::ReaperLow;
 use reaper_medium::{
     DurationInSeconds, ItemAttributeKey, MediaItem, MediaItemTake, MediaTrack,
@@ -48,23 +50,24 @@ pub fn count_takes(low: &ReaperLow, item: MediaItem) -> i32 {
     unsafe { low.CountTakes(item.as_ptr()) }
 }
 
-/// Get a take by index within an item (returns raw pointer).
+/// Get a take by index within an item.
 pub fn get_take(
-    low: &ReaperLow,
-    item: MediaItem,
-    index: i32,
-) -> *mut reaper_low::raw::MediaItem_Take {
-    unsafe { low.GetTake(item.as_ptr(), index) }
-}
-
-/// Get a take by index, returning a medium-level newtype.
-pub fn get_take_medium(
     low: &ReaperLow,
     item: MediaItem,
     index: i32,
 ) -> Option<MediaItemTake> {
     let ptr = unsafe { low.GetTake(item.as_ptr(), index) };
     MediaItemTake::new(ptr)
+}
+
+/// Get a take by index, returning a medium-level newtype.
+#[deprecated(note = "use get_take instead, which now returns Option<MediaItemTake>")]
+pub fn get_take_medium(
+    low: &ReaperLow,
+    item: MediaItem,
+    index: i32,
+) -> Option<MediaItemTake> {
+    get_take(low, item, index)
 }
 
 /// Set the active take for an item.
@@ -115,17 +118,18 @@ pub fn move_item_to_track(
 pub fn get_take_item(
     low: &ReaperLow,
     take: MediaItemTake,
-) -> *mut reaper_low::raw::MediaItem {
-    unsafe { low.GetMediaItemTake_Item(take.as_ptr()) }
+) -> Option<MediaItem> {
+    let ptr = unsafe { low.GetMediaItemTake_Item(take.as_ptr()) };
+    MediaItem::new(ptr)
 }
 
-/// Get a float info value from a media item (low-level, raw pointer).
+/// Get a float info value from a media item.
 pub fn get_media_item_info_value(
     low: &ReaperLow,
-    item: *mut reaper_low::raw::MediaItem,
-    attr: *const i8,
+    item: MediaItem,
+    attr: &CStr,
 ) -> f64 {
-    unsafe { low.GetMediaItemInfo_Value(item, attr) }
+    unsafe { low.GetMediaItemInfo_Value(item.as_ptr(), attr.as_ptr()) }
 }
 
 // =============================================================================

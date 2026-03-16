@@ -53,9 +53,9 @@ impl PositionConversionService for ReaperPositionConversion {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let low = Reaper::get().medium_reaper().low();
-            let proj_ptr = proj.raw().as_ptr();
+            let proj_ctx = proj.context();
 
-            let result = sw::time_to_beats(low, proj_ptr, time);
+            let result = sw::time_to_beats(low, proj_ctx, time);
 
             // Apply measure mode
             let final_measure = match measure_mode {
@@ -64,7 +64,7 @@ impl PositionConversionService for ReaperPositionConversion {
             };
 
             // Get time signature at this position
-            let ts = sw::get_time_sig_at_time(low, proj_ptr, time);
+            let ts = sw::get_time_sig_at_time(low, proj_ctx, time);
 
             Some(TimeToBeatsResult {
                 full_beats: PositionInBeats::from_beats(result.full_beats),
@@ -89,7 +89,7 @@ impl PositionConversionService for ReaperPositionConversion {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let low = Reaper::get().medium_reaper().low();
-            let proj_ptr = proj.raw().as_ptr();
+            let proj_ctx = proj.context();
 
             // Adjust beats based on measure mode
             let adjusted_beats = match measure_mode {
@@ -97,13 +97,13 @@ impl PositionConversionService for ReaperPositionConversion {
                 MeasureMode::FromMeasureAtIndex(measure_idx) => {
                     // Get the beat position at the start of this measure
                     let measure_start_time =
-                        sw::get_measure_info(low, proj_ptr, measure_idx);
-                    let tb = sw::time_to_beats(low, proj_ptr, measure_start_time);
+                        sw::get_measure_info(low, proj_ctx, measure_idx);
+                    let tb = sw::time_to_beats(low, proj_ctx, measure_start_time);
                     tb.full_beats + full_beats
                 }
             };
 
-            let time = sw::beats_to_time(low, proj_ptr, adjusted_beats, std::ptr::null());
+            let time = sw::beats_to_time(low, proj_ctx, adjusted_beats, None);
 
             Some(PositionInSeconds::from_seconds(time))
         })
@@ -122,16 +122,16 @@ impl PositionConversionService for ReaperPositionConversion {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let low = Reaper::get().medium_reaper().low();
-            let proj_ptr = proj.raw().as_ptr();
+            let proj_ctx = proj.context();
 
-            let qn_position = sw::time_to_qn(low, proj_ptr, time);
+            let qn_position = sw::time_to_qn(low, proj_ctx, time);
 
             // Get measure info
-            let minfo = sw::qn_to_measures(low, proj_ptr, qn_position);
+            let minfo = sw::qn_to_measures(low, proj_ctx, qn_position);
             let qn_since_measure = qn_position - minfo.qn_start;
 
             // Get time signature
-            let ts = sw::get_time_sig_at_time(low, proj_ptr, time);
+            let ts = sw::get_time_sig_at_time(low, proj_ctx, time);
 
             Some(TimeToQuarterNotesResult {
                 quarter_notes: PositionInQuarterNotes::from_quarter_notes(qn_position),
@@ -158,7 +158,7 @@ impl PositionConversionService for ReaperPositionConversion {
             let proj = resolve_project(&project)?;
             let low = Reaper::get().medium_reaper().low();
 
-            let time = sw::qn_to_time(low, proj.raw().as_ptr(), qn);
+            let time = sw::qn_to_time(low, proj.context(), qn);
 
             Some(PositionInSeconds::from_seconds(time))
         })
@@ -177,13 +177,13 @@ impl PositionConversionService for ReaperPositionConversion {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let low = Reaper::get().medium_reaper().low();
-            let proj_ptr = proj.raw().as_ptr();
+            let proj_ctx = proj.context();
 
-            let minfo = sw::qn_to_measures(low, proj_ptr, qn);
+            let minfo = sw::qn_to_measures(low, proj_ctx, qn);
 
             // Get time signature at this position
-            let time = sw::qn_to_time(low, proj_ptr, qn);
-            let ts = sw::get_time_sig_at_time(low, proj_ptr, time);
+            let time = sw::qn_to_time(low, proj_ctx, qn);
+            let ts = sw::get_time_sig_at_time(low, proj_ctx, time);
 
             Some(QuarterNotesToMeasureResult {
                 measure_index: minfo.measure_index,

@@ -1,6 +1,7 @@
 //! Safe wrappers for REAPER tempo/time-signature marker APIs.
 
 use super::ReaperLow;
+use reaper_medium::ProjectContext;
 
 /// Raw tempo marker data returned by `GetTempoTimeSigMarker`.
 #[derive(Debug, Default)]
@@ -19,7 +20,7 @@ pub struct TempoMarkerRaw {
 /// Returns `None` if the index is out of range.
 pub fn get_tempo_marker(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     index: i32,
 ) -> Option<TempoMarkerRaw> {
     let mut m = TempoMarkerRaw {
@@ -28,7 +29,7 @@ pub fn get_tempo_marker(
     };
     let exists = unsafe {
         low.GetTempoTimeSigMarker(
-            project,
+            project.to_raw(),
             index,
             &mut m.timepos,
             &mut m.measurepos,
@@ -47,7 +48,7 @@ pub fn get_tempo_marker(
 /// Pass `index = -1` to add a new marker.
 pub fn set_tempo_marker(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     index: i32,
     timepos: f64,
     measurepos: i32,
@@ -59,7 +60,7 @@ pub fn set_tempo_marker(
 ) -> bool {
     unsafe {
         low.SetTempoTimeSigMarker(
-            project,
+            project.to_raw(),
             index,
             timepos,
             measurepos,
@@ -75,10 +76,10 @@ pub fn set_tempo_marker(
 /// Delete a tempo/time-signature marker.
 pub fn delete_tempo_marker(
     low: &ReaperLow,
-    project: *mut reaper_low::raw::ReaProject,
+    project: ProjectContext,
     index: i32,
 ) {
     unsafe {
-        low.DeleteTempoTimeSigMarker(project, index);
+        low.DeleteTempoTimeSigMarker(project.to_raw(), index);
     }
 }
