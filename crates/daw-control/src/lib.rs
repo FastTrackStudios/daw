@@ -53,6 +53,11 @@
 // Re-export daw-proto types for convenience
 // Note: We selectively re-export to avoid shadowing our local modules (fx, tracks, transport, etc.)
 pub use daw_proto::{
+    // Audio engine types
+    AudioEngineState,
+    AudioInputChannel,
+    AudioInputInfo,
+    AudioLatency,
     // FX types
     AddFxAtRequest,
     CreateContainerRequest,
@@ -123,29 +128,31 @@ pub use daw_proto::transport::transport::Transport as TransportState;
 
 use std::sync::Arc;
 
-pub use daw_proto::AudioEngineServiceClient;
-pub use daw_proto::AutomationServiceClient;
-pub use daw_proto::ExtStateServiceClient;
-pub use daw_proto::FxServiceClient;
-pub use daw_proto::HealthServiceClient;
-pub use daw_proto::ItemServiceClient;
-pub use daw_proto::LiveMidiServiceClient;
-pub use daw_proto::MarkerServiceClient;
-pub use daw_proto::MidiAnalysisServiceClient;
-pub use daw_proto::MidiServiceClient;
-pub use daw_proto::PositionConversionServiceClient;
-pub use daw_proto::ProjectServiceClient;
-pub use daw_proto::RegionServiceClient;
-pub use daw_proto::RoutingServiceClient;
-pub use daw_proto::TakeServiceClient;
-pub use daw_proto::TempoMapServiceClient;
-pub use daw_proto::TrackServiceClient;
-pub use daw_proto::transport::transport::TransportServiceClient;
+// Service clients are internal — consumers use high-level handles instead.
+pub(crate) use daw_proto::AudioEngineServiceClient;
+pub(crate) use daw_proto::AutomationServiceClient;
+pub(crate) use daw_proto::ExtStateServiceClient;
+pub(crate) use daw_proto::FxServiceClient;
+pub(crate) use daw_proto::HealthServiceClient;
+pub(crate) use daw_proto::ItemServiceClient;
+pub(crate) use daw_proto::LiveMidiServiceClient;
+pub(crate) use daw_proto::MarkerServiceClient;
+pub(crate) use daw_proto::MidiAnalysisServiceClient;
+pub(crate) use daw_proto::MidiServiceClient;
+pub(crate) use daw_proto::PositionConversionServiceClient;
+pub(crate) use daw_proto::ProjectServiceClient;
+pub(crate) use daw_proto::RegionServiceClient;
+pub(crate) use daw_proto::RoutingServiceClient;
+pub(crate) use daw_proto::TakeServiceClient;
+pub(crate) use daw_proto::TempoMapServiceClient;
+pub(crate) use daw_proto::TrackServiceClient;
+pub(crate) use daw_proto::transport::transport::TransportServiceClient;
 pub use roam::ErasedCaller;
 
 pub mod error;
 pub use error::{Error, Result};
 
+mod audio_engine;
 mod automation;
 mod ext_state;
 mod fx;
@@ -160,6 +167,7 @@ mod tempo_map;
 mod tracks;
 mod transport;
 
+pub use self::audio_engine::AudioEngine;
 pub use self::automation::{EnvelopeHandle, Envelopes};
 pub use self::ext_state::ExtState;
 pub use self::fx::{FxChain, FxHandle, FxParamHandle};
@@ -445,7 +453,7 @@ impl Daw {
         Ok(rx)
     }
 
-    /// Get a handle to the audio engine service
+    /// Get a handle to the audio engine.
     ///
     /// The audio engine provides access to global audio device state
     /// including latency information useful for synchronization.
@@ -456,13 +464,13 @@ impl Daw {
     /// use daw_control::Daw;
     ///
     /// # async fn example(daw: &Daw) -> crate::Result<()> {
-    /// let latency = daw.audio_engine().get_output_latency_seconds().await?;
+    /// let latency = daw.audio_engine().output_latency_seconds().await?;
     /// println!("Audio output latency: {}ms", latency * 1000.0);
     /// # Ok(())
     /// # }
     /// ```
-    pub fn audio_engine(&self) -> &AudioEngineServiceClient {
-        &self.clients.audio_engine
+    pub fn audio_engine(&self) -> AudioEngine {
+        AudioEngine::new(self.clients.clone())
     }
 
     /// Get a handle to the persistent key-value storage (ExtState).
