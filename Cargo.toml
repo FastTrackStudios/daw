@@ -10,6 +10,10 @@ members = [
     "crates/daw-standalone",
     "crates/dawfile-reaper",
     "crates/daw-ui",
+    "crates/reaper-test",
+    "crates/reaper-test-macro",
+    "crates/reaper-launcher",
+    "xtask",
 ]
 resolver = "2"
 
@@ -48,7 +52,8 @@ dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus", default-features = f
 dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
 # Testing
-reaper-test = { path = "../FastTrackStudio/crates/reaper/reaper-test" }
+reaper-test = { path = "crates/reaper-test" }
+reaper-launcher = { path = "crates/reaper-launcher" }
 
 # REAPER bindings
 reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
