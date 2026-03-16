@@ -537,48 +537,54 @@ impl Daw {
 
 // ============================================================================
 // Global singleton support (for backwards compatibility / single-host usage)
+// Not available on WASM — roam's ErasedCallerDyn uses MaybeSend/MaybeSync
+// which are empty traits on wasm32, so Daw is not Sync and can't be in a static.
 // ============================================================================
 
-use std::sync::OnceLock;
+#[cfg(not(target_arch = "wasm32"))]
+mod global {
+    use super::*;
+    use std::sync::OnceLock;
 
-static GLOBAL_DAW: OnceLock<Daw> = OnceLock::new();
+    static GLOBAL_DAW: OnceLock<Daw> = OnceLock::new();
 
-impl Daw {
-    /// Initialize the global DAW connection (for single-host usage)
-    ///
-    /// This must be called once at startup before using the global static methods.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if already initialized.
-    pub fn init(handle: ErasedCaller) -> crate::Result<()> {
-        GLOBAL_DAW
-            .set(Daw::new(handle))
-            .map_err(|_| Error::InvalidOperation("DAW already initialized".to_string()))
-    }
+    impl Daw {
+        /// Initialize the global DAW connection (for single-host usage)
+        ///
+        /// This must be called once at startup before using the global static methods.
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if already initialized.
+        pub fn init(handle: ErasedCaller) -> crate::Result<()> {
+            GLOBAL_DAW
+                .set(Daw::new(handle))
+                .map_err(|_| Error::InvalidOperation("DAW already initialized".to_string()))
+        }
 
-    /// Get the global DAW instance
-    ///
-    /// # Panics
-    ///
-    /// Panics if `init()` has not been called.
-    pub fn get() -> &'static Daw {
-        GLOBAL_DAW
-            .get()
-            .expect("DAW not initialized. Call Daw::init() first.")
-    }
+        /// Get the global DAW instance
+        ///
+        /// # Panics
+        ///
+        /// Panics if `init()` has not been called.
+        pub fn get() -> &'static Daw {
+            GLOBAL_DAW
+                .get()
+                .expect("DAW not initialized. Call Daw::init() first.")
+        }
 
-    /// Try to get the global DAW instance without panicking.
-    ///
-    /// Returns `None` if `init()` has not been called yet.
-    /// Useful for gracefully handling the case where DAW is not yet initialized.
-    pub fn try_get() -> Option<&'static Daw> {
-        GLOBAL_DAW.get()
-    }
+        /// Try to get the global DAW instance without panicking.
+        ///
+        /// Returns `None` if `init()` has not been called yet.
+        /// Useful for gracefully handling the case where DAW is not yet initialized.
+        pub fn try_get() -> Option<&'static Daw> {
+            GLOBAL_DAW.get()
+        }
 
-    /// Check if the DAW has been initialized.
-    pub fn is_initialized() -> bool {
-        GLOBAL_DAW.get().is_some()
+        /// Check if the DAW has been initialized.
+        pub fn is_initialized() -> bool {
+            GLOBAL_DAW.get().is_some()
+        }
     }
 }
 

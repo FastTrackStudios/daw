@@ -95,6 +95,123 @@ pub fn song_name_from_path(path: &Path) -> String {
 
 // ── Track Concatenation (US-004) ─────────────────────────────────────────────
 
+// ── Song Bounds Resolution ───────────────────────────────────────────────────
+
+/// Resolved bounds for a song — the full range to include in the combined setlist.
+#[derive(Debug, Clone)]
+pub struct SongBounds {
+    /// Start of the song's allocated range (seconds, relative to project start).
+    pub start: f64,
+    /// End of the song's allocated range.
+    pub end: f64,
+    /// Position of the last marker/region endpoint in the song.
+    pub last_marker_position: f64,
+}
+
+/// Resolve the full bounds of a song from its markers.
+///
+/// Priority (outermost wins):
+/// 1. PREROLL → POSTROLL
+/// 2. COUNT-IN → POSTROLL (or =END if no POSTROLL)
+/// 3. =START → =END
+/// 4. SONGSTART → SONGEND
+/// 5. First section region → last section region end
+/// 6. 0 → last marker position
+pub fn resolve_song_bounds(project: &ReaperProject) -> SongBounds {
+    let markers = &project.markers_regions.all;
+
+    let mut preroll: Option<f64> = None;
+    let mut postroll: Option<f64> = None;
+    let mut count_in: Option<f64> = None;
+    let mut eq_start: Option<f64> = None;
+    let mut eq_end: Option<f64> = None;
+    let mut songstart: Option<f64> = None;
+    let mut songend: Option<f64> = None;
+    let mut last_pos: f64 = 0.0;
+    let mut first_section_start: Option<f64> = None;
+    let mut last_section_end: Option<f64> = None;
+
+    for m in markers {
+        let name_upper = m.name.to_uppercase();
+
+        let end_pos = m.end_position.unwrap_or(m.position);
+        if end_pos > last_pos { last_pos = end_pos; }
+        if m.position > last_pos { last_pos = m.position; }
+
+        match name_upper.as_str() {
+            "PREROLL" | "=PREROLL" => preroll = Some(m.position),
+            "POSTROLL" | "=POSTROLL" => postroll = Some(m.position),
+            "COUNT-IN" | "COUNT IN" | "COUNTIN" => count_in = Some(m.position),
+            "=START" => eq_start = Some(m.position),
+            "=END" => eq_end = Some(m.position),
+            "SONGSTART" => songstart = Some(m.position),
+            "SONGEND" => songend = Some(m.position),
+            _ => {
+                if m.is_region() && !m.name.is_empty() {
+                    if first_section_start.is_none() || m.position < first_section_start.unwrap() {
+                        first_section_start = Some(m.position);
+                    }
+                    if let Some(end) = m.end_position {
+                        if last_section_end.is_none() || end > last_section_end.unwrap() {
+                            last_section_end = Some(end);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let start = preroll
+        .or(count_in)
+        .or(eq_start)
+        .or(songstart)
+        .or(first_section_start)
+        .unwrap_or(0.0);
+
+    let end = postroll
+        .or(eq_end)
+        .or(songend)
+        .or(last_section_end)
+        .unwrap_or(last_pos);
+
+    SongBounds {
+        start,
+        end: end.max(start + 0.1),
+        last_marker_position: last_pos,
+    }
+}
+
+/// Build `SongInfo` entries from parsed projects using resolved bounds + gap.
+pub fn build_song_infos_from_projects(
+    projects: &[ReaperProject],
+    names: &[&str],
+    gap_seconds: f64,
+) -> Vec<SongInfo> {
+    assert_eq!(projects.len(), names.len());
+    let mut result = Vec::with_capacity(projects.len());
+    let mut offset = 0.0;
+
+    for (i, (project, name)) in projects.iter().zip(names.iter()).enumerate() {
+        let bounds = resolve_song_bounds(project);
+        let duration = bounds.end - bounds.start;
+
+        result.push(SongInfo {
+            name: name.to_string(),
+            global_start_seconds: offset,
+            duration_seconds: duration,
+        });
+
+        offset += duration;
+        if i < projects.len() - 1 {
+            offset += gap_seconds;
+        }
+    }
+
+    result
+}
+
+// ── Track Concatenation (US-004) ─────────────────────────────────────────────
+
 /// Well-known guide track names that get merged across songs.
 const GUIDE_TRACK_NAMES: &[&str] = &["Click", "Loop", "Count", "Guide"];
 
@@ -256,22 +373,29 @@ pub fn concatenate_tempo_envelopes(
         let offset = song.global_start_seconds;
 
         if let Some(ref envelope) = project.tempo_envelope {
-            for (i, point) in envelope.points.iter().enumerate() {
+            let mut last_tempo = envelope.default_tempo;
+
+            for point in &envelope.points {
                 let mut p = point.clone();
                 p.position += offset;
-
-                // Force all points to square shape (instant transitions)
-                // in the combined setlist. Gradual tempo ramps within
-                // individual songs don't translate well when concatenated
-                // because the gap between songs would cause unexpected
-                // interpolation.
-                p.shape = 1;
-
+                p.shape = 1; // Force square (instant) for combined setlists
+                last_tempo = p.tempo;
                 points.push(p);
             }
+
+            // Insert a trailing tempo marker at the song's last marker position.
+            // This "freezes" the tempo at the end of the song, preventing any
+            // curve/interpolation from bleeding into the gap or next song.
+            let bounds = resolve_song_bounds(project);
+            let trailing_pos = bounds.last_marker_position + offset;
+            if trailing_pos > points.last().map(|p| p.position).unwrap_or(0.0) {
+                let mut trailing = TempoTimePoint::default();
+                trailing.position = trailing_pos;
+                trailing.tempo = last_tempo;
+                trailing.shape = 1;
+                points.push(trailing);
+            }
         }
-        // Songs without tempo envelopes inherit the previous song's last tempo
-        // (REAPER will use project default if no envelope exists)
     }
 
     let (default_tempo, default_ts) = projects
@@ -304,8 +428,11 @@ pub fn generate_markers_regions(
 
     for (project, song) in projects.iter().zip(songs.iter()) {
         let offset = song.global_start_seconds;
+        let bounds = resolve_song_bounds(project);
 
-        // Song-spanning region
+        // SONG lane region — spans the full song bounds + a tiny bit past the last marker.
+        // The extra 0.1s ensures the region visually covers the trailing tempo marker.
+        let song_region_end = offset + (bounds.last_marker_position - bounds.start) + 0.1;
         all.push(MarkerRegion {
             id: next_id,
             position: offset,
@@ -315,13 +442,13 @@ pub fn generate_markers_regions(
             locked: 0,
             guid: String::new(),
             additional: 0,
-            end_position: Some(offset + song.duration_seconds),
-            lane: None,
+            end_position: Some(song_region_end.max(offset + song.duration_seconds)),
+            lane: Some(3), // SONG lane (index 3)
             beat_position: None,
         });
         next_id += 1;
 
-        // Offset copies of internal markers/regions
+        // Offset copies of internal markers/regions with lane classification
         for mr in &project.markers_regions.all {
             let mut cloned = mr.clone();
             cloned.position += offset;
@@ -330,6 +457,12 @@ pub fn generate_markers_regions(
             }
             cloned.id = next_id;
             cloned.guid = String::new();
+
+            // Classify into the correct ruler lane if not already set
+            if cloned.lane.is_none() || cloned.lane == Some(0) {
+                cloned.lane = Some(0); // TODO: implement classify_lane
+            }
+
             all.push(cloned);
             next_id += 1;
         }
@@ -437,17 +570,31 @@ pub fn project_to_rpp_text(project: &ReaperProject) -> String {
         out.push_str("  >\n");
     }
 
+    // Ruler lane definitions (FTS standard layout)
+    // These must come before markers so REAPER knows the lane names
+    out.push_str("  RULERHEIGHT 120 84\n");
+    out.push_str("  RULERLANE 1 8 SECTIONS 0 -1\n");  // flag 8 = default region lane
+    out.push_str("  RULERLANE 2 0 MARKS 0 -1\n");
+    out.push_str("  RULERLANE 3 4 SONG 0 -1\n");      // flag 4 = default marker lane
+    out.push_str("  RULERLANE 4 0 START/END 0 -1\n");
+    out.push_str("  RULERLANE 5 0 KEY 0 -1\n");
+    out.push_str("  RULERLANE 6 0 MODE 0 -1\n");
+    out.push_str("  RULERLANE 7 0 CHORDS 0 -1\n");
+    out.push_str("  RULERLANE 8 0 NOTES 0 -1\n");
+
     // Markers and regions
+    // The last number on each MARKER line is the ruler lane index (0 = default)
     for mr in &project.markers_regions.all {
+        let lane = mr.lane.unwrap_or(0);
         if mr.is_region() {
             // Region: two MARKER lines with same ID
-            out.push_str(&format!("  MARKER {} {} {:?} 1 0 1 R {{}} 0\n",
-                mr.id, mr.position, mr.name));
-            out.push_str(&format!("  MARKER {} {} \"\" 1 0 1 R {{}} 0\n",
-                mr.id, mr.end_position.unwrap_or(mr.position)));
+            out.push_str(&format!("  MARKER {} {} {:?} 1 0 1 R {{}} 0 {}\n",
+                mr.id, mr.position, mr.name, lane));
+            out.push_str(&format!("  MARKER {} {} \"\" 1 0 1 R {{}} 0 {}\n",
+                mr.id, mr.end_position.unwrap_or(mr.position), lane));
         } else {
-            out.push_str(&format!("  MARKER {} {} {:?} 0 0 1 B {{}} 0\n",
-                mr.id, mr.position, mr.name));
+            out.push_str(&format!("  MARKER {} {} {:?} 0 0 1 B {{}} 0 {}\n",
+                mr.id, mr.position, mr.name, lane));
         }
     }
 
@@ -515,6 +662,29 @@ fn write_item_rpp(out: &mut String, item: &Item, indent: usize) {
         out.push_str(&format!("{}  NAME {:?}\n", prefix, item.name));
     }
     out.push_str(&format!("{}>\n", prefix));
+}
+
+// ── Lane Classification ──────────────────────────────────────────────────────
+
+/// FTS ruler lane indices (matching session-proto::ruler_lanes::CoreLane).
+const LANE_SECTIONS: u32 = 1;
+const LANE_MARKS: u32 = 2;
+const LANE_START_END: u32 = 4;
+
+/// Classify a marker/region name into the correct FTS ruler lane index.
+fn classify_lane(name: &str, is_region: bool) -> u32 {
+    if is_region {
+        // Most regions are sections
+        LANE_SECTIONS
+    } else {
+        let upper = name.trim().to_uppercase();
+        match upper.as_str() {
+            "SONGSTART" | "SONGEND" | "COUNT-IN" | "COUNT IN" | "COUNTIN" => LANE_MARKS,
+            "=START" | "=END" | "PREROLL" | "=PREROLL" | "POSTROLL" | "=POSTROLL" => LANE_START_END,
+            _ if name.starts_with('=') => LANE_START_END,
+            _ => 0, // Default lane for unclassified markers
+        }
+    }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

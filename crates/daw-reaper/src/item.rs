@@ -609,66 +609,51 @@ impl ItemService for ReaperItem {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
-            // Try specific project first, fall back to current
-            let proj = resolve_project(&project)
-                .unwrap_or_else(|| reaper.current_project());
-            let reaper_track = match resolve_track(&proj, &track) {
-                Some(t) => t,
-                None => {
-                    // Track not found in resolved project — try all projects
-                    let mut found = None;
-                    for tab in 0..128u32 {
-                        if let Some(result) = medium.enum_projects(ProjectRef::Tab(tab), 0) {
-                            let p = Project::new(result.project);
-                            if let Some(t) = resolve_track(&p, &track) {
-                                found = Some(t);
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                    found?
-                }
-            };
-            let track_ptr = reaper_track.raw().ok()?;
-
-            // Use fully low-level REAPER API for item creation
             let low = reaper_low::Reaper::get();
 
-            // Ensure correct project tab is active
-            unsafe { low.SelectProjectInstance(proj.raw().as_ptr()); }
+            // Resolve project and track
+            let proj = resolve_project(&project)
+                .or_else(|| Some(reaper.current_project()))?;
+            let reaper_track = resolve_track(&proj, &track)?;
+            let track_ptr = reaper_track.raw().ok()?;
 
-            let raw_track = track_ptr.as_ptr();
-
-            // Create item on track
-            let raw_item = unsafe { low.AddMediaItemToTrack(raw_track) };
+            // Add item to track via low-level API
+            let raw_item = unsafe { low.AddMediaItemToTrack(track_ptr.as_ptr()) };
             if raw_item.is_null() {
+                tracing::error!("AddMediaItemToTrack returned null for track {:?}", track);
                 return None;
             }
+            let item = unsafe { MediaItem::new(raw_item) }?;
 
             // Set position and length
-            unsafe {
-                low.SetMediaItemInfo_Value(raw_item, b"D_POSITION\0".as_ptr() as _, position.as_seconds());
-                low.SetMediaItemInfo_Value(raw_item, b"D_LENGTH\0".as_ptr() as _, length.as_seconds());
-            }
+            item_sw::set_media_item_position(
+                medium,
+                item,
+                reaper_medium::PositionInSeconds::new(position.as_seconds()).ok()?,
+                UiRefreshBehavior::NoRefresh,
+            );
+            item_sw::set_media_item_length(
+                medium,
+                item,
+                DurationInSeconds::new(length.as_seconds()).ok()?,
+                UiRefreshBehavior::NoRefresh,
+            );
 
-            // Add take with MIDI source
-            let raw_take = unsafe { low.AddTakeToMediaItem(raw_item) };
-            if !raw_take.is_null() {
+            // Add a take with MIDI source
+            if let Ok(take) = unsafe { medium.add_take_to_media_item(item) } {
+                let low = reaper_low::Reaper::get();
                 let pcm_source = unsafe {
                     low.PCM_Source_CreateFromType(b"MIDI\0".as_ptr() as _)
                 };
                 if !pcm_source.is_null() {
                     unsafe {
-                        low.SetMediaItemTake_Source(raw_take, pcm_source);
+                        low.SetMediaItemTake_Source(take.as_ptr() as _, pcm_source);
                     }
                 }
             }
 
-            unsafe { low.UpdateArrange() };
-
-            Some(format!("{:p}", raw_item))
+            medium.update_timeline();
+            Some(format!("{:p}", item.as_ptr()))
         })
         .await
         .unwrap_or(None)
