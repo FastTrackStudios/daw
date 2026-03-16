@@ -17,10 +17,13 @@ use crate::types::track::{FolderSettings, FolderState, Track};
 pub struct SongInfo {
     /// Song name — used as the folder name in TRACKS/.
     pub name: String,
-    /// Time offset: all item positions shift by this amount.
+    /// Where this song starts in the combined timeline.
     pub global_start_seconds: f64,
     /// Duration of the song in seconds.
     pub duration_seconds: f64,
+    /// Local start position within the original project (bounds.start).
+    /// Items/markers in the original at `local_start` map to `global_start_seconds`.
+    pub local_start: f64,
 }
 
 /// Build `SongInfo` entries from song names and durations, with a configurable
@@ -40,6 +43,7 @@ pub fn build_song_infos(
             name: name.to_string(),
             global_start_seconds: offset,
             duration_seconds: *duration,
+            local_start: 0.0, // Simple builder assumes songs start at 0
         });
         offset += duration;
         if i < songs.len() - 1 {
@@ -199,6 +203,7 @@ pub fn build_song_infos_from_projects(
             name: name.to_string(),
             global_start_seconds: offset,
             duration_seconds: duration,
+            local_start: bounds.start,
         });
 
         offset += duration;
@@ -233,7 +238,7 @@ pub fn concatenate_tracks(projects: &[ReaperProject], songs: &[SongInfo]) -> Vec
     let mut song_contents: Vec<SongContent> = Vec::new();
 
     for (project, song) in projects.iter().zip(songs.iter()) {
-        let offset = song.global_start_seconds;
+        let offset = song.global_start_seconds - song.local_start;
         let mut content = SongContent { tracks: vec![] };
 
         for track in &project.tracks {
@@ -370,7 +375,7 @@ pub fn concatenate_tempo_envelopes(
     let mut points: Vec<TempoTimePoint> = Vec::new();
 
     for (project, song) in projects.iter().zip(songs.iter()) {
-        let offset = song.global_start_seconds;
+        let offset = song.global_start_seconds - song.local_start;
 
         if let Some(ref envelope) = project.tempo_envelope {
             let mut last_tempo = envelope.default_tempo;
@@ -427,7 +432,7 @@ pub fn generate_markers_regions(
     let mut next_id: i32 = 1;
 
     for (project, song) in projects.iter().zip(songs.iter()) {
-        let offset = song.global_start_seconds;
+        let offset = song.global_start_seconds - song.local_start;
         let bounds = resolve_song_bounds(project);
 
         // SONG lane region — spans the full song bounds + a tiny bit past the last marker.

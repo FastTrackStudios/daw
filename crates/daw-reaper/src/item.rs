@@ -628,9 +628,12 @@ impl ItemService for ReaperItem {
             let reaper_track = resolve_track(&proj, &track)?;
             let track_ptr = reaper_track.raw().ok()?;
 
-            // Use CreateNewMIDIItemInProj which creates a proper MIDI item
-            // with an active in-project MIDI take
+            // Switch to the correct project tab before creating the item.
+            // CreateNewMIDIItemInProj uses the current project context.
             let low = medium.low();
+            unsafe { low.SelectProjectInstance(proj.raw().as_ptr()); }
+
+            // Create a proper MIDI item with an active in-project MIDI take
             let start = position.as_seconds();
             let end = start + length.as_seconds();
             let raw_item = unsafe {

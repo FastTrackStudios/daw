@@ -79,6 +79,16 @@ async fn item_create_basic(ctx: &reaper_test::ReaperTestContext) -> eyre::Result
         }
     };
 
+    // Debug: get track chunk to inspect item/take/source
+    let chunk = track.get_chunk().await.unwrap_or_else(|_| "FAILED".into());
+    // Find the ITEM section
+    if let Some(item_start) = chunk.find("<ITEM") {
+        let item_chunk = &chunk[item_start..chunk.len().min(item_start + 800)];
+        ctx.log(&format!("Item chunk:\n{}", item_chunk));
+    } else {
+        ctx.log("No <ITEM found in track chunk");
+    }
+
     // Debug: check project context
     ctx.log(&format!("Project ID: {}", ctx.project.guid()));
     ctx.log(&format!("Item guid: {}", item.guid()));
@@ -92,6 +102,10 @@ async fn item_create_basic(ctx: &reaper_test::ReaperTestContext) -> eyre::Result
             return Err(eyre::eyre!("Failed to add MIDI note: {:?}", e));
         }
     }
+
+    // Debug: check if note count changes after single add
+    let count_after_add = take.midi().note_count().await?;
+    ctx.log(&format!("Note count after add_note: {}", count_after_add));
 
     // Step 7b: Try adding multiple notes via add_notes
     ctx.log("Adding 3 more notes via add_notes...");

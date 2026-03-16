@@ -82,7 +82,9 @@ impl ReaperMidi {
 
     fn extract_guid_from_chunk(chunk: &str) -> Option<String> {
         for line in chunk.lines() {
-            if let Some(rest) = line.strip_prefix("GUID ") {
+            let trimmed = line.trim();
+            // IGUID is the item GUID, GUID is the take GUID
+            if let Some(rest) = trimmed.strip_prefix("IGUID ") {
                 return Some(rest.trim().to_string());
             }
         }
@@ -139,7 +141,18 @@ impl ReaperMidi {
         medium: &reaper_medium::Reaper,
         location: &MidiTakeLocation,
     ) -> Option<MediaItemTake> {
+        // Ensure the correct project tab is active for item resolution
+        if let ProjectContext::Project(guid) = &location.project {
+            if let Some(raw_proj) = crate::project_context::find_project_by_guid_raw(guid) {
+                unsafe { medium.low().SelectProjectInstance(raw_proj.as_ptr()); }
+                tracing::debug!("MIDI: switched to project {}", guid);
+            } else {
+                tracing::warn!("MIDI: could not find project {}", guid);
+            }
+        }
         let project_ctx = resolve_project_context(&location.project);
+        let item_count = medium.count_media_items(project_ctx);
+        tracing::debug!("MIDI: project has {} items, looking for {:?}", item_count, location.item);
         let item = Self::resolve_item(medium, project_ctx, &location.item)?;
         Self::resolve_take(medium, item, &location.take)
     }

@@ -59,7 +59,7 @@ fn combine_battle_sp26_rpl() {
     println!("\nParsed {}/{} projects successfully", projects.len(), rpp_paths.len());
 
     // ── 2. Build song infos with 2-measure gap at 120 BPM ───────────
-    let gap = measures_to_seconds(2, 120.0, 4);
+    let gap = measures_to_seconds(16, 120.0, 4);
     let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
     let song_infos = build_song_infos_from_projects(&projects, &name_refs, gap);
 
