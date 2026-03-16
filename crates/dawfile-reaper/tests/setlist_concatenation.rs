@@ -183,3 +183,105 @@ fn concatenate_three_songs_with_bounds() {
 
     println!("\n═══ ALL ASSERTIONS PASSED ═══\n");
 }
+
+// ─── Shell Copy Generation ───────────────────────────────────────────────────
+
+#[test]
+fn shell_copy_preserves_structure_strips_content() {
+    let rpl_path = fixture_path("test_setlist.RPL");
+    let rpp_paths = setlist_rpp::parse_rpl(&rpl_path).unwrap();
+    let projects: Vec<_> = rpp_paths.iter()
+        .map(|p| read_project(p).unwrap())
+        .collect();
+
+    let gap = measures_to_seconds(2, 120.0, 4);
+    let names: Vec<&str> = vec!["Song A", "Song B", "Song C"];
+    let songs = build_song_infos_from_projects(&projects, &names, gap);
+    let master = concatenate_projects(&projects, &songs);
+
+    // Generate a Vocals shell copy
+    let shell = setlist_rpp::generate_shell_copy(&master, "Vocals");
+
+    println!("\n═══ SHELL COPY: Vocals ═══\n");
+    println!("Tracks ({}):", shell.tracks.len());
+    for (i, t) in shell.tracks.iter().enumerate() {
+        let folder = t.folder.as_ref()
+            .map(|f| format!(" [{:?} indent={}]", f.folder_state, f.indentation))
+            .unwrap_or_default();
+        let items = if t.items.is_empty() { String::new() } else { format!(" ({} items)", t.items.len()) };
+        println!("  {:>2}. {}{}{}", i, t.name, folder, items);
+    }
+
+    // Should have Click/Guide tracks WITH items (performer needs the click)
+    let click = shell.tracks.iter().find(|t| t.name == "Click");
+    assert!(click.is_some(), "Shell should keep Click track");
+    assert!(!click.unwrap().items.is_empty(), "Click track should keep its items");
+
+    // Should NOT have content tracks (Guitar, Bass, Keys, Drums, Synth Lead)
+    let content_names = ["Guitar", "Bass", "Keys", "Drums", "Synth Lead"];
+    for name in &content_names {
+        assert!(
+            !shell.tracks.iter().any(|t| t.name == *name),
+            "Shell should NOT have {} track", name
+        );
+    }
+
+    // Should NOT have Song A/B/C folders or TRACKS folder
+    assert!(!shell.tracks.iter().any(|t| t.name == "TRACKS"), "No TRACKS folder");
+    assert!(!shell.tracks.iter().any(|t| t.name == "Song A"), "No Song A folder");
+
+    // Should have a Vocals role folder
+    let vocals_folder = shell.tracks.iter().find(|t| t.name == "Vocals");
+    assert!(vocals_folder.is_some(), "Should have Vocals folder");
+
+    // Should preserve tempo envelope
+    assert!(shell.tempo_envelope.is_some(), "Should keep tempo envelope");
+    let env = shell.tempo_envelope.as_ref().unwrap();
+    assert!(env.points.len() >= 3, "Should keep all tempo points");
+
+    // Should preserve markers/regions
+    assert!(!shell.markers_regions.all.is_empty(), "Should keep markers/regions");
+
+    println!("\nTempo points: {}", env.points.len());
+    println!("Markers/regions: {}", shell.markers_regions.all.len());
+    println!("\n═══ SHELL COPY VERIFIED ═══\n");
+}
+
+#[test]
+fn generate_all_role_setlists() {
+    let rpl_path = fixture_path("test_setlist.RPL");
+    let rpp_paths = setlist_rpp::parse_rpl(&rpl_path).unwrap();
+    let projects: Vec<_> = rpp_paths.iter()
+        .map(|p| read_project(p).unwrap())
+        .collect();
+
+    let gap = measures_to_seconds(2, 120.0, 4);
+    let names: Vec<&str> = vec!["Song A", "Song B", "Song C"];
+    let songs = build_song_infos_from_projects(&projects, &names, gap);
+    let master = concatenate_projects(&projects, &songs);
+
+    // Generate all standard roles
+    let roles = setlist_rpp::STANDARD_ROLES;
+    let role_projects = setlist_rpp::generate_role_setlists(&master, roles);
+
+    println!("\n═══ ROLE SETLISTS ═══\n");
+    for (role, project) in &role_projects {
+        let has_click = project.tracks.iter().any(|t| t.name == "Click" && !t.items.is_empty());
+        let has_role_folder = project.tracks.iter().any(|t| t.name == *role);
+        // Check no content tracks remain (excluding the role folder itself and its placeholder)
+        let content_names = ["TRACKS", "Song A", "Song B", "Song C", "Synth Lead"];
+        let no_content = !project.tracks.iter().any(|t| {
+            content_names.contains(&t.name.as_str())
+        });
+
+        println!("  {} — {} tracks, click={}, role_folder={}, no_content={}",
+            role, project.tracks.len(), has_click, has_role_folder, no_content);
+
+        assert!(has_click, "{} should have Click with items", role);
+        assert!(has_role_folder, "{} should have role folder", role);
+        assert!(no_content, "{} should not have content tracks", role);
+    }
+
+    assert_eq!(role_projects.len(), roles.len());
+    println!("\n═══ ALL {} ROLES VERIFIED ═══\n", roles.len());
+}

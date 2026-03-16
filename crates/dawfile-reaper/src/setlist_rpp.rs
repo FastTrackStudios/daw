@@ -493,6 +493,157 @@ pub fn concatenate_projects(projects: &[ReaperProject], songs: &[SongInfo]) -> R
     combined
 }
 
+// ── Shell Copy Generation ────────────────────────────────────────────────────
+
+/// Generate a shell copy of a setlist project for a specific role.
+///
+/// A shell copy preserves the timeline structure (tempo, markers, regions,
+/// ruler lanes) and the Click/Guide tracks, but strips all content tracks.
+/// A placeholder folder for the role's own tracks is added.
+///
+/// This enables role-specific REAPER instances (Vocals, Guitar, Keys, etc.)
+/// to share the same timeline and click track while having their own
+/// independent track setup.
+pub fn generate_shell_copy(master: &ReaperProject, role: &str) -> ReaperProject {
+    let mut shell = master.clone();
+
+    // Strip content tracks — keep only Click/Guide tracks
+    let mut kept_tracks: Vec<Track> = Vec::new();
+    let mut in_guide_folder = false;
+    let mut guide_depth: i32 = 0;
+
+    for track in &master.tracks {
+        let name_lower = track.name.to_lowercase();
+        let is_folder_start = track.folder.as_ref()
+            .map_or(false, |f| f.folder_state == FolderState::FolderParent);
+        let is_folder_end = track.folder.as_ref()
+            .map_or(false, |f| f.folder_state == FolderState::LastInFolder);
+
+        // Track the Click/Guide folder hierarchy
+        if name_lower == "click/guide" && is_folder_start {
+            in_guide_folder = true;
+            guide_depth = 1;
+            kept_tracks.push(track.clone());
+            continue;
+        }
+
+        if in_guide_folder {
+            kept_tracks.push(track.clone());
+            if is_folder_start {
+                guide_depth += 1;
+            }
+            if is_folder_end {
+                guide_depth += track.folder.as_ref().map_or(0, |f| f.indentation);
+                if guide_depth <= 0 {
+                    in_guide_folder = false;
+                }
+            }
+            continue;
+        }
+
+        // Also keep individual Click/Loop/Count/Guide tracks at the top level
+        // (in case they're not inside a Click/Guide folder)
+        if GUIDE_TRACK_NAMES.iter().any(|g| g.to_lowercase() == name_lower)
+            && !is_folder_start
+        {
+            kept_tracks.push(track.clone());
+            continue;
+        }
+
+        // Skip everything else (TRACKS folder, song folders, content tracks)
+    }
+
+    // Add a role folder for the performer's own tracks
+    let mut role_folder = Track {
+        name: role.to_string(),
+        folder: Some(FolderSettings {
+            folder_state: FolderState::FolderParent,
+            indentation: 0,
+        }),
+        ..Track::default()
+    };
+
+    // Add a placeholder child track inside the role folder
+    let mut placeholder = Track {
+        name: format!("{} (add tracks here)", role),
+        folder: Some(FolderSettings {
+            folder_state: FolderState::LastInFolder,
+            indentation: -1,
+        }),
+        ..Track::default()
+    };
+
+    kept_tracks.push(role_folder);
+    kept_tracks.push(placeholder);
+
+    shell.tracks = kept_tracks;
+
+    // Clear items from the top-level items list (they're inside tracks)
+    shell.items.clear();
+
+    shell
+}
+
+/// Generate shell copies for multiple roles from a master setlist.
+///
+/// Returns a vec of (role_name, project) pairs.
+pub fn generate_role_setlists(
+    master: &ReaperProject,
+    roles: &[&str],
+) -> Vec<(String, ReaperProject)> {
+    roles
+        .iter()
+        .map(|role| {
+            let shell = generate_shell_copy(master, role);
+            (role.to_string(), shell)
+        })
+        .collect()
+}
+
+/// Standard FTS roles for setlist shell copies.
+pub const STANDARD_ROLES: &[&str] = &[
+    "Vocals",
+    "Guitar",
+    "Guitar 2",
+    "Keys",
+    "Keys 2",
+    "Bass",
+    "Drums",
+];
+
+/// Write all role setlists to a directory.
+///
+/// Each file is named `{role} - {setlist_name}.RPP`.
+/// Returns the paths of the written files.
+pub fn write_role_setlists(
+    master: &ReaperProject,
+    roles: &[&str],
+    setlist_name: &str,
+    output_dir: &Path,
+) -> std::io::Result<Vec<PathBuf>> {
+    std::fs::create_dir_all(output_dir)?;
+
+    let role_projects = generate_role_setlists(master, roles);
+    let mut paths = Vec::new();
+
+    for (role, project) in &role_projects {
+        let filename = format!("{} - {}.RPP", role, setlist_name);
+        let path = output_dir.join(&filename);
+        let rpp_text = project_to_rpp_text(project);
+        std::fs::write(&path, &rpp_text)?;
+        paths.push(path);
+    }
+
+    // Also write the master as "Tracks - {name}.RPP"
+    let master_filename = format!("Tracks - {}.RPP", setlist_name);
+    let master_path = output_dir.join(&master_filename);
+    let master_text = project_to_rpp_text(master);
+    std::fs::write(&master_path, &master_text)?;
+    paths.insert(0, master_path);
+
+    Ok(paths)
+}
+
 // ── RPP Serialization ────────────────────────────────────────────────────────
 
 /// Write a combined `ReaperProject` to RPP text.

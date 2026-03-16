@@ -348,10 +348,30 @@ impl ReaperItem {
         let medium = reaper.medium_reaper();
 
         let item = match item_ref {
-            ItemRef::Guid(_guid) => {
-                // GUID lookup not directly supported in reaper_medium
-                // Would need to iterate through all items and check GUIDs
-                // For now, return None
+            ItemRef::Guid(guid) => {
+                // Iterate all items in the project and match GUID
+                let item_count = medium.count_media_items(project);
+                for i in 0..item_count {
+                    if let Some(candidate) = medium.get_media_item(project, i) {
+                        let guid_ptr = unsafe {
+                            medium.low().GetSetMediaItemInfo(
+                                candidate.as_ptr(),
+                                b"GUID\0".as_ptr() as _,
+                                std::ptr::null_mut(),
+                            ) as *const reaper_low::raw::GUID
+                        };
+                        if !guid_ptr.is_null() {
+                            let g = unsafe { &*guid_ptr };
+                            let item_guid = format!("{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+                                g.Data1, g.Data2, g.Data3,
+                                g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
+                                g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
+                            if item_guid == *guid {
+                                return Some(candidate);
+                            }
+                        }
+                    }
+                }
                 return None;
             }
             ItemRef::Index(idx) => {
@@ -626,15 +646,38 @@ impl ItemService for ReaperItem {
                 UiRefreshBehavior::NoRefresh,
             );
 
-            // Add a take
-            let _ = unsafe { medium.add_take_to_media_item(item) };
+            // Add a take with MIDI source
+            if let Ok(take) = unsafe { medium.add_take_to_media_item(item) } {
+                let pcm_source = unsafe {
+                    medium.low().PCM_Source_CreateFromType(b"MIDI\0".as_ptr() as _)
+                };
+                if !pcm_source.is_null() {
+                    unsafe {
+                        medium.low().SetMediaItemTake_Source(take.as_ptr() as _, pcm_source);
+                    }
+                }
+            }
 
             medium.update_timeline();
 
-            // Return pointer-based ID — proper GUID extraction needs
-            // reaper_low which can crash on load. The resolve_item method
-            // handles pointer-based IDs.
-            Some(format!("{:p}", item.as_ptr()))
+            // Get item GUID via low-level API (using medium.low() to avoid
+            // reaper_low::Reaper::get() which crashes the extension on load)
+            let guid_ptr = unsafe {
+                medium.low().GetSetMediaItemInfo(
+                    item.as_ptr(),
+                    b"GUID\0".as_ptr() as _,
+                    std::ptr::null_mut(),
+                ) as *const reaper_low::raw::GUID
+            };
+            if !guid_ptr.is_null() {
+                let g = unsafe { &*guid_ptr };
+                Some(format!("{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+                    g.Data1, g.Data2, g.Data3,
+                    g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
+                    g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]))
+            } else {
+                Some(format!("{:p}", item.as_ptr()))
+            }
         })
         .await
         .unwrap_or(None)
