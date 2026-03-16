@@ -460,7 +460,7 @@ pub fn generate_markers_regions(
 
             // Classify into the correct ruler lane if not already set
             if cloned.lane.is_none() || cloned.lane == Some(0) {
-                cloned.lane = Some(0); // TODO: implement classify_lane
+                cloned.lane = Some(classify_lane(&cloned.name, cloned.is_region()) as i32);
             }
 
             all.push(cloned);
