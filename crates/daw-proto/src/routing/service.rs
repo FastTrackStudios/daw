@@ -1,9 +1,9 @@
 //! Routing service trait
 
-use super::{RouteRef, RouteType, SendMode, TrackRoute};
+use super::{RouteRef, RouteType, RoutingEvent, SendMode, TrackRoute};
 use crate::project::ProjectContext;
 use crate::track::TrackRef;
-use roam::service;
+use roam::{Tx, service};
 
 /// Specifies a route location (track + route type + route reference)
 #[derive(Clone, Debug, facet::Facet)]
@@ -132,4 +132,9 @@ pub trait RoutingService {
         track: TrackRef,
         enabled: bool,
     );
+
+    // === Subscriptions ===
+
+    /// Subscribe to routing change events for a project.
+    async fn subscribe_routing(&self, project: ProjectContext, tx: Tx<RoutingEvent>);
 }

@@ -1,9 +1,9 @@
 //! Item and Take service traits
 
-use super::{FadeShape, Item, ItemRef, SourceType, Take, TakeRef};
+use super::{FadeShape, Item, ItemEvent, ItemRef, SourceType, Take, TakeEvent, TakeRef};
 use crate::primitives::{BeatAttachMode, Duration, PositionInSeconds};
 use crate::{ProjectContext, TrackRef};
-use roam::service;
+use roam::{Tx, service};
 
 /// Service for managing items on tracks
 ///
@@ -142,6 +142,13 @@ pub trait ItemService {
 
     /// Set the group ID (None to remove from group)
     async fn set_group_id(&self, project: ProjectContext, item: ItemRef, group_id: Option<u32>);
+
+    // =========================================================================
+    // Subscriptions
+    // =========================================================================
+
+    /// Subscribe to item change events for a project.
+    async fn subscribe_items(&self, project: ProjectContext, tx: Tx<ItemEvent>);
 }
 
 /// Service for managing takes within items
@@ -257,4 +264,11 @@ pub trait TakeService {
         item: ItemRef,
         take: TakeRef,
     ) -> SourceType;
+
+    // =========================================================================
+    // Subscriptions
+    // =========================================================================
+
+    /// Subscribe to take change events for a project.
+    async fn subscribe_takes(&self, project: ProjectContext, tx: Tx<TakeEvent>);
 }

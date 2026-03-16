@@ -1,6 +1,7 @@
 //! Standalone track implementation
 
-use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackExtStateRequest, TrackRef, TrackService};
+use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent, TrackExtStateRequest, TrackRef, TrackService};
+use roam::Tx;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -424,4 +425,6 @@ impl TrackService for StandaloneTrack {
         _request: TrackExtStateRequest,
     ) {
     }
+
+    async fn subscribe_tracks(&self, _project: ProjectContext, _tx: Tx<TrackEvent>) {}
 }

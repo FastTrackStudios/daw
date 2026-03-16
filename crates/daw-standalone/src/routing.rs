@@ -4,10 +4,12 @@ use daw_proto::{
     ProjectContext,
     primitives::AutomationMode,
     routing::{
-        ChannelMapping, RouteLocation, RouteRef, RouteType, RoutingService, SendMode, TrackRoute,
+        ChannelMapping, RouteLocation, RouteRef, RouteType, RoutingEvent, RoutingService, SendMode,
+        TrackRoute,
     },
     track::TrackRef,
 };
+use roam::Tx;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -376,4 +378,6 @@ impl RoutingService for StandaloneRouting {
     ) {
         // Stub - no-op
     }
+
+    async fn subscribe_routing(&self, _project: ProjectContext, _tx: Tx<RoutingEvent>) {}
 }

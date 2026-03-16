@@ -4,8 +4,9 @@
 
 use daw_proto::{
     Position, ProjectContext, TimePosition, TimeSignature,
-    tempo_map::{TempoMapService, TempoPoint},
+    tempo_map::{TempoMapEvent, TempoMapService, TempoPoint},
 };
+use roam::Tx;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::debug;
@@ -427,4 +428,6 @@ impl TempoMapService for StandaloneTempoMap {
             numerator, denominator
         );
     }
+
+    async fn subscribe_tempo_map(&self, _project: ProjectContext, _tx: Tx<TempoMapEvent>) {}
 }

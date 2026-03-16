@@ -2,10 +2,10 @@
 //!
 //! Defines the RPC interface for track operations.
 
-use super::{InputMonitoringMode, RecordInput, Track, TrackRef};
+use super::{InputMonitoringMode, RecordInput, Track, TrackEvent, TrackRef};
 use crate::ProjectContext;
 use facet::Facet;
-use roam::service;
+use roam::{Tx, service};
 
 /// Request for track-scoped extended state operations.
 ///
@@ -222,4 +222,15 @@ pub trait TrackService {
         track: TrackRef,
         request: TrackExtStateRequest,
     );
+
+    // =========================================================================
+    // Subscriptions
+    // =========================================================================
+
+    /// Subscribe to track change events for a project.
+    ///
+    /// Streams granular `TrackEvent`s (added, removed, renamed, mute/solo
+    /// changes, volume/pan changes, etc.) for as long as the client is
+    /// connected.
+    async fn subscribe_tracks(&self, project: ProjectContext, tx: Tx<TrackEvent>);
 }

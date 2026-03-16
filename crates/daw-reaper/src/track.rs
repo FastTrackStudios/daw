@@ -4,13 +4,302 @@
 //! using TaskSupport from reaper-high. Follows the same pattern as ReaperFx and
 //! ReaperTransport.
 
-use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackExtStateRequest, TrackRef, TrackService};
-use reaper_high::{GroupingBehavior, Reaper};
-use reaper_medium::GangBehavior;
+use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent, TrackExtStateRequest, TrackRef, TrackService};
+use reaper_high::{GroupingBehavior, Project, Reaper};
+use reaper_medium::{GangBehavior, ProjectRef};
+use roam::Tx;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use tokio::sync::broadcast;
 
 use crate::main_thread;
-use crate::project_context::find_project_by_guid;
+use crate::project_context::{find_project_by_guid, project_guid};
 use crate::safe_wrappers::routing as routing_sw;
+
+// =============================================================================
+// Track Change Detection (Broadcaster + Cache + Poll)
+// =============================================================================
+
+/// Global track event broadcaster
+static TRACK_BROADCASTER: OnceLock<broadcast::Sender<TrackEvent>> = OnceLock::new();
+
+/// Cached per-project track states for change detection.
+/// Key is project GUID, value is the list of cached track states for that project.
+static TRACK_CACHE: OnceLock<Mutex<HashMap<String, Vec<CachedTrackState>>>> = OnceLock::new();
+
+/// Cached track state for change detection.
+/// Mirrors the fields we want to diff between polls.
+#[derive(Clone, Debug)]
+struct CachedTrackState {
+    guid: String,
+    name: String,
+    muted: bool,
+    soloed: bool,
+    armed: bool,
+    selected: bool,
+    volume: f64,
+    pan: f64,
+    color: Option<u32>,
+    visible_in_tcp: bool,
+    visible_in_mixer: bool,
+    index: u32,
+    folder_depth: i32,
+    fx_count: u32,
+    input_fx_count: u32,
+    is_folder: bool,
+}
+
+/// Build a CachedTrackState from a reaper-high Track.
+fn build_cached_track_state(track: &reaper_high::Track) -> CachedTrackState {
+    let guid = track.guid().to_string_without_braces();
+    let index = track.index().unwrap_or(0);
+    let name = track
+        .name()
+        .map(|n| n.to_str().to_string())
+        .unwrap_or_else(|| {
+            if track.is_master_track() {
+                "MASTER".to_string()
+            } else {
+                format!("Track {}", index + 1)
+            }
+        });
+    let color = track
+        .custom_color()
+        .map(|c| ((c.r as u32) << 16) | ((c.g as u32) << 8) | (c.b as u32));
+    let volume = track.volume().get();
+    let pan = track.pan().reaper_value().get();
+    let muted = track.is_muted();
+    let soloed = track.is_solo();
+    let armed = track.is_armed(false);
+    let selected = track.is_selected();
+    let folder_depth = track.folder_depth_change();
+    let is_folder = folder_depth > 0;
+    let fx_count = track.normal_fx_chain().fx_count();
+    let input_fx_count = track.input_fx_chain().fx_count();
+    let visible_in_tcp = track.is_shown(reaper_medium::TrackArea::Tcp);
+    let visible_in_mixer = track.is_shown(reaper_medium::TrackArea::Mcp);
+
+    CachedTrackState {
+        guid,
+        name,
+        muted,
+        soloed,
+        armed,
+        selected,
+        volume,
+        pan,
+        color,
+        visible_in_tcp,
+        visible_in_mixer,
+        index,
+        folder_depth,
+        fx_count,
+        input_fx_count,
+        is_folder,
+    }
+}
+
+/// Convert a CachedTrackState into a daw_proto::Track for Added events.
+fn cached_to_track(cached: &CachedTrackState) -> Track {
+    Track {
+        guid: cached.guid.clone(),
+        index: cached.index,
+        name: cached.name.clone(),
+        color: cached.color,
+        muted: cached.muted,
+        soloed: cached.soloed,
+        armed: cached.armed,
+        selected: cached.selected,
+        volume: cached.volume,
+        pan: cached.pan,
+        parent_guid: None, // parent_guid is assigned via post-processing
+        folder_depth: cached.folder_depth,
+        is_folder: cached.is_folder,
+        visible_in_tcp: cached.visible_in_tcp,
+        visible_in_mixer: cached.visible_in_mixer,
+        fx_count: cached.fx_count,
+        input_fx_count: cached.input_fx_count,
+    }
+}
+
+/// Initialize the track broadcaster.
+/// Called by the extension during initialization.
+pub fn init_track_broadcaster() {
+    let (tx, _rx) = broadcast::channel::<TrackEvent>(256);
+    let _ = TRACK_BROADCASTER.set(tx);
+    let _ = TRACK_CACHE.set(Mutex::new(HashMap::new()));
+}
+
+/// Get a receiver for track events.
+fn track_receiver() -> Option<broadcast::Receiver<TrackEvent>> {
+    TRACK_BROADCASTER.get().map(|tx| tx.subscribe())
+}
+
+/// Threshold for volume/pan change detection
+const VOLUME_PAN_THRESHOLD: f64 = 0.0001;
+
+/// Poll REAPER track state for ALL open projects and broadcast changes.
+/// **MUST be called from the main thread** (e.g., from timer callback).
+///
+/// Iterates all open projects, reads track state, diffs against cache,
+/// and emits granular TrackEvent variants for each change.
+pub fn poll_and_broadcast_tracks() {
+    let Some(tx) = TRACK_BROADCASTER.get() else {
+        return;
+    };
+    if tx.receiver_count() == 0 {
+        return;
+    }
+
+    let Some(cache) = TRACK_CACHE.get() else {
+        return;
+    };
+    let mut cache_guard = cache.lock().unwrap();
+
+    let reaper = Reaper::get();
+    let medium = reaper.medium_reaper();
+
+    // Track which project GUIDs we've seen this poll (for cleanup)
+    let mut seen_guids = Vec::new();
+
+    // Iterate through all open projects
+    for tab_index in 0..128u32 {
+        let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
+            break;
+        };
+
+        let project = Project::new(result.project);
+        let proj_guid = project_guid(&project);
+        seen_guids.push(proj_guid.clone());
+
+        // Build current track states for this project
+        let current: Vec<CachedTrackState> = project
+            .tracks()
+            .map(|t| build_cached_track_state(&t))
+            .collect();
+
+        // Get previous cached state
+        let previous = cache_guard.get(&proj_guid);
+
+        // Diff and emit events
+        diff_and_emit(tx, previous.map(|v| v.as_slice()).unwrap_or(&[]), &current);
+
+        // Update cache
+        cache_guard.insert(proj_guid, current);
+    }
+
+    // Clean up cache entries for projects that are no longer open
+    cache_guard.retain(|guid, _| seen_guids.contains(guid));
+}
+
+/// Diff previous and current track states and emit TrackEvent variants.
+fn diff_and_emit(
+    tx: &broadcast::Sender<TrackEvent>,
+    previous: &[CachedTrackState],
+    current: &[CachedTrackState],
+) {
+    // Build lookup of previous tracks by GUID
+    let prev_map: HashMap<&str, &CachedTrackState> = previous
+        .iter()
+        .map(|t| (t.guid.as_str(), t))
+        .collect();
+
+    let curr_map: HashMap<&str, &CachedTrackState> = current
+        .iter()
+        .map(|t| (t.guid.as_str(), t))
+        .collect();
+
+    // Check for added tracks (in current but not in previous)
+    for curr in current {
+        if !prev_map.contains_key(curr.guid.as_str()) {
+            let _ = tx.send(TrackEvent::Added(cached_to_track(curr)));
+        }
+    }
+
+    // Check for removed tracks (in previous but not in current)
+    for prev in previous {
+        if !curr_map.contains_key(prev.guid.as_str()) {
+            let _ = tx.send(TrackEvent::Removed(prev.guid.clone()));
+        }
+    }
+
+    // Check for changed tracks (in both previous and current)
+    for curr in current {
+        let Some(prev) = prev_map.get(curr.guid.as_str()) else {
+            continue; // Already handled as Added
+        };
+
+        let guid = &curr.guid;
+
+        if prev.name != curr.name {
+            let _ = tx.send(TrackEvent::Renamed {
+                guid: guid.clone(),
+                name: curr.name.clone(),
+            });
+        }
+        if prev.muted != curr.muted {
+            let _ = tx.send(TrackEvent::MuteChanged {
+                guid: guid.clone(),
+                muted: curr.muted,
+            });
+        }
+        if prev.soloed != curr.soloed {
+            let _ = tx.send(TrackEvent::SoloChanged {
+                guid: guid.clone(),
+                soloed: curr.soloed,
+            });
+        }
+        if prev.armed != curr.armed {
+            let _ = tx.send(TrackEvent::ArmChanged {
+                guid: guid.clone(),
+                armed: curr.armed,
+            });
+        }
+        if prev.selected != curr.selected {
+            let _ = tx.send(TrackEvent::SelectionChanged {
+                guid: guid.clone(),
+                selected: curr.selected,
+            });
+        }
+        if (prev.volume - curr.volume).abs() > VOLUME_PAN_THRESHOLD {
+            let _ = tx.send(TrackEvent::VolumeChanged {
+                guid: guid.clone(),
+                volume: curr.volume,
+            });
+        }
+        if (prev.pan - curr.pan).abs() > VOLUME_PAN_THRESHOLD {
+            let _ = tx.send(TrackEvent::PanChanged {
+                guid: guid.clone(),
+                pan: curr.pan,
+            });
+        }
+        if prev.color != curr.color {
+            let _ = tx.send(TrackEvent::ColorChanged {
+                guid: guid.clone(),
+                color: curr.color,
+            });
+        }
+        if prev.visible_in_tcp != curr.visible_in_tcp {
+            let _ = tx.send(TrackEvent::TcpVisibilityChanged {
+                guid: guid.clone(),
+                visible: curr.visible_in_tcp,
+            });
+        }
+        if prev.visible_in_mixer != curr.visible_in_mixer {
+            let _ = tx.send(TrackEvent::MixerVisibilityChanged {
+                guid: guid.clone(),
+                visible: curr.visible_in_mixer,
+            });
+        }
+        if prev.index != curr.index {
+            let _ = tx.send(TrackEvent::Moved {
+                guid: guid.clone(),
+                old_index: prev.index,
+                new_index: curr.index,
+            });
+        }
+    }
+}
 
 /// REAPER track service implementation.
 ///
@@ -835,5 +1124,43 @@ impl TrackService for ReaperTrack {
             key: request.key,
             value: String::new(),
         }).await;
+    }
+
+    // =========================================================================
+    // Subscriptions
+    // =========================================================================
+
+    async fn subscribe_tracks(&self, _project: ProjectContext, tx: Tx<TrackEvent>) {
+        tracing::info!("ReaperTrack: subscribe_tracks - subscribing to broadcast channel");
+
+        let Some(mut rx) = track_receiver() else {
+            tracing::info!("ReaperTrack: track broadcast channel not initialized");
+            return;
+        };
+
+        moire::task::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if let Err(e) = tx.send(event).await {
+                            tracing::debug!("ReaperTrack: subscribe_tracks stream closed: {}", e);
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(count)) => {
+                        tracing::debug!(
+                            "ReaperTrack: subscribe_tracks lagged by {} messages",
+                            count
+                        );
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        tracing::info!("ReaperTrack: track broadcast channel closed");
+                        break;
+                    }
+                }
+            }
+
+            tracing::info!("ReaperTrack: subscribe_tracks stream ended");
+        });
     }
 }

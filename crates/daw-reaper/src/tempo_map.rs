@@ -2,16 +2,200 @@
 //!
 //! Implements TempoMapService for REAPER's tempo/time signature system.
 //! Uses low-level REAPER APIs via medium_reaper().low() for tempo marker access.
+//!
+//! # Tempo Map Change Detection
+//!
+//! Tempo maps are small (usually <50 points), so full comparison on each poll
+//! is cheap. The broadcaster follows the same reactive pattern as transport:
+//!
+//! ```text
+//! Timer Callback (main thread, ~30Hz)
+//!     ↓
+//!     poll_and_broadcast_tempo_map() called directly
+//!     ↓
+//!     For each open project:
+//!       - Read all tempo markers from REAPER
+//!       - Compare with cached markers
+//!       - Only broadcast TempoMapEvent::MapChanged if different
+//! ```
 
 use crate::main_thread;
+use crate::project_context::project_guid as project_guid_from;
 use crate::safe_wrappers::tempo as sw;
 use crate::safe_wrappers::time_map as tw;
 use daw_proto::{
-    Position, ProjectContext, TempoMapService, TempoPoint, TimePosition, TimeSignature,
+    Position, ProjectContext, TempoMapEvent, TempoMapService, TempoPoint, TimePosition,
+    TimeSignature,
 };
-use reaper_high::Reaper;
-use reaper_medium::{MeasureMode, ProjectContext as ReaperProjectContext};
-use tracing::debug;
+use reaper_high::{Project, Reaper};
+use reaper_medium::{MeasureMode, ProjectContext as ReaperProjectContext, ProjectRef};
+use roam::Tx;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use tokio::sync::broadcast;
+use tracing::{debug, info};
+
+// =============================================================================
+// Tempo Map Change Detection — broadcaster + cache + poll
+// =============================================================================
+
+/// Global tempo map event broadcaster
+static TEMPO_MAP_BROADCASTER: OnceLock<broadcast::Sender<TempoMapEvent>> = OnceLock::new();
+
+/// Cached per-project tempo map state for change detection.
+/// Key is project GUID, value is the list of cached tempo points.
+static TEMPO_MAP_CACHE: OnceLock<Mutex<HashMap<String, Vec<CachedTempoPoint>>>> = OnceLock::new();
+
+/// Lightweight representation of a tempo point for cache comparison.
+/// Uses a custom PartialEq with threshold for BPM to handle floating-point noise.
+#[derive(Clone, Debug)]
+struct CachedTempoPoint {
+    position: f64, // seconds
+    bpm: f64,
+    numerator: i32,
+    denominator: i32,
+}
+
+impl PartialEq for CachedTempoPoint {
+    fn eq(&self, other: &Self) -> bool {
+        // BPM: use threshold for floating-point comparison
+        if (self.bpm - other.bpm).abs() > 0.01 {
+            return false;
+        }
+        // Position: use 1ms threshold
+        if (self.position - other.position).abs() > 0.001 {
+            return false;
+        }
+        self.numerator == other.numerator && self.denominator == other.denominator
+    }
+}
+
+/// Initialize the tempo map broadcaster and cache.
+/// Called by the extension during initialization.
+pub fn init_tempo_map_broadcaster() {
+    let (tx, _rx) = broadcast::channel::<TempoMapEvent>(256);
+    let _ = TEMPO_MAP_BROADCASTER.set(tx);
+    let _ = TEMPO_MAP_CACHE.set(Mutex::new(HashMap::new()));
+}
+
+/// Get a receiver for tempo map change events.
+fn tempo_map_receiver() -> Option<broadcast::Receiver<TempoMapEvent>> {
+    TEMPO_MAP_BROADCASTER.get().map(|tx| tx.subscribe())
+}
+
+/// Get project GUID from a REAPER project (delegates to shared implementation).
+fn project_guid(project: &Project) -> String {
+    project_guid_from(project)
+}
+
+/// Read the current tempo map for a project as a Vec of CachedTempoPoints.
+/// **MUST be called from the main thread.**
+fn read_cached_tempo_points(
+    low: &reaper_low::Reaper,
+    medium: &reaper_medium::Reaper,
+    reaper_ctx: ReaperProjectContext,
+) -> Vec<CachedTempoPoint> {
+    let count = medium.count_tempo_time_sig_markers(reaper_ctx);
+    let mut points = Vec::with_capacity(count as usize);
+
+    for i in 0..count {
+        if let Some(m) = sw::get_tempo_marker(low, reaper_ctx, i as i32) {
+            points.push(CachedTempoPoint {
+                position: m.timepos,
+                bpm: m.bpm,
+                numerator: m.timesig_num,
+                denominator: m.timesig_denom,
+            });
+        }
+    }
+
+    points
+}
+
+/// Read the current tempo map for a project as a Vec of TempoPoints (proto type).
+/// **MUST be called from the main thread.**
+fn read_tempo_points(
+    low: &reaper_low::Reaper,
+    medium: &reaper_medium::Reaper,
+    reaper_ctx: ReaperProjectContext,
+) -> Vec<TempoPoint> {
+    let count = medium.count_tempo_time_sig_markers(reaper_ctx);
+    let mut points = Vec::with_capacity(count as usize);
+
+    for i in 0..count {
+        if let Some(m) = sw::get_tempo_marker(low, reaper_ctx, i as i32) {
+            points.push(marker_to_point(&m));
+        }
+    }
+
+    points
+}
+
+/// Poll REAPER tempo map state for ALL open projects and broadcast changes.
+/// **MUST be called from the main thread** (e.g., from timer callback).
+///
+/// Tempo maps are usually small (<50 points), so full comparison each poll is cheap.
+/// Only broadcasts `TempoMapEvent::MapChanged` when the tempo map actually differs.
+pub fn poll_and_broadcast_tempo_map() {
+    let Some(tx) = TEMPO_MAP_BROADCASTER.get() else {
+        return;
+    };
+
+    // Skip if no subscribers
+    if tx.receiver_count() == 0 {
+        return;
+    }
+
+    let Some(cache) = TEMPO_MAP_CACHE.get() else {
+        return;
+    };
+
+    let reaper = Reaper::get();
+    let medium = reaper.medium_reaper();
+    let low = medium.low();
+
+    let mut cache_guard = cache.lock().unwrap();
+    let mut seen_guids = Vec::new();
+
+    // Iterate through all open projects
+    for tab_index in 0..128u32 {
+        let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
+            break;
+        };
+
+        let project = Project::new(result.project);
+        let guid = project_guid(&project);
+        seen_guids.push(guid.clone());
+
+        let reaper_ctx = ReaperProjectContext::Proj(result.project);
+        let current_points = read_cached_tempo_points(low, medium, reaper_ctx);
+
+        let should_broadcast = match cache_guard.get(&guid) {
+            None => {
+                // First time seeing this project — always broadcast
+                cache_guard.insert(guid.clone(), current_points.clone());
+                true
+            }
+            Some(prev) => {
+                if prev.len() != current_points.len() || prev != &current_points {
+                    cache_guard.insert(guid.clone(), current_points.clone());
+                    true
+                } else {
+                    false
+                }
+            }
+        };
+
+        if should_broadcast {
+            // Read the full TempoPoint data for the event payload
+            let proto_points = read_tempo_points(low, medium, reaper_ctx);
+            let _ = tx.send(TempoMapEvent::MapChanged(proto_points));
+        }
+    }
+
+    // Clean up cache entries for projects that are no longer open
+    cache_guard.retain(|guid, _| seen_guids.contains(guid));
+}
 
 // =============================================================================
 // Public sync helpers — callable directly from the main thread
@@ -487,6 +671,46 @@ impl TempoMapService for ReaperTempoMap {
                     false,
                 );
             }
+        });
+    }
+
+    // =========================================================================
+    // Subscriptions
+    // =========================================================================
+
+    async fn subscribe_tempo_map(&self, _project: ProjectContext, tx: Tx<TempoMapEvent>) {
+        info!("ReaperTempoMap: subscribe_tempo_map - subscribing to broadcast channel");
+
+        let Some(mut rx) = tempo_map_receiver() else {
+            info!(
+                "ReaperTempoMap: broadcast channel not initialized, subscriber will not receive updates"
+            );
+            return;
+        };
+
+        moire::task::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if let Err(e) = tx.send(event).await {
+                            debug!("ReaperTempoMap: subscribe_tempo_map stream closed: {}", e);
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(count)) => {
+                        debug!(
+                            "ReaperTempoMap: subscribe_tempo_map lagged by {} messages",
+                            count
+                        );
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        info!("ReaperTempoMap: broadcast channel closed");
+                        break;
+                    }
+                }
+            }
+
+            info!("ReaperTempoMap: subscribe_tempo_map stream ended");
         });
     }
 }

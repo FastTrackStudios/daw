@@ -4,11 +4,12 @@ use std::sync::Arc;
 
 use crate::{DawClients, Error};
 use daw_proto::{
-    ProjectContext,
+    ProjectContext, RoutingEvent,
     routing::{RouteLocation, RouteRef, RouteType, SendMode, TrackRoute},
     track::TrackRef,
 };
 use crate::Result;
+use roam::Rx;
 
 /// Sends accessor for a track
 #[derive(Clone)]
@@ -66,6 +67,23 @@ impl Sends {
                 self.clients.clone(),
             )
         }))
+    }
+
+    // =========================================================================
+    // Streaming
+    // =========================================================================
+
+    /// Subscribe to routing events (sends/receives added, removed, changed, etc.)
+    ///
+    /// Returns a receiver that streams granular routing events for this project.
+    /// The stream continues until the returned `Rx` is dropped.
+    pub async fn subscribe(&self) -> Result<Rx<RoutingEvent>> {
+        let (tx, rx) = roam::channel::<RoutingEvent>();
+        self.clients
+            .routing
+            .subscribe_routing(self.context(), tx)
+            .await?;
+        Ok(rx)
     }
 
     /// Add a send to another track

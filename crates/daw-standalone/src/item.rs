@@ -2,10 +2,11 @@
 
 use daw_proto::{
     ProjectContext,
-    item::{FadeShape, Item, ItemRef, ItemService, Take, TakeRef, TakeService},
+    item::{FadeShape, Item, ItemEvent, ItemRef, ItemService, Take, TakeEvent, TakeRef, TakeService},
     primitives::{BeatAttachMode, Duration, PositionInSeconds},
     track::TrackRef,
 };
+use roam::Tx;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -407,6 +408,8 @@ impl ItemService for StandaloneItem {
     ) {
         // Stub - no-op
     }
+
+    async fn subscribe_items(&self, _project: ProjectContext, _tx: Tx<ItemEvent>) {}
 }
 
 /// Standalone take service implementation
@@ -743,4 +746,6 @@ impl TakeService for StandaloneTake {
         }
         daw_proto::item::SourceType::Empty
     }
+
+    async fn subscribe_takes(&self, _project: ProjectContext, _tx: Tx<TakeEvent>) {}
 }

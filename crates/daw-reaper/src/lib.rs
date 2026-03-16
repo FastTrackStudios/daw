@@ -84,3 +84,15 @@ pub use transport::{init_transport_broadcaster, poll_and_broadcast};
 
 // Re-export FX broadcaster functions
 pub use fx::{init_fx_broadcaster, poll_and_broadcast_fx};
+
+// Re-export track broadcaster functions
+pub use track::{init_track_broadcaster, poll_and_broadcast_tracks};
+
+// Re-export tempo map broadcaster functions
+pub use tempo_map::{init_tempo_map_broadcaster, poll_and_broadcast_tempo_map};
+
+// Re-export item broadcaster functions
+pub use item::{init_item_broadcaster, poll_and_broadcast_items};
+
+// Re-export routing broadcaster functions
+pub use routing::{init_routing_broadcaster, poll_and_broadcast_routing};

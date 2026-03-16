@@ -3,8 +3,9 @@
 use std::sync::Arc;
 
 use crate::DawClients;
-use daw_proto::{ProjectContext, TempoPoint};
+use daw_proto::{ProjectContext, TempoMapEvent, TempoPoint};
 use crate::Result;
+use roam::Rx;
 
 /// TempoMap handle for a specific project
 ///
@@ -231,6 +232,23 @@ impl TempoMap {
             .set_default_time_signature(self.context(), numerator, denominator)
             .await?;
         Ok(())
+    }
+
+    // =========================================================================
+    // Streaming
+    // =========================================================================
+
+    /// Subscribe to tempo map events (tempo points added, removed, changed, etc.)
+    ///
+    /// Returns a receiver that streams granular tempo map events for this project.
+    /// The stream continues until the returned `Rx` is dropped.
+    pub async fn subscribe(&self) -> Result<Rx<TempoMapEvent>> {
+        let (tx, rx) = roam::channel::<TempoMapEvent>();
+        self.clients
+            .tempo_map
+            .subscribe_tempo_map(self.context(), tx)
+            .await?;
+        Ok(rx)
     }
 }
 

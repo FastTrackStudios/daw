@@ -3,8 +3,9 @@
 use std::sync::Arc;
 
 use crate::DawClients;
-use daw_proto::{Marker, ProjectContext};
+use daw_proto::{Marker, MarkerEvent, ProjectContext};
 use crate::Result;
+use roam::Rx;
 
 /// Markers handle for a specific project
 ///
@@ -183,6 +184,17 @@ impl Markers {
     pub async fn goto(&self, id: u32) -> Result<()> {
         self.clients.marker.goto_marker(self.context(), id).await?;
         Ok(())
+    }
+
+    // =========================================================================
+    // Subscriptions
+    // =========================================================================
+
+    /// Subscribe to marker change events for this project.
+    pub async fn subscribe(&self) -> Result<Rx<MarkerEvent>> {
+        let (tx, rx) = roam::channel::<MarkerEvent>();
+        self.clients.marker.subscribe(self.context(), tx).await?;
+        Ok(rx)
     }
 }
 

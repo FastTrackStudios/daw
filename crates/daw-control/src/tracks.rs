@@ -4,10 +4,11 @@ use std::sync::Arc;
 
 use crate::{DawClients, Envelopes, Error, FxChain, HardwareOutputs, Items, Receives, Sends};
 use daw_proto::{
-    FxChainContext, InputMonitoringMode, ProjectContext, RecordInput, Track, TrackExtStateRequest,
-    TrackRef,
+    FxChainContext, InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent,
+    TrackExtStateRequest, TrackRef,
 };
 use crate::Result;
+use roam::Rx;
 
 /// Tracks handle for a specific project
 ///
@@ -205,6 +206,23 @@ impl Tracks {
     pub async fn remove_all(&self) -> Result<()> {
         self.clients.track.remove_all_tracks(self.context()).await?;
         Ok(())
+    }
+
+    // =========================================================================
+    // Streaming
+    // =========================================================================
+
+    /// Subscribe to track events (added, removed, renamed, mute/solo changes, etc.)
+    ///
+    /// Returns a receiver that streams granular track events for this project.
+    /// The stream continues until the returned `Rx` is dropped.
+    pub async fn subscribe(&self) -> Result<Rx<TrackEvent>> {
+        let (tx, rx) = roam::channel::<TrackEvent>();
+        self.clients
+            .track
+            .subscribe_tracks(self.context(), tx)
+            .await?;
+        Ok(rx)
     }
 }
 

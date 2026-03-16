@@ -4,12 +4,13 @@ use std::sync::Arc;
 
 use crate::{DawClients, Error, MidiEditor};
 use daw_proto::{
-    ProjectContext,
+    ItemEvent, ProjectContext, TakeEvent,
     item::{FadeShape, Item, ItemRef, Take, TakeRef},
     primitives::{Duration, PositionInSeconds},
     track::TrackRef,
 };
 use crate::Result;
+use roam::Rx;
 
 /// Items handle for a specific track
 ///
@@ -212,6 +213,36 @@ impl ProjectItems {
             .select_all_items(self.context(), false)
             .await?;
         Ok(())
+    }
+
+    // =========================================================================
+    // Streaming
+    // =========================================================================
+
+    /// Subscribe to item events (added, removed, moved, etc.)
+    ///
+    /// Returns a receiver that streams granular item events for this project.
+    /// The stream continues until the returned `Rx` is dropped.
+    pub async fn subscribe(&self) -> Result<Rx<ItemEvent>> {
+        let (tx, rx) = roam::channel::<ItemEvent>();
+        self.clients
+            .item
+            .subscribe_items(self.context(), tx)
+            .await?;
+        Ok(rx)
+    }
+
+    /// Subscribe to take events (added, removed, activated, etc.)
+    ///
+    /// Returns a receiver that streams granular take events for this project.
+    /// The stream continues until the returned `Rx` is dropped.
+    pub async fn subscribe_takes(&self) -> Result<Rx<TakeEvent>> {
+        let (tx, rx) = roam::channel::<TakeEvent>();
+        self.clients
+            .take
+            .subscribe_takes(self.context(), tx)
+            .await?;
+        Ok(rx)
     }
 }
 

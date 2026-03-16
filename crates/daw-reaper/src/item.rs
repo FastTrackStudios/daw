@@ -4,17 +4,329 @@
 //! via [`crate::main_thread`].
 
 use crate::main_thread;
+use crate::project_context::project_guid as project_guid_from;
 use crate::safe_wrappers::item as item_sw;
 use daw_proto::{
-    BeatAttachMode, Duration, FadeShape, Item, ItemRef, ItemService, PositionInSeconds,
-    ProjectContext, SourceType, Take, TakeRef, TakeService, TrackRef,
+    BeatAttachMode, Duration, FadeShape, Item, ItemEvent, ItemRef, ItemService, PositionInSeconds,
+    ProjectContext, SourceType, Take, TakeEvent, TakeRef, TakeService, TrackRef,
 };
-use reaper_high::Reaper;
+use reaper_high::{Project, Reaper};
 use reaper_medium::{
     DurationInSeconds, ItemAttributeKey, MediaItem, MediaItemTake,
-    ProjectContext as ReaperProjectContext, Semitones, TakeAttributeKey, UiRefreshBehavior,
+    ProjectContext as ReaperProjectContext, ProjectRef, Semitones, TakeAttributeKey,
+    UiRefreshBehavior,
 };
-use tracing::debug;
+use roam::Tx;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use tokio::sync::broadcast;
+use tracing::{debug, info};
+
+// =============================================================================
+// Broadcaster / Cache State
+// =============================================================================
+
+/// Global item event broadcaster
+static ITEM_BROADCASTER: OnceLock<broadcast::Sender<ItemEvent>> = OnceLock::new();
+
+/// Global take event broadcaster
+static TAKE_BROADCASTER: OnceLock<broadcast::Sender<TakeEvent>> = OnceLock::new();
+
+/// Per-project cached item states for change detection.
+/// Key is project GUID, value is a vec of lightweight snapshots.
+static ITEM_CACHE: OnceLock<Mutex<HashMap<String, Vec<CachedItemState>>>> = OnceLock::new();
+
+/// Lightweight snapshot of item state used for fast diff comparisons.
+#[derive(Clone, Debug)]
+struct CachedItemState {
+    guid: String,
+    track_guid: String,
+    position: f64,
+    length: f64,
+    muted: bool,
+    selected: bool,
+    volume: f64,
+    active_take_index: u32,
+}
+
+/// Thresholds for floating-point change detection
+const ITEM_POSITION_THRESHOLD: f64 = 0.001; // 1ms
+const ITEM_LENGTH_THRESHOLD: f64 = 0.001; // 1ms
+const ITEM_VOLUME_THRESHOLD: f64 = 0.0001;
+
+/// Initialize item and take broadcasters.
+/// Called by the extension during initialization.
+pub fn init_item_broadcaster() {
+    let (tx, _rx) = broadcast::channel::<ItemEvent>(1024);
+    let _ = ITEM_BROADCASTER.set(tx);
+    let (take_tx, _rx) = broadcast::channel::<TakeEvent>(512);
+    let _ = TAKE_BROADCASTER.set(take_tx);
+    let _ = ITEM_CACHE.set(Mutex::new(HashMap::new()));
+}
+
+/// Get a receiver for item events.
+fn item_receiver() -> Option<broadcast::Receiver<ItemEvent>> {
+    ITEM_BROADCASTER.get().map(|tx| tx.subscribe())
+}
+
+/// Get a receiver for take events.
+fn take_receiver() -> Option<broadcast::Receiver<TakeEvent>> {
+    TAKE_BROADCASTER.get().map(|tx| tx.subscribe())
+}
+
+/// Poll REAPER item state for ALL open projects and broadcast changes.
+/// **MUST be called from the main thread** (e.g., from timer callback).
+///
+/// Uses a two-phase approach:
+/// 1. Quick count check per project — if item count matches cached count, skip full diff
+/// 2. Full per-item diff when count changes or any item state is stale
+pub fn poll_and_broadcast_items() {
+    let item_tx = ITEM_BROADCASTER.get();
+
+    // Skip if no subscribers
+    let has_item_subs = item_tx.map(|t| t.receiver_count() > 0).unwrap_or(false);
+    if !has_item_subs {
+        return;
+    }
+
+    let Some(cache) = ITEM_CACHE.get() else {
+        return;
+    };
+    let mut cache_guard = cache.lock().unwrap();
+
+    let reaper = Reaper::get();
+    let medium = reaper.medium_reaper();
+    let low = medium.low();
+
+    let mut seen_guids = Vec::new();
+
+    // Iterate through all open projects
+    for tab_index in 0..128u32 {
+        let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
+            break;
+        };
+
+        let project = Project::new(result.project);
+        let project_guid = project_guid_from(&project);
+        seen_guids.push(project_guid.clone());
+
+        let reaper_ctx = ReaperProjectContext::Proj(result.project);
+
+        // Phase 1: quick count check
+        let current_count = medium.count_media_items(reaper_ctx);
+        let cached_items = cache_guard.get(&project_guid);
+        let cached_count = cached_items.map(|v| v.len() as u32).unwrap_or(u32::MAX);
+
+        // Phase 2: build current snapshot and diff
+        let mut current_states = Vec::with_capacity(current_count as usize);
+        for i in 0..current_count {
+            let Some(item) = medium.get_media_item(reaper_ctx, i) else {
+                continue;
+            };
+
+            let guid = item_sw::get_item_state_chunk(low, item, 1024)
+                .and_then(|chunk| extract_guid_from_chunk(&chunk))
+                .unwrap_or_default();
+
+            let track = item_sw::get_media_item_track(medium, item);
+            let track_guid = track
+                .map(|t| item_sw::get_track_guid(low, t))
+                .unwrap_or_default();
+
+            let position = item_sw::get_item_info_value(medium, item, ItemAttributeKey::Position);
+            let length = item_sw::get_item_info_value(medium, item, ItemAttributeKey::Length);
+            let muted = item_sw::get_item_info_value(medium, item, ItemAttributeKey::Mute) != 0.0;
+            let selected = item_sw::is_item_selected(low, item);
+            let volume = item_sw::get_item_info_value(medium, item, ItemAttributeKey::Vol);
+
+            let active_take = item_sw::get_active_take(medium, item);
+            let take_count = item_sw::count_takes(low, item) as u32;
+            let active_take_index = if let Some(active) = active_take {
+                let mut idx = 0u32;
+                for ti in 0..take_count {
+                    if let Some(t) = item_sw::get_take(low, item, ti as i32) {
+                        if t == active {
+                            idx = ti;
+                            break;
+                        }
+                    }
+                }
+                idx
+            } else {
+                0
+            };
+
+            current_states.push(CachedItemState {
+                guid,
+                track_guid,
+                position,
+                length,
+                muted,
+                selected,
+                volume,
+                active_take_index,
+            });
+        }
+
+        // If counts match and we have a cache, do per-item diff
+        if current_count == cached_count {
+            if let Some(prev_states) = cached_items {
+                // Compare each item
+                for (prev, curr) in prev_states.iter().zip(current_states.iter()) {
+                    emit_item_diffs(item_tx, &project_guid, prev, curr);
+                }
+                // Update cache
+                cache_guard.insert(project_guid.clone(), current_states);
+                continue;
+            }
+        }
+
+        // Count mismatch or no cache — detect creates/deletes and update everything
+        if let Some(prev_states) = cached_items.cloned() {
+            // Build lookup of previous GUIDs
+            let prev_guids: HashMap<&str, &CachedItemState> =
+                prev_states.iter().map(|s| (s.guid.as_str(), s)).collect();
+            let curr_guids: HashMap<&str, &CachedItemState> =
+                current_states.iter().map(|s| (s.guid.as_str(), s)).collect();
+
+            // Deleted items: in prev but not in curr
+            for prev in &prev_states {
+                if !prev.guid.is_empty() && !curr_guids.contains_key(prev.guid.as_str()) {
+                    if let Some(tx) = item_tx {
+                        let _ = tx.send(ItemEvent::Deleted {
+                            project_guid: project_guid.clone(),
+                            track_guid: prev.track_guid.clone(),
+                            item_guid: prev.guid.clone(),
+                        });
+                    }
+                }
+            }
+
+            // Created items: in curr but not in prev; changed items: in both
+            for curr in &current_states {
+                if curr.guid.is_empty() {
+                    continue;
+                }
+                if let Some(prev) = prev_guids.get(curr.guid.as_str()) {
+                    emit_item_diffs(item_tx, &project_guid, prev, curr);
+                } else {
+                    // New item — emit Created with a full Item snapshot
+                    // We build a lightweight Item here; the subscriber can query for full details
+                    if let Some(tx) = item_tx {
+                        let _ = tx.send(ItemEvent::Created {
+                            project_guid: project_guid.clone(),
+                            track_guid: curr.track_guid.clone(),
+                            item: Item {
+                                guid: curr.guid.clone(),
+                                track_guid: curr.track_guid.clone(),
+                                index: 0,
+                                position: daw_proto::PositionInSeconds::from_seconds(curr.position),
+                                length: Duration::from_seconds(curr.length),
+                                snap_offset: Duration::from_seconds(0.0),
+                                muted: curr.muted,
+                                selected: curr.selected,
+                                locked: false,
+                                volume: curr.volume,
+                                fade_in_length: Duration::from_seconds(0.0),
+                                fade_out_length: Duration::from_seconds(0.0),
+                                fade_in_shape: FadeShape::Linear,
+                                fade_out_shape: FadeShape::Linear,
+                                beat_attach_mode: BeatAttachMode::Time,
+                                loop_source: false,
+                                auto_stretch: false,
+                                color: None,
+                                group_id: None,
+                                take_count: 0,
+                                active_take_index: curr.active_take_index,
+                            },
+                        });
+                    }
+                }
+            }
+        } else {
+            // No previous cache at all — first poll, don't emit events
+        }
+
+        cache_guard.insert(project_guid.clone(), current_states);
+    }
+
+    // Clean up cache entries for projects that are no longer open
+    cache_guard.retain(|guid, _| seen_guids.contains(guid));
+}
+
+/// Emit diff events for a single item by comparing previous and current cached states.
+fn emit_item_diffs(
+    item_tx: Option<&broadcast::Sender<ItemEvent>>,
+    project_guid: &str,
+    prev: &CachedItemState,
+    curr: &CachedItemState,
+) {
+    let Some(tx) = item_tx else { return };
+
+    if (prev.position - curr.position).abs() > ITEM_POSITION_THRESHOLD {
+        let _ = tx.send(ItemEvent::PositionChanged {
+            project_guid: project_guid.to_string(),
+            item_guid: curr.guid.clone(),
+            old_position: prev.position,
+            new_position: curr.position,
+        });
+    }
+
+    if (prev.length - curr.length).abs() > ITEM_LENGTH_THRESHOLD {
+        let _ = tx.send(ItemEvent::LengthChanged {
+            project_guid: project_guid.to_string(),
+            item_guid: curr.guid.clone(),
+            old_length: prev.length,
+            new_length: curr.length,
+        });
+    }
+
+    if prev.track_guid != curr.track_guid {
+        let _ = tx.send(ItemEvent::MovedToTrack {
+            project_guid: project_guid.to_string(),
+            item_guid: curr.guid.clone(),
+            old_track_guid: prev.track_guid.clone(),
+            new_track_guid: curr.track_guid.clone(),
+        });
+    }
+
+    if prev.muted != curr.muted {
+        let _ = tx.send(ItemEvent::MuteChanged {
+            project_guid: project_guid.to_string(),
+            item_guid: curr.guid.clone(),
+            muted: curr.muted,
+        });
+    }
+
+    if prev.selected != curr.selected {
+        let _ = tx.send(ItemEvent::SelectionChanged {
+            project_guid: project_guid.to_string(),
+            item_guid: curr.guid.clone(),
+            selected: curr.selected,
+        });
+    }
+
+    if (prev.volume - curr.volume).abs() > ITEM_VOLUME_THRESHOLD {
+        let _ = tx.send(ItemEvent::VolumeChanged {
+            project_guid: project_guid.to_string(),
+            item_guid: curr.guid.clone(),
+            volume: curr.volume,
+        });
+    }
+
+    if prev.active_take_index != curr.active_take_index {
+        let _ = tx.send(ItemEvent::ActiveTakeChanged {
+            project_guid: project_guid.to_string(),
+            item_guid: curr.guid.clone(),
+            old_take_index: prev.active_take_index,
+            new_take_index: curr.active_take_index,
+        });
+    }
+}
+
+// =============================================================================
+// ReaperItem
+// =============================================================================
 
 /// REAPER item implementation.
 ///
@@ -768,6 +1080,40 @@ impl ItemService for ReaperItem {
             }
         });
     }
+
+    // =========================================================================
+    // Subscriptions
+    // =========================================================================
+
+    async fn subscribe_items(&self, _project: ProjectContext, tx: Tx<ItemEvent>) {
+        info!("ReaperItem: subscribe_items - subscribing to broadcast channel");
+
+        let Some(mut rx) = item_receiver() else {
+            info!("ReaperItem: item broadcast channel not initialized");
+            return;
+        };
+
+        moire::task::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if tx.send(event).await.is_err() {
+                            debug!("ReaperItem: subscribe_items stream closed");
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(count)) => {
+                        debug!("ReaperItem: subscribe_items lagged by {} messages", count);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        info!("ReaperItem: item broadcast channel closed");
+                        break;
+                    }
+                }
+            }
+            info!("ReaperItem: subscribe_items stream ended");
+        });
+    }
 }
 
 // =============================================================================
@@ -1265,6 +1611,40 @@ impl TakeService for ReaperTake {
         .await
         .unwrap_or(None)
         .unwrap_or(SourceType::Unknown)
+    }
+
+    // =========================================================================
+    // Subscriptions
+    // =========================================================================
+
+    async fn subscribe_takes(&self, _project: ProjectContext, tx: Tx<TakeEvent>) {
+        info!("ReaperTake: subscribe_takes - subscribing to broadcast channel");
+
+        let Some(mut rx) = take_receiver() else {
+            info!("ReaperTake: take broadcast channel not initialized");
+            return;
+        };
+
+        moire::task::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if tx.send(event).await.is_err() {
+                            debug!("ReaperTake: subscribe_takes stream closed");
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(count)) => {
+                        debug!("ReaperTake: subscribe_takes lagged by {} messages", count);
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        info!("ReaperTake: take broadcast channel closed");
+                        break;
+                    }
+                }
+            }
+            info!("ReaperTake: subscribe_takes stream ended");
+        });
     }
 }
 

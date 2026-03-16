@@ -4,18 +4,239 @@
 //! using `crate::main_thread`.
 
 use crate::main_thread;
-use crate::project_context::find_project_by_guid;
+use crate::project_context::{find_project_by_guid, project_guid as project_guid_from};
 use crate::safe_wrappers::routing as routing_sw;
 use daw_proto::{
     AutomationMode, ChannelMapping, MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel,
-    ProjectContext, RouteLocation, RouteRef, RouteType, RoutingService, SendMode, TrackRef,
-    TrackRoute,
+    ProjectContext, RouteLocation, RouteRef, RouteType, RoutingEvent, RoutingService, SendMode,
+    TrackRef, TrackRoute,
 };
 use reaper_high::{Project, Reaper, SendPartnerType, Track, TrackRoute as ReaperTrackRoute};
 use reaper_medium::{
-    EditMode, ReaperVolumeValue, SendTarget, TrackSendAttributeKey, TrackSendCategory,
+    EditMode, ProjectRef, ReaperVolumeValue, SendTarget, TrackSendAttributeKey, TrackSendCategory,
 };
-use tracing::{debug, warn};
+use roam::Tx;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use tokio::sync::broadcast;
+use tracing::{debug, info, warn};
+
+// =============================================================================
+// Routing Change Detection Broadcasting Infrastructure
+//
+// Follows the same reactive polling pattern as transport.rs and fx.rs:
+// poll_and_broadcast_routing() is called from the timer callback on the main
+// thread at ~30Hz. It reads current send/receive/hw-output counts per track,
+// diffs against a cache, and only broadcasts RoutingEvent when something
+// actually changed.
+// =============================================================================
+
+/// Cached routing counts for a single track (for change detection)
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct CachedTrackRouting {
+    send_count: u32,
+    receive_count: u32,
+    hw_output_count: u32,
+}
+
+/// Cached routing state for an entire project (per-track routing counts)
+#[derive(Clone, Debug, Default)]
+struct CachedRoutingState {
+    tracks: HashMap<String, CachedTrackRouting>,
+}
+
+/// Global routing event broadcaster
+static ROUTING_BROADCASTER: OnceLock<broadcast::Sender<RoutingEvent>> = OnceLock::new();
+
+/// Cached per-project routing states for change detection
+/// Key is project GUID, value is last known routing state
+static ROUTING_CACHE: OnceLock<Mutex<HashMap<String, CachedRoutingState>>> = OnceLock::new();
+
+/// Initialize the routing broadcaster.
+/// Called by the extension during initialization.
+pub fn init_routing_broadcaster() {
+    let (tx, _rx) = broadcast::channel::<RoutingEvent>(256);
+    let _ = ROUTING_BROADCASTER.set(tx);
+    let _ = ROUTING_CACHE.set(Mutex::new(HashMap::new()));
+}
+
+/// Get a receiver for routing change events.
+fn routing_receiver() -> Option<broadcast::Receiver<RoutingEvent>> {
+    ROUTING_BROADCASTER.get().map(|tx| tx.subscribe())
+}
+
+/// Get project GUID from a REAPER project (delegates to shared implementation).
+fn project_guid(project: &Project) -> String {
+    project_guid_from(project)
+}
+
+/// Poll REAPER routing state for ALL open projects and broadcast changes.
+/// **MUST be called from the main thread** (e.g., from timer callback).
+///
+/// This function reads REAPER state directly without async overhead,
+/// enabling low-latency change detection.
+///
+/// **Reactive Pattern**: Only broadcasts when a track's route counts actually change.
+/// Compares send/receive/hw-output counts per track against the cache.
+pub fn poll_and_broadcast_routing() {
+    let Some(tx) = ROUTING_BROADCASTER.get() else {
+        return;
+    };
+
+    // Skip if no subscribers
+    if tx.receiver_count() == 0 {
+        return;
+    }
+
+    let Some(cache) = ROUTING_CACHE.get() else {
+        return;
+    };
+    let mut cache_guard = cache.lock().unwrap();
+
+    let reaper = Reaper::get();
+    let medium = reaper.medium_reaper();
+
+    let mut seen_guids = Vec::new();
+
+    // Iterate through all open projects
+    for tab_index in 0..128u32 {
+        let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
+            break;
+        };
+
+        let project = Project::new(result.project);
+        let guid = project_guid(&project);
+        seen_guids.push(guid.clone());
+
+        let cached_state = cache_guard
+            .entry(guid.clone())
+            .or_insert_with(CachedRoutingState::default);
+
+        let mut seen_track_guids = Vec::new();
+
+        // Iterate all tracks in this project (including master)
+        let track_count = project.track_count();
+        for track_idx in 0..track_count {
+            let Some(track) = project.track_by_index(track_idx) else {
+                continue;
+            };
+            let track_guid = track.guid().to_string_without_braces();
+            seen_track_guids.push(track_guid.clone());
+
+            let current = CachedTrackRouting {
+                send_count: track.typed_sends(SendPartnerType::Track).count() as u32,
+                receive_count: track.receives().count() as u32,
+                hw_output_count: track
+                    .typed_sends(SendPartnerType::HardwareOutput)
+                    .count() as u32,
+            };
+
+            let prev = cached_state
+                .tracks
+                .get(&track_guid)
+                .cloned()
+                .unwrap_or_default();
+
+            if current != prev {
+                // Detect created/deleted sends
+                emit_count_changes(
+                    tx,
+                    &guid,
+                    &track_guid,
+                    &track,
+                    RouteType::Send,
+                    prev.send_count,
+                    current.send_count,
+                );
+                // Detect created/deleted receives
+                emit_count_changes(
+                    tx,
+                    &guid,
+                    &track_guid,
+                    &track,
+                    RouteType::Receive,
+                    prev.receive_count,
+                    current.receive_count,
+                );
+                // Detect created/deleted hardware outputs
+                emit_count_changes(
+                    tx,
+                    &guid,
+                    &track_guid,
+                    &track,
+                    RouteType::HardwareOutput,
+                    prev.hw_output_count,
+                    current.hw_output_count,
+                );
+
+                cached_state.tracks.insert(track_guid, current);
+            }
+        }
+
+        // Clean up cache entries for tracks that no longer exist
+        cached_state
+            .tracks
+            .retain(|guid, _| seen_track_guids.contains(guid));
+    }
+
+    // Clean up cache entries for projects that are no longer open
+    cache_guard.retain(|guid, _| seen_guids.contains(guid));
+}
+
+/// Emit RouteCreated or RouteDeleted events based on count changes.
+///
+/// When count increases, we emit RouteCreated for each new route (the last N routes).
+/// When count decreases, we emit RouteDeleted for each removed route.
+fn emit_count_changes(
+    tx: &broadcast::Sender<RoutingEvent>,
+    project_guid: &str,
+    track_guid: &str,
+    track: &Track,
+    route_type: RouteType,
+    old_count: u32,
+    new_count: u32,
+) {
+    if new_count > old_count {
+        // Routes were added - emit RouteCreated for the new ones
+        for idx in old_count..new_count {
+            // Try to build a full TrackRoute for the new route
+            let route = match route_type {
+                RouteType::Send => track
+                    .typed_sends(SendPartnerType::Track)
+                    .nth(idx as usize)
+                    .map(|r| convert_track_route(&r, RouteType::Send, idx)),
+                RouteType::Receive => track
+                    .receives()
+                    .nth(idx as usize)
+                    .map(|r| convert_track_route(&r, RouteType::Receive, idx)),
+                RouteType::HardwareOutput => track
+                    .typed_sends(SendPartnerType::HardwareOutput)
+                    .nth(idx as usize)
+                    .map(|r| convert_track_route(&r, RouteType::HardwareOutput, idx)),
+            };
+
+            if let Some(route) = route {
+                let _ = tx.send(RoutingEvent::RouteCreated {
+                    project_guid: project_guid.to_string(),
+                    source_track_guid: track_guid.to_string(),
+                    route,
+                });
+            }
+        }
+    } else if new_count < old_count {
+        // Routes were removed - emit RouteDeleted for the removed ones
+        // We don't know exactly which routes were removed, so emit for the
+        // indices that no longer exist (from new_count to old_count)
+        for idx in new_count..old_count {
+            let _ = tx.send(RoutingEvent::RouteDeleted {
+                project_guid: project_guid.to_string(),
+                source_track_guid: track_guid.to_string(),
+                route_type,
+                route_index: idx,
+            });
+        }
+    }
+}
 
 /// REAPER routing implementation that dispatches to the main thread via `main_thread`.
 #[derive(Clone)]
@@ -905,6 +1126,78 @@ impl RoutingService for ReaperRouting {
                 reaper_medium::TrackAttributeKey::MainSend,
                 if enabled { 1.0 } else { 0.0 },
             );
+        });
+    }
+
+    // === Subscriptions ===
+
+    async fn subscribe_routing(&self, project: ProjectContext, tx: Tx<RoutingEvent>) {
+        info!(
+            "ReaperRouting: subscribe_routing for {:?} - subscribing to broadcast channel",
+            project
+        );
+
+        // Determine the project GUID to filter events
+        let filter_guid = match &project {
+            ProjectContext::Current => {
+                // Resolve current project GUID on the main thread
+                main_thread::query(|| {
+                    let reaper = Reaper::get();
+                    project_guid(&reaper.current_project())
+                })
+                .await
+            }
+            ProjectContext::Project(guid) => Some(guid.clone()),
+        };
+
+        let Some(filter_guid) = filter_guid else {
+            info!("ReaperRouting: could not resolve project GUID for subscription");
+            return;
+        };
+
+        let Some(mut rx) = routing_receiver() else {
+            info!("ReaperRouting: routing broadcaster not initialized, subscriber will not receive events");
+            return;
+        };
+
+        // Spawn the forwarding loop that filters events for this project
+        moire::task::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        // Filter events to only forward those for the subscribed project
+                        let event_project_guid = match &event {
+                            RoutingEvent::RouteCreated { project_guid, .. } => project_guid,
+                            RoutingEvent::RouteDeleted { project_guid, .. } => project_guid,
+                            RoutingEvent::VolumeChanged { project_guid, .. } => project_guid,
+                            RoutingEvent::PanChanged { project_guid, .. } => project_guid,
+                            RoutingEvent::MuteChanged { project_guid, .. } => project_guid,
+                            RoutingEvent::ParentSendChanged { project_guid, .. } => project_guid,
+                        };
+
+                        if event_project_guid != &filter_guid {
+                            continue;
+                        }
+
+                        if let Err(e) = tx.send(event).await {
+                            debug!("ReaperRouting: subscribe_routing stream closed: {}", e);
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(count)) => {
+                        debug!(
+                            "ReaperRouting: subscribe_routing lagged by {} messages",
+                            count
+                        );
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        info!("ReaperRouting: routing broadcast channel closed");
+                        break;
+                    }
+                }
+            }
+
+            info!("ReaperRouting: subscribe_routing stream ended");
         });
     }
 }

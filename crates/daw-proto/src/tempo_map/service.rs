@@ -2,9 +2,9 @@
 //!
 //! Defines the RPC interface for tempo and time signature management.
 
-use super::TempoPoint;
+use super::{TempoMapEvent, TempoPoint};
 use crate::ProjectContext;
-use roam::service;
+use roam::{Tx, service};
 
 /// Service for managing the tempo map in a DAW project
 ///
@@ -98,4 +98,11 @@ pub trait TempoMapService {
         numerator: i32,
         denominator: i32,
     );
+
+    // =========================================================================
+    // Subscriptions
+    // =========================================================================
+
+    /// Subscribe to tempo map change events for a project.
+    async fn subscribe_tempo_map(&self, project: ProjectContext, tx: Tx<TempoMapEvent>);
 }

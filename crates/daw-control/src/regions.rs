@@ -3,8 +3,9 @@
 use std::sync::Arc;
 
 use crate::DawClients;
-use daw_proto::{ProjectContext, Region};
+use daw_proto::{ProjectContext, Region, RegionEvent};
 use crate::Result;
+use roam::Rx;
 
 /// Regions handle for a specific project
 ///
@@ -174,6 +175,17 @@ impl Regions {
             .goto_region_end(self.context(), id)
             .await?;
         Ok(())
+    }
+
+    // =========================================================================
+    // Subscriptions
+    // =========================================================================
+
+    /// Subscribe to region change events for this project.
+    pub async fn subscribe(&self) -> Result<Rx<RegionEvent>> {
+        let (tx, rx) = roam::channel::<RegionEvent>();
+        self.clients.region.subscribe(self.context(), tx).await?;
+        Ok(rx)
     }
 }
 
