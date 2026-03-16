@@ -1463,7 +1463,11 @@ name = "daw"
 version = "0.1.0"
 dependencies = [
  "daw-control",
+ "daw-control-sync",
  "daw-proto",
+ "daw-reaper",
+ "daw-standalone",
+ "dawfile-reaper",
 ]
 
 [[package]]
@@ -1471,8 +1475,7 @@ name = "daw-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
- "daw-control",
- "daw-proto",
+ "daw",
  "eyre",
  "libc",
  "roam",
@@ -6462,7 +6465,7 @@ dependencies = [
 name = "reaper-test"
 version = "0.1.0"
 dependencies = [
- "daw-control",
+ "daw",
  "eyre",
  "reaper-test-macro",
  "roam",
@@ -7289,9 +7292,11 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 name = "signal"
 version = "0.1.0"
 dependencies = [
- "daw-control",
- "daw-proto",
+ "daw",
+ "nam-manager",
  "signal-controller",
+ "signal-daw-bridge",
+ "signal-import",
  "signal-live",
  "signal-proto",
  "signal-storage",
@@ -7307,6 +7312,17 @@ dependencies = [
  "signal-proto",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "signal-daw-bridge"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "serde",
+ "signal-import",
+ "signal-proto",
 ]
 
 [[package]]
@@ -7330,13 +7346,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "signal-import"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "serde",
+ "serde_json",
+ "signal-controller",
+ "signal-proto",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "signal-live"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "daw",
- "daw-control",
- "daw-proto",
  "eyre",
  "futures",
  "macromod",

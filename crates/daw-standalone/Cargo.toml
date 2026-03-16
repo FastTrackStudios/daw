@@ -14,6 +14,6 @@ keyflow = { workspace = true, features = ["engraver", "midi-import"] }
 
 [dev-dependencies]
 daw-proto = { path = "../daw-proto" }
-daw-control = { workspace = true }
+daw-control = { path = "../daw-control" }
 eyre = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

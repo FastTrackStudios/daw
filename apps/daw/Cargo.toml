@@ -12,8 +12,7 @@ name = "daw"
 path = "src/main.rs"
 
 [dependencies]
-daw-control.workspace = true
-daw-proto.workspace = true
+daw.workspace = true
 roam.workspace = true
 roam-stream.workspace = true
 tokio.workspace = true

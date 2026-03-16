@@ -20,17 +20,16 @@ authors = ["FastTrack Studio"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-# Internal crates
-daw-cli = { path = "apps/daw" }
-audio-controls = { path = "crates/audio-controls" }
+# Facade crate — the only public API surface for the daw domain
 daw = { path = "crates/daw" }
-daw-proto = { path = "crates/daw-proto" }
-daw-control = { path = "crates/daw-control" }
-daw-control-sync = { path = "crates/daw-control-sync" }
-daw-standalone = { path = "crates/daw-standalone" }
-daw-reaper = { path = "crates/daw-reaper" }
-daw-ui = { path = "crates/daw-ui" }
-dawfile-reaper = { path = "crates/dawfile-reaper" }
+# App crate (binary + lib)
+daw-cli = { path = "apps/daw" }
+# UI crate stays public (Dioxus components with feature flags)
+daw-ui = { path = "crates/daw-ui", default-features = false }
+# Widget crate stays public (standalone Dioxus widgets)
+audio-controls = { path = "crates/audio-controls" }
+# NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
+# dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 
 # Facet reflection - use crates.io 0.44.x
 facet = { version = "0.44" }

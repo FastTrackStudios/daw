@@ -8,8 +8,8 @@ use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-use daw_control::Daw;
-use daw_proto::FxType;
+use daw::Daw;
+use daw::service::FxType;
 use eyre::{Result, bail};
 use roam::ErasedCaller;
 use roam::SessionHandle;
@@ -104,8 +104,8 @@ pub const REAPER_CONFIGS: &[ReaperConfig] = &[
         role: "session",
     },
     ReaperConfig {
-        id: "fts-guitar",
-        label: "FTS-GUITAR (Signal)",
+        id: "fts-signal",
+        label: "FTS-SIGNAL (Signal)",
         executable: "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/MacOS/REAPER",
         resources: "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/Resources",
         role: "signal",
@@ -250,7 +250,7 @@ pub async fn resolve_track(daw: &Daw, track_arg: &str) -> Result<(String, String
 }
 
 /// Resolve a track argument and return the TrackHandle directly.
-pub async fn resolve_track_handle(daw: &Daw, track_arg: &str) -> Result<daw_control::TrackHandle> {
+pub async fn resolve_track_handle(daw: &Daw, track_arg: &str) -> Result<daw::TrackHandle> {
     let (guid, _) = resolve_track(daw, track_arg).await?;
     let project = daw.current_project().await?;
     project
@@ -262,10 +262,10 @@ pub async fn resolve_track_handle(daw: &Daw, track_arg: &str) -> Result<daw_cont
 
 /// Resolve an FX argument (index or name) on a track's FX chain.
 pub async fn resolve_fx_handle(
-    fx_chain: &daw_control::FxChain,
+    fx_chain: &daw::FxChain,
     fx_arg: &str,
     track_name: &str,
-) -> Result<daw_control::FxHandle> {
+) -> Result<daw::FxHandle> {
     let fx_handle = if let Ok(idx) = fx_arg.parse::<u32>() {
         fx_chain.by_index(idx).await?
     } else {
@@ -278,7 +278,7 @@ pub async fn resolve_fx_handle(
 // Formatting Helpers
 // ============================================================================
 
-pub fn format_position(pos: &daw_proto::primitives::Position) -> String {
+pub fn format_position(pos: &daw::service::primitives::Position) -> String {
     if let Some(ref musical) = pos.musical {
         format!("{}.{}.{:03}", musical.measure, musical.beat, musical.subdivision)
     } else if let Some(ref time) = pos.time {
@@ -877,7 +877,7 @@ pub async fn cmd_add_track(daw: &Daw, name: Option<&str>, at_index: Option<u32>,
 pub async fn cmd_remove_track(daw: &Daw, track_arg: &str) -> Result<()> {
     let (guid, name) = resolve_track(daw, track_arg).await?;
     let project = daw.current_project().await?;
-    project.tracks().remove(daw_proto::TrackRef::Guid(guid.clone())).await?;
+    project.tracks().remove(daw::service::TrackRef::Guid(guid.clone())).await?;
     println!("Removed track \"{}\" ({})", name, guid);
     Ok(())
 }

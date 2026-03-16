@@ -12,7 +12,7 @@ nom = "8"
 libc = "0.2"
 
 # Domain types for conversion
-daw-proto = { workspace = true }
+daw-proto = { path = "../daw-proto" }
 
 # Common workspace dependencies
 serde = { workspace = true }

@@ -10,7 +10,7 @@ path = "src/lib.rs"
 # The REAPER implementation runs in-process within the reaper-extension.
 
 [dependencies]
-daw-proto.workspace = true
+daw-proto = { path = "../daw-proto" }
 roam.workspace = true
 tracing.workspace = true
 tokio.workspace = true
@@ -18,7 +18,7 @@ moire.workspace = true
 keyflow = { workspace = true, features = ["engraver", "midi-import"] }
 
 # RPP chunk parsing/serialization for chunk-based FX manipulation
-dawfile-reaper.workspace = true
+dawfile-reaper = { path = "../dawfile-reaper" }
 
 # REAPER bindings for actual DAW control
 reaper-high.workspace = true
@@ -28,8 +28,8 @@ enumflags2.workspace = true
 camino = "1"
 
 [dev-dependencies]
-daw-control.workspace = true
-daw-proto.workspace = true
+daw-control = { path = "../daw-control" }
+daw-proto = { path = "../daw-proto" }
 signal = { path = "../../../FastTrackStudio/crates/signal/signal", features = ["daw"] }
 signal-live = { path = "../../../FastTrackStudio/crates/signal/signal-live" }
 signal-proto = { path = "../../../FastTrackStudio/crates/signal/signal-proto" }
