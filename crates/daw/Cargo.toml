@@ -6,5 +6,18 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
-daw-proto.workspace = true
-daw-control.workspace = true
+# Always included — these are WASM-compatible and form the core API
+daw-proto = { path = "../daw-proto" }
+daw-control = { path = "../daw-control" }
+
+# Feature-gated internal crates
+daw-control-sync = { path = "../daw-control-sync", optional = true }
+daw-reaper = { path = "../daw-reaper", optional = true }
+daw-standalone = { path = "../daw-standalone", optional = true }
+dawfile-reaper = { path = "../dawfile-reaper", optional = true }
+
+[features]
+sync = ["dep:daw-control-sync"]
+reaper = ["dep:daw-reaper"]
+standalone = ["dep:daw-standalone"]
+file = ["dep:dawfile-reaper"]
