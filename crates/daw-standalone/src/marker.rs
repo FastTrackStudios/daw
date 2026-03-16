@@ -421,6 +421,16 @@ impl MarkerService for StandaloneMarker {
         }
     }
 
+    async fn add_marker_in_lane(
+        &self,
+        _project: ProjectContext,
+        _position: f64,
+        _name: String,
+        _lane: u32,
+    ) -> u32 {
+        0
+    }
+
     async fn set_marker_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)

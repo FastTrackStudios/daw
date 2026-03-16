@@ -58,7 +58,7 @@ enum Command {
 
     /// Launch a REAPER instance
     Launch {
-        /// Config ID (e.g., "fts-tracks", "fts-guitar")
+        /// Config ID (e.g., "fts-tracks", "fts-signal")
         #[arg(long)]
         config: Option<String>,
     },

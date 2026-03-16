@@ -216,6 +216,30 @@ pub trait ProjectService {
     /// command identifier could not be resolved.
     async fn run_command(&self, project: ProjectContext, command: String) -> bool;
 
+    // =========================================================================
+    // Save
+    // =========================================================================
+
+    /// Save the specified project. If it hasn't been saved before (no path),
+    /// this is equivalent to "Save As" and may prompt the user.
+    async fn save(&self, project: ProjectContext);
+
+    /// Save all open projects (REAPER action 40897).
+    async fn save_all(&self);
+
+    // =========================================================================
+    // Ruler Lane Management (v7.62+)
+    // =========================================================================
+
+    /// Set the name of a ruler lane (1-based index). Creates the lane if needed.
+    async fn set_ruler_lane_name(&self, project: ProjectContext, lane_index: u32, name: String);
+
+    /// Get the name of a ruler lane, or empty string if it doesn't exist.
+    async fn get_ruler_lane_name(&self, project: ProjectContext, lane_index: u32) -> String;
+
+    /// Get the number of named ruler lanes.
+    async fn ruler_lane_count(&self, project: ProjectContext) -> u32;
+
     /// Subscribe to project state changes
     ///
     /// Streams events when:

@@ -42,8 +42,8 @@ async fn auto_color_all_applies_colors(ctx: &ReaperTestContext) -> eyre::Result<
     sleep(Duration::from_millis(300)).await;
 
     // Run the explicit color-all action
-    let ok = project.run_command("fts.auto_color.color_all").await?;
-    assert!(ok, "fts.auto_color.color_all command should be found");
+    let ok = project.run_command("FTS_AUTO_COLOR_AUTO_COLOR_ALL_TRACKS").await?;
+    assert!(ok, "FTS_AUTO_COLOR_AUTO_COLOR_ALL_TRACKS command should be found");
     sleep(SETTLE).await;
 
     // Verify every track got a color
@@ -108,7 +108,7 @@ async fn auto_color_clear_all_removes_colors(ctx: &ReaperTestContext) -> eyre::R
     sleep(Duration::from_millis(200)).await;
 
     // Apply colors first
-    project.run_command("fts.auto_color.color_all").await?;
+    project.run_command("FTS_AUTO_COLOR_AUTO_COLOR_ALL_TRACKS").await?;
     sleep(SETTLE).await;
 
     let before = project.tracks().all().await?;
@@ -116,7 +116,7 @@ async fn auto_color_clear_all_removes_colors(ctx: &ReaperTestContext) -> eyre::R
     assert!(colored_before > 0, "tracks should be colored before clear");
 
     // Clear all
-    project.run_command("fts.auto_color.clear_all").await?;
+    project.run_command("FTS_AUTO_COLOR_CLEAR_ALL_TRACK_COLORS").await?;
     sleep(SETTLE).await;
 
     let after = project.tracks().all().await?;
@@ -145,7 +145,7 @@ async fn auto_color_toggle_colors_new_tracks(ctx: &ReaperTestContext) -> eyre::R
     sleep(Duration::from_millis(200)).await;
 
     // Toggle auto-color ON
-    let ok = project.run_command("fts.auto_color.toggle").await?;
+    let ok = project.run_command("FTS_AUTO_COLOR_TOGGLE_AUTO_COLOR").await?;
     assert!(ok, "toggle command should be found");
     sleep(SETTLE).await;
 
@@ -176,7 +176,7 @@ async fn auto_color_toggle_colors_new_tracks(ctx: &ReaperTestContext) -> eyre::R
     );
 
     // Toggle auto-color OFF (clears colors)
-    project.run_command("fts.auto_color.toggle").await?;
+    project.run_command("FTS_AUTO_COLOR_TOGGLE_AUTO_COLOR").await?;
     sleep(SETTLE).await;
 
     let tracks = project.tracks().all().await?;
@@ -205,7 +205,7 @@ async fn auto_color_recolors_on_rename(ctx: &ReaperTestContext) -> eyre::Result<
     sleep(Duration::from_millis(200)).await;
 
     // Toggle auto-color ON
-    project.run_command("fts.auto_color.toggle").await?;
+    project.run_command("FTS_AUTO_COLOR_TOGGLE_AUTO_COLOR").await?;
     sleep(SETTLE).await;
 
     let tracks = project.tracks().all().await?;
@@ -230,7 +230,7 @@ async fn auto_color_recolors_on_rename(ctx: &ReaperTestContext) -> eyre::Result<
     );
 
     // Clean up: toggle off
-    project.run_command("fts.auto_color.toggle").await?;
+    project.run_command("FTS_AUTO_COLOR_TOGGLE_AUTO_COLOR").await?;
     sleep(SETTLE).await;
 
     Ok(())
@@ -254,7 +254,7 @@ async fn auto_color_selected_only(ctx: &ReaperTestContext) -> eyre::Result<()> {
     sleep(Duration::from_millis(100)).await;
 
     // Color selected only
-    project.run_command("fts.auto_color.color_selected").await?;
+    project.run_command("FTS_AUTO_COLOR_AUTO_COLOR_SELECTED").await?;
     sleep(SETTLE).await;
 
     let tracks = project.tracks().all().await?;

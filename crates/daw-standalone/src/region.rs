@@ -6,7 +6,7 @@
 use crate::project::project_guids;
 use daw_proto::{
     ProjectContext, TimeRange,
-    region::{Region, RegionEvent, RegionService},
+    region::{AddRegionInLaneRequest, Region, RegionEvent, RegionService},
 };
 use roam::Tx;
 use std::collections::HashMap;
@@ -385,6 +385,14 @@ impl RegionService for StandaloneRegion {
                 id, color, proj_id
             );
         }
+    }
+
+    async fn add_region_in_lane(
+        &self,
+        _project: ProjectContext,
+        _request: AddRegionInLaneRequest,
+    ) -> u32 {
+        0
     }
 
     async fn set_region_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>) {

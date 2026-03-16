@@ -75,6 +75,16 @@ pub trait MarkerService {
     // Lane Methods (v7.62+)
     // =========================================================================
 
+    /// Add a new marker at the given position in a specific ruler lane.
+    /// Returns the marker ID.
+    async fn add_marker_in_lane(
+        &self,
+        project: ProjectContext,
+        position: f64,
+        name: String,
+        lane: u32,
+    ) -> u32;
+
     /// Set the ruler lane for a marker (None to move to default lane)
     async fn set_marker_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>);
 

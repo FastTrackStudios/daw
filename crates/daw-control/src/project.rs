@@ -354,6 +354,18 @@ impl Project {
             .await?)
     }
 
+    /// Save this project.
+    ///
+    /// If the project hasn't been saved before (no path), this may prompt
+    /// the user with a "Save As" dialog.
+    pub async fn save(&self) -> crate::Result<()> {
+        self.clients
+            .project
+            .save(daw_proto::ProjectContext::project(&self.guid))
+            .await?;
+        Ok(())
+    }
+
     /// Run a REAPER action/command by its string identifier.
     ///
     /// Accepts either a numeric command ID (e.g. `"40001"`) or a named
@@ -368,6 +380,44 @@ impl Project {
                 daw_proto::ProjectContext::project(&self.guid),
                 command.to_string(),
             )
+            .await?)
+    }
+
+    // =========================================================================
+    // Ruler Lane Management (v7.62+)
+    // =========================================================================
+
+    /// Set the name of a ruler lane (1-based index). Creates the lane if needed.
+    pub async fn set_ruler_lane_name(&self, lane_index: u32, name: &str) -> crate::Result<()> {
+        self.clients
+            .project
+            .set_ruler_lane_name(
+                daw_proto::ProjectContext::project(&self.guid),
+                lane_index,
+                name.to_string(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Get the name of a ruler lane, or empty string if it doesn't exist.
+    pub async fn get_ruler_lane_name(&self, lane_index: u32) -> crate::Result<String> {
+        Ok(self
+            .clients
+            .project
+            .get_ruler_lane_name(
+                daw_proto::ProjectContext::project(&self.guid),
+                lane_index,
+            )
+            .await?)
+    }
+
+    /// Get the number of named ruler lanes.
+    pub async fn ruler_lane_count(&self) -> crate::Result<u32> {
+        Ok(self
+            .clients
+            .project
+            .ruler_lane_count(daw_proto::ProjectContext::project(&self.guid))
             .await?)
     }
 

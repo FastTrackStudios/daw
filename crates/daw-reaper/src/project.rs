@@ -561,6 +561,137 @@ impl ProjectService for ReaperProject {
     }
 
     // =========================================================================
+    // Save
+    // =========================================================================
+
+    async fn save(&self, project: daw_proto::ProjectContext) {
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+
+            let proj_ctx = match resolve_project(&project) {
+                Some(p) => ProjectContext::Proj(p.raw()),
+                None => ProjectContext::CurrentProject,
+            };
+
+            // Action 40026 = "File: Save project"
+            medium.main_on_command_ex(CommandId::new(40026), 0, proj_ctx);
+        });
+    }
+
+    async fn save_all(&self) {
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+
+            // Action 40897 = "File: Save all projects"
+            medium.main_on_command_ex(
+                CommandId::new(40897),
+                0,
+                ProjectContext::CurrentProject,
+            );
+        });
+    }
+
+    // =========================================================================
+    // Ruler Lane Management (v7.62+)
+    // =========================================================================
+
+    async fn set_ruler_lane_name(
+        &self,
+        project: daw_proto::ProjectContext,
+        lane_index: u32,
+        name: String,
+    ) {
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let low = reaper.medium_reaper().low();
+            let proj_ctx = match resolve_project(&project) {
+                Some(p) => ProjectContext::Proj(p.raw()),
+                None => ProjectContext::CurrentProject,
+            };
+            let key =
+                std::ffi::CString::new(format!("RULER_LANE_NAME:{}", lane_index)).unwrap();
+            let value = std::ffi::CString::new(name).unwrap();
+            unsafe {
+                low.GetSetProjectInfo_String(
+                    proj_ctx.to_raw(),
+                    key.as_ptr(),
+                    value.as_ptr() as *mut _,
+                    true,
+                );
+            }
+        });
+    }
+
+    async fn get_ruler_lane_name(
+        &self,
+        project: daw_proto::ProjectContext,
+        lane_index: u32,
+    ) -> String {
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let low = reaper.medium_reaper().low();
+            let proj_ctx = match resolve_project(&project) {
+                Some(p) => ProjectContext::Proj(p.raw()),
+                None => ProjectContext::CurrentProject,
+            };
+            let key =
+                std::ffi::CString::new(format!("RULER_LANE_NAME:{}", lane_index)).unwrap();
+            let mut buf = [0u8; 256];
+            let buf_ptr = buf.as_mut_ptr() as *mut std::ffi::c_char;
+            unsafe {
+                low.GetSetProjectInfo_String(
+                    proj_ctx.to_raw(),
+                    key.as_ptr(),
+                    buf_ptr,
+                    false,
+                );
+                std::ffi::CStr::from_ptr(buf_ptr)
+                    .to_string_lossy()
+                    .to_string()
+            }
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    async fn ruler_lane_count(&self, project: daw_proto::ProjectContext) -> u32 {
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let low = reaper.medium_reaper().low();
+            let proj_ctx = match resolve_project(&project) {
+                Some(p) => ProjectContext::Proj(p.raw()),
+                None => ProjectContext::CurrentProject,
+            };
+            // Count by probing lane names until we find an empty one
+            let mut count = 0u32;
+            for i in 1..=128 {
+                let key =
+                    std::ffi::CString::new(format!("RULER_LANE_NAME:{}", i)).unwrap();
+                let mut buf = [0u8; 256];
+                let buf_ptr = buf.as_mut_ptr() as *mut std::ffi::c_char;
+                unsafe {
+                    low.GetSetProjectInfo_String(
+                        proj_ctx.to_raw(),
+                        key.as_ptr(),
+                        buf_ptr,
+                        false,
+                    );
+                    let name = std::ffi::CStr::from_ptr(buf_ptr).to_string_lossy();
+                    if name.is_empty() {
+                        break;
+                    }
+                    count = i;
+                }
+            }
+            count
+        })
+        .await
+        .unwrap_or(0)
+    }
+
+    // =========================================================================
     // Streaming
     // =========================================================================
 

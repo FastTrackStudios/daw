@@ -125,6 +125,27 @@ impl Markers {
         Ok(id)
     }
 
+    /// Add a new marker at the given position in a specific ruler lane.
+    ///
+    /// Returns the ID of the newly created marker.
+    pub async fn add_in_lane(&self, position: f64, name: &str, lane: u32) -> Result<u32> {
+        let id = self
+            .clients
+            .marker
+            .add_marker_in_lane(self.context(), position, name.to_string(), lane)
+            .await?;
+        Ok(id)
+    }
+
+    /// Set the ruler lane for a marker. Pass None to move to the default lane.
+    pub async fn set_lane(&self, id: u32, lane: Option<u32>) -> Result<()> {
+        self.clients
+            .marker
+            .set_marker_lane(self.context(), id, lane)
+            .await?;
+        Ok(())
+    }
+
     /// Remove a marker by ID
     pub async fn remove(&self, id: u32) -> Result<()> {
         self.clients

@@ -4,7 +4,18 @@
 
 use super::{Region, RegionEvent};
 use crate::ProjectContext;
+use facet::Facet;
 use roam::{Tx, service};
+
+/// Request for adding a region in a specific ruler lane.
+/// Groups params to stay within the 4-element Facet tuple limit.
+#[derive(Clone, Debug, Facet)]
+pub struct AddRegionInLaneRequest {
+    pub start: f64,
+    pub end: f64,
+    pub name: String,
+    pub lane: u32,
+}
 
 /// Service for managing regions in a DAW project
 ///
@@ -58,6 +69,13 @@ pub trait RegionService {
     // =========================================================================
     // Lane Methods (v7.62+)
     // =========================================================================
+
+    /// Add a new region in a specific ruler lane. Returns region ID.
+    async fn add_region_in_lane(
+        &self,
+        project: ProjectContext,
+        request: AddRegionInLaneRequest,
+    ) -> u32;
 
     /// Set the ruler lane for a region (None to move to default lane)
     async fn set_region_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>);

@@ -7,8 +7,8 @@
 //!
 //!   cargo test -p daw-reaper --test reaper_setlist -- --ignored --nocapture
 
-use dawfile_reaper::io::{read_project, parse_project_text};
-use dawfile_reaper::setlist_rpp::{self, SongInfo, concatenate_projects};
+use dawfile_reaper::io::read_project;
+use dawfile_reaper::setlist_rpp::{self, SongInfo, build_song_infos, measures_to_seconds, concatenate_projects};
 use eyre::Result;
 use reaper_test::{DawInstanceConfig, run_multi_reaper_test};
 use std::path::PathBuf;
@@ -43,23 +43,12 @@ fn setlist_four_tabs() -> Result<()> {
                     .map(|p| read_project(p).unwrap())
                     .collect();
 
-                let songs = vec![
-                    SongInfo {
-                        name: "Song A".to_string(),
-                        global_start_seconds: 0.0,
-                        duration_seconds: 24.0,
-                    },
-                    SongInfo {
-                        name: "Song B".to_string(),
-                        global_start_seconds: 24.0,
-                        duration_seconds: 16.0,
-                    },
-                    SongInfo {
-                        name: "Song C".to_string(),
-                        global_start_seconds: 40.0,
-                        duration_seconds: 20.571429,
-                    },
-                ];
+                // 2-measure gap at 120 BPM 4/4 = 4 seconds between songs
+                let gap = measures_to_seconds(2, 120.0, 4);
+                let songs = build_song_infos(
+                    &[("Song A", 24.0), ("Song B", 16.0), ("Song C", 20.571429)],
+                    gap,
+                );
 
                 let combined = concatenate_projects(&projects, &songs);
 

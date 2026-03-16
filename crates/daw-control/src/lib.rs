@@ -418,6 +418,14 @@ impl Daw {
         Ok(Project::new(info.guid, self.clients.clone()))
     }
 
+    /// Save all open projects.
+    ///
+    /// Equivalent to REAPER's "File: Save all projects" action (40897).
+    pub async fn save_all_projects(&self) -> crate::Result<()> {
+        self.clients.project.save_all().await?;
+        Ok(())
+    }
+
     /// Subscribe to project changes (open, close, switch)
     ///
     /// Returns a receiver that streams project events:

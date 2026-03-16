@@ -229,6 +229,30 @@ impl ProjectService for StandaloneProject {
         false
     }
 
+    async fn save(&self, _project: daw_proto::ProjectContext) {}
+
+    async fn save_all(&self) {}
+
+    async fn set_ruler_lane_name(
+        &self,
+        _project: daw_proto::ProjectContext,
+        _lane_index: u32,
+        _name: String,
+    ) {
+    }
+
+    async fn get_ruler_lane_name(
+        &self,
+        _project: daw_proto::ProjectContext,
+        _lane_index: u32,
+    ) -> String {
+        String::new()
+    }
+
+    async fn ruler_lane_count(&self, _project: daw_proto::ProjectContext) -> u32 {
+        0
+    }
+
     async fn subscribe(&self, tx: Tx<ProjectEvent>) {
         info!("ProjectService::subscribe() - starting project stream");
 

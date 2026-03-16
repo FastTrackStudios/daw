@@ -721,16 +721,11 @@ fn get_fx_block_via_track_chunk(track: &Track, fx_index: u32) -> Option<String> 
     let fxchain_text = dawfile_reaper::chunk_ops::extract_fxchain_block(&chunk_str)?;
     let chain = dawfile_reaper::FxChain::parse(fxchain_text).ok()?;
     let node = chain.nodes.get(fx_index as usize)?;
-    match node {
-        dawfile_reaper::types::FxChainNode::Plugin(plugin) => {
-            if plugin.raw_block.is_empty() {
-                None
-            } else {
-                Some(plugin.raw_block.clone())
-            }
-        }
-        dawfile_reaper::types::FxChainNode::Container(_) => None,
-    }
+    let raw = match node {
+        dawfile_reaper::types::FxChainNode::Plugin(plugin) => &plugin.raw_block,
+        dawfile_reaper::types::FxChainNode::Container(container) => &container.raw_block,
+    };
+    if raw.is_empty() { None } else { Some(raw.clone()) }
 }
 
 /// Replace the raw RPP block text for a specific FX by chain index.
@@ -753,16 +748,12 @@ fn set_fx_block_via_track_chunk(
         .get(fx_index as usize)
         .ok_or_else(|| format!("FX index {} out of range", fx_index))?;
     let old_block = match node {
-        dawfile_reaper::types::FxChainNode::Plugin(plugin) => {
-            if plugin.raw_block.is_empty() {
-                return Err("plugin raw_block is empty".to_string());
-            }
-            &plugin.raw_block
-        }
-        dawfile_reaper::types::FxChainNode::Container(_) => {
-            return Err("FX at index is a container, not a plugin".to_string());
-        }
+        dawfile_reaper::types::FxChainNode::Plugin(plugin) => &plugin.raw_block,
+        dawfile_reaper::types::FxChainNode::Container(container) => &container.raw_block,
     };
+    if old_block.is_empty() {
+        return Err("FX raw_block is empty".to_string());
+    }
     let new_chunk_str = chunk_str.replace(old_block, new_block);
     let new_chunk = reaper_high::Chunk::new(new_chunk_str);
     track

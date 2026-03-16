@@ -119,6 +119,35 @@ impl Regions {
         Ok(id)
     }
 
+    /// Add a new region in a specific ruler lane.
+    ///
+    /// Returns the ID of the newly created region.
+    pub async fn add_in_lane(&self, start: f64, end: f64, name: &str, lane: u32) -> Result<u32> {
+        let id = self
+            .clients
+            .region
+            .add_region_in_lane(
+                self.context(),
+                daw_proto::AddRegionInLaneRequest {
+                    start,
+                    end,
+                    name: name.to_string(),
+                    lane,
+                },
+            )
+            .await?;
+        Ok(id)
+    }
+
+    /// Set the ruler lane for a region. Pass None to move to the default lane.
+    pub async fn set_lane(&self, id: u32, lane: Option<u32>) -> Result<()> {
+        self.clients
+            .region
+            .set_region_lane(self.context(), id, lane)
+            .await?;
+        Ok(())
+    }
+
     /// Remove a region by ID
     pub async fn remove(&self, id: u32) -> Result<()> {
         self.clients

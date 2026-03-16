@@ -4,7 +4,7 @@
 //! combined project's structure — tracks, items, tempo, markers, regions.
 
 use dawfile_reaper::io::read_project;
-use dawfile_reaper::setlist_rpp::{SongInfo, concatenate_projects, concatenate_tracks, concatenate_tempo_envelopes, generate_markers_regions};
+use dawfile_reaper::setlist_rpp::{SongInfo, build_song_infos, measures_to_seconds, concatenate_projects, concatenate_tracks, concatenate_tempo_envelopes, generate_markers_regions};
 use dawfile_reaper::types::track::FolderState;
 use std::path::PathBuf;
 
@@ -148,15 +148,14 @@ fn concatenate_three_songs_full() {
         .collect();
 
     // Song A: 24s at 120 BPM, Song B: 16s at 90 BPM, Song C: ~20.57s at 140 BPM
-    let song_a_duration = 24.0;
-    let song_b_duration = 16.0;
-    let song_c_duration = 20.571429;
+    // 2-measure gap at 120 BPM 4/4 = 4 seconds between each song
+    let gap = measures_to_seconds(2, 120.0, 4);
+    assert_eq!(gap, 4.0);
 
-    let songs = vec![
-        SongInfo { name: "Song A".to_string(), global_start_seconds: 0.0, duration_seconds: song_a_duration },
-        SongInfo { name: "Song B".to_string(), global_start_seconds: song_a_duration, duration_seconds: song_b_duration },
-        SongInfo { name: "Song C".to_string(), global_start_seconds: song_a_duration + song_b_duration, duration_seconds: song_c_duration },
-    ];
+    let songs = build_song_infos(
+        &[("Song A", 24.0), ("Song B", 16.0), ("Song C", 20.571429)],
+        gap,
+    );
 
     let combined = concatenate_projects(&projects, &songs);
 
@@ -183,13 +182,13 @@ fn concatenate_three_songs_full() {
     let click = combined.tracks.iter().find(|t| t.name == "Click").unwrap();
     assert_eq!(click.items.len(), 3, "Click should have items from all 3 songs");
     assert_eq!(click.items[0].position, 0.0, "Song A click at 0s");
-    assert_eq!(click.items[1].position, 24.0, "Song B click at 24s");
-    assert!((click.items[2].position - 40.0).abs() < 0.01, "Song C click at 40s");
+    assert_eq!(click.items[1].position, 28.0, "Song B click at 28s (24 + 4 gap)");
+    assert!((click.items[2].position - 48.0).abs() < 0.01, "Song C click at 48s (28 + 16 + 4 gap)");
 
     // Shared Guide track should have items from Song C only
     let guide = combined.tracks.iter().find(|t| t.name == "Guide").unwrap();
     assert_eq!(guide.items.len(), 1, "Guide should have 1 item from Song C");
-    assert!((guide.items[0].position - 40.0).abs() < 0.01, "Song C guide at 40s");
+    assert!((guide.items[0].position - 48.0).abs() < 0.01, "Song C guide at 48s");
 
     // TRACKS folder with per-song subfolders
     let tracks_folder = combined.tracks.iter().find(|t| t.name == "TRACKS");
@@ -210,18 +209,18 @@ fn concatenate_three_songs_full() {
     assert!(song_b_folder.is_some(), "Should have Song B folder");
     let keys = combined.tracks.iter().find(|t| t.name == "Keys");
     assert!(keys.is_some(), "Should have Keys track from Song B");
-    assert_eq!(keys.unwrap().items[0].position, 24.0, "Keys item offset to 24s");
+    assert_eq!(keys.unwrap().items[0].position, 28.0, "Keys item offset to 28s");
 
     let drums = combined.tracks.iter().find(|t| t.name == "Drums");
     assert!(drums.is_some(), "Should have Drums track from Song B");
-    assert_eq!(drums.unwrap().items[0].position, 24.0, "Drums item offset to 24s");
+    assert_eq!(drums.unwrap().items[0].position, 28.0, "Drums item offset to 28s");
 
     // Song C folder with Synth Lead
     let song_c_folder = combined.tracks.iter().find(|t| t.name == "Song C");
     assert!(song_c_folder.is_some(), "Should have Song C folder");
     let synth = combined.tracks.iter().find(|t| t.name == "Synth Lead");
     assert!(synth.is_some(), "Should have Synth Lead track from Song C");
-    assert!((synth.unwrap().items[0].position - 40.0).abs() < 0.01, "Synth Lead offset to 40s");
+    assert!((synth.unwrap().items[0].position - 48.0).abs() < 0.01, "Synth Lead offset to 48s");
 
     // ── Tempo Envelope ───────────────────────────────────────────────────
     println!("\nTempo Envelope:");
@@ -234,16 +233,16 @@ fn concatenate_three_songs_full() {
     assert_eq!(env.points[0].position, 0.0);
     assert_eq!(env.points[0].tempo, 120.0);
 
-    // Song B: 90 BPM at 24s (boundary, square shape), 110 BPM at 24+10.67=34.67s
-    assert_eq!(env.points[1].position, 24.0);
+    // Song B: 90 BPM at 28s (boundary, square shape), 110 BPM at 28+10.67=38.67s
+    assert_eq!(env.points[1].position, 28.0);
     assert_eq!(env.points[1].tempo, 90.0);
     assert_eq!(env.points[1].shape, 1, "Song B boundary should be square");
 
-    assert!((env.points[2].position - 34.666667).abs() < 0.01, "Song B tempo change at ~34.67s");
+    assert!((env.points[2].position - 38.666667).abs() < 0.01, "Song B tempo change at ~38.67s");
     assert_eq!(env.points[2].tempo, 110.0);
 
-    // Song C: 140 BPM at 40s
-    assert_eq!(env.points[3].position, 40.0);
+    // Song C: 140 BPM at 48s
+    assert_eq!(env.points[3].position, 48.0);
     assert_eq!(env.points[3].tempo, 140.0);
     assert_eq!(env.points[3].shape, 1, "Song C boundary should be square");
 
@@ -266,22 +265,22 @@ fn concatenate_three_songs_full() {
     assert_eq!(ra.position, 0.0);
     assert_eq!(ra.end_position, Some(24.0));
 
-    // Song B region: 24 → 40
+    // Song B region: 28 → 44
     let rb = combined.markers_regions.regions.iter().find(|r| r.name == "Song B").unwrap();
-    assert_eq!(rb.position, 24.0);
-    assert_eq!(rb.end_position, Some(40.0));
+    assert_eq!(rb.position, 28.0);
+    assert_eq!(rb.end_position, Some(44.0));
 
-    // Song C region: 40 → 60.57
+    // Song C region: 48 → 68.57
     let rc = combined.markers_regions.regions.iter().find(|r| r.name == "Song C").unwrap();
-    assert!((rc.position - 40.0).abs() < 0.01);
-    assert!((rc.end_position.unwrap() - 60.571429).abs() < 0.01);
+    assert!((rc.position - 48.0).abs() < 0.01);
+    assert!((rc.end_position.unwrap() - 68.571429).abs() < 0.01);
 
-    // Song B's "Solo Section" region should be offset to 24+2=26s → 24+12=36s
+    // Song B's "Solo Section" region should be offset to 28+2=30s → 28+12=40s
     let solo = combined.markers_regions.all.iter().find(|m| m.name == "Solo Section");
     assert!(solo.is_some(), "Should have Solo Section region from Song B");
     let solo = solo.unwrap();
-    assert_eq!(solo.position, 26.0, "Solo Section offset to 26s");
-    assert_eq!(solo.end_position, Some(36.0), "Solo Section end offset to 36s");
+    assert_eq!(solo.position, 30.0, "Solo Section offset to 30s");
+    assert_eq!(solo.end_position, Some(40.0), "Solo Section end offset to 40s");
 
     // All IDs should be unique
     let ids: Vec<i32> = combined.markers_regions.all.iter().map(|m| m.id).collect();

@@ -6,6 +6,7 @@
 use crate::main_thread;
 use crate::project_context::project_guid as project_guid_from;
 use crate::safe_wrappers::item as item_sw;
+use crate::track::{resolve_project, resolve_track};
 use daw_proto::{
     BeatAttachMode, Duration, FadeShape, Item, ItemEvent, ItemRef, ItemService, PositionInSeconds,
     ProjectContext, SourceType, Take, TakeEvent, TakeRef, TakeService, TrackRef,
@@ -596,62 +597,38 @@ impl ItemService for ReaperItem {
 
     async fn add_item(
         &self,
-        _project: ProjectContext,
+        project: ProjectContext,
         track: TrackRef,
         position: PositionInSeconds,
         length: Duration,
     ) -> Option<String> {
         debug!(
-            "ReaperItem: add_item at {} for {}",
-            position.as_seconds(),
-            length.as_seconds()
+            "ReaperItem: add_item {:?} at {} for {}",
+            track, position.as_seconds(), length.as_seconds()
         );
         main_thread::query(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-            let proj = reaper.current_project();
-
-            // Resolve track reference to a raw MediaTrack pointer
-            let reaper_track = match &track {
-                TrackRef::Master => proj.master_track().ok(),
-                TrackRef::Index(idx) => proj.track_by_index(*idx),
-                TrackRef::Guid(guid) => {
-                    (0..proj.track_count()).find_map(|i| {
-                        let t = proj.track_by_index(i)?;
-                        if t.guid().to_string_without_braces() == *guid {
-                            Some(t)
-                        } else {
-                            None
-                        }
-                    })
-                }
-            }?;
+            let proj = resolve_project(&project)?;
+            let reaper_track = resolve_track(&proj, &track)?;
             let track_ptr = reaper_track.raw().ok()?;
 
-            let item = item_sw::add_media_item_to_track(medium, track_ptr)?;
-
-            // Set position and length
-            item_sw::set_media_item_position(
-                medium,
-                item,
-                reaper_medium::PositionInSeconds::new(position.as_seconds()).ok()?,
-                UiRefreshBehavior::NoRefresh,
-            );
-            item_sw::set_media_item_length(
-                medium,
-                item,
-                DurationInSeconds::new(length.as_seconds()).ok()?,
-                UiRefreshBehavior::NoRefresh,
-            );
-
-            // Add an empty MIDI take so the item has a take to work with
-            let _take = unsafe {
-                medium.add_take_to_media_item(item)
+            // Use CreateNewMIDIItemInProj to create an item with a proper MIDI take
+            let start = position.as_seconds();
+            let end = start + length.as_seconds();
+            let low = reaper_low::Reaper::get();
+            let item_ptr = unsafe {
+                low.CreateNewMIDIItemInProj(
+                    track_ptr.as_ptr(),
+                    start,
+                    end,
+                    std::ptr::null(), // times are in seconds, not QN
+                )
             };
 
-            // GUID extraction not available in reaper_medium
-            // Use pointer address as temporary ID
-            Some(format!("{:p}", item.as_ptr()))
+            if item_ptr.is_null() {
+                return None;
+            }
+
+            Some(format!("{:p}", item_ptr))
         })
         .await
         .unwrap_or(None)

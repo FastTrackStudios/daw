@@ -326,7 +326,7 @@ impl Default for ReaperTrack {
 // =============================================================================
 
 /// Resolve a ProjectContext to a REAPER Project
-fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
+pub(crate) fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
     match ctx {
         ProjectContext::Current => Some(Reaper::get().current_project()),
         ProjectContext::Project(guid) => find_project_by_guid(guid),
@@ -347,7 +347,7 @@ pub fn resolve_track_pub(
     resolve_track(project, track_ref)
 }
 
-fn resolve_track(
+pub(crate) fn resolve_track(
     project: &reaper_high::Project,
     track_ref: &TrackRef,
 ) -> Option<reaper_high::Track> {

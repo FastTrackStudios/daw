@@ -55,10 +55,10 @@ dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 reaper-test = { path = "crates/reaper-test" }
 reaper-launcher = { path = "crates/reaper-launcher" }
 
-# REAPER bindings
-reaper-low = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
-reaper-medium = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
-reaper-high = { git = "https://github.com/helgoboss/reaper-rs.git", branch = "master" }
+# REAPER bindings (FTS fork with v7.63 ruler lane APIs)
+reaper-low = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 
 # UI
 dioxus = "0.7.2"

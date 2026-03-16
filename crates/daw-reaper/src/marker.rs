@@ -258,6 +258,42 @@ impl MarkerService for ReaperMarker {
         });
     }
 
+    async fn add_marker_in_lane(
+        &self,
+        project: ProjectContext,
+        position: f64,
+        name: String,
+        lane: u32,
+    ) -> u32 {
+        debug!(
+            "ReaperMarker: add_marker_in_lane '{}' at {} in lane {}",
+            name, position, lane
+        );
+        let id = self.add_marker(project.clone(), position, name).await;
+        if id != 0 {
+            // Find the enumeration index for the newly created marker and set its lane
+            main_thread::run(move || {
+                let reaper = reaper_high::Reaper::get();
+                let medium = reaper.medium_reaper();
+                let low = medium.low();
+                let reaper_ctx = ReaperProjectContext::CurrentProject;
+                let count_result = medium.count_project_markers(reaper_ctx);
+                let total_count = count_result.total_count;
+
+                for idx in 0..total_count {
+                    medium.enum_project_markers_3(reaper_ctx, idx, |result| {
+                        if let Some(info) = result {
+                            if info.region_end_position.is_none() && info.id.get() == id {
+                                ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane);
+                            }
+                        }
+                    });
+                }
+            });
+        }
+        id
+    }
+
     async fn set_marker_lane(&self, _project: ProjectContext, _id: u32, _lane: Option<u32>) {
         // TODO: Implement once GetRegionOrMarkerInfo_Value FFI wrappers are available
         debug!("ReaperMarker: set_marker_lane not yet implemented");

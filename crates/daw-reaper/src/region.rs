@@ -7,6 +7,7 @@ use crate::main_thread;
 use crate::project_context::resolve_project_context;
 use crate::safe_wrappers::markers as sw;
 use crate::safe_wrappers::ruler_lanes;
+use daw_proto::region::AddRegionInLaneRequest;
 use daw_proto::{ProjectContext, Region, RegionEvent, RegionService, TimeRange};
 use reaper_medium::{
     MarkerOrRegionPosition, PositionInSeconds, ProjectContext as ReaperProjectContext,
@@ -281,8 +282,44 @@ impl RegionService for ReaperRegion {
     }
 
     // =========================================================================
-    // Navigation Methods
+    // Lane Methods
     // =========================================================================
+
+    async fn add_region_in_lane(
+        &self,
+        project: ProjectContext,
+        request: AddRegionInLaneRequest,
+    ) -> u32 {
+        debug!(
+            "ReaperRegion: add_region_in_lane '{}' from {} to {} in lane {}",
+            request.name, request.start, request.end, request.lane
+        );
+        let id = self
+            .add_region(project.clone(), request.start, request.end, request.name)
+            .await;
+        if id != 0 {
+            let lane = request.lane;
+            main_thread::run(move || {
+                let reaper = reaper_high::Reaper::get();
+                let medium = reaper.medium_reaper();
+                let low = medium.low();
+                let reaper_ctx = ReaperProjectContext::CurrentProject;
+                let count_result = medium.count_project_markers(reaper_ctx);
+                let total_count = count_result.total_count;
+
+                for idx in 0..total_count {
+                    medium.enum_project_markers_3(reaper_ctx, idx, |result| {
+                        if let Some(info) = result {
+                            if info.region_end_position.is_some() && info.id.get() == id {
+                                ruler_lanes::set_marker_lane(low, reaper_ctx, idx, lane);
+                            }
+                        }
+                    });
+                }
+            });
+        }
+        id
+    }
 
     async fn set_region_lane(&self, _project: ProjectContext, _id: u32, _lane: Option<u32>) {
         // TODO: Implement once GetRegionOrMarkerInfo_Value FFI wrappers are available
