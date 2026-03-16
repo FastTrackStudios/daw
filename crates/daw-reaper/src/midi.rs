@@ -266,11 +266,12 @@ impl MidiService for ReaperMidi {
 
     async fn add_note(
         &self,
-        _location: MidiTakeLocation,
-        _note: MidiNoteCreate,
+        location: MidiTakeLocation,
+        note: MidiNoteCreate,
     ) -> u32 {
-        Self::readonly_warn("add_note");
-        0
+        // Delegate to add_notes with a single note
+        let indices = self.add_notes(location, vec![note]).await;
+        indices.into_iter().next().unwrap_or(0)
     }
 
     async fn add_notes(

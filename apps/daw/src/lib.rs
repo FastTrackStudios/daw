@@ -101,7 +101,7 @@ fn fts_home() -> String {
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let production = format!("{home}/Music/FastTrackStudio");
-    if std::path::Path::new(&production).exists() {
+    if std::path::Path::new(&format!("{production}/Reaper/reaper.ini")).exists() {
         return production;
     }
     format!("{home}/Music/Dev/FastTrackStudio")
@@ -149,7 +149,7 @@ pub fn spawn_reaper(config: &ReaperConfig) -> Result<u32> {
 
     let child = cmd
         .spawn()
-        .map_err(|e| eyre::eyre!("Failed to spawn REAPER ({}): {e}", config.label))?;
+        .map_err(|e| eyre::eyre!("Failed to spawn REAPER ({}) at {}: {e}", config.label, config.executable))?;
 
     let pid = child.id();
     drop(child);

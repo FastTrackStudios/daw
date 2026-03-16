@@ -51,7 +51,7 @@ fn fts_home() -> String {
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let production = format!("{home}/Music/FastTrackStudio");
-    if std::path::Path::new(&production).exists() {
+    if std::path::Path::new(&format!("{production}/Reaper/reaper.ini")).exists() {
         return production;
     }
     format!("{home}/Music/Dev/FastTrackStudio")
@@ -62,16 +62,27 @@ fn fts_home() -> String {
 /// Checks `$FTS_REAPER_EXECUTABLE`, falls back to `<fts_home>/Reaper/FTS-TESTING.app/Contents/MacOS/REAPER`.
 pub fn reaper_executable() -> String {
     std::env::var("FTS_REAPER_EXECUTABLE").unwrap_or_else(|_| {
-        format!("{}/Reaper/FTS-TESTING.app/Contents/MacOS/REAPER", fts_home())
+        let fts = fts_home();
+        // Try FTS-TRACKS subdirectory first (production layout), then direct (dev layout)
+        let production = format!("{fts}/Reaper/FTS-TRACKS/FTS-TESTING.app/Contents/MacOS/REAPER");
+        if std::path::Path::new(&production).exists() {
+            return production;
+        }
+        format!("{fts}/Reaper/FTS-TESTING.app/Contents/MacOS/REAPER")
     })
 }
 
 /// Resolve the REAPER resources path.
 ///
-/// Checks `$FTS_REAPER_RESOURCES`, falls back to `<fts_home>/Reaper/FTS-TESTING.app/Contents/Resources`.
+/// Checks `$FTS_REAPER_RESOURCES`, falls back to auto-detected path.
 pub fn reaper_resources() -> String {
     std::env::var("FTS_REAPER_RESOURCES").unwrap_or_else(|_| {
-        format!("{}/Reaper/FTS-TESTING.app/Contents/Resources", fts_home())
+        let fts = fts_home();
+        let production = format!("{fts}/Reaper/FTS-TRACKS/FTS-TESTING.app/Contents/Resources");
+        if std::path::Path::new(&production).exists() {
+            return production;
+        }
+        format!("{fts}/Reaper/FTS-TESTING.app/Contents/Resources")
     })
 }
 pub const LOG_DIR: &str = "/tmp/reaper-tests";

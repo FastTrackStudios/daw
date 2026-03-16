@@ -26,7 +26,7 @@ fn fts_home() -> String {
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     let production = format!("{home}/Music/FastTrackStudio");
-    if std::path::Path::new(&production).exists() {
+    if std::path::Path::new(&format!("{production}/Reaper/reaper.ini")).exists() {
         return production;
     }
     format!("{home}/Music/Dev/FastTrackStudio")

@@ -628,35 +628,18 @@ impl ItemService for ReaperItem {
             let reaper_track = resolve_track(&proj, &track)?;
             let track_ptr = reaper_track.raw().ok()?;
 
-            // Add item to track — AddMediaItemToTrack works with the track
-            // pointer directly regardless of which project tab is active
-            let item = unsafe { medium.add_media_item_to_track(track_ptr) }.ok()?;
-
-            // Set position and length
-            item_sw::set_media_item_position(
-                medium,
-                item,
-                reaper_medium::PositionInSeconds::new(position.as_seconds()).ok()?,
-                UiRefreshBehavior::NoRefresh,
-            );
-            item_sw::set_media_item_length(
-                medium,
-                item,
-                DurationInSeconds::new(length.as_seconds()).ok()?,
-                UiRefreshBehavior::NoRefresh,
-            );
-
-            // Add a take with MIDI source
-            if let Ok(take) = unsafe { medium.add_take_to_media_item(item) } {
-                let pcm_source = unsafe {
-                    medium.low().PCM_Source_CreateFromType(b"MIDI\0".as_ptr() as _)
-                };
-                if !pcm_source.is_null() {
-                    unsafe {
-                        medium.low().SetMediaItemTake_Source(take.as_ptr() as _, pcm_source);
-                    }
-                }
+            // Use CreateNewMIDIItemInProj which creates a proper MIDI item
+            // with an active in-project MIDI take
+            let low = medium.low();
+            let start = position.as_seconds();
+            let end = start + length.as_seconds();
+            let raw_item = unsafe {
+                low.CreateNewMIDIItemInProj(track_ptr.as_ptr(), start, end, std::ptr::null())
+            };
+            if raw_item.is_null() {
+                return None;
             }
+            let item = unsafe { MediaItem::new(raw_item) }?;
 
             medium.update_timeline();
 
