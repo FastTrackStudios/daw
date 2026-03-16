@@ -95,7 +95,10 @@ fn combine_battle_sp26_rpl() {
     println!("\nWriting to: {}", OUTPUT_DIR);
 
     let output_dir = PathBuf::from(OUTPUT_DIR);
-    let paths = write_role_setlists(&combined, STANDARD_ROLES, SETLIST_NAME, &output_dir)
+    // Only generate the roles we actually need for this setlist
+    let roles: &[&str] = &["Vocals", "Guitar", "Keys", "Drum Enhancement"];
+
+    let paths = write_role_setlists(&combined, roles, SETLIST_NAME, &output_dir)
         .expect("Failed to write role setlists");
 
     println!("\nGenerated {} files:", paths.len());
@@ -106,7 +109,7 @@ fn combine_battle_sp26_rpl() {
 
     // ── 5. Verify shell copies have correct structure ────────────────
     println!("\nVerifying shell copies:");
-    for role in STANDARD_ROLES {
+    for role in roles {
         let filename = format!("{} - {}.RPP", role, SETLIST_NAME);
         let path = output_dir.join(&filename);
         assert!(path.exists(), "Missing: {}", filename);

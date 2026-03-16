@@ -90,35 +90,54 @@ pub fn discover_all_sockets() -> Vec<(u32, PathBuf)> {
 pub struct ReaperConfig {
     pub id: &'static str,
     pub label: &'static str,
-    pub executable: &'static str,
-    pub resources: &'static str,
+    pub executable: String,
+    pub resources: String,
     pub role: &'static str,
 }
 
-pub const REAPER_CONFIGS: &[ReaperConfig] = &[
-    ReaperConfig {
-        id: "fts-tracks",
-        label: "FTS-TRACKS (Session)",
-        executable: "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/MacOS/REAPER",
-        resources: "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/Resources",
-        role: "session",
-    },
-    ReaperConfig {
-        id: "fts-signal",
-        label: "FTS-SIGNAL (Signal)",
-        executable: "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/MacOS/REAPER",
-        resources: "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/Resources",
-        role: "signal",
-    },
-];
+fn fts_home() -> String {
+    if let Ok(p) = std::env::var("FTS_HOME") {
+        return p;
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let production = format!("{home}/Music/FastTrackStudio");
+    if std::path::Path::new(&production).exists() {
+        return production;
+    }
+    format!("{home}/Music/Dev/FastTrackStudio")
+}
 
-pub fn config_by_id(id: &str) -> Option<&'static ReaperConfig> {
-    REAPER_CONFIGS.iter().find(|c| c.id == id)
+pub fn reaper_configs() -> Vec<ReaperConfig> {
+    let fts = fts_home();
+    let live_app = format!("{fts}/Reaper/FTS-LIVE.app");
+    let executable = format!("{live_app}/Contents/MacOS/REAPER");
+    let resources = format!("{live_app}/Contents/Resources");
+
+    vec![
+        ReaperConfig {
+            id: "fts-tracks",
+            label: "FTS-TRACKS (Session)",
+            executable: executable.clone(),
+            resources: resources.clone(),
+            role: "session",
+        },
+        ReaperConfig {
+            id: "fts-signal",
+            label: "FTS-SIGNAL (Signal)",
+            executable,
+            resources,
+            role: "signal",
+        },
+    ]
+}
+
+pub fn config_by_id(id: &str) -> Option<ReaperConfig> {
+    reaper_configs().into_iter().find(|c| c.id == id)
 }
 
 pub fn spawn_reaper(config: &ReaperConfig) -> Result<u32> {
-    let mut cmd = Command::new(config.executable);
-    cmd.current_dir(config.resources)
+    let mut cmd = Command::new(&config.executable);
+    cmd.current_dir(&config.resources)
         .env("FTS_DAW_ROLE", config.role)
         .process_group(0)
         .stdin(Stdio::null())
@@ -156,7 +175,7 @@ pub async fn launch_and_connect(config_id: &str) -> Result<(DawConnection, u32, 
         .ok_or_else(|| eyre::eyre!("Unknown REAPER config: {config_id}"))?;
 
     eprintln!("Spawning REAPER ({})...", config.label);
-    let pid = spawn_reaper(config)?;
+    let pid = spawn_reaper(&config)?;
     let socket_path = PathBuf::from(format!("/tmp/fts-daw-{pid}.sock"));
     let _ = std::fs::remove_file(&socket_path); // remove any stale
 
@@ -747,11 +766,11 @@ pub fn cmd_launch(config_id: Option<&str>) -> Result<()> {
     let id = config_id.unwrap_or("fts-tracks");
     let config = config_by_id(id)
         .ok_or_else(|| {
-            let known: Vec<_> = REAPER_CONFIGS.iter().map(|c| c.id).collect();
+            let known: Vec<_> = reaper_configs().iter().map(|c| c.id).collect();
             eyre::eyre!("Unknown config \"{id}\". Known configs: {}", known.join(", "))
         })?;
 
-    let pid = spawn_reaper(config)?;
+    let pid = spawn_reaper(&config)?;
     println!("Launched {} (PID {pid})", config.label);
     Ok(())
 }

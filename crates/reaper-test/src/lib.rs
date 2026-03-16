@@ -41,29 +41,38 @@ pub const SOCKET_SUFFIX: &str = ".sock";
 pub const SOCKET_PATH: &str = "/tmp/fts-control.sock";
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const REAPER_BOOT_TIMEOUT_SECS: u64 = 30;
-/// Base directory for FTS REAPER bundles.
-pub const FTS_TRACKS_DIR: &str =
-    "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS";
-
-/// Default REAPER executable — uses FTS-TESTING bundle.
-/// Override with `FTS_REAPER_EXECUTABLE` env var.
-pub const DEFAULT_REAPER_EXECUTABLE: &str =
-    "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-TESTING.app/Contents/MacOS/REAPER";
-/// Default REAPER resources directory.
-/// Override with `FTS_REAPER_RESOURCES` env var.
-pub const DEFAULT_REAPER_RESOURCES: &str =
-    "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-TESTING.app/Contents/Resources";
-
-/// Resolve the REAPER executable path (env var or default).
-pub fn reaper_executable() -> String {
-    std::env::var("FTS_REAPER_EXECUTABLE")
-        .unwrap_or_else(|_| DEFAULT_REAPER_EXECUTABLE.to_string())
+/// Resolve the FTS home directory.
+///
+/// Checks `$FTS_HOME`, then `~/Music/FastTrackStudio/` (if it exists),
+/// then falls back to `~/Music/Dev/FastTrackStudio/`.
+fn fts_home() -> String {
+    if let Ok(p) = std::env::var("FTS_HOME") {
+        return p;
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let production = format!("{home}/Music/FastTrackStudio");
+    if std::path::Path::new(&production).exists() {
+        return production;
+    }
+    format!("{home}/Music/Dev/FastTrackStudio")
 }
 
-/// Resolve the REAPER resources path (env var or default).
+/// Resolve the REAPER executable path.
+///
+/// Checks `$FTS_REAPER_EXECUTABLE`, falls back to `<fts_home>/Reaper/FTS-TESTING.app/Contents/MacOS/REAPER`.
+pub fn reaper_executable() -> String {
+    std::env::var("FTS_REAPER_EXECUTABLE").unwrap_or_else(|_| {
+        format!("{}/Reaper/FTS-TESTING.app/Contents/MacOS/REAPER", fts_home())
+    })
+}
+
+/// Resolve the REAPER resources path.
+///
+/// Checks `$FTS_REAPER_RESOURCES`, falls back to `<fts_home>/Reaper/FTS-TESTING.app/Contents/Resources`.
 pub fn reaper_resources() -> String {
-    std::env::var("FTS_REAPER_RESOURCES")
-        .unwrap_or_else(|_| DEFAULT_REAPER_RESOURCES.to_string())
+    std::env::var("FTS_REAPER_RESOURCES").unwrap_or_else(|_| {
+        format!("{}/Reaper/FTS-TESTING.app/Contents/Resources", fts_home())
+    })
 }
 pub const LOG_DIR: &str = "/tmp/reaper-tests";
 

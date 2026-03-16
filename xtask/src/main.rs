@@ -20,25 +20,37 @@ enum Cmd {
     },
 }
 
-/// Where FTS REAPER bundles live.
-const FTS_TRACKS_DIR: &str =
-    "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS";
+fn fts_home() -> String {
+    if let Ok(p) = std::env::var("FTS_HOME") {
+        return p;
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let production = format!("{home}/Music/FastTrackStudio");
+    if std::path::Path::new(&production).exists() {
+        return production;
+    }
+    format!("{home}/Music/Dev/FastTrackStudio")
+}
 
-/// The real REAPER binary inside FTS-LIVE (the shared REAPER installation).
-const REAPER_EXE: &str =
-    "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/MacOS/REAPER";
+fn reaper_dir() -> String {
+    format!("{}/Reaper", fts_home())
+}
 
-/// Shared REAPER resources directory.
-const REAPER_RESOURCES: &str =
-    "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/FTS-LIVE.app/Contents/Resources";
+fn reaper_exe() -> String {
+    format!("{}/FTS-LIVE.app/Contents/MacOS/REAPER", reaper_dir())
+}
 
-/// Path to reaper.ini.
-const REAPER_INI: &str =
-    "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/reaper.ini";
+fn reaper_resources() -> String {
+    format!("{}/FTS-LIVE.app/Contents/Resources", reaper_dir())
+}
 
-/// Default theme.
-const DEFAULT_THEME: &str =
-    "/Users/codywright/Music/FastTrackStudio/Reaper/FTS-TRACKS/ColorThemes/Default_7.0.ReaperThemeZip";
+fn reaper_ini() -> String {
+    format!("{}/reaper.ini", reaper_dir())
+}
+
+fn default_theme() -> String {
+    format!("{}/ColorThemes/Default_7.0.ReaperThemeZip", reaper_dir())
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
@@ -62,7 +74,8 @@ const BUNDLES: &[BundleSpec] = &[
 ];
 
 fn setup_test_bundles(force: bool) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Setting up REAPER test bundles in {FTS_TRACKS_DIR}");
+    let reaper_dir = reaper_dir();
+    println!("Setting up REAPER test bundles in {reaper_dir}");
 
     // Build reaper-launcher
     print!("  Building reaper-launcher...");
@@ -103,7 +116,7 @@ fn setup_test_bundles(force: bool) -> Result<(), Box<dyn std::error::Error>> {
             .as_secs()
     );
 
-    let base_dir = PathBuf::from(FTS_TRACKS_DIR);
+    let base_dir = PathBuf::from(&reaper_dir);
 
     for spec in BUNDLES {
         let bundle_dir = base_dir.join(format!("{}.app", spec.app_name));
@@ -135,12 +148,12 @@ fn setup_test_bundles(force: bool) -> Result<(), Box<dyn std::error::Error>> {
         let launch_config = reaper_launcher::LaunchConfig {
             role: spec.role.to_string(),
             rig_type: None,
-            reaper_executable: REAPER_EXE.to_string(),
-            resources_dir: REAPER_RESOURCES.to_string(),
-            ini_path: REAPER_INI.to_string(),
+            reaper_executable: reaper_exe(),
+            resources_dir: reaper_resources(),
+            ini_path: reaper_ini(),
             ini_overrides: reaper_launcher::ReaperIniConfig {
                 undo_max_mem: None, // preserve original for testing
-                theme: Some(DEFAULT_THEME.to_string()),
+                theme: Some(default_theme()),
             },
             restore_ini_after_launch: false,
         };
@@ -211,7 +224,7 @@ fn setup_test_bundles(force: bool) -> Result<(), Box<dyn std::error::Error>> {
         println!(" OK");
     }
 
-    println!("\nDone. FTS-TESTING.app is ready in {FTS_TRACKS_DIR}");
+    println!("\nDone. FTS-TESTING.app is ready in {reaper_dir}");
 
     Ok(())
 }

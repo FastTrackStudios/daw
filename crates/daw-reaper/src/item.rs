@@ -362,7 +362,7 @@ impl ReaperItem {
                         };
                         if !guid_ptr.is_null() {
                             let g = unsafe { &*guid_ptr };
-                            let item_guid = format!("{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+                            let item_guid = format!("{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
                                 g.Data1, g.Data2, g.Data3,
                                 g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
                                 g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
@@ -671,7 +671,7 @@ impl ItemService for ReaperItem {
             };
             if !guid_ptr.is_null() {
                 let g = unsafe { &*guid_ptr };
-                Some(format!("{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+                Some(format!("{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
                     g.Data1, g.Data2, g.Data3,
                     g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
                     g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]))
