@@ -34,6 +34,24 @@ pub struct TempoTimePoint {
     pub unknown4: i32,
 }
 
+impl Default for TempoTimePoint {
+    fn default() -> Self {
+        Self {
+            position: 0.0,
+            tempo: 120.0,
+            shape: 0,
+            time_signature_encoded: None,
+            selected: false,
+            unknown1: 0,
+            bezier_tension: 0.0,
+            metronome_pattern: String::new(),
+            unknown2: 0,
+            unknown3: 0,
+            unknown4: 0,
+        }
+    }
+}
+
 impl TempoTimePoint {
     /// Create a TempoTimePoint from already-tokenized PT line tokens.
     pub fn from_tokens(tokens: &[Token]) -> Result<Self, String> {

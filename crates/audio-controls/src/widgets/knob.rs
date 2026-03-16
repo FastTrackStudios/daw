@@ -81,7 +81,7 @@ pub fn Knob(
     let scaled_size = theme.scale(size);
 
     // Configuration
-    let _sensitivity = DragSensitivity::DEFAULT;
+    let sensitivity = DragSensitivity::DEFAULT;
     let scroll_sens = ScrollSensitivity::DEFAULT;
     let kb_steps = keyboard_steps.unwrap_or_default();
     let value_step = stepping.unwrap_or_default();
@@ -246,6 +246,8 @@ pub fn Knob(
                     // Set up global mouse listeners for drag tracking
                     #[cfg(target_arch = "wasm32")]
                     {
+                        use std::cell::RefCell;
+                        use std::rc::Rc;
                         use wasm_bindgen::closure::Closure;
 
                         let window = web_sys::window().unwrap();

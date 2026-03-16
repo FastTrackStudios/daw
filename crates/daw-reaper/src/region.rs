@@ -6,6 +6,7 @@
 use crate::main_thread;
 use crate::project_context::resolve_project_context;
 use crate::safe_wrappers::markers as sw;
+use crate::safe_wrappers::ruler_lanes;
 use daw_proto::{ProjectContext, Region, RegionEvent, RegionService, TimeRange};
 use reaper_medium::{
     MarkerOrRegionPosition, PositionInSeconds, ProjectContext as ReaperProjectContext,
@@ -25,6 +26,7 @@ use tracing::{debug, info};
 pub fn get_regions_on_main_thread() -> Vec<Region> {
     let reaper = reaper_high::Reaper::get();
     let medium = reaper.medium_reaper();
+    let low = medium.low();
     let mut regions = Vec::new();
 
     let count_result = medium.count_project_markers(ReaperProjectContext::CurrentProject);
@@ -34,6 +36,11 @@ pub fn get_regions_on_main_thread() -> Vec<Region> {
         medium.enum_project_markers_3(ReaperProjectContext::CurrentProject, idx, |result| {
             if let Some(info) = result {
                 if let Some(end_pos) = info.region_end_position {
+                    let lane = ruler_lanes::get_marker_lane(
+                        low,
+                        ReaperProjectContext::CurrentProject,
+                        idx,
+                    );
                     regions.push(Region {
                         id: Some(info.id.get()),
                         time_range: TimeRange::from_seconds(
@@ -46,6 +53,7 @@ pub fn get_regions_on_main_thread() -> Vec<Region> {
                             if c != 0 { Some(c as u32) } else { None }
                         },
                         guid: None,
+                        lane,
                     });
                 }
             }
@@ -94,6 +102,7 @@ impl RegionService for ReaperRegion {
 
             let reaper = reaper_high::Reaper::get();
             let medium = reaper.medium_reaper();
+            let low = medium.low();
             let mut regions = Vec::new();
 
             let count_result = medium.count_project_markers(reaper_ctx);
@@ -103,6 +112,8 @@ impl RegionService for ReaperRegion {
                 medium.enum_project_markers_3(reaper_ctx, idx, |result| {
                     if let Some(info) = result {
                         if let Some(end_pos) = info.region_end_position {
+                            let lane =
+                                ruler_lanes::get_marker_lane(low, reaper_ctx, idx);
                             regions.push(Region {
                                 id: Some(info.id.get()),
                                 time_range: TimeRange::from_seconds(
@@ -115,6 +126,7 @@ impl RegionService for ReaperRegion {
                                     if c != 0 { Some(c as u32) } else { None }
                                 },
                                 guid: None,
+                                lane,
                             });
                         }
                     }
@@ -271,6 +283,19 @@ impl RegionService for ReaperRegion {
     // =========================================================================
     // Navigation Methods
     // =========================================================================
+
+    async fn set_region_lane(&self, _project: ProjectContext, _id: u32, _lane: Option<u32>) {
+        // TODO: Implement once GetRegionOrMarkerInfo_Value FFI wrappers are available
+        debug!("ReaperRegion: set_region_lane not yet implemented");
+    }
+
+    async fn get_regions_in_lane(&self, project: ProjectContext, lane: u32) -> Vec<Region> {
+        let regions = self.get_regions(project).await;
+        regions
+            .into_iter()
+            .filter(|r| r.lane == Some(lane))
+            .collect()
+    }
 
     async fn goto_region_start(&self, _project: ProjectContext, id: u32) {
         debug!("ReaperRegion: goto_region_start {}", id);

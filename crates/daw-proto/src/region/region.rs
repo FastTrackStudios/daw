@@ -21,6 +21,8 @@ pub struct Region {
     pub color: Option<u32>,
     /// GUID for stable identification across sessions
     pub guid: Option<String>,
+    /// Ruler lane index (v7.62+). None = default lane.
+    pub lane: Option<u32>,
 }
 
 impl Region {
@@ -32,6 +34,7 @@ impl Region {
             name,
             color: None,
             guid: None,
+            lane: None,
         }
     }
 
@@ -54,6 +57,7 @@ impl Region {
             name,
             color,
             guid,
+            lane: None,
         }
     }
 

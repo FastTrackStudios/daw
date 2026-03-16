@@ -387,6 +387,26 @@ impl RegionService for StandaloneRegion {
         }
     }
 
+    async fn set_region_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>) {
+        let mut state = self.state.write().await;
+        if let Some(proj_id) = project_id(&project)
+            && let Some(regions) = state.regions_by_project.get_mut(proj_id)
+            && let Some(region) = regions.iter_mut().find(|r| r.id == Some(id))
+        {
+            region.lane = lane;
+            debug!("Set region {} lane to {:?} in project {}", id, lane, proj_id);
+        }
+    }
+
+    async fn get_regions_in_lane(&self, project: ProjectContext, lane: u32) -> Vec<Region> {
+        let state = self.state.read().await;
+        Self::get_project_regions(&state, &project)
+            .iter()
+            .filter(|r| r.lane == Some(lane))
+            .cloned()
+            .collect()
+    }
+
     async fn goto_region_start(&self, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)

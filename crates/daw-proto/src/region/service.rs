@@ -56,6 +56,16 @@ pub trait RegionService {
     async fn set_region_color(&self, project: ProjectContext, id: u32, color: u32);
 
     // =========================================================================
+    // Lane Methods (v7.62+)
+    // =========================================================================
+
+    /// Set the ruler lane for a region (None to move to default lane)
+    async fn set_region_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>);
+
+    /// Get all regions in a specific ruler lane
+    async fn get_regions_in_lane(&self, project: ProjectContext, lane: u32) -> Vec<Region>;
+
+    // =========================================================================
     // Navigation Methods
     // =========================================================================
 

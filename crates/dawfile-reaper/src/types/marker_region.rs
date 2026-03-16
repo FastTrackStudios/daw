@@ -30,6 +30,8 @@ pub struct MarkerRegion {
     pub additional: i32,
     /// End position for regions (None for markers)
     pub end_position: Option<f64>,
+    /// Ruler lane index (v7.62+). 0 = default lane.
+    pub lane: Option<i32>,
     /// Beat position in format measure.beat.subbeat (e.g., "3.2.25")
     /// This is calculated from tempo data and represents the musical position
     pub beat_position: Option<String>,
@@ -86,11 +88,22 @@ impl MarkerRegion {
         } else {
             0
         };
-        let end_position = if tokens.len() > 10 {
-            let candidate = tokens[10].as_number().ok_or("Invalid region end position")?;
-            (candidate > position).then_some(candidate)
+        // Field 10 is lane index (v7.62+) OR legacy inline end_position (pre-7.62).
+        // Distinguish: lane indices are small non-negative integers (0..255);
+        // legacy end positions are floating-point timestamps > position.
+        let (lane, end_position) = if tokens.len() > 10 {
+            let val = tokens[10].as_number().unwrap_or(0.0);
+            if val == val.floor() && val >= 0.0 && val < 256.0 {
+                // Small non-negative integer → lane index
+                (Some(val as i32), None)
+            } else if val > position {
+                // Large float > position → legacy inline end_position
+                (None, Some(val))
+            } else {
+                (None, None)
+            }
         } else {
-            None
+            (None, None)
         };
 
         Ok(MarkerRegion {
@@ -103,6 +116,7 @@ impl MarkerRegion {
             guid,
             additional,
             end_position,
+            lane,
             beat_position: None,
         })
     }
@@ -259,6 +273,7 @@ impl MarkerRegion {
                 guid: self.guid.clone(),
                 additional: self.additional,
                 end_position: None,
+                lane: self.lane,
                 beat_position: None,
             }
             .musical_position_string(
@@ -273,6 +288,9 @@ impl MarkerRegion {
         output.push_str(&format!("  Color: {}\n", self.color));
         output.push_str(&format!("  Flags: {}\n", self.flags));
         output.push_str(&format!("  Locked: {}\n", self.locked != 0));
+        if let Some(lane) = self.lane {
+            output.push_str(&format!("  Lane: {}\n", lane));
+        }
         output.push_str(&format!("  GUID: {}\n", self.guid));
         output
     }
@@ -290,6 +308,9 @@ impl fmt::Display for MarkerRegion {
         writeln!(f, "  Color: {}", self.color)?;
         writeln!(f, "  Flags: {}", self.flags)?;
         writeln!(f, "  Locked: {}", self.locked != 0)?;
+        if let Some(lane) = self.lane {
+            writeln!(f, "  Lane: {}", lane)?;
+        }
         writeln!(f, "  GUID: {}", self.guid)?;
         Ok(())
     }
@@ -393,7 +414,8 @@ impl MarkerRegionCollection {
                             guid: start.guid.clone(),
                             additional: start.additional,
                             end_position: Some(end.position),
-                            beat_position: start.beat_position.clone(), // Copy beat position from start marker
+                            lane: start.lane,
+                            beat_position: start.beat_position.clone(),
                         };
 
                         // Remove the start and end markers from all collections
@@ -546,6 +568,9 @@ impl MarkerRegionCollection {
                 output.push_str(&format!("  Color: {}\n", marker_region.color));
                 output.push_str(&format!("  Flags: {}\n", marker_region.flags));
                 output.push_str(&format!("  Locked: {}\n", marker_region.locked != 0));
+                if let Some(lane) = marker_region.lane {
+                    output.push_str(&format!("  Lane: {}\n", lane));
+                }
                 output.push_str(&format!("  GUID: {}\n", marker_region.guid));
                 output.push('\n');
             }
@@ -596,6 +621,7 @@ mod tests {
         assert_eq!(marker.locked, 1);
         assert_eq!(marker.guid, "{976796DE-F915-A9CD-2372-4ED6EF87EE3F}");
         assert_eq!(marker.additional, 0);
+        assert_eq!(marker.lane, None);
         assert_eq!(marker.beat_position, None);
         assert!(marker.is_marker());
         assert!(!marker.is_region());
@@ -603,7 +629,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_region() {
+    fn test_parse_region_legacy_inline_end() {
         let line = r#"MARKER 2 1.96811262665014 "FIRST SONG'S TITLE" 0 0 1 B {87C50EE4-933A-2712-D084-63479FAFC779} 0 5.90433787995042"#;
         let region = MarkerRegion::from_marker_line(line).unwrap();
 
@@ -616,6 +642,7 @@ mod tests {
         assert_eq!(region.guid, "{87C50EE4-933A-2712-D084-63479FAFC779}");
         assert_eq!(region.additional, 0);
         assert_eq!(region.end_position, Some(5.90433787995042));
+        assert_eq!(region.lane, None);
         assert_eq!(region.beat_position, None);
         assert!(!region.is_marker());
         assert!(region.is_region());
@@ -636,7 +663,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_marker_with_trailing_field_stays_marker() {
+    fn test_parse_marker_with_lane_index() {
+        // v7.62+ format: field 10 is a lane index, not an end position
         let line = r#"MARKER 4 15.42857142857143 COUNT-IN 0 0 1 B {5FF23F09-0052-514C-A31A-0FFC208784AF} 0 2"#;
         let marker = MarkerRegion::from_marker_line(line).unwrap();
 
@@ -648,6 +676,49 @@ mod tests {
         assert!(marker.is_marker());
         assert!(!marker.is_region());
         assert_eq!(marker.end_position, None);
+        assert_eq!(marker.lane, Some(2));
+    }
+
+    #[test]
+    fn test_parse_v762_marker_at_position_zero_with_lane() {
+        // This was the bug: lane 3 > position 0 was wrongly interpreted as end_position
+        let line = r#"MARKER 1 0 "SONG NAME" 1 0 1 B {12345678-1234-1234-1234-123456789012} 0 3"#;
+        let marker = MarkerRegion::from_marker_line(line).unwrap();
+
+        assert_eq!(marker.id, 1);
+        assert_eq!(marker.position, 0.0);
+        assert_eq!(marker.name, "SONG NAME");
+        assert_eq!(marker.flags, 1);
+        assert!(marker.is_marker()); // NOT a region!
+        assert_eq!(marker.end_position, None);
+        assert_eq!(marker.lane, Some(3));
+    }
+
+    #[test]
+    fn test_parse_v762_region_pair_with_lanes() {
+        // v7.62+ regions use paired MARKER lines, each with a lane index
+        let mut collection = MarkerRegionCollection::new();
+
+        // Region start: lane 3 (SONG)
+        collection.add(
+            MarkerRegion::from_marker_line(
+                r#"MARKER 1 0 "SONG NAME" 1 0 1 B {12345678-1234-1234-1234-123456789012} 0 3"#,
+            )
+            .unwrap(),
+        );
+        // Region end: minimal fields
+        collection.add(
+            MarkerRegion::from_marker_line(r#"MARKER 1 34 "" 1"#).unwrap(),
+        );
+
+        collection.process_regions();
+
+        let regions = collection.regions_sorted();
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].name, "SONG NAME");
+        assert_eq!(regions[0].position, 0.0);
+        assert_eq!(regions[0].end_position, Some(34.0));
+        assert_eq!(regions[0].lane, Some(3)); // Lane propagated from start marker
     }
 
     #[test]
@@ -659,7 +730,7 @@ mod tests {
         )
         .unwrap();
         let region = MarkerRegion::from_marker_line(
-            r#"MARKER 2 1.0 "Test Region" 0 0 1 B {87654321-4321-4321-4321-210987654321} 0 2.0"#,
+            r#"MARKER 2 1.0 "Test Region" 0 0 1 B {87654321-4321-4321-4321-210987654321} 0 2.5"#,
         )
         .unwrap();
 

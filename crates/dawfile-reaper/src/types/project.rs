@@ -190,6 +190,25 @@ pub struct ReaperProject {
     pub fx_chains: Vec<FxChain>,
     pub markers_regions: MarkerRegionCollection,
     pub tempo_envelope: Option<TempoTimeEnvelope>,
+    /// Ruler lanes (v7.62+)
+    pub ruler_lanes: Vec<RulerLane>,
+    /// Ruler height (v7.62+): (total_height, secondary)
+    pub ruler_height: Option<(i32, i32)>,
+}
+
+/// A ruler lane definition (v7.62+)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RulerLane {
+    /// Lane index (1-based)
+    pub index: i32,
+    /// Flags: 8 = default region lane, 4 = default marker lane, 0 = normal
+    pub flags: i32,
+    /// Lane name
+    pub name: String,
+    /// Color (0 = default)
+    pub color: i32,
+    /// Extra field (purpose unknown, typically -1)
+    pub extra: i32,
 }
 
 /// Controls which typed domains to decode from an `RppProject`.
@@ -326,6 +345,10 @@ pub struct ProjectProperties {
     pub master_play_speed_env: Option<EnvelopeSettings>, // MASTERPLAYSPEEDENV
     pub tempo_env: Option<EnvelopeSettings>,             // TEMPOENVEX
 
+    // Ruler lanes (v7.62+)
+    pub ruler_lanes: Vec<RulerLane>,
+    pub ruler_height: Option<(i32, i32)>,
+
     // Custom properties (for any we haven't defined yet)
     pub custom_properties: HashMap<String, Vec<Token>>,
 }
@@ -403,6 +426,8 @@ impl ProjectProperties {
             metronome: None,
             master_play_speed_env: None,
             tempo_env: None,
+            ruler_lanes: Vec::new(),
+            ruler_height: None,
             custom_properties: HashMap::new(),
         }
     }
@@ -1190,11 +1215,60 @@ impl ProjectProperties {
                     self.global_auto = Some(val as i32);
                 }
             }
+            "RULERLANE" => {
+                // RULERLANE index flags name color extra
+                if tokens.len() >= 5 {
+                    let index = tokens[0].as_number().unwrap_or(0.0) as i32;
+                    let flags = tokens[1].as_number().unwrap_or(0.0) as i32;
+                    let name_str = match &tokens[2] {
+                        Token::String(s, _) => s.clone(),
+                        Token::Identifier(s) => s.clone(),
+                        _ => String::new(),
+                    };
+                    let color = tokens[3].as_number().unwrap_or(0.0) as i32;
+                    let extra = tokens[4].as_number().unwrap_or(-1.0) as i32;
+                    self.ruler_lanes.push(RulerLane {
+                        index,
+                        flags,
+                        name: name_str,
+                        color,
+                        extra,
+                    });
+                }
+            }
+            "RULERHEIGHT" => {
+                if tokens.len() >= 2 {
+                    if let (Some(a), Some(b)) =
+                        (tokens[0].as_number(), tokens[1].as_number())
+                    {
+                        self.ruler_height = Some((a as i32, b as i32));
+                    }
+                }
+            }
             _ => {
                 // Store unknown properties in custom_properties
                 self.custom_properties
                     .insert(name.to_string(), tokens.to_vec());
             }
+        }
+    }
+}
+
+impl Default for ReaperProject {
+    fn default() -> Self {
+        Self {
+            version: 0.1,
+            version_string: String::new(),
+            timestamp: 0,
+            properties: ProjectProperties::default(),
+            tracks: vec![],
+            items: vec![],
+            envelopes: vec![],
+            fx_chains: vec![],
+            markers_regions: MarkerRegionCollection::default(),
+            tempo_envelope: None,
+            ruler_lanes: vec![],
+            ruler_height: None,
         }
     }
 }
@@ -1221,7 +1295,13 @@ impl ReaperProject {
             fx_chains: Vec::new(),
             markers_regions: MarkerRegionCollection::new(),
             tempo_envelope: None,
+            ruler_lanes: Vec::new(),
+            ruler_height: None,
         };
+
+        // Copy ruler lanes from parsed properties
+        project.ruler_lanes = project.properties.ruler_lanes.clone();
+        project.ruler_height = project.properties.ruler_height;
 
         // Parse project-global domains in-order.
         for block in &rpp_project.blocks {

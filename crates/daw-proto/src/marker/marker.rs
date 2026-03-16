@@ -21,6 +21,8 @@ pub struct Marker {
     pub color: Option<u32>,
     /// GUID for stable identification across sessions
     pub guid: Option<String>,
+    /// Ruler lane index (v7.62+). None = default lane.
+    pub lane: Option<u32>,
 }
 
 impl Marker {
@@ -32,6 +34,7 @@ impl Marker {
             name,
             color: None,
             guid: None,
+            lane: None,
         }
     }
 
@@ -57,6 +60,7 @@ impl Marker {
             name,
             color,
             guid,
+            lane: None,
         }
     }
 

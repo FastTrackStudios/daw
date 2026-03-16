@@ -319,6 +319,36 @@ pub struct Item {
     pub raw_content: String,
 }
 
+impl Default for Item {
+    fn default() -> Self {
+        Self {
+            position: 0.0,
+            snap_offset: 0.0,
+            length: 0.0,
+            loop_source: false,
+            play_all_takes: false,
+            color: None,
+            beat: None,
+            selected: false,
+            fade_in: None,
+            fade_out: None,
+            mute: None,
+            item_guid: None,
+            item_id: None,
+            name: String::new(),
+            volpan: None,
+            slip_offset: 0.0,
+            playrate: None,
+            channel_mode: ChannelMode::Normal,
+            take_guid: None,
+            rec_pass: None,
+            takes: vec![],
+            stretch_markers: vec![],
+            raw_content: String::new(),
+        }
+    }
+}
+
 /// Fade settings for an item
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FadeSettings {

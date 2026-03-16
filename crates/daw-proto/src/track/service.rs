@@ -184,6 +184,14 @@ pub trait TrackService {
         depth: i32,
     ) -> Result<(), String>;
 
+    /// Set the number of audio channels for a track (e.g., 2 for stereo, 8 for multi-out plugins).
+    async fn set_num_channels(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        num_channels: u32,
+    ) -> Result<(), String>;
+
     /// Remove all tracks from the project (excluding master).
     async fn remove_all_tracks(&self, project: ProjectContext) -> Result<(), String>;
 

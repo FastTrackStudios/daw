@@ -6,6 +6,7 @@
 use crate::main_thread;
 use crate::project_context::resolve_project_context;
 use crate::safe_wrappers::markers as sw;
+use crate::safe_wrappers::ruler_lanes;
 use daw_proto::{Marker, MarkerEvent, MarkerService, Position, ProjectContext, TimePosition};
 use reaper_medium::{BookmarkRef, MarkerOrRegionPosition, ProjectContext as ReaperProjectContext};
 use roam::Tx;
@@ -40,6 +41,7 @@ impl MarkerService for ReaperMarker {
         main_thread::query(move || {
             let reaper = reaper_high::Reaper::get();
             let medium = reaper.medium_reaper();
+            let low = medium.low();
             let mut markers = Vec::new();
 
             // Resolve the project context to a REAPER project context
@@ -55,6 +57,8 @@ impl MarkerService for ReaperMarker {
                     if let Some(info) = result {
                         // region_end_position is None for markers, Some for regions
                         if info.region_end_position.is_none() {
+                            let lane =
+                                ruler_lanes::get_marker_lane(low, reaper_ctx, idx);
                             markers.push(Marker {
                                 id: Some(info.id.get()),
                                 position: Position::from_time(TimePosition::from_seconds(
@@ -66,6 +70,7 @@ impl MarkerService for ReaperMarker {
                                     if c != 0 { Some(c as u32) } else { None }
                                 },
                                 guid: None,
+                                lane,
                             });
                         }
                     }
@@ -251,6 +256,19 @@ impl MarkerService for ReaperMarker {
                 ReaperProjectContext::CurrentProject,
             );
         });
+    }
+
+    async fn set_marker_lane(&self, _project: ProjectContext, _id: u32, _lane: Option<u32>) {
+        // TODO: Implement once GetRegionOrMarkerInfo_Value FFI wrappers are available
+        debug!("ReaperMarker: set_marker_lane not yet implemented");
+    }
+
+    async fn get_markers_in_lane(&self, project: ProjectContext, lane: u32) -> Vec<Marker> {
+        let markers = self.get_markers(project).await;
+        markers
+            .into_iter()
+            .filter(|m| m.lane == Some(lane))
+            .collect()
     }
 
     async fn goto_marker(&self, _project: ProjectContext, id: u32) {

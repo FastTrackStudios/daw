@@ -57,6 +57,7 @@ pub mod index;
 pub mod io;
 pub mod primitives;
 pub mod rpp_tree;
+pub mod setlist_rpp;
 pub mod types;
 
 #[cfg(test)]

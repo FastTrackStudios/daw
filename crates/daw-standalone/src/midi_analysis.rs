@@ -137,6 +137,7 @@ impl MidiAnalysisService for StandaloneMidiAnalysis {
             }],
             Vec::new(),
             vec![Some(DEFAULT_TRACK_NAME.to_string())],
+            None,
         );
 
         let chart_text = generate_chart_text(&midi_file, &MidiChartConfig::default());

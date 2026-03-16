@@ -559,6 +559,17 @@ impl TrackHandle {
         Ok(())
     }
 
+    /// Set the number of audio channels for this track.
+    ///
+    /// Defaults to 2 (stereo). Set to 8 for multi-output plugins like FTS Guide.
+    pub async fn set_num_channels(&self, num_channels: u32) -> Result<()> {
+        self.clients
+            .track
+            .set_num_channels(self.context(), self.track_ref(), num_channels)
+            .await
+            .map_err(|e| Error::Other(format!("{:?}", e)))
+    }
+
     /// Set the folder depth change for this track.
     ///
     /// Controls folder hierarchy: `1` = folder start, `0` = normal,

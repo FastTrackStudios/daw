@@ -392,6 +392,15 @@ impl TrackService for StandaloneTrack {
         Ok(())
     }
 
+    async fn set_num_channels(
+        &self,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _num_channels: u32,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
     async fn remove_all_tracks(
         &self,
         _project: ProjectContext,

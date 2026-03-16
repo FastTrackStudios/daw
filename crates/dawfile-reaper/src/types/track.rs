@@ -560,6 +560,53 @@ pub struct FreezeData {
     pub raw_content: String,
 }
 
+impl Default for Track {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            selected: false,
+            locked: false,
+            peak_color: None,
+            beat: None,
+            automation_mode: AutomationMode::TrimRead,
+            volpan: None,
+            mutesolo: None,
+            invert_phase: false,
+            folder: None,
+            bus_compact: None,
+            show_in_mixer: None,
+            free_mode: None,
+            fixed_lanes: None,
+            lane_solo: None,
+            lane_record: None,
+            lane_names: None,
+            record: None,
+            track_height: None,
+            input_quantize: None,
+            channel_count: 2,
+            rec_cfg: None,
+            midi_color_map_fn: None,
+            fx_enabled: true,
+            track_id: None,
+            perf: None,
+            layouts: None,
+            extension_data: vec![],
+            receives: vec![],
+            midi_output: None,
+            custom_note_order: None,
+            midi_note_names: vec![],
+            master_send: None,
+            hardware_outputs: vec![],
+            items: vec![],
+            envelopes: vec![],
+            fx_chain: None,
+            freeze: None,
+            input_fx: None,
+            raw_content: String::new(),
+        }
+    }
+}
+
 impl Track {
     fn fast_classify_track_token(raw: &str) -> Token {
         if let Some(hex) = raw.strip_prefix("0x") {

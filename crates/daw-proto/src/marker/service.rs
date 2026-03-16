@@ -72,6 +72,16 @@ pub trait MarkerService {
     async fn goto_marker(&self, project: ProjectContext, id: u32);
 
     // =========================================================================
+    // Lane Methods (v7.62+)
+    // =========================================================================
+
+    /// Set the ruler lane for a marker (None to move to default lane)
+    async fn set_marker_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>);
+
+    /// Get all markers in a specific ruler lane
+    async fn get_markers_in_lane(&self, project: ProjectContext, lane: u32) -> Vec<Marker>;
+
+    // =========================================================================
     // Streaming
     // =========================================================================
 

@@ -421,6 +421,26 @@ impl MarkerService for StandaloneMarker {
         }
     }
 
+    async fn set_marker_lane(&self, project: ProjectContext, id: u32, lane: Option<u32>) {
+        let mut state = self.state.write().await;
+        if let Some(proj_id) = project_id(&project)
+            && let Some(markers) = state.markers_by_project.get_mut(proj_id)
+            && let Some(marker) = markers.iter_mut().find(|m| m.id == Some(id))
+        {
+            marker.lane = lane;
+            debug!("Set marker {} lane to {:?} in project {}", id, lane, proj_id);
+        }
+    }
+
+    async fn get_markers_in_lane(&self, project: ProjectContext, lane: u32) -> Vec<Marker> {
+        let state = self.state.read().await;
+        Self::get_project_markers(&state, &project)
+            .iter()
+            .filter(|m| m.lane == Some(lane))
+            .cloned()
+            .collect()
+    }
+
     async fn goto_marker(&self, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)

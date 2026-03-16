@@ -1018,6 +1018,28 @@ impl TrackService for ReaperTrack {
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
+    async fn set_num_channels(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        num_channels: u32,
+    ) -> Result<(), String> {
+        main_thread::query(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "Project not found".to_string())?;
+            let t = resolve_track(&proj, &track).ok_or_else(|| "Track not found".to_string())?;
+            let raw = t.raw().map_err(|e| format!("raw track failed: {e}"))?;
+            routing_sw::set_media_track_info_value(
+                Reaper::get().medium_reaper(),
+                raw,
+                reaper_medium::TrackAttributeKey::Nchan,
+                num_channels as f64,
+            );
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
+    }
+
     async fn remove_all_tracks(
         &self,
         project: ProjectContext,

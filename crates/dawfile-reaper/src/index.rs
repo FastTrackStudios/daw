@@ -287,6 +287,8 @@ mod tests {
             fx_chains: Vec::new(),
             markers_regions: Default::default(),
             tempo_envelope: None,
+            ruler_lanes: Vec::new(),
+            ruler_height: None,
         }
     }
 
