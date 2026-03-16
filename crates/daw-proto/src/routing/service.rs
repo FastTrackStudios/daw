@@ -120,6 +120,26 @@ pub trait RoutingService {
         mode: SendMode,
     );
 
+    // === Channel Mapping ===
+
+    /// Set source audio channels for a route (0-indexed start channel, num channels)
+    async fn set_source_channels(
+        &self,
+        project: ProjectContext,
+        location: RouteLocation,
+        start_channel: u32,
+        num_channels: u32,
+    );
+
+    /// Set destination audio channels for a route (0-indexed start channel, num channels)
+    async fn set_dest_channels(
+        &self,
+        project: ProjectContext,
+        location: RouteLocation,
+        start_channel: u32,
+        num_channels: u32,
+    );
+
     // === Parent Send (Folder routing) ===
 
     /// Get whether parent send is enabled (for folder track routing)

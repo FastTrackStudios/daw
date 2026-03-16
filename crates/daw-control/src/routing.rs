@@ -430,6 +430,33 @@ impl RouteHandle {
     }
 
     // =========================================================================
+    // Channel Mapping
+    // =========================================================================
+
+    /// Set the source audio channels for this route.
+    ///
+    /// `start_channel` is 0-indexed (0 = ch 1/2 if stereo, 2 = ch 3/4, etc.).
+    /// `num_channels` is typically 2 for stereo.
+    pub async fn set_source_channels(&self, start_channel: u32, num_channels: u32) -> Result<()> {
+        self.clients
+            .routing
+            .set_source_channels(self.context(), self.location(), start_channel, num_channels)
+            .await;
+        Ok(())
+    }
+
+    /// Set the destination audio channels for this route.
+    ///
+    /// `start_channel` is 0-indexed. `num_channels` is typically 2 for stereo.
+    pub async fn set_dest_channels(&self, start_channel: u32, num_channels: u32) -> Result<()> {
+        self.clients
+            .routing
+            .set_dest_channels(self.context(), self.location(), start_channel, num_channels)
+            .await;
+        Ok(())
+    }
+
+    // =========================================================================
     // Operations
     // =========================================================================
 

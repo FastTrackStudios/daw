@@ -1068,6 +1068,114 @@ impl RoutingService for ReaperRouting {
         });
     }
 
+    // === Channel Mapping ===
+
+    async fn set_source_channels(
+        &self,
+        project: ProjectContext,
+        location: RouteLocation,
+        start_channel: u32,
+        num_channels: u32,
+    ) {
+        debug!(
+            "ReaperRouting::set_source_channels({:?}, {:?}, start={}, num={})",
+            project, location, start_channel, num_channels
+        );
+
+        main_thread::run(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some(reaper_track) = resolve_track(&proj, &location.track) else {
+                return;
+            };
+            let Some(raw_track) = reaper_track.raw().ok() else {
+                return;
+            };
+
+            let route_index = match &location.route {
+                RouteRef::Index(idx) => *idx,
+                RouteRef::ByDestination(_) => return,
+            };
+
+            let (category, actual_index) = match location.route_type {
+                RouteType::Send => {
+                    let hw_count =
+                        reaper_track.typed_send_count(SendPartnerType::HardwareOutput);
+                    (TrackSendCategory::Send, route_index - hw_count.min(route_index))
+                }
+                RouteType::Receive => (TrackSendCategory::Receive, route_index),
+                RouteType::HardwareOutput => {
+                    (TrackSendCategory::HardwareOutput, route_index)
+                }
+            };
+
+            // REAPER I_SRCCHAN encoding: start_channel | (num_channels << 10)
+            let value = start_channel as f64 + ((num_channels as f64) * 1024.0);
+            routing_sw::set_track_send_info_value(
+                Reaper::get().medium_reaper(),
+                raw_track,
+                category,
+                actual_index,
+                TrackSendAttributeKey::SrcChan,
+                value,
+            );
+        });
+    }
+
+    async fn set_dest_channels(
+        &self,
+        project: ProjectContext,
+        location: RouteLocation,
+        start_channel: u32,
+        num_channels: u32,
+    ) {
+        debug!(
+            "ReaperRouting::set_dest_channels({:?}, {:?}, start={}, num={})",
+            project, location, start_channel, num_channels
+        );
+
+        main_thread::run(move || {
+            let Some(proj) = resolve_project(&project) else {
+                return;
+            };
+            let Some(reaper_track) = resolve_track(&proj, &location.track) else {
+                return;
+            };
+            let Some(raw_track) = reaper_track.raw().ok() else {
+                return;
+            };
+
+            let route_index = match &location.route {
+                RouteRef::Index(idx) => *idx,
+                RouteRef::ByDestination(_) => return,
+            };
+
+            let (category, actual_index) = match location.route_type {
+                RouteType::Send => {
+                    let hw_count =
+                        reaper_track.typed_send_count(SendPartnerType::HardwareOutput);
+                    (TrackSendCategory::Send, route_index - hw_count.min(route_index))
+                }
+                RouteType::Receive => (TrackSendCategory::Receive, route_index),
+                RouteType::HardwareOutput => {
+                    (TrackSendCategory::HardwareOutput, route_index)
+                }
+            };
+
+            // REAPER I_DSTCHAN encoding: start_channel | (num_channels << 10)
+            let value = start_channel as f64 + ((num_channels as f64) * 1024.0);
+            routing_sw::set_track_send_info_value(
+                Reaper::get().medium_reaper(),
+                raw_track,
+                category,
+                actual_index,
+                TrackSendAttributeKey::DstChan,
+                value,
+            );
+        });
+    }
+
     // === Parent Send (Folder routing) ===
 
     async fn get_parent_send_enabled(

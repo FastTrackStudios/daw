@@ -362,6 +362,26 @@ impl RoutingService for StandaloneRouting {
         }
     }
 
+    async fn set_source_channels(
+        &self,
+        _project: ProjectContext,
+        _location: RouteLocation,
+        _start_channel: u32,
+        _num_channels: u32,
+    ) {
+        // Standalone: no-op
+    }
+
+    async fn set_dest_channels(
+        &self,
+        _project: ProjectContext,
+        _location: RouteLocation,
+        _start_channel: u32,
+        _num_channels: u32,
+    ) {
+        // Standalone: no-op
+    }
+
     async fn get_parent_send_enabled(
         &self,
         _project: ProjectContext,
