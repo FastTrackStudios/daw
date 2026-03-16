@@ -609,16 +609,24 @@ impl ItemService for ReaperItem {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
+            let proj = reaper.current_project();
 
-            let track_ptr = match track {
-                TrackRef::Master => {
-                    Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
+            // Resolve track reference to a raw MediaTrack pointer
+            let reaper_track = match &track {
+                TrackRef::Master => proj.master_track().ok(),
+                TrackRef::Index(idx) => proj.track_by_index(*idx),
+                TrackRef::Guid(guid) => {
+                    (0..proj.track_count()).find_map(|i| {
+                        let t = proj.track_by_index(i)?;
+                        if t.guid().to_string_without_braces() == *guid {
+                            Some(t)
+                        } else {
+                            None
+                        }
+                    })
                 }
-                TrackRef::Index(idx) => {
-                    medium.get_track(ReaperProjectContext::CurrentProject, idx)
-                }
-                TrackRef::Guid(_) => None,
             }?;
+            let track_ptr = reaper_track.raw().ok()?;
 
             let item = item_sw::add_media_item_to_track(medium, track_ptr)?;
 
@@ -635,6 +643,11 @@ impl ItemService for ReaperItem {
                 DurationInSeconds::new(length.as_seconds()).ok()?,
                 UiRefreshBehavior::NoRefresh,
             );
+
+            // Add an empty MIDI take so the item has a take to work with
+            let _take = unsafe {
+                medium.add_take_to_media_item(item)
+            };
 
             // GUID extraction not available in reaper_medium
             // Use pointer address as temporary ID
