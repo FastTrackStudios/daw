@@ -240,6 +240,7 @@ fn concatenate_three_songs_full() {
 
     assert!((env.points[2].position - 38.666667).abs() < 0.01, "Song B tempo change at ~38.67s");
     assert_eq!(env.points[2].tempo, 110.0);
+    assert_eq!(env.points[2].shape, 1, "All points should be square in combined setlist");
 
     // Song C: 140 BPM at 48s
     assert_eq!(env.points[3].position, 48.0);

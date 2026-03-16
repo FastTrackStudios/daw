@@ -260,10 +260,12 @@ pub fn concatenate_tempo_envelopes(
                 let mut p = point.clone();
                 p.position += offset;
 
-                // First point of non-first songs: square shape for instant transition
-                if i == 0 && !points.is_empty() {
-                    p.shape = 1;
-                }
+                // Force all points to square shape (instant transitions)
+                // in the combined setlist. Gradual tempo ramps within
+                // individual songs don't translate well when concatenated
+                // because the gap between songs would cause unexpected
+                // interpolation.
+                p.shape = 1;
 
                 points.push(p);
             }

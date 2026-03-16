@@ -607,28 +607,68 @@ impl ItemService for ReaperItem {
             track, position.as_seconds(), length.as_seconds()
         );
         main_thread::query(move || {
-            let proj = resolve_project(&project)?;
-            let reaper_track = resolve_track(&proj, &track)?;
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            // Try specific project first, fall back to current
+            let proj = resolve_project(&project)
+                .unwrap_or_else(|| reaper.current_project());
+            let reaper_track = match resolve_track(&proj, &track) {
+                Some(t) => t,
+                None => {
+                    // Track not found in resolved project — try all projects
+                    let mut found = None;
+                    for tab in 0..128u32 {
+                        if let Some(result) = medium.enum_projects(ProjectRef::Tab(tab), 0) {
+                            let p = Project::new(result.project);
+                            if let Some(t) = resolve_track(&p, &track) {
+                                found = Some(t);
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                    found?
+                }
+            };
             let track_ptr = reaper_track.raw().ok()?;
 
-            // Use CreateNewMIDIItemInProj to create an item with a proper MIDI take
-            let start = position.as_seconds();
-            let end = start + length.as_seconds();
+            // Use fully low-level REAPER API for item creation
             let low = reaper_low::Reaper::get();
-            let item_ptr = unsafe {
-                low.CreateNewMIDIItemInProj(
-                    track_ptr.as_ptr(),
-                    start,
-                    end,
-                    std::ptr::null(), // times are in seconds, not QN
-                )
-            };
 
-            if item_ptr.is_null() {
+            // Ensure correct project tab is active
+            unsafe { low.SelectProjectInstance(proj.raw().as_ptr()); }
+
+            let raw_track = track_ptr.as_ptr();
+
+            // Create item on track
+            let raw_item = unsafe { low.AddMediaItemToTrack(raw_track) };
+            if raw_item.is_null() {
                 return None;
             }
 
-            Some(format!("{:p}", item_ptr))
+            // Set position and length
+            unsafe {
+                low.SetMediaItemInfo_Value(raw_item, b"D_POSITION\0".as_ptr() as _, position.as_seconds());
+                low.SetMediaItemInfo_Value(raw_item, b"D_LENGTH\0".as_ptr() as _, length.as_seconds());
+            }
+
+            // Add take with MIDI source
+            let raw_take = unsafe { low.AddTakeToMediaItem(raw_item) };
+            if !raw_take.is_null() {
+                let pcm_source = unsafe {
+                    low.PCM_Source_CreateFromType(b"MIDI\0".as_ptr() as _)
+                };
+                if !pcm_source.is_null() {
+                    unsafe {
+                        low.SetMediaItemTake_Source(raw_take, pcm_source);
+                    }
+                }
+            }
+
+            unsafe { low.UpdateArrange() };
+
+            Some(format!("{:p}", raw_item))
         })
         .await
         .unwrap_or(None)
