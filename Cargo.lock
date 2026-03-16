@@ -1412,6 +1412,7 @@ dependencies = [
  "reaper-test",
  "roam",
  "serde_json",
+ "session-proto",
  "signal",
  "signal-live",
  "signal-proto",
@@ -6192,6 +6193,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "session-proto"
+version = "0.1.0"
+dependencies = [
+ "actions-proto",
+ "daw",
+ "eyre",
+ "facet",
+ "futures",
+ "gloo-timers",
+ "keyflow",
+ "roam",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "utils",
+ "uuid",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6248,6 +6269,7 @@ dependencies = [
  "signal-proto",
  "signal-storage",
  "tokio",
+ "utils",
 ]
 
 [[package]]
@@ -6342,6 +6364,7 @@ dependencies = [
  "serde_json",
  "signal-proto",
  "thiserror 2.0.18",
+ "utils",
  "uuid",
 ]
 

@@ -416,7 +416,8 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
     Ok(Daw::new(roam::ErasedCaller::new(caller)))
 }
 
-/// Discover the first available `/tmp/fts-daw-*.sock` socket.
+/// Discover the first available `/tmp/fts-daw-*.sock` socket that is actually
+/// connectable (filters out stale sockets from crashed sessions).
 async fn discover_socket() -> Result<PathBuf> {
     let deadline = std::time::Instant::now() + Duration::from_secs(REAPER_BOOT_TIMEOUT_SECS);
     loop {
@@ -425,14 +426,20 @@ async fn discover_socket() -> Result<PathBuf> {
                 let path = entry.path();
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name.starts_with("fts-daw-") && name.ends_with(".sock") {
-                        return Ok(path);
+                        // Verify the socket is connectable (not stale)
+                        if tokio::net::UnixStream::connect(&path).await.is_ok() {
+                            return Ok(path);
+                        } else {
+                            // Stale socket — clean it up
+                            let _ = std::fs::remove_file(&path);
+                        }
                     }
                 }
             }
         }
         if std::time::Instant::now() > deadline {
             return Err(eyre::eyre!(
-                "Timed out discovering REAPER socket (no fts-daw-*.sock found in /tmp)"
+                "Timed out discovering REAPER socket (no connectable fts-daw-*.sock found in /tmp)"
             ));
         }
         tokio::time::sleep(Duration::from_millis(500)).await;

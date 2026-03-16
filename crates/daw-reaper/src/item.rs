@@ -566,20 +566,13 @@ impl ItemService for ReaperItem {
         .unwrap_or_default()
     }
 
-    async fn item_count(&self, _project: ProjectContext, track: TrackRef) -> u32 {
+    async fn item_count(&self, project: ProjectContext, track: TrackRef) -> u32 {
         main_thread::query(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
-            let track_ptr = match track {
-                TrackRef::Master => {
-                    Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
-                }
-                TrackRef::Index(idx) => {
-                    medium.get_track(ReaperProjectContext::CurrentProject, idx)
-                }
-                TrackRef::Guid(_) => None,
-            };
+            let medium = Reaper::get().medium_reaper();
+            let proj = resolve_project(&project)
+                .or_else(|| Some(Reaper::get().current_project()));
+            let reaper_track = proj.as_ref().and_then(|p| resolve_track(p, &track));
+            let track_ptr = reaper_track.and_then(|t| t.raw().ok());
 
             if let Some(track) = track_ptr {
                 item_sw::count_track_media_items(medium, track)
@@ -615,7 +608,8 @@ impl ItemService for ReaperItem {
             let reaper_track = resolve_track(&proj, &track)?;
             let track_ptr = reaper_track.raw().ok()?;
 
-            // Add item using safe wrapper
+            // Add item to track — AddMediaItemToTrack works with the track
+            // pointer directly regardless of which project tab is active
             let item = unsafe { medium.add_media_item_to_track(track_ptr) }.ok()?;
 
             // Set position and length
@@ -636,6 +630,10 @@ impl ItemService for ReaperItem {
             let _ = unsafe { medium.add_take_to_media_item(item) };
 
             medium.update_timeline();
+
+            // Return pointer-based ID — proper GUID extraction needs
+            // reaper_low which can crash on load. The resolve_item method
+            // handles pointer-based IDs.
             Some(format!("{:p}", item.as_ptr()))
         })
         .await
