@@ -95,6 +95,20 @@ enum Command {
         /// Track name or index
         track: String,
     },
+
+    // -- File Operations --
+
+    /// Combine multiple RPP files into a single project
+    Combine {
+        /// Path to .RPL file or list of .RPP files
+        input: String,
+        /// Output .RPP file path (default: derived from input name)
+        #[arg(short, long)]
+        output: Option<String>,
+        /// Gap between songs in measures (uses next song's tempo)
+        #[arg(long, default_value = "0")]
+        gap: u32,
+    },
 }
 
 #[tokio::main]
@@ -116,6 +130,9 @@ async fn main() -> Result<()> {
         }
         Command::Quit { pid } => {
             return daw_cli::cmd_quit(pid);
+        }
+        Command::Combine { ref input, ref output, gap } => {
+            return daw_cli::cmd_combine(input, output.as_deref(), gap);
         }
         _ => {}
     }
@@ -140,7 +157,7 @@ async fn main() -> Result<()> {
         Command::AddTrack { ref name, at } => daw_cli::cmd_add_track(&daw, name.as_deref(), at, cli.json).await?,
         Command::RemoveTrack { ref track } => daw_cli::cmd_remove_track(&daw, track).await?,
         // Already handled above
-        Command::Launch { .. } | Command::Quit { .. } => unreachable!(),
+        Command::Launch { .. } | Command::Quit { .. } | Command::Combine { .. } => unreachable!(),
     }
 
     Ok(())

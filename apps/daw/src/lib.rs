@@ -900,3 +900,68 @@ pub async fn cmd_remove_track(daw: &Daw, track_arg: &str) -> Result<()> {
     println!("Removed track \"{}\" ({})", name, guid);
     Ok(())
 }
+
+// ── File Operations ──────────────────────────────────────────────────────────
+
+pub fn cmd_combine(input: &str, output: Option<&str>, gap_measures: u32) -> Result<()> {
+    use dawfile_reaper::setlist_rpp::{self, CombineOptions};
+    use std::path::Path;
+
+    let input_path = Path::new(input);
+    if !input_path.exists() {
+        eyre::bail!("Input file not found: {}", input);
+    }
+
+    // Determine output path
+    let output_path = if let Some(out) = output {
+        PathBuf::from(out)
+    } else {
+        // Default: same name as input but with .RPP extension, in same directory
+        let stem = input_path.file_stem().unwrap_or_default();
+        let parent = input_path.parent().unwrap_or(Path::new("."));
+        parent.join(format!("{}.RPP", stem.to_string_lossy()))
+    };
+
+    let options = CombineOptions { gap_measures };
+
+    // Parse RPL or treat as single RPP
+    let is_rpl = input_path
+        .extension()
+        .map_or(false, |ext| ext.eq_ignore_ascii_case("rpl"));
+
+    let (combined, song_infos) = if is_rpl {
+        setlist_rpp::combine_rpl(input_path, &options)?
+    } else {
+        // Single RPP or list of RPPs — for now just treat as RPL
+        setlist_rpp::combine_rpl(input_path, &options)?
+    };
+
+    std::fs::write(&output_path, &combined)?;
+
+    // Print summary
+    println!("Combined {} songs → {}", song_infos.len(), output_path.display());
+    if gap_measures > 0 {
+        println!("Gap: {} measure(s) between songs", gap_measures);
+    }
+    println!();
+    let mut total = 0.0;
+    for (i, info) in song_infos.iter().enumerate() {
+        println!(
+            "  {:>2}. {:<40} {:>6.1}s ({:.0}:{:02.0})",
+            i + 1,
+            info.name,
+            info.global_start_seconds,
+            (info.duration_seconds / 60.0).floor(),
+            info.duration_seconds % 60.0,
+        );
+        total = info.global_start_seconds + info.duration_seconds;
+    }
+    println!();
+    println!(
+        "Total: {:.0}:{:02.0}",
+        (total / 60.0).floor(),
+        total % 60.0,
+    );
+
+    Ok(())
+}

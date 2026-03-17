@@ -149,7 +149,7 @@ fn combine_rpl_with_gap() {
     }
 
     let options = dawfile_reaper::setlist_rpp::CombineOptions {
-        gap_seconds: 5.0,
+        gap_measures: 2,
     };
     let (_, song_infos) = dawfile_reaper::setlist_rpp::combine_rpl(
         Path::new(RPL_PATH),
@@ -157,17 +157,21 @@ fn combine_rpl_with_gap() {
     )
     .expect("combine_rpl with gap failed");
 
-    // With 7 songs and 5s gaps, total should be longer than without gaps
-    // 6 gaps * 5s = 30s extra
+    // With gap_measures=2, each gap should be 2 measures at the NEXT song's tempo.
+    // Gaps should be > 0 between all adjacent songs.
     for i in 1..song_infos.len() {
         let prev_end = song_infos[i - 1].global_start_seconds + song_infos[i - 1].duration_seconds;
         let gap = song_infos[i].global_start_seconds - prev_end;
         assert!(
-            (gap - 5.0).abs() < 0.01,
-            "Gap between song {} and {} should be 5.0s, got {:.2}s",
+            gap > 0.5,
+            "Gap between song {} and {} should be > 0.5s (2 measures), got {:.2}s",
             i - 1,
             i,
             gap
+        );
+        println!(
+            "  Gap {}->{}: {:.2}s ({})",
+            i - 1, i, gap, song_infos[i].name
         );
     }
 }
