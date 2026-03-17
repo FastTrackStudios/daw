@@ -229,7 +229,7 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<DawConnection> {
     .map_err(|e| eyre::eyre!("Failed to connect to {}: {}", path.display(), e))?;
 
     let link = roam_stream::StreamLink::unix(stream);
-    let (caller, session) = roam::initiator(link)
+    let (caller, session) = roam::initiator_conduit(roam::BareConduit::new(link))
         .establish::<roam::DriverCaller>(())
         .await
         .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;

@@ -453,7 +453,7 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await?;
     let link = roam_stream::StreamLink::unix(stream);
-    let (caller, _session) = roam::initiator(link)
+    let (caller, _session) = roam::initiator_conduit(roam::BareConduit::new(link))
         .establish::<roam::DriverCaller>(())
         .await
         .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
