@@ -20,4 +20,6 @@ dawfile-reaper = { path = "../dawfile-reaper", optional = true }
 sync = ["dep:daw-control-sync"]
 reaper = ["dep:daw-reaper"]
 standalone = ["dep:daw-standalone"]
+standalone-audio = ["standalone", "daw-standalone/audio"]
+standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
 file = ["dep:dawfile-reaper"]
