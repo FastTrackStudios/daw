@@ -23,16 +23,16 @@ pub fn wrap_in_folder(folder_name: &str, mut tracks: Vec<Track>) -> Vec<Track> {
         return vec![make_folder_track(folder_name)];
     }
 
-    // Calculate the net folder depth of the tracks we're wrapping.
-    // If they have internal folder structure, the last track's close
-    // needs to account for it.
-    let net_depth: i32 = tracks
+    // Calculate the net folder depth of the tracks we're wrapping,
+    // EXCLUDING the last track (since we'll overwrite its folder settings).
+    // This tells us how many folders are still open after all but the last track.
+    let net_depth_without_last: i32 = tracks[..tracks.len() - 1]
         .iter()
         .map(|t| t.folder.as_ref().map_or(0, |f| f.indentation))
         .sum();
 
-    // The last track must close our new folder plus any unclosed inner folders
-    let close_depth = -1 - net_depth;
+    // The last track must close: our new folder (-1) plus any unclosed inner folders
+    let close_depth = -1 - net_depth_without_last;
     let last = tracks.last_mut().unwrap();
     last.folder = Some(FolderSettings {
         folder_state: FolderState::LastInFolder,
@@ -205,6 +205,295 @@ fn make_folder_track(name: &str) -> Track {
     }
 }
 
+// ── FTS Project Hierarchy ─────────────────────────────────────────────────────
+
+/// Well-known guide track names.
+const GUIDE_NAMES: &[&str] = &["Click", "Loop", "Count", "Guide"];
+
+/// Well-known Keyflow track names.
+const KEYFLOW_NAMES: &[&str] = &["CHORDS", "LINES", "HITS"];
+
+/// Well-known structural folder names to strip (we rebuild these).
+const STRUCTURAL_FOLDERS: &[&str] = &[
+    "click/guide",
+    "click + guide",
+    "tracks",
+    "keyflow",
+    "midi bus",
+    "reference",
+];
+
+/// Classify a track's role in the FTS hierarchy.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TrackRole {
+    /// Click, Loop, Count, Guide
+    Guide,
+    /// CHORDS, LINES, HITS
+    Keyflow,
+    /// Structural folder to be stripped (Click+Guide, TRACKS, Keyflow, Reference)
+    Structural,
+    /// Reference mix track (mp3, full song bounce)
+    Mix,
+    /// Stem split track (demucs/lalal output)
+    StemSplit,
+    /// Stem Split folder marker
+    StemSplitFolder,
+    /// Regular content track
+    Content,
+}
+
+/// Classify a track into its FTS role.
+pub fn classify_track(track: &Track) -> TrackRole {
+    let name = &track.name;
+    let lower = name.to_lowercase();
+
+    // Structural folders to strip
+    let is_folder = track
+        .folder
+        .as_ref()
+        .map_or(false, |f| f.folder_state == FolderState::FolderParent);
+    if is_folder && STRUCTURAL_FOLDERS.iter().any(|s| lower == *s) {
+        return TrackRole::Structural;
+    }
+
+    // Guide tracks
+    if GUIDE_NAMES.iter().any(|g| g.to_lowercase() == lower) {
+        return TrackRole::Guide;
+    }
+
+    // Keyflow tracks
+    if KEYFLOW_NAMES.iter().any(|k| k.to_lowercase() == lower) {
+        return TrackRole::Keyflow;
+    }
+
+    // Stem Split folder
+    if lower == "stem split" && is_folder {
+        return TrackRole::StemSplitFolder;
+    }
+
+    // Stem split tracks — items with stem-like names or tracks inside Stem Split
+    if lower == "stem split" {
+        return TrackRole::StemSplit;
+    }
+
+    // Reference/Mix detection — mp3 files, "mix", "reference", "bounce"
+    let is_mix_name = lower.contains(".mp3")
+        || lower == "mix"
+        || lower == "reference"
+        || lower == "bounce"
+        || lower == "master";
+
+    // Check if the track has items that look like stems (demucs patterns)
+    let has_stem_items = track.items.iter().any(|item| {
+        item.takes.iter().any(|take| {
+            if let Some(ref source) = take.source {
+                let fp = source.file_path.to_lowercase();
+                fp.contains("(drums)") || fp.contains("(bass)")
+                    || fp.contains("(vocals)") || fp.contains("(guitar)")
+                    || fp.contains("(piano)") || fp.contains("(other)")
+            } else {
+                false
+            }
+        })
+    });
+
+    // Check if items are mp3/reference sources
+    let has_mp3_items = track.items.iter().any(|item| {
+        item.takes.iter().any(|take| {
+            if let Some(ref source) = take.source {
+                let fp = source.file_path.to_lowercase();
+                fp.ends_with(".mp3") || fp.contains("mix") || fp.contains("bounce")
+            } else {
+                false
+            }
+        })
+    });
+
+    if has_stem_items {
+        return TrackRole::StemSplit;
+    }
+
+    if is_mix_name || has_mp3_items {
+        return TrackRole::Mix;
+    }
+
+    // Empty tracks (no items, not a folder) — treat as reference placeholder
+    if track.items.is_empty() && !is_folder {
+        return TrackRole::Mix;
+    }
+
+    TrackRole::Content
+}
+
+/// Organize a flat list of tracks into the canonical FTS project hierarchy.
+///
+/// Produces:
+/// ```text
+/// Click + Guide/
+/// ├── Click, Loop, Count, Guide
+/// Keyflow/
+/// ├── CHORDS, LINES, HITS
+/// TRACKS/
+/// ├── (content tracks)
+/// Reference/
+/// ├── Mix
+/// └── Stem Split/
+///     ├── Drums, Bass, Vocals, ...
+/// ```
+///
+/// Structural folders from the source project are stripped and rebuilt.
+/// Tracks are classified by name and content into the correct category.
+pub fn organize_into_fts_hierarchy(tracks: Vec<Track>) -> Vec<Track> {
+    let mut guide: Vec<Track> = Vec::new();
+    let mut keyflow: Vec<Track> = Vec::new();
+    let mut content: Vec<Track> = Vec::new();
+    let mut mix: Vec<Track> = Vec::new();
+    let mut stems: Vec<Track> = Vec::new();
+
+    // Track folder context to detect tracks inside Reference/Stem Split folders
+    let mut in_reference = false;
+    let mut in_stem_split = false;
+    let mut ref_depth = 0i32;
+    let mut stem_depth = 0i32;
+
+    for track in tracks {
+        let role = classify_track(&track);
+
+        // Track folder context
+        let lower = track.name.to_lowercase();
+        if lower == "reference"
+            && track
+                .folder
+                .as_ref()
+                .map_or(false, |f| f.folder_state == FolderState::FolderParent)
+        {
+            in_reference = true;
+            ref_depth = 1;
+            continue; // Skip the folder track itself
+        }
+        if (lower == "stem split")
+            && track
+                .folder
+                .as_ref()
+                .map_or(false, |f| f.folder_state == FolderState::FolderParent)
+        {
+            in_stem_split = true;
+            stem_depth = 1;
+            continue;
+        }
+
+        // If inside stem split folder, all children are stems
+        if in_stem_split {
+            let indent = track.folder.as_ref().map_or(0, |f| f.indentation);
+            stem_depth += indent;
+            if stem_depth <= 0 {
+                in_stem_split = false;
+            }
+            let mut t = track;
+            t.folder = None;
+            stems.push(t);
+            continue;
+        }
+
+        // If inside reference folder, classify children
+        if in_reference {
+            let indent = track.folder.as_ref().map_or(0, |f| f.indentation);
+            ref_depth += indent;
+            if ref_depth <= 0 {
+                in_reference = false;
+            }
+            let mut t = track;
+            t.folder = None;
+            match role {
+                TrackRole::StemSplit => stems.push(t),
+                _ => mix.push(t),
+            }
+            continue;
+        }
+
+        match role {
+            TrackRole::Structural => continue,
+            TrackRole::Guide => {
+                let mut t = track;
+                t.folder = None;
+                guide.push(t);
+            }
+            TrackRole::Keyflow => {
+                let mut t = track;
+                t.folder = None;
+                keyflow.push(t);
+            }
+            TrackRole::Mix => {
+                let mut t = track;
+                t.folder = None;
+                mix.push(t);
+            }
+            TrackRole::StemSplit | TrackRole::StemSplitFolder => {
+                let mut t = track;
+                t.folder = None;
+                stems.push(t);
+            }
+            TrackRole::Content => {
+                let mut t = track;
+                t.folder = None;
+                content.push(t);
+            }
+        }
+    }
+
+    // Build the hierarchy
+    let mut result: Vec<Track> = Vec::new();
+
+    // Click + Guide folder — always present with standard tracks
+    if guide.is_empty() {
+        for name in GUIDE_NAMES {
+            guide.push(Track {
+                name: name.to_string(),
+                ..Track::default()
+            });
+        }
+    }
+    result.extend(wrap_in_folder("Click + Guide", guide));
+
+    // Keyflow folder — always present with standard tracks
+    if keyflow.is_empty() {
+        for name in KEYFLOW_NAMES {
+            keyflow.push(Track {
+                name: name.to_string(),
+                ..Track::default()
+            });
+        }
+    }
+    result.extend(wrap_in_folder("Keyflow", keyflow));
+    // TRACKS folder is always present
+    if content.is_empty() {
+        // Empty folder — just the folder track itself
+        result.push(make_folder_track("TRACKS"));
+        result.push(Track {
+            name: String::new(),
+            folder: Some(FolderSettings {
+                folder_state: FolderState::LastInFolder,
+                indentation: -1,
+            }),
+            ..Track::default()
+        });
+    } else {
+        result.extend(wrap_in_folder("TRACKS", content));
+    }
+
+    // Reference section
+    let mut ref_children: Vec<Track> = Vec::new();
+    ref_children.extend(mix);
+    if !stems.is_empty() {
+        ref_children.extend(wrap_in_folder("Stem Split", stems));
+    }
+    if !ref_children.is_empty() {
+        result.extend(wrap_in_folder("Reference", ref_children));
+    }
+
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -292,9 +581,10 @@ mod tests {
 
         assert_eq!(names(&result), vec!["Outer", "Sub", "A", "B"]);
         assert!(is_folder_parent(&result[0]));
-        // Net inner depth: +1 + 0 + (-1) = 0, so last track closes just our folder
+        // Inner depth without last: +1 + 0 = 1 (Sub folder opened, not yet closed)
+        // close_depth = -1 (outer) - 1 (unclosed inner) = -2
         assert!(is_last_in_folder(&result[3]));
-        assert_eq!(indent(&result[3]), -1);
+        assert_eq!(indent(&result[3]), -2);
     }
 
     #[test]

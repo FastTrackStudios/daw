@@ -12,6 +12,7 @@ use crate::types::marker_region::{MarkerRegion, MarkerRegionCollection};
 use crate::types::project::ReaperProject;
 use crate::types::time_tempo::{TempoTimeEnvelope, TempoTimePoint};
 use crate::types::track::{FolderSettings, FolderState, Track};
+use crate::types::track_ops::wrap_in_folder;
 
 /// Information about a song for concatenation.
 pub struct SongInfo {
@@ -232,10 +233,11 @@ pub fn combine_rpp_files(
 
         offset += duration;
 
-        // Add gap between songs using the CURRENT (ending) song's tempo.
+        // Add gap between songs.
         //
-        // Since resolve_song_bounds already snaps end to the next measure
-        // boundary, we just need to add the requested gap_measures.
+        // The gap is exactly `gap_measures` measures at the ending song's tempo.
+        // This ensures a clean number of measures between songs regardless of
+        // the accumulated tempo history.
         if options.gap_measures > 0 && i < projects.len() - 1 {
             let (bpm, beats_per_measure) = extract_ending_tempo(project);
             let gap = measures_to_seconds(options.gap_measures, bpm, beats_per_measure);
@@ -401,11 +403,10 @@ pub fn resolve_song_bounds(project: &ReaperProject) -> SongBounds {
         .or(last_section_end)
         .unwrap_or(last_pos);
 
-    // Snap start to the previous measure boundary and end to the next measure
-    // boundary. This ensures the tempo grid stays aligned when songs are
-    // concatenated — each song starts and ends on a clean barline.
-    let start = snap_to_prev_measure(raw_start, project);
-    let end = snap_to_next_measure(raw_end, project).max(start + 0.1);
+    // Use exact marker positions. Measure alignment is handled by the
+    // combine pipeline's gap calculation, not here.
+    let start = raw_start;
+    let end = raw_end.max(start + 0.1);
 
     SongBounds {
         start,
@@ -614,44 +615,53 @@ pub fn build_song_infos_from_projects(
 
 // ── Track Concatenation (US-004) ─────────────────────────────────────────────
 
-/// Well-known guide track names that get merged across songs.
+/// Well-known guide track names that get merged across songs into the
+/// Click + Guide header folder.
 const GUIDE_TRACK_NAMES: &[&str] = &["Click", "Loop", "Count", "Guide"];
+
+/// Well-known Keyflow track names that get merged across songs into the
+/// Keyflow header folder.
+const KEYFLOW_TRACK_NAMES: &[&str] = &["CHORDS", "LINES", "HITS"];
+
+/// All header track names that get merged (guide + keyflow).
+fn is_header_track(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    GUIDE_TRACK_NAMES
+        .iter()
+        .any(|g| g.to_lowercase() == lower)
+        || KEYFLOW_TRACK_NAMES
+            .iter()
+            .any(|k| k.to_lowercase() == lower)
+}
 
 /// Concatenate tracks from multiple projects into a single track list.
 ///
-/// Guide tracks (Click, Loop, Count, Guide) are merged — items from all songs
-/// placed on shared tracks at correct time offsets. Content tracks appear
-/// under `TRACKS/{Song Name}/` folder hierarchy.
+/// Header tracks are merged across songs:
+/// - **Click + Guide**: Click, Loop, Count, Guide
+/// - **Keyflow**: CHORDS, LINES, HITS
+///
+/// Content tracks appear under `TRACKS/{Song Name}/` folder hierarchy.
 pub fn concatenate_tracks(projects: &[ReaperProject], songs: &[SongInfo]) -> Vec<Track> {
     assert_eq!(projects.len(), songs.len());
 
-    // Guide tracks (Click, Loop, Count, Guide) are merged across songs —
-    // items from all songs placed on shared tracks at correct time offsets.
-    // Content tracks appear under TRACKS/{Song Name}/ folder hierarchy.
-
-    let mut guide_tracks: std::collections::HashMap<String, Track> =
+    let mut header_tracks: std::collections::HashMap<String, Track> =
         std::collections::HashMap::new();
-    let mut content_tracks: Vec<Track> = Vec::new();
+    let mut all_song_tracks: Vec<(String, Vec<Track>)> = Vec::new();
+    let mut all_song_reference: Vec<(String, Vec<Track>)> = Vec::new();
 
     for (project, song) in projects.iter().zip(songs.iter()) {
         let offset = song.global_start_seconds - song.local_start;
 
         let mut song_content: Vec<Track> = Vec::new();
-        // Compute local end for item trimming.
-        // When trim_to_bounds is active, duration_seconds reflects the bounded
-        // range — items past this point should be truncated. When not trimming,
-        // duration = full content extent, so this naturally includes everything.
         let local_end = song.local_start + song.duration_seconds;
 
         for track in &project.tracks {
             let name_lower = track.name.to_lowercase();
-            let is_guide = GUIDE_TRACK_NAMES
-                .iter()
-                .any(|g| g.to_lowercase() == name_lower);
+            let is_header = is_header_track(&track.name);
             let is_structural = is_structural_folder(&name_lower, track);
 
             if is_structural {
-                // Skip structural folders (Click/Guide, TRACKS) — we rebuild them
+                // Skip structural folders (Click/Guide, TRACKS, Keyflow) — we rebuild them
                 continue;
             }
 
@@ -664,9 +674,11 @@ pub fn concatenate_tracks(projects: &[ReaperProject], songs: &[SongInfo]) -> Vec
             );
             cloned.track_id = None;
 
-            if is_guide {
-                // Merge into shared guide track
-                guide_tracks
+            if is_header {
+                // Merge into shared header track — clear folder settings
+                // since we'll rebuild the folder structure ourselves
+                cloned.folder = None;
+                header_tracks
                     .entry(track.name.clone())
                     .and_modify(|existing| {
                         existing.items.extend(cloned.items.clone());
@@ -679,51 +691,67 @@ pub fn concatenate_tracks(projects: &[ReaperProject], songs: &[SongInfo]) -> Vec
             }
         }
 
-        if !song_content.is_empty() {
-            // Song sub-folder
-            content_tracks.push(make_folder_track(&song.name));
+        // Split song content into regular tracks vs reference tracks
+        let mut song_tracks: Vec<Track> = Vec::new();
+        let mut song_reference: Vec<Track> = Vec::new();
 
-            let last_idx = song_content.len() - 1;
-            for (j, mut track) in song_content.into_iter().enumerate() {
-                if j == last_idx {
-                    track.folder = Some(FolderSettings {
-                        folder_state: FolderState::LastInFolder,
-                        indentation: -1,
-                    });
-                }
-                content_tracks.push(track);
+        for track in song_content {
+            let lower = track.name.to_lowercase();
+            if lower == "reference" || lower == "stem split" || lower == "mix" {
+                song_reference.push(track);
+            } else {
+                song_tracks.push(track);
             }
+        }
+
+        if !song_tracks.is_empty() {
+            all_song_tracks.push((song.name.clone(), song_tracks));
+        }
+        if !song_reference.is_empty() {
+            all_song_reference.push((song.name.clone(), song_reference));
         }
     }
 
     let mut result: Vec<Track> = Vec::new();
 
-    // Guide tracks first (merged, flat at the top level)
+    // ── Click + Guide folder ──────────────────────────────────────
+    let mut guide_children: Vec<Track> = Vec::new();
     for guide_name in GUIDE_TRACK_NAMES {
-        if let Some(track) = guide_tracks.remove(*guide_name) {
-            result.push(track);
+        if let Some(track) = header_tracks.remove(*guide_name) {
+            guide_children.push(track);
         }
     }
+    if !guide_children.is_empty() {
+        result.extend(wrap_in_folder("Click + Guide", guide_children));
+    }
 
-    // Content tracks under TRACKS folder
-    if !content_tracks.is_empty() {
-        result.push(make_folder_track("TRACKS"));
-
-        let last_idx = content_tracks.len() - 1;
-        for (j, mut track) in content_tracks.into_iter().enumerate() {
-            if j == last_idx {
-                // The very last content track closes the TRACKS folder
-                let current_indent = track
-                    .folder
-                    .as_ref()
-                    .map_or(0, |f| f.indentation);
-                track.folder = Some(FolderSettings {
-                    folder_state: FolderState::LastInFolder,
-                    indentation: current_indent - 1,
-                });
-            }
-            result.push(track);
+    // ── Keyflow folder ────────────────────────────────────────────
+    let mut keyflow_children: Vec<Track> = Vec::new();
+    for keyflow_name in KEYFLOW_TRACK_NAMES {
+        if let Some(track) = header_tracks.remove(*keyflow_name) {
+            keyflow_children.push(track);
         }
+    }
+    if !keyflow_children.is_empty() {
+        result.extend(wrap_in_folder("Keyflow", keyflow_children));
+    }
+
+    // ── TRACKS folder (per-song content) ──────────────────────────
+    if !all_song_tracks.is_empty() {
+        let mut tracks_children: Vec<Track> = Vec::new();
+        for (song_name, tracks) in all_song_tracks {
+            tracks_children.extend(wrap_in_folder(&song_name, tracks));
+        }
+        result.extend(wrap_in_folder("TRACKS", tracks_children));
+    }
+
+    // ── Reference folder (per-song reference/stem split) ──────────
+    if !all_song_reference.is_empty() {
+        let mut ref_children: Vec<Track> = Vec::new();
+        for (song_name, tracks) in all_song_reference {
+            ref_children.extend(wrap_in_folder(&song_name, tracks));
+        }
+        result.extend(wrap_in_folder("Reference", ref_children));
     }
 
     result
@@ -766,7 +794,11 @@ fn is_structural_folder(name_lower: &str, track: &Track) -> bool {
         .folder
         .as_ref()
         .map_or(false, |f| f.folder_state == FolderState::FolderParent);
-    (name_lower == "click/guide" || name_lower == "tracks") && is_folder
+    let is_structural_name = matches!(
+        name_lower,
+        "click/guide" | "click + guide" | "tracks" | "keyflow" | "midi bus"
+    );
+    is_structural_name && is_folder
 }
 
 fn clone_track_with_offset(
