@@ -93,6 +93,7 @@ impl Default for CombineOptions {
 }
 
 /// Compute the content extent of a project (the latest point of any content).
+// r[impl bounds.content-extent]
 ///
 /// Returns the maximum of:
 /// - item ends (position + length) across all tracks
@@ -188,6 +189,9 @@ fn extract_project_tempo(project: &ReaperProject) -> (f64, u32) {
 /// projects are concatenated with proper offsets.
 ///
 /// Returns `(combined_rpp_text, song_infos)`.
+// r[impl combine.rpl-to-rpp]
+// r[impl combine.sequential-layout]
+// r[impl combine.gap-measures]
 pub fn combine_rpp_files(
     rpp_paths: &[PathBuf],
     options: &CombineOptions,
@@ -291,6 +295,7 @@ pub fn combine_rpl_to_file(
 ///
 /// Each non-empty line is a path to an RPP file. Relative paths are resolved
 /// against the RPL file's parent directory.
+// r[impl rpl.parse]
 pub fn parse_rpl(rpl_path: &Path) -> std::io::Result<Vec<PathBuf>> {
     let content = std::fs::read_to_string(rpl_path)?;
     let parent = rpl_path.parent().unwrap_or(Path::new("."));
@@ -312,6 +317,7 @@ pub fn parse_rpl(rpl_path: &Path) -> std::io::Result<Vec<PathBuf>> {
 ///
 /// Strips the extension and any trailing bracketed content
 /// (e.g., `"Belief - John Mayer [Battle SP26].RPP"` → `"Belief - John Mayer"`).
+// r[impl rpl.song-name]
 pub fn song_name_from_path(path: &Path) -> String {
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     let name = stem.split('[').next().unwrap_or(&stem).trim();
@@ -342,6 +348,7 @@ pub struct SongBounds {
 /// 4. SONGSTART → SONGEND
 /// 5. First section region → last section region end
 /// 6. 0 → last marker position
+// r[impl bounds.resolve]
 pub fn resolve_song_bounds(project: &ReaperProject) -> SongBounds {
     let markers = &project.markers_regions.all;
 
@@ -1549,6 +1556,8 @@ fn extract_tempo_points_raw(
 /// Collects tempo points from each project's TEMPOENVEX, offsets them by each
 /// song's global position, and emits a single combined envelope. A square-shape
 /// boundary point is inserted at each song transition.
+// r[impl combine.tempo-boundary]
+// r[impl combine.tempo-preserve-internal]
 fn write_combined_tempoenvex(out: &mut String, rpp_paths: &[PathBuf], song_infos: &[SongInfo]) {
     out.push_str("  <TEMPOENVEX\n");
     out.push_str("    ACT 1 -1\n");
@@ -1720,6 +1729,11 @@ fn force_square_shape(pt_line: &str) -> String {
 ///
 /// This preserves ALL data (FX, MIDI, envelopes, takes, sources, fades, etc.)
 /// by using the original RPP text and only patching POSITION and FILE lines.
+// r[impl combine.raw-pipeline]
+// r[impl combine.file-paths]
+// r[impl combine.markers]
+// r[impl combine.song-folders]
+// r[impl combine.tempo-concat]
 pub fn concatenate_rpp_files_raw(
     rpp_paths: &[PathBuf],
     song_infos: &[SongInfo],

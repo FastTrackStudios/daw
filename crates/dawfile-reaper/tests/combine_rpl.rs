@@ -13,6 +13,10 @@ fn rpl_exists() -> bool {
     Path::new(RPL_PATH).exists()
 }
 
+// r[verify combine.rpl-to-rpp]
+// r[verify combine.sequential-layout]
+// r[verify combine.file-paths]
+// r[verify combine.song-folders]
 #[test]
 fn combine_rpl_produces_valid_rpp() {
     if !rpl_exists() {
@@ -141,6 +145,7 @@ fn combine_rpl_produces_valid_rpp() {
     println!("Total setlist duration: {:.1}s ({:.1} minutes)", total_duration, total_duration / 60.0);
 }
 
+// r[verify combine.gap-measures]
 #[test]
 fn combine_rpl_with_gap() {
     if !rpl_exists() {

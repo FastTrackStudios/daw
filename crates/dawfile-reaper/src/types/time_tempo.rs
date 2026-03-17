@@ -54,6 +54,7 @@ impl Default for TempoTimePoint {
 
 impl TempoTimePoint {
     /// Create a TempoTimePoint from already-tokenized PT line tokens.
+    // r[impl rpp.parse.tempo]
     pub fn from_tokens(tokens: &[Token]) -> Result<Self, String> {
         if tokens.len() < 4 {
             return Err(format!(

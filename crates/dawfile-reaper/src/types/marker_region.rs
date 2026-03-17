@@ -122,6 +122,7 @@ impl MarkerRegion {
     }
 
     /// Create a MarkerRegion from a raw RPP marker line
+    // r[impl rpp.parse.markers]
     pub fn from_marker_line(line: &str) -> Result<Self, String> {
         let (_remaining, tokens) =
             parse_token_line(line).map_err(|e| format!("Failed to parse marker line: {:?}", e))?;

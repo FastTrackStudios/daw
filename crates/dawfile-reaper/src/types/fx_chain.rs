@@ -223,6 +223,7 @@ impl FxChain {
     /// `content` should be the full text of the `<FXCHAIN ...>...</FXCHAIN>`
     /// block, including the opening `<FXCHAIN` and closing `>` lines.
     /// It also accepts just the inner content (without the wrapper lines).
+    // r[impl rpp.parse.fx-chain]
     pub fn parse(content: &str) -> Result<Self, String> {
         let raw_content = content.to_string();
 
@@ -1179,6 +1180,7 @@ impl FxChain {
     /// Serialize this FX chain to valid RPP text (a complete `<FXCHAIN>...\n>` block).
     ///
     /// Uses 2-space indentation per nesting level, matching REAPER conventions.
+    // r[impl rpp.write.fx-chain]
     pub fn to_rpp_string(&self) -> String {
         let mut out = String::new();
         out.push_str("<FXCHAIN\n");

@@ -244,6 +244,8 @@ mod tests {
 
     /// Calculate beat positions with tempo and time signature changes
     /// Takes a list of tempo/time signature points: (time_seconds, tempo_bpm, time_signature)
+    // r[impl beat-pos.tempo-changes]
+    // r[impl beat-pos.float-snap]
     fn calculate_beat_position_with_changes(
         time_seconds: f64,
         change_points: &[(f64, f64, (i32, i32))],

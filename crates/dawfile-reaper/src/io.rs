@@ -24,6 +24,7 @@ use crate::types::{DecodeOptions, FxChain, ReaperProject};
 use crate::{parse_rpp_file, RppParseError, RppResult};
 
 /// Parse a full project text into typed [`ReaperProject`].
+// r[impl rpp.parse.project]
 pub fn parse_project_text(content: &str) -> RppResult<ReaperProject> {
     let parsed = parse_rpp_file(content)?;
     ReaperProject::from_rpp_project(&parsed).map_err(RppParseError::ParseError)
@@ -123,6 +124,7 @@ pub fn parse_daw_tracks_from_project_text(content: &str) -> RppResult<Vec<DawTra
 /// Lenient track parser used as fallback when strict parsing fails.
 ///
 /// Reads only commonly needed fields and ignores malformed lines.
+// r[impl rpp.parse.lenient]
 fn parse_track_block_lenient(block: &RppBlock) -> RppTrack {
     let mut track = RppTrack::from_rpp_block("<TRACK\n>").unwrap_or_else(|_| RppTrack {
         name: String::new(),

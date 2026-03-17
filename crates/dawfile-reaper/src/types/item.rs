@@ -979,6 +979,7 @@ impl Item {
     }
 
     /// Create an Item from a parsed RPP block (legacy method for compatibility)
+    // r[impl rpp.parse.item]
     pub fn from_block(block: &crate::primitives::RppBlock) -> Result<Self, String> {
         let mut item = Item {
             position: 0.0,

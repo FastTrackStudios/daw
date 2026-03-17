@@ -18,6 +18,7 @@ use super::track::{FolderSettings, FolderState, Track};
 /// let wrapped = wrap_in_folder("Band", tracks);
 /// // Result: [Band (folder), Drums, Bass, Guitar (closes folder)]
 /// ```
+// r[impl track-ops.wrap-in-folder]
 pub fn wrap_in_folder(folder_name: &str, mut tracks: Vec<Track>) -> Vec<Track> {
     if tracks.is_empty() {
         return vec![make_folder_track(folder_name)];
@@ -51,6 +52,7 @@ pub fn wrap_in_folder(folder_name: &str, mut tracks: Vec<Track>) -> Vec<Track> {
 ///
 /// Indices must be valid and non-empty. Tracks are removed from their
 /// original positions and replaced with the folder group.
+// r[impl track-ops.group-into-folder]
 pub fn group_into_folder(tracks: &mut Vec<Track>, folder_name: &str, indices: &[usize]) {
     if indices.is_empty() {
         return;
@@ -82,6 +84,7 @@ pub fn group_into_folder(tracks: &mut Vec<Track>, folder_name: &str, indices: &[
 /// Scans the track list, collects all tracks where `predicate` returns true,
 /// removes them, wraps them in a folder, and inserts at the position of
 /// the first matched track.
+// r[impl track-ops.group-by-predicate]
 pub fn group_by_predicate(
     tracks: &mut Vec<Track>,
     folder_name: &str,
@@ -110,6 +113,7 @@ pub fn group_by_names(tracks: &mut Vec<Track>, folder_name: &str, names: &[&str]
 /// The `folder_idx` must point to a track with `FolderState::FolderParent`.
 /// The tracks are removed from their current positions and inserted as
 /// children of the folder (before the folder's closing track).
+// r[impl track-ops.move-into-existing]
 pub fn move_into_existing_folder(
     tracks: &mut Vec<Track>,
     folder_idx: usize,
@@ -343,6 +347,7 @@ pub fn classify_track(track: &Track) -> TrackRole {
 ///
 /// Structural folders from the source project are stripped and rebuilt.
 /// Tracks are classified by name and content into the correct category.
+// r[impl track-ops.fts-hierarchy]
 pub fn organize_into_fts_hierarchy(tracks: Vec<Track>) -> Vec<Track> {
     let mut guide: Vec<Track> = Vec::new();
     let mut keyflow: Vec<Track> = Vec::new();

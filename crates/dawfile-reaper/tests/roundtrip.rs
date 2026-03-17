@@ -27,6 +27,8 @@ fn count(text: &str, pattern: &str) -> usize {
 
 // ──────────────────────────────────────────────────────────────
 // Level 1: RChunk tree idempotent round-trip
+// r[verify roundtrip.idempotent]
+// r[verify roundtrip.structural]
 // ──────────────────────────────────────────────────────────────
 
 #[test]
@@ -81,6 +83,11 @@ fn roundtrip_rchunk_tree_idempotent() {
 
 // ──────────────────────────────────────────────────────────────
 // Level 2: ReaperProject semantic validation
+// r[verify rpp.parse.project]
+// r[verify rpp.parse.track]
+// r[verify rpp.parse.item]
+// r[verify rpp.parse.tempo]
+// r[verify rpp.parse.markers]
 // ──────────────────────────────────────────────────────────────
 
 #[test]
@@ -208,6 +215,7 @@ fn roundtrip_reaper_project_semantic() {
 
 // ──────────────────────────────────────────────────────────────
 // Level 3: Semantic equivalence across round-trip
+// r[verify roundtrip.semantic]
 // ──────────────────────────────────────────────────────────────
 
 #[test]

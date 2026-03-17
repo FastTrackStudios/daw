@@ -715,6 +715,7 @@ pub fn read_rpp(path: impl AsRef<Path>) -> RppResult<RChunk> {
 }
 
 /// Parse chunk text into a single root chunk.
+// r[impl rpp.parse.chunk-tree]
 pub fn read_rpp_chunk(input: &str) -> RppResult<RChunk> {
     parse_root_chunk_lines(input.lines())
 }
@@ -725,6 +726,7 @@ pub fn read_rpp_lines<T: AsRef<str>>(lines: &[T]) -> RppResult<RChunk> {
 }
 
 /// Stringify any node tree.
+// r[impl rpp.write.chunk-tree]
 pub fn stringify_rpp_node(node: &RNodeTree) -> String {
     stringify_node(node, 0)
 }

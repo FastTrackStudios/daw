@@ -903,6 +903,7 @@ pub async fn cmd_remove_track(daw: &Daw, track_arg: &str) -> Result<()> {
 
 // ── File Operations ──────────────────────────────────────────────────────────
 
+// r[impl cli.combine]
 pub fn cmd_combine(input: &str, output: Option<&str>, gap_measures: u32) -> Result<()> {
     use dawfile_reaper::setlist_rpp::{self, CombineOptions};
     use std::path::Path;

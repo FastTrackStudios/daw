@@ -978,6 +978,7 @@ impl Track {
     }
 
     /// Create a Track from a parsed RPP block
+    // r[impl rpp.parse.track]
     pub fn from_block(block: &RppBlock) -> Result<Self, String> {
         Self::from_block_with_options(block, TrackParseOptions::full())
     }
