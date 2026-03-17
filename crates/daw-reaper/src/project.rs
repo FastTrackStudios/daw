@@ -546,9 +546,13 @@ impl ProjectService for ReaperProject {
                 }
             };
 
-            // Resolve project context for the command
+            // REAPER actions always operate on the "current" project tab,
+            // so we must switch to the correct tab before executing
             let proj_ctx = match resolve_project(&project) {
-                Some(p) => ProjectContext::Proj(p.raw()),
+                Some(p) => {
+                    unsafe { medium.low().SelectProjectInstance(p.raw().as_ptr()); }
+                    ProjectContext::Proj(p.raw())
+                }
                 None => ProjectContext::CurrentProject,
             };
 

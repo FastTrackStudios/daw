@@ -364,10 +364,84 @@ pub fn resolve_song_bounds(project: &ReaperProject) -> SongBounds {
         .or(last_section_end)
         .unwrap_or(last_pos);
 
+    // Snap end to the next measure boundary so songs don't cut mid-measure.
+    let end = snap_to_next_measure(end, project).max(start + 0.1);
+
     SongBounds {
         start,
-        end: end.max(start + 0.1),
+        end,
         last_marker_position: last_pos,
+    }
+}
+
+/// Snap a time position to the start of the next measure.
+///
+/// If the position already falls exactly on a measure boundary, returns
+/// that position unchanged. Otherwise rounds up to the next barline.
+///
+/// Uses the project's tempo envelope to determine the measure length at
+/// the given position (accounting for tempo and time signature changes).
+fn snap_to_next_measure(position: f64, project: &ReaperProject) -> f64 {
+    // Collect tempo change points from the envelope
+    let (bpm, beats_per_measure) = if let Some(ref te) = project.tempo_envelope {
+        // Find the tempo point active at `position` (last point <= position)
+        let mut current_bpm = te
+            .points
+            .first()
+            .map(|p| p.tempo)
+            .unwrap_or(120.0);
+        let mut current_beats: u32 = te
+            .points
+            .first()
+            .and_then(|p| p.time_signature_encoded)
+            .map(|ts| (ts & 0xFFFF) as u32)
+            .unwrap_or(4);
+        let mut current_start = 0.0f64;
+
+        for pt in &te.points {
+            if pt.position > position {
+                break;
+            }
+            current_bpm = pt.tempo;
+            current_start = pt.position;
+            if let Some(ts) = pt.time_signature_encoded {
+                current_beats = (ts & 0xFFFF) as u32;
+            }
+        }
+
+        // Calculate how many complete measures fit between the tempo point
+        // and our position, then find the next measure boundary
+        let beat_duration = 60.0 / current_bpm;
+        let measure_duration = current_beats.max(1) as f64 * beat_duration;
+        let elapsed = position - current_start;
+        let measures_elapsed = elapsed / measure_duration;
+        let next_measure = measures_elapsed.ceil();
+        let snapped = current_start + next_measure * measure_duration;
+
+        // If we're already very close to a boundary (within 1ms), don't advance
+        if (snapped - position).abs() < 0.001 {
+            return position;
+        }
+        return snapped;
+    } else {
+        // No tempo envelope — use TEMPO header
+        if let Some((bpm, num, _denom, _flags)) = project.properties.tempo {
+            (bpm as f64, (num as u32).max(1))
+        } else {
+            (120.0, 4)
+        }
+    };
+
+    let beat_duration = 60.0 / bpm;
+    let measure_duration = beats_per_measure as f64 * beat_duration;
+    let measures = position / measure_duration;
+    let next = measures.ceil();
+    let snapped = next * measure_duration;
+
+    if (snapped - position).abs() < 0.001 {
+        position
+    } else {
+        snapped
     }
 }
 
@@ -1140,7 +1214,16 @@ struct RawTempoPoint {
 /// Extract PT (tempo point) lines from a TEMPOENVEX block in raw RPP text,
 /// applying a time offset to each point's position.
 /// Returns the points and the default tempo from the TEMPO header line.
-fn extract_tempo_points_raw(rpp_text: &str, offset: f64) -> (Vec<RawTempoPoint>, Option<String>) {
+/// Extract tempo points from a TEMPOENVEX block, applying a time offset.
+///
+/// When `local_end` is provided, points at or beyond that local position are
+/// excluded. This prevents tempo points from bleeding past a song's =END
+/// marker into the next song's territory.
+fn extract_tempo_points_raw(
+    rpp_text: &str,
+    offset: f64,
+    local_end: Option<f64>,
+) -> (Vec<RawTempoPoint>, Option<String>) {
     let mut points = Vec::new();
     let mut in_tempoenvex = false;
     let mut default_tempo = None;
@@ -1168,6 +1251,12 @@ fn extract_tempo_points_raw(rpp_text: &str, offset: f64) -> (Vec<RawTempoPoint>,
             let parts: Vec<&str> = trimmed.splitn(4, ' ').collect();
             if parts.len() >= 3 {
                 if let Ok(pos) = parts[1].parse::<f64>() {
+                    // Skip points beyond the song's end bound
+                    if let Some(end) = local_end {
+                        if pos >= end {
+                            continue;
+                        }
+                    }
                     let new_pos = pos + offset;
                     let rest = if parts.len() > 3 {
                         format!(" {}", parts[3])
@@ -1207,7 +1296,14 @@ fn write_combined_tempoenvex(out: &mut String, rpp_paths: &[PathBuf], song_infos
         };
 
         let offset = song.global_start_seconds - song.local_start;
-        let (points, default_tempo) = extract_tempo_points_raw(&rpp_text, offset);
+        // When local_start > 0 (trimming), compute the local end position
+        // so tempo points past the song's bounds are excluded.
+        let local_end = if song.local_start > 0.0 {
+            Some(song.local_start + song.duration_seconds)
+        } else {
+            None
+        };
+        let (points, default_tempo) = extract_tempo_points_raw(&rpp_text, offset, local_end);
         let song_end = song.global_start_seconds + song.duration_seconds;
         let is_last_song = song_idx == song_infos.len() - 1;
 
@@ -1237,11 +1333,14 @@ fn write_combined_tempoenvex(out: &mut String, rpp_paths: &[PathBuf], song_infos
             ));
         } else {
             // Write all tempo points, preserving original shapes for internal
-            // transitions. Only force the FIRST point to shape=1 (square) so
-            // there's no gradual interpolation from the previous song's tempo.
+            // transitions. Force the FIRST point to shape=1 (square) and ensure
+            // it carries the project's time signature — otherwise a song could
+            // inherit the previous song's time signature if its first PT line
+            // doesn't explicitly set one.
             for (i, pt) in points.iter().enumerate() {
                 if i == 0 {
-                    out.push_str(&force_square_shape(&pt.line));
+                    let line = ensure_time_signature(&force_square_shape(&pt.line), ts_encoded);
+                    out.push_str(&line);
                 } else {
                     out.push_str(&pt.line);
                 }
@@ -1265,6 +1364,59 @@ fn write_combined_tempoenvex(out: &mut String, rpp_paths: &[PathBuf], song_infos
     }
 
     out.push_str("  >\n");
+}
+
+/// Ensure a PT line includes the time signature in field 4.
+///
+/// PT format: `PT <position> <tempo> <shape> [<ts_encoded> <rest...>]`
+/// If the line has only 3 fields (position, tempo, shape) or the ts field
+/// is missing/zero, inject the project's time signature so the song doesn't
+/// inherit the previous song's time signature.
+fn ensure_time_signature(pt_line: &str, ts_encoded: i32) -> String {
+    let trimmed = pt_line.trim();
+    let parts: Vec<&str> = trimmed.splitn(5, ' ').collect();
+    // parts: ["PT", position, tempo, shape, rest...]
+    if parts.len() < 4 {
+        return pt_line.to_string();
+    }
+
+    if parts.len() == 4 {
+        // No time signature field — append it with standard trailing fields
+        format!(
+            "    PT {} {} {} {} 0 1 0 \"\" 0 169 0 ABBB",
+            parts[1], parts[2], parts[3], ts_encoded
+        )
+    } else {
+        // Has rest — check if the ts field is present and non-zero
+        let rest = parts[4];
+        let existing_ts: i32 = rest
+            .split_whitespace()
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        if existing_ts == 0 {
+            // Replace the first token in rest with the correct ts
+            let after_ts = rest
+                .split_whitespace()
+                .skip(1)
+                .collect::<Vec<_>>()
+                .join(" ");
+            if after_ts.is_empty() {
+                format!(
+                    "    PT {} {} {} {}",
+                    parts[1], parts[2], parts[3], ts_encoded
+                )
+            } else {
+                format!(
+                    "    PT {} {} {} {} {}",
+                    parts[1], parts[2], parts[3], ts_encoded, after_ts
+                )
+            }
+        } else {
+            // Already has a valid time signature — leave as-is
+            pt_line.to_string()
+        }
+    }
 }
 
 /// Force a PT line's shape field to 1 (square / no gradual transition).
