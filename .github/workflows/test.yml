@@ -16,8 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Enable unprivileged user namespaces (needed by buildFHSEnv/bwrap)
-        run: sudo sysctl -w kernel.unprivileged_userns_clone=1
+      - name: Allow unprivileged user namespaces (bwrap needs this)
+        run: |
+          # Ubuntu 24.04+ blocks unprivileged user namespaces via AppArmor
+          # buildFHSEnv uses bubblewrap which requires them
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            echo 0 | sudo tee /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          fi
+          # Older kernels use this sysctl instead
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 2>/dev/null || true
 
       - uses: cachix/install-nix-action@v27
         with:
