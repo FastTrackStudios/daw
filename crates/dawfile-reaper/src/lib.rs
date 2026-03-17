@@ -53,6 +53,7 @@ use thiserror::Error;
 pub mod chunk_ops;
 pub mod compat;
 pub mod convert;
+pub mod diff;
 pub mod index;
 pub mod io;
 pub mod primitives;
