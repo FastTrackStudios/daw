@@ -5,6 +5,23 @@
 
 use serde::{Deserialize, Serialize};
 
+// ── Options ─────────────────────────────────────────────────────────────────
+
+/// Options controlling how the diff is computed.
+#[derive(Debug, Clone, Default)]
+pub struct DiffOptions {
+    /// Time offset (seconds) to subtract from all positions in the "new" project
+    /// before comparing. Use this when diffing an individual song RPP against
+    /// its section within a concatenated setlist — pass the song's global start
+    /// time so that positions are compared relative to the song, not the setlist.
+    pub position_offset: f64,
+
+    /// If set, only diff items/points/events within this time window (in the
+    /// "new" project's coordinate space, BEFORE offset subtraction). This lets
+    /// you isolate a single song's region within a larger setlist project.
+    pub time_window: Option<(f64, f64)>,
+}
+
 // ── Top-level ───────────────────────────────────────────────────────────────
 
 /// Complete diff between two `ReaperProject` snapshots.

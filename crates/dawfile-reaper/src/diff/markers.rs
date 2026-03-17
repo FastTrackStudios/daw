@@ -9,7 +9,9 @@ use super::f64_eq;
 pub(crate) fn diff_markers_regions(
     old: &MarkerRegionCollection,
     new: &MarkerRegionCollection,
+    options: &DiffOptions,
 ) -> Vec<MarkerRegionDiff> {
+    let offset = options.position_offset;
     let mut diffs = Vec::new();
 
     // Build lookup by (is_region, id) — the stable identity for markers/regions
@@ -49,11 +51,11 @@ pub(crate) fn diff_markers_regions(
                         new_value: new_entry.name.clone(),
                     });
                 }
-                if !f64_eq(old_entry.position, new_entry.position) {
+                if !f64_eq(old_entry.position, new_entry.position - offset) {
                     changes.push(PropertyChange {
                         field: "position".into(),
                         old_value: format!("{:.6}", old_entry.position),
-                        new_value: format!("{:.6}", new_entry.position),
+                        new_value: format!("{:.6}", new_entry.position - offset),
                     });
                 }
                 if is_region && old_entry.end_position != new_entry.end_position {
@@ -135,7 +137,7 @@ mod tests {
             vec![marker(1, "SONGSTART", 0.0)],
             vec![region(1, "Intro", 0.0, 8.0)],
         );
-        let diffs = diff_markers_regions(&col, &col);
+        let diffs = diff_markers_regions(&col, &col, &DiffOptions::default());
         assert!(diffs.is_empty());
     }
 
@@ -143,7 +145,7 @@ mod tests {
     fn marker_added() {
         let old = collection(vec![], vec![]);
         let new = collection(vec![marker(1, "SONGSTART", 0.0)], vec![]);
-        let diffs = diff_markers_regions(&old, &new);
+        let diffs = diff_markers_regions(&old, &new, &DiffOptions::default());
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].kind, ChangeKind::Added);
         assert_eq!(diffs[0].name, "SONGSTART");
@@ -153,7 +155,7 @@ mod tests {
     fn marker_moved() {
         let old = collection(vec![marker(1, "SONGEND", 8.0)], vec![]);
         let new = collection(vec![marker(1, "SONGEND", 10.0)], vec![]);
-        let diffs = diff_markers_regions(&old, &new);
+        let diffs = diff_markers_regions(&old, &new, &DiffOptions::default());
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].kind, ChangeKind::Modified);
         assert_eq!(diffs[0].property_changes[0].field, "position");
@@ -163,7 +165,7 @@ mod tests {
     fn region_removed() {
         let old = collection(vec![], vec![region(1, "Intro", 0.0, 8.0)]);
         let new = collection(vec![], vec![]);
-        let diffs = diff_markers_regions(&old, &new);
+        let diffs = diff_markers_regions(&old, &new, &DiffOptions::default());
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].kind, ChangeKind::Removed);
         assert!(diffs[0].is_region);

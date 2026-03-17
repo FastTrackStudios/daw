@@ -8,7 +8,7 @@ use super::types::*;
 use super::f64_eq;
 
 /// Diff two lists of envelopes, matched by `(guid, envelope_type)`.
-pub(crate) fn diff_envelopes(old: &[Envelope], new: &[Envelope]) -> Vec<EnvelopeDiff> {
+pub(crate) fn diff_envelopes(old: &[Envelope], new: &[Envelope], options: &DiffOptions) -> Vec<EnvelopeDiff> {
     let mut diffs = Vec::new();
 
     let old_map: HashMap<(&str, &str), &Envelope> = old
@@ -35,7 +35,7 @@ pub(crate) fn diff_envelopes(old: &[Envelope], new: &[Envelope]) -> Vec<Envelope
             }
             Some(&new_env) => {
                 let prop_changes = diff_envelope_properties(old_env, new_env);
-                let point_changes = diff_points(&old_env.points, &new_env.points);
+                let point_changes = diff_points(&old_env.points, &new_env.points, options.position_offset);
                 let ai_changes = diff_automation_items(
                     &old_env.automation_items,
                     &new_env.automation_items,
@@ -107,8 +107,10 @@ fn diff_envelope_properties(old: &Envelope, new: &Envelope) -> Vec<PropertyChang
 /// - If old < new: old point was Removed
 /// - If new < old: new point was Added
 ///
+/// `offset` is subtracted from new point positions before comparison.
+///
 /// O(n + m) where n = old.len(), m = new.len().
-pub(crate) fn diff_points(old: &[EnvelopePoint], new: &[EnvelopePoint]) -> Vec<PointChange> {
+pub(crate) fn diff_points(old: &[EnvelopePoint], new: &[EnvelopePoint], offset: f64) -> Vec<PointChange> {
     let mut changes = Vec::new();
     let mut i = 0;
     let mut j = 0;
@@ -116,22 +118,23 @@ pub(crate) fn diff_points(old: &[EnvelopePoint], new: &[EnvelopePoint]) -> Vec<P
     while i < old.len() && j < new.len() {
         let op = &old[i];
         let np = &new[j];
+        let np_pos = np.position - offset; // Offset-adjusted position
 
-        if f64_eq(op.position, np.position) {
+        if f64_eq(op.position, np_pos) {
             // Same position — check if value or shape changed
             if !f64_eq(op.value, np.value) || op.shape != np.shape {
                 changes.push(PointChange::Modified {
                     old: snapshot(op),
-                    new: snapshot(np),
+                    new: PointSnapshot { position: np_pos, value: np.value, shape: np.shape as i32 },
                 });
             }
             i += 1;
             j += 1;
-        } else if op.position < np.position {
+        } else if op.position < np_pos {
             changes.push(PointChange::Removed(snapshot(op)));
             i += 1;
         } else {
-            changes.push(PointChange::Added(snapshot(np)));
+            changes.push(PointChange::Added(PointSnapshot { position: np_pos, value: np.value, shape: np.shape as i32 }));
             j += 1;
         }
     }
@@ -142,7 +145,12 @@ pub(crate) fn diff_points(old: &[EnvelopePoint], new: &[EnvelopePoint]) -> Vec<P
         i += 1;
     }
     while j < new.len() {
-        changes.push(PointChange::Added(snapshot(&new[j])));
+        let np = &new[j];
+        changes.push(PointChange::Added(PointSnapshot {
+            position: np.position - offset,
+            value: np.value,
+            shape: np.shape as i32,
+        }));
         j += 1;
     }
 
@@ -230,6 +238,7 @@ fn diff_automation_items(
 pub(crate) fn diff_tempo_envelope(
     old: Option<&TempoTimeEnvelope>,
     new: Option<&TempoTimeEnvelope>,
+    options: &DiffOptions,
 ) -> Option<TempoEnvelopeDiff> {
     match (old, new) {
         (None, None) => None,
@@ -256,7 +265,7 @@ pub(crate) fn diff_tempo_envelope(
                 None
             };
 
-            let point_changes = diff_tempo_points(&old_env.points, &new_env.points);
+            let point_changes = diff_tempo_points(&old_env.points, &new_env.points, options.position_offset);
 
             if tempo_changed.is_none() && ts_changed.is_none() && point_changes.is_empty() {
                 None
@@ -271,7 +280,7 @@ pub(crate) fn diff_tempo_envelope(
     }
 }
 
-fn diff_tempo_points(old: &[TempoTimePoint], new: &[TempoTimePoint]) -> Vec<TempoPointChange> {
+fn diff_tempo_points(old: &[TempoTimePoint], new: &[TempoTimePoint], offset: f64) -> Vec<TempoPointChange> {
     let mut changes = Vec::new();
     let mut i = 0;
     let mut j = 0;
@@ -279,8 +288,9 @@ fn diff_tempo_points(old: &[TempoTimePoint], new: &[TempoTimePoint]) -> Vec<Temp
     while i < old.len() && j < new.len() {
         let op = &old[i];
         let np = &new[j];
+        let np_pos = np.position - offset;
 
-        if f64_eq(op.position, np.position) {
+        if f64_eq(op.position, np_pos) {
             if !f64_eq(op.tempo, np.tempo) {
                 changes.push(TempoPointChange::Modified {
                     position: op.position,
@@ -290,7 +300,7 @@ fn diff_tempo_points(old: &[TempoTimePoint], new: &[TempoTimePoint]) -> Vec<Temp
             }
             i += 1;
             j += 1;
-        } else if op.position < np.position {
+        } else if op.position < np_pos {
             changes.push(TempoPointChange::Removed {
                 position: op.position,
                 tempo: op.tempo,
@@ -299,7 +309,7 @@ fn diff_tempo_points(old: &[TempoTimePoint], new: &[TempoTimePoint]) -> Vec<Temp
             i += 1;
         } else {
             changes.push(TempoPointChange::Added {
-                position: np.position,
+                position: np_pos,
                 tempo: np.tempo,
                 time_sig: np.time_signature(),
             });
@@ -317,7 +327,7 @@ fn diff_tempo_points(old: &[TempoTimePoint], new: &[TempoTimePoint]) -> Vec<Temp
     }
     while j < new.len() {
         changes.push(TempoPointChange::Added {
-            position: new[j].position,
+            position: new[j].position - offset,
             tempo: new[j].tempo,
             time_sig: new[j].time_signature(),
         });
@@ -347,7 +357,7 @@ mod tests {
     #[test]
     fn identical_points_no_diff() {
         let points = vec![pt(0.0, 0.5), pt(1.0, 0.8), pt(2.0, 0.3)];
-        let changes = diff_points(&points, &points);
+        let changes = diff_points(&points, &points, 0.0);
         assert!(changes.is_empty());
     }
 
@@ -355,7 +365,7 @@ mod tests {
     fn point_added_in_middle() {
         let old = vec![pt(0.0, 0.5), pt(2.0, 0.3)];
         let new = vec![pt(0.0, 0.5), pt(1.0, 0.8), pt(2.0, 0.3)];
-        let changes = diff_points(&old, &new);
+        let changes = diff_points(&old, &new, 0.0);
         assert_eq!(changes.len(), 1);
         assert!(matches!(&changes[0], PointChange::Added(p) if f64_eq(p.position, 1.0)));
     }
@@ -364,7 +374,7 @@ mod tests {
     fn point_removed() {
         let old = vec![pt(0.0, 0.5), pt(1.0, 0.8), pt(2.0, 0.3)];
         let new = vec![pt(0.0, 0.5), pt(2.0, 0.3)];
-        let changes = diff_points(&old, &new);
+        let changes = diff_points(&old, &new, 0.0);
         assert_eq!(changes.len(), 1);
         assert!(matches!(&changes[0], PointChange::Removed(p) if f64_eq(p.position, 1.0)));
     }
@@ -373,7 +383,7 @@ mod tests {
     fn point_value_changed() {
         let old = vec![pt(0.0, 0.5), pt(1.0, 0.8)];
         let new = vec![pt(0.0, 0.5), pt(1.0, 0.6)];
-        let changes = diff_points(&old, &new);
+        let changes = diff_points(&old, &new, 0.0);
         assert_eq!(changes.len(), 1);
         assert!(matches!(&changes[0], PointChange::Modified { old, new }
             if f64_eq(old.value, 0.8) && f64_eq(new.value, 0.6)));

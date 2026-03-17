@@ -9,8 +9,21 @@ use super::types::*;
 use super::f64_eq;
 
 /// Diff two lists of items, matched by `item_guid` (IGUID).
-pub(crate) fn diff_items(old: &[Item], new: &[Item]) -> Vec<ItemDiff> {
+///
+/// When `options.position_offset` is set, item positions in `new` are shifted
+/// by `-offset` before comparison. When `options.time_window` is set, items
+/// in `new` outside the window are excluded.
+pub(crate) fn diff_items(old: &[Item], new: &[Item], options: &DiffOptions) -> Vec<ItemDiff> {
     let mut diffs = Vec::new();
+
+    // Filter new items by time window (if set)
+    let in_window = |item: &&Item| -> bool {
+        if let Some((start, end)) = options.time_window {
+            item.position >= start && item.position < end
+        } else {
+            true
+        }
+    };
 
     let old_map: HashMap<&str, &Item> = old
         .iter()
@@ -19,12 +32,13 @@ pub(crate) fn diff_items(old: &[Item], new: &[Item]) -> Vec<ItemDiff> {
 
     let new_map: HashMap<&str, &Item> = new
         .iter()
+        .filter(in_window)
         .filter_map(|i| i.item_guid.as_deref().map(|g| (g, i)))
         .collect();
 
     // Items without GUIDs — match by index as fallback
     let old_no_guid: Vec<&Item> = old.iter().filter(|i| i.item_guid.is_none()).collect();
-    let new_no_guid: Vec<&Item> = new.iter().filter(|i| i.item_guid.is_none()).collect();
+    let new_no_guid: Vec<&Item> = new.iter().filter(in_window).filter(|i| i.item_guid.is_none()).collect();
 
     // Removed or modified (GUID-matched)
     for (&guid, &old_item) in &old_map {
@@ -39,7 +53,7 @@ pub(crate) fn diff_items(old: &[Item], new: &[Item]) -> Vec<ItemDiff> {
                 });
             }
             Some(&new_item) => {
-                if let Some(diff) = diff_single_item(old_item, new_item) {
+                if let Some(diff) = diff_single_item(old_item, new_item, options) {
                     diffs.push(diff);
                 }
             }
@@ -62,7 +76,7 @@ pub(crate) fn diff_items(old: &[Item], new: &[Item]) -> Vec<ItemDiff> {
     // No-GUID items: match by index, report extras
     let common = old_no_guid.len().min(new_no_guid.len());
     for i in 0..common {
-        if let Some(diff) = diff_single_item(old_no_guid[i], new_no_guid[i]) {
+        if let Some(diff) = diff_single_item(old_no_guid[i], new_no_guid[i], options) {
             diffs.push(diff);
         }
     }
@@ -88,8 +102,9 @@ pub(crate) fn diff_items(old: &[Item], new: &[Item]) -> Vec<ItemDiff> {
     diffs
 }
 
-fn diff_single_item(old: &Item, new: &Item) -> Option<ItemDiff> {
+fn diff_single_item(old: &Item, new: &Item, options: &DiffOptions) -> Option<ItemDiff> {
     let mut props = Vec::new();
+    let offset = options.position_offset;
 
     macro_rules! check {
         ($field:ident) => {
@@ -103,21 +118,28 @@ fn diff_single_item(old: &Item, new: &Item) -> Option<ItemDiff> {
         };
     }
 
-    macro_rules! check_f64 {
-        ($field:ident) => {
-            if !f64_eq(old.$field, new.$field) {
-                props.push(PropertyChange {
-                    field: stringify!($field).into(),
-                    old_value: format!("{:.6}", old.$field),
-                    new_value: format!("{:.6}", new.$field),
-                });
-            }
-        };
+    // Position is compared with offset subtracted from new
+    if !f64_eq(old.position, new.position - offset) {
+        props.push(PropertyChange {
+            field: "position".into(),
+            old_value: format!("{:.6}", old.position),
+            new_value: format!("{:.6}", new.position - offset),
+        });
     }
-
-    check_f64!(position);
-    check_f64!(length);
-    check_f64!(snap_offset);
+    if !f64_eq(old.length, new.length) {
+        props.push(PropertyChange {
+            field: "length".into(),
+            old_value: format!("{:.6}", old.length),
+            new_value: format!("{:.6}", new.length),
+        });
+    }
+    if !f64_eq(old.snap_offset, new.snap_offset) {
+        props.push(PropertyChange {
+            field: "snap_offset".into(),
+            old_value: format!("{:.6}", old.snap_offset),
+            new_value: format!("{:.6}", new.snap_offset),
+        });
+    }
     check!(name);
     check!(loop_source);
     check!(mute);

@@ -129,6 +129,33 @@ fn project_content_extent(project: &ReaperProject) -> f64 {
     max_item_end.max(max_marker).max(max_tempo)
 }
 
+/// Extract the ending tempo (BPM) and beats-per-measure from a project.
+///
+/// Uses the last tempo envelope point (which represents the tempo at the end
+/// of the song). Falls back to the TEMPO header if no envelope exists.
+fn extract_ending_tempo(project: &ReaperProject) -> (f64, u32) {
+    if let Some(ref te) = project.tempo_envelope {
+        if let Some(pt) = te.points.last() {
+            let beats = pt
+                .time_signature_encoded
+                .map(|ts| (ts & 0xFFFF) as u32)
+                .unwrap_or_else(|| {
+                    // No time sig on last point — walk backwards to find most recent
+                    te.points
+                        .iter()
+                        .rev()
+                        .find_map(|p| p.time_signature_encoded.map(|ts| (ts & 0xFFFF) as u32))
+                        .unwrap_or(4)
+                });
+            return (pt.tempo, beats.max(1));
+        }
+    }
+    if let Some((bpm, num, _denom, _flags)) = project.properties.tempo {
+        return (bpm as f64, (num as u32).max(1));
+    }
+    (120.0, 4)
+}
+
 /// Extract the starting tempo (BPM) and beats-per-measure from a project.
 ///
 /// Uses the first tempo envelope point if available, otherwise falls back
@@ -205,10 +232,12 @@ pub fn combine_rpp_files(
 
         offset += duration;
 
-        // Add gap measured in the NEXT song's tempo/time signature
+        // Add gap between songs using the CURRENT (ending) song's tempo.
+        //
+        // Since resolve_song_bounds already snaps end to the next measure
+        // boundary, we just need to add the requested gap_measures.
         if options.gap_measures > 0 && i < projects.len() - 1 {
-            let next = &projects[i + 1];
-            let (bpm, beats_per_measure) = extract_project_tempo(next);
+            let (bpm, beats_per_measure) = extract_ending_tempo(project);
             let gap = measures_to_seconds(options.gap_measures, bpm, beats_per_measure);
             offset += gap;
         }
@@ -351,21 +380,28 @@ pub fn resolve_song_bounds(project: &ReaperProject) -> SongBounds {
         }
     }
 
-    let start = preroll
-        .or(count_in)
-        .or(eq_start)
-        .or(songstart)
-        .or(first_section_start)
-        .unwrap_or(0.0);
+    // Pick the earliest available start bound.
+    // All of these markers indicate "the song starts here" — take the earliest
+    // so we don't accidentally skip content before a later marker.
+    let raw_start = [preroll, count_in, eq_start, songstart, first_section_start]
+        .iter()
+        .filter_map(|opt| *opt)
+        .fold(f64::MAX, f64::min);
+    let raw_start = if raw_start == f64::MAX { 0.0 } else { raw_start };
 
-    let end = postroll
+    // Pick the latest available end bound.
+    // Prefer explicit end markers (=END, POSTROLL) over section-based detection.
+    let raw_end = postroll
         .or(eq_end)
         .or(songend)
         .or(last_section_end)
         .unwrap_or(last_pos);
 
-    // Snap end to the next measure boundary so songs don't cut mid-measure.
-    let end = snap_to_next_measure(end, project).max(start + 0.1);
+    // Snap start to the previous measure boundary and end to the next measure
+    // boundary. This ensures the tempo grid stays aligned when songs are
+    // concatenated — each song starts and ends on a clean barline.
+    let start = snap_to_prev_measure(raw_start, project);
+    let end = snap_to_next_measure(raw_end, project).max(start + 0.1);
 
     SongBounds {
         start,
@@ -374,75 +410,171 @@ pub fn resolve_song_bounds(project: &ReaperProject) -> SongBounds {
     }
 }
 
-/// Snap a time position to the start of the next measure.
+/// Snap a time position to the start of the previous (or current) measure.
 ///
-/// If the position already falls exactly on a measure boundary, returns
-/// that position unchanged. Otherwise rounds up to the next barline.
-///
-/// Uses the project's tempo envelope to determine the measure length at
-/// the given position (accounting for tempo and time signature changes).
-fn snap_to_next_measure(position: f64, project: &ReaperProject) -> f64 {
-    // Collect tempo change points from the envelope
-    let (bpm, beats_per_measure) = if let Some(ref te) = project.tempo_envelope {
-        // Find the tempo point active at `position` (last point <= position)
-        let mut current_bpm = te
-            .points
-            .first()
-            .map(|p| p.tempo)
-            .unwrap_or(120.0);
-        let mut current_beats: u32 = te
-            .points
-            .first()
-            .and_then(|p| p.time_signature_encoded)
-            .map(|ts| (ts & 0xFFFF) as u32)
-            .unwrap_or(4);
-        let mut current_start = 0.0f64;
+/// If the position already falls on a measure boundary, returns it unchanged.
+/// Otherwise rounds down to the previous barline.
+fn snap_to_prev_measure(position: f64, project: &ReaperProject) -> f64 {
+    use crate::types::time_pos_utils::time_to_beat_position_structured;
 
-        for pt in &te.points {
-            if pt.position > position {
-                break;
-            }
-            current_bpm = pt.tempo;
-            current_start = pt.position;
-            if let Some(ts) = pt.time_signature_encoded {
-                current_beats = (ts & 0xFFFF) as u32;
-            }
-        }
+    if position <= 0.0 {
+        return 0.0;
+    }
 
-        // Calculate how many complete measures fit between the tempo point
-        // and our position, then find the next measure boundary
-        let beat_duration = 60.0 / current_bpm;
-        let measure_duration = current_beats.max(1) as f64 * beat_duration;
-        let elapsed = position - current_start;
-        let measures_elapsed = elapsed / measure_duration;
-        let next_measure = measures_elapsed.ceil();
-        let snapped = current_start + next_measure * measure_duration;
-
-        // If we're already very close to a boundary (within 1ms), don't advance
-        if (snapped - position).abs() < 0.001 {
-            return position;
-        }
-        return snapped;
+    let (default_tempo, default_ts) = if let Some((bpm, num, denom, _)) = project.properties.tempo {
+        (bpm as f64, (num, denom))
     } else {
-        // No tempo envelope — use TEMPO header
-        if let Some((bpm, num, _denom, _flags)) = project.properties.tempo {
-            (bpm as f64, (num as u32).max(1))
-        } else {
-            (120.0, 4)
-        }
+        (120.0, (4i32, 4i32))
     };
 
-    let beat_duration = 60.0 / bpm;
-    let measure_duration = beats_per_measure as f64 * beat_duration;
-    let measures = position / measure_duration;
-    let next = measures.ceil();
-    let snapped = next * measure_duration;
+    let tempo_points = project
+        .tempo_envelope
+        .as_ref()
+        .map(|te| te.points.as_slice())
+        .unwrap_or(&[]);
 
-    if (snapped - position).abs() < 0.001 {
-        position
-    } else {
-        snapped
+    let (measure, beat, subbeat) =
+        time_to_beat_position_structured(position, tempo_points, default_tempo, default_ts);
+
+    // If already on a measure boundary, return as-is
+    if beat == 1 && subbeat == 0 {
+        return position;
     }
+
+    // Target: start of current measure (measure, beat 1, subbeat 0)
+    let target_measure = measure;
+
+    // Walk tempo envelope to compute time at start of `target_measure`
+    let mut current_time = 0.0;
+    let mut current_tempo = default_tempo;
+    let mut current_ts = default_ts;
+    let mut current_measure_f = 0.0;
+
+    let target_measures_0based = (target_measure - 1) as f64;
+
+    for point in tempo_points {
+        let segment_duration = point.position - current_time;
+        if segment_duration > 0.0 {
+            let tempo_ratio = current_ts.1 as f64 / 4.0;
+            let effective_tempo = current_tempo * tempo_ratio;
+            let segment_beats = segment_duration * effective_tempo / 60.0;
+            let beats_per_measure = current_ts.0 as f64;
+            let segment_measures = segment_beats / beats_per_measure;
+
+            if current_measure_f + segment_measures >= target_measures_0based {
+                let remaining_measures = target_measures_0based - current_measure_f;
+                let remaining_beats = remaining_measures * beats_per_measure;
+                let remaining_time = remaining_beats * 60.0 / effective_tempo;
+                return current_time + remaining_time;
+            }
+
+            current_measure_f += segment_measures;
+        }
+
+        current_time = point.position;
+        current_tempo = point.tempo;
+        if let Some(ts) = point.time_signature() {
+            current_ts = ts;
+        }
+    }
+
+    let remaining_measures = target_measures_0based - current_measure_f;
+    if remaining_measures <= 0.0 {
+        return current_time;
+    }
+    let tempo_ratio = current_ts.1 as f64 / 4.0;
+    let effective_tempo = current_tempo * tempo_ratio;
+    let beats_per_measure = current_ts.0 as f64;
+    let remaining_beats = remaining_measures * beats_per_measure;
+    let remaining_time = remaining_beats * 60.0 / effective_tempo;
+    current_time + remaining_time
+}
+
+/// Snap a time position to the start of the next measure.
+///
+/// If the position already falls exactly on a measure boundary (within 1ms),
+/// returns that position unchanged. Otherwise rounds up to the next barline.
+///
+/// Uses `time_to_beat_position_structured` to accurately determine the current
+/// musical position (accounting for all tempo and time signature changes), then
+/// walks the tempo envelope forward to compute the time of the next measure start.
+fn snap_to_next_measure(position: f64, project: &ReaperProject) -> f64 {
+    use crate::types::time_pos_utils::time_to_beat_position_structured;
+
+    // Get default tempo and time signature from project
+    let (default_tempo, default_ts) = if let Some((bpm, num, denom, _)) = project.properties.tempo {
+        (bpm as f64, (num, denom))
+    } else {
+        (120.0, (4i32, 4i32))
+    };
+
+    let tempo_points = project
+        .tempo_envelope
+        .as_ref()
+        .map(|te| te.points.as_slice())
+        .unwrap_or(&[]);
+
+    // Get the musical position at the given time
+    let (measure, beat, subbeat) =
+        time_to_beat_position_structured(position, tempo_points, default_tempo, default_ts);
+
+    // If we're already at beat 1, subbeat 0 — we're on a measure boundary
+    if beat == 1 && subbeat == 0 {
+        return position;
+    }
+
+    // Target: start of the next measure (measure + 1, beat 1, subbeat 0)
+    let target_measure = measure + 1;
+
+    // Walk the tempo envelope to compute time at the start of `target_measure`.
+    // This is the inverse of time_to_beat_position_structured.
+    let mut current_time = 0.0;
+    let mut current_tempo = default_tempo;
+    let mut current_ts = default_ts;
+    let mut current_measure_f = 0.0; // 0-based fractional measure count
+
+    let target_measures_0based = (target_measure - 1) as f64; // convert 1-based to 0-based
+
+    for point in tempo_points {
+        // Calculate measures from current_time to this point
+        let segment_duration = point.position - current_time;
+        if segment_duration > 0.0 {
+            let tempo_ratio = current_ts.1 as f64 / 4.0;
+            let effective_tempo = current_tempo * tempo_ratio;
+            let segment_beats = segment_duration * effective_tempo / 60.0;
+            let beats_per_measure = current_ts.0 as f64;
+            let segment_measures = segment_beats / beats_per_measure;
+
+            // Would passing this point overshoot our target?
+            if current_measure_f + segment_measures >= target_measures_0based {
+                // Target is within this segment
+                let remaining_measures = target_measures_0based - current_measure_f;
+                let remaining_beats = remaining_measures * beats_per_measure;
+                let remaining_time = remaining_beats * 60.0 / effective_tempo;
+                return current_time + remaining_time;
+            }
+
+            current_measure_f += segment_measures;
+        }
+
+        current_time = point.position;
+        current_tempo = point.tempo;
+        if let Some(ts) = point.time_signature() {
+            current_ts = ts;
+        }
+    }
+
+    // Target is past all tempo points — use final tempo
+    let remaining_measures = target_measures_0based - current_measure_f;
+    if remaining_measures <= 0.0 {
+        return current_time;
+    }
+    let tempo_ratio = current_ts.1 as f64 / 4.0;
+    let effective_tempo = current_tempo * tempo_ratio;
+    let beats_per_measure = current_ts.0 as f64;
+    let remaining_beats = remaining_measures * beats_per_measure;
+    let remaining_time = remaining_beats * 60.0 / effective_tempo;
+    current_time + remaining_time
 }
 
 /// Build `SongInfo` entries from parsed projects using resolved bounds + gap.
@@ -501,6 +633,11 @@ pub fn concatenate_tracks(projects: &[ReaperProject], songs: &[SongInfo]) -> Vec
         let offset = song.global_start_seconds - song.local_start;
 
         let mut song_content: Vec<Track> = Vec::new();
+        // Compute local end for item trimming.
+        // When trim_to_bounds is active, duration_seconds reflects the bounded
+        // range — items past this point should be truncated. When not trimming,
+        // duration = full content extent, so this naturally includes everything.
+        let local_end = song.local_start + song.duration_seconds;
 
         for track in &project.tracks {
             let name_lower = track.name.to_lowercase();
@@ -514,8 +651,13 @@ pub fn concatenate_tracks(projects: &[ReaperProject], songs: &[SongInfo]) -> Vec
                 continue;
             }
 
-            let mut cloned =
-                clone_track_with_offset(track, offset, song.source_dir.as_deref());
+            let mut cloned = clone_track_with_offset(
+                track,
+                offset,
+                song.source_dir.as_deref(),
+                song.local_start,
+                Some(local_end),
+            );
             cloned.track_id = None;
 
             if is_guide {
@@ -583,6 +725,38 @@ pub fn concatenate_tracks(projects: &[ReaperProject], songs: &[SongInfo]) -> Vec
     result
 }
 
+/// Patch the SOFFS value in an item's raw_content string.
+fn patch_soffs(raw_content: &str, new_soffs: f64) -> String {
+    let mut result = Vec::new();
+    let mut found = false;
+    for line in raw_content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("SOFFS ") {
+            result.push(format!("SOFFS {}", new_soffs));
+            found = true;
+        } else {
+            result.push(line.to_string());
+        }
+    }
+    if !found && new_soffs > 0.0 {
+        // Insert SOFFS after POSITION or at the start
+        let mut inserted = false;
+        let mut final_result = Vec::new();
+        for line in &result {
+            final_result.push(line.clone());
+            if !inserted && line.trim().starts_with("POSITION ") {
+                final_result.push(format!("SOFFS {}", new_soffs));
+                inserted = true;
+            }
+        }
+        if !inserted {
+            final_result.insert(0, format!("SOFFS {}", new_soffs));
+        }
+        return final_result.join("\n");
+    }
+    result.join("\n")
+}
+
 fn is_structural_folder(name_lower: &str, track: &Track) -> bool {
     let is_folder = track
         .folder
@@ -591,12 +765,54 @@ fn is_structural_folder(name_lower: &str, track: &Track) -> bool {
     (name_lower == "click/guide" || name_lower == "tracks") && is_folder
 }
 
-fn clone_track_with_offset(track: &Track, offset_seconds: f64, source_dir: Option<&Path>) -> Track {
+fn clone_track_with_offset(
+    track: &Track,
+    offset_seconds: f64,
+    source_dir: Option<&Path>,
+    local_start: f64,
+    local_end: Option<f64>,
+) -> Track {
     let mut cloned = track.clone();
 
-    // Filter out items that would end up at negative positions
-    // (items before the song's bounds.start)
-    cloned.items.retain(|item| item.position + offset_seconds >= -0.01);
+    // Filter out items that start before the song's start bound.
+    // Items that overlap the start boundary are trimmed (position moved,
+    // length shortened, source offset advanced so playback starts at the
+    // correct point in the source media).
+    cloned.items.retain_mut(|item| {
+        if item.position + item.length <= local_start {
+            // Entirely before start — remove
+            return false;
+        }
+        if item.position < local_start {
+            // Partially before start — trim the beginning
+            let trim = local_start - item.position;
+            item.position = local_start;
+            item.length -= trim;
+            item.snap_offset = (item.snap_offset - trim).max(0.0);
+            // Advance source offset so playback starts at the right point
+            item.slip_offset += trim;
+            for take in &mut item.takes {
+                take.slip_offset += trim;
+            }
+            // Patch SOFFS in raw_content if present
+            if !item.raw_content.is_empty() {
+                item.raw_content = patch_soffs(&item.raw_content, item.slip_offset);
+            }
+        }
+        true
+    });
+
+    // Filter out items that start at or after the song's end bound
+    if let Some(end) = local_end {
+        cloned.items.retain(|item| item.position < end);
+        // Truncate items that start before the end but extend past it
+        for item in &mut cloned.items {
+            let item_end = item.position + item.length;
+            if item_end > end {
+                item.length = end - item.position;
+            }
+        }
+    }
 
     for item in &mut cloned.items {
         item.position += offset_seconds;
@@ -1216,12 +1432,12 @@ struct RawTempoPoint {
 /// Returns the points and the default tempo from the TEMPO header line.
 /// Extract tempo points from a TEMPOENVEX block, applying a time offset.
 ///
-/// When `local_end` is provided, points at or beyond that local position are
-/// excluded. This prevents tempo points from bleeding past a song's =END
-/// marker into the next song's territory.
+/// Points outside the `[local_start, local_end)` range are excluded.
+/// This prevents tempo points from bleeding outside a song's bounds.
 fn extract_tempo_points_raw(
     rpp_text: &str,
     offset: f64,
+    local_start: f64,
     local_end: Option<f64>,
 ) -> (Vec<RawTempoPoint>, Option<String>) {
     let mut points = Vec::new();
@@ -1251,6 +1467,10 @@ fn extract_tempo_points_raw(
             let parts: Vec<&str> = trimmed.splitn(4, ' ').collect();
             if parts.len() >= 3 {
                 if let Ok(pos) = parts[1].parse::<f64>() {
+                    // Skip points before the song's start bound
+                    if pos < local_start {
+                        continue;
+                    }
                     // Skip points beyond the song's end bound
                     if let Some(end) = local_end {
                         if pos >= end {
@@ -1296,14 +1516,9 @@ fn write_combined_tempoenvex(out: &mut String, rpp_paths: &[PathBuf], song_infos
         };
 
         let offset = song.global_start_seconds - song.local_start;
-        // When local_start > 0 (trimming), compute the local end position
-        // so tempo points past the song's bounds are excluded.
-        let local_end = if song.local_start > 0.0 {
-            Some(song.local_start + song.duration_seconds)
-        } else {
-            None
-        };
-        let (points, default_tempo) = extract_tempo_points_raw(&rpp_text, offset, local_end);
+        let local_end = Some(song.local_start + song.duration_seconds);
+        let (points, default_tempo) =
+            extract_tempo_points_raw(&rpp_text, offset, song.local_start, local_end);
         let song_end = song.global_start_seconds + song.duration_seconds;
         let is_last_song = song_idx == song_infos.len() - 1;
 
@@ -1324,28 +1539,39 @@ fn write_combined_tempoenvex(out: &mut String, rpp_paths: &[PathBuf], song_infos
             }
         }
 
-        if points.is_empty() {
-            // No tempo points in source — create a square point from TEMPO header
-            // Shape=1 in REAPER means square (instant, no gradual transition)
+        // Always emit a tempo point exactly at the song's start position.
+        // This ensures each song begins with the correct tempo and time
+        // signature, regardless of where the first PT line falls.
+        //
+        // If we have tempo points AND the first one is already at the start,
+        // we just force it to square shape + correct time sig. Otherwise we
+        // insert a leading point from the TEMPO header.
+        let first_is_at_start = points.first().map_or(false, |pt| {
+            // Check if the first point is within 1ms of global_start
+            let pt_pos = pt.line.trim().split_whitespace().nth(1)
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(f64::MAX);
+            (pt_pos - song.global_start_seconds).abs() < 0.001
+        });
+
+        if points.is_empty() || !first_is_at_start {
+            // Insert a leading tempo point at the song start
             out.push_str(&format!(
                 "    PT {:.12} {} 1 {} 0 1 0 \"\" 0 169 0 ABBB\n",
                 song.global_start_seconds, bpm_str, ts_encoded
             ));
-        } else {
-            // Write all tempo points, preserving original shapes for internal
-            // transitions. Force the FIRST point to shape=1 (square) and ensure
-            // it carries the project's time signature — otherwise a song could
-            // inherit the previous song's time signature if its first PT line
-            // doesn't explicitly set one.
-            for (i, pt) in points.iter().enumerate() {
-                if i == 0 {
-                    let line = ensure_time_signature(&force_square_shape(&pt.line), ts_encoded);
-                    out.push_str(&line);
-                } else {
-                    out.push_str(&pt.line);
-                }
-                out.push('\n');
+        }
+
+        // Write remaining tempo points
+        for (i, pt) in points.iter().enumerate() {
+            if i == 0 && first_is_at_start {
+                // First point is at song start — force square + time sig
+                let line = ensure_time_signature(&force_square_shape(&pt.line), ts_encoded);
+                out.push_str(&line);
+            } else {
+                out.push_str(&pt.line);
             }
+            out.push('\n');
         }
 
         // Insert a square boundary point at the song's end.
@@ -1747,22 +1973,224 @@ fn classify_marker_lane_from_line(line: &str) -> u32 {
 /// FTS ruler lane indices (matching session-proto::ruler_lanes::CoreLane).
 const LANE_SECTIONS: u32 = 1;
 const LANE_MARKS: u32 = 2;
+const LANE_SONG: u32 = 3;
 const LANE_START_END: u32 = 4;
 
 /// Classify a marker/region name into the correct FTS ruler lane index.
 fn classify_lane(name: &str, is_region: bool) -> u32 {
+    let upper = name.trim().to_uppercase();
+
+    // Structural markers → MARKS lane
+    match upper.as_str() {
+        "SONGSTART" | "SONGEND" | "COUNT-IN" | "COUNT IN" | "COUNTIN" => return LANE_MARKS,
+        "=START" | "=END" | "PREROLL" | "=PREROLL" | "POSTROLL" | "=POSTROLL" => {
+            return LANE_START_END
+        }
+        _ => {}
+    }
+    if name.starts_with('=') {
+        return LANE_START_END;
+    }
+
     if is_region {
-        // Most regions are sections
+        // Regions go to SECTIONS lane (Verse, Chorus, Intro, etc.)
         LANE_SECTIONS
     } else {
-        let upper = name.trim().to_uppercase();
-        match upper.as_str() {
-            "SONGSTART" | "SONGEND" | "COUNT-IN" | "COUNT IN" | "COUNTIN" => LANE_MARKS,
-            "=START" | "=END" | "PREROLL" | "=PREROLL" | "POSTROLL" | "=POSTROLL" => LANE_START_END,
-            _ if name.starts_with('=') => LANE_START_END,
-            _ => 0, // Default lane for unclassified markers
+        // Unclassified markers go to default lane
+        0
+    }
+}
+
+/// Organize marker/region lanes in raw RPP text without parsing/re-serializing.
+///
+/// This patches each MARKER line's trailing lane number based on the marker name,
+/// preserving all other fields (color, GUID, flags, etc.) exactly as-is.
+/// Also ensures the standard FTS RULERLANE definitions are present.
+///
+/// This is the safe alternative to `organize_ruler_lanes` — it avoids the lossy
+/// parse→re-serialize cycle that strips colors, GUIDs, and flags.
+pub fn organize_marker_lanes_raw(rpp_text: &str) -> String {
+    let mut result = String::with_capacity(rpp_text.len());
+    let mut ruler_lanes_written = false;
+
+    for line in rpp_text.lines() {
+        let trimmed = line.trim();
+
+        // Skip existing RULERLANE lines — we'll write our own
+        if trimmed.starts_with("RULERLANE ") {
+            if !ruler_lanes_written {
+                // Write FTS standard ruler lanes (once, replacing all originals)
+                result.push_str("  RULERLANE 1 8 SECTIONS 0 -1\n");
+                result.push_str("  RULERLANE 2 0 MARKS 0 -1\n");
+                result.push_str("  RULERLANE 3 4 SONG 0 -1\n");
+                result.push_str("  RULERLANE 4 0 START/END 0 -1\n");
+                result.push_str("  RULERLANE 5 0 KEY 0 -1\n");
+                result.push_str("  RULERLANE 6 0 MODE 0 -1\n");
+                result.push_str("  RULERLANE 7 0 CHORDS 0 -1\n");
+                result.push_str("  RULERLANE 8 0 NOTES 0 -1\n");
+                ruler_lanes_written = true;
+            }
+            continue;
+        }
+
+        // Patch MARKER lines: replace the trailing lane number
+        if trimmed.starts_with("MARKER ") {
+            let lane = classify_marker_lane_for_raw(trimmed);
+            // The lane is the last token on the line. Replace it.
+            if let Some(last_space) = trimmed.rfind(' ') {
+                let prefix = &trimmed[..last_space];
+                result.push_str(&format!("  {} {}\n", prefix, lane));
+            } else {
+                result.push_str(line);
+                result.push('\n');
+            }
+            continue;
+        }
+
+        result.push_str(line);
+        result.push('\n');
+    }
+
+    result
+}
+
+/// Classify a raw MARKER line into the correct FTS ruler lane.
+///
+/// Extracts the marker name from the line and classifies it.
+/// Returns the lane index to use.
+fn classify_marker_lane_for_raw(marker_line: &str) -> u32 {
+    // MARKER format: MARKER id position "name" flags color isrgn type {guid} additional [lane]
+    // Or for region end: MARKER id position "" flags ...
+    //
+    // Extract the name (quoted or unquoted after position)
+    let name = extract_marker_name(marker_line);
+
+    // Empty name = region end line — keep on same lane as its pair
+    // We can't know the pair's lane here, so use 0 (will inherit from pair)
+    if name.is_empty() {
+        // Check if this line already has a lane we should preserve
+        // For region end markers, the lane should match the start marker
+        // The raw combine already sets the correct lane, so preserve it
+        return extract_trailing_lane(marker_line);
+    }
+
+    // Check if name matches a structural marker
+    let upper = name.to_uppercase();
+    match upper.as_str() {
+        "SONGSTART" | "SONGEND" | "COUNT-IN" | "COUNT IN" | "COUNTIN" => return LANE_MARKS,
+        "=START" | "=END" | "PREROLL" | "=PREROLL" | "POSTROLL" | "=POSTROLL" => {
+            return LANE_START_END
+        }
+        _ => {}
+    }
+    if name.starts_with('=') {
+        return LANE_START_END;
+    }
+
+    // Check if this is a region (flag field contains 1 after the name)
+    let is_region = is_region_marker_line(marker_line);
+    if is_region {
+        // Check if this was already on the SONG lane (song-spanning regions
+        // generated by the combine pipeline should stay there)
+        let current_lane = extract_trailing_lane(marker_line);
+        if current_lane == LANE_SONG {
+            return LANE_SONG;
+        }
+        return LANE_SECTIONS;
+    }
+
+    // Unclassified marker — keep current lane or use 0
+    extract_trailing_lane(marker_line)
+}
+
+/// Extract the marker name from a MARKER line.
+fn extract_marker_name(line: &str) -> String {
+    // Find quoted name: MARKER id pos "name" ...
+    if let Some(quote_start) = line.find('"') {
+        if let Some(quote_end) = line[quote_start + 1..].find('"') {
+            return line[quote_start + 1..quote_start + 1 + quote_end].to_string();
         }
     }
+    // Unquoted name: MARKER id pos name ...
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() >= 4 {
+        parts[3].to_string()
+    } else {
+        String::new()
+    }
+}
+
+/// Check if a MARKER line represents a region (has flag 1 after name).
+fn is_region_marker_line(line: &str) -> bool {
+    // After the name, regions have "1" as the flags field
+    // Format: MARKER id pos "name" 1 color 1 R {guid} ...
+    // vs markers: MARKER id pos "name" 0 color 1 B {guid} ...
+    // The "R" vs "B" after "1" distinguishes regions from markers
+    line.contains(" R {") || line.contains(" R {")
+}
+
+/// Extract the trailing lane number from a MARKER line.
+fn extract_trailing_lane(line: &str) -> u32 {
+    line.split_whitespace()
+        .last()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0)
+}
+
+/// Organize all markers and regions in a project into the correct FTS ruler lanes.
+///
+/// This reclassifies every marker/region based on its name, overriding any
+/// existing lane assignment. Call this on the combined project after
+/// concatenation, or on individual projects for offline cleanup.
+///
+/// Also ensures the standard FTS ruler lane definitions are present.
+pub fn organize_ruler_lanes(project: &mut ReaperProject) {
+    // Set standard ruler lanes
+    use crate::types::project::RulerLane;
+    let fts_lane = |index, flags, name: &str| RulerLane {
+        index,
+        flags,
+        name: name.to_string(),
+        color: 0,
+        extra: -1,
+    };
+    project.ruler_lanes = vec![
+        fts_lane(1, 8, "SECTIONS"), // flag 8 = default region lane
+        fts_lane(2, 0, "MARKS"),
+        fts_lane(3, 4, "SONG"), // flag 4 = default marker lane
+        fts_lane(4, 0, "START/END"),
+        fts_lane(5, 0, "KEY"),
+        fts_lane(6, 0, "MODE"),
+        fts_lane(7, 0, "CHORDS"),
+        fts_lane(8, 0, "NOTES"),
+    ];
+
+    // Reclassify all markers and regions.
+    // Preserve SONG lane (3) for markers already assigned there
+    // (these are the song-spanning regions generated by the combine pipeline).
+    for mr in &mut project.markers_regions.all {
+        if mr.lane == Some(LANE_SONG as i32) {
+            // Already on SONG lane — keep it there
+            continue;
+        }
+        let lane = classify_lane(&mr.name, mr.is_region());
+        mr.lane = Some(lane as i32);
+    }
+    // Update filtered views
+    project.markers_regions.markers = project
+        .markers_regions
+        .all
+        .iter()
+        .filter(|m| m.is_marker())
+        .cloned()
+        .collect();
+    project.markers_regions.regions = project
+        .markers_regions
+        .all
+        .iter()
+        .filter(|m| m.is_region())
+        .cloned()
+        .collect();
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

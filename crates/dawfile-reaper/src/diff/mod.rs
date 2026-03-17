@@ -50,7 +50,34 @@ pub(crate) fn f64_eq(a: f64, b: f64) -> bool {
 }
 
 /// Compare two `ReaperProject` snapshots and produce a structured diff.
+///
+/// For comparing a song RPP against its section in a setlist, use
+/// [`diff_projects_with_options`] and pass the song's global start time
+/// as `position_offset`.
 pub fn diff_projects(old: &ReaperProject, new: &ReaperProject) -> ProjectDiff {
+    diff_projects_with_options(old, new, &DiffOptions::default())
+}
+
+/// Compare two `ReaperProject` snapshots with configurable offset/windowing.
+///
+/// # Offset
+///
+/// When `options.position_offset` is non-zero, all positions in `new` are
+/// shifted by `-offset` before comparison. This neutralizes the concatenation
+/// offset when diffing Song B (individual RPP, starts at 0s) against Song B's
+/// section in the setlist (starts at e.g. 60s).
+///
+/// # Time window
+///
+/// When `options.time_window` is set to `Some((start, end))`, only items,
+/// envelope points, markers, and MIDI events within that time range (in
+/// `new`'s raw coordinate space, before offset) are included in the diff.
+/// Items outside the window are ignored entirely.
+pub fn diff_projects_with_options(
+    old: &ReaperProject,
+    new: &ReaperProject,
+    options: &DiffOptions,
+) -> ProjectDiff {
     let mut property_changes = Vec::new();
 
     // Project-level scalar properties
@@ -78,12 +105,12 @@ pub fn diff_projects(old: &ReaperProject, new: &ReaperProject) -> ProjectDiff {
         });
     }
 
-    let tracks = track::diff_tracks(&old.tracks, &new.tracks);
-    let envelopes = envelope::diff_envelopes(&old.envelopes, &new.envelopes);
+    let tracks = track::diff_tracks(&old.tracks, &new.tracks, options);
+    let envelopes = envelope::diff_envelopes(&old.envelopes, &new.envelopes, options);
     let markers_regions =
-        markers::diff_markers_regions(&old.markers_regions, &new.markers_regions);
+        markers::diff_markers_regions(&old.markers_regions, &new.markers_regions, options);
     let tempo_envelope =
-        envelope::diff_tempo_envelope(old.tempo_envelope.as_ref(), new.tempo_envelope.as_ref());
+        envelope::diff_tempo_envelope(old.tempo_envelope.as_ref(), new.tempo_envelope.as_ref(), options);
 
     let ruler_lanes_changed = old.ruler_lanes != new.ruler_lanes
         || old.ruler_height != new.ruler_height;
