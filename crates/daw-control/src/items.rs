@@ -123,6 +123,56 @@ impl Items {
             self.clients.clone(),
         ))
     }
+
+    /// Create a MIDI item on this track and add notes to it.
+    ///
+    /// Combines `create_midi_item` + `add_notes` into a single operation.
+    /// Returns the item handle if successful.
+    pub async fn create_midi_item_with_notes(
+        &self,
+        start_seconds: f64,
+        end_seconds: f64,
+        notes: Vec<daw_proto::MidiNoteCreate>,
+    ) -> Result<Option<ItemHandle>> {
+        use daw_proto::midi::MidiTakeLocation;
+
+        // Create empty MIDI item
+        let location = self
+            .clients
+            .midi
+            .create_midi_item(
+                self.context(),
+                self.track_ref(),
+                start_seconds,
+                end_seconds,
+            )
+            .await?;
+
+        let Some(location) = location else {
+            return Ok(None);
+        };
+
+        // Add notes
+        if !notes.is_empty() {
+            self.clients
+                .midi
+                .add_notes(location.clone(), notes)
+                .await?;
+        }
+
+        // Return handle to the created item
+        let item_guid = match &location.item {
+            daw_proto::item::ItemRef::Guid(g) => g.clone(),
+            _ => return Ok(None),
+        };
+
+        Ok(Some(ItemHandle::new(
+            item_guid,
+            self.track_guid.clone(),
+            self.project_id.clone(),
+            self.clients.clone(),
+        )))
+    }
 }
 
 impl std::fmt::Debug for Items {
