@@ -131,9 +131,34 @@ impl ReaperProcess {
         )
     }
 
+    /// Spawn REAPER from a full `DawInstanceConfig`.
+    pub fn spawn_config(config: &DawInstanceConfig) -> Result<Self> {
+        let env_pairs: Vec<(&str, &str)> = config
+            .env
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let args: Vec<String> = config.args.clone();
+        Self::spawn_inner_with_exe(
+            if env_pairs.is_empty() { None } else { Some(&env_pairs) },
+            &args,
+            config.executable.as_deref(),
+            config.resources.as_deref(),
+        )
+    }
+
     fn spawn_inner(env: Option<&[(&str, &str)]>, extra_args: &[String]) -> Result<Self> {
-        let exe = reaper_executable();
-        let resources = reaper_resources();
+        Self::spawn_inner_with_exe(env, extra_args, None, None)
+    }
+
+    fn spawn_inner_with_exe(
+        env: Option<&[(&str, &str)]>,
+        extra_args: &[String],
+        custom_exe: Option<&str>,
+        custom_resources: Option<&str>,
+    ) -> Result<Self> {
+        let exe = custom_exe.map(String::from).unwrap_or_else(reaper_executable);
+        let resources = custom_resources.map(String::from).unwrap_or_else(reaper_resources);
         let mut cmd = Command::new(&exe);
         cmd.current_dir(&resources)
             .arg("-newinst")
@@ -789,6 +814,10 @@ pub struct DawInstanceConfig {
     pub env: Vec<(String, String)>,
     /// Extra CLI arguments for REAPER.
     pub args: Vec<String>,
+    /// Custom executable path (None = default FTS-TESTING).
+    pub executable: Option<String>,
+    /// Custom resources path (None = derived from executable).
+    pub resources: Option<String>,
 }
 
 impl DawInstanceConfig {
@@ -798,6 +827,23 @@ impl DawInstanceConfig {
             label: label.to_string(),
             env: Vec::new(),
             args: Vec::new(),
+            executable: None,
+            resources: None,
+        }
+    }
+
+    /// Create a config for a specific FTS app bundle (e.g., "FTS-VOCALS", "FTS-GUITAR").
+    ///
+    /// Resolves the executable and resources paths from the FTS home directory.
+    pub fn for_app(label: &str, app_name: &str) -> Self {
+        let fts = fts_home();
+        let app_path = format!("{fts}/Reaper/{app_name}.app");
+        Self {
+            label: label.to_string(),
+            env: Vec::new(),
+            args: Vec::new(),
+            executable: Some(format!("{app_path}/Contents/MacOS/REAPER")),
+            resources: Some(format!("{app_path}/Contents/Resources")),
         }
     }
 
@@ -897,7 +943,7 @@ pub fn run_multi_reaper_test(
             .collect();
         let arg_refs: Vec<&str> = config.args.iter().map(|s| s.as_str()).collect();
 
-        let process = ReaperProcess::spawn_with_env(&env_pairs, &arg_refs)
+        let process = ReaperProcess::spawn_config(&config)
             .map_err(|e| eyre::eyre!("[{test_name}] Failed to spawn '{}': {e}", config.label))?;
 
         println!(

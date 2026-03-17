@@ -69,13 +69,16 @@ pub fn measures_to_seconds(measures: u32, bpm: f64, beats_per_measure: u32) -> f
 
 /// Options for combining RPP files.
 pub struct CombineOptions {
-    /// Gap between songs in seconds (default: 0.0).
-    pub gap_seconds: f64,
+    /// Gap between songs, specified as a number of measures.
+    /// The gap duration is computed from the **next** song's tempo and time signature.
+    /// For example, 2 measures at 120 BPM in 4/4 = 4 seconds.
+    /// Default: 0 (no gap).
+    pub gap_measures: u32,
 }
 
 impl Default for CombineOptions {
     fn default() -> Self {
-        Self { gap_seconds: 0.0 }
+        Self { gap_measures: 0 }
     }
 }
 
@@ -115,6 +118,28 @@ fn project_content_extent(project: &ReaperProject) -> f64 {
         .unwrap_or(0.0);
 
     max_item_end.max(max_marker).max(max_tempo)
+}
+
+/// Extract the starting tempo (BPM) and beats-per-measure from a project.
+///
+/// Uses the first tempo envelope point if available, otherwise falls back
+/// to the TEMPO project property.
+fn extract_project_tempo(project: &ReaperProject) -> (f64, u32) {
+    // Try tempo envelope first point
+    if let Some(ref te) = project.tempo_envelope {
+        if let Some(pt) = te.points.first() {
+            let beats = pt
+                .time_signature_encoded
+                .map(|ts| (ts & 0xFFFF) as u32) // numerator in low bits
+                .unwrap_or(4);
+            return (pt.tempo, beats.max(1));
+        }
+    }
+    // Fall back to TEMPO property: (bpm, numerator, denominator, flags)
+    if let Some((bpm, num, _denom, _flags)) = project.properties.tempo {
+        return (bpm as f64, (num as u32).max(1));
+    }
+    (120.0, 4) // default
 }
 
 /// Combine multiple RPP files into a single RPP project.
@@ -163,8 +188,13 @@ pub fn combine_rpp_files(
         });
 
         offset += extent;
-        if i < projects.len() - 1 {
-            offset += options.gap_seconds;
+
+        // Add gap measured in the NEXT song's tempo/time signature
+        if options.gap_measures > 0 && i < projects.len() - 1 {
+            let next = &projects[i + 1];
+            let (bpm, beats_per_measure) = extract_project_tempo(next);
+            let gap = measures_to_seconds(options.gap_measures, bpm, beats_per_measure);
+            offset += gap;
         }
     }
 
@@ -1190,11 +1220,11 @@ fn write_combined_tempoenvex(out: &mut String, rpp_paths: &[PathBuf], song_infos
                 song.global_start_seconds, bpm_str, ts_encoded
             ));
         } else {
-            // Write all tempo points, but force the FIRST point to shape=0 (square)
-            // so there's no gradual interpolation from the previous song's tempo.
+            // Write all tempo points, preserving original shapes for internal
+            // transitions. Only force the FIRST point to shape=1 (square) so
+            // there's no gradual interpolation from the previous song's tempo.
             for (i, pt) in points.iter().enumerate() {
                 if i == 0 {
-                    // Replace shape in the first PT line to ensure it's square (0)
                     out.push_str(&force_square_shape(&pt.line));
                 } else {
                     out.push_str(&pt.line);

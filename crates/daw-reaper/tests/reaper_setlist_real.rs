@@ -27,8 +27,11 @@ fn open_battle_sp26_setlist() -> Result<()> {
     run_multi_reaper_test(
         "battle_sp26_setlist",
         vec![
-            DawInstanceConfig::new("tracks"),
-            DawInstanceConfig::new("vocals"),
+            DawInstanceConfig::new("tracks")
+                .with_env("FTS_DAW_ROLE", "session"),
+            DawInstanceConfig::new("vocals")
+                .with_env("FTS_DAW_ROLE", "signal")
+                .with_env("FTS_RIG_TYPE", "vocals"),
         ],
         |ctx| {
             Box::pin(async move {

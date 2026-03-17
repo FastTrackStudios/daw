@@ -61,7 +61,12 @@ fn combine_battle_sp26_rpl() {
     // ── 2. Build song infos with 2-measure gap at 120 BPM ───────────
     let gap = measures_to_seconds(16, 120.0, 4);
     let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-    let song_infos = build_song_infos_from_projects(&projects, &name_refs, gap);
+    let mut song_infos = build_song_infos_from_projects(&projects, &name_refs, gap);
+
+    // Set source directories so file paths get resolved to absolute
+    for (si, path) in song_infos.iter_mut().zip(rpp_paths.iter()) {
+        si.source_dir = path.parent().map(|p| p.to_path_buf());
+    }
 
     println!("\nSong layout:");
     for si in &song_infos {
@@ -73,33 +78,35 @@ fn combine_battle_sp26_rpl() {
         .unwrap_or(0.0);
     println!("\nTotal timeline: {:.1}s ({:.1} minutes)", total, total / 60.0);
 
-    // ── 3. Concatenate into combined setlist ─────────────────────────
-    let combined = concatenate_projects(&projects, &song_infos);
+    // ── 3. Concatenate using raw chunk approach ────────────────────
+    // This preserves ALL RPP data by directly patching the text.
+    let rpp_text = setlist_rpp::concatenate_rpp_files_raw(&rpp_paths, &song_infos);
 
-    println!("\nCombined project:");
-    println!("  Tracks: {}", combined.tracks.len());
-    println!("  Tempo points: {}", combined.tempo_envelope.as_ref().map_or(0, |e| e.points.len()));
-    println!("  Markers/regions: {}", combined.markers_regions.all.len());
-
-    // Print track structure
-    println!("\nTrack structure:");
-    for (i, t) in combined.tracks.iter().enumerate() {
-        let folder = t.folder.as_ref()
-            .map(|f| format!(" [{:?}]", f.folder_state))
-            .unwrap_or_default();
-        let items = if t.items.is_empty() { String::new() } else { format!(" ({} items)", t.items.len()) };
-        println!("  {:>2}. {}{}{}", i, t.name, folder, items);
-    }
+    println!("\nCombined RPP: {} bytes", rpp_text.len());
 
     // ── 4. Write to output directory ─────────────────────────────────
     println!("\nWriting to: {}", OUTPUT_DIR);
 
     let output_dir = PathBuf::from(OUTPUT_DIR);
-    // Only generate the roles we actually need for this setlist
-    let roles: &[&str] = &["Vocals", "Guitar", "Keys", "Drum Enhancement"];
+    std::fs::create_dir_all(&output_dir).expect("Failed to create output dir");
 
-    let paths = write_role_setlists(&combined, roles, SETLIST_NAME, &output_dir)
-        .expect("Failed to write role setlists");
+    let master_path = output_dir.join(format!("Tracks - {}.RPP", SETLIST_NAME));
+    std::fs::write(&master_path, &rpp_text).expect("Failed to write master RPP");
+
+    // Also generate shell copies using the parsed approach (shells don't need audio)
+    let combined = concatenate_projects(&projects, &song_infos);
+    let roles: &[&str] = &["Vocals", "Guitar", "Keys", "Drum Enhancement"];
+    for role in roles {
+        let shell = setlist_rpp::generate_shell_copy(&combined, role);
+        let shell_text = setlist_rpp::project_to_rpp_text(&shell);
+        let shell_path = output_dir.join(format!("{} - {}.RPP", role, SETLIST_NAME));
+        std::fs::write(&shell_path, &shell_text).expect("Failed to write shell RPP");
+    }
+
+    let mut paths = vec![master_path.clone()];
+    for role in roles {
+        paths.push(output_dir.join(format!("{} - {}.RPP", role, SETLIST_NAME)));
+    }
 
     println!("\nGenerated {} files:", paths.len());
     for path in &paths {

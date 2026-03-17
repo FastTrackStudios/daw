@@ -591,6 +591,12 @@ impl ItemService for ReaperItem {
             let medium = Reaper::get().medium_reaper();
             let proj = resolve_project(&project)
                 .or_else(|| Some(Reaper::get().current_project()));
+
+            // Switch to correct project tab
+            if let Some(ref p) = proj {
+                unsafe { medium.low().SelectProjectInstance(p.raw().as_ptr()); }
+            }
+
             let reaper_track = proj.as_ref().and_then(|p| resolve_track(p, &track));
             let track_ptr = reaper_track.and_then(|t| t.raw().ok());
 
