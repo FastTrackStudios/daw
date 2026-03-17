@@ -38,14 +38,13 @@ pub fn generate_guide_items(
         })
         .collect();
 
-    let region_names: Vec<String> = regions.iter().map(|r| {
-        format!("{}@{:.1}", r.name, r.position)
-    }).collect();
-    eprintln!("[guide_gen] {} regions: {:?}", regions.len(), region_names);
-
     if regions.is_empty() {
         return (click_items, count_items, guide_items);
     }
+
+    // Sort regions by position
+    let mut regions = regions;
+    regions.sort_by(|a, b| a.position.partial_cmp(&b.position).unwrap());
 
     // Get tempo info
     let (default_bpm, default_num, default_denom) =
@@ -57,61 +56,77 @@ pub fn generate_guide_items(
 
     let tempo_env = project.tempo_envelope.as_ref();
 
+    // Find the overall song extent from the first region's count-in to the last region's end
+    let first_region_start = regions[0].position;
+    let last_region_end = regions
+        .iter()
+        .map(|r| r.end_position.unwrap_or(r.position + 1.0))
+        .fold(0.0f64, f64::max);
+
+    let (first_bpm, first_num, first_denom) =
+        tempo_at_position(first_region_start, tempo_env, default_bpm, default_num, default_denom);
+    let first_beat_unit = 4.0 / first_denom as f64;
+    let first_measure_seconds = first_beat_unit * first_num as f64 * 60.0 / first_bpm;
+
+    // Count-in starts one measure before first region
+    let song_start = (first_region_start - first_measure_seconds).max(0.0);
+
+    // ── Click: single continuous item spanning the entire song ──
+    {
+        let mut notes = Vec::new();
+        let mut pos = song_start;
+
+        while pos < last_region_end - 0.001 {
+            let (bpm, num, denom) =
+                tempo_at_position(pos, tempo_env, default_bpm, default_num, default_denom);
+            let beat_unit = 4.0 / denom as f64;
+            let beat_seconds = beat_unit * 60.0 / bpm;
+            let measure_seconds = beat_unit * num as f64 * 60.0 / bpm;
+
+            let is_beat_one = {
+                let offset = pos - song_start;
+                let frac = (offset / measure_seconds).fract();
+                frac < 0.01 || frac > 0.99
+            };
+            let (midi_note, velocity) = if is_beat_one {
+                (76, 120) // Hi woodblock, accent
+            } else {
+                (77, 100) // Lo woodblock, normal
+            };
+            notes.push((pos, midi_note, velocity));
+            pos += beat_seconds;
+        }
+
+        if !notes.is_empty() {
+            click_items.push(make_midi_item(song_start, last_region_end, &notes));
+        }
+    }
+
+    // ── Count + Guide: per-section items ──
     let mut prev_region_end = 0.0f64;
 
     for region in &regions {
         let section_start = region.position;
         let section_end = region.end_position.unwrap_or(section_start + 1.0);
 
-        // Get tempo and time signature at the section start
         let (bpm, num, denom) =
             tempo_at_position(section_start, tempo_env, default_bpm, default_num, default_denom);
-
         let beat_unit = 4.0 / denom as f64;
-        let qn_per_measure = beat_unit * num as f64;
         let seconds_per_qn = 60.0 / bpm;
-        let measure_seconds = qn_per_measure * seconds_per_qn;
+        let measure_seconds = beat_unit * num as f64 * seconds_per_qn;
 
         // Count-in: one measure before section, clamped to prev region end
         let count_in_start = (section_start - measure_seconds).max(prev_region_end).max(0.0);
 
-        // ── Click MIDI item ──
-        // Full section + count-in, with accent on beat 1
-        let click_start = count_in_start;
-        let click_end = section_end;
-        if click_end > click_start {
-            let mut notes = Vec::new();
-            let mut pos = count_in_start;
-            let beat_seconds = seconds_per_qn * beat_unit;
-
-            while pos < click_end - 0.001 {
-                let is_beat_one = ((pos - count_in_start) / measure_seconds).fract() < 0.01
-                    || ((pos - count_in_start) / measure_seconds).fract() > 0.99;
-                let (midi_note, velocity) = if is_beat_one {
-                    (76, 120) // Hi woodblock, accent
-                } else {
-                    (77, 100) // Lo woodblock, normal
-                };
-                notes.push((pos, midi_note, velocity));
-                pos += beat_seconds;
-            }
-
-            if !notes.is_empty() {
-                click_items.push(make_midi_item(click_start, click_end, &notes));
-            }
-        }
-
-        // ── Count MIDI item ──
-        // One measure of count beats before section start
+        // Count item: beat numbers for the count-in measure
         if count_in_start < section_start - 0.001 {
-            let mut notes = Vec::new();
             let beat_seconds = seconds_per_qn * beat_unit;
+            let mut notes = Vec::new();
             let mut pos = count_in_start;
             let mut beat_num = 1u32;
 
             while pos < section_start - 0.001 && beat_num <= num {
-                // Count notes: different pitch per beat number
-                let midi_note = 60 + beat_num as u8; // C4, C#4, D4, D#4...
+                let midi_note = 60 + beat_num as u8;
                 notes.push((pos, midi_note, 100));
                 pos += beat_seconds;
                 beat_num += 1;
@@ -122,10 +137,8 @@ pub fn generate_guide_items(
             }
         }
 
-        // ── Guide MIDI item ──
-        // Section cue: single note at count-in start indicating section type
-        let section_midi = section_name_to_midi(&region.name);
-        if let Some(midi_note) = section_midi {
+        // Guide item: section cue note
+        if let Some(midi_note) = section_name_to_midi(&region.name) {
             guide_items.push(make_midi_item(
                 count_in_start,
                 count_in_start + measure_seconds,
