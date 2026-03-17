@@ -60,7 +60,7 @@ impl LocalCaller {
         });
 
         // Client side: get the ErasedCaller
-        let (caller, _session) = roam::initiator(BareConduit::new(client_link))
+        let (caller, _session) = roam::initiator_conduit(BareConduit::new(client_link))
             .establish::<DriverCaller>(())
             .await
             .map_err(|e| eyre::eyre!("LocalCaller initiation failed: {:?}", e))?;

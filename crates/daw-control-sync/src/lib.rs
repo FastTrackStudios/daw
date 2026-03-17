@@ -118,7 +118,7 @@ impl DawSync {
                 socket_path
             ))?;
         let link = roam_stream::StreamLink::unix(stream);
-        let (caller, _session) = roam::initiator(link)
+        let (caller, _session) = roam::initiator_conduit(roam::BareConduit::new(link))
             .establish::<roam::DriverCaller>(())
             .await
             .context("Failed to establish roam session")?;
