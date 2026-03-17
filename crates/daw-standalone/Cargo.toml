@@ -36,3 +36,7 @@ tracing-subscriber = "0.3"
 [features]
 audio = ["dep:cpal", "dep:symphonia"]
 rpp-loader = ["audio", "dep:dawfile-reaper"]
+
+[[example]]
+name = "play_rpp"
+required-features = ["rpp-loader"]
