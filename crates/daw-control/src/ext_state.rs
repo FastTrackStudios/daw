@@ -6,7 +6,7 @@
 //! # Example
 //!
 //! ```no_run
-//! # async fn example(daw: &daw_control::Daw) -> crate::Result<()> {
+//! # async fn example(daw: &daw_control::Daw) -> daw_control::Result<()> {
 //! let ext = daw.ext_state();
 //!
 //! // Store a value (persistent across REAPER restarts)
@@ -102,7 +102,7 @@ impl ExtState {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(ext: &daw_control::ExtState) -> crate::Result<()> {
+    /// # async fn example(ext: &daw_control::ExtState) -> daw_control::Result<()> {
     /// #[derive(serde::Deserialize)]
     /// struct Config {
     ///     volume: f32,
@@ -142,7 +142,7 @@ impl ExtState {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(ext: &daw_control::ExtState) -> crate::Result<()> {
+    /// # async fn example(ext: &daw_control::ExtState) -> daw_control::Result<()> {
     /// #[derive(serde::Serialize)]
     /// struct Config {
     ///     volume: f32,

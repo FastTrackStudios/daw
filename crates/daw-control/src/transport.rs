@@ -19,7 +19,7 @@ use roam::Rx;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+/// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// let transport = project.transport();
@@ -278,7 +278,7 @@ impl Transport {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(transport: daw_control::Transport) -> crate::Result<()> {
+    /// # async fn example(transport: daw_control::Transport) -> daw_control::Result<()> {
     /// // Go to measure 5, beat 1 (0-indexed: measure 4, beat 0)
     /// transport.set_position_musical(4, 0, 0).await?;
     ///
@@ -314,7 +314,7 @@ impl Transport {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     /// let transport = project.transport();
@@ -351,7 +351,7 @@ impl Transport {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     /// let transport = project.transport();
@@ -360,7 +360,7 @@ impl Transport {
     /// let mut rx = transport.subscribe_state().await?;
     ///
     /// // Receive updates
-    /// while let Some(state) = rx.recv().await? {
+    /// while let Ok(Some(state)) = rx.recv().await {
     ///     println!("Position: {:?}", state.playhead_position);
     /// }
     /// # Ok(())
@@ -393,7 +393,7 @@ impl Transport {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     /// let transport = project.transport();
@@ -402,8 +402,8 @@ impl Transport {
     /// let mut rx = transport.subscribe_all_projects().await?;
     ///
     /// // Receive updates
-    /// while let Some(update) = rx.recv().await? {
-    ///     for proj in update.projects {
+    /// while let Ok(Some(update)) = rx.recv().await {
+    ///     for proj in &update.projects {
     ///         println!("Project {}: {:?}", proj.project_guid, proj.transport.play_state);
     ///     }
     /// }

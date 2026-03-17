@@ -20,7 +20,7 @@ use daw_proto::FxChainContext;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+/// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// println!("Project GUID: {}", project.guid());
@@ -68,7 +68,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -91,7 +91,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -114,7 +114,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -138,7 +138,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -162,7 +162,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -236,7 +236,7 @@ impl Project {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(project: daw_control::Project) -> crate::Result<()> {
+    /// # async fn example(project: daw_control::Project) -> daw_control::Result<()> {
     /// for track in project.iter_tracks().await? {
     ///     let info = track.info().await?;
     ///     println!("{}: {}", info.index, info.name);
@@ -285,7 +285,7 @@ impl Project {
     /// # Example
     ///
     /// ```no_run
-    /// # async fn example(project: daw_control::Project) -> crate::Result<()> {
+    /// # async fn example(project: daw_control::Project) -> daw_control::Result<()> {
     /// project.begin_undo_block("Batch rename tracks").await?;
     /// for track in project.iter_tracks().await? {
     ///     track.rename("New Name").await?;
@@ -443,7 +443,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -483,7 +483,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::{PositionInSeconds, MeasureMode};
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -520,7 +520,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::{PositionInBeats, MeasureMode};
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -558,7 +558,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInSeconds;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -590,7 +590,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInQuarterNotes;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -622,7 +622,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInQuarterNotes;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -658,7 +658,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInBeats;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -690,7 +690,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInQuarterNotes;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -726,7 +726,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///

@@ -23,7 +23,7 @@ use crate::Result;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+/// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 ///
@@ -161,7 +161,7 @@ impl FxChain {
     ///
     /// ```no_run
     /// # use daw_control::FxChain;
-    /// # async fn example(chain: FxChain) -> crate::Result<()> {
+    /// # async fn example(chain: FxChain) -> daw_control::Result<()> {
     /// chain.add("ReaComp").await?;
     /// chain.add("VST3: FabFilter Pro-C 2").await?;
     /// chain.add("JS: 1175 Compressor").await?;
@@ -226,10 +226,10 @@ impl FxChain {
     ///
     /// ```no_run
     /// # use daw_control::FxChain;
-    /// # async fn example(chain: FxChain) -> crate::Result<()> {
+    /// # async fn example(chain: FxChain) -> daw_control::Result<()> {
     /// let mut rx = chain.subscribe_events().await?;
-    /// while let Some(event) = rx.recv().await? {
-    ///     println!("FX event: {:?}", event);
+    /// while let Ok(Some(event)) = rx.recv().await {
+    ///     println!("FX event: {:?}", &*event);
     /// }
     /// # Ok(())
     /// # }
@@ -488,7 +488,7 @@ impl std::fmt::Debug for FxChain {
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+/// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// let track = project.tracks().by_name("Vocals").await?.unwrap();
@@ -916,7 +916,7 @@ impl std::fmt::Debug for FxHandle {
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::session::ConnectionHandle) -> crate::Result<()> {
+/// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// let track = project.tracks().by_name("Vocals").await?.unwrap();

@@ -137,8 +137,8 @@ pub type TrackStructureBuilder = super::TrackHierarchyBuilder;
 /// use daw_proto::{TrackGroup, TrackStructureBuilder};
 ///
 /// let drums = TrackGroup::folder("Drums")
-///     .track("Kick", "kick.wav")
-///     .track("Snare", "snare.wav")
+///     .track("Kick").item("kick.wav")
+///     .track("Snare").item("snare.wav")
 ///     .end();
 ///
 /// let bass = TrackGroup::single_track("Bass", "bass.wav");

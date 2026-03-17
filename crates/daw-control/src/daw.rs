@@ -14,7 +14,7 @@ use crate::Result;
 /// use daw_proto::client::Daw;
 ///
 /// #[tokio::main]
-/// async fn main() -> crate::Result<()> {
+/// async fn main() -> daw_control::Result<()> {
 ///     // Initialize the global connection
 ///     let handle = roam::connect("unix:///tmp/fts-daw.sock").await?;
 ///     Daw::init(handle)?;

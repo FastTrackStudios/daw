@@ -8,46 +8,33 @@
 //! ```no_run
 //! use daw_control::Daw;
 //!
-//! #[tokio::main]
-//! async fn main() -> crate::Result<()> {
-//!     // Initialize global connection
-//!     let handle = roam::connect("unix:///tmp/fts-daw.sock").await?;
-//!     Daw::init(handle)?;
+//! # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+//! // Initialize global connection
+//! Daw::init(handle)?;
 //!
-//!     // Use the global API
-//!     let project = Daw::current_project().await?;
-//!     project.transport().play().await?;
-//!
-//!     Ok(())
-//! }
+//! // Use the global API
+//! let daw = Daw::get();
+//! let project = daw.current_project().await?;
+//! project.transport().play().await?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Multiple Hosts (Instance-based)
 //!
 //! ```no_run
 //! use daw_control::Daw;
-//! use host_manager::HostManager;
 //!
-//! #[tokio::main]
-//! async fn main() -> crate::Result<()> {
-//!     let mut manager = HostManager::new();
-//!     manager.connect("/tmp/guitar1.sock", 0).await?;
-//!     manager.connect("/tmp/guitar2.sock", 0).await?;
+//! # async fn example(handle1: roam::ErasedCaller, handle2: roam::ErasedCaller) -> daw_control::Result<()> {
+//! // Create Daw instances for each host
+//! let daw1 = Daw::new(handle1);
+//! let daw2 = Daw::new(handle2);
 //!
-//!     // Get host connections
-//!     let guitar1 = manager.get_host("guitar:Guitar 1", "guitar1").await?;
-//!     let guitar2 = manager.get_host("guitar:Guitar 2", "guitar2").await?;
-//!
-//!     // Create Daw instances for each host
-//!     let daw1 = Daw::new(guitar1.handle().clone());
-//!     let daw2 = Daw::new(guitar2.handle().clone());
-//!
-//!     // Use the same API on each
-//!     daw1.current_project().await?.transport().play().await?;
-//!     daw2.current_project().await?.transport().play().await?;
-//!
-//!     Ok(())
-//! }
+//! // Use the same API on each
+//! daw1.current_project().await?.transport().play().await?;
+//! daw2.current_project().await?.transport().play().await?;
+//! # Ok(())
+//! # }
 //! ```
 
 // Re-export daw-proto types for convenience
@@ -243,7 +230,7 @@ impl DawClients {
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::ErasedCaller) -> crate::Result<()> {
+/// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// project.transport().play().await?;
@@ -266,7 +253,7 @@ impl Daw {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> crate::Result<()> {
+    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// daw.current_project().await?.transport().play().await?;
     /// # Ok(())
@@ -347,7 +334,7 @@ impl Daw {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(daw: &Daw) -> crate::Result<()> {
+    /// # async fn example(daw: &Daw) -> daw_control::Result<()> {
     /// // Switch to a specific project
     /// let project = daw.select_project("project-guid-123").await?;
     /// println!("Now on project: {}", project.guid());
@@ -439,10 +426,10 @@ impl Daw {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(daw: &Daw) -> crate::Result<()> {
+    /// # async fn example(daw: &Daw) -> daw_control::Result<()> {
     /// let mut rx = daw.subscribe_projects().await?;
     /// while let Ok(Some(event)) = rx.recv().await {
-    ///     match event {
+    ///     match &*event {
     ///         daw_control::ProjectEvent::CurrentChanged(guid) => {
     ///             println!("Current project: {:?}", guid);
     ///         }
@@ -471,7 +458,7 @@ impl Daw {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(daw: &Daw) -> crate::Result<()> {
+    /// # async fn example(daw: &Daw) -> daw_control::Result<()> {
     /// let latency = daw.audio_engine().output_latency_seconds().await?;
     /// println!("Audio output latency: {}ms", latency * 1000.0);
     /// # Ok(())
@@ -491,7 +478,7 @@ impl Daw {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(daw: &Daw) -> crate::Result<()> {
+    /// # async fn example(daw: &Daw) -> daw_control::Result<()> {
     /// let ext = daw.ext_state();
     /// ext.set("MyExt", "theme", "dark", true).await?;
     /// let theme = ext.get("MyExt", "theme").await?;
