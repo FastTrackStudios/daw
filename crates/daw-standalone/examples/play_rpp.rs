@@ -28,8 +28,19 @@ fn main() {
     let engine = AudioEngine::new().expect("Failed to create audio engine");
 
     println!("Loading RPP: {rpp_path}");
-    let project = rpp_loader::load_rpp_project(&engine, &rpp_path)
-        .expect("Failed to load RPP project");
+    let rpp_text = std::fs::read_to_string(&rpp_path).expect("Failed to read RPP file");
+    let rpp_dir = std::path::Path::new(&rpp_path).parent().unwrap();
+
+    let project = rpp_loader::load_rpp(&engine, &rpp_text, |file_path| {
+        // Resolve relative paths against the RPP directory
+        let path = if std::path::Path::new(file_path).is_absolute() {
+            std::path::PathBuf::from(file_path)
+        } else {
+            rpp_dir.join(file_path)
+        };
+        std::fs::read(&path).ok()
+    })
+    .expect("Failed to load RPP project");
 
     println!("\n=== Loaded Project ===");
     println!("Sample rate: {} Hz", project.sample_rate);
@@ -48,14 +59,14 @@ fn main() {
             track.position,
             track.length,
             track.source_offset,
-            track.source_path.file_name().unwrap_or_default().to_string_lossy()
+            track.source_file
         );
     }
 
     if !project.failed.is_empty() {
         println!("\nFailed to load:");
-        for (path, reason) in &project.failed {
-            println!("  {} — {reason}", path.display());
+        for (file, reason) in &project.failed {
+            println!("  {file} — {reason}");
         }
     }
 

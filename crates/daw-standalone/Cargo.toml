@@ -16,7 +16,7 @@ web-time = "1"
 cpal = { version = "0.17", optional = true, features = ["wasm-bindgen"] }
 symphonia = { version = "0.5", optional = true, features = ["mp3", "ogg", "flac", "wav", "pcm", "aac"] }
 
-# RPP project loading (feature-gated, native only — dawfile-reaper uses rayon)
+# RPP project loading
 dawfile-reaper = { path = "../dawfile-reaper", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
