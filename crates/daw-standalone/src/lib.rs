@@ -27,6 +27,8 @@ mod midi;
 mod midi_analysis;
 mod position_conversion;
 mod project;
+#[cfg(feature = "audio")]
+pub mod audio_engine;
 pub(crate) mod platform;
 mod region;
 mod resource;
@@ -45,7 +47,7 @@ pub use marker::StandaloneMarker;
 pub use midi::StandaloneMidi;
 pub use midi_analysis::StandaloneMidiAnalysis;
 pub use position_conversion::StandalonePositionConversion;
-pub use project::StandaloneProject;
+pub use project::{StandaloneProject, project_guids};
 pub use region::StandaloneRegion;
 pub use resource::StandaloneResource;
 pub use routing::StandaloneRouting;
