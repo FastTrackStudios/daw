@@ -45,11 +45,11 @@ roam-stream = { git = "https://github.com/bearcove/roam.git", branch = "main" }
 # CLI
 clap = { version = "4", features = ["derive"] }
 
-# Sibling repos (local paths)
-actions-proto = { path = "../input_actions/crates/actions-proto" }
-keyflow = { path = "../keyflow/crates/keyflow" }
-dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus", default-features = false }
-dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
+# Sibling repos
+actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }
+keyflow = { git = "https://github.com/FastTrackStudios/keyflow.git", branch = "main" }
+dock-dioxus = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "main", default-features = false }
+dock-proto = { git = "https://github.com/FastTrackStudios/dock-dioxus.git", branch = "main" }
 
 # Testing
 reaper-test = { path = "crates/reaper-test" }
