@@ -7,6 +7,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  NIXPKGS_ALLOW_UNFREE: 1
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -26,10 +29,10 @@ jobs:
         continue-on-error: true
 
       - name: Build FTS test environment (CI preset)
-        run: nix build .#fts-test-ci
+        run: nix build .#fts-test-ci --impure
 
       - name: Smoke test — REAPER starts headless
-        run: nix run .#fts-test-ci -- ./ci/test.sh
+        run: nix run .#fts-test-ci --impure -- ./ci/test.sh
 
       # Uncomment when daw crate tests are Linux-ready:
       # - name: Clone daw repo
@@ -40,7 +43,7 @@ jobs:
       #
       # - name: Run integration tests
       #   run: |
-      #     nix run .#fts-test-ci -- bash -c "
+      #     nix run .#fts-test-ci --impure -- bash -c "
       #       cd daw
       #       cargo test -p daw-reaper --test reaper_connection -- --ignored --nocapture
       #     "
