@@ -168,8 +168,22 @@ fn parse_track_block_lenient(block: &RppBlock) -> RppTrack {
     });
 
     for child in &block.children {
-        let RppBlockContent::Content(tokens) = child else {
-            continue;
+        // Handle both Content (nom parser) and RawLine (fast parser) variants.
+        // The fast parser stores TRACK children as RawLine for performance;
+        // we tokenize on demand here.
+        let tokens_owned;
+        let tokens: &[Token] = match child {
+            RppBlockContent::Content(t) => t,
+            RppBlockContent::RawLine(raw) => {
+                match crate::primitives::token::parse_token_line(raw) {
+                    Ok((_, t)) => {
+                        tokens_owned = t;
+                        &tokens_owned
+                    }
+                    Err(_) => continue,
+                }
+            }
+            _ => continue,
         };
         let Some(Token::Identifier(id)) = tokens.first() else {
             continue;

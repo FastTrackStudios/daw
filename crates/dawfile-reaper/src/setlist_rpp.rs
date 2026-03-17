@@ -24,6 +24,8 @@ pub struct SongInfo {
     /// Local start position within the original project (bounds.start).
     /// Items/markers in the original at `local_start` map to `global_start_seconds`.
     pub local_start: f64,
+    /// Directory of the original RPP file (for resolving relative media paths).
+    pub source_dir: Option<PathBuf>,
 }
 
 /// Build `SongInfo` entries from song names and durations, with a configurable
@@ -43,7 +45,8 @@ pub fn build_song_infos(
             name: name.to_string(),
             global_start_seconds: offset,
             duration_seconds: *duration,
-            local_start: 0.0, // Simple builder assumes songs start at 0
+            local_start: 0.0,
+            source_dir: None,
         });
         offset += duration;
         if i < songs.len() - 1 {
@@ -60,6 +63,143 @@ pub fn build_song_infos(
 pub fn measures_to_seconds(measures: u32, bpm: f64, beats_per_measure: u32) -> f64 {
     let beat_duration = 60.0 / bpm;
     measures as f64 * beats_per_measure as f64 * beat_duration
+}
+
+// ── RPP Combiner ────────────────────────────────────────────────────────────
+
+/// Options for combining RPP files.
+pub struct CombineOptions {
+    /// Gap between songs in seconds (default: 0.0).
+    pub gap_seconds: f64,
+}
+
+impl Default for CombineOptions {
+    fn default() -> Self {
+        Self { gap_seconds: 0.0 }
+    }
+}
+
+/// Compute the content extent of a project (the latest point of any content).
+///
+/// Returns the maximum of:
+/// - item ends (position + length) across all tracks
+/// - marker/region endpoints
+/// - tempo envelope points
+///
+/// This ensures the combined project allocates enough space for each song's
+/// full extent, including trailing tempo points that extend past audio.
+fn project_content_extent(project: &ReaperProject) -> f64 {
+    let max_item_end = project
+        .tracks
+        .iter()
+        .flat_map(|t| t.items.iter())
+        .map(|item| item.position + item.length)
+        .fold(0.0f64, f64::max);
+
+    let max_marker = project
+        .markers_regions
+        .all
+        .iter()
+        .map(|m| m.end_position.unwrap_or(m.position).max(m.position))
+        .fold(0.0f64, f64::max);
+
+    let max_tempo = project
+        .tempo_envelope
+        .as_ref()
+        .map(|te| {
+            te.points
+                .iter()
+                .map(|pt| pt.position)
+                .fold(0.0f64, f64::max)
+        })
+        .unwrap_or(0.0);
+
+    max_item_end.max(max_marker).max(max_tempo)
+}
+
+/// Combine multiple RPP files into a single RPP project.
+///
+/// Reads each RPP, determines the full content extent of each project,
+/// and lays them out sequentially on a shared timeline. Uses the raw
+/// concatenation pipeline to preserve everything (FX chains, MIDI data,
+/// plugin state, envelopes, fades, takes). Tempo envelopes from all
+/// projects are concatenated with proper offsets.
+///
+/// Returns `(combined_rpp_text, song_infos)`.
+pub fn combine_rpp_files(
+    rpp_paths: &[PathBuf],
+    options: &CombineOptions,
+) -> crate::RppResult<(String, Vec<SongInfo>)> {
+    if rpp_paths.is_empty() {
+        return Err(crate::RppParseError::ParseError(
+            "No RPP files to combine".to_string(),
+        ));
+    }
+
+    // Parse each RPP to determine content extent
+    let mut projects = Vec::with_capacity(rpp_paths.len());
+    let mut names = Vec::with_capacity(rpp_paths.len());
+
+    for path in rpp_paths {
+        let content = std::fs::read_to_string(path)?;
+        let project = crate::parse_project_text(&content)?;
+        projects.push(project);
+        names.push(song_name_from_path(path));
+    }
+
+    // Build song infos using full content extent (local_start = 0, duration = extent)
+    let mut song_infos = Vec::with_capacity(projects.len());
+    let mut offset = 0.0;
+
+    for (i, (project, name)) in projects.iter().zip(names.iter()).enumerate() {
+        let extent = project_content_extent(project);
+
+        song_infos.push(SongInfo {
+            name: name.clone(),
+            global_start_seconds: offset,
+            duration_seconds: extent,
+            local_start: 0.0, // include everything from position 0
+            source_dir: None,
+        });
+
+        offset += extent;
+        if i < projects.len() - 1 {
+            offset += options.gap_seconds;
+        }
+    }
+
+    // Set source_dir on each song so media paths get resolved to absolute
+    for (info, path) in song_infos.iter_mut().zip(rpp_paths.iter()) {
+        info.source_dir = path.parent().map(|p| p.to_path_buf());
+    }
+
+    let combined = concatenate_rpp_files_raw(rpp_paths, &song_infos);
+    Ok((combined, song_infos))
+}
+
+/// Combine RPP files listed in an `.RPL` file into a single RPP project.
+///
+/// Convenience wrapper around [`combine_rpp_files`] that first parses the RPL.
+/// Returns `(combined_rpp_text, song_infos)`.
+pub fn combine_rpl(
+    rpl_path: &Path,
+    options: &CombineOptions,
+) -> crate::RppResult<(String, Vec<SongInfo>)> {
+    let rpp_paths = parse_rpl(rpl_path)?;
+    combine_rpp_files(&rpp_paths, options)
+}
+
+/// Combine RPP files listed in an `.RPL` and write the result to disk.
+///
+/// Returns the `Vec<SongInfo>` with resolved positions for each song.
+pub fn combine_rpl_to_file(
+    rpl_path: &Path,
+    output_path: &Path,
+    options: &CombineOptions,
+) -> crate::RppResult<Vec<SongInfo>> {
+    let (combined, song_infos) = combine_rpl(rpl_path, options)?;
+    std::fs::write(output_path, &combined)?;
+    Ok(song_infos)
 }
 
 // ── Track Concatenation (US-004) ─────────────────────────────────────────────
@@ -204,6 +344,7 @@ pub fn build_song_infos_from_projects(
             global_start_seconds: offset,
             duration_seconds: duration,
             local_start: bounds.start,
+            source_dir: None, // Set by caller after construction
         });
 
         offset += duration;
@@ -228,98 +369,94 @@ const GUIDE_TRACK_NAMES: &[&str] = &["Click", "Loop", "Count", "Guide"];
 pub fn concatenate_tracks(projects: &[ReaperProject], songs: &[SongInfo]) -> Vec<Track> {
     assert_eq!(projects.len(), songs.len());
 
-    // Accumulate guide track items across all songs
-    let mut guide_items: Vec<Vec<Item>> = vec![vec![]; GUIDE_TRACK_NAMES.len()];
+    // Guide tracks (Click, Loop, Count, Guide) are merged across songs —
+    // items from all songs placed on shared tracks at correct time offsets.
+    // Content tracks appear under TRACKS/{Song Name}/ folder hierarchy.
 
-    // Collect per-song content tracks
-    struct SongContent {
-        tracks: Vec<Track>,
-    }
-    let mut song_contents: Vec<SongContent> = Vec::new();
+    let mut guide_tracks: std::collections::HashMap<String, Track> =
+        std::collections::HashMap::new();
+    let mut content_tracks: Vec<Track> = Vec::new();
 
     for (project, song) in projects.iter().zip(songs.iter()) {
         let offset = song.global_start_seconds - song.local_start;
-        let mut content = SongContent { tracks: vec![] };
+
+        let mut song_content: Vec<Track> = Vec::new();
 
         for track in &project.tracks {
             let name_lower = track.name.to_lowercase();
-
-            // Merge guide track items onto shared tracks
-            if let Some(idx) = GUIDE_TRACK_NAMES
+            let is_guide = GUIDE_TRACK_NAMES
                 .iter()
-                .position(|g| g.to_lowercase() == name_lower)
-            {
-                for item in &track.items {
-                    let mut offset_item = item.clone();
-                    offset_item.position += offset;
-                    guide_items[idx].push(offset_item);
-                }
+                .any(|g| g.to_lowercase() == name_lower);
+            let is_structural = is_structural_folder(&name_lower, track);
+
+            if is_structural {
+                // Skip structural folders (Click/Guide, TRACKS) — we rebuild them
                 continue;
             }
 
-            // Skip structural folders from source projects
-            if is_structural_folder(&name_lower, track) {
-                continue;
+            let mut cloned =
+                clone_track_with_offset(track, offset, song.source_dir.as_deref());
+            cloned.track_id = None;
+
+            if is_guide {
+                // Merge into shared guide track
+                guide_tracks
+                    .entry(track.name.clone())
+                    .and_modify(|existing| {
+                        existing.items.extend(cloned.items.clone());
+                    })
+                    .or_insert(cloned);
+            } else {
+                // Clear any folder settings — we'll set them ourselves
+                cloned.folder = None;
+                song_content.push(cloned);
             }
-
-            // Content track — clone with offset items
-            let mut cloned = clone_track_with_offset(track, offset);
-            cloned.track_id = None; // New GUID on import
-            content.tracks.push(cloned);
         }
 
-        song_contents.push(content);
-    }
+        if !song_content.is_empty() {
+            // Song sub-folder
+            content_tracks.push(make_folder_track(&song.name));
 
-    // Build the output track list
-    let mut result: Vec<Track> = Vec::new();
-
-    // Click/Guide folder
-    result.push(make_folder_track("Click/Guide"));
-    for (i, name) in GUIDE_TRACK_NAMES.iter().enumerate() {
-        let mut t = empty_track(name);
-        t.items = std::mem::take(&mut guide_items[i]);
-        if i == GUIDE_TRACK_NAMES.len() - 1 {
-            // Last guide track closes the folder
-            t.folder = Some(FolderSettings {
-                folder_state: FolderState::LastInFolder,
-                indentation: -1,
-            });
-        }
-        result.push(t);
-    }
-
-    // TRACKS folder with per-song subfolders
-    result.push(make_folder_track("TRACKS"));
-
-    for (i, (content, song)) in song_contents.iter().zip(songs.iter()).enumerate() {
-        let is_last_song = i == songs.len() - 1;
-
-        // Song subfolder
-        result.push(make_folder_track(&song.name));
-
-        if content.tracks.is_empty() {
-            // Empty song — placeholder closes the folder
-            let mut placeholder = empty_track("(empty)");
-            placeholder.folder = Some(FolderSettings {
-                folder_state: FolderState::LastInFolder,
-                indentation: if is_last_song { -2 } else { -1 },
-            });
-            result.push(placeholder);
-        } else {
-            for (j, track) in content.tracks.iter().enumerate() {
-                let mut t = track.clone();
-                if j == content.tracks.len() - 1 {
-                    // Last track in song closes the song folder
-                    // (and TRACKS folder if this is the last song)
-                    let depth = if is_last_song { -2 } else { -1 };
-                    t.folder = Some(FolderSettings {
+            let last_idx = song_content.len() - 1;
+            for (j, mut track) in song_content.into_iter().enumerate() {
+                if j == last_idx {
+                    track.folder = Some(FolderSettings {
                         folder_state: FolderState::LastInFolder,
-                        indentation: depth,
+                        indentation: -1,
                     });
                 }
-                result.push(t);
+                content_tracks.push(track);
             }
+        }
+    }
+
+    let mut result: Vec<Track> = Vec::new();
+
+    // Guide tracks first (merged, flat at the top level)
+    for guide_name in GUIDE_TRACK_NAMES {
+        if let Some(track) = guide_tracks.remove(*guide_name) {
+            result.push(track);
+        }
+    }
+
+    // Content tracks under TRACKS folder
+    if !content_tracks.is_empty() {
+        result.push(make_folder_track("TRACKS"));
+
+        let last_idx = content_tracks.len() - 1;
+        for (j, mut track) in content_tracks.into_iter().enumerate() {
+            if j == last_idx {
+                // The very last content track closes the TRACKS folder
+                let current_indent = track
+                    .folder
+                    .as_ref()
+                    .map_or(0, |f| f.indentation);
+                track.folder = Some(FolderSettings {
+                    folder_state: FolderState::LastInFolder,
+                    indentation: current_indent - 1,
+                });
+            }
+            result.push(track);
         }
     }
 
@@ -334,10 +471,47 @@ fn is_structural_folder(name_lower: &str, track: &Track) -> bool {
     (name_lower == "click/guide" || name_lower == "tracks") && is_folder
 }
 
-fn clone_track_with_offset(track: &Track, offset_seconds: f64) -> Track {
+fn clone_track_with_offset(track: &Track, offset_seconds: f64, source_dir: Option<&Path>) -> Track {
     let mut cloned = track.clone();
+
+    // Filter out items that would end up at negative positions
+    // (items before the song's bounds.start)
+    cloned.items.retain(|item| item.position + offset_seconds >= -0.01);
+
     for item in &mut cloned.items {
         item.position += offset_seconds;
+
+        if let Some(dir) = source_dir {
+            // Resolve relative file paths in parsed take sources
+            for take in &mut item.takes {
+                if let Some(ref mut source) = take.source {
+                    if !source.file_path.is_empty() && !PathBuf::from(&source.file_path).is_absolute() {
+                        let absolute = dir.join(&source.file_path);
+                        source.file_path = absolute.to_string_lossy().to_string();
+                    }
+                }
+            }
+
+            // Also resolve FILE paths in raw_content so raw-content-based
+            // serialization gets absolute paths too
+            if !item.raw_content.is_empty() {
+                let mut patched_lines = Vec::new();
+                for line in item.raw_content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("FILE ") {
+                        let file_path = trimmed.trim_start_matches("FILE ")
+                            .trim_matches('"');
+                        if !PathBuf::from(file_path).is_absolute() {
+                            let absolute = dir.join(file_path);
+                            patched_lines.push(format!("FILE \"{}\"", absolute.to_string_lossy()));
+                            continue;
+                        }
+                    }
+                    patched_lines.push(line.to_string());
+                }
+                item.raw_content = patched_lines.join("\n");
+            }
+        }
     }
     cloned
 }
@@ -765,9 +939,40 @@ pub fn project_to_rpp_text(project: &ReaperProject) -> String {
 
 fn write_track_rpp(out: &mut String, track: &Track, indent: usize) {
     let prefix = "  ".repeat(indent);
-    out.push_str(&format!("{}<TRACK {{}}\n", prefix));
+
+    if !track.raw_content.is_empty() {
+        // Use raw content — preserves FX chains, envelopes, sends, etc.
+        // But we need to patch item positions (they've been offset).
+        // The raw_content includes <ITEM> blocks, so we write the track
+        // header with patched ISBUS, then the raw content for everything
+        // between the header and items, then our offset items.
+        //
+        // For simplicity, rebuild the track header but use raw items.
+        write_track_header(out, track, &prefix);
+        for item in &track.items {
+            write_item_rpp(out, item, indent + 1, None);
+        }
+        out.push_str(&format!("{}>\n", prefix));
+    } else {
+        // No raw content — build from parsed fields
+        write_track_header(out, track, &prefix);
+        for item in &track.items {
+            write_item_rpp(out, item, indent + 1, None);
+        }
+        out.push_str(&format!("{}>\n", prefix));
+    }
+}
+
+fn write_track_header(out: &mut String, track: &Track, prefix: &str) {
+    // Write track ID if available, otherwise empty braces
+    let track_id = track.track_id.as_deref().unwrap_or("");
+    if track_id.is_empty() {
+        out.push_str(&format!("{}<TRACK {{}}\n", prefix));
+    } else {
+        out.push_str(&format!("{}<TRACK {{{}}}\n", prefix, track_id));
+    }
     out.push_str(&format!("{}  NAME {:?}\n", prefix, track.name));
-    out.push_str(&format!("{}  PEAKCOL 16576\n", prefix));
+    out.push_str(&format!("{}  PEAKCOL {}\n", prefix, track.peak_color.unwrap_or(16576)));
     out.push_str(&format!("{}  BEAT -1\n", prefix));
     out.push_str(&format!("{}  AUTOMODE 0\n", prefix));
 
@@ -795,29 +1000,548 @@ fn write_track_rpp(out: &mut String, track: &Track, indent: usize) {
     out.push_str(&format!("{}  SEL 0\n", prefix));
     out.push_str(&format!("{}  REC 0 0 0 0 0 0 0 0\n", prefix));
     out.push_str(&format!("{}  FX 1\n", prefix));
-    out.push_str(&format!("{}  NCHAN 2\n", prefix));
+    out.push_str(&format!("{}  NCHAN {}\n", prefix, track.channel_count));
+}
 
-    // Items
-    for item in &track.items {
-        write_item_rpp(out, item, indent + 1);
+fn write_item_rpp(out: &mut String, item: &Item, indent: usize, item_source_dir: Option<&Path>) {
+    let prefix = "  ".repeat(indent);
+
+    // Use raw_content as the primary source of truth — it preserves ALL item
+    // data including takes, sources, MIDI content, FX, envelopes, etc.
+    // We only patch POSITION and resolve relative FILE paths to absolute.
+    out.push_str(&format!("{}<ITEM\n", prefix));
+    out.push_str(&format!("{}  POSITION {}\n", prefix, item.position));
+
+    if !item.raw_content.is_empty() {
+        // Write raw content, patching POSITION and FILE paths
+        for line in item.raw_content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with("POSITION ") {
+                continue;
+            }
+            // Patch relative FILE paths to absolute
+            if trimmed.starts_with("FILE ") {
+                if let Some(ref source_dir) = item_source_dir {
+                    // Extract the path (may be quoted)
+                    let file_path = trimmed.trim_start_matches("FILE ")
+                        .trim_matches('"');
+                    if !PathBuf::from(file_path).is_absolute() {
+                        let absolute = source_dir.join(file_path);
+                        out.push_str(&format!("{}  FILE {:?}\n", prefix,
+                            absolute.to_string_lossy()));
+                        continue;
+                    }
+                }
+            }
+            out.push_str(&format!("{}  {}\n", prefix, trimmed));
+        }
+    } else {
+        // No raw content — write minimal from parsed fields
+        out.push_str(&format!("{}  SNAPOFFS {}\n", prefix, item.snap_offset));
+        out.push_str(&format!("{}  LENGTH {}\n", prefix, item.length));
+        out.push_str(&format!("{}  LOOP 0\n", prefix));
+        out.push_str(&format!("{}  ALLTAKES 0\n", prefix));
+        out.push_str(&format!("{}  SEL 0\n", prefix));
+        if !item.name.is_empty() {
+            out.push_str(&format!("{}  NAME {:?}\n", prefix, item.name));
+        }
+        // Write parsed source blocks for items without raw_content
+        for take in &item.takes {
+            if let Some(ref source) = take.source {
+                use crate::types::item::SourceType;
+                let type_str = match source.source_type {
+                    SourceType::Wave => "WAVE",
+                    SourceType::Midi => "MIDI",
+                    SourceType::Mp3 => "MP3",
+                    SourceType::Flac => "FLAC",
+                    SourceType::Video => "VIDEO",
+                    SourceType::Vorbis => "VORBIS",
+                    SourceType::OfflineWave => "WAVE",
+                    SourceType::Section => "SECTION",
+                    SourceType::Empty => "EMPTY",
+                    SourceType::Unknown(ref s) => s.as_str(),
+                };
+                out.push_str(&format!("{}  <SOURCE {}\n", prefix, type_str));
+                if !source.file_path.is_empty() {
+                    out.push_str(&format!("{}    FILE {:?}\n", prefix, source.file_path));
+                }
+                if !source.raw_content.is_empty() {
+                    for line in source.raw_content.lines() {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() && !trimmed.starts_with("FILE ") {
+                            out.push_str(&format!("{}    {}\n", prefix, trimmed));
+                        }
+                    }
+                }
+                out.push_str(&format!("{}  >\n", prefix));
+            }
+        }
     }
 
     out.push_str(&format!("{}>\n", prefix));
 }
 
-fn write_item_rpp(out: &mut String, item: &Item, indent: usize) {
-    let prefix = "  ".repeat(indent);
-    out.push_str(&format!("{}<ITEM\n", prefix));
-    out.push_str(&format!("{}  POSITION {}\n", prefix, item.position));
-    out.push_str(&format!("{}  SNAPOFFS 0\n", prefix));
-    out.push_str(&format!("{}  LENGTH {}\n", prefix, item.length));
-    out.push_str(&format!("{}  LOOP 0\n", prefix));
-    out.push_str(&format!("{}  ALLTAKES 0\n", prefix));
-    out.push_str(&format!("{}  SEL 0\n", prefix));
-    if !item.name.is_empty() {
-        out.push_str(&format!("{}  NAME {:?}\n", prefix, item.name));
+// ── Raw Chunk-Based Concatenation ────────────────────────────────────────────
+
+/// A tempo point extracted from raw RPP text.
+struct RawTempoPoint {
+    /// The formatted PT line (with offset applied).
+    line: String,
+    /// The tempo (BPM) value at this point.
+    tempo: String,
+}
+
+/// Extract PT (tempo point) lines from a TEMPOENVEX block in raw RPP text,
+/// applying a time offset to each point's position.
+/// Returns the points and the default tempo from the TEMPO header line.
+fn extract_tempo_points_raw(rpp_text: &str, offset: f64) -> (Vec<RawTempoPoint>, Option<String>) {
+    let mut points = Vec::new();
+    let mut in_tempoenvex = false;
+    let mut default_tempo = None;
+
+    for line in rpp_text.lines() {
+        let trimmed = line.trim();
+
+        // Capture the project's default TEMPO line
+        if default_tempo.is_none() && trimmed.starts_with("TEMPO ") {
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+            if parts.len() >= 2 {
+                default_tempo = Some(parts[1].to_string());
+            }
+        }
+
+        if trimmed.starts_with("<TEMPOENVEX") {
+            in_tempoenvex = true;
+            continue;
+        }
+        if in_tempoenvex && trimmed == ">" {
+            break;
+        }
+        if in_tempoenvex && trimmed.starts_with("PT ") {
+            // PT <position> <tempo> <shape> [optional fields...]
+            let parts: Vec<&str> = trimmed.splitn(4, ' ').collect();
+            if parts.len() >= 3 {
+                if let Ok(pos) = parts[1].parse::<f64>() {
+                    let new_pos = pos + offset;
+                    let rest = if parts.len() > 3 {
+                        format!(" {}", parts[3])
+                    } else {
+                        String::new()
+                    };
+                    points.push(RawTempoPoint {
+                        line: format!("    PT {:.12} {}{}", new_pos, parts[2], rest),
+                        tempo: parts[2].to_string(),
+                    });
+                }
+            }
+        }
     }
-    out.push_str(&format!("{}>\n", prefix));
+    (points, default_tempo)
+}
+
+/// Write a combined TEMPOENVEX block from all projects into the output string.
+///
+/// Collects tempo points from each project's TEMPOENVEX, offsets them by each
+/// song's global position, and emits a single combined envelope. A square-shape
+/// boundary point is inserted at each song transition.
+fn write_combined_tempoenvex(out: &mut String, rpp_paths: &[PathBuf], song_infos: &[SongInfo]) {
+    out.push_str("  <TEMPOENVEX\n");
+    out.push_str("    ACT 1 -1\n");
+    out.push_str("    VIS 1 0 1\n");
+    out.push_str("    LANEHEIGHT 0 0\n");
+    out.push_str("    ARM 0\n");
+    // DEFSHAPE 1 = square by default — prevents accidental gradual transitions
+    // (REAPER: 0=linear, 1=square, 2=slow start/end, etc.)
+    out.push_str("    DEFSHAPE 1 -1 -1\n");
+
+    for (song_idx, (rpp_path, song)) in rpp_paths.iter().zip(song_infos.iter()).enumerate() {
+        let rpp_text = match std::fs::read_to_string(rpp_path) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        let offset = song.global_start_seconds - song.local_start;
+        let (points, default_tempo) = extract_tempo_points_raw(&rpp_text, offset);
+        let song_end = song.global_start_seconds + song.duration_seconds;
+        let is_last_song = song_idx == song_infos.len() - 1;
+
+        // Parse default BPM and time signature from TEMPO header line
+        let mut bpm_str = default_tempo.unwrap_or_else(|| "120".to_string());
+        let mut ts_encoded = 262148i32; // default 4/4
+        for line in rpp_text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("TEMPO ") {
+                let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                if parts.len() >= 4 {
+                    bpm_str = parts[1].to_string();
+                    let num: i32 = parts[2].parse().unwrap_or(4);
+                    let denom: i32 = parts[3].parse().unwrap_or(4);
+                    ts_encoded = 65536 * denom + num;
+                }
+                break;
+            }
+        }
+
+        if points.is_empty() {
+            // No tempo points in source — create a square point from TEMPO header
+            // Shape=1 in REAPER means square (instant, no gradual transition)
+            out.push_str(&format!(
+                "    PT {:.12} {} 1 {} 0 1 0 \"\" 0 169 0 ABBB\n",
+                song.global_start_seconds, bpm_str, ts_encoded
+            ));
+        } else {
+            // Write all tempo points, but force the FIRST point to shape=0 (square)
+            // so there's no gradual interpolation from the previous song's tempo.
+            for (i, pt) in points.iter().enumerate() {
+                if i == 0 {
+                    // Replace shape in the first PT line to ensure it's square (0)
+                    out.push_str(&force_square_shape(&pt.line));
+                } else {
+                    out.push_str(&pt.line);
+                }
+                out.push('\n');
+            }
+        }
+
+        // Insert a square boundary point at the song's end.
+        // This freezes the tempo so it doesn't interpolate into the next song.
+        if !is_last_song {
+            let end_tempo = points
+                .last()
+                .map(|p| p.tempo.as_str())
+                .unwrap_or(&bpm_str);
+            // Shape=1 = square (instant jump, no gradual transition)
+            out.push_str(&format!(
+                "    PT {:.12} {} 1\n",
+                song_end, end_tempo
+            ));
+        }
+    }
+
+    out.push_str("  >\n");
+}
+
+/// Force a PT line's shape field to 1 (square / no gradual transition).
+///
+/// PT lines have format: `    PT <position> <tempo> <shape> [rest...]`
+/// REAPER shape values: 0=linear, 1=square, 2=slow start/end, etc.
+/// We replace the shape field with 1 (square).
+fn force_square_shape(pt_line: &str) -> String {
+    let trimmed = pt_line.trim();
+    let parts: Vec<&str> = trimmed.splitn(5, ' ').collect();
+    // parts: ["PT", position, tempo, shape, rest...]
+    if parts.len() >= 4 {
+        let rest = if parts.len() > 4 {
+            format!(" {}", parts[4])
+        } else {
+            String::new()
+        };
+        format!("    PT {} {} 1{}", parts[1], parts[2], rest)
+    } else {
+        pt_line.to_string()
+    }
+}
+
+/// Concatenate multiple RPP files by directly manipulating the raw text.
+///
+/// This preserves ALL data (FX, MIDI, envelopes, takes, sources, fades, etc.)
+/// by using the original RPP text and only patching POSITION and FILE lines.
+pub fn concatenate_rpp_files_raw(
+    rpp_paths: &[PathBuf],
+    song_infos: &[SongInfo],
+) -> String {
+    assert_eq!(rpp_paths.len(), song_infos.len());
+
+    let mut out = String::new();
+
+    // Write project header from the first project
+    let first_rpp = std::fs::read_to_string(&rpp_paths[0]).unwrap_or_default();
+
+    // Extract header (everything before first <TRACK)
+    let first_track_idx = first_rpp.find("<TRACK").unwrap_or(first_rpp.len());
+    let header = &first_rpp[..first_track_idx];
+
+    // Write header, skipping MARKER lines and the TEMPOENVEX block
+    // (we'll write our own combined versions below)
+    let mut in_tempoenvex = false;
+    let mut tempoenvex_depth = 0;
+    for line in header.lines() {
+        let trimmed = line.trim();
+
+        // Track TEMPOENVEX block depth to skip the entire block
+        if trimmed.starts_with("<TEMPOENVEX") {
+            in_tempoenvex = true;
+            tempoenvex_depth = 1;
+            continue;
+        }
+        if in_tempoenvex {
+            if trimmed.starts_with('<') {
+                tempoenvex_depth += 1;
+            }
+            if trimmed == ">" {
+                tempoenvex_depth -= 1;
+                if tempoenvex_depth == 0 {
+                    in_tempoenvex = false;
+                }
+            }
+            continue;
+        }
+
+        // Skip markers (we'll add our own)
+        if trimmed.starts_with("MARKER ") {
+            continue;
+        }
+        // Skip existing ruler lines (we'll write our own)
+        if trimmed.starts_with("RULERHEIGHT ") || trimmed.starts_with("RULERLANE ") {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    // Write combined tempo envelope from all projects
+    write_combined_tempoenvex(&mut out, rpp_paths, song_infos);
+
+    // Write ruler lane definitions
+    out.push_str("  RULERHEIGHT 120 84\n");
+    out.push_str("  RULERLANE 1 8 SECTIONS 0 -1\n");
+    out.push_str("  RULERLANE 2 0 MARKS 0 -1\n");
+    out.push_str("  RULERLANE 3 4 SONG 0 -1\n");
+    out.push_str("  RULERLANE 4 0 START/END 0 -1\n");
+    out.push_str("  RULERLANE 5 0 KEY 0 -1\n");
+    out.push_str("  RULERLANE 6 0 MODE 0 -1\n");
+    out.push_str("  RULERLANE 7 0 CHORDS 0 -1\n");
+    out.push_str("  RULERLANE 8 0 NOTES 0 -1\n");
+
+    // Process each song
+    for (song_idx, (rpp_path, song)) in rpp_paths.iter().zip(song_infos.iter()).enumerate() {
+        let rpp_text = match std::fs::read_to_string(rpp_path) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
+
+        let offset = song.global_start_seconds - song.local_start;
+        let source_dir = rpp_path.parent().unwrap_or(Path::new("."));
+
+        // Write song region marker (SONG lane = 3)
+        let song_end = song.global_start_seconds + song.duration_seconds + 0.1;
+        out.push_str(&format!("  MARKER {} {} {:?} 1 0 1 R {{}} 0 3\n",
+            song_idx * 100 + 1, song.global_start_seconds, song.name));
+        out.push_str(&format!("  MARKER {} {} \"\" 1 0 1 R {{}} 0 3\n",
+            song_idx * 100 + 1, song_end));
+
+        // Write offset markers from this project
+        for line in rpp_text.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("MARKER ") {
+                if let Some(patched) = offset_marker_line(trimmed, offset) {
+                    let lane = classify_marker_lane_from_line(trimmed);
+                    // Rewrite with lane
+                    out.push_str(&format!("  {} {}\n", patched, lane));
+                }
+            }
+        }
+
+        // Write song folder track
+        out.push_str(&format!("  <TRACK {{}}\n"));
+        out.push_str(&format!("    NAME {:?}\n", song.name));
+        out.push_str(&format!("    ISBUS 1 0\n"));
+        out.push_str(&format!("    NCHAN 2\n"));
+        out.push_str(&format!("  >\n"));
+
+        // Extract and write all TRACK blocks with offset positions and resolved paths
+        let track_blocks = extract_track_blocks(&rpp_text);
+        let total_tracks = track_blocks.len();
+
+        for (t_idx, block) in track_blocks.iter().enumerate() {
+            let patched = patch_track_block(block, offset, source_dir);
+
+            // Last track in song needs to close the song folder
+            if t_idx == total_tracks - 1 {
+                // Replace the last ISBUS line or add folder close
+                let patched = close_song_folder(&patched);
+                out.push_str(&patched);
+            } else {
+                out.push_str(&patched);
+            }
+        }
+    }
+
+    // Close the project
+    out.push_str(">\n");
+    out
+}
+
+/// Extract all <TRACK ...> ... > blocks from RPP text.
+fn extract_track_blocks(rpp: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut depth = 0;
+    let mut current_block = String::new();
+    let mut in_track = false;
+
+    for line in rpp.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("<TRACK") && depth == 1 {
+            // Top-level track (depth 1 = inside project)
+            in_track = true;
+            current_block.clear();
+            current_block.push_str(line);
+            current_block.push('\n');
+            depth += 1;
+            continue;
+        }
+
+        if trimmed.starts_with('<') && !trimmed.starts_with("<!") {
+            depth += 1;
+        }
+
+        if in_track {
+            current_block.push_str(line);
+            current_block.push('\n');
+        }
+
+        if trimmed == ">" {
+            depth -= 1;
+            if in_track && depth <= 1 {
+                blocks.push(current_block.clone());
+                current_block.clear();
+                in_track = false;
+            }
+        }
+    }
+
+    blocks
+}
+
+/// Patch a track block: offset POSITION lines, resolve FILE paths.
+/// Parse a quoted file path from a FILE line's value portion.
+///
+/// Handles `"path/to/file.wav"`, `"path/to/file.wav" 1`, and unquoted paths.
+/// Returns `(path, trailing)` where trailing is any text after the closing quote.
+fn parse_quoted_file_path(s: &str) -> Option<(String, &str)> {
+    let s = s.trim();
+    if s.starts_with('"') {
+        // Find the closing quote
+        if let Some(end) = s[1..].find('"') {
+            let path = &s[1..1 + end];
+            let trailing = s[1 + end + 1..].trim();
+            Some((path.to_string(), trailing))
+        } else {
+            // No closing quote — take everything after the opening quote
+            Some((s[1..].to_string(), ""))
+        }
+    } else {
+        // Unquoted — take the first whitespace-delimited token
+        let (path, rest) = s.split_once(char::is_whitespace).unwrap_or((s, ""));
+        Some((path.to_string(), rest.trim()))
+    }
+}
+
+fn patch_track_block(block: &str, offset: f64, source_dir: &Path) -> String {
+    let mut result = String::new();
+
+    for line in block.lines() {
+        let trimmed = line.trim();
+
+        if trimmed.starts_with("POSITION ") {
+            // Offset the position
+            if let Some(pos_str) = trimmed.strip_prefix("POSITION ") {
+                if let Ok(pos) = pos_str.trim().parse::<f64>() {
+                    let new_pos = pos + offset;
+                    if new_pos < -0.01 {
+                        // Item before song bounds — skip entire item
+                        // (we'd need to skip until matching >, but for now just set to 0)
+                    }
+                    // Preserve indentation
+                    let indent = line.len() - line.trim_start().len();
+                    result.push_str(&" ".repeat(indent));
+                    result.push_str(&format!("POSITION {}\n", new_pos));
+                    continue;
+                }
+            }
+        }
+
+        if trimmed.starts_with("FILE ") {
+            // Resolve relative paths to absolute.
+            // FILE lines can be: FILE "path" or FILE "path" 1 (with trailing flags)
+            let after_file = trimmed.strip_prefix("FILE ").unwrap_or("");
+            if let Some((file_path, trailing)) = parse_quoted_file_path(after_file) {
+                if !file_path.is_empty() && !PathBuf::from(&file_path).is_absolute() {
+                    let absolute = source_dir.join(&file_path);
+                    let indent = line.len() - line.trim_start().len();
+                    result.push_str(&" ".repeat(indent));
+                    result.push_str(&format!("FILE \"{}\"", absolute.to_string_lossy()));
+                    if !trailing.is_empty() {
+                        result.push(' ');
+                        result.push_str(trailing);
+                    }
+                    result.push('\n');
+                    continue;
+                }
+            }
+        }
+
+        result.push_str(line);
+        result.push('\n');
+    }
+
+    result
+}
+
+/// Make the last track in a song folder close the folder (ISBUS 2 -1).
+fn close_song_folder(block: &str) -> String {
+    // Find the last ISBUS line and replace it
+    let lines: Vec<&str> = block.lines().collect();
+    let mut result = String::new();
+    let mut last_isbus_idx = None;
+
+    for (i, line) in lines.iter().enumerate() {
+        if line.trim().starts_with("ISBUS ") {
+            last_isbus_idx = Some(i);
+        }
+    }
+
+    for (i, line) in lines.iter().enumerate() {
+        if Some(i) == last_isbus_idx {
+            let indent = line.len() - line.trim_start().len();
+            result.push_str(&" ".repeat(indent));
+            result.push_str("ISBUS 2 -1\n");
+        } else {
+            result.push_str(line);
+            result.push('\n');
+        }
+    }
+
+    result
+}
+
+/// Offset a MARKER line's position value.
+fn offset_marker_line(line: &str, offset: f64) -> Option<String> {
+    // MARKER id position "name" ...
+    let parts: Vec<&str> = line.splitn(4, ' ').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let pos: f64 = parts[2].parse().ok()?;
+    let new_pos = pos + offset;
+    let rest = if parts.len() > 3 { parts[3..].join(" ") } else { String::new() };
+    Some(format!("MARKER {} {} {}", parts[1], new_pos, rest))
+}
+
+/// Classify a marker line to determine its ruler lane.
+fn classify_marker_lane_from_line(line: &str) -> u32 {
+    let upper = line.to_uppercase();
+    if upper.contains("SONGSTART") || upper.contains("SONGEND") || upper.contains("COUNT-IN") || upper.contains("COUNTIN") {
+        2 // MARKS
+    } else if upper.contains("=START") || upper.contains("=END") || upper.contains("PREROLL") || upper.contains("POSTROLL") {
+        4 // START/END
+    } else if line.contains("\" 1 0") {
+        // Regions (have flag 1 after name) go to SECTIONS
+        1
+    } else {
+        0 // default
+    }
 }
 
 // ── Lane Classification ──────────────────────────────────────────────────────
@@ -877,6 +1601,8 @@ mod tests {
                     name: name.to_string(),
                     global_start_seconds: offset,
                     duration_seconds: *dur,
+                    local_start: 0.0,
+                    source_dir: None,
                 };
                 offset += dur;
                 s

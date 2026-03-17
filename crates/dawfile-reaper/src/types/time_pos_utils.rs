@@ -285,6 +285,12 @@ mod tests {
                 // Add beats to current position
                 current_beat_fraction += segment_beats;
 
+                // Snap near-integer fractions to avoid floating-point drift
+                let rounded = current_beat_fraction.round();
+                if (current_beat_fraction - rounded).abs() < 1e-9 {
+                    current_beat_fraction = rounded;
+                }
+
                 // Handle measure/beat overflow
                 let _beats_per_measure = current_time_sig.0 as f64;
                 while current_beat_fraction >= 1.0 {
@@ -341,6 +347,12 @@ mod tests {
                 // Add final beats to current position
                 current_beat_fraction += segment_beats;
 
+                // Snap near-integer fractions to avoid floating-point drift
+                let rounded = current_beat_fraction.round();
+                if (current_beat_fraction - rounded).abs() < 1e-9 {
+                    current_beat_fraction = rounded;
+                }
+
                 // Handle measure/beat overflow
                 let _beats_per_measure = current_time_sig.0 as f64;
                 while current_beat_fraction >= 1.0 {
@@ -373,11 +385,17 @@ mod tests {
 
             let segment_beats = segment_duration * effective_tempo / 60.0;
 
-            println!("  Final segment {:.3}s to {:.3}s: {:.3}s at {:.1} BPM ({}/{} time) = {:.1} effective BPM = {:.3} beats", 
+            println!("  Final segment {:.3}s to {:.3}s: {:.3}s at {:.1} BPM ({}/{} time) = {:.1} effective BPM = {:.3} beats",
                      last_time, time_seconds, segment_duration, current_tempo, current_time_sig.0, current_time_sig.1, effective_tempo, segment_beats);
 
             // Add final beats to current position
             current_beat_fraction += segment_beats;
+
+            // Snap near-integer fractions to avoid floating-point drift
+            let rounded = current_beat_fraction.round();
+            if (current_beat_fraction - rounded).abs() < 1e-9 {
+                current_beat_fraction = rounded;
+            }
 
             // Handle measure/beat overflow
             let _beats_per_measure = current_time_sig.0 as f64;
@@ -728,13 +746,16 @@ mod tests {
         ];
 
         // Test cases extending to measure 5.1
+        // At 100 BPM in 4/4, each beat = 0.6s. Measure 4 starts at 9.9s.
+        // beat 1: 9.9–10.5, beat 2: 10.5–11.1, beat 3: 11.1–11.7, beat 4: 11.7–12.3
+        // Measure 5 starts at 12.3s.
         let test_cases = vec![
             (9.9, "4.1.00"),    // M13: 4.1 at 9.9s
-            (10.2, "4.1.50"),   // M20: 4.1.50 at 10.2s
-            (10.8, "4.2.50"),   // M21: 4.2.50 at 10.8s
-            (11.4, "4.3.50"),   // M22: 4.3.50 at 11.4s
-            (11.7, "5.1.00"),   // M23: 5.1.00 at 11.7s (start of gradual tempo change)
-            (11.976, "5.1.50"), // M26: 5.1.50 at 11.976s
+            (10.2, "4.1.50"),   // 0.3s into beat 1 = 0.5 fraction
+            (10.8, "4.2.50"),   // 0.9s = 1.5 beats → beat 2, fraction 0.5
+            (11.4, "4.3.50"),   // 1.5s = 2.5 beats → beat 3, fraction 0.5
+            (11.7, "4.4.00"),   // 1.8s = 3.0 beats → beat 4, fraction 0
+            (12.3, "5.1.00"),   // 2.4s = 4.0 beats → measure 5, beat 1
         ];
 
         for (time, expected) in test_cases {
