@@ -141,18 +141,7 @@ impl ReaperMidi {
         medium: &reaper_medium::Reaper,
         location: &MidiTakeLocation,
     ) -> Option<MediaItemTake> {
-        // Ensure the correct project tab is active for item resolution
-        if let ProjectContext::Project(guid) = &location.project {
-            if let Some(raw_proj) = crate::project_context::find_project_by_guid_raw(guid) {
-                unsafe { medium.low().SelectProjectInstance(raw_proj.as_ptr()); }
-                tracing::debug!("MIDI: switched to project {}", guid);
-            } else {
-                tracing::warn!("MIDI: could not find project {}", guid);
-            }
-        }
         let project_ctx = resolve_project_context(&location.project);
-        let item_count = medium.count_media_items(project_ctx);
-        tracing::debug!("MIDI: project has {} items, looking for {:?}", item_count, location.item);
         let item = Self::resolve_item(medium, project_ctx, &location.item)?;
         Self::resolve_take(medium, item, &location.take)
     }

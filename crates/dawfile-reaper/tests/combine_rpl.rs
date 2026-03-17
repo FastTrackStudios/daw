@@ -150,6 +150,7 @@ fn combine_rpl_with_gap() {
 
     let options = dawfile_reaper::setlist_rpp::CombineOptions {
         gap_measures: 2,
+        trim_to_bounds: false,
     };
     let (_, song_infos) = dawfile_reaper::setlist_rpp::combine_rpl(
         Path::new(RPL_PATH),

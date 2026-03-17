@@ -546,7 +546,7 @@ impl ProjectService for ReaperProject {
                 }
             };
 
-            // Resolve project context
+            // Resolve project context for the command
             let proj_ctx = match resolve_project(&project) {
                 Some(p) => ProjectContext::Proj(p.raw()),
                 None => ProjectContext::CurrentProject,

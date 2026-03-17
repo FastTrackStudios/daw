@@ -24,6 +24,32 @@ use tokio::sync::broadcast;
 use tracing::{debug, info};
 
 // =============================================================================
+// Helpers
+// =============================================================================
+
+/// Extract a REAPER item's GUID as a braced string (e.g., "{XXXXXXXX-XXXX-...}")
+fn item_guid_string(medium: &reaper_medium::Reaper, item: MediaItem) -> String {
+    let guid_ptr = unsafe {
+        medium.low().GetSetMediaItemInfo(
+            item.as_ptr(),
+            b"GUID\0".as_ptr() as _,
+            std::ptr::null_mut(),
+        ) as *const reaper_low::raw::GUID
+    };
+    if !guid_ptr.is_null() {
+        let g = unsafe { &*guid_ptr };
+        format!(
+            "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+            g.Data1, g.Data2, g.Data3,
+            g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
+            g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]
+        )
+    } else {
+        format!("{:p}", item.as_ptr())
+    }
+}
+
+// =============================================================================
 // Broadcaster / Cache State
 // =============================================================================
 
@@ -588,25 +614,13 @@ impl ItemService for ReaperItem {
 
     async fn item_count(&self, project: ProjectContext, track: TrackRef) -> u32 {
         main_thread::query(move || {
-            let medium = Reaper::get().medium_reaper();
             let proj = resolve_project(&project)
-                .or_else(|| Some(Reaper::get().current_project()));
-
-            // Switch to correct project tab
-            if let Some(ref p) = proj {
-                unsafe { medium.low().SelectProjectInstance(p.raw().as_ptr()); }
-            }
-
-            let reaper_track = proj.as_ref().and_then(|p| resolve_track(p, &track));
-            let track_ptr = reaper_track.and_then(|t| t.raw().ok());
-
-            if let Some(track) = track_ptr {
-                item_sw::count_track_media_items(medium, track)
-            } else {
-                0
-            }
+                .or_else(|| Some(Reaper::get().current_project()))?;
+            let reaper_track = resolve_track(&proj, &track)?;
+            Some(reaper_track.item_count())
         })
         .await
+        .flatten()
         .unwrap_or(0)
     }
 
@@ -626,50 +640,34 @@ impl ItemService for ReaperItem {
             track, position.as_seconds(), length.as_seconds()
         );
         main_thread::query(move || {
-            let reaper = Reaper::get();
-            let medium = reaper.medium_reaper();
-
             let proj = resolve_project(&project)
-                .or_else(|| Some(reaper.current_project()))?;
+                .or_else(|| Some(Reaper::get().current_project()))?;
             let reaper_track = resolve_track(&proj, &track)?;
-            let track_ptr = reaper_track.raw().ok()?;
 
-            // Switch to the correct project tab before creating the item.
-            // CreateNewMIDIItemInProj uses the current project context.
-            let low = medium.low();
-            unsafe { low.SelectProjectInstance(proj.raw().as_ptr()); }
+            // Use reaper-high's Track::add_item() — it inherits the
+            // correct project context from the track pointer
+            let item = reaper_track.add_item().ok()?;
 
-            // Create a proper MIDI item with an active in-project MIDI take
-            let start = position.as_seconds();
-            let end = start + length.as_seconds();
-            let raw_item = unsafe {
-                low.CreateNewMIDIItemInProj(track_ptr.as_ptr(), start, end, std::ptr::null())
-            };
-            if raw_item.is_null() {
-                return None;
-            }
-            let item = unsafe { MediaItem::new(raw_item) }?;
+            // Set position and length
+            item.set_position(
+                reaper_medium::PositionInSeconds::new(position.as_seconds()).ok()?,
+                UiRefreshBehavior::NoRefresh,
+            ).ok()?;
+            item.set_length(
+                DurationInSeconds::new(length.as_seconds()).ok()?,
+                UiRefreshBehavior::NoRefresh,
+            ).ok()?;
 
-            medium.update_timeline();
+            // Add a take with MIDI source using reaper-high API
+            let take = item.add_take().ok()?;
+            let midi_source = reaper_high::OwnedSource::from_type("MIDI").ok()?;
+            take.set_source(midi_source);
 
-            // Get item GUID via low-level API (using medium.low() to avoid
-            // reaper_low::Reaper::get() which crashes the extension on load)
-            let guid_ptr = unsafe {
-                medium.low().GetSetMediaItemInfo(
-                    item.as_ptr(),
-                    b"GUID\0".as_ptr() as _,
-                    std::ptr::null_mut(),
-                ) as *const reaper_low::raw::GUID
-            };
-            if !guid_ptr.is_null() {
-                let g = unsafe { &*guid_ptr };
-                Some(format!("{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
-                    g.Data1, g.Data2, g.Data3,
-                    g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
-                    g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]))
-            } else {
-                Some(format!("{:p}", item.as_ptr()))
-            }
+            Reaper::get().medium_reaper().update_timeline();
+
+            // Get the item GUID
+            let guid = item_guid_string(Reaper::get().medium_reaper(), item.raw());
+            Some(guid)
         })
         .await
         .unwrap_or(None)

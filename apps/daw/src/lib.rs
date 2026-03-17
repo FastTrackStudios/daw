@@ -922,7 +922,10 @@ pub fn cmd_combine(input: &str, output: Option<&str>, gap_measures: u32) -> Resu
         parent.join(format!("{}.RPP", stem.to_string_lossy()))
     };
 
-    let options = CombineOptions { gap_measures };
+    let options = CombineOptions {
+        gap_measures,
+        trim_to_bounds: false,
+    };
 
     // Parse RPL or treat as single RPP
     let is_rpl = input_path

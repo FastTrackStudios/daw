@@ -74,11 +74,20 @@ pub struct CombineOptions {
     /// For example, 2 measures at 120 BPM in 4/4 = 4 seconds.
     /// Default: 0 (no gap).
     pub gap_measures: u32,
+    /// When true, trim each song to its marker-defined bounds
+    /// (PREROLL → POSTROLL / =START → =END / SONGSTART → SONGEND).
+    /// Content outside the bounds is excluded. When false, include
+    /// everything from position 0 to the last content extent.
+    /// Default: false (include everything).
+    pub trim_to_bounds: bool,
 }
 
 impl Default for CombineOptions {
     fn default() -> Self {
-        Self { gap_measures: 0 }
+        Self {
+            gap_measures: 0,
+            trim_to_bounds: false,
+        }
     }
 }
 
@@ -172,22 +181,29 @@ pub fn combine_rpp_files(
         names.push(song_name_from_path(path));
     }
 
-    // Build song infos using full content extent (local_start = 0, duration = extent)
+    // Build song infos — either trimmed to marker bounds or full extent
     let mut song_infos = Vec::with_capacity(projects.len());
     let mut offset = 0.0;
 
     for (i, (project, name)) in projects.iter().zip(names.iter()).enumerate() {
-        let extent = project_content_extent(project);
+        let (duration, local_start) = if options.trim_to_bounds {
+            // Trim to marker-defined bounds (PREROLL → POSTROLL / =START → =END / etc.)
+            let bounds = resolve_song_bounds(project);
+            (bounds.end - bounds.start, bounds.start)
+        } else {
+            // Include everything from position 0 to last content
+            (project_content_extent(project), 0.0)
+        };
 
         song_infos.push(SongInfo {
             name: name.clone(),
             global_start_seconds: offset,
-            duration_seconds: extent,
-            local_start: 0.0, // include everything from position 0
+            duration_seconds: duration,
+            local_start,
             source_dir: None,
         });
 
-        offset += extent;
+        offset += duration;
 
         // Add gap measured in the NEXT song's tempo/time signature
         if options.gap_measures > 0 && i < projects.len() - 1 {
