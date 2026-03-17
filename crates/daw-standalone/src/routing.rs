@@ -10,8 +10,8 @@ use daw_proto::{
     track::TrackRef,
 };
 use roam::Tx;
+use crate::platform::RwLock;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Internal route state
 #[derive(Clone)]
@@ -53,15 +53,21 @@ impl RouteState {
 }
 
 /// Standalone routing service implementation
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct StandaloneRouting {
     routes: Arc<RwLock<Vec<RouteState>>>,
+}
+
+impl Default for StandaloneRouting {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StandaloneRouting {
     pub fn new() -> Self {
         Self {
-            routes: Arc::new(RwLock::new(Vec::new())),
+            routes: Arc::new(RwLock::new("standalone-routing", Vec::new())),
         }
     }
 }

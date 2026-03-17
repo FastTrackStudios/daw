@@ -7,8 +7,8 @@ use daw_proto::{
     tempo_map::{TempoMapEvent, TempoMapService, TempoPoint},
 };
 use roam::Tx;
+use crate::platform::RwLock;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tracing::debug;
 
 /// Internal tempo map state
@@ -82,7 +82,7 @@ impl Default for StandaloneTempoMap {
 impl StandaloneTempoMap {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new(TempoMapState::default())),
+            state: Arc::new(RwLock::new("standalone-tempo-map-state", TempoMapState::default())),
         }
     }
 

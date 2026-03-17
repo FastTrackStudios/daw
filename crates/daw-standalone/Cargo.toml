@@ -6,11 +6,18 @@ edition = "2024"
 [dependencies]
 daw-proto = { path = "../daw-proto" }
 roam = { workspace = true }
-tokio = { workspace = true }
 tracing = { workspace = true }
 moire = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 keyflow = { workspace = true, features = ["engraver", "midi-import"] }
+web-time = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { version = "0.3", features = ["futures"] }
+async-lock = "3"
 
 [dev-dependencies]
 daw-proto = { path = "../daw-proto" }

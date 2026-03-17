@@ -9,10 +9,10 @@ use daw_proto::{
     marker::{Marker, MarkerEvent, MarkerService},
 };
 use roam::Tx;
+use crate::platform::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 /// Internal marker state per project
@@ -183,7 +183,7 @@ impl Default for StandaloneMarker {
 impl StandaloneMarker {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new(MarkerState::default())),
+            state: Arc::new(RwLock::new("standalone-marker-state", MarkerState::default())),
         }
     }
 
@@ -493,7 +493,7 @@ impl MarkerService for StandaloneMarker {
             let mut last_markers = markers;
 
             loop {
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                crate::platform::sleep(Duration::from_millis(500)).await;
 
                 // Check for marker changes
                 let current_markers = {

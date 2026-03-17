@@ -27,6 +27,7 @@ mod midi;
 mod midi_analysis;
 mod position_conversion;
 mod project;
+pub(crate) mod platform;
 mod region;
 mod resource;
 mod routing;

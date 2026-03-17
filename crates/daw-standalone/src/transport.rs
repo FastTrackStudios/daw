@@ -10,9 +10,10 @@ use daw_proto::{
 };
 use roam::Tx;
 use std::collections::HashMap;
+use crate::platform::RwLock;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
+use std::time::Duration;
+use web_time::Instant;
 use tracing::{debug, info, warn};
 
 /// Runtime state wrapping Transport with playback timing for a single project
@@ -131,6 +132,16 @@ pub struct SharedProjectState {
 }
 
 impl SharedProjectState {
+    /// Create a new shared project state
+    pub fn new(project_guids: Vec<String>) -> Self {
+        Self {
+            project_guids: Arc::new(project_guids),
+            current_index: Arc::new(RwLock::new("shared-project-current-index", 0)),
+        }
+    }
+}
+
+impl SharedProjectState {
     /// Get the GUID of the current project
     pub async fn current_guid(&self) -> Option<String> {
         let index = *self.current_index.read().await;
@@ -157,7 +168,7 @@ impl StandaloneTransport {
     /// Create a new transport with shared project state
     pub fn new(project_state: SharedProjectState) -> Self {
         Self {
-            states: Arc::new(RwLock::new(HashMap::new())),
+            states: Arc::new(RwLock::new("standalone-transport-states", HashMap::new())),
             project_state,
         }
     }
@@ -586,8 +597,10 @@ impl TransportService for StandaloneTransport {
     // Streaming
     // =========================================================================
 
-    async fn subscribe_state(&self, project: ProjectContext, tx: Tx<Transport>) {
-        let Some(guid) = self.resolve_project(&project).await else {
+    async fn subscribe_state(&self, _project: ProjectContext, _tx: Tx<Transport>) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+        let Some(guid) = self.resolve_project(&_project).await else {
             warn!("StandaloneTransport::subscribe_state - could not resolve project");
             return;
         };
@@ -599,6 +612,7 @@ impl TransportService for StandaloneTransport {
         // Clone states for the spawned task
         let states = self.states.clone();
         let guid = guid.clone();
+        let tx = _tx;
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
@@ -611,7 +625,7 @@ impl TransportService for StandaloneTransport {
                 // Sleep until next frame
                 let elapsed = last_send.elapsed();
                 if elapsed < interval {
-                    tokio::time::sleep(interval - elapsed).await;
+                    crate::platform::sleep(interval - elapsed).await;
                 }
                 last_send = Instant::now();
 
@@ -651,10 +665,9 @@ impl TransportService for StandaloneTransport {
         moire::task::spawn(async move {
             // ~16ms for 60Hz batched updates
             let interval = Duration::from_millis(16);
-            let mut ticker = tokio::time::interval(interval);
 
             loop {
-                ticker.tick().await;
+                crate::platform::sleep(interval).await;
 
                 // Get transport snapshots for all projects
                 let projects: Vec<daw_proto::ProjectTransportState> = {

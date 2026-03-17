@@ -47,6 +47,7 @@ pub mod project;
 pub mod time_pos_utils;
 pub mod time_tempo;
 pub mod track;
+pub mod track_ops;
 
 // Re-export the main types for convenience
 pub use envelope::Envelope;

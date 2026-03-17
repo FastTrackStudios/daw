@@ -9,10 +9,10 @@ use daw_proto::{
     region::{AddRegionInLaneRequest, Region, RegionEvent, RegionService},
 };
 use roam::Tx;
+use crate::platform::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 /// Section type colors (matching session-proto SectionType colors)
@@ -210,7 +210,7 @@ impl Default for StandaloneRegion {
 impl StandaloneRegion {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new(RegionState::default())),
+            state: Arc::new(RwLock::new("standalone-region-state", RegionState::default())),
         }
     }
 
@@ -471,7 +471,7 @@ impl RegionService for StandaloneRegion {
             let mut last_regions = regions;
 
             loop {
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                crate::platform::sleep(Duration::from_millis(500)).await;
 
                 // Check for region changes
                 let current_regions = {

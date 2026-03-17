@@ -9,8 +9,8 @@ use daw_proto::{
     primitives::{AutomationMode, PositionInSeconds},
     track::TrackRef,
 };
+use crate::platform::RwLock;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Internal envelope state
 #[derive(Clone)]
@@ -65,15 +65,21 @@ impl PointState {
 }
 
 /// Standalone automation service implementation
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct StandaloneAutomation {
     envelopes: Arc<RwLock<Vec<EnvelopeState>>>,
+}
+
+impl Default for StandaloneAutomation {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StandaloneAutomation {
     pub fn new() -> Self {
         Self {
-            envelopes: Arc::new(RwLock::new(Vec::new())),
+            envelopes: Arc::new(RwLock::new("standalone-automation", Vec::new())),
         }
     }
 

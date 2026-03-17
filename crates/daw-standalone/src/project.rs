@@ -5,7 +5,6 @@ use daw_proto::{ProjectEvent, ProjectInfo, ProjectService};
 use roam::Tx;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
 use tracing::{debug, info};
 
 /// Well-known project GUIDs for testing
@@ -59,10 +58,7 @@ impl StandaloneProject {
         ];
 
         let project_guids: Vec<String> = projects.iter().map(|p| p.guid.clone()).collect();
-        let shared_state = SharedProjectState {
-            project_guids: Arc::new(project_guids),
-            current_index: Arc::new(RwLock::new(0)),
-        };
+        let shared_state = SharedProjectState::new(project_guids);
 
         Self {
             projects: Arc::new(projects),
@@ -73,10 +69,7 @@ impl StandaloneProject {
     /// Create with specific projects (useful for tests)
     pub fn with_projects(projects: Vec<ProjectInfo>) -> Self {
         let project_guids: Vec<String> = projects.iter().map(|p| p.guid.clone()).collect();
-        let shared_state = SharedProjectState {
-            project_guids: Arc::new(project_guids),
-            current_index: Arc::new(RwLock::new(0)),
-        };
+        let shared_state = SharedProjectState::new(project_guids);
 
         Self {
             projects: Arc::new(projects),
@@ -291,7 +284,7 @@ impl ProjectService for StandaloneProject {
             let mut last_index = *this.shared_state.current_index.read().await;
 
             loop {
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                crate::platform::sleep(Duration::from_millis(500)).await;
 
                 // Check for current project change
                 let current_index = *this.shared_state.current_index.read().await;

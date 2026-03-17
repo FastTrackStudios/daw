@@ -1,9 +1,9 @@
 //! Standalone track implementation
 
 use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent, TrackExtStateRequest, TrackRef, TrackService};
+use crate::platform::RwLock;
 use roam::Tx;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// Internal track state for standalone implementation
@@ -81,7 +81,7 @@ impl StandaloneTrack {
         ];
 
         Self {
-            tracks: Arc::new(RwLock::new(default_tracks)),
+            tracks: Arc::new(RwLock::new("standalone-tracks", default_tracks)),
         }
     }
 

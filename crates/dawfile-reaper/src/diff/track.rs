@@ -1,4 +1,4 @@
-//! Track-level diffing — GUID-based matching with property comparison.
+//! Track-level diffing — GUID or name-based matching with property comparison.
 
 use std::collections::HashMap;
 
@@ -7,38 +7,41 @@ use super::{envelope, fx, item};
 use super::types::*;
 use super::f64_eq;
 
-/// Diff two lists of tracks, matched by `track_id` (GUID).
+/// Track identity key — either GUID or name, depending on options.
+fn track_key<'a>(track: &'a Track, by_name: bool) -> Option<&'a str> {
+    if by_name {
+        Some(track.name.as_str())
+    } else {
+        track.track_id.as_deref()
+    }
+}
+
+/// Diff two lists of tracks.
+///
+/// When `options.match_tracks_by_name` is true, tracks are matched by name
+/// instead of GUID. This is needed when diffing against a concatenated setlist
+/// where track GUIDs were cleared during generation.
 pub(crate) fn diff_tracks(old: &[Track], new: &[Track], options: &DiffOptions) -> Vec<TrackDiff> {
     let mut diffs = Vec::new();
+    let by_name = options.match_tracks_by_name;
 
+    // Build lookup maps using the appropriate key
     let old_map: HashMap<&str, &Track> = old
         .iter()
-        .filter_map(|t| t.track_id.as_deref().map(|g| (g, t)))
+        .filter_map(|t| track_key(t, by_name).map(|k| (k, t)))
         .collect();
 
     let new_map: HashMap<&str, &Track> = new
         .iter()
-        .filter_map(|t| t.track_id.as_deref().map(|g| (g, t)))
+        .filter_map(|t| track_key(t, by_name).map(|k| (k, t)))
         .collect();
 
-    // Tracks without GUIDs — match by index
-    let old_no_guid: Vec<(usize, &Track)> = old
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| t.track_id.is_none())
-        .collect();
-    let new_no_guid: Vec<(usize, &Track)> = new
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| t.track_id.is_none())
-        .collect();
-
-    // Removed or modified (GUID-matched)
-    for (&guid, &old_track) in &old_map {
-        match new_map.get(guid) {
+    // Removed or modified
+    for (&key, &old_track) in &old_map {
+        match new_map.get(key) {
             None => {
                 diffs.push(TrackDiff {
-                    guid: Some(guid.to_string()),
+                    guid: old_track.track_id.clone(),
                     name: old_track.name.clone(),
                     kind: ChangeKind::Removed,
                     property_changes: Vec::new(),
@@ -55,11 +58,11 @@ pub(crate) fn diff_tracks(old: &[Track], new: &[Track], options: &DiffOptions) -
         }
     }
 
-    // Added (GUID-matched)
-    for (&guid, &new_track) in &new_map {
-        if !old_map.contains_key(guid) {
+    // Added
+    for (&key, &new_track) in &new_map {
+        if !old_map.contains_key(key) {
             diffs.push(TrackDiff {
-                guid: Some(guid.to_string()),
+                guid: new_track.track_id.clone(),
                 name: new_track.name.clone(),
                 kind: ChangeKind::Added,
                 property_changes: Vec::new(),
@@ -70,43 +73,13 @@ pub(crate) fn diff_tracks(old: &[Track], new: &[Track], options: &DiffOptions) -
         }
     }
 
-    // No-GUID tracks by index
-    let common = old_no_guid.len().min(new_no_guid.len());
-    for i in 0..common {
-        if let Some(diff) = diff_single_track(old_no_guid[i].1, new_no_guid[i].1, options) {
-            diffs.push(diff);
-        }
-    }
-    for i in common..old_no_guid.len() {
-        diffs.push(TrackDiff {
-            guid: None,
-            name: old_no_guid[i].1.name.clone(),
-            kind: ChangeKind::Removed,
-            property_changes: Vec::new(),
-            items: Vec::new(),
-            envelopes: Vec::new(),
-            fx_chain: None,
-        });
-    }
-    for i in common..new_no_guid.len() {
-        diffs.push(TrackDiff {
-            guid: None,
-            name: new_no_guid[i].1.name.clone(),
-            kind: ChangeKind::Added,
-            property_changes: Vec::new(),
-            items: Vec::new(),
-            envelopes: Vec::new(),
-            fx_chain: None,
-        });
-    }
-
     diffs
 }
 
 fn diff_single_track(old: &Track, new: &Track, options: &DiffOptions) -> Option<TrackDiff> {
     let mut props = Vec::new();
 
-    // Compare scalar properties
+    // Compare scalar properties (skip name when matching by name — it's the key)
     macro_rules! check {
         ($field:ident) => {
             if old.$field != new.$field {
@@ -119,7 +92,9 @@ fn diff_single_track(old: &Track, new: &Track, options: &DiffOptions) -> Option<
         };
     }
 
-    check!(name);
+    if !options.match_tracks_by_name {
+        check!(name);
+    }
     check!(selected);
     check!(locked);
     check!(peak_color);

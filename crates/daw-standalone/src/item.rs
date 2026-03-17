@@ -6,9 +6,9 @@ use daw_proto::{
     primitives::{BeatAttachMode, Duration, PositionInSeconds},
     track::TrackRef,
 };
+use crate::platform::RwLock;
 use roam::Tx;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// Internal item state
@@ -138,7 +138,7 @@ impl Default for StandaloneItem {
 impl StandaloneItem {
     pub fn new() -> Self {
         Self {
-            items: Arc::new(RwLock::new(Vec::new())),
+            items: Arc::new(RwLock::new("standalone-items", Vec::new())),
         }
     }
 

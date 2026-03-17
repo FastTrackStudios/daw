@@ -7,8 +7,8 @@ use daw_proto::midi::{
 };
 use daw_proto::track::TrackRef;
 use daw_proto::{ItemRef, ProjectContext, TakeRef};
+use crate::platform::RwLock;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Internal note state
 #[derive(Clone)]
@@ -94,15 +94,21 @@ pub(crate) struct TakeMidiData {
 }
 
 /// Standalone MIDI editing service implementation
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct StandaloneMidi {
     takes: Arc<RwLock<Vec<TakeMidiData>>>,
+}
+
+impl Default for StandaloneMidi {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StandaloneMidi {
     pub fn new() -> Self {
         Self {
-            takes: Arc::new(RwLock::new(Vec::new())),
+            takes: Arc::new(RwLock::new("standalone-midi-takes", Vec::new())),
         }
     }
 

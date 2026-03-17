@@ -12,8 +12,8 @@ use keyflow::engraver::import::{
 };
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use crate::platform::RwLock;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 const DEFAULT_TRACK_NAME: &str = "CHORDS";
 const MIN_CHORD_DURATION_PPQ: i64 = 120;

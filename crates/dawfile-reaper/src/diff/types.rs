@@ -20,6 +20,14 @@ pub struct DiffOptions {
     /// "new" project's coordinate space, BEFORE offset subtraction). This lets
     /// you isolate a single song's region within a larger setlist project.
     pub time_window: Option<(f64, f64)>,
+
+    /// Match tracks by name instead of GUID. Use this when diffing against
+    /// a concatenated setlist where track GUIDs were cleared during generation.
+    pub match_tracks_by_name: bool,
+
+    /// Match items by name+position instead of GUID. Use when item GUIDs
+    /// may differ between individual song and setlist representations.
+    pub match_items_by_name: bool,
 }
 
 // ── Top-level ───────────────────────────────────────────────────────────────

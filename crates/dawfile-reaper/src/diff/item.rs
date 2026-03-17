@@ -25,27 +25,41 @@ pub(crate) fn diff_items(old: &[Item], new: &[Item], options: &DiffOptions) -> V
         }
     };
 
-    let old_map: HashMap<&str, &Item> = old
+    let by_name = options.match_items_by_name;
+    let offset = options.position_offset;
+
+    // Item key: GUID if available and not matching by name, otherwise name+offset-adjusted-position
+    let item_key = |item: &Item, apply_offset: bool| -> String {
+        if !by_name {
+            if let Some(ref guid) = item.item_guid {
+                return guid.clone();
+            }
+        }
+        let pos = if apply_offset { item.position - offset } else { item.position };
+        format!("{}@{:.3}", item.name, pos)
+    };
+
+    let old_map: HashMap<String, &Item> = old
         .iter()
-        .filter_map(|i| i.item_guid.as_deref().map(|g| (g, i)))
+        .map(|i| (item_key(i, false), i))
         .collect();
 
-    let new_map: HashMap<&str, &Item> = new
+    let new_map: HashMap<String, &Item> = new
         .iter()
         .filter(in_window)
-        .filter_map(|i| i.item_guid.as_deref().map(|g| (g, i)))
+        .map(|i| (item_key(i, true), i))
         .collect();
 
-    // Items without GUIDs — match by index as fallback
-    let old_no_guid: Vec<&Item> = old.iter().filter(|i| i.item_guid.is_none()).collect();
-    let new_no_guid: Vec<&Item> = new.iter().filter(in_window).filter(|i| i.item_guid.is_none()).collect();
+    // Remaining unmatched items (should be empty with good key generation)
+    let _old_no_match: Vec<&Item> = Vec::new();
+    let _new_no_match: Vec<&Item> = Vec::new();
 
-    // Removed or modified (GUID-matched)
-    for (&guid, &old_item) in &old_map {
-        match new_map.get(guid) {
+    // Removed or modified
+    for (key, &old_item) in &old_map {
+        match new_map.get(key) {
             None => {
                 diffs.push(ItemDiff {
-                    guid: Some(guid.to_string()),
+                    guid: old_item.item_guid.clone(),
                     name: old_item.name.clone(),
                     kind: ChangeKind::Removed,
                     property_changes: Vec::new(),
@@ -60,43 +74,17 @@ pub(crate) fn diff_items(old: &[Item], new: &[Item], options: &DiffOptions) -> V
         }
     }
 
-    // Added (GUID-matched)
-    for (&guid, &new_item) in &new_map {
-        if !old_map.contains_key(guid) {
+    // Added
+    for (key, &new_item) in &new_map {
+        if !old_map.contains_key(key) {
             diffs.push(ItemDiff {
-                guid: Some(guid.to_string()),
+                guid: new_item.item_guid.clone(),
                 name: new_item.name.clone(),
                 kind: ChangeKind::Added,
                 property_changes: Vec::new(),
                 takes: Vec::new(),
             });
         }
-    }
-
-    // No-GUID items: match by index, report extras
-    let common = old_no_guid.len().min(new_no_guid.len());
-    for i in 0..common {
-        if let Some(diff) = diff_single_item(old_no_guid[i], new_no_guid[i], options) {
-            diffs.push(diff);
-        }
-    }
-    for i in common..old_no_guid.len() {
-        diffs.push(ItemDiff {
-            guid: None,
-            name: old_no_guid[i].name.clone(),
-            kind: ChangeKind::Removed,
-            property_changes: Vec::new(),
-            takes: Vec::new(),
-        });
-    }
-    for i in common..new_no_guid.len() {
-        diffs.push(ItemDiff {
-            guid: None,
-            name: new_no_guid[i].name.clone(),
-            kind: ChangeKind::Added,
-            property_changes: Vec::new(),
-            takes: Vec::new(),
-        });
     }
 
     diffs

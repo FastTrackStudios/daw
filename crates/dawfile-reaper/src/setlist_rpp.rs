@@ -2416,4 +2416,97 @@ mod tests {
         let unique: std::collections::HashSet<_> = ids.iter().collect();
         assert_eq!(unique.len(), ids.len(), "IDs must be unique");
     }
+
+    // ── Lane classification tests ────────────────────────────────────────
+
+    #[test]
+    fn organize_lanes_raw_preserves_marker_data() {
+        // A minimal RPP with markers that have color, GUID, and flags
+        let input = r#"<REAPER_PROJECT 0.1 "7.0/generated" 0
+  TEMPO 120 4 4 0
+  RULERLANE 1 0 Default 0 -1
+  MARKER 1 0 "Intro" 1 16777215 1 R {AAAA-BBBB} 0 0
+  MARKER 1 10 "" 1 0 1 R {AAAA-BBBB} 0 0
+  MARKER 2 10 SONGSTART 0 12345 1 B {CCCC-DDDD} 0 0
+  MARKER 3 50 "=END" 0 0 1 B {EEEE-FFFF} 0 0
+  MARKER 4 0 "Belief" 1 0 1 R {} 0 3
+  MARKER 4 60 "" 1 0 1 R {} 0 3
+>"#;
+        let output = organize_marker_lanes_raw(input);
+
+        // Should have FTS ruler lanes
+        assert!(output.contains("RULERLANE 1 8 SECTIONS"), "Missing SECTIONS lane");
+        assert!(output.contains("RULERLANE 2 0 MARKS"), "Missing MARKS lane");
+        assert!(output.contains("RULERLANE 3 4 SONG"), "Missing SONG lane");
+        assert!(output.contains("RULERLANE 4 0 START/END"), "Missing START/END lane");
+
+        // Should NOT have old "Default" lane
+        assert!(!output.contains("Default"), "Old lane should be replaced");
+
+        // Intro region → SECTIONS (lane 1), preserving color and GUID
+        assert!(
+            output.contains("\"Intro\" 1 16777215 1 R {AAAA-BBBB} 0 1"),
+            "Intro should be lane 1 (SECTIONS) with original color/GUID preserved.\nGot: {}",
+            output.lines().find(|l| l.contains("Intro")).unwrap_or("NOT FOUND")
+        );
+
+        // SONGSTART → MARKS (lane 2), preserving color
+        assert!(
+            output.contains("SONGSTART 0 12345 1 B {CCCC-DDDD} 0 2"),
+            "SONGSTART should be lane 2 (MARKS) with original data.\nGot: {}",
+            output.lines().find(|l| l.contains("SONGSTART")).unwrap_or("NOT FOUND")
+        );
+
+        // =END → START/END (lane 4)
+        assert!(
+            output.contains("\"=END\" 0 0 1 B {EEEE-FFFF} 0 4"),
+            "=END should be lane 4 (START/END).\nGot: {}",
+            output.lines().find(|l| l.contains("=END")).unwrap_or("NOT FOUND")
+        );
+
+        // Song region should stay on SONG lane (3)
+        assert!(
+            output.contains("\"Belief\" 1 0 1 R {} 0 3"),
+            "Song region should stay on lane 3 (SONG).\nGot: {}",
+            output.lines().find(|l| l.contains("Belief")).unwrap_or("NOT FOUND")
+        );
+    }
+
+    #[test]
+    fn organize_lanes_raw_section_regions_go_to_sections() {
+        let input = r#"<REAPER_PROJECT 0.1 "7.0" 0
+  MARKER 1 0 "VS 1" 1 0 1 R {} 0 0
+  MARKER 1 10 "" 1 0 1 R {} 0 0
+  MARKER 2 10 "Chorus" 1 0 1 R {} 0 0
+  MARKER 2 20 "" 1 0 1 R {} 0 0
+  MARKER 3 20 "Bridge" 1 0 1 R {} 0 0
+  MARKER 3 30 "" 1 0 1 R {} 0 0
+>"#;
+        let output = organize_marker_lanes_raw(input);
+
+        // All section regions should be on lane 1
+        for name in &["VS 1", "Chorus", "Bridge"] {
+            let line = output.lines().find(|l| l.contains(name)).expect(name);
+            assert!(
+                line.ends_with(" 1"),
+                "{} should be on lane 1, got: {}", name, line
+            );
+        }
+    }
+
+    #[test]
+    fn extract_marker_name_works() {
+        assert_eq!(
+            extract_marker_name(r#"MARKER 1 0 "Intro" 1 0 1 R {} 0 1"#),
+            "Intro"
+        );
+        assert_eq!(
+            extract_marker_name("MARKER 2 10 SONGSTART 0 0 1 B {} 0 2"),
+            "SONGSTART"
+        );
+        assert_eq!(
+            extract_marker_name(r#"MARKER 1 10 "" 1"#),
+            ""
+        );
+    }
 }
