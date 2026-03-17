@@ -93,6 +93,41 @@ impl ProjectDiff {
             && !self.ruler_lanes_changed
     }
 
+    /// Returns true if the diff contains structural changes that require
+    /// a full setlist regeneration rather than incremental patching.
+    ///
+    /// Structural changes include:
+    /// - Tempo envelope changes (shifts all subsequent positions)
+    /// - Tracks added or removed (setlist folder structure changes)
+    /// - Significant item count changes on a track (measure added/removed)
+    pub fn is_structural(&self) -> bool {
+        // Tempo envelope changes affect all position calculations
+        if self.tempo_envelope.is_some() {
+            return true;
+        }
+
+        // Tracks added or removed
+        let tracks_added_or_removed = self.tracks.iter().any(|t| {
+            matches!(t.kind, ChangeKind::Added | ChangeKind::Removed)
+        });
+        if tracks_added_or_removed {
+            return true;
+        }
+
+        // Large number of item changes on any single track (likely measure insert/delete)
+        let many_item_changes = self.tracks.iter().any(|t| {
+            let item_add_remove = t.items.iter()
+                .filter(|i| matches!(i.kind, ChangeKind::Added | ChangeKind::Removed))
+                .count();
+            item_add_remove >= 3
+        });
+        if many_item_changes {
+            return true;
+        }
+
+        false
+    }
+
     /// Human-readable summary of changes.
     pub fn summary(&self) -> String {
         let mut parts = Vec::new();

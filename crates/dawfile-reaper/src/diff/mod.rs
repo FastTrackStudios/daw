@@ -149,4 +149,61 @@ mod tests {
         assert!(!diff.is_empty());
         assert!(diff.property_changes.iter().any(|p| p.field == "version"));
     }
+
+    #[test]
+    fn empty_diff_is_not_structural() {
+        let diff = ProjectDiff::default();
+        assert!(!diff.is_structural());
+    }
+
+    #[test]
+    fn tempo_change_is_structural() {
+        let diff = ProjectDiff {
+            tempo_envelope: Some(TempoEnvelopeDiff {
+                default_tempo_changed: Some((120.0, 140.0)),
+                default_time_sig_changed: None,
+                point_changes: Vec::new(),
+            }),
+            ..Default::default()
+        };
+        assert!(diff.is_structural());
+    }
+
+    #[test]
+    fn track_added_is_structural() {
+        let diff = ProjectDiff {
+            tracks: vec![TrackDiff {
+                guid: None,
+                name: "New Track".into(),
+                kind: ChangeKind::Added,
+                property_changes: Vec::new(),
+                items: Vec::new(),
+                envelopes: Vec::new(),
+                fx_chain: None,
+            }],
+            ..Default::default()
+        };
+        assert!(diff.is_structural());
+    }
+
+    #[test]
+    fn property_change_is_not_structural() {
+        let diff = ProjectDiff {
+            tracks: vec![TrackDiff {
+                guid: Some("guid".into()),
+                name: "Track".into(),
+                kind: ChangeKind::Modified,
+                property_changes: vec![PropertyChange {
+                    field: "volume".into(),
+                    old_value: "0.5".into(),
+                    new_value: "0.8".into(),
+                }],
+                items: Vec::new(),
+                envelopes: Vec::new(),
+                fx_chain: None,
+            }],
+            ..Default::default()
+        };
+        assert!(!diff.is_structural());
+    }
 }
