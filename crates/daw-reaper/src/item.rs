@@ -644,29 +644,21 @@ impl ItemService for ReaperItem {
                 .or_else(|| Some(Reaper::get().current_project()))?;
             let reaper_track = resolve_track(&proj, &track)?;
 
-            // Use reaper-high's Track::add_item() — it inherits the
-            // correct project context from the track pointer
-            let item = reaper_track.add_item().ok()?;
+            // Use CreateNewMIDIItemInProj via existing safe wrapper —
+            // creates a properly initialized MIDI item with active take
+            let low = Reaper::get().medium_reaper().low();
+            let track_ptr = reaper_track.raw().ok()?;
+            let start = position.as_seconds();
+            let end = start + length.as_seconds();
 
-            // Set position and length
-            item.set_position(
-                reaper_medium::PositionInSeconds::new(position.as_seconds()).ok()?,
-                UiRefreshBehavior::NoRefresh,
-            ).ok()?;
-            item.set_length(
-                DurationInSeconds::new(length.as_seconds()).ok()?,
-                UiRefreshBehavior::NoRefresh,
-            ).ok()?;
-
-            // Add a take with MIDI source using reaper-high API
-            let take = item.add_take().ok()?;
-            let midi_source = reaper_high::OwnedSource::from_type("MIDI").ok()?;
-            take.set_source(midi_source);
+            let item = crate::safe_wrappers::midi::create_new_midi_item(
+                low, track_ptr, start, end
+            )?;
 
             Reaper::get().medium_reaper().update_timeline();
 
             // Get the item GUID
-            let guid = item_guid_string(Reaper::get().medium_reaper(), item.raw());
+            let guid = item_guid_string(Reaper::get().medium_reaper(), item);
             Some(guid)
         })
         .await
