@@ -53,13 +53,11 @@ fn main() {
 
     for (i, track) in project.tracks.iter().enumerate() {
         println!(
-            "  [{}] {} — pos: {:.1}s, len: {:.1}s, offset: {:.1}s, file: {}",
+            "  [{}] {} — {} items, {:.1}s",
             i + 1,
             track.track_name,
-            track.position,
-            track.length,
-            track.source_offset,
-            track.source_file
+            track.item_count,
+            track.audio_duration,
         );
     }
 

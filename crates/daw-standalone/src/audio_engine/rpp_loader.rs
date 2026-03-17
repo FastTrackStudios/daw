@@ -16,22 +16,16 @@ pub struct LoadedTrack {
     pub handle: TrackHandle,
     /// Track name from RPP
     pub track_name: String,
-    /// Source audio file name (as referenced in RPP)
-    pub source_file: String,
-    /// Timeline position of this item in seconds
-    pub position: f64,
-    /// Duration of this item on the timeline in seconds
-    pub length: f64,
-    /// Source offset (where in the audio file playback starts) in seconds
-    pub source_offset: f64,
-    /// Duration of the decoded audio in seconds
+    /// Number of items merged into this track
+    pub item_count: usize,
+    /// Duration of the track's audio in seconds
     pub audio_duration: f64,
 }
 
 /// Result of loading an RPP project.
 #[derive(Debug)]
 pub struct LoadedProject {
-    /// All loaded audio tracks
+    /// All loaded audio tracks (one per RPP track that has audio)
     pub tracks: Vec<LoadedTrack>,
     /// Project sample rate from RPP
     pub sample_rate: u32,
@@ -41,19 +35,23 @@ pub struct LoadedProject {
     pub failed: Vec<(String, String)>,
 }
 
-/// Audio item extracted from RPP, before loading.
-struct RppAudioItem {
-    track_name: String,
+/// A single audio item within a track
+struct AudioItem {
     position: f64,
     length: f64,
     source_offset: f64,
-    /// The file path as written in the RPP (may be relative or absolute)
     source_file: String,
     playrate: f64,
 }
 
-/// Parse RPP text and extract audio items (no I/O).
-fn extract_audio_items(rpp_text: &str) -> Result<(Vec<RppAudioItem>, u32), String> {
+/// All audio items grouped under one RPP track
+struct TrackItems {
+    track_name: String,
+    items: Vec<AudioItem>,
+}
+
+/// Parse RPP text and extract audio items grouped by track.
+fn extract_tracks_with_items(rpp_text: &str) -> Result<(Vec<TrackItems>, u32), String> {
     let options = dawfile_reaper::types::project::DecodeOptions {
         parse_tracks: true,
         parse_project_items: false,
@@ -83,8 +81,11 @@ fn extract_audio_items(rpp_text: &str) -> Result<(Vec<RppAudioItem>, u32), Strin
         sample_rate
     );
 
-    let mut audio_items = Vec::new();
+    let mut result = Vec::new();
+
     for track in &project.tracks {
+        let mut audio_items = Vec::new();
+
         for item in &track.items {
             let take = item
                 .takes
@@ -109,12 +110,7 @@ fn extract_audio_items(rpp_text: &str) -> Result<(Vec<RppAudioItem>, u32), Strin
                 .map(|pr| pr.rate)
                 .unwrap_or(1.0);
 
-            audio_items.push(RppAudioItem {
-                track_name: if track.name.is_empty() {
-                    format!("Track {}", audio_items.len() + 1)
-                } else {
-                    track.name.clone()
-                },
+            audio_items.push(AudioItem {
                 position: item.position,
                 length: item.length,
                 source_offset: take.slip_offset,
@@ -122,10 +118,24 @@ fn extract_audio_items(rpp_text: &str) -> Result<(Vec<RppAudioItem>, u32), Strin
                 playrate,
             });
         }
+
+        if !audio_items.is_empty() {
+            let track_name = if track.name.is_empty() {
+                format!("Track {}", result.len() + 1)
+            } else {
+                track.name.clone()
+            };
+
+            result.push(TrackItems {
+                track_name,
+                items: audio_items,
+            });
+        }
     }
 
-    info!("Found {} audio items", audio_items.len());
-    Ok((audio_items, sample_rate))
+    let total_items: usize = result.iter().map(|t| t.items.len()).sum();
+    info!("Found {} audio tracks with {} total items", result.len(), total_items);
+    Ok((result, sample_rate))
 }
 
 /// Load an RPP project into the audio engine.
@@ -134,28 +144,33 @@ fn extract_audio_items(rpp_text: &str) -> Result<(Vec<RppAudioItem>, u32), Strin
 /// `resolve_audio` is called for each unique audio file path referenced in the RPP,
 /// and should return the file's raw bytes (or None if unavailable).
 ///
-/// Works on all platforms — the caller handles I/O.
+/// Items on the same RPP track are merged into a single audio buffer,
+/// giving you one mixer track per RPP track.
 pub fn load_rpp(
     engine: &AudioEngine,
     rpp_text: &str,
     mut resolve_audio: impl FnMut(&str) -> Option<Vec<u8>>,
 ) -> Result<LoadedProject, String> {
-    let (audio_items, sample_rate) = extract_audio_items(rpp_text)?;
+    let (track_items, sample_rate) = extract_tracks_with_items(rpp_text)?;
+
+    // Collect all unique audio file paths
+    let mut all_files: Vec<String> = Vec::new();
+    for ti in &track_items {
+        for item in &ti.items {
+            if !all_files.contains(&item.source_file) {
+                all_files.push(item.source_file.clone());
+            }
+        }
+    }
 
     // Decode unique audio files
     let mut decoded_cache: HashMap<String, Option<DecodedAudio>> = HashMap::new();
     let mut failed = Vec::new();
 
-    for item in &audio_items {
-        if decoded_cache.contains_key(&item.source_file) {
-            continue;
-        }
-
-        match resolve_audio(&item.source_file) {
+    for file_path in &all_files {
+        match resolve_audio(file_path) {
             Some(bytes) => {
-                // Get extension from the file path
-                let ext = item
-                    .source_file
+                let ext = file_path
                     .rsplit('.')
                     .next()
                     .unwrap_or("")
@@ -165,64 +180,121 @@ pub fn load_rpp(
                     Some(audio) => {
                         info!(
                             "Decoded: {} ({:.1}s, {} ch, {} Hz)",
-                            item.source_file,
+                            file_path,
                             audio.duration_seconds(),
                             audio.channels,
                             audio.sample_rate
                         );
-                        decoded_cache.insert(item.source_file.clone(), Some(audio));
+                        decoded_cache.insert(file_path.clone(), Some(audio));
                     }
                     None => {
-                        warn!("Failed to decode: {}", item.source_file);
-                        failed.push((
-                            item.source_file.clone(),
-                            "Decode failed".to_string(),
-                        ));
-                        decoded_cache.insert(item.source_file.clone(), None);
+                        warn!("Failed to decode: {}", file_path);
+                        failed.push((file_path.clone(), "Decode failed".to_string()));
+                        decoded_cache.insert(file_path.clone(), None);
                     }
                 }
             }
             None => {
-                warn!("Audio file not found: {}", item.source_file);
-                failed.push((item.source_file.clone(), "File not provided".to_string()));
-                decoded_cache.insert(item.source_file.clone(), None);
+                warn!("Audio file not found: {}", file_path);
+                failed.push((file_path.clone(), "File not provided".to_string()));
+                decoded_cache.insert(file_path.clone(), None);
             }
         }
     }
 
-    // Load items into the engine
+    // Build one merged audio buffer per track
     let engine_sample_rate = engine.sample_rate();
     let mut loaded_tracks = Vec::new();
     let mut max_end = 0.0f64;
 
-    for item in &audio_items {
-        let Some(Some(decoded)) = decoded_cache.get(&item.source_file) else {
+    for ti in &track_items {
+        // Find the end of the last item to determine total track length
+        let track_end = ti
+            .items
+            .iter()
+            .map(|item| item.position + item.length)
+            .fold(0.0f64, f64::max);
+
+        if track_end <= 0.0 {
             continue;
+        }
+
+        max_end = max_end.max(track_end);
+
+        // Determine output channels (from first successfully decoded source)
+        let out_channels = ti
+            .items
+            .iter()
+            .filter_map(|item| decoded_cache.get(&item.source_file)?.as_ref())
+            .map(|audio| audio.channels as usize)
+            .next()
+            .unwrap_or(2);
+
+        // Create the merged buffer for this track
+        let total_frames = (track_end * engine_sample_rate as f64) as usize;
+        let mut samples = vec![0.0f32; total_frames * out_channels];
+
+        let mut items_rendered = 0usize;
+
+        for item in &ti.items {
+            let Some(Some(decoded)) = decoded_cache.get(&item.source_file) else {
+                continue;
+            };
+
+            let silence_frames = (item.position * engine_sample_rate as f64) as usize;
+            let item_frames = (item.length * engine_sample_rate as f64) as usize;
+            let src_offset_frames =
+                (item.source_offset * decoded.sample_rate as f64) as usize;
+
+            for frame in 0..item_frames {
+                let dst_frame = silence_frames + frame;
+                if dst_frame >= total_frames {
+                    break;
+                }
+
+                let src_frame_f = src_offset_frames as f64
+                    + frame as f64 * item.playrate * decoded.sample_rate as f64
+                        / engine_sample_rate as f64;
+                let src_frame = src_frame_f as usize;
+
+                if src_frame >= decoded.frame_count() {
+                    break;
+                }
+
+                let dst_offset = dst_frame * out_channels;
+                let src_offset = src_frame * decoded.channels as usize;
+
+                for ch in 0..out_channels {
+                    let src_ch = if ch < decoded.channels as usize { ch } else { 0 };
+                    if let Some(&sample) = decoded.samples.get(src_offset + src_ch) {
+                        // Additive mix (items on the same track can overlap)
+                        samples[dst_offset + ch] += sample;
+                    }
+                }
+            }
+
+            items_rendered += 1;
+        }
+
+        if items_rendered == 0 {
+            continue;
+        }
+
+        let merged = DecodedAudio {
+            samples,
+            channels: out_channels as u16,
+            sample_rate: engine_sample_rate,
         };
 
-        let positioned = create_positioned_audio(
-            decoded,
-            item.position,
-            item.length,
-            item.source_offset,
-            item.playrate,
-            engine_sample_rate,
-        );
-
-        let audio_duration = positioned.duration_seconds();
-        let handle = engine.add_track(positioned);
+        let audio_duration = merged.duration_seconds();
+        let handle = engine.add_track(merged);
 
         loaded_tracks.push(LoadedTrack {
             handle,
-            track_name: item.track_name.clone(),
-            source_file: item.source_file.clone(),
-            position: item.position,
-            length: item.length,
-            source_offset: item.source_offset,
+            track_name: ti.track_name.clone(),
+            item_count: items_rendered,
             audio_duration,
         });
-
-        max_end = max_end.max(item.position + item.length);
     }
 
     info!(
@@ -240,64 +312,14 @@ pub fn load_rpp(
     })
 }
 
-/// Get the list of audio files referenced by an RPP project.
-///
-/// Useful for knowing which files to upload before calling `load_rpp`.
+/// Get the list of unique audio files referenced by an RPP project.
 pub fn list_audio_files(rpp_text: &str) -> Result<Vec<String>, String> {
-    let (items, _) = extract_audio_items(rpp_text)?;
-    let mut files: Vec<String> = items.iter().map(|i| i.source_file.clone()).collect();
+    let (tracks, _) = extract_tracks_with_items(rpp_text)?;
+    let mut files: Vec<String> = tracks
+        .iter()
+        .flat_map(|t| t.items.iter().map(|i| i.source_file.clone()))
+        .collect();
     files.sort();
     files.dedup();
     Ok(files)
-}
-
-/// Create a positioned audio buffer where silence fills the gap before the item
-/// starts on the timeline, then the audio plays from the source offset.
-fn create_positioned_audio(
-    source: &DecodedAudio,
-    position: f64,
-    length: f64,
-    source_offset: f64,
-    playrate: f64,
-    output_sample_rate: u32,
-) -> DecodedAudio {
-    let channels = source.channels as usize;
-    if channels == 0 {
-        return source.clone();
-    }
-
-    let silence_frames = (position * output_sample_rate as f64) as usize;
-    let item_frames = (length * output_sample_rate as f64) as usize;
-    let total_frames = silence_frames + item_frames;
-
-    let src_offset_frames =
-        (source_offset * source.sample_rate as f64) as usize;
-
-    let mut samples = vec![0.0f32; total_frames * channels];
-
-    for frame in 0..item_frames {
-        let src_frame_f = src_offset_frames as f64
-            + frame as f64 * playrate * source.sample_rate as f64 / output_sample_rate as f64;
-        let src_frame = src_frame_f as usize;
-
-        if src_frame >= source.frame_count() {
-            break;
-        }
-
-        let dst_offset = (silence_frames + frame) * channels;
-        let src_offset = src_frame * source.channels as usize;
-
-        for ch in 0..channels {
-            let src_ch = if ch < source.channels as usize { ch } else { 0 };
-            if let Some(&sample) = source.samples.get(src_offset + src_ch) {
-                samples[dst_offset + ch] = sample;
-            }
-        }
-    }
-
-    DecodedAudio {
-        samples,
-        channels: channels as u16,
-        sample_rate: output_sample_rate,
-    }
 }
