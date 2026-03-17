@@ -56,7 +56,17 @@ pub fn generate_guide_items(
 
     let tempo_env = project.tempo_envelope.as_ref();
 
-    // Find the overall song extent from the first region's count-in to the last region's end
+    // Find the COUNT-IN marker position (if any)
+    let count_in_marker = project
+        .markers_regions
+        .all
+        .iter()
+        .find(|m| {
+            let upper = m.name.to_uppercase();
+            matches!(upper.as_str(), "COUNT-IN" | "COUNT IN" | "COUNTIN")
+        });
+
+    // Find the overall song extent
     let first_region_start = regions[0].position;
     let last_region_end = regions
         .iter()
@@ -68,8 +78,10 @@ pub fn generate_guide_items(
     let first_beat_unit = 4.0 / first_denom as f64;
     let first_measure_seconds = first_beat_unit * first_num as f64 * 60.0 / first_bpm;
 
-    // Count-in starts one measure before first region
-    let song_start = (first_region_start - first_measure_seconds).max(0.0);
+    // Count-in starts at the COUNT-IN marker, or one measure before first region
+    let song_start = count_in_marker
+        .map(|m| m.position)
+        .unwrap_or_else(|| (first_region_start - first_measure_seconds).max(0.0));
 
     // ── Click: single continuous item spanning the entire song ──
     {
@@ -105,31 +117,67 @@ pub fn generate_guide_items(
     // ── Count + Guide: per-section items ──
     let mut prev_region_end = 0.0f64;
 
-    for region in &regions {
+    for (region_idx, region) in regions.iter().enumerate() {
         let section_start = region.position;
         let section_end = region.end_position.unwrap_or(section_start + 1.0);
 
         let (bpm, num, denom) =
             tempo_at_position(section_start, tempo_env, default_bpm, default_num, default_denom);
         let beat_unit = 4.0 / denom as f64;
-        let seconds_per_qn = 60.0 / bpm;
-        let measure_seconds = beat_unit * num as f64 * seconds_per_qn;
+        let beat_seconds = beat_unit * 60.0 / bpm;
+        let measure_seconds = beat_unit * num as f64 * 60.0 / bpm;
 
-        // Count-in: one measure before section, clamped to prev region end
-        let count_in_start = (section_start - measure_seconds).max(prev_region_end).max(0.0);
+        // Count-in start: use COUNT-IN marker for the first section,
+        // one measure before for subsequent sections
+        let count_in_start = if region_idx == 0 {
+            song_start
+        } else {
+            (section_start - measure_seconds).max(prev_region_end).max(0.0)
+        };
 
-        // Count item: beat numbers for the count-in measure
+        // Count item: generate count-in pattern
         if count_in_start < section_start - 0.001 {
-            let beat_seconds = seconds_per_qn * beat_unit;
+            let total_count_beats =
+                ((section_start - count_in_start) / beat_seconds).round() as u32;
+            let total_measures =
+                ((section_start - count_in_start) / measure_seconds).round() as u32;
+
             let mut notes = Vec::new();
             let mut pos = count_in_start;
-            let mut beat_num = 1u32;
+            let mut beat_in_count = 0u32;
 
-            while pos < section_start - 0.001 && beat_num <= num {
-                let midi_note = 60 + beat_num as u8;
-                notes.push((pos, midi_note, 100));
+            for _ in 0..total_count_beats {
+                let measure_idx = beat_in_count / num;
+                let beat_in_measure = (beat_in_count % num) + 1;
+                let is_last_measure = measure_idx == total_measures.saturating_sub(1);
+
+                // Count-in pattern:
+                // - Last measure: all beats (1 2 3 4)
+                // - Earlier measures: only beats 1 and 3 (1 x 2 x) for 4/4
+                //   or beats 1 and 4 for 6/8, etc.
+                let should_count = if is_last_measure {
+                    true // All beats in the final measure
+                } else {
+                    // Sparse: beat 1 and the halfway beat
+                    let halfway = (num / 2) + 1;
+                    beat_in_measure == 1 || beat_in_measure == halfway
+                };
+
+                if should_count {
+                    // Map beat number to count number for sparse measures
+                    let count_number = if is_last_measure {
+                        beat_in_measure
+                    } else if beat_in_measure == 1 {
+                        measure_idx + 1 // "1" for first sparse measure, "2" for second, etc.
+                    } else {
+                        measure_idx + 1 + total_measures // Higher number for the "x" beats
+                    };
+                    let midi_note = 60 + (count_number as u8).min(24);
+                    notes.push((pos, midi_note, 100));
+                }
+
                 pos += beat_seconds;
-                beat_num += 1;
+                beat_in_count += 1;
             }
 
             if !notes.is_empty() {
