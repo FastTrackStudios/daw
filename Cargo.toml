@@ -82,6 +82,19 @@ moire = { git = "https://github.com/bearcove/peeps", branch = "main", features =
 eyre = "0.6"
 uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 
+# ── Local development overrides ──────────────────────────────────────
+# Uncomment to use local checkouts instead of GitHub.
+#
+# [patch."https://github.com/FastTrackStudios/input_actions.git"]
+# actions-proto = { path = "../input_actions/crates/actions-proto" }
+#
+# [patch."https://github.com/FastTrackStudios/keyflow.git"]
+# keyflow = { path = "../keyflow/crates/keyflow" }
+#
+# [patch."https://github.com/FastTrackStudios/dock-dioxus.git"]
+# dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
+# dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
+
 [workspace.lints.rust]
 dead_code = "allow"
 unused = "allow"
