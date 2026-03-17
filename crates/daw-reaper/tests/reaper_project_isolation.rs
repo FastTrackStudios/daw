@@ -10,8 +10,6 @@
 //!
 //!   cargo xtask reaper-test
 
-mod daw_helpers;
-
 use reaper_test::reaper_test;
 
 // ---------------------------------------------------------------------------

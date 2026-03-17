@@ -30,11 +30,7 @@ camino = "1"
 [dev-dependencies]
 daw-control = { path = "../daw-control" }
 daw-proto = { path = "../daw-proto" }
-signal = { path = "../../../FastTrackStudio/crates/signal/signal", features = ["daw"] }
-signal-live = { path = "../../../FastTrackStudio/crates/signal/signal-live" }
-signal-proto = { path = "../../../FastTrackStudio/crates/signal/signal-proto" }
 reaper-test.workspace = true
-session-proto = { path = "../../../FastTrackStudio/crates/session/session-proto" }
 eyre.workspace = true
 serde_json = "1.0"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

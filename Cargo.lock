@@ -4019,6 +4019,7 @@ checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
 [[package]]
 name = "macromod"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#13032aa2abd75864eb3516d1eaf6a323a8bb8370"
 dependencies = [
  "facet",
  "serde",
@@ -4368,6 +4369,7 @@ dependencies = [
 [[package]]
 name = "nam-manager"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#13032aa2abd75864eb3516d1eaf6a323a8bb8370"
 dependencies = [
  "base64 0.22.1",
  "regex",
@@ -6353,6 +6355,7 @@ dependencies = [
 [[package]]
 name = "session-proto"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#13032aa2abd75864eb3516d1eaf6a323a8bb8370"
 dependencies = [
  "actions-proto",
  "daw 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
@@ -6416,6 +6419,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "signal"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#13032aa2abd75864eb3516d1eaf6a323a8bb8370"
 dependencies = [
  "daw 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
  "moire",
@@ -6433,6 +6437,7 @@ dependencies = [
 [[package]]
 name = "signal-controller"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#13032aa2abd75864eb3516d1eaf6a323a8bb8370"
 dependencies = [
  "roam",
  "signal-live",
@@ -6445,6 +6450,7 @@ dependencies = [
 [[package]]
 name = "signal-daw-bridge"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#13032aa2abd75864eb3516d1eaf6a323a8bb8370"
 dependencies = [
  "daw 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
  "serde",
@@ -6465,6 +6471,7 @@ dependencies = [
 [[package]]
 name = "signal-import"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#13032aa2abd75864eb3516d1eaf6a323a8bb8370"
 dependencies = [
  "eyre",
  "serde",
@@ -6478,6 +6485,7 @@ dependencies = [
 [[package]]
 name = "signal-live"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#13032aa2abd75864eb3516d1eaf6a323a8bb8370"
 dependencies = [
  "base64 0.22.1",
  "daw 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
@@ -6498,6 +6506,7 @@ dependencies = [
 [[package]]
 name = "signal-proto"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#13032aa2abd75864eb3516d1eaf6a323a8bb8370"
 dependencies = [
  "actions-proto",
  "facet",
@@ -6512,6 +6521,7 @@ dependencies = [
 [[package]]
 name = "signal-storage"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#13032aa2abd75864eb3516d1eaf6a323a8bb8370"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7943,6 +7953,7 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 [[package]]
 name = "utils"
 version = "0.1.0"
+source = "git+https://github.com/FastTrackStudios/FastTrackStudio.git?branch=main#13032aa2abd75864eb3516d1eaf6a323a8bb8370"
 dependencies = [
  "facet",
  "serde",
