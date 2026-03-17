@@ -33,6 +33,7 @@
 //! ```
 
 pub mod types;
+pub mod apply;
 mod envelope;
 mod fx;
 mod item;

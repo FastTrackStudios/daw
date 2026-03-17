@@ -443,7 +443,11 @@ impl RegionService for StandaloneRegion {
         }
     }
 
-    async fn subscribe(&self, project: ProjectContext, tx: Tx<RegionEvent>) {
+    async fn subscribe(&self, _project: ProjectContext, _tx: Tx<RegionEvent>) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+        let project = _project;
+        let tx = _tx;
         info!("RegionService::subscribe() - starting region stream");
 
         // Clone state for the spawned task
@@ -496,5 +500,6 @@ impl RegionService for StandaloneRegion {
 
             info!("RegionService::subscribe() - stream ended");
         });
+        } // cfg(not(wasm32))
     }
 }

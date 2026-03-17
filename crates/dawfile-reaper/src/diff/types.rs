@@ -7,6 +7,39 @@ use serde::{Deserialize, Serialize};
 
 // ── Options ─────────────────────────────────────────────────────────────────
 
+/// Options controlling how a [`ProjectDiff`] is applied to a target project.
+///
+/// The semantics assume the diff was computed as
+/// `diff_projects_with_options(song, setlist_section, diff_options)`:
+///
+/// - `Removed` in the diff means the item exists in the song but NOT in the
+///   setlist section → the applicator **inserts** it into the target (with
+///   `position_offset` added to positions).
+/// - `Added` means the item exists only in the setlist → the applicator
+///   **keeps** it (no action needed since it is already in the target).
+/// - `Modified` means the item exists in both but differs → the applicator
+///   **updates** the target copy to match the song version.
+#[derive(Debug, Clone)]
+pub struct ApplyOptions {
+    /// Offset to ADD to all positions when inserting new items from the song
+    /// into the setlist. This is the song's start time within the setlist
+    /// timeline.
+    pub position_offset: f64,
+
+    /// Match tracks by name instead of GUID (same semantics as
+    /// [`DiffOptions::match_tracks_by_name`]).
+    pub match_tracks_by_name: bool,
+}
+
+impl Default for ApplyOptions {
+    fn default() -> Self {
+        Self {
+            position_offset: 0.0,
+            match_tracks_by_name: false,
+        }
+    }
+}
+
 /// Options controlling how the diff is computed.
 #[derive(Debug, Clone, Default)]
 pub struct DiffOptions {

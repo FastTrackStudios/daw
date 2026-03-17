@@ -465,7 +465,11 @@ impl MarkerService for StandaloneMarker {
         }
     }
 
-    async fn subscribe(&self, project: ProjectContext, tx: Tx<MarkerEvent>) {
+    async fn subscribe(&self, _project: ProjectContext, _tx: Tx<MarkerEvent>) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+        let project = _project;
+        let tx = _tx;
         info!("MarkerService::subscribe() - starting marker stream");
 
         // Clone state for the spawned task
@@ -518,5 +522,6 @@ impl MarkerService for StandaloneMarker {
 
             info!("MarkerService::subscribe() - stream ended");
         });
+        } // cfg(not(wasm32))
     }
 }

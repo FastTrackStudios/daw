@@ -248,8 +248,12 @@ pub fn combine_rpp_files(
         info.source_dir = path.parent().map(|p| p.to_path_buf());
     }
 
-    let combined = concatenate_rpp_files_raw(rpp_paths, &song_infos);
-    Ok((combined, song_infos))
+    // Use the parsed pipeline for proper track organization (folder structure,
+    // guide track merging, item trimming). Then serialize to RPP text.
+    let mut combined = concatenate_projects(&projects, &song_infos);
+    organize_ruler_lanes(&mut combined);
+    let combined_text = project_to_rpp_text(&combined);
+    Ok((combined_text, song_infos))
 }
 
 /// Combine RPP files listed in an `.RPL` file into a single RPP project.
@@ -1248,19 +1252,33 @@ pub fn project_to_rpp_text(project: &ReaperProject) -> String {
     out.push_str("  RULERLANE 7 0 CHORDS 0 -1\n");
     out.push_str("  RULERLANE 8 0 NOTES 0 -1\n");
 
-    // Markers and regions
-    // The last number on each MARKER line is the ruler lane index (0 = default)
+    // Markers and regions — preserve original color, flags, GUID where available
     for mr in &project.markers_regions.all {
         let lane = mr.lane.unwrap_or(0);
+        let guid_str = if mr.guid.is_empty() {
+            "{}".to_string()
+        } else if mr.guid.starts_with('{') {
+            mr.guid.clone()
+        } else {
+            format!("{{{}}}", mr.guid)
+        };
         if mr.is_region() {
             // Region: two MARKER lines with same ID
-            out.push_str(&format!("  MARKER {} {} {:?} 1 0 1 R {{}} 0 {}\n",
-                mr.id, mr.position, mr.name, lane));
-            out.push_str(&format!("  MARKER {} {} \"\" 1 0 1 R {{}} 0 {}\n",
-                mr.id, mr.end_position.unwrap_or(mr.position), lane));
+            out.push_str(&format!(
+                "  MARKER {} {} {:?} {} {} 1 R {} {} {}\n",
+                mr.id, mr.position, mr.name, mr.flags, mr.color, guid_str, mr.additional, lane
+            ));
+            out.push_str(&format!(
+                "  MARKER {} {} \"\" {} {} 1 R {} {} {}\n",
+                mr.id,
+                mr.end_position.unwrap_or(mr.position),
+                mr.flags, mr.color, guid_str, mr.additional, lane
+            ));
         } else {
-            out.push_str(&format!("  MARKER {} {} {:?} 0 0 1 B {{}} 0 {}\n",
-                mr.id, mr.position, mr.name, lane));
+            out.push_str(&format!(
+                "  MARKER {} {} {:?} {} {} 1 B {} {} {}\n",
+                mr.id, mr.position, mr.name, mr.flags, mr.color, guid_str, mr.additional, lane
+            ));
         }
     }
 

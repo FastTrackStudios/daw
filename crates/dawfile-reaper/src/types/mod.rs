@@ -67,3 +67,7 @@ pub use time_pos_utils::{
 };
 pub use time_tempo::{TempoTimeEnvelope, TempoTimePoint};
 pub use track::{Track, TrackParseOptions};
+pub use track_ops::{
+    group_by_names, group_by_predicate, group_into_folder, move_into_existing_folder,
+    wrap_in_folder,
+};

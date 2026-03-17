@@ -246,7 +246,10 @@ impl ProjectService for StandaloneProject {
         0
     }
 
-    async fn subscribe(&self, tx: Tx<ProjectEvent>) {
+    async fn subscribe(&self, _tx: Tx<ProjectEvent>) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+        let tx = _tx;
         info!("ProjectService::subscribe() - starting project stream");
 
         // Clone self for the spawned task
@@ -304,5 +307,6 @@ impl ProjectService for StandaloneProject {
 
             info!("ProjectService::subscribe() - stream ended");
         });
+        } // cfg(not(wasm32))
     }
 }

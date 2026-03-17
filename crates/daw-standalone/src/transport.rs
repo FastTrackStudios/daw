@@ -653,9 +653,13 @@ impl TransportService for StandaloneTransport {
                 guid
             );
         });
+        } // cfg(not(wasm32))
     }
 
-    async fn subscribe_all_projects(&self, tx: Tx<daw_proto::AllProjectsTransport>) {
+    async fn subscribe_all_projects(&self, _tx: Tx<daw_proto::AllProjectsTransport>) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+        let tx = _tx;
         info!("StandaloneTransport: subscribe_all_projects - starting stream for all projects");
 
         // Clone states for the spawned task
@@ -699,5 +703,6 @@ impl TransportService for StandaloneTransport {
 
             info!("StandaloneTransport: subscribe_all_projects stream ended");
         });
+        } // cfg(not(wasm32))
     }
 }
