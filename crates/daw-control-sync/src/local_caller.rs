@@ -4,7 +4,7 @@
 //! that any in-process consumer (plugins, extensions, desktop apps) can use
 //! to get an `ErasedCaller` without duplicating the boilerplate.
 
-use roam::{DriverCaller, DriverReplySink, ErasedCaller, Handler};
+use roam::{BareConduit, DriverCaller, DriverReplySink, ErasedCaller, Handler};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
@@ -45,7 +45,7 @@ impl LocalCaller {
 
         // Server side: accept and dispatch
         let handle = tokio::spawn(async move {
-            match roam::acceptor(server_link)
+            match roam::acceptor(BareConduit::new(server_link))
                 .establish::<DriverCaller>(handler)
                 .await
             {
@@ -60,7 +60,7 @@ impl LocalCaller {
         });
 
         // Client side: get the ErasedCaller
-        let (caller, _session) = roam::initiator(client_link)
+        let (caller, _session) = roam::initiator(BareConduit::new(client_link))
             .establish::<DriverCaller>(())
             .await
             .map_err(|e| eyre::eyre!("LocalCaller initiation failed: {:?}", e))?;
