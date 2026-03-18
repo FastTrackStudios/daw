@@ -334,12 +334,27 @@ fn get_app() -> Option<&'static Fragile<App>> {
 
 /// Timer callback for periodic updates (runs on main thread ~30Hz)
 extern "C" fn timer_callback() {
-    use std::sync::atomic::AtomicU64;
+    use std::sync::atomic::{AtomicBool, AtomicU64};
     static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
+    static AUDIO_INITIALIZED: AtomicBool = AtomicBool::new(false);
     let tick = TICK_COUNT.fetch_add(1, Ordering::Relaxed);
 
     if tick == 0 {
         info!("timer_callback: first tick — timer is running");
+    }
+
+    // Log every 30 ticks (~1s) for the first 5 seconds, for CI diagnostics
+    if tick > 0 && tick <= 150 && tick % 30 == 0 {
+        info!("timer_callback: tick {tick}");
+    }
+
+    // In headless mode, REAPER's main loop goes idle without an audio engine.
+    // We must call Audio_Init() AFTER REAPER finishes its own initialization
+    // (which runs after plugin_main). Tick 5 (~150ms) is safely past that point.
+    if tick == 5 && !AUDIO_INITIALIZED.swap(true, Ordering::Relaxed) {
+        info!("timer_callback: calling Audio_Init() to activate dummy audio driver");
+        let reaper = HighReaper::get();
+        reaper.medium_reaper().low().Audio_Init();
     }
 
     // catch_unwind prevents panics from unwinding through the C ABI boundary
@@ -406,14 +421,6 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let mut session = app.session.borrow_mut();
     session.plugin_register_add_timer(timer_callback)?;
     drop(session);
-
-    // In headless mode, REAPER's main loop goes idle without an audio engine,
-    // causing the timer to stop. Calling Audio_Init() with audiodriver=2 (dummy)
-    // configured in reaper.ini keeps the main loop spinning at ~30Hz.
-    {
-        let reaper = HighReaper::get();
-        reaper.medium_reaper().low().Audio_Init();
-    }
 
     info!("daw-bridge initialized successfully");
     Ok(())
