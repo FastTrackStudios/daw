@@ -2487,12 +2487,24 @@ mod tests {
         let songs = make_songs(&[("A", 30.0), ("B", 45.0)]);
         let envelope = concatenate_tempo_envelopes(&[p1, p2], &songs);
 
-        assert_eq!(envelope.points.len(), 2);
+        // Song A: leading at 0.0 (120bpm) + trailing at 30.0 (120bpm)
+        // Song B: leading at 30.0 (90bpm) + trailing at 75.0 (90bpm)
+        assert_eq!(envelope.points.len(), 4);
         assert_eq!(envelope.points[0].position, 0.0);
         assert_eq!(envelope.points[0].tempo, 120.0);
         assert_eq!(envelope.points[1].position, 30.0);
-        assert_eq!(envelope.points[1].tempo, 90.0);
-        assert_eq!(envelope.points[1].shape, 1, "Boundary should be square");
+        assert_eq!(
+            envelope.points[1].tempo, 120.0,
+            "Trailing marker freezes song A tempo"
+        );
+        assert_eq!(envelope.points[2].position, 30.0);
+        assert_eq!(envelope.points[2].tempo, 90.0);
+        assert_eq!(envelope.points[2].shape, 1, "Boundary should be square");
+        assert_eq!(envelope.points[3].position, 75.0);
+        assert_eq!(
+            envelope.points[3].tempo, 90.0,
+            "Trailing marker freezes song B tempo"
+        );
     }
 
     #[test]
