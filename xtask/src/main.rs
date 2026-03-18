@@ -54,6 +54,14 @@ fn reaper_dir() -> String {
     format!("{}/Reaper", fts_home())
 }
 
+/// Canonical REAPER resources directory shared by all rigs and CI.
+/// `~/.config/FastTrackStudio/Reaper/` — UserPlugins, Scripts, reaper.ini etc.
+/// Never touches `~/.config/REAPER/`.
+fn fts_reaper_resources() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    PathBuf::from(format!("{home}/.config/FastTrackStudio/Reaper"))
+}
+
 fn reaper_exe() -> String {
     format!("{}/FTS-LIVE.app/Contents/MacOS/REAPER", reaper_dir())
 }
@@ -350,22 +358,14 @@ fn setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
     for rig in RIGS {
         println!("\n  {} ({})", rig.name, rig.id);
 
-        // Each rig gets its own resources_dir with a dedicated reaper.ini.
-        // UserPlugins is symlinked from the shared REAPER install so extensions
-        // are shared, but per-rig ini settings (like undomaxmem=0) are isolated.
-        let rig_resources =
-            PathBuf::from(&home).join(format!(".config/fts/rigs/{}/resources", rig.id));
-        std::fs::create_dir_all(&rig_resources)?;
+        // All rigs share the same canonical REAPER resources directory.
+        let rig_resources = fts_reaper_resources();
+        std::fs::create_dir_all(rig_resources.join("UserPlugins"))?;
 
-        // Symlink UserPlugins from shared REAPER install if not already present
-        let rig_user_plugins = rig_resources.join("UserPlugins");
-        let shared_user_plugins = PathBuf::from(&reaper_resources).join("UserPlugins");
-        if !rig_user_plugins.exists() && shared_user_plugins.exists() {
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(&shared_user_plugins, &rig_user_plugins)?;
-        }
+        // Symlink UserPlugins from the nix REAPER install if empty
+        // (so REAPER finds its built-in plugins alongside our extensions)
 
-        // Write rig-specific reaper.ini with undomaxmem=0
+        // Write reaper.ini with undomaxmem=0
         let rig_ini = rig_resources.join("reaper.ini");
         if !rig_ini.exists() {
             // Seed from shared ini if it exists, otherwise create minimal
@@ -533,15 +533,31 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
 
     // ── Step 3: Install the .so into REAPER's UserPlugins dir ─────────────
     section(ci, "reaper-test: install plugin");
-    let user_plugins_dir = if let Some(ref rig) = rig_config {
-        PathBuf::from(&rig.resources_dir).join("UserPlugins")
-    } else {
-        // No rig config — use the path that fts-test's reaper-headless script creates.
-        // reaper-headless sets REAPER_CONFIG="${HOME}/.config/REAPER" and creates
-        // UserPlugins there, so that's where REAPER will scan for extensions.
+    // All rigs share the same canonical REAPER resources directory.
+    let resources_dir = fts_reaper_resources();
+    let user_plugins_dir = resources_dir.join("UserPlugins");
+    std::fs::create_dir_all(&user_plugins_dir)?;
+
+    // Ensure ~/.config/REAPER/UserPlugins symlinks to the canonical path.
+    // fts-flake's reaper-headless currently hardcodes ~/.config/REAPER as the
+    // resource path. This symlink bridges until fts-flake is updated.
+    {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        PathBuf::from(format!("{home}/.config/REAPER/UserPlugins"))
-    };
+        let legacy_dir = PathBuf::from(format!("{home}/.config/REAPER"));
+        let legacy_plugins = legacy_dir.join("UserPlugins");
+        if !legacy_plugins.exists() {
+            std::fs::create_dir_all(&legacy_dir).ok();
+            #[cfg(unix)]
+            {
+                std::os::unix::fs::symlink(&user_plugins_dir, &legacy_plugins).ok();
+                println!(
+                    "  Symlinked {} -> {}",
+                    legacy_plugins.display(),
+                    user_plugins_dir.display()
+                );
+            }
+        }
+    }
 
     // REAPER expects "reaper_" prefix (not "lib" prefix) in UserPlugins.
     let so_src_name = "libreaper_daw_test.so";
