@@ -629,13 +629,13 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         std::fs::write(&reaper_ini, "[reaper]\n")?;
     }
 
-    // Audio configuration: REAPER connects to PipeWire's JACK interface,
-    // which the headless wrapper starts automatically if no daemon is running.
-    // Override driver with FTS_AUDIO_DRIVER env var (0=ALSA, 1=JACK, 2=dummy, 3=Pulse).
-    if let Ok(audio_driver) = std::env::var("FTS_AUDIO_DRIVER") {
+    // Audio: default to JACK (1) since PipeWire provides a JACK interface.
+    // Override with FTS_AUDIO_DRIVER env var (0=ALSA, 1=JACK, 2=dummy, 3=Pulse).
+    {
+        let audio_driver = std::env::var("FTS_AUDIO_DRIVER").unwrap_or_else(|_| "1".into());
         let ini = reaper_launcher::ReaperIni::new(&reaper_ini);
         let _ = ini.set("audiodriver", &audio_driver);
-        println!("  audiodriver: {audio_driver} (from FTS_AUDIO_DRIVER)");
+        println!("  audiodriver: {audio_driver}");
     }
     let reaper_args: Vec<String> = vec![
         "-cfgfile".into(),
