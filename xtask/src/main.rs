@@ -376,14 +376,14 @@ fn setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
             if PathBuf::from(&ini_path).exists() {
                 std::fs::copy(&ini_path, &rig_ini)?;
             } else {
-                std::fs::write(&rig_ini, "[REAPER]\n")?;
+                std::fs::write(&rig_ini, "[reaper]\n")?;
             }
         }
         // Patch undomaxmem=0 into rig ini
         {
             let content = std::fs::read_to_string(&rig_ini)?;
             if !content.contains("undomaxmem=") {
-                let patched = content.replace("[REAPER]\n", "[REAPER]\nundomaxmem=0\n");
+                let patched = content.replace("[reaper]\n", "[reaper]\nundomaxmem=0\n");
                 std::fs::write(&rig_ini, patched)?;
             } else {
                 // Update existing value
@@ -623,20 +623,23 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     let fts_test = find_fts_test();
     let needs_fhs = std::env::var("DISPLAY").map_or(true, |d| d.is_empty());
 
-    // Build REAPER CLI args: point it at our isolated config dir via -cfgfile
+    // Build REAPER CLI args.
+    // The reaper.ini is created by fts-flake's reaper-headless on first run.
+    // If it already exists, we can patch specific settings on top of it.
+    // If it doesn't exist yet, reaper-headless will create it with proper
+    // defaults (audiodriver=1, etc.) before REAPER starts.
     let reaper_ini = resources_dir.join("reaper.ini");
-    if !reaper_ini.exists() {
-        std::fs::write(&reaper_ini, "[REAPER]\n")?;
+    if reaper_ini.exists() {
+        // Patch audio driver if explicitly requested via environment
+        if let Ok(audio_driver) = std::env::var("FTS_AUDIO_DRIVER") {
+            let ini = reaper_launcher::ReaperIni::new(&reaper_ini);
+            let _ = ini.set("audiodriver", &audio_driver);
+            println!("  audiodriver: {audio_driver} (from FTS_AUDIO_DRIVER)");
+        }
+    } else {
+        println!("  reaper.ini not yet created — reaper-headless will write defaults");
     }
 
-    // Audio: let REAPER auto-detect the audio driver. PipeWire provides a
-    // JACK interface which REAPER finds automatically. Override with
-    // FTS_AUDIO_DRIVER env var if needed.
-    if let Ok(audio_driver) = std::env::var("FTS_AUDIO_DRIVER") {
-        let ini = reaper_launcher::ReaperIni::new(&reaper_ini);
-        let _ = ini.set("audiodriver", &audio_driver);
-        println!("  audiodriver: {audio_driver} (from FTS_AUDIO_DRIVER)");
-    }
     let reaper_args: Vec<String> = vec![
         "-cfgfile".into(),
         reaper_ini.to_string_lossy().into_owned(),
@@ -650,6 +653,7 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         println!("  launcher:    {launcher}");
     }
     println!("  config dir:  {}", resources_dir.display());
+    println!("  ini:         {}", reaper_ini.display());
     println!("  needs fhs:   {needs_fhs}");
     if let Some(ref fts) = fts_test {
         println!("  fts-test:    {fts}");

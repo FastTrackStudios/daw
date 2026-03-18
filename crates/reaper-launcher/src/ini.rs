@@ -1,6 +1,6 @@
 //! Low-level reaper.ini reader/writer.
 //!
-//! REAPER's ini format is a simple `key=value` per line under `[REAPER]`.
+//! REAPER's ini format is a simple `key=value` per line under `[reaper]`.
 //! This module handles reading, patching, and restoring individual keys
 //! without disturbing the rest of the file.
 
@@ -40,7 +40,7 @@ impl ReaperIni {
     }
 
     /// Set a key to a new value. If the key exists, its value is replaced.
-    /// If it doesn't exist, it's appended under the `[REAPER]` section.
+    /// If it doesn't exist, it's appended under the `[reaper]` section.
     /// Returns the previous value (if any).
     pub fn set(&self, key: &str, value: &str) -> std::io::Result<Option<String>> {
         let content = std::fs::read_to_string(&self.path)?;
@@ -60,12 +60,12 @@ impl ReaperIni {
         }
 
         if !found {
-            // Insert after [REAPER] header, or at end
+            // Insert after [reaper] header, or at end
             let mut inserted = false;
             let mut result: Vec<String> = Vec::new();
             for line in &lines {
                 result.push(line.clone());
-                if !inserted && line.trim() == "[REAPER]" {
+                if !inserted && line.trim() == "[reaper]" {
                     result.push(format!("{key}={value}"));
                     inserted = true;
                 }
