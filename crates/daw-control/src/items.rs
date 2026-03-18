@@ -140,12 +140,7 @@ impl Items {
         let location = self
             .clients
             .midi
-            .create_midi_item(
-                self.context(),
-                self.track_ref(),
-                start_seconds,
-                end_seconds,
-            )
+            .create_midi_item(self.context(), self.track_ref(), start_seconds, end_seconds)
             .await?;
 
         let Some(location) = location else {
@@ -154,10 +149,7 @@ impl Items {
 
         // Add notes
         if !notes.is_empty() {
-            self.clients
-                .midi
-                .add_notes(location.clone(), notes)
-                .await?;
+            self.clients.midi.add_notes(location.clone(), notes).await?;
         }
 
         // Return handle to the created item

@@ -143,14 +143,14 @@ pub fn start_shm_host(handler: DawConnectionAcceptor) -> Option<String> {
         bootstrap_path.display()
     );
 
-    moire::task::spawn(async move {
+    tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
                     info!("SHM bootstrap connection received");
                     let state = Arc::clone(&state);
                     let acceptor = handler.clone();
-                    moire::task::spawn(async move {
+                    tokio::spawn(async move {
                         if let Err(e) = handle_bootstrap_connection(stream, &state, acceptor).await
                         {
                             warn!("SHM bootstrap failed: {}", e);

@@ -1103,7 +1103,7 @@ impl TrackService for ReaperTrack {
             return;
         };
 
-        moire::task::spawn(async move {
+        tokio::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(event) => {

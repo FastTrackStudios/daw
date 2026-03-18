@@ -138,7 +138,7 @@ impl ConnectionAcceptor for DawConnectionAcceptor {
             metadata: vec![],
             setup: Box::new(move |handle: ConnectionHandle| {
                 let mut driver = Driver::new(handle, handler.as_ref().clone());
-                moire::task::spawn(async move {
+                tokio::spawn(async move {
                     driver.run().await;
                 });
             }),

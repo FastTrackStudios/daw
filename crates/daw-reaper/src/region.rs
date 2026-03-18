@@ -357,7 +357,7 @@ impl RegionService for ReaperRegion {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        moire::task::spawn(async move {
+        tokio::spawn(async move {
             // Send initial state
             let regions = this.get_regions(project.clone()).await;
             if tx

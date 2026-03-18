@@ -45,7 +45,7 @@ impl<H: Handler<DriverReplySink> + Clone + 'static> ConnectionAcceptor for Local
             metadata: vec![],
             setup: Box::new(move |handle: ConnectionHandle| {
                 let mut driver = Driver::new(handle, handler.as_ref().clone());
-                moire::task::spawn(async move { driver.run().await });
+                tokio::spawn(async move { driver.run().await });
             }),
         })
     }
@@ -127,7 +127,7 @@ impl LocalCaller {
 
         let mut driver = Driver::new(conn, ());
         let caller = ErasedCaller::new(driver.caller());
-        moire::task::spawn(async move { driver.run().await });
+        tokio::spawn(async move { driver.run().await });
 
         debug!("LocalCaller established (in-process memory channels, virtual connection)");
 

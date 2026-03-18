@@ -3356,7 +3356,7 @@ impl FxService for ReaperFx {
 
         // Spawn a forwarding loop that filters events for this specific chain
         let target_context = context;
-        moire::task::spawn(async move {
+        tokio::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(event) => {

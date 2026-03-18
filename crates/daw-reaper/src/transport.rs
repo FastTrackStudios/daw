@@ -849,7 +849,7 @@ impl TransportService for ReaperTransport {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        moire::task::spawn(async move {
+        tokio::spawn(async move {
             loop {
                 // Wait for the next state update from the broadcaster
                 match rx.recv().await {
@@ -894,7 +894,7 @@ impl TransportService for ReaperTransport {
         };
 
         // Spawn the streaming loop so this method returns immediately
-        moire::task::spawn(async move {
+        tokio::spawn(async move {
             // Buffer to collect updates within a small window
             // This batches multiple project updates into a single message
             let mut pending_updates: HashMap<String, Transport> = HashMap::new();
