@@ -553,7 +553,10 @@ async fn discover_socket() -> Result<PathBuf> {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("fts-daw-") && name.ends_with(".sock") {
+                    if name.starts_with("fts-daw-")
+                        && name.ends_with(".sock")
+                        && !name.contains(".bootstrap.")
+                    {
                         // Verify the socket is connectable (not stale)
                         if tokio::net::UnixStream::connect(&path).await.is_ok() {
                             return Ok(path);
