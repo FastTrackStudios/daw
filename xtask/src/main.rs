@@ -629,10 +629,11 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         std::fs::write(&reaper_ini, "[reaper]\n")?;
     }
 
-    // Configure dummy audio driver in headless mode to keep REAPER's main loop
-    // active. Without an audio engine, the timer callback stops firing after
-    // ~10 ticks. audiodriver=2 is REAPER's built-in dummy audio streamer.
-    if needs_fhs {
+    // Configure dummy audio driver to keep REAPER's main loop active.
+    // Without an audio engine, the timer callback stops after ~10 ticks.
+    // audiodriver=2 is REAPER's built-in dummy audio streamer.
+    // This applies even with Xvfb — a display alone isn't enough.
+    {
         let audio_driver = std::env::var("FTS_AUDIO_DRIVER").unwrap_or_else(|_| "2".into());
         let ini = reaper_launcher::ReaperIni::new(&reaper_ini);
         let _ = ini.set("audiodriver", &audio_driver);
