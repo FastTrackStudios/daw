@@ -17,7 +17,6 @@ use std::cell::RefCell;
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::sync::atomic::Ordering;
 use tokio::net::UnixListener;
 use tracing::{debug, info, warn};
 
@@ -334,34 +333,6 @@ fn get_app() -> Option<&'static Fragile<App>> {
 
 /// Timer callback for periodic updates (runs on main thread ~30Hz)
 extern "C" fn timer_callback() {
-    use std::sync::atomic::{AtomicBool, AtomicU64};
-    static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
-    static AUDIO_INITIALIZED: AtomicBool = AtomicBool::new(false);
-    let tick = TICK_COUNT.fetch_add(1, Ordering::Relaxed);
-
-    if tick == 0 {
-        info!("timer_callback: first tick — timer is running");
-    }
-
-    // Log every 30 ticks (~1s) for the first 5 seconds, for CI diagnostics
-    if tick > 0 && tick <= 150 && tick % 30 == 0 {
-        info!("timer_callback: tick {tick}");
-    }
-
-    // In headless mode, REAPER's main loop goes idle without an audio engine.
-    // We must call Audio_Init() AFTER REAPER finishes its own initialization
-    // (which runs after plugin_main). Tick 5 (~150ms) is safely past that point.
-    // Audio_IsRunning() may return false even with dummy driver, so we also
-    // retry a few times if it doesn't stick.
-    if tick == 5 && !AUDIO_INITIALIZED.load(Ordering::Relaxed) {
-        AUDIO_INITIALIZED.store(true, Ordering::Relaxed);
-        let reaper = HighReaper::get();
-        let low = reaper.medium_reaper().low();
-        low.Audio_Init();
-        let running = low.Audio_IsRunning() != 0;
-        info!("timer_callback: Audio_Init() called, Audio_IsRunning={running}");
-    }
-
     // catch_unwind prevents panics from unwinding through the C ABI boundary
     // (which is UB). Any panic inside is logged and the timer keeps running.
     let result = std::panic::catch_unwind(|| {

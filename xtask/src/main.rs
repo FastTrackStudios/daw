@@ -629,38 +629,13 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         std::fs::write(&reaper_ini, "[reaper]\n")?;
     }
 
-    // Configure audio to keep REAPER's main loop active in headless mode.
-    // Without an active audio engine, the timer callback stops after ~10 ticks.
-    //
-    // Three settings work together:
-    //   audiodriver=0    → use ALSA (with null PCM device if no real hardware)
-    //   audioclosestop=0 → don't close audio device when transport is stopped
-    //   audiocloseinactive=0 → don't close audio when app is "inactive" (no GUI)
-    //
+    // Audio configuration: REAPER connects to PipeWire's JACK interface,
+    // which the headless wrapper starts automatically if no daemon is running.
     // Override driver with FTS_AUDIO_DRIVER env var (0=ALSA, 1=JACK, 2=dummy, 3=Pulse).
-    {
-        let audio_driver = std::env::var("FTS_AUDIO_DRIVER").unwrap_or_else(|_| "0".into());
+    if let Ok(audio_driver) = std::env::var("FTS_AUDIO_DRIVER") {
         let ini = reaper_launcher::ReaperIni::new(&reaper_ini);
         let _ = ini.set("audiodriver", &audio_driver);
-        // Prevent REAPER from closing the audio device when stopped or inactive.
-        // In headless mode, the app is always "inactive" (no GUI) and the
-        // transport is stopped, so both of these would kill the audio engine.
-        let _ = ini.set("audioclosestop", "0");
-        let _ = ini.set("audiocloseinactive", "0");
-        println!("  audiodriver: {audio_driver}, audioclosestop=0, audiocloseinactive=0");
-
-        // Ensure ALSA has a usable device even without real hardware.
-        // The ALSA null PCM plugin silently discards audio — no kernel
-        // module required, built into alsa-lib.
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-        let asoundrc = PathBuf::from(&home).join(".asoundrc");
-        if !asoundrc.exists() {
-            std::fs::write(
-                &asoundrc,
-                "pcm.!default { type null }\nctl.!default { type null }\n",
-            )?;
-            println!("  created {} with null PCM device", asoundrc.display());
-        }
+        println!("  audiodriver: {audio_driver} (from FTS_AUDIO_DRIVER)");
     }
     let reaper_args: Vec<String> = vec![
         "-cfgfile".into(),
