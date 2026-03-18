@@ -338,11 +338,8 @@ extern "C" fn timer_callback() {
     static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
     let tick = TICK_COUNT.fetch_add(1, Ordering::Relaxed);
 
-    // Log first tick and then every ~3 seconds (every 100 ticks at ~30Hz)
     if tick == 0 {
         info!("timer_callback: first tick — timer is running");
-    } else if tick % 100 == 0 {
-        info!("timer_callback: tick {tick} — still running");
     }
 
     // catch_unwind prevents panics from unwinding through the C ABI boundary
@@ -409,6 +406,14 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let mut session = app.session.borrow_mut();
     session.plugin_register_add_timer(timer_callback)?;
     drop(session);
+
+    // In headless mode, REAPER's main loop goes idle without an audio engine,
+    // causing the timer to stop. Calling Audio_Init() with audiodriver=2 (dummy)
+    // configured in reaper.ini keeps the main loop spinning at ~30Hz.
+    {
+        let reaper = HighReaper::get();
+        reaper.medium_reaper().low().Audio_Init();
+    }
 
     info!("daw-bridge initialized successfully");
     Ok(())

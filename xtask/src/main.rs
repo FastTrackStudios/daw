@@ -616,6 +616,10 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         .or_else(|_| which_command("reaper").ok_or(()))
         .unwrap_or_else(|_| "reaper".to_string());
 
+    // Optional launcher prefix (e.g. "pw-jack") set by reaper-headless
+    // when PipeWire is available, so REAPER connects via PipeWire JACK.
+    let reaper_launcher = std::env::var("FTS_REAPER_LAUNCHER").ok();
+
     let fts_test = find_fts_test();
     let needs_fhs = std::env::var("DISPLAY").map_or(true, |d| d.is_empty());
 
@@ -623,6 +627,16 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     let reaper_ini = resources_dir.join("reaper.ini");
     if !reaper_ini.exists() {
         std::fs::write(&reaper_ini, "[reaper]\n")?;
+    }
+
+    // Configure dummy audio driver in headless mode to keep REAPER's main loop
+    // active. Without an audio engine, the timer callback stops firing after
+    // ~10 ticks. audiodriver=2 is REAPER's built-in dummy audio streamer.
+    if needs_fhs {
+        let audio_driver = std::env::var("FTS_AUDIO_DRIVER").unwrap_or_else(|_| "2".into());
+        let ini = reaper_launcher::ReaperIni::new(&reaper_ini);
+        let _ = ini.set("audiodriver", &audio_driver);
+        println!("  audiodriver: {audio_driver} (dummy)");
     }
     let reaper_args: Vec<String> = vec![
         "-cfgfile".into(),
@@ -633,6 +647,9 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     ];
 
     println!("  exe:         {reaper_exe}");
+    if let Some(ref launcher) = reaper_launcher {
+        println!("  launcher:    {launcher}");
+    }
     println!("  config dir:  {}", resources_dir.display());
     println!("  needs fhs:   {needs_fhs}");
     if let Some(ref fts) = fts_test {
@@ -650,31 +667,53 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         .map_err(|e| format!("Failed to create REAPER log {}: {e}", reaper_log.display()))?;
     let reaper_log_stderr = reaper_log_file.try_clone()?;
 
+    // Build the REAPER command, optionally prefixed with a launcher (e.g. pw-jack)
+    let effective_exe: String;
+    let mut extra_prefix_args: Vec<String> = Vec::new();
+    if let Some(ref launcher) = reaper_launcher {
+        effective_exe = launcher.clone();
+        extra_prefix_args.push(reaper_exe.clone());
+    } else {
+        effective_exe = reaper_exe.clone();
+    }
+
     let mut reaper_child = if needs_fhs {
         if let Some(ref fts) = fts_test {
             let mut cmd = Command::new(fts);
-            cmd.arg(&reaper_exe);
-            cmd.args(&reaper_args);
-            cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
-            println!("  spawning: {fts} {reaper_exe} {}", reaper_args.join(" "));
-            cmd.spawn()
-                .map_err(|e| format!("Failed to spawn via fts-test: {e}"))?
-        } else {
-            let mut cmd = Command::new(&reaper_exe);
+            cmd.arg(&effective_exe);
+            cmd.args(&extra_prefix_args);
             cmd.args(&reaper_args);
             cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
             println!(
-                "  spawning: {reaper_exe} {} (no fhs wrapper)",
+                "  spawning: {fts} {effective_exe} {} {}",
+                extra_prefix_args.join(" "),
+                reaper_args.join(" ")
+            );
+            cmd.spawn()
+                .map_err(|e| format!("Failed to spawn via fts-test: {e}"))?
+        } else {
+            let mut cmd = Command::new(&effective_exe);
+            cmd.args(&extra_prefix_args);
+            cmd.args(&reaper_args);
+            cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
+            println!(
+                "  spawning: {effective_exe} {} {} (no fhs wrapper)",
+                extra_prefix_args.join(" "),
                 reaper_args.join(" ")
             );
             cmd.spawn()
                 .map_err(|e| format!("Failed to spawn REAPER: {e}"))?
         }
     } else {
-        let mut cmd = Command::new(&reaper_exe);
+        let mut cmd = Command::new(&effective_exe);
+        cmd.args(&extra_prefix_args);
         cmd.args(&reaper_args);
         cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
-        println!("  spawning: {reaper_exe} {}", reaper_args.join(" "));
+        println!(
+            "  spawning: {effective_exe} {} {}",
+            extra_prefix_args.join(" "),
+            reaper_args.join(" ")
+        );
         cmd.spawn()
             .map_err(|e| format!("Failed to spawn REAPER: {e}"))?
     };
