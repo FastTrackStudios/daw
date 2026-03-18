@@ -351,10 +351,15 @@ extern "C" fn timer_callback() {
     // In headless mode, REAPER's main loop goes idle without an audio engine.
     // We must call Audio_Init() AFTER REAPER finishes its own initialization
     // (which runs after plugin_main). Tick 5 (~150ms) is safely past that point.
-    if tick == 5 && !AUDIO_INITIALIZED.swap(true, Ordering::Relaxed) {
-        info!("timer_callback: calling Audio_Init() to activate dummy audio driver");
+    // Audio_IsRunning() may return false even with dummy driver, so we also
+    // retry a few times if it doesn't stick.
+    if tick == 5 && !AUDIO_INITIALIZED.load(Ordering::Relaxed) {
+        AUDIO_INITIALIZED.store(true, Ordering::Relaxed);
         let reaper = HighReaper::get();
-        reaper.medium_reaper().low().Audio_Init();
+        let low = reaper.medium_reaper().low();
+        low.Audio_Init();
+        let running = low.Audio_IsRunning() != 0;
+        info!("timer_callback: Audio_Init() called, Audio_IsRunning={running}");
     }
 
     // catch_unwind prevents panics from unwinding through the C ABI boundary
