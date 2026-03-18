@@ -867,7 +867,10 @@ fn find_fts_daw_socket() -> Option<String> {
     for entry in entries.flatten() {
         let path = entry.path();
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with("fts-daw-") && name.ends_with(".sock") {
+            if name.starts_with("fts-daw-")
+                && name.ends_with(".sock")
+                && !name.contains(".bootstrap.")
+            {
                 return Some(path.to_string_lossy().into_owned());
             }
         }

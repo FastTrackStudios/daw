@@ -17,6 +17,7 @@ use std::cell::RefCell;
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::net::UnixListener;
 use tracing::{debug, info, warn};
 
@@ -333,19 +334,31 @@ fn get_app() -> Option<&'static Fragile<App>> {
 
 /// Timer callback for periodic updates (runs on main thread ~30Hz)
 extern "C" fn timer_callback() {
-    if let Some(app_fragile) = get_app() {
-        let app = app_fragile.get();
+    static TIMER_LOGGED: AtomicBool = AtomicBool::new(false);
+    if !TIMER_LOGGED.swap(true, Ordering::Relaxed) {
+        info!("timer_callback: first tick — timer is running");
+    }
 
-        // Process main-thread task queue
-        app.process_tasks();
+    // catch_unwind prevents panics from unwinding through the C ABI boundary
+    // (which is UB). Any panic inside is logged and the timer keeps running.
+    let result = std::panic::catch_unwind(|| {
+        if let Some(app_fragile) = get_app() {
+            let app = app_fragile.get();
 
-        // Poll all broadcasters for state changes
-        daw::reaper::poll_and_broadcast();
-        daw::reaper::poll_and_broadcast_fx();
-        daw::reaper::poll_and_broadcast_tracks();
-        daw::reaper::poll_and_broadcast_items();
-        daw::reaper::poll_and_broadcast_routing();
-        daw::reaper::poll_and_broadcast_tempo_map();
+            // Process main-thread task queue
+            app.process_tasks();
+
+            // Poll all broadcasters for state changes
+            daw::reaper::poll_and_broadcast();
+            daw::reaper::poll_and_broadcast_fx();
+            daw::reaper::poll_and_broadcast_tracks();
+            daw::reaper::poll_and_broadcast_items();
+            daw::reaper::poll_and_broadcast_routing();
+            daw::reaper::poll_and_broadcast_tempo_map();
+        }
+    });
+    if let Err(e) = result {
+        warn!("timer_callback panicked: {:?}", e);
     }
 }
 
