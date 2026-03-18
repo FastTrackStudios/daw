@@ -55,10 +55,14 @@ fn reaper_dir() -> String {
 }
 
 /// Canonical REAPER resources directory shared by all rigs and CI.
-/// `~/.config/FastTrackStudio/Reaper/` — UserPlugins, Scripts, reaper.ini etc.
-/// Never touches `~/.config/REAPER/`.
+/// Reads `FTS_REAPER_CONFIG` (set by fts-flake), falls back to
+/// `~/.config/FastTrackStudio/Reaper`.
 fn fts_reaper_resources() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    if let Ok(p) = std::env::var("FTS_REAPER_CONFIG") {
+        // Nix env blocks set literal strings — expand $HOME at runtime
+        return PathBuf::from(p.replace("$HOME", &home));
+    }
     PathBuf::from(format!("{home}/.config/FastTrackStudio/Reaper"))
 }
 
@@ -475,8 +479,9 @@ fn setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
 /// Returns the config or None if not set up yet.
 fn load_daw_test_rig() -> Option<reaper_launcher::LaunchConfig> {
     let home = std::env::var("HOME").ok()?;
-    let config_path = PathBuf::from(format!("{home}/.config/fts/rigs/fts-daw-test/launch.json"));
-    reaper_launcher::LaunchConfig::load(&config_path).ok()
+    // Try canonical location first, then legacy
+    let canonical = PathBuf::from(format!("{home}/.config/fts/rigs/fts-daw-test/launch.json"));
+    reaper_launcher::LaunchConfig::load(&canonical).ok()
 }
 
 fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -537,27 +542,6 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     let resources_dir = fts_reaper_resources();
     let user_plugins_dir = resources_dir.join("UserPlugins");
     std::fs::create_dir_all(&user_plugins_dir)?;
-
-    // Ensure ~/.config/REAPER/UserPlugins symlinks to the canonical path.
-    // fts-flake's reaper-headless currently hardcodes ~/.config/REAPER as the
-    // resource path. This symlink bridges until fts-flake is updated.
-    {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        let legacy_dir = PathBuf::from(format!("{home}/.config/REAPER"));
-        let legacy_plugins = legacy_dir.join("UserPlugins");
-        if !legacy_plugins.exists() {
-            std::fs::create_dir_all(&legacy_dir).ok();
-            #[cfg(unix)]
-            {
-                std::os::unix::fs::symlink(&user_plugins_dir, &legacy_plugins).ok();
-                println!(
-                    "  Symlinked {} -> {}",
-                    legacy_plugins.display(),
-                    user_plugins_dir.display()
-                );
-            }
-        }
-    }
 
     // REAPER expects "reaper_" prefix (not "lib" prefix) in UserPlugins.
     let so_src_name = "libreaper_daw_test.so";
@@ -623,23 +607,33 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
 
     // ── Step 5: Spawn REAPER ──────────────────────────────────────────────
     section(ci, "reaper-test: spawn REAPER");
-    let home = std::env::var("HOME").unwrap_or_default();
-    let daw_test_wrapper = format!("{home}/.local/bin/fts-daw-test");
     let reaper_log = PathBuf::from("/tmp/fts-daw-reaper.log");
 
-    let (reaper_exe, pass_reaper_args) = if PathBuf::from(&daw_test_wrapper).exists() {
-        (daw_test_wrapper, false)
-    } else if let Ok(exe) = std::env::var("FTS_REAPER_EXECUTABLE") {
-        (exe, true)
-    } else {
-        ("reaper".to_string(), true)
-    };
+    // Always use the raw REAPER executable so we can pass -cfgfile.
+    // The rig wrapper (fts-daw-test) has its own launch.json that may point
+    // to a different config dir, so we bypass it.
+    let reaper_exe = std::env::var("FTS_REAPER_EXECUTABLE")
+        .or_else(|_| which_command("reaper").ok_or(()))
+        .unwrap_or_else(|_| "reaper".to_string());
 
     let fts_test = find_fts_test();
     let needs_fhs = std::env::var("DISPLAY").map_or(true, |d| d.is_empty());
 
+    // Build REAPER CLI args: point it at our isolated config dir via -cfgfile
+    let reaper_ini = resources_dir.join("reaper.ini");
+    if !reaper_ini.exists() {
+        std::fs::write(&reaper_ini, "[reaper]\n")?;
+    }
+    let reaper_args: Vec<String> = vec![
+        "-cfgfile".into(),
+        reaper_ini.to_string_lossy().into_owned(),
+        "-newinst".into(),
+        "-nosplash".into(),
+        "-ignoreerrors".into(),
+    ];
+
     println!("  exe:         {reaper_exe}");
-    println!("  pass args:   {pass_reaper_args}");
+    println!("  config dir:  {}", resources_dir.display());
     println!("  needs fhs:   {needs_fhs}");
     if let Some(ref fts) = fts_test {
         println!("  fts-test:    {fts}");
@@ -660,30 +654,27 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         if let Some(ref fts) = fts_test {
             let mut cmd = Command::new(fts);
             cmd.arg(&reaper_exe);
-            if pass_reaper_args {
-                cmd.args(["-newinst", "-nosplash", "-ignoreerrors"]);
-            }
+            cmd.args(&reaper_args);
             cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
-            println!("  spawning: {fts} {reaper_exe}");
+            println!("  spawning: {fts} {reaper_exe} {}", reaper_args.join(" "));
             cmd.spawn()
                 .map_err(|e| format!("Failed to spawn via fts-test: {e}"))?
         } else {
             let mut cmd = Command::new(&reaper_exe);
-            if pass_reaper_args {
-                cmd.args(["-newinst", "-nosplash", "-ignoreerrors"]);
-            }
+            cmd.args(&reaper_args);
             cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
-            println!("  spawning: {reaper_exe} (no fhs wrapper)");
+            println!(
+                "  spawning: {reaper_exe} {} (no fhs wrapper)",
+                reaper_args.join(" ")
+            );
             cmd.spawn()
                 .map_err(|e| format!("Failed to spawn REAPER: {e}"))?
         }
     } else {
         let mut cmd = Command::new(&reaper_exe);
-        if pass_reaper_args {
-            cmd.args(["-newinst", "-nosplash", "-ignoreerrors"]);
-        }
+        cmd.args(&reaper_args);
         cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
-        println!("  spawning: {reaper_exe}");
+        println!("  spawning: {reaper_exe} {}", reaper_args.join(" "));
         cmd.spawn()
             .map_err(|e| format!("Failed to spawn REAPER: {e}"))?
     };
