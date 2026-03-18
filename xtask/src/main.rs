@@ -536,8 +536,11 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     let user_plugins_dir = if let Some(ref rig) = rig_config {
         PathBuf::from(&rig.resources_dir).join("UserPlugins")
     } else {
+        // No rig config — use the path that fts-test's reaper-headless script creates.
+        // reaper-headless sets REAPER_CONFIG="${HOME}/.config/REAPER" and creates
+        // UserPlugins there, so that's where REAPER will scan for extensions.
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        PathBuf::from(format!("{home}/.config/fts-test/REAPER/UserPlugins"))
+        PathBuf::from(format!("{home}/.config/REAPER/UserPlugins"))
     };
 
     // REAPER expects "reaper_" prefix (not "lib" prefix) in UserPlugins.
