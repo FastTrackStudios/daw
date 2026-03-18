@@ -629,17 +629,25 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         std::fs::write(&reaper_ini, "[reaper]\n")?;
     }
 
-    // Configure audio driver to keep REAPER's main loop active.
-    // Without an audio engine, the timer callback stops after ~10 ticks.
-    // Default: audiodriver=0 (ALSA). On CI/headless where no real ALSA
-    // devices exist, we create an .asoundrc with a null PCM device so
-    // REAPER can open ALSA and keep its audio engine spinning.
-    // Override with FTS_AUDIO_DRIVER env var (0=ALSA, 1=JACK, 2=dummy, 3=Pulse).
+    // Configure audio to keep REAPER's main loop active in headless mode.
+    // Without an active audio engine, the timer callback stops after ~10 ticks.
+    //
+    // Three settings work together:
+    //   audiodriver=0    → use ALSA (with null PCM device if no real hardware)
+    //   audioclosestop=0 → don't close audio device when transport is stopped
+    //   audiocloseinactive=0 → don't close audio when app is "inactive" (no GUI)
+    //
+    // Override driver with FTS_AUDIO_DRIVER env var (0=ALSA, 1=JACK, 2=dummy, 3=Pulse).
     {
         let audio_driver = std::env::var("FTS_AUDIO_DRIVER").unwrap_or_else(|_| "0".into());
         let ini = reaper_launcher::ReaperIni::new(&reaper_ini);
         let _ = ini.set("audiodriver", &audio_driver);
-        println!("  audiodriver: {audio_driver}");
+        // Prevent REAPER from closing the audio device when stopped or inactive.
+        // In headless mode, the app is always "inactive" (no GUI) and the
+        // transport is stopped, so both of these would kill the audio engine.
+        let _ = ini.set("audioclosestop", "0");
+        let _ = ini.set("audiocloseinactive", "0");
+        println!("  audiodriver: {audio_driver}, audioclosestop=0, audiocloseinactive=0");
 
         // Ensure ALSA has a usable device even without real hardware.
         // The ALSA null PCM plugin silently discards audio — no kernel
