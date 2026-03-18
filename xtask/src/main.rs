@@ -376,14 +376,14 @@ fn setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
             if PathBuf::from(&ini_path).exists() {
                 std::fs::copy(&ini_path, &rig_ini)?;
             } else {
-                std::fs::write(&rig_ini, "[reaper]\n")?;
+                std::fs::write(&rig_ini, "[REAPER]\n")?;
             }
         }
         // Patch undomaxmem=0 into rig ini
         {
             let content = std::fs::read_to_string(&rig_ini)?;
             if !content.contains("undomaxmem=") {
-                let patched = content.replace("[reaper]\n", "[reaper]\nundomaxmem=0\n");
+                let patched = content.replace("[REAPER]\n", "[REAPER]\nundomaxmem=0\n");
                 std::fs::write(&rig_ini, patched)?;
             } else {
                 // Update existing value
@@ -626,7 +626,7 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     // Build REAPER CLI args: point it at our isolated config dir via -cfgfile
     let reaper_ini = resources_dir.join("reaper.ini");
     if !reaper_ini.exists() {
-        std::fs::write(&reaper_ini, "[reaper]\n")?;
+        std::fs::write(&reaper_ini, "[REAPER]\n")?;
     }
 
     // Audio: default to JACK (1) since PipeWire provides a JACK interface.
