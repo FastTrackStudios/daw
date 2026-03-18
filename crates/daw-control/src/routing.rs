@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
+use crate::Result;
 use crate::{DawClients, Error};
 use daw_proto::{
     ProjectContext, RoutingEvent,
     routing::{RouteLocation, RouteRef, RouteType, SendMode, TrackRoute},
     track::TrackRef,
 };
-use crate::Result;
 use roam::Rx;
 
 /// Sends accessor for a track

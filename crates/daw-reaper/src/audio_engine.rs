@@ -111,8 +111,7 @@ impl AudioEngineService for ReaperAudioEngine {
             let low = medium.low();
 
             // Get device name via GetAudioDeviceInfo("IDENT_IN")
-            let device_name =
-                sw::get_audio_device_info(low, c"IDENT_IN", 256).unwrap_or_default();
+            let device_name = sw::get_audio_device_info(low, c"IDENT_IN", 256).unwrap_or_default();
 
             // Get number of audio inputs
             let num_inputs = low.GetNumAudioInputs() as u32;
@@ -203,22 +202,10 @@ fn get_sample_rate(medium: &reaper_medium::Reaper) -> u32 {
     let reaper = Reaper::get();
     let project = reaper.current_project();
 
-    let use_custom = sw::get_set_project_info(
-        low,
-        project.raw(),
-        c"PROJECT_SRATE_USE",
-        0.0,
-        false,
-    );
+    let use_custom = sw::get_set_project_info(low, project.raw(), c"PROJECT_SRATE_USE", 0.0, false);
 
     if use_custom > 0.0 {
-        let rate = sw::get_set_project_info(
-            low,
-            project.raw(),
-            c"PROJECT_SRATE",
-            0.0,
-            false,
-        );
+        let rate = sw::get_set_project_info(low, project.raw(), c"PROJECT_SRATE", 0.0, false);
         if rate > 0.0 {
             return rate as u32;
         }

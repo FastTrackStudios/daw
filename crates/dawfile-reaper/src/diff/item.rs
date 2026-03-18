@@ -2,11 +2,11 @@
 
 use std::collections::HashMap;
 
-use crate::types::Item;
-use crate::types::item::Take;
+use super::f64_eq;
 use super::midi;
 use super::types::*;
-use super::f64_eq;
+use crate::types::item::Take;
+use crate::types::Item;
 
 /// Diff two lists of items, matched by `item_guid` (IGUID).
 ///
@@ -35,14 +35,15 @@ pub(crate) fn diff_items(old: &[Item], new: &[Item], options: &DiffOptions) -> V
                 return guid.clone();
             }
         }
-        let pos = if apply_offset { item.position - offset } else { item.position };
+        let pos = if apply_offset {
+            item.position - offset
+        } else {
+            item.position
+        };
         format!("{}@{:.3}", item.name, pos)
     };
 
-    let old_map: HashMap<String, &Item> = old
-        .iter()
-        .map(|i| (item_key(i, false), i))
-        .collect();
+    let old_map: HashMap<String, &Item> = old.iter().map(|i| (item_key(i, false), i)).collect();
 
     let new_map: HashMap<String, &Item> = new
         .iter()

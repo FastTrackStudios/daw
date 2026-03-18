@@ -96,8 +96,7 @@ impl PositionConversionService for ReaperPositionConversion {
                 MeasureMode::IgnoreMeasure => full_beats,
                 MeasureMode::FromMeasureAtIndex(measure_idx) => {
                     // Get the beat position at the start of this measure
-                    let measure_start_time =
-                        sw::get_measure_info(low, proj_ctx, measure_idx);
+                    let measure_start_time = sw::get_measure_info(low, proj_ctx, measure_idx);
                     let tb = sw::time_to_beats(low, proj_ctx, measure_start_time);
                     tb.full_beats + full_beats
                 }
@@ -216,9 +215,7 @@ impl PositionConversionService for ReaperPositionConversion {
         position: PositionInQuarterNotes,
     ) -> PositionInBeats {
         // Convert quarter notes → time → beats
-        let time = self
-            .quarter_notes_to_time(project.clone(), position)
-            .await;
+        let time = self.quarter_notes_to_time(project.clone(), position).await;
         let result = self
             .time_to_beats(project, time, MeasureMode::IgnoreMeasure)
             .await;

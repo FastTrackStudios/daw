@@ -401,6 +401,9 @@ impl ProjectService for ReaperProject {
             }
 
             // Close the current tab: action 40860
+            // Note: undomaxmem=0 in reaper.ini prevents the "Save changes?"
+            // dialog. REAPER must be launched with -cfgfile pointing to the
+            // rig-specific ini for this to work.
             let action_close_tab = CommandId::new(40860);
             medium.main_on_command_ex(action_close_tab, 0, ProjectContext::CurrentProject);
 
@@ -425,11 +428,7 @@ impl ProjectService for ReaperProject {
     // Undo
     // =========================================================================
 
-    async fn begin_undo_block(
-        &self,
-        project: daw_proto::ProjectContext,
-        label: String,
-    ) {
+    async fn begin_undo_block(&self, project: daw_proto::ProjectContext, label: String) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -495,10 +494,7 @@ impl ProjectService for ReaperProject {
         .unwrap_or(false)
     }
 
-    async fn last_undo_label(
-        &self,
-        project: daw_proto::ProjectContext,
-    ) -> Option<String> {
+    async fn last_undo_label(&self, project: daw_proto::ProjectContext) -> Option<String> {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             proj.label_of_last_undoable_action()
@@ -508,10 +504,7 @@ impl ProjectService for ReaperProject {
         .flatten()
     }
 
-    async fn last_redo_label(
-        &self,
-        project: daw_proto::ProjectContext,
-    ) -> Option<String> {
+    async fn last_redo_label(&self, project: daw_proto::ProjectContext) -> Option<String> {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             proj.label_of_last_redoable_action()
@@ -550,7 +543,9 @@ impl ProjectService for ReaperProject {
             // so we must switch to the correct tab before executing
             let proj_ctx = match resolve_project(&project) {
                 Some(p) => {
-                    unsafe { medium.low().SelectProjectInstance(p.raw().as_ptr()); }
+                    unsafe {
+                        medium.low().SelectProjectInstance(p.raw().as_ptr());
+                    }
                     ProjectContext::Proj(p.raw())
                 }
                 None => ProjectContext::CurrentProject,
@@ -589,11 +584,7 @@ impl ProjectService for ReaperProject {
             let medium = reaper.medium_reaper();
 
             // Action 40897 = "File: Save all projects"
-            medium.main_on_command_ex(
-                CommandId::new(40897),
-                0,
-                ProjectContext::CurrentProject,
-            );
+            medium.main_on_command_ex(CommandId::new(40897), 0, ProjectContext::CurrentProject);
         });
     }
 
@@ -614,8 +605,7 @@ impl ProjectService for ReaperProject {
                 Some(p) => ProjectContext::Proj(p.raw()),
                 None => ProjectContext::CurrentProject,
             };
-            let key =
-                std::ffi::CString::new(format!("RULER_LANE_NAME:{}", lane_index)).unwrap();
+            let key = std::ffi::CString::new(format!("RULER_LANE_NAME:{}", lane_index)).unwrap();
             let value = std::ffi::CString::new(name).unwrap();
             unsafe {
                 low.GetSetProjectInfo_String(
@@ -640,17 +630,11 @@ impl ProjectService for ReaperProject {
                 Some(p) => ProjectContext::Proj(p.raw()),
                 None => ProjectContext::CurrentProject,
             };
-            let key =
-                std::ffi::CString::new(format!("RULER_LANE_NAME:{}", lane_index)).unwrap();
+            let key = std::ffi::CString::new(format!("RULER_LANE_NAME:{}", lane_index)).unwrap();
             let mut buf = [0u8; 256];
             let buf_ptr = buf.as_mut_ptr() as *mut std::ffi::c_char;
             unsafe {
-                low.GetSetProjectInfo_String(
-                    proj_ctx.to_raw(),
-                    key.as_ptr(),
-                    buf_ptr,
-                    false,
-                );
+                low.GetSetProjectInfo_String(proj_ctx.to_raw(), key.as_ptr(), buf_ptr, false);
                 std::ffi::CStr::from_ptr(buf_ptr)
                     .to_string_lossy()
                     .to_string()
@@ -671,17 +655,11 @@ impl ProjectService for ReaperProject {
             // Count by probing lane names until we find an empty one
             let mut count = 0u32;
             for i in 1..=128 {
-                let key =
-                    std::ffi::CString::new(format!("RULER_LANE_NAME:{}", i)).unwrap();
+                let key = std::ffi::CString::new(format!("RULER_LANE_NAME:{}", i)).unwrap();
                 let mut buf = [0u8; 256];
                 let buf_ptr = buf.as_mut_ptr() as *mut std::ffi::c_char;
                 unsafe {
-                    low.GetSetProjectInfo_String(
-                        proj_ctx.to_raw(),
-                        key.as_ptr(),
-                        buf_ptr,
-                        false,
-                    );
+                    low.GetSetProjectInfo_String(proj_ctx.to_raw(), key.as_ptr(), buf_ptr, false);
                     let name = std::ffi::CStr::from_ptr(buf_ptr).to_string_lossy();
                     if name.is_empty() {
                         break;

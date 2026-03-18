@@ -39,11 +39,7 @@ pub fn apply_diff(target: &mut ReaperProject, diff: &ProjectDiff, options: &Appl
 
 // ── Tracks ──────────────────────────────────────────────────────────────────
 
-fn apply_tracks(
-    target: &mut ReaperProject,
-    track_diffs: &[TrackDiff],
-    options: &ApplyOptions,
-) {
+fn apply_tracks(target: &mut ReaperProject, track_diffs: &[TrackDiff], options: &ApplyOptions) {
     for td in track_diffs {
         match td.kind {
             ChangeKind::Added => {
@@ -329,11 +325,7 @@ fn apply_markers_regions(
                     // As a pragmatic default we set position = offset (start
                     // of the song region in the setlist).
                     position: offset,
-                    end_position: if md.is_region {
-                        Some(offset)
-                    } else {
-                        None
-                    },
+                    end_position: if md.is_region { Some(offset) } else { None },
                     color: 0,
                     flags: if md.is_region { 1 } else { 0 },
                     locked: 0,
@@ -348,9 +340,17 @@ fn apply_markers_regions(
                 // Find the marker/region in the target by (is_region, id)
                 // and apply property changes.
                 let entry = if md.is_region {
-                    target.markers_regions.regions.iter_mut().find(|m| m.id == md.id)
+                    target
+                        .markers_regions
+                        .regions
+                        .iter_mut()
+                        .find(|m| m.id == md.id)
                 } else {
-                    target.markers_regions.markers.iter_mut().find(|m| m.id == md.id)
+                    target
+                        .markers_regions
+                        .markers
+                        .iter_mut()
+                        .find(|m| m.id == md.id)
                 };
 
                 if let Some(m) = entry {
@@ -421,11 +421,18 @@ mod tests {
         }
     }
 
-    fn collection(markers: Vec<MarkerRegion>, regions: Vec<MarkerRegion>) -> MarkerRegionCollection {
+    fn collection(
+        markers: Vec<MarkerRegion>,
+        regions: Vec<MarkerRegion>,
+    ) -> MarkerRegionCollection {
         let mut all = Vec::new();
         all.extend(markers.iter().cloned());
         all.extend(regions.iter().cloned());
-        MarkerRegionCollection { all, markers, regions }
+        MarkerRegionCollection {
+            all,
+            markers,
+            regions,
+        }
     }
 
     fn make_item(guid: &str, name: &str, position: f64, length: f64) -> Item {

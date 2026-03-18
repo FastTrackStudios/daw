@@ -1,38 +1,96 @@
 //! REAPER instance launcher.
 //!
-//! Reads `launch.json` from the wrapper bundle's `Contents/` directory,
-//! patches `reaper.ini`, sets environment variables, and execs REAPER.
-//! If `restore_ini_after_launch` is set, forks first so the parent can
-//! restore the original INI values after REAPER has started.
+//! Reads `launch.json` using a three-tier discovery strategy:
+//!
+//! 1. `--config <path>` CLI argument (stripped before passing args to REAPER)
+//! 2. `FTS_LAUNCH_CONFIG` environment variable
+//! 3. `../launch.json` relative to the binary (macOS `.app` bundle layout)
+//!
+//! After loading the config, patches `reaper.ini`, sets environment variables,
+//! and execs REAPER. If `restore_ini_after_launch` is set, forks first so the
+//! parent can restore the original INI values after REAPER has started.
 
 use crate::config::LaunchConfig;
 use crate::ini::ReaperIni;
 use std::os::unix::process::CommandExt;
+use std::path::PathBuf;
 use std::process::Command;
 
-/// Launch REAPER based on the config found relative to the current executable.
+/// Discover the `launch.json` config path using three-tier strategy:
 ///
-/// This is the main entry point for wrapper `.app` binaries.
-/// It reads `launch.json` from `../` relative to the binary (i.e.,
-/// `Contents/launch.json` when the binary is at `Contents/MacOS/REAPER`).
-pub fn launch() -> ! {
+/// 1. `--config <path>` CLI argument
+/// 2. `FTS_LAUNCH_CONFIG` environment variable
+/// 3. `../launch.json` relative to the current executable (macOS `.app` bundle)
+///
+/// Returns the resolved path and any remaining CLI args (with `--config` stripped).
+pub fn discover_config() -> (PathBuf, Vec<String>) {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // 1. Check for --config <path> in CLI args
+    let mut remaining_args = Vec::new();
+    let mut config_from_cli = None;
+    let mut skip_next = false;
+    for (i, arg) in args.iter().enumerate() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
+        if arg == "--config" {
+            if let Some(path) = args.get(i + 1) {
+                config_from_cli = Some(PathBuf::from(path));
+                skip_next = true;
+                continue;
+            }
+        }
+        if let Some(path) = arg.strip_prefix("--config=") {
+            config_from_cli = Some(PathBuf::from(path));
+            continue;
+        }
+        remaining_args.push(arg.clone());
+    }
+
+    if let Some(path) = config_from_cli {
+        return (path, remaining_args);
+    }
+
+    // 2. Check FTS_LAUNCH_CONFIG environment variable
+    if let Ok(path) = std::env::var("FTS_LAUNCH_CONFIG") {
+        return (PathBuf::from(path), remaining_args);
+    }
+
+    // 3. Fallback: ../launch.json relative to binary (macOS .app bundle layout)
     let exe = std::env::current_exe().expect("Failed to get current exe path");
-    // exe is at .../Contents/MacOS/REAPER
-    // launch.json is at .../Contents/launch.json
     let contents_dir = exe
         .parent() // MacOS/
         .and_then(|p| p.parent()) // Contents/
         .expect("Invalid bundle structure: expected Contents/MacOS/REAPER");
 
-    let config_path = contents_dir.join("launch.json");
-    let config = LaunchConfig::load(&config_path)
-        .unwrap_or_else(|e| panic!("Failed to load launch config: {e}"));
-
-    launch_with_config(&config);
+    (contents_dir.join("launch.json"), remaining_args)
 }
 
-/// Launch REAPER with the given config. Does not return.
+/// Launch REAPER based on config discovered via CLI arg, env var, or bundle layout.
+///
+/// This is the main entry point for both wrapper `.app` binaries (macOS)
+/// and wrapper scripts (Linux) that set `--config` or `FTS_LAUNCH_CONFIG`.
+pub fn launch() -> ! {
+    let (config_path, extra_args) = discover_config();
+    let config = LaunchConfig::load(&config_path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to load launch config from {}: {e}",
+            config_path.display()
+        )
+    });
+
+    launch_with_config_and_args(&config, &extra_args);
+}
+
+/// Launch REAPER with the given config and no extra CLI args. Does not return.
 pub fn launch_with_config(config: &LaunchConfig) -> ! {
+    launch_with_config_and_args(config, &[]);
+}
+
+/// Launch REAPER with the given config and extra CLI args. Does not return.
+pub fn launch_with_config_and_args(config: &LaunchConfig, extra_args: &[String]) -> ! {
     let ini = ReaperIni::new(&config.ini_path);
 
     // Build the list of ini patches
@@ -41,7 +99,7 @@ pub fn launch_with_config(config: &LaunchConfig) -> ! {
 
     if config.restore_ini_after_launch && !patch_refs.is_empty() {
         // Fork: child launches REAPER, parent restores ini after a delay
-        launch_with_restore(&ini, &patch_refs, config);
+        launch_with_restore(&ini, &patch_refs, config, extra_args);
     } else {
         // Simple path: patch and exec (no restore needed)
         if !patch_refs.is_empty() {
@@ -49,7 +107,7 @@ pub fn launch_with_config(config: &LaunchConfig) -> ! {
                 eprintln!("Warning: failed to patch reaper.ini: {e}");
             }
         }
-        exec_reaper(config);
+        exec_reaper(config, extra_args);
     }
 }
 
@@ -58,6 +116,7 @@ fn launch_with_restore(
     ini: &ReaperIni,
     patches: &[(&str, &str)],
     config: &LaunchConfig,
+    extra_args: &[String],
 ) -> ! {
     // Save originals before patching
     let originals = ini.patch(patches).unwrap_or_else(|e| {
@@ -72,11 +131,11 @@ fn launch_with_restore(
         -1 => {
             // Fork failed — just exec without restore
             eprintln!("Warning: fork failed, launching without ini restore");
-            exec_reaper(config);
+            exec_reaper(config, extra_args);
         }
         0 => {
             // Child: exec REAPER
-            exec_reaper(config);
+            exec_reaper(config, extra_args);
         }
         _parent => {
             // Parent: wait for REAPER to read its ini, then restore
@@ -93,7 +152,7 @@ fn launch_with_restore(
 }
 
 /// Set env vars and exec the real REAPER binary. Does not return.
-fn exec_reaper(config: &LaunchConfig) -> ! {
+fn exec_reaper(config: &LaunchConfig, extra_args: &[String]) -> ! {
     // Safety: we are single-threaded at this point (pre-exec), no other
     // threads are reading env vars concurrently.
     unsafe {
@@ -106,14 +165,10 @@ fn exec_reaper(config: &LaunchConfig) -> ! {
     std::env::set_current_dir(&config.resources_dir)
         .unwrap_or_else(|e| eprintln!("Warning: failed to chdir: {e}"));
 
-    let args: Vec<&str> = vec!["-newinst", "-nosplash", "-ignoreerrors"];
-
-    // Collect any extra args passed to this binary
-    let extra_args: Vec<String> = std::env::args().skip(1).collect();
-
     let err = Command::new(&config.reaper_executable)
-        .args(&args)
-        .args(&extra_args)
+        .args(&config.reaper_args)
+        .args(["-cfgfile", &config.ini_path])
+        .args(extra_args)
         .exec();
 
     // exec() only returns on error

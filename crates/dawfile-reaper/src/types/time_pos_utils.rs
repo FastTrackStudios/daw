@@ -752,12 +752,12 @@ mod tests {
         // beat 1: 9.9–10.5, beat 2: 10.5–11.1, beat 3: 11.1–11.7, beat 4: 11.7–12.3
         // Measure 5 starts at 12.3s.
         let test_cases = vec![
-            (9.9, "4.1.00"),    // M13: 4.1 at 9.9s
-            (10.2, "4.1.50"),   // 0.3s into beat 1 = 0.5 fraction
-            (10.8, "4.2.50"),   // 0.9s = 1.5 beats → beat 2, fraction 0.5
-            (11.4, "4.3.50"),   // 1.5s = 2.5 beats → beat 3, fraction 0.5
-            (11.7, "4.4.00"),   // 1.8s = 3.0 beats → beat 4, fraction 0
-            (12.3, "5.1.00"),   // 2.4s = 4.0 beats → measure 5, beat 1
+            (9.9, "4.1.00"),  // M13: 4.1 at 9.9s
+            (10.2, "4.1.50"), // 0.3s into beat 1 = 0.5 fraction
+            (10.8, "4.2.50"), // 0.9s = 1.5 beats → beat 2, fraction 0.5
+            (11.4, "4.3.50"), // 1.5s = 2.5 beats → beat 3, fraction 0.5
+            (11.7, "4.4.00"), // 1.8s = 3.0 beats → beat 4, fraction 0
+            (12.3, "5.1.00"), // 2.4s = 4.0 beats → measure 5, beat 1
         ];
 
         for (time, expected) in test_cases {

@@ -15,9 +15,7 @@ const TICKS_PER_QN: u32 = 960;
 ///
 /// Returns `(click_items, count_items, guide_items)` that can be placed
 /// on the corresponding tracks in the Click + Guide folder.
-pub fn generate_guide_items(
-    project: &ReaperProject,
-) -> (Vec<Item>, Vec<Item>, Vec<Item>) {
+pub fn generate_guide_items(project: &ReaperProject) -> (Vec<Item>, Vec<Item>, Vec<Item>) {
     let mut click_items = Vec::new();
     let mut count_items = Vec::new();
     let mut guide_items = Vec::new();
@@ -57,14 +55,10 @@ pub fn generate_guide_items(
     let tempo_env = project.tempo_envelope.as_ref();
 
     // Find the COUNT-IN marker position (if any)
-    let count_in_marker = project
-        .markers_regions
-        .all
-        .iter()
-        .find(|m| {
-            let upper = m.name.to_uppercase();
-            matches!(upper.as_str(), "COUNT-IN" | "COUNT IN" | "COUNTIN")
-        });
+    let count_in_marker = project.markers_regions.all.iter().find(|m| {
+        let upper = m.name.to_uppercase();
+        matches!(upper.as_str(), "COUNT-IN" | "COUNT IN" | "COUNTIN")
+    });
 
     // Find the overall song extent
     let first_region_start = regions[0].position;
@@ -73,8 +67,13 @@ pub fn generate_guide_items(
         .map(|r| r.end_position.unwrap_or(r.position + 1.0))
         .fold(0.0f64, f64::max);
 
-    let (first_bpm, first_num, first_denom) =
-        tempo_at_position(first_region_start, tempo_env, default_bpm, default_num, default_denom);
+    let (first_bpm, first_num, first_denom) = tempo_at_position(
+        first_region_start,
+        tempo_env,
+        default_bpm,
+        default_num,
+        default_denom,
+    );
     let first_beat_unit = 4.0 / first_denom as f64;
     let first_measure_seconds = first_beat_unit * first_num as f64 * 60.0 / first_bpm;
 
@@ -121,8 +120,13 @@ pub fn generate_guide_items(
         let section_start = region.position;
         let section_end = region.end_position.unwrap_or(section_start + 1.0);
 
-        let (bpm, num, denom) =
-            tempo_at_position(section_start, tempo_env, default_bpm, default_num, default_denom);
+        let (bpm, num, denom) = tempo_at_position(
+            section_start,
+            tempo_env,
+            default_bpm,
+            default_num,
+            default_denom,
+        );
         let beat_unit = 4.0 / denom as f64;
         let beat_seconds = beat_unit * 60.0 / bpm;
         let measure_seconds = beat_unit * num as f64 * 60.0 / bpm;
@@ -132,7 +136,9 @@ pub fn generate_guide_items(
         let count_in_start = if region_idx == 0 {
             song_start
         } else {
-            (section_start - measure_seconds).max(prev_region_end).max(0.0)
+            (section_start - measure_seconds)
+                .max(prev_region_end)
+                .max(0.0)
         };
 
         // Count item: generate count-in pattern
@@ -242,8 +248,12 @@ fn tempo_at_position(
         if let Some(ts) = pt.time_signature_encoded {
             num = (ts & 0xFFFF) as u32;
             denom = (ts >> 16) as u32;
-            if num == 0 { num = default_num; }
-            if denom == 0 { denom = default_denom; }
+            if num == 0 {
+                num = default_num;
+            }
+            if denom == 0 {
+                denom = default_denom;
+            }
         }
     }
 
@@ -318,18 +328,18 @@ fn section_name_to_midi(name: &str) -> Option<u8> {
     let upper = name.split_whitespace().next().unwrap_or("").to_uppercase();
     // Remove trailing numbers: "VS 1" → "VS", "CH 2" → "CH"
     match upper.as_str() {
-        "INTRO" => Some(36),    // C2
-        "VS" | "VERSE" => Some(38),   // D2
+        "INTRO" => Some(36),                                       // C2
+        "VS" | "VERSE" => Some(38),                                // D2
         "PRE" | "PRECHORUS" | "PRE-CHORUS" | "PRE-CH" => Some(40), // E2
-        "CH" | "CHORUS" => Some(41),  // F2
-        "BR" | "BRIDGE" => Some(43),  // G2
-        "SOLO" => Some(45),    // A2
-        "OUTRO" => Some(47),   // B2
-        "BREAK" | "BREAKDOWN" => Some(48), // C3
-        "INTERLUDE" => Some(50), // D3
-        "INSTRUMENTAL" => Some(52), // E3
-        "TAG" | "VAMP" => Some(53), // F3
-        "HITS" => Some(55),    // G3
-        _ => Some(60),         // C4 — generic section
+        "CH" | "CHORUS" => Some(41),                               // F2
+        "BR" | "BRIDGE" => Some(43),                               // G2
+        "SOLO" => Some(45),                                        // A2
+        "OUTRO" => Some(47),                                       // B2
+        "BREAK" | "BREAKDOWN" => Some(48),                         // C3
+        "INTERLUDE" => Some(50),                                   // D3
+        "INSTRUMENTAL" => Some(52),                                // E3
+        "TAG" | "VAMP" => Some(53),                                // F3
+        "HITS" => Some(55),                                        // G3
+        _ => Some(60),                                             // C4 — generic section
     }
 }

@@ -47,7 +47,6 @@ impl UndoScope {
     }
 }
 
-
 /// Parts of a REAPER project that can be affected by undoable operations
 #[derive(Copy, Clone, Eq, PartialEq, Hash, Debug, Facet)]
 #[repr(u32)]

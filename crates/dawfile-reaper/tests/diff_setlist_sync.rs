@@ -9,7 +9,7 @@
 //! section (with offset) to detect what changed, then apply only those
 //! changes to the setlist.
 
-use dawfile_reaper::diff::{diff_projects_with_options, DiffOptions, ChangeKind};
+use dawfile_reaper::diff::{diff_projects_with_options, ChangeKind, DiffOptions};
 use dawfile_reaper::io::read_project;
 use dawfile_reaper::setlist_rpp::{
     self, build_song_infos_from_projects, concatenate_projects, measures_to_seconds,
@@ -89,28 +89,44 @@ fn song_b_vs_setlist_no_changes_with_offset() {
 
     println!("Diff summary: {}", diff.summary());
     for track in &diff.tracks {
-        println!("  Track {:?} ({:?}): {} props, {} items",
-            track.name, track.kind,
-            track.property_changes.len(), track.items.len());
+        println!(
+            "  Track {:?} ({:?}): {} props, {} items",
+            track.name,
+            track.kind,
+            track.property_changes.len(),
+            track.items.len()
+        );
         for prop in &track.property_changes {
-            println!("    {} : {} → {}", prop.field, prop.old_value, prop.new_value);
+            println!(
+                "    {} : {} → {}",
+                prop.field, prop.old_value, prop.new_value
+            );
         }
         for item in &track.items {
             println!("    Item {:?} ({:?})", item.name, item.kind);
             for prop in &item.property_changes {
-                println!("      {} : {} → {}", prop.field, prop.old_value, prop.new_value);
+                println!(
+                    "      {} : {} → {}",
+                    prop.field, prop.old_value, prop.new_value
+                );
             }
         }
     }
     for mr in &diff.markers_regions {
-        println!("  Marker/Region {:?} ({:?}): {} props",
-            mr.name, mr.kind, mr.property_changes.len());
+        println!(
+            "  Marker/Region {:?} ({:?}): {} props",
+            mr.name,
+            mr.kind,
+            mr.property_changes.len()
+        );
     }
 
     // With the correct offset, item positions should not show as changed.
     // Track-level changes might exist (due to setlist concatenation adding
     // tracks from other songs), but Song B's own tracks should match.
-    let item_position_diffs: Vec<_> = diff.tracks.iter()
+    let item_position_diffs: Vec<_> = diff
+        .tracks
+        .iter()
         .flat_map(|t| &t.items)
         .filter(|i| i.kind == ChangeKind::Modified)
         .flat_map(|i| &i.property_changes)
@@ -164,8 +180,7 @@ fn song_b_marker_added_detected_in_diff() {
 
     // The new marker should show as Removed in the diff (it's in "old" = song_b
     // but not in "new" = setlist's song_b section)
-    let new_marker_diff = diff.markers_regions.iter()
-        .find(|m| m.name == "NEW MARKER");
+    let new_marker_diff = diff.markers_regions.iter().find(|m| m.name == "NEW MARKER");
     assert!(
         new_marker_diff.is_some(),
         "Should detect the new marker in the diff"
@@ -187,7 +202,10 @@ fn song_b_item_length_changed_detected() {
         if let Some(item) = track.items.first_mut() {
             let old_len = item.length;
             item.length += 2.0; // Add 2 seconds
-            println!("Modified item '{}' length: {:.1} → {:.1}", item.name, old_len, item.length);
+            println!(
+                "Modified item '{}' length: {:.1} → {:.1}",
+                item.name, old_len, item.length
+            );
         }
     }
 
@@ -204,7 +222,9 @@ fn song_b_item_length_changed_detected() {
     println!("  {}", diff.summary());
 
     // Find the item length change
-    let length_changes: Vec<_> = diff.tracks.iter()
+    let length_changes: Vec<_> = diff
+        .tracks
+        .iter()
         .flat_map(|t| &t.items)
         .filter(|i| i.kind == ChangeKind::Modified)
         .flat_map(|i| &i.property_changes)
@@ -224,13 +244,11 @@ fn without_offset_positions_differ() {
     let fix = setup_setlist();
 
     // No offset — raw comparison
-    let diff = diff_projects_with_options(
-        &fix.song_b,
-        &fix.combined,
-        &DiffOptions::default(),
-    );
+    let diff = diff_projects_with_options(&fix.song_b, &fix.combined, &DiffOptions::default());
 
-    let item_position_diffs: Vec<_> = diff.tracks.iter()
+    let item_position_diffs: Vec<_> = diff
+        .tracks
+        .iter()
         .flat_map(|t| &t.items)
         .filter(|i| i.kind == ChangeKind::Modified)
         .flat_map(|i| &i.property_changes)
@@ -239,7 +257,10 @@ fn without_offset_positions_differ() {
 
     // Without offset, Song B items at 0s in the song RPP vs 26s+ in the setlist
     // should show position changes
-    println!("Without offset: {} position diffs", item_position_diffs.len());
+    println!(
+        "Without offset: {} position diffs",
+        item_position_diffs.len()
+    );
     assert!(
         !item_position_diffs.is_empty() || fix.song_b_offset > 0.0,
         "Without offset, positions should differ (song_b starts at {:.1}s in setlist)",

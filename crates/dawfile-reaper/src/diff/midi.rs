@@ -1,7 +1,7 @@
 //! MIDI source diffing — two-pointer merge on absolute tick positions.
 
-use crate::types::{MidiEvent, MidiSource};
 use super::types::*;
+use crate::types::{MidiEvent, MidiSource};
 
 /// Diff two MIDI sources. Returns None if both are None or identical.
 pub(crate) fn diff_midi_sources(
@@ -110,12 +110,18 @@ fn diff_midi_events(old: &[MidiEvent], new: &[MidiEvent]) -> Vec<MidiEventChange
 
     while i < old_abs.len() {
         let (t, b) = &old_abs[i];
-        changes.push(MidiEventChange::Removed { absolute_tick: *t, bytes: b.clone() });
+        changes.push(MidiEventChange::Removed {
+            absolute_tick: *t,
+            bytes: b.clone(),
+        });
         i += 1;
     }
     while j < new_abs.len() {
         let (t, b) = &new_abs[j];
-        changes.push(MidiEventChange::Added { absolute_tick: *t, bytes: b.clone() });
+        changes.push(MidiEventChange::Added {
+            absolute_tick: *t,
+            bytes: b.clone(),
+        });
         j += 1;
     }
 
@@ -139,7 +145,10 @@ mod tests {
     use crate::types::MidiEvent;
 
     fn ev(delta: u32, bytes: &[u8]) -> MidiEvent {
-        MidiEvent { delta_ticks: delta, bytes: bytes.to_vec() }
+        MidiEvent {
+            delta_ticks: delta,
+            bytes: bytes.to_vec(),
+        }
     }
 
     #[test]
@@ -154,13 +163,19 @@ mod tests {
         let old = vec![ev(0, &[0x90, 60, 100]), ev(480, &[0x80, 60, 0])];
         let new = vec![
             ev(0, &[0x90, 60, 100]),
-            ev(240, &[0x90, 64, 100]),    // added note
-            ev(240, &[0x80, 60, 0]),       // original note-off, now 240 delta
+            ev(240, &[0x90, 64, 100]), // added note
+            ev(240, &[0x80, 60, 0]),   // original note-off, now 240 delta
         ];
         let changes = diff_midi_events(&old, &new);
         // The added note at tick 240 should appear
         assert!(!changes.is_empty());
-        assert!(changes.iter().any(|c| matches!(c, MidiEventChange::Added { absolute_tick: 240, .. })));
+        assert!(changes.iter().any(|c| matches!(
+            c,
+            MidiEventChange::Added {
+                absolute_tick: 240,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -173,6 +188,12 @@ mod tests {
         let new = vec![ev(0, &[0x90, 60, 100]), ev(480, &[0x80, 60, 0])];
         let changes = diff_midi_events(&old, &new);
         assert!(!changes.is_empty());
-        assert!(changes.iter().any(|c| matches!(c, MidiEventChange::Removed { absolute_tick: 240, .. })));
+        assert!(changes.iter().any(|c| matches!(
+            c,
+            MidiEventChange::Removed {
+                absolute_tick: 240,
+                ..
+            }
+        )));
     }
 }

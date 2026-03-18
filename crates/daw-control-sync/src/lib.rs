@@ -118,12 +118,32 @@ impl DawSync {
                 socket_path
             ))?;
         let link = roam_stream::StreamLink::unix(stream);
-        let (caller, _session) = roam::initiator_conduit(roam::BareConduit::new(link))
+        let (_root_caller, session) = roam::initiator_conduit(roam::BareConduit::new(link))
             .establish::<roam::DriverCaller>(())
             .await
             .context("Failed to establish roam session")?;
 
-        Self::from_caller(ErasedCaller::new(caller))
+        // Open a virtual connection for DAW services
+        let conn = session
+            .open_connection(
+                roam::ConnectionSettings {
+                    parity: roam::Parity::Odd,
+                    max_concurrent_requests: 64,
+                },
+                vec![roam::MetadataEntry {
+                    key: "role",
+                    value: roam::MetadataValue::String("sync-client"),
+                    flags: roam::MetadataFlags::NONE,
+                }],
+            )
+            .await
+            .context("Failed to open DAW virtual connection")?;
+
+        let mut driver = roam::Driver::new(conn, ());
+        let caller = ErasedCaller::new(driver.caller());
+        moire::task::spawn(async move { driver.run().await });
+
+        Self::from_caller(caller)
     }
 
     /// Get the underlying async `Daw` instance.
@@ -172,11 +192,8 @@ impl DawSync {
                     .by_index(track_idx)
                     .await?
                     .ok_or_else(|| eyre::eyre!("Track {} not found", track_idx))?;
-                let fx = track
-                    .fx_chain()
-                    .by_index(fx_idx)
-                    .await?
-                    .ok_or_else(|| {
+                let fx =
+                    track.fx_chain().by_index(fx_idx).await?.ok_or_else(|| {
                         eyre::eyre!("FX {} not found on track {}", fx_idx, track_idx)
                     })?;
                 fx.param(param_idx).set(value).await?;

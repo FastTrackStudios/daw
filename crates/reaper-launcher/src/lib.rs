@@ -7,10 +7,12 @@
 //!
 //! Used by the wrapper `.app` launcher binaries and by `xtask setup-rigs`.
 
-mod ini;
 mod config;
+pub mod desktop;
+pub mod icon_gen;
+mod ini;
 mod launcher;
 
 pub use config::{LaunchConfig, ReaperIniConfig};
 pub use ini::ReaperIni;
-pub use launcher::launch;
+pub use launcher::{discover_config, launch, launch_with_config, launch_with_config_and_args};

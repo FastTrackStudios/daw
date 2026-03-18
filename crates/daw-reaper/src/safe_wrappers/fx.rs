@@ -36,9 +36,8 @@ pub fn track_fx_get_pin_mappings(
     pin: i32,
 ) -> (i32, i32) {
     let mut high32: i32 = 0;
-    let low32 = unsafe {
-        low.TrackFX_GetPinMappings(track.as_ptr(), fx, is_output, pin, &mut high32)
-    };
+    let low32 =
+        unsafe { low.TrackFX_GetPinMappings(track.as_ptr(), fx, is_output, pin, &mut high32) };
     (low32, high32)
 }
 

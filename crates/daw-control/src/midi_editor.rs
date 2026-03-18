@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use crate::DawClients;
+use crate::Result;
 use daw_proto::{
     ProjectContext,
     item::{ItemRef, TakeRef},
@@ -12,7 +13,6 @@ use daw_proto::{
         QuantizeParams,
     },
 };
-use crate::Result;
 
 /// MIDI editor for a take
 ///

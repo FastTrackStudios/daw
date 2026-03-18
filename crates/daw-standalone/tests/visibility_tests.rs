@@ -106,10 +106,7 @@ async fn toggle_visibility_roundtrip() {
     track_svc
         .set_visible_in_tcp(current(), track_ref.clone(), true)
         .await;
-    let track = track_svc
-        .get_track(current(), track_ref)
-        .await
-        .unwrap();
+    let track = track_svc.get_track(current(), track_ref).await.unwrap();
     assert!(track.visible_in_tcp);
 }
 
@@ -126,18 +123,10 @@ async fn hide_multiple_tracks_independently() {
 
     // Hide tracks 0 and 2
     track_svc
-        .set_visible_in_tcp(
-            current(),
-            TrackRef::Guid(tracks[0].guid.clone()),
-            false,
-        )
+        .set_visible_in_tcp(current(), TrackRef::Guid(tracks[0].guid.clone()), false)
         .await;
     track_svc
-        .set_visible_in_tcp(
-            current(),
-            TrackRef::Guid(tracks[2].guid.clone()),
-            false,
-        )
+        .set_visible_in_tcp(current(), TrackRef::Guid(tracks[2].guid.clone()), false)
         .await;
 
     // Verify: 0 hidden, 1 visible, 2 hidden, 3 visible
@@ -216,10 +205,7 @@ async fn to_track_propagates_all_state() {
         .await;
 
     // Verify all fields come back correctly from get_track
-    let track = track_svc
-        .get_track(current(), track_ref)
-        .await
-        .unwrap();
+    let track = track_svc.get_track(current(), track_ref).await.unwrap();
     assert!(track.muted, "muted should propagate");
     assert!(track.soloed, "soloed should propagate");
     assert!(!track.visible_in_tcp, "visible_in_tcp should propagate");

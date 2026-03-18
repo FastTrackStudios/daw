@@ -1,5 +1,6 @@
 //! Standalone MIDI editing implementation
 
+use crate::platform::RwLock;
 use daw_proto::midi::{
     HumanizeParams, MidiCC, MidiCCCreate, MidiNote, MidiNoteCreate, MidiPitchBend,
     MidiPitchBendCreate, MidiProgramChange, MidiService, MidiSysEx, MidiTakeLocation, PpqRange,
@@ -7,7 +8,6 @@ use daw_proto::midi::{
 };
 use daw_proto::track::TrackRef;
 use daw_proto::{ItemRef, ProjectContext, TakeRef};
-use crate::platform::RwLock;
 use std::sync::Arc;
 
 /// Internal note state
@@ -220,11 +220,7 @@ impl MidiService for StandaloneMidi {
             .unwrap_or(0)
     }
 
-    async fn add_note(
-        &self,
-        location: MidiTakeLocation,
-        note: MidiNoteCreate,
-    ) -> u32 {
+    async fn add_note(&self, location: MidiTakeLocation, note: MidiNoteCreate) -> u32 {
         let take_guid = self.get_or_create_take(&location).await;
         let mut takes = self.takes.write().await;
         let take = takes.iter_mut().find(|t| t.take_guid == take_guid).unwrap();
@@ -242,11 +238,7 @@ impl MidiService for StandaloneMidi {
         index
     }
 
-    async fn add_notes(
-        &self,
-        location: MidiTakeLocation,
-        notes: Vec<MidiNoteCreate>,
-    ) -> Vec<u32> {
+    async fn add_notes(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32> {
         let take_guid = self.get_or_create_take(&location).await;
         let mut takes = self.takes.write().await;
         let take = takes.iter_mut().find(|t| t.take_guid == take_guid).unwrap();
@@ -304,12 +296,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn set_note_pitch(
-        &self,
-        location: MidiTakeLocation,
-        index: u32,
-        pitch: u8,
-    ) {
+    async fn set_note_pitch(&self, location: MidiTakeLocation, index: u32, pitch: u8) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
@@ -319,12 +306,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn set_note_velocity(
-        &self,
-        location: MidiTakeLocation,
-        index: u32,
-        velocity: u8,
-    ) {
+    async fn set_note_velocity(&self, location: MidiTakeLocation, index: u32, velocity: u8) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
@@ -334,12 +316,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn set_note_position(
-        &self,
-        location: MidiTakeLocation,
-        index: u32,
-        start_ppq: f64,
-    ) {
+    async fn set_note_position(&self, location: MidiTakeLocation, index: u32, start_ppq: f64) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
@@ -349,12 +326,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn set_note_length(
-        &self,
-        location: MidiTakeLocation,
-        index: u32,
-        length_ppq: f64,
-    ) {
+    async fn set_note_length(&self, location: MidiTakeLocation, index: u32, length_ppq: f64) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
@@ -364,12 +336,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn set_note_channel(
-        &self,
-        location: MidiTakeLocation,
-        index: u32,
-        channel: u8,
-    ) {
+    async fn set_note_channel(&self, location: MidiTakeLocation, index: u32, channel: u8) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
@@ -379,12 +346,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn set_note_selected(
-        &self,
-        location: MidiTakeLocation,
-        index: u32,
-        selected: bool,
-    ) {
+    async fn set_note_selected(&self, location: MidiTakeLocation, index: u32, selected: bool) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
@@ -394,12 +356,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn set_note_muted(
-        &self,
-        location: MidiTakeLocation,
-        index: u32,
-        muted: bool,
-    ) {
+    async fn set_note_muted(&self, location: MidiTakeLocation, index: u32, muted: bool) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid)
@@ -419,12 +376,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn transpose_notes(
-        &self,
-        location: MidiTakeLocation,
-        indices: Vec<u32>,
-        semitones: i8,
-    ) {
+    async fn transpose_notes(&self, location: MidiTakeLocation, indices: Vec<u32>, semitones: i8) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
@@ -439,11 +391,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn quantize_notes(
-        &self,
-        location: MidiTakeLocation,
-        params: QuantizeParams,
-    ) {
+    async fn quantize_notes(&self, location: MidiTakeLocation, params: QuantizeParams) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
@@ -460,11 +408,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn humanize_notes(
-        &self,
-        location: MidiTakeLocation,
-        params: HumanizeParams,
-    ) {
+    async fn humanize_notes(&self, location: MidiTakeLocation, params: HumanizeParams) {
         let take_guid = Self::get_take_guid(&location);
         let mut takes = self.takes.write().await;
         if let Some(take) = takes.iter_mut().find(|t| t.take_guid == take_guid) {
@@ -484,11 +428,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn get_ccs(
-        &self,
-        location: MidiTakeLocation,
-        controller: Option<u8>,
-    ) -> Vec<MidiCC> {
+    async fn get_ccs(&self, location: MidiTakeLocation, controller: Option<u8>) -> Vec<MidiCC> {
         let take_guid = Self::get_take_guid(&location);
         let takes = self.takes.read().await;
         takes
@@ -542,10 +482,7 @@ impl MidiService for StandaloneMidi {
         }
     }
 
-    async fn get_pitch_bends(
-        &self,
-        location: MidiTakeLocation,
-    ) -> Vec<MidiPitchBend> {
+    async fn get_pitch_bends(&self, location: MidiTakeLocation) -> Vec<MidiPitchBend> {
         let take_guid = Self::get_take_guid(&location);
         let takes = self.takes.read().await;
         takes
@@ -555,11 +492,7 @@ impl MidiService for StandaloneMidi {
             .unwrap_or_default()
     }
 
-    async fn add_pitch_bend(
-        &self,
-        location: MidiTakeLocation,
-        pb: MidiPitchBendCreate,
-    ) -> u32 {
+    async fn add_pitch_bend(&self, location: MidiTakeLocation, pb: MidiPitchBendCreate) -> u32 {
         let take_guid = self.get_or_create_take(&location).await;
         let mut takes = self.takes.write().await;
         let take = takes.iter_mut().find(|t| t.take_guid == take_guid).unwrap();
@@ -574,10 +507,7 @@ impl MidiService for StandaloneMidi {
         index
     }
 
-    async fn get_program_changes(
-        &self,
-        _location: MidiTakeLocation,
-    ) -> Vec<MidiProgramChange> {
+    async fn get_program_changes(&self, _location: MidiTakeLocation) -> Vec<MidiProgramChange> {
         vec![]
     }
 

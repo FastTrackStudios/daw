@@ -6,12 +6,7 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 
 /// Delete a project marker or region.
-pub fn delete_project_marker(
-    low: &ReaperLow,
-    project: ProjectContext,
-    id: i32,
-    is_region: bool,
-) {
+pub fn delete_project_marker(low: &ReaperLow, project: ProjectContext, id: i32, is_region: bool) {
     unsafe {
         low.DeleteProjectMarker(project.to_raw(), id, is_region);
     }
@@ -50,22 +45,36 @@ pub fn set_project_marker_by_index2(
 ) {
     let name_ptr = name.map_or(std::ptr::null(), |n| n.as_ptr());
     unsafe {
-        low.SetProjectMarkerByIndex2(project.to_raw(), id, is_region, pos, end, name_idx, name_ptr, color, flags);
+        low.SetProjectMarkerByIndex2(
+            project.to_raw(),
+            id,
+            is_region,
+            pos,
+            end,
+            name_idx,
+            name_ptr,
+            color,
+            flags,
+        );
     }
 }
 
 /// Enumerate project markers. Returns `None` when no more markers exist.
-pub fn enum_project_markers(
-    low: &ReaperLow,
-    idx: i32,
-) -> Option<EnumMarkerResult> {
+pub fn enum_project_markers(low: &ReaperLow, idx: i32) -> Option<EnumMarkerResult> {
     let mut is_region = false;
     let mut pos = 0.0;
     let mut end = 0.0;
     let mut name_ptr: *const c_char = std::ptr::null();
     let mut marker_idx = 0;
     let result = unsafe {
-        low.EnumProjectMarkers(idx, &mut is_region, &mut pos, &mut end, &mut name_ptr, &mut marker_idx)
+        low.EnumProjectMarkers(
+            idx,
+            &mut is_region,
+            &mut pos,
+            &mut end,
+            &mut name_ptr,
+            &mut marker_idx,
+        )
     };
     if result == 0 {
         return None;

@@ -74,11 +74,7 @@ pub fn chord(frequencies: &[f32], duration_seconds: f32, sample_rate: u32) -> De
 }
 
 /// Generate a click track: short clicks at regular intervals.
-pub fn click_track(
-    bpm: f32,
-    duration_seconds: f32,
-    sample_rate: u32,
-) -> DecodedAudio {
+pub fn click_track(bpm: f32, duration_seconds: f32, sample_rate: u32) -> DecodedAudio {
     let num_samples = (duration_seconds * sample_rate as f32) as usize;
     let mut samples = vec![0.0f32; num_samples];
     let click_interval = (60.0 / bpm * sample_rate as f32) as usize;
@@ -105,10 +101,7 @@ pub fn click_track(
 /// useful for testing the mixer and UI.
 pub fn demo_tracks(duration_seconds: f32, sample_rate: u32) -> Vec<(&'static str, DecodedAudio)> {
     vec![
-        (
-            "Click",
-            click_track(120.0, duration_seconds, sample_rate),
-        ),
+        ("Click", click_track(120.0, duration_seconds, sample_rate)),
         (
             "Bass",
             sine_wave(110.0, duration_seconds, sample_rate), // A2

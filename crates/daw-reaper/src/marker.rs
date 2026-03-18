@@ -57,8 +57,7 @@ impl MarkerService for ReaperMarker {
                     if let Some(info) = result {
                         // region_end_position is None for markers, Some for regions
                         if info.region_end_position.is_none() {
-                            let lane =
-                                ruler_lanes::get_marker_lane(low, reaper_ctx, idx);
+                            let lane = ruler_lanes::get_marker_lane(low, reaper_ctx, idx);
                             markers.push(Marker {
                                 id: Some(info.id.get()),
                                 position: Position::from_time(TimePosition::from_seconds(
@@ -108,11 +107,7 @@ impl MarkerService for ReaperMarker {
             .collect()
     }
 
-    async fn get_next_marker(
-        &self,
-        project: ProjectContext,
-        after: f64,
-    ) -> Option<Marker> {
+    async fn get_next_marker(&self, project: ProjectContext, after: f64) -> Option<Marker> {
         let markers = self.get_markers(project).await;
         markers
             .into_iter()
@@ -124,11 +119,7 @@ impl MarkerService for ReaperMarker {
             })
     }
 
-    async fn get_previous_marker(
-        &self,
-        project: ProjectContext,
-        before: f64,
-    ) -> Option<Marker> {
+    async fn get_previous_marker(&self, project: ProjectContext, before: f64) -> Option<Marker> {
         let markers = self.get_markers(project).await;
         markers
             .into_iter()
@@ -148,12 +139,7 @@ impl MarkerService for ReaperMarker {
     // Mutation Methods
     // =========================================================================
 
-    async fn add_marker(
-        &self,
-        _project: ProjectContext,
-        position: f64,
-        name: String,
-    ) -> u32 {
+    async fn add_marker(&self, _project: ProjectContext, position: f64, name: String) -> u32 {
         debug!("ReaperMarker: add_marker '{}' at {}", name, position);
         main_thread::query(move || {
             let reaper = reaper_high::Reaper::get();
@@ -180,12 +166,7 @@ impl MarkerService for ReaperMarker {
         debug!("ReaperMarker: remove_marker {}", id);
         main_thread::run(move || {
             let low = reaper_high::Reaper::get().medium_reaper().low();
-            sw::delete_project_marker(
-                low,
-                ReaperProjectContext::CurrentProject,
-                id as i32,
-                false,
-            );
+            sw::delete_project_marker(low, ReaperProjectContext::CurrentProject, id as i32, false);
         });
     }
 

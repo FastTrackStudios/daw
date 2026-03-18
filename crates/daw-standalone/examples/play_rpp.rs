@@ -44,7 +44,8 @@ fn main() {
 
     println!("\n=== Loaded Project ===");
     println!("Sample rate: {} Hz", project.sample_rate);
-    println!("Duration: {:.1}s ({:.0}:{:04.1})",
+    println!(
+        "Duration: {:.1}s ({:.0}:{:04.1})",
         project.duration,
         (project.duration / 60.0).floor(),
         project.duration % 60.0
@@ -89,10 +90,17 @@ fn main() {
     loop {
         // Show position
         let pos = engine.position_seconds();
-        let state = if engine.is_playing() { "PLAYING" } else { "PAUSED " };
-        print!("\r  {state} {:.0}:{:04.1} / {:.0}:{:04.1}  ",
-            (pos / 60.0).floor(), pos % 60.0,
-            (project.duration / 60.0).floor(), project.duration % 60.0
+        let state = if engine.is_playing() {
+            "PLAYING"
+        } else {
+            "PAUSED "
+        };
+        print!(
+            "\r  {state} {:.0}:{:04.1} / {:.0}:{:04.1}  ",
+            (pos / 60.0).floor(),
+            pos % 60.0,
+            (project.duration / 60.0).floor(),
+            project.duration % 60.0
         );
         stdout().flush().ok();
 
@@ -132,10 +140,16 @@ fn main() {
                         let current = engine.track_gain(track.handle);
                         if current > 0.0 {
                             engine.set_track_muted(track.handle, true);
-                            println!("\r  Muted: {}                             ", track.track_name);
+                            println!(
+                                "\r  Muted: {}                             ",
+                                track.track_name
+                            );
                         } else {
                             engine.set_track_muted(track.handle, false);
-                            println!("\r  Unmuted: {}                           ", track.track_name);
+                            println!(
+                                "\r  Unmuted: {}                           ",
+                                track.track_name
+                            );
                         }
                     }
                 }
@@ -155,8 +169,10 @@ fn enable_raw_mode() {
     #[cfg(unix)]
     {
         use std::process::Command;
-        Command::new("stty").args(["-icanon", "-echo", "min", "0", "time", "1"])
-            .status().ok();
+        Command::new("stty")
+            .args(["-icanon", "-echo", "min", "0", "time", "1"])
+            .status()
+            .ok();
     }
 }
 
@@ -164,7 +180,6 @@ fn disable_raw_mode() {
     #[cfg(unix)]
     {
         use std::process::Command;
-        Command::new("stty").args(["icanon", "echo"])
-            .status().ok();
+        Command::new("stty").args(["icanon", "echo"]).status().ok();
     }
 }

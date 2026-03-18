@@ -1,5 +1,6 @@
 //! Standalone automation implementation
 
+use crate::platform::RwLock;
 use daw_proto::{
     ProjectContext,
     automation::{
@@ -9,7 +10,6 @@ use daw_proto::{
     primitives::{AutomationMode, PositionInSeconds},
     track::TrackRef,
 };
-use crate::platform::RwLock;
 use std::sync::Arc;
 
 /// Internal envelope state
@@ -103,11 +103,7 @@ impl StandaloneAutomation {
 }
 
 impl AutomationService for StandaloneAutomation {
-    async fn get_envelopes(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-    ) -> Vec<Envelope> {
+    async fn get_envelopes(&self, _project: ProjectContext, track: TrackRef) -> Vec<Envelope> {
         let track_guid = match track {
             TrackRef::Guid(g) => g,
             _ => return vec![],
@@ -155,12 +151,7 @@ impl AutomationService for StandaloneAutomation {
         }
     }
 
-    async fn set_armed(
-        &self,
-        _project: ProjectContext,
-        location: EnvelopeLocation,
-        armed: bool,
-    ) {
+    async fn set_armed(&self, _project: ProjectContext, location: EnvelopeLocation, armed: bool) {
         let mut envelopes = self.envelopes.write().await;
         if let Some(e) = Self::find_envelope(&mut envelopes, &location) {
             e.armed = armed;
@@ -311,12 +302,7 @@ impl AutomationService for StandaloneAutomation {
         0
     }
 
-    async fn delete_point(
-        &self,
-        _project: ProjectContext,
-        location: EnvelopeLocation,
-        index: u32,
-    ) {
+    async fn delete_point(&self, _project: ProjectContext, location: EnvelopeLocation, index: u32) {
         let mut envelopes = self.envelopes.write().await;
         if let Some(e) = Self::find_envelope(&mut envelopes, &location) {
             e.points.retain(|p| p.index != index);

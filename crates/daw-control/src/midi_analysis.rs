@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::DawClients;
-use daw_proto::{MidiChartData, MidiChartRequest, ProjectContext};
 use crate::Result;
+use daw_proto::{MidiChartData, MidiChartRequest, ProjectContext};
 
 /// Read-only project MIDI analysis access.
 #[derive(Clone)]

@@ -54,8 +54,22 @@ fn roundtrip_rchunk_tree_idempotent() {
 
     // Verify structural counts are preserved from the original
     let structural_checks = [
-        "<TRACK", "<ITEM", "<SOURCE", "SOURCE WAVE", "FADEIN", "FADEOUT", "SOFFS", "VOLPAN",
-        "PLAYRATE", "MARKER", "ISBUS", "<TEMPOENVEX", "PT ", "NAME ", "TRACKID", "GUID",
+        "<TRACK",
+        "<ITEM",
+        "<SOURCE",
+        "SOURCE WAVE",
+        "FADEIN",
+        "FADEOUT",
+        "SOFFS",
+        "VOLPAN",
+        "PLAYRATE",
+        "MARKER",
+        "ISBUS",
+        "<TEMPOENVEX",
+        "PT ",
+        "NAME ",
+        "TRACKID",
+        "GUID",
     ];
 
     println!("Structural preservation (original → normalized):");
@@ -173,9 +187,7 @@ fn roundtrip_reaper_project_semantic() {
         (first_item.length - 131.20822586816902).abs() < 1e-10,
         "First drums item length"
     );
-    assert_eq!(
-        first_item.name, "Belief (Live) - John Mayer (Drums)_1.wav"
-    );
+    assert_eq!(first_item.name, "Belief (Live) - John Mayer (Drums)_1.wav");
 
     // SOURCE WAVE via takes
     assert!(!first_item.takes.is_empty());
@@ -209,8 +221,12 @@ fn roundtrip_reaper_project_semantic() {
     assert!((tempo.points[0].tempo - 101.0).abs() < 0.01);
 
     println!("ReaperProject semantic validation: PASSED");
-    println!("  tracks={}, items={total_items}, markers={}, tempo_pts={}",
-        project.tracks.len(), markers.all.len(), tempo.points.len());
+    println!(
+        "  tracks={}, items={total_items}, markers={}, tempo_pts={}",
+        project.tracks.len(),
+        markers.all.len(),
+        tempo.points.len()
+    );
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -225,16 +241,14 @@ fn roundtrip_serialize_reparse_semantic_equivalence() {
         return;
     };
 
-    let project_before =
-        dawfile_reaper::parse_project_text(&original).expect("first parse failed");
+    let project_before = dawfile_reaper::parse_project_text(&original).expect("first parse failed");
 
     // Round-trip through RChunk tree
     let chunk = dawfile_reaper::read_rpp_chunk(&original).expect("RChunk parse failed");
-    let serialized =
-        dawfile_reaper::stringify_rpp_node(&dawfile_reaper::RNodeTree::Chunk(chunk));
+    let serialized = dawfile_reaper::stringify_rpp_node(&dawfile_reaper::RNodeTree::Chunk(chunk));
 
-    let project_after = dawfile_reaper::parse_project_text(&serialized)
-        .expect("re-parse of serialized RPP failed");
+    let project_after =
+        dawfile_reaper::parse_project_text(&serialized).expect("re-parse of serialized RPP failed");
 
     // ── Metadata ──
     assert_eq!(project_before.version, project_after.version);
@@ -266,7 +280,10 @@ fn roundtrip_serialize_reparse_semantic_equivalence() {
         assert_eq!(before.folder, after.folder, "track[{i}] folder");
         assert_eq!(before.volpan, after.volpan, "track[{i}] volpan");
         assert_eq!(before.mutesolo, after.mutesolo, "track[{i}] mutesolo");
-        assert_eq!(before.channel_count, after.channel_count, "track[{i}] nchan");
+        assert_eq!(
+            before.channel_count, after.channel_count,
+            "track[{i}] nchan"
+        );
 
         // Items
         assert_eq!(
@@ -359,9 +376,16 @@ fn roundtrip_serialize_reparse_semantic_equivalence() {
     println!(
         "  {} tracks, {} items, {} markers, {} tempo points",
         project_before.tracks.len(),
-        project_before.tracks.iter().map(|t| t.items.len()).sum::<usize>(),
+        project_before
+            .tracks
+            .iter()
+            .map(|t| t.items.len())
+            .sum::<usize>(),
         project_before.markers_regions.all.len(),
-        project_before.tempo_envelope.as_ref().map_or(0, |t| t.points.len())
+        project_before
+            .tempo_envelope
+            .as_ref()
+            .map_or(0, |t| t.points.len())
     );
 }
 
@@ -400,18 +424,54 @@ fn roundtrip_write_to_file_and_reparse() {
 
     // Structural count verification
     let checks = [
-        ("<TRACK", count(&original, "<TRACK"), count(&written, "<TRACK")),
+        (
+            "<TRACK",
+            count(&original, "<TRACK"),
+            count(&written, "<TRACK"),
+        ),
         ("<ITEM", count(&original, "<ITEM"), count(&written, "<ITEM")),
-        ("<SOURCE", count(&original, "<SOURCE"), count(&written, "<SOURCE")),
-        ("SOURCE WAVE", count(&original, "SOURCE WAVE"), count(&written, "SOURCE WAVE")),
-        ("FADEIN", count(&original, "FADEIN"), count(&written, "FADEIN")),
-        ("FADEOUT", count(&original, "FADEOUT"), count(&written, "FADEOUT")),
+        (
+            "<SOURCE",
+            count(&original, "<SOURCE"),
+            count(&written, "<SOURCE"),
+        ),
+        (
+            "SOURCE WAVE",
+            count(&original, "SOURCE WAVE"),
+            count(&written, "SOURCE WAVE"),
+        ),
+        (
+            "FADEIN",
+            count(&original, "FADEIN"),
+            count(&written, "FADEIN"),
+        ),
+        (
+            "FADEOUT",
+            count(&original, "FADEOUT"),
+            count(&written, "FADEOUT"),
+        ),
         ("SOFFS", count(&original, "SOFFS"), count(&written, "SOFFS")),
-        ("VOLPAN", count(&original, "VOLPAN"), count(&written, "VOLPAN")),
-        ("PLAYRATE", count(&original, "PLAYRATE"), count(&written, "PLAYRATE")),
-        ("MARKER", count(&original, "MARKER"), count(&written, "MARKER")),
+        (
+            "VOLPAN",
+            count(&original, "VOLPAN"),
+            count(&written, "VOLPAN"),
+        ),
+        (
+            "PLAYRATE",
+            count(&original, "PLAYRATE"),
+            count(&written, "PLAYRATE"),
+        ),
+        (
+            "MARKER",
+            count(&original, "MARKER"),
+            count(&written, "MARKER"),
+        ),
         ("ISBUS", count(&original, "ISBUS"), count(&written, "ISBUS")),
-        ("<TEMPOENVEX", count(&original, "<TEMPOENVEX"), count(&written, "<TEMPOENVEX")),
+        (
+            "<TEMPOENVEX",
+            count(&original, "<TEMPOENVEX"),
+            count(&written, "<TEMPOENVEX"),
+        ),
         ("PT ", count(&original, "PT "), count(&written, "PT ")),
     ];
 

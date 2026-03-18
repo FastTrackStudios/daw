@@ -40,9 +40,17 @@ fn item_guid_string(medium: &reaper_medium::Reaper, item: MediaItem) -> String {
         let g = unsafe { &*guid_ptr };
         format!(
             "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
-            g.Data1, g.Data2, g.Data3,
-            g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
-            g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]
+            g.Data1,
+            g.Data2,
+            g.Data3,
+            g.Data4[0],
+            g.Data4[1],
+            g.Data4[2],
+            g.Data4[3],
+            g.Data4[4],
+            g.Data4[5],
+            g.Data4[6],
+            g.Data4[7]
         )
     } else {
         format!("{:p}", item.as_ptr())
@@ -213,8 +221,10 @@ pub fn poll_and_broadcast_items() {
             // Build lookup of previous GUIDs
             let prev_guids: HashMap<&str, &CachedItemState> =
                 prev_states.iter().map(|s| (s.guid.as_str(), s)).collect();
-            let curr_guids: HashMap<&str, &CachedItemState> =
-                current_states.iter().map(|s| (s.guid.as_str(), s)).collect();
+            let curr_guids: HashMap<&str, &CachedItemState> = current_states
+                .iter()
+                .map(|s| (s.guid.as_str(), s))
+                .collect();
 
             // Deleted items: in prev but not in curr
             for prev in &prev_states {
@@ -388,10 +398,20 @@ impl ReaperItem {
                         };
                         if !guid_ptr.is_null() {
                             let g = unsafe { &*guid_ptr };
-                            let item_guid = format!("{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
-                                g.Data1, g.Data2, g.Data3,
-                                g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
-                                g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7]);
+                            let item_guid = format!(
+                                "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+                                g.Data1,
+                                g.Data2,
+                                g.Data3,
+                                g.Data4[0],
+                                g.Data4[1],
+                                g.Data4[2],
+                                g.Data4[3],
+                                g.Data4[4],
+                                g.Data4[5],
+                                g.Data4[6],
+                                g.Data4[7]
+                            );
                             if item_guid == *guid {
                                 return Some(candidate);
                             }
@@ -513,11 +533,7 @@ impl ItemService for ReaperItem {
     // Queries
     // =========================================================================
 
-    async fn get_items(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-    ) -> Vec<Item> {
+    async fn get_items(&self, _project: ProjectContext, track: TrackRef) -> Vec<Item> {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -528,9 +544,7 @@ impl ItemService for ReaperItem {
                 TrackRef::Master => {
                     Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
                 }
-                TrackRef::Index(idx) => {
-                    medium.get_track(ReaperProjectContext::CurrentProject, idx)
-                }
+                TrackRef::Index(idx) => medium.get_track(ReaperProjectContext::CurrentProject, idx),
                 TrackRef::Guid(_) => {
                     // GUID lookup not directly supported
                     None
@@ -555,11 +569,7 @@ impl ItemService for ReaperItem {
         .unwrap_or_default()
     }
 
-    async fn get_item(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-    ) -> Option<Item> {
+    async fn get_item(&self, _project: ProjectContext, item: ItemRef) -> Option<Item> {
         main_thread::query(move || {
             let item_ptr = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
             Self::media_item_to_item(item_ptr)
@@ -614,8 +624,8 @@ impl ItemService for ReaperItem {
 
     async fn item_count(&self, project: ProjectContext, track: TrackRef) -> u32 {
         main_thread::query(move || {
-            let proj = resolve_project(&project)
-                .or_else(|| Some(Reaper::get().current_project()))?;
+            let proj =
+                resolve_project(&project).or_else(|| Some(Reaper::get().current_project()))?;
             let reaper_track = resolve_track(&proj, &track)?;
             Some(reaper_track.item_count())
         })
@@ -637,11 +647,13 @@ impl ItemService for ReaperItem {
     ) -> Option<String> {
         debug!(
             "ReaperItem: add_item {:?} at {} for {}",
-            track, position.as_seconds(), length.as_seconds()
+            track,
+            position.as_seconds(),
+            length.as_seconds()
         );
         main_thread::query(move || {
-            let proj = resolve_project(&project)
-                .or_else(|| Some(Reaper::get().current_project()))?;
+            let proj =
+                resolve_project(&project).or_else(|| Some(Reaper::get().current_project()))?;
             let reaper_track = resolve_track(&proj, &track)?;
 
             // Use CreateNewMIDIItemInProj via existing safe wrapper —
@@ -651,9 +663,8 @@ impl ItemService for ReaperItem {
             let start = position.as_seconds();
             let end = start + length.as_seconds();
 
-            let item = crate::safe_wrappers::midi::create_new_midi_item(
-                low, track_ptr, start, end
-            )?;
+            let item =
+                crate::safe_wrappers::midi::create_new_midi_item(low, track_ptr, start, end)?;
 
             Reaper::get().medium_reaper().update_timeline();
 
@@ -680,11 +691,7 @@ impl ItemService for ReaperItem {
         });
     }
 
-    async fn duplicate_item(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-    ) -> Option<String> {
+    async fn duplicate_item(&self, _project: ProjectContext, item: ItemRef) -> Option<String> {
         debug!("ReaperItem: duplicate_item");
         main_thread::query(move || {
             let reaper = Reaper::get();
@@ -742,12 +749,7 @@ impl ItemService for ReaperItem {
         });
     }
 
-    async fn set_length(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        length: Duration,
-    ) {
+    async fn set_length(&self, _project: ProjectContext, item: ItemRef, length: Duration) {
         debug!("ReaperItem: set_length to {}", length.as_seconds());
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -761,12 +763,7 @@ impl ItemService for ReaperItem {
         });
     }
 
-    async fn move_to_track(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        track: TrackRef,
-    ) {
+    async fn move_to_track(&self, _project: ProjectContext, item: ItemRef, track: TrackRef) {
         debug!("ReaperItem: move_to_track");
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -791,12 +788,7 @@ impl ItemService for ReaperItem {
         });
     }
 
-    async fn set_snap_offset(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        offset: Duration,
-    ) {
+    async fn set_snap_offset(&self, _project: ProjectContext, item: ItemRef, offset: Duration) {
         debug!("ReaperItem: set_snap_offset to {}", offset.as_seconds());
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -836,12 +828,7 @@ impl ItemService for ReaperItem {
         });
     }
 
-    async fn set_selected(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        selected: bool,
-    ) {
+    async fn set_selected(&self, _project: ProjectContext, item: ItemRef, selected: bool) {
         debug!("ReaperItem: set_selected to {}", selected);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -854,12 +841,7 @@ impl ItemService for ReaperItem {
         });
     }
 
-    async fn set_locked(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        locked: bool,
-    ) {
+    async fn set_locked(&self, _project: ProjectContext, item: ItemRef, locked: bool) {
         debug!("ReaperItem: set_locked to {}", locked);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -884,12 +866,7 @@ impl ItemService for ReaperItem {
     // Audio Properties
     // =========================================================================
 
-    async fn set_volume(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        volume: f64,
-    ) {
+    async fn set_volume(&self, _project: ProjectContext, item: ItemRef, volume: f64) {
         debug!("ReaperItem: set_volume to {}", volume);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -974,12 +951,7 @@ impl ItemService for ReaperItem {
     // Timing Behavior
     // =========================================================================
 
-    async fn set_loop_source(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        loop_source: bool,
-    ) {
+    async fn set_loop_source(&self, _project: ProjectContext, item: ItemRef, loop_source: bool) {
         debug!("ReaperItem: set_loop_source to {}", loop_source);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -1027,12 +999,7 @@ impl ItemService for ReaperItem {
         });
     }
 
-    async fn set_auto_stretch(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        auto_stretch: bool,
-    ) {
+    async fn set_auto_stretch(&self, _project: ProjectContext, item: ItemRef, auto_stretch: bool) {
         debug!("ReaperItem: set_auto_stretch to {}", auto_stretch);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -1054,12 +1021,7 @@ impl ItemService for ReaperItem {
     // Visual Properties
     // =========================================================================
 
-    async fn set_color(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        color: Option<u32>,
-    ) {
+    async fn set_color(&self, _project: ProjectContext, item: ItemRef, color: Option<u32>) {
         debug!("ReaperItem: set_color to {:?}", color);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -1078,12 +1040,7 @@ impl ItemService for ReaperItem {
         });
     }
 
-    async fn set_group_id(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        group_id: Option<u32>,
-    ) {
+    async fn set_group_id(&self, _project: ProjectContext, item: ItemRef, group_id: Option<u32>) {
         debug!("ReaperItem: set_group_id to {:?}", group_id);
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -1216,8 +1173,7 @@ impl ReaperTake {
             item_sw::get_take_info_value(medium, take, TakeAttributeKey::PitchMode);
         let preserve_pitch = preserve_pitch_raw != 0.0;
 
-        let start_offset =
-            item_sw::get_take_info_value(medium, take, TakeAttributeKey::StartOffs);
+        let start_offset = item_sw::get_take_info_value(medium, take, TakeAttributeKey::StartOffs);
 
         // Get source info
         // TODO: Implement proper source inspection using low-level API
@@ -1325,11 +1281,7 @@ impl TakeService for ReaperTake {
         .unwrap_or(None)
     }
 
-    async fn get_active_take(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-    ) -> Option<Take> {
+    async fn get_active_take(&self, _project: ProjectContext, item: ItemRef) -> Option<Take> {
         main_thread::query(move || {
             let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
             let reaper = Reaper::get();
@@ -1367,11 +1319,7 @@ impl TakeService for ReaperTake {
     // CRUD Operations
     // =========================================================================
 
-    async fn add_take(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-    ) -> Option<String> {
+    async fn add_take(&self, _project: ProjectContext, item: ItemRef) -> Option<String> {
         debug!("ReaperTake: add_take");
         main_thread::query(move || {
             let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
@@ -1385,12 +1333,7 @@ impl TakeService for ReaperTake {
         .unwrap_or(None)
     }
 
-    async fn delete_take(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-    ) {
+    async fn delete_take(&self, _project: ProjectContext, item: ItemRef, take: TakeRef) {
         debug!("ReaperTake: delete_take");
         main_thread::run(move || {
             let Some(item_ptr) =
@@ -1406,12 +1349,7 @@ impl TakeService for ReaperTake {
         });
     }
 
-    async fn set_active_take(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-    ) {
+    async fn set_active_take(&self, _project: ProjectContext, item: ItemRef, take: TakeRef) {
         debug!("ReaperTake: set_active_take");
         main_thread::run(move || {
             let Some(item_ptr) =
@@ -1431,13 +1369,7 @@ impl TakeService for ReaperTake {
     // Metadata
     // =========================================================================
 
-    async fn set_name(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-        name: String,
-    ) {
+    async fn set_name(&self, _project: ProjectContext, item: ItemRef, take: TakeRef, name: String) {
         debug!("ReaperTake: set_name to '{}'", name);
         main_thread::run(move || {
             let Some(item_ptr) =
@@ -1677,7 +1609,9 @@ impl TakeService for ReaperTake {
 fn extract_guid_from_chunk(chunk: &str) -> Option<String> {
     // Look for GUID line like: GUID {12345678-1234-1234-1234-123456789ABC}
     for line in chunk.lines() {
-        if line.starts_with("GUID ") && let Some(guid_part) = line.strip_prefix("GUID ") {
+        if line.starts_with("GUID ")
+            && let Some(guid_part) = line.strip_prefix("GUID ")
+        {
             return Some(guid_part.trim().to_string());
         }
     }

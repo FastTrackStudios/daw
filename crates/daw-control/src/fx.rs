@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::Result;
 use crate::{DawClients, Error};
 use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
@@ -11,7 +12,6 @@ use daw_proto::{
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
-use crate::Result;
 
 /// Handle to an FX chain
 ///
@@ -260,7 +260,9 @@ impl FxChain {
             .fx
             .add_fx_at(self.project_context(), request)
             .await?
-            .ok_or_else(|| Error::Other(format!("Failed to add FX at index {}: {}", index, fx_name)))?;
+            .ok_or_else(|| {
+                Error::Other(format!("Failed to add FX at index {}: {}", index, fx_name))
+            })?;
 
         Ok(FxHandle::new(
             self.context.clone(),

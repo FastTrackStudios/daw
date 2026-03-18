@@ -13,11 +13,7 @@ pub struct TimeToBeatsResult {
 }
 
 /// Convert time to beats using `TimeMap2_timeToBeats`.
-pub fn time_to_beats(
-    low: &ReaperLow,
-    project: ProjectContext,
-    time: f64,
-) -> TimeToBeatsResult {
+pub fn time_to_beats(low: &ReaperLow, project: ProjectContext, time: f64) -> TimeToBeatsResult {
     let mut measure_index: i32 = 0;
     let mut beats_since_measure: i32 = 0;
     let mut full_beats: f64 = 0.0;
@@ -60,20 +56,12 @@ pub fn beats_to_time(
 }
 
 /// Convert time to quarter notes using `TimeMap2_timeToQN`.
-pub fn time_to_qn(
-    low: &ReaperLow,
-    project: ProjectContext,
-    time: f64,
-) -> f64 {
+pub fn time_to_qn(low: &ReaperLow, project: ProjectContext, time: f64) -> f64 {
     unsafe { low.TimeMap2_timeToQN(project.to_raw(), time) }
 }
 
 /// Convert quarter notes to time using `TimeMap2_QNToTime`.
-pub fn qn_to_time(
-    low: &ReaperLow,
-    project: ProjectContext,
-    qn: f64,
-) -> f64 {
+pub fn qn_to_time(low: &ReaperLow, project: ProjectContext, qn: f64) -> f64 {
     unsafe { low.TimeMap2_QNToTime(project.to_raw(), qn) }
 }
 
@@ -85,16 +73,11 @@ pub struct QnToMeasuresResult {
 }
 
 /// Convert quarter notes to measure info.
-pub fn qn_to_measures(
-    low: &ReaperLow,
-    project: ProjectContext,
-    qn: f64,
-) -> QnToMeasuresResult {
+pub fn qn_to_measures(low: &ReaperLow, project: ProjectContext, qn: f64) -> QnToMeasuresResult {
     let mut qn_start: f64 = 0.0;
     let mut qn_end: f64 = 0.0;
-    let measure_index = unsafe {
-        low.TimeMap_QNToMeasures(project.to_raw(), qn, &mut qn_start, &mut qn_end)
-    };
+    let measure_index =
+        unsafe { low.TimeMap_QNToMeasures(project.to_raw(), qn, &mut qn_start, &mut qn_end) };
     QnToMeasuresResult {
         measure_index,
         qn_start,
@@ -110,11 +93,7 @@ pub struct TimeSigAtTime {
 }
 
 /// Get the time signature and tempo at a given time position.
-pub fn get_time_sig_at_time(
-    low: &ReaperLow,
-    project: ProjectContext,
-    time: f64,
-) -> TimeSigAtTime {
+pub fn get_time_sig_at_time(low: &ReaperLow, project: ProjectContext, time: f64) -> TimeSigAtTime {
     let mut num: i32 = 4;
     let mut denom: i32 = 4;
     let mut tempo: f64 = 120.0;
@@ -127,11 +106,7 @@ pub fn get_time_sig_at_time(
 /// Get measure info at a given measure index.
 ///
 /// Returns the time position (seconds) of the measure start.
-pub fn get_measure_info(
-    low: &ReaperLow,
-    project: ProjectContext,
-    measure_index: i32,
-) -> f64 {
+pub fn get_measure_info(low: &ReaperLow, project: ProjectContext, measure_index: i32) -> f64 {
     unsafe {
         low.TimeMap_GetMeasureInfo(
             project.to_raw(),

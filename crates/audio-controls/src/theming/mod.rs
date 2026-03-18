@@ -7,6 +7,6 @@ pub mod presets;
 pub mod style;
 pub mod svg_texture;
 
-pub use context::{use_theme, ControlConfig, ThemeContext, ThemeProvider};
+pub use context::{ControlConfig, ThemeContext, ThemeProvider, use_theme};
 pub use style::{ControlState, ControlVariant, KnobStyle, SliderStyle, StyleSheet, XYPadStyle};
 pub use svg_texture::SvgTexture;

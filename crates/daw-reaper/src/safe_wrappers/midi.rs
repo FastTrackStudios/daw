@@ -112,15 +112,13 @@ pub fn create_new_midi_item(
     start: f64,
     end: f64,
 ) -> Option<MediaItem> {
-    let ptr = unsafe { low.CreateNewMIDIItemInProj(track.as_ptr(), start, end, std::ptr::null_mut()) };
+    let ptr =
+        unsafe { low.CreateNewMIDIItemInProj(track.as_ptr(), start, end, std::ptr::null_mut()) };
     MediaItem::new(ptr)
 }
 
 /// Get the active take of a media item (low-level).
-pub fn get_active_take(
-    low: &ReaperLow,
-    item: MediaItem,
-) -> Option<MediaItemTake> {
+pub fn get_active_take(low: &ReaperLow, item: MediaItem) -> Option<MediaItemTake> {
     let ptr = unsafe { low.GetActiveTake(item.as_ptr()) };
     MediaItemTake::new(ptr)
 }

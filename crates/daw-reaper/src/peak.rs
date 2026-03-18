@@ -92,11 +92,8 @@ impl PeakService for ReaperPeak {
             };
 
             // Resolve item
-            let midi_item = crate::midi::ReaperMidi::resolve_item(
-                medium,
-                reaper_project_ctx,
-                &item,
-            )?;
+            let midi_item =
+                crate::midi::ReaperMidi::resolve_item(medium, reaper_project_ctx, &item)?;
 
             // Resolve take
             let midi_take = crate::midi::ReaperMidi::resolve_take(medium, midi_item, &take)?;

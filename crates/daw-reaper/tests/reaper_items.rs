@@ -24,10 +24,14 @@ async fn item_create_basic(ctx: &reaper_test::ReaperTestContext) -> eyre::Result
 
     // Step 3: Try to add an item
     ctx.log("Attempting to add item at 0.0s, length 2.0s...");
-    let item = match track.items().add(
-        daw_proto::primitives::PositionInSeconds::from_seconds(0.0),
-        daw_proto::primitives::Duration::from_seconds(2.0),
-    ).await {
+    let item = match track
+        .items()
+        .add(
+            daw_proto::primitives::PositionInSeconds::from_seconds(0.0),
+            daw_proto::primitives::Duration::from_seconds(2.0),
+        )
+        .await
+    {
         Ok(item) => {
             ctx.log(&format!("Item created successfully: guid={}", item.guid()));
             item
@@ -52,8 +56,11 @@ async fn item_create_basic(ctx: &reaper_test::ReaperTestContext) -> eyre::Result
 
     // Step 5: Check item properties
     let info = item.info().await?;
-    ctx.log(&format!("Item position: {:.2}s, length: {:.2}s",
-        info.position.as_seconds(), info.length.as_seconds()));
+    ctx.log(&format!(
+        "Item position: {:.2}s, length: {:.2}s",
+        info.position.as_seconds(),
+        info.length.as_seconds()
+    ));
 
     // Step 6: Try to get the active take
     ctx.log("Getting active take...");
@@ -73,7 +80,11 @@ async fn item_create_basic(ctx: &reaper_test::ReaperTestContext) -> eyre::Result
                 }
                 Err(e2) => {
                     ctx.log(&format!("Failed to add take: {:?}", e2));
-                    return Err(eyre::eyre!("No active take and can't add one: {:?}, {:?}", e, e2));
+                    return Err(eyre::eyre!(
+                        "No active take and can't add one: {:?}, {:?}",
+                        e,
+                        e2
+                    ));
                 }
             }
         }
@@ -111,9 +122,27 @@ async fn item_create_basic(ctx: &reaper_test::ReaperTestContext) -> eyre::Result
     ctx.log("Adding 3 more notes via add_notes...");
     use daw_proto::midi::MidiNoteCreate;
     let notes_to_add = vec![
-        MidiNoteCreate { pitch: 62, velocity: 100, channel: 0, start_ppq: 480.0, length_ppq: 480.0 },
-        MidiNoteCreate { pitch: 64, velocity: 100, channel: 0, start_ppq: 960.0, length_ppq: 480.0 },
-        MidiNoteCreate { pitch: 65, velocity: 100, channel: 0, start_ppq: 1440.0, length_ppq: 480.0 },
+        MidiNoteCreate {
+            pitch: 62,
+            velocity: 100,
+            channel: 0,
+            start_ppq: 480.0,
+            length_ppq: 480.0,
+        },
+        MidiNoteCreate {
+            pitch: 64,
+            velocity: 100,
+            channel: 0,
+            start_ppq: 960.0,
+            length_ppq: 480.0,
+        },
+        MidiNoteCreate {
+            pitch: 65,
+            velocity: 100,
+            channel: 0,
+            start_ppq: 1440.0,
+            length_ppq: 480.0,
+        },
     ];
     let indices = take.midi().add_notes(notes_to_add).await?;
     ctx.log(&format!("add_notes returned indices: {:?}", indices));
@@ -128,11 +157,13 @@ async fn item_create_basic(ctx: &reaper_test::ReaperTestContext) -> eyre::Result
     if notes.is_empty() {
         ctx.log("WARNING: No notes found — MIDI source may not be properly linked");
         ctx.log("item_create_basic: PARTIAL PASS (item created, notes not persisting)");
-        return Ok(());  // Don't fail — item creation works, MIDI needs more work
+        return Ok(()); // Don't fail — item creation works, MIDI needs more work
     }
     assert!(notes.len() >= 1, "Should have at least 1 note");
-    ctx.log(&format!("Note 0: pitch={}, vel={}, start={:.1}, len={:.1}",
-        notes[0].pitch, notes[0].velocity, notes[0].start_ppq, notes[0].length_ppq));
+    ctx.log(&format!(
+        "Note 0: pitch={}, vel={}, start={:.1}, len={:.1}",
+        notes[0].pitch, notes[0].velocity, notes[0].start_ppq, notes[0].length_ppq
+    ));
 
     ctx.log("item_create_basic: PASSED");
     Ok(())

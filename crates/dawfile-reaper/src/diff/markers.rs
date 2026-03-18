@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 
-use crate::types::MarkerRegionCollection;
-use super::types::*;
 use super::f64_eq;
+use super::types::*;
+use crate::types::MarkerRegionCollection;
 
 pub(crate) fn diff_markers_regions(
     old: &MarkerRegionCollection,
@@ -61,8 +61,12 @@ pub(crate) fn diff_markers_regions(
                 if is_region && old_entry.end_position != new_entry.end_position {
                     changes.push(PropertyChange {
                         field: "end_position".into(),
-                        old_value: old_entry.end_position.map_or("none".into(), |v| format!("{:.6}", v)),
-                        new_value: new_entry.end_position.map_or("none".into(), |v| format!("{:.6}", v)),
+                        old_value: old_entry
+                            .end_position
+                            .map_or("none".into(), |v| format!("{:.6}", v)),
+                        new_value: new_entry
+                            .end_position
+                            .map_or("none".into(), |v| format!("{:.6}", v)),
                     });
                 }
                 if old_entry.color != new_entry.color {
@@ -110,25 +114,48 @@ mod tests {
 
     fn marker(id: i32, name: &str, pos: f64) -> MarkerRegion {
         MarkerRegion {
-            id, name: name.into(), position: pos, end_position: None,
-            color: 0, flags: 0, locked: 0, guid: String::new(),
-            additional: 0, lane: None, beat_position: None,
+            id,
+            name: name.into(),
+            position: pos,
+            end_position: None,
+            color: 0,
+            flags: 0,
+            locked: 0,
+            guid: String::new(),
+            additional: 0,
+            lane: None,
+            beat_position: None,
         }
     }
 
     fn region(id: i32, name: &str, pos: f64, end: f64) -> MarkerRegion {
         MarkerRegion {
-            id, name: name.into(), position: pos, end_position: Some(end),
-            color: 0, flags: 0, locked: 0, guid: String::new(),
-            additional: 0, lane: None, beat_position: None,
+            id,
+            name: name.into(),
+            position: pos,
+            end_position: Some(end),
+            color: 0,
+            flags: 0,
+            locked: 0,
+            guid: String::new(),
+            additional: 0,
+            lane: None,
+            beat_position: None,
         }
     }
 
-    fn collection(markers: Vec<MarkerRegion>, regions: Vec<MarkerRegion>) -> MarkerRegionCollection {
+    fn collection(
+        markers: Vec<MarkerRegion>,
+        regions: Vec<MarkerRegion>,
+    ) -> MarkerRegionCollection {
         let mut all = Vec::new();
         all.extend(markers.iter().cloned());
         all.extend(regions.iter().cloned());
-        MarkerRegionCollection { all, markers, regions }
+        MarkerRegionCollection {
+            all,
+            markers,
+            regions,
+        }
     }
 
     #[test]

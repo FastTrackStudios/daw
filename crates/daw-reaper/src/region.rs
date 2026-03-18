@@ -44,10 +44,7 @@ pub fn get_regions_on_main_thread() -> Vec<Region> {
                     );
                     regions.push(Region {
                         id: Some(info.id.get()),
-                        time_range: TimeRange::from_seconds(
-                            info.position.get(),
-                            end_pos.get(),
-                        ),
+                        time_range: TimeRange::from_seconds(info.position.get(), end_pos.get()),
                         name: info.name.to_string(),
                         color: {
                             let c = info.color.to_raw();
@@ -113,8 +110,7 @@ impl RegionService for ReaperRegion {
                 medium.enum_project_markers_3(reaper_ctx, idx, |result| {
                     if let Some(info) = result {
                         if let Some(end_pos) = info.region_end_position {
-                            let lane =
-                                ruler_lanes::get_marker_lane(low, reaper_ctx, idx);
+                            let lane = ruler_lanes::get_marker_lane(low, reaper_ctx, idx);
                             regions.push(Region {
                                 id: Some(info.id.get()),
                                 time_range: TimeRange::from_seconds(
@@ -164,11 +160,7 @@ impl RegionService for ReaperRegion {
             .collect()
     }
 
-    async fn get_region_at(
-        &self,
-        project: ProjectContext,
-        position: f64,
-    ) -> Option<Region> {
+    async fn get_region_at(&self, project: ProjectContext, position: f64) -> Option<Region> {
         let regions = self.get_regions(project).await;
         regions.into_iter().find(|r| r.contains_position(position))
     }
@@ -228,13 +220,7 @@ impl RegionService for ReaperRegion {
         });
     }
 
-    async fn set_region_bounds(
-        &self,
-        _project: ProjectContext,
-        id: u32,
-        start: f64,
-        end: f64,
-    ) {
+    async fn set_region_bounds(&self, _project: ProjectContext, id: u32, start: f64, end: f64) {
         debug!(
             "ReaperRegion: set_region_bounds {} to {} - {}",
             id, start, end
@@ -242,12 +228,8 @@ impl RegionService for ReaperRegion {
         main_thread::run(move || {
             let low = reaper_high::Reaper::get().medium_reaper().low();
             sw::set_project_marker(
-                low,
-                id as i32,
-                true, // is a region
-                start,
-                end,
-                None,
+                low, id as i32, true, // is a region
+                start, end, None,
             );
         });
     }

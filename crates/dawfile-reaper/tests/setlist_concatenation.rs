@@ -6,8 +6,8 @@
 
 use dawfile_reaper::io::read_project;
 use dawfile_reaper::setlist_rpp::{
-    self, SongInfo, build_song_infos, build_song_infos_from_projects, measures_to_seconds,
-    concatenate_projects, resolve_song_bounds,
+    self, build_song_infos, build_song_infos_from_projects, concatenate_projects,
+    measures_to_seconds, resolve_song_bounds, SongInfo,
 };
 use std::path::PathBuf;
 
@@ -23,14 +23,23 @@ fn fixture_path(name: &str) -> PathBuf {
 fn parse_song_a() {
     let project = read_project(fixture_path("song_a.RPP")).expect("Failed to parse song_a.RPP");
 
-    assert_eq!(project.tracks.len(), 5, "Song A: Click/Guide, Click, TRACKS, Guitar, Bass");
+    assert_eq!(
+        project.tracks.len(),
+        5,
+        "Song A: Click/Guide, Click, TRACKS, Guitar, Bass"
+    );
 
     // Click item: 0→22s
     assert_eq!(project.tracks[1].items.len(), 1);
     assert_eq!(project.tracks[1].items[0].length, 22.0);
 
     // FTS markers present
-    let marker_names: Vec<&str> = project.markers_regions.all.iter().map(|m| m.name.as_str()).collect();
+    let marker_names: Vec<&str> = project
+        .markers_regions
+        .all
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect();
     assert!(marker_names.contains(&"PREROLL"));
     assert!(marker_names.contains(&"Count-In"));
     assert!(marker_names.contains(&"=START"));
@@ -44,8 +53,13 @@ fn parse_song_a() {
     assert_eq!(bounds.start, 0.0, "PREROLL is at 0");
     assert_eq!(bounds.end, 22.0, "POSTROLL is at 22");
 
-    println!("Song A: {} tracks, bounds {:.1}→{:.1}s, {} markers/regions",
-        project.tracks.len(), bounds.start, bounds.end, project.markers_regions.all.len());
+    println!(
+        "Song A: {} tracks, bounds {:.1}→{:.1}s, {} markers/regions",
+        project.tracks.len(),
+        bounds.start,
+        bounds.end,
+        project.markers_regions.all.len()
+    );
 }
 
 #[test]
@@ -66,9 +80,18 @@ fn parse_song_b() {
     assert_eq!(bounds.end, 18.0);
 
     // Has Solo Section region
-    assert!(project.markers_regions.all.iter().any(|m| m.name == "Solo Section" && m.end_position.is_some()));
+    assert!(project
+        .markers_regions
+        .all
+        .iter()
+        .any(|m| m.name == "Solo Section" && m.end_position.is_some()));
 
-    println!("Song B: {} tracks, bounds {:.1}→{:.1}s", project.tracks.len(), bounds.start, bounds.end);
+    println!(
+        "Song B: {} tracks, bounds {:.1}→{:.1}s",
+        project.tracks.len(),
+        bounds.start,
+        bounds.end
+    );
 }
 
 #[test]
@@ -82,7 +105,12 @@ fn parse_song_c() {
     assert_eq!(bounds.start, 0.0);
     assert!((bounds.end - 17.142857).abs() < 0.01);
 
-    println!("Song C: {} tracks, bounds {:.1}→{:.1}s", project.tracks.len(), bounds.start, bounds.end);
+    println!(
+        "Song C: {} tracks, bounds {:.1}→{:.1}s",
+        project.tracks.len(),
+        bounds.start,
+        bounds.end
+    );
 }
 
 // ─── RPL Parsing ─────────────────────────────────────────────────────────────
@@ -99,8 +127,14 @@ fn parse_rpl_file() {
 
 #[test]
 fn song_name_extraction() {
-    assert_eq!(setlist_rpp::song_name_from_path(&PathBuf::from("Belief - John Mayer [Battle SP26].RPP")), "Belief - John Mayer");
-    assert_eq!(setlist_rpp::song_name_from_path(&PathBuf::from("song_a.RPP")), "song_a");
+    assert_eq!(
+        setlist_rpp::song_name_from_path(&PathBuf::from("Belief - John Mayer [Battle SP26].RPP")),
+        "Belief - John Mayer"
+    );
+    assert_eq!(
+        setlist_rpp::song_name_from_path(&PathBuf::from("song_a.RPP")),
+        "song_a"
+    );
 }
 
 // ─── Bounds-Based Concatenation ──────────────────────────────────────────────
@@ -109,9 +143,7 @@ fn song_name_extraction() {
 fn concatenate_three_songs_with_bounds() {
     let rpl_path = fixture_path("test_setlist.RPL");
     let rpp_paths = setlist_rpp::parse_rpl(&rpl_path).unwrap();
-    let projects: Vec<_> = rpp_paths.iter()
-        .map(|p| read_project(p).unwrap())
-        .collect();
+    let projects: Vec<_> = rpp_paths.iter().map(|p| read_project(p).unwrap()).collect();
 
     let gap = measures_to_seconds(2, 120.0, 4); // 4s gap
 
@@ -121,7 +153,10 @@ fn concatenate_three_songs_with_bounds() {
 
     println!("\nSong layout with bounds:");
     for s in &songs {
-        println!("  {} @ {:.1}s, duration {:.1}s", s.name, s.global_start_seconds, s.duration_seconds);
+        println!(
+            "  {} @ {:.1}s, duration {:.1}s",
+            s.name, s.global_start_seconds, s.duration_seconds
+        );
     }
 
     // Song A: PREROLL(0) → POSTROLL(22) = 22s
@@ -143,7 +178,11 @@ fn concatenate_three_songs_with_bounds() {
     // Tracks
     println!("Tracks ({}):", combined.tracks.len());
     for (i, t) in combined.tracks.iter().enumerate() {
-        let items = if t.items.is_empty() { String::new() } else { format!(" ({} items)", t.items.len()) };
+        let items = if t.items.is_empty() {
+            String::new()
+        } else {
+            format!(" ({} items)", t.items.len())
+        };
         println!("  {:>2}. {}{}", i, t.name, items);
     }
 
@@ -151,24 +190,50 @@ fn concatenate_three_songs_with_bounds() {
     println!("\nTempo:");
     let env = combined.tempo_envelope.as_ref().unwrap();
     for pt in &env.points {
-        println!("  {:.2}s → {:.0} BPM (shape={})", pt.position, pt.tempo, pt.shape);
+        println!(
+            "  {:.2}s → {:.0} BPM (shape={})",
+            pt.position, pt.tempo, pt.shape
+        );
     }
     // All shapes should be 1 (square)
     for pt in &env.points {
-        assert_eq!(pt.shape, 1, "All tempo points should be square, got shape={} at {:.2}s", pt.shape, pt.position);
+        assert_eq!(
+            pt.shape, 1,
+            "All tempo points should be square, got shape={} at {:.2}s",
+            pt.shape, pt.position
+        );
     }
 
     // Markers/regions
-    println!("\nMarkers/Regions ({}):", combined.markers_regions.all.len());
+    println!(
+        "\nMarkers/Regions ({}):",
+        combined.markers_regions.all.len()
+    );
     for mr in &combined.markers_regions.all {
-        let kind = if mr.end_position.is_some() { "RGN" } else { "MKR" };
-        let end = mr.end_position.map(|e| format!("→{:.1}s", e)).unwrap_or_default();
-        let lane = mr.lane.map(|l| format!(" [lane {}]", l)).unwrap_or_default();
-        println!("  [{:>2}] {} {:.1}s{} {:?}{}", mr.id, kind, mr.position, end, mr.name, lane);
+        let kind = if mr.end_position.is_some() {
+            "RGN"
+        } else {
+            "MKR"
+        };
+        let end = mr
+            .end_position
+            .map(|e| format!("→{:.1}s", e))
+            .unwrap_or_default();
+        let lane = mr
+            .lane
+            .map(|l| format!(" [lane {}]", l))
+            .unwrap_or_default();
+        println!(
+            "  [{:>2}] {} {:.1}s{} {:?}{}",
+            mr.id, kind, mr.position, end, mr.name, lane
+        );
     }
 
     // SONG regions should be in lane 3
-    let song_regions: Vec<_> = combined.markers_regions.all.iter()
+    let song_regions: Vec<_> = combined
+        .markers_regions
+        .all
+        .iter()
         .filter(|m| m.lane == Some(3) && m.is_region())
         .collect();
     assert_eq!(song_regions.len(), 3, "Should have 3 SONG lane regions");
@@ -190,9 +255,7 @@ fn concatenate_three_songs_with_bounds() {
 fn shell_copy_preserves_structure_strips_content() {
     let rpl_path = fixture_path("test_setlist.RPL");
     let rpp_paths = setlist_rpp::parse_rpl(&rpl_path).unwrap();
-    let projects: Vec<_> = rpp_paths.iter()
-        .map(|p| read_project(p).unwrap())
-        .collect();
+    let projects: Vec<_> = rpp_paths.iter().map(|p| read_project(p).unwrap()).collect();
 
     let gap = measures_to_seconds(2, 120.0, 4);
     let names: Vec<&str> = vec!["Song A", "Song B", "Song C"];
@@ -205,30 +268,46 @@ fn shell_copy_preserves_structure_strips_content() {
     println!("\n═══ SHELL COPY: Vocals ═══\n");
     println!("Tracks ({}):", shell.tracks.len());
     for (i, t) in shell.tracks.iter().enumerate() {
-        let folder = t.folder.as_ref()
+        let folder = t
+            .folder
+            .as_ref()
             .map(|f| format!(" [{:?} indent={}]", f.folder_state, f.indentation))
             .unwrap_or_default();
-        let items = if t.items.is_empty() { String::new() } else { format!(" ({} items)", t.items.len()) };
+        let items = if t.items.is_empty() {
+            String::new()
+        } else {
+            format!(" ({} items)", t.items.len())
+        };
         println!("  {:>2}. {}{}{}", i, t.name, folder, items);
     }
 
     // Should have Click/Guide tracks WITH items (performer needs the click)
     let click = shell.tracks.iter().find(|t| t.name == "Click");
     assert!(click.is_some(), "Shell should keep Click track");
-    assert!(!click.unwrap().items.is_empty(), "Click track should keep its items");
+    assert!(
+        !click.unwrap().items.is_empty(),
+        "Click track should keep its items"
+    );
 
     // Should NOT have content tracks (Guitar, Bass, Keys, Drums, Synth Lead)
     let content_names = ["Guitar", "Bass", "Keys", "Drums", "Synth Lead"];
     for name in &content_names {
         assert!(
             !shell.tracks.iter().any(|t| t.name == *name),
-            "Shell should NOT have {} track", name
+            "Shell should NOT have {} track",
+            name
         );
     }
 
     // Should NOT have Song A/B/C folders or TRACKS folder
-    assert!(!shell.tracks.iter().any(|t| t.name == "TRACKS"), "No TRACKS folder");
-    assert!(!shell.tracks.iter().any(|t| t.name == "Song A"), "No Song A folder");
+    assert!(
+        !shell.tracks.iter().any(|t| t.name == "TRACKS"),
+        "No TRACKS folder"
+    );
+    assert!(
+        !shell.tracks.iter().any(|t| t.name == "Song A"),
+        "No Song A folder"
+    );
 
     // Should have a Vocals role folder
     let vocals_folder = shell.tracks.iter().find(|t| t.name == "Vocals");
@@ -240,7 +319,10 @@ fn shell_copy_preserves_structure_strips_content() {
     assert!(env.points.len() >= 3, "Should keep all tempo points");
 
     // Should preserve markers/regions
-    assert!(!shell.markers_regions.all.is_empty(), "Should keep markers/regions");
+    assert!(
+        !shell.markers_regions.all.is_empty(),
+        "Should keep markers/regions"
+    );
 
     println!("\nTempo points: {}", env.points.len());
     println!("Markers/regions: {}", shell.markers_regions.all.len());
@@ -251,9 +333,7 @@ fn shell_copy_preserves_structure_strips_content() {
 fn generate_all_role_setlists() {
     let rpl_path = fixture_path("test_setlist.RPL");
     let rpp_paths = setlist_rpp::parse_rpl(&rpl_path).unwrap();
-    let projects: Vec<_> = rpp_paths.iter()
-        .map(|p| read_project(p).unwrap())
-        .collect();
+    let projects: Vec<_> = rpp_paths.iter().map(|p| read_project(p).unwrap()).collect();
 
     let gap = measures_to_seconds(2, 120.0, 4);
     let names: Vec<&str> = vec!["Song A", "Song B", "Song C"];
@@ -266,16 +346,26 @@ fn generate_all_role_setlists() {
 
     println!("\n═══ ROLE SETLISTS ═══\n");
     for (role, project) in &role_projects {
-        let has_click = project.tracks.iter().any(|t| t.name == "Click" && !t.items.is_empty());
+        let has_click = project
+            .tracks
+            .iter()
+            .any(|t| t.name == "Click" && !t.items.is_empty());
         let has_role_folder = project.tracks.iter().any(|t| t.name == *role);
         // Check no content tracks remain (excluding the role folder itself and its placeholder)
         let content_names = ["TRACKS", "Song A", "Song B", "Song C", "Synth Lead"];
-        let no_content = !project.tracks.iter().any(|t| {
-            content_names.contains(&t.name.as_str())
-        });
+        let no_content = !project
+            .tracks
+            .iter()
+            .any(|t| content_names.contains(&t.name.as_str()));
 
-        println!("  {} — {} tracks, click={}, role_folder={}, no_content={}",
-            role, project.tracks.len(), has_click, has_role_folder, no_content);
+        println!(
+            "  {} — {} tracks, click={}, role_folder={}, no_content={}",
+            role,
+            project.tracks.len(),
+            has_click,
+            has_role_folder,
+            no_content
+        );
 
         assert!(has_click, "{} should have Click with items", role);
         assert!(has_role_folder, "{} should have role folder", role);

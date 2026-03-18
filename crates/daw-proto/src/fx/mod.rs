@@ -11,9 +11,7 @@ mod types;
 
 pub use error::FxError;
 pub use event::FxEvent;
-pub use service::{
-    FxService, FxServiceClient, FxServiceDispatcher, fx_service_service_descriptor,
-};
+pub use service::{FxService, FxServiceClient, FxServiceDispatcher, fx_service_service_descriptor};
 pub use tree::{
     FxContainerChannelConfig, FxNode, FxNodeId, FxNodeKind, FxRoutingMode, FxTree,
     FxTreeDepthFirstIter,

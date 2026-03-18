@@ -686,7 +686,10 @@ fn capture_single_fx(
     let chunk_str = match fx.tag_chunk() {
         Ok(tag) => Some(tag.content().to_string()),
         Err(_) => {
-            debug!("  FX[{}] tag_chunk failed, trying track chunk fallback", raw_index);
+            debug!(
+                "  FX[{}] tag_chunk failed, trying track chunk fallback",
+                raw_index
+            );
             get_fx_block_via_track_chunk(track, raw_index)
         }
     };
@@ -695,7 +698,10 @@ fn capture_single_fx(
         Some(s) => {
             debug!(
                 "  FX[{}] '{}' (GUID {}) — chunk captured ({} bytes)",
-                raw_index, plugin_name, guid, s.len()
+                raw_index,
+                plugin_name,
+                guid,
+                s.len()
             );
             chunks.push(FxStateChunk {
                 fx_guid: guid,
@@ -725,7 +731,11 @@ fn get_fx_block_via_track_chunk(track: &Track, fx_index: u32) -> Option<String> 
         dawfile_reaper::types::FxChainNode::Plugin(plugin) => &plugin.raw_block,
         dawfile_reaper::types::FxChainNode::Container(container) => &container.raw_block,
     };
-    if raw.is_empty() { None } else { Some(raw.clone()) }
+    if raw.is_empty() {
+        None
+    } else {
+        Some(raw.clone())
+    }
 }
 
 /// Replace the raw RPP block text for a specific FX by chain index.
@@ -739,10 +749,10 @@ fn set_fx_block_via_track_chunk(
         .chunk(MAX_TRACK_CHUNK_SIZE, ChunkCacheHint::NormalMode)
         .map_err(|e| format!("get chunk: {e}"))?;
     let chunk_str = chunk.to_string();
-    let fxchain_text = dawfile_reaper::chunk_ops::extract_fxchain_block(&chunk_str)
-        .ok_or("no FXCHAIN block")?;
-    let chain = dawfile_reaper::FxChain::parse(fxchain_text)
-        .map_err(|e| format!("parse fxchain: {e}"))?;
+    let fxchain_text =
+        dawfile_reaper::chunk_ops::extract_fxchain_block(&chunk_str).ok_or("no FXCHAIN block")?;
+    let chain =
+        dawfile_reaper::FxChain::parse(fxchain_text).map_err(|e| format!("parse fxchain: {e}"))?;
     let node = chain
         .nodes
         .get(fx_index as usize)
@@ -875,7 +885,11 @@ fn build_fx_parameter(param: &reaper_high::FxParameter) -> FxParameter {
         if let reaper_medium::GetParameterStepSizesResult::Normal { normal_step, .. } = ss {
             if normal_step > 0.0 {
                 let n = (1.0 / normal_step).round() as u32;
-                if (2..=256).contains(&n) { Some(n) } else { None }
+                if (2..=256).contains(&n) {
+                    Some(n)
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -1388,8 +1402,7 @@ fn search_children_for_raw(
         // If this child is a container, recurse
         let child_fx = chain.fx_by_index_untracked(child_raw);
         if is_container_fx(&child_fx)
-            && let Some(id) =
-                search_children_for_raw(chain, &child_fx, target_raw, &child_path)
+            && let Some(id) = search_children_for_raw(chain, &child_fx, target_raw, &child_path)
         {
             return Some(id);
         }
@@ -1442,11 +1455,7 @@ impl FxService for ReaperFx {
     // Chain Queries
     // =========================================================================
 
-    async fn get_fx_list(
-        &self,
-        project: ProjectContext,
-        context: FxChainContext,
-    ) -> Vec<Fx> {
+    async fn get_fx_list(&self, project: ProjectContext, context: FxChainContext) -> Vec<Fx> {
         debug!("ReaperFx::get_fx_list({:?})", context);
 
         main_thread::query(move || {
@@ -1484,11 +1493,7 @@ impl FxService for ReaperFx {
         .unwrap_or(None)
     }
 
-    async fn fx_count(
-        &self,
-        project: ProjectContext,
-        context: FxChainContext,
-    ) -> u32 {
+    async fn fx_count(&self, project: ProjectContext, context: FxChainContext) -> u32 {
         debug!("ReaperFx::fx_count({:?})", context);
 
         main_thread::query(move || {
@@ -1577,11 +1582,7 @@ impl FxService for ReaperFx {
         .unwrap_or(None)
     }
 
-    async fn add_fx_at(
-        &self,
-        project: ProjectContext,
-        request: AddFxAtRequest,
-    ) -> Option<String> {
+    async fn add_fx_at(&self, project: ProjectContext, request: AddFxAtRequest) -> Option<String> {
         debug!("ReaperFx::add_fx_at({:?})", request);
 
         main_thread::query(move || {
@@ -1609,11 +1610,7 @@ impl FxService for ReaperFx {
         .unwrap_or(None)
     }
 
-    async fn remove_fx(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-    ) -> Result<(), String> {
+    async fn remove_fx(&self, project: ProjectContext, target: FxTarget) -> Result<(), String> {
         debug!("ReaperFx::remove_fx({:?})", target);
 
         main_thread::query(move || {
@@ -1671,11 +1668,7 @@ impl FxService for ReaperFx {
     // values normalized 0.0-1.0.
     // =========================================================================
 
-    async fn get_parameters(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-    ) -> Vec<FxParameter> {
+    async fn get_parameters(&self, project: ProjectContext, target: FxTarget) -> Vec<FxParameter> {
         debug!("ReaperFx::get_parameters({:?})", target);
 
         main_thread::query(move || {
@@ -1743,21 +1736,18 @@ impl FxService for ReaperFx {
             }
 
             let proj = resolve_project(&project).ok_or_else(|| "project not found".to_string())?;
-            let (_track, chain) =
-                resolve_fx_chain(&proj, &request.target.context).ok_or_else(|| {
-                    format!("FX chain not found for {:?}", request.target.context)
-                })?;
-            let fx_idx = resolve_fx_index(&chain, &request.target.fx).ok_or_else(|| {
-                format!("FX not found for {:?}", request.target.fx)
-            })?;
-            let fx = chain.fx_by_index(fx_idx).ok_or_else(|| {
-                format!("fx_by_index({}) returned None", fx_idx)
-            })?;
+            let (_track, chain) = resolve_fx_chain(&proj, &request.target.context)
+                .ok_or_else(|| format!("FX chain not found for {:?}", request.target.context))?;
+            let fx_idx = resolve_fx_index(&chain, &request.target.fx)
+                .ok_or_else(|| format!("FX not found for {:?}", request.target.fx))?;
+            let fx = chain
+                .fx_by_index(fx_idx)
+                .ok_or_else(|| format!("fx_by_index({}) returned None", fx_idx))?;
             let param = fx.parameter_by_index(request.index);
             let norm_val = reaper_medium::ReaperNormalizedFxParamValue::new(request.value);
-            param.set_reaper_normalized_value(norm_val).map_err(|e| {
-                format!("set_reaper_normalized_value failed: {e}")
-            })?;
+            param
+                .set_reaper_normalized_value(norm_val)
+                .map_err(|e| format!("set_reaper_normalized_value failed: {e}"))?;
             Ok(())
         })
         .await
@@ -1834,16 +1824,19 @@ impl FxService for ReaperFx {
                     request.target.fx
                 )
             })?;
-            let fx = chain.fx_by_index(fx_idx).ok_or_else(|| {
-                format!("fx_by_index({}) returned None", fx_idx)
-            })?;
+            let fx = chain
+                .fx_by_index(fx_idx)
+                .ok_or_else(|| format!("fx_by_index({}) returned None", fx_idx))?;
             for param in fx.parameters() {
                 if let Ok(pname) = param.name()
                     && pname.to_str() == request.name
                 {
                     let value = reaper_medium::ReaperNormalizedFxParamValue::new(request.value);
                     param.set_reaper_normalized_value(value).map_err(|e| {
-                        format!("set_reaper_normalized_value failed for {:?}: {e}", request.name)
+                        format!(
+                            "set_reaper_normalized_value failed for {:?}: {e}",
+                            request.name
+                        )
                     })?;
                     return Ok(());
                 }
@@ -1895,11 +1888,7 @@ impl FxService for ReaperFx {
         .unwrap_or(None)
     }
 
-    async fn next_preset(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-    ) -> Result<(), String> {
+    async fn next_preset(&self, project: ProjectContext, target: FxTarget) -> Result<(), String> {
         debug!("ReaperFx::next_preset({:?})", target);
 
         main_thread::query(move || {
@@ -1913,23 +1902,14 @@ impl FxService for ReaperFx {
                 .raw()
                 .map_err(|_| "next_preset: raw track not available".to_string())?;
             let location = fx_location(index, chain.is_input_fx());
-            fx_sw::track_fx_navigate_presets(
-                Reaper::get().medium_reaper(),
-                raw_track,
-                location,
-                1,
-            );
+            fx_sw::track_fx_navigate_presets(Reaper::get().medium_reaper(), raw_track, location, 1);
             Ok(())
         })
         .await
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
-    async fn prev_preset(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-    ) -> Result<(), String> {
+    async fn prev_preset(&self, project: ProjectContext, target: FxTarget) -> Result<(), String> {
         debug!("ReaperFx::prev_preset({:?})", target);
 
         main_thread::query(move || {
@@ -1990,11 +1970,7 @@ impl FxService for ReaperFx {
     // UI
     // =========================================================================
 
-    async fn open_fx_ui(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-    ) -> Result<(), String> {
+    async fn open_fx_ui(&self, project: ProjectContext, target: FxTarget) -> Result<(), String> {
         debug!("ReaperFx::open_fx_ui({:?})", target);
 
         main_thread::query(move || {
@@ -2012,11 +1988,7 @@ impl FxService for ReaperFx {
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
-    async fn close_fx_ui(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-    ) -> Result<(), String> {
+    async fn close_fx_ui(&self, project: ProjectContext, target: FxTarget) -> Result<(), String> {
         debug!("ReaperFx::close_fx_ui({:?})", target);
 
         main_thread::query(move || {
@@ -2034,11 +2006,7 @@ impl FxService for ReaperFx {
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
-    async fn toggle_fx_ui(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-    ) -> Result<(), String> {
+    async fn toggle_fx_ui(&self, project: ProjectContext, target: FxTarget) -> Result<(), String> {
         debug!("ReaperFx::toggle_fx_ui({:?})", target);
 
         main_thread::query(move || {
@@ -2116,11 +2084,7 @@ impl FxService for ReaperFx {
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
-    async fn get_fx_latency(
-        &self,
-        project: ProjectContext,
-        target: FxTarget,
-    ) -> Option<FxLatency> {
+    async fn get_fx_latency(&self, project: ProjectContext, target: FxTarget) -> Option<FxLatency> {
         debug!("ReaperFx::get_fx_latency({:?})", target);
 
         main_thread::query(move || {
@@ -2161,13 +2125,13 @@ impl FxService for ReaperFx {
             let fx = chain.fx_by_index_untracked(index);
 
             let p = param_index;
-            let lfo_active = read_config_str(&fx, &format!("param.{p}.lfo.active"))
-                .is_some_and(|s| s == "1");
+            let lfo_active =
+                read_config_str(&fx, &format!("param.{p}.lfo.active")).is_some_and(|s| s == "1");
             let lfo_speed = read_config_f64(&fx, &format!("param.{p}.lfo.speed"));
             let lfo_strength = read_config_f64(&fx, &format!("param.{p}.lfo.strength"));
 
-            let link_active = read_config_str(&fx, &format!("param.{p}.plink.active"))
-                .is_some_and(|s| s == "1");
+            let link_active =
+                read_config_str(&fx, &format!("param.{p}.plink.active")).is_some_and(|s| s == "1");
             let link_fx_index = read_config_i32(&fx, &format!("param.{p}.plink.effect"));
             let link_param_index = read_config_i32(&fx, &format!("param.{p}.plink.param"));
 
@@ -2233,8 +2197,8 @@ impl FxService for ReaperFx {
                 .ok_or_else(|| format!("FX not found for {:?}", target.fx))?;
             let fx = chain.fx_by_index_untracked(index);
 
-            let chunk_str = String::from_utf8(chunk)
-                .map_err(|e| format!("chunk is not valid UTF-8: {e}"))?;
+            let chunk_str =
+                String::from_utf8(chunk).map_err(|e| format!("chunk is not valid UTF-8: {e}"))?;
 
             // Try set_tag_chunk first (works for VST/VST3), fallback to dawfile-reaper (for CLAP)
             match fx.set_tag_chunk(&chunk_str) {
@@ -2387,9 +2351,16 @@ impl FxService for ReaperFx {
                     match fx.set_tag_chunk(encoded) {
                         Ok(()) => {}
                         Err(_) => {
-                            debug!("set_tag_chunk failed for FX[{}], trying track chunk fallback", fx_index);
-                            if let Err(e) = set_fx_block_via_track_chunk(&track, fx_index, encoded) {
-                                warn!("set_fx_block_via_track_chunk also failed for FX[{}]: {}", fx_index, e);
+                            debug!(
+                                "set_tag_chunk failed for FX[{}], trying track chunk fallback",
+                                fx_index
+                            );
+                            if let Err(e) = set_fx_block_via_track_chunk(&track, fx_index, encoded)
+                            {
+                                warn!(
+                                    "set_fx_block_via_track_chunk also failed for FX[{}]: {}",
+                                    fx_index, e
+                                );
                             }
                         }
                     }
@@ -2439,11 +2410,7 @@ impl FxService for ReaperFx {
     // implemented in US-004 and US-005.
     // =========================================================================
 
-    async fn get_fx_tree(
-        &self,
-        project: ProjectContext,
-        context: FxChainContext,
-    ) -> FxTree {
+    async fn get_fx_tree(&self, project: ProjectContext, context: FxChainContext) -> FxTree {
         debug!("ReaperFx::get_fx_tree({:?})", context);
 
         main_thread::query(move || {
@@ -2889,13 +2856,8 @@ impl FxService for ReaperFx {
             }
             // Scan second bank
             for pin in 0..MAX_PINS {
-                let (low32, high32) = fx_sw::track_fx_get_pin_mappings(
-                    low,
-                    raw_track,
-                    raw_fx,
-                    1,
-                    pin + SECOND_BANK,
-                );
+                let (low32, high32) =
+                    fx_sw::track_fx_get_pin_mappings(low, raw_track, raw_fx, 1, pin + SECOND_BANK);
                 if low32 != 0 || high32 != 0 {
                     saved.push((pin + SECOND_BANK, low32, high32));
                     fx_sw::track_fx_set_pin_mappings(

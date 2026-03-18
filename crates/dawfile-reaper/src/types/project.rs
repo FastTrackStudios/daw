@@ -275,7 +275,7 @@ pub struct ProjectProperties {
     // Project settings
     pub proj_offs: Option<(i32, i32, i32)>, // PROJOFFS 0 0 0
     pub max_proj_len: Option<(i32, i32)>,   // MAXPROJLEN 0 0
-    pub grid: GridSettings, // GRID 3199 8 1 8 1 0 0 0
+    pub grid: GridSettings,                 // GRID 3199 8 1 8 1 0 0 0
     pub time_mode: Option<(i32, i32, i32, i32, i32, i32, i32)>, // TIMEMODE 1 5 -1 30 0 0 -1
     pub video_config: Option<(i32, i32, i32)>, // VIDEO_CONFIG 0 0 65792
     pub pan_mode: Option<i32>,              // PANMODE 3
@@ -287,11 +287,11 @@ pub struct ProjectProperties {
     pub v_zoom_ex: Option<(i32, i32)>, // VZOOMEX 6 0
 
     // Recording settings
-    pub use_rec_cfg: Option<i32>, // USE_REC_CFG 0
-    pub rec_mode: Option<i32>,    // RECMODE 1
-    pub smpte_sync: SmpteSyncSettings, // SMPTESYNC 0 30 100 40 1000 300 0 0 1 0 0
-    pub r#loop: Option<i32>,                                                         // LOOP 0
-    pub loop_gran: Option<(i32, i32)>,                                               // LOOPGRAN 0 4
+    pub use_rec_cfg: Option<i32>,              // USE_REC_CFG 0
+    pub rec_mode: Option<i32>,                 // RECMODE 1
+    pub smpte_sync: SmpteSyncSettings,         // SMPTESYNC 0 30 100 40 1000 300 0 0 1 0 0
+    pub r#loop: Option<i32>,                   // LOOP 0
+    pub loop_gran: Option<(i32, i32)>,         // LOOPGRAN 0 4
     pub record_path: Option<(String, String)>, // RECORD_PATH "Media" ""
 
     // Render settings
@@ -327,13 +327,13 @@ pub struct ProjectProperties {
     pub master_peak_col: Option<i32>,            // MASTERPEAKCOL 16576
     pub master_mute_solo: Option<i32>,           // MASTERMUTESOLO 0
     pub master_track_view: Option<MasterTrackView>, // MASTERTRACKVIEW 0 0.6667 0.5 0.5 0 0 0 0 0 0 0 0 0 0
-    pub master_hw_out: MasterHwOut, // MASTERHWOUT 0 0 1 0 0 0 0 -1
-    pub master_nch: Option<(i32, i32)>,                                  // MASTER_NCH 2 2
+    pub master_hw_out: MasterHwOut,                 // MASTERHWOUT 0 0 1 0 0 0 0 -1
+    pub master_nch: Option<(i32, i32)>,             // MASTER_NCH 2 2
     pub master_volume: Option<(i32, i32, i32, i32, i32)>, // MASTER_VOLUME 1 0 -1 -1 1
-    pub master_pan_mode: Option<i32>,                     // MASTER_PANMODE 3
-    pub master_pan_law_flags: Option<i32>,                // MASTER_PANLAWFLAGS 3
-    pub master_fx: Option<i32>,                           // MASTER_FX 1
-    pub master_sel: Option<i32>,                          // MASTER_SEL 0
+    pub master_pan_mode: Option<i32>,               // MASTER_PANMODE 3
+    pub master_pan_law_flags: Option<i32>,          // MASTER_PANLAWFLAGS 3
+    pub master_fx: Option<i32>,                     // MASTER_FX 1
+    pub master_sel: Option<i32>,                    // MASTER_SEL 0
 
     // Global automation
     pub global_auto: Option<i32>, // GLOBAL_AUTO -1
@@ -1238,9 +1238,7 @@ impl ProjectProperties {
             }
             "RULERHEIGHT" => {
                 if tokens.len() >= 2 {
-                    if let (Some(a), Some(b)) =
-                        (tokens[0].as_number(), tokens[1].as_number())
-                    {
+                    if let (Some(a), Some(b)) = (tokens[0].as_number(), tokens[1].as_number()) {
                         self.ruler_height = Some((a as i32, b as i32));
                     }
                 }

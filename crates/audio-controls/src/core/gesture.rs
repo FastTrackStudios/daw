@@ -187,11 +187,7 @@ impl ScrollSensitivity {
     /// Apply inversion if configured.
     #[must_use]
     pub fn apply_direction(&self, delta: f32) -> f32 {
-        if self.invert {
-            -delta
-        } else {
-            delta
-        }
+        if self.invert { -delta } else { delta }
     }
 }
 
@@ -202,8 +198,7 @@ impl Default for ScrollSensitivity {
 }
 
 /// Touch gesture type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TouchGesture {
     /// No active gesture.
     #[default]
@@ -261,18 +256,19 @@ impl TouchRecognizer {
 
         // Check for double tap
         if positions.len() == 1
-            && let Some(last_pos) = self.last_tap_position {
-                let dt = timestamp - self.last_tap_time;
-                let dx = positions[0].0 - last_pos.0;
-                let dy = positions[0].1 - last_pos.1;
-                let distance = (dx * dx + dy * dy).sqrt();
+            && let Some(last_pos) = self.last_tap_position
+        {
+            let dt = timestamp - self.last_tap_time;
+            let dx = positions[0].0 - last_pos.0;
+            let dy = positions[0].1 - last_pos.1;
+            let distance = (dx * dx + dy * dy).sqrt();
 
-                if dt < Self::DOUBLE_TAP_MS && distance < Self::DOUBLE_TAP_DISTANCE {
-                    self.gesture = TouchGesture::DoubleTap;
-                    self.last_tap_position = None;
-                    return;
-                }
+            if dt < Self::DOUBLE_TAP_MS && distance < Self::DOUBLE_TAP_DISTANCE {
+                self.gesture = TouchGesture::DoubleTap;
+                self.last_tap_position = None;
+                return;
             }
+        }
 
         self.gesture = match positions.len() {
             1 => TouchGesture::SingleDrag,
@@ -356,7 +352,6 @@ impl TouchRecognizer {
         self.start_positions.clear();
     }
 }
-
 
 /// Calculate distance between two points.
 fn distance(a: (f32, f32), b: (f32, f32)) -> f32 {

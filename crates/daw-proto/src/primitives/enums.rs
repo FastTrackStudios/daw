@@ -4,8 +4,7 @@ use facet::Facet;
 
 /// Time display mode (how time is shown in the UI)
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet, Default)]
 pub enum TimeMode {
     /// Display as seconds (e.g., "123.456")
     Time,
@@ -26,11 +25,9 @@ pub enum TimeMode {
     AbsoluteFrames,
 }
 
-
 /// How items/regions attach to timeline (affects time stretch behavior)
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet, Default)]
 pub enum BeatAttachMode {
     /// Fixed to time (doesn't move with tempo changes)
     #[default]
@@ -41,11 +38,9 @@ pub enum BeatAttachMode {
     BeatsPositionOnly,
 }
 
-
 /// How beats are calculated in time mapping
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet, Default)]
 pub enum MeasureMode {
     /// Pure beat counting (ignore measure boundaries)
     #[default]
@@ -54,11 +49,9 @@ pub enum MeasureMode {
     FromMeasureAtIndex(i32),
 }
 
-
 /// Time mode override (for specific contexts)
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet, Default)]
 pub enum TimeModeOverride {
     /// Use the project's default time mode
     #[default]
@@ -67,11 +60,9 @@ pub enum TimeModeOverride {
     Mode(TimeMode),
 }
 
-
 /// MIDI event timing
 #[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Facet, Default)]
 pub enum SendMidiTime {
     /// Send MIDI event immediately
     #[default]
@@ -79,7 +70,6 @@ pub enum SendMidiTime {
     /// Send MIDI event at specific frame offset
     AtFrameOffset(u32),
 }
-
 
 /// Automation playback/recording mode
 #[repr(u8)]

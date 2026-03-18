@@ -132,10 +132,11 @@ impl TrackHierarchyBuilder {
     /// This modifies the last track to close the folder.
     pub fn end(mut self) -> Self {
         if self.folder_stack.pop().is_some()
-            && let Some(last) = self.tracks.last_mut() {
-                let current = last.folder_depth_change.to_raw_value();
-                last.folder_depth_change = FolderDepthChange::from_raw_value(current - 1);
-            }
+            && let Some(last) = self.tracks.last_mut()
+        {
+            let current = last.folder_depth_change.to_raw_value();
+            last.folder_depth_change = FolderDepthChange::from_raw_value(current - 1);
+        }
         self
     }
 

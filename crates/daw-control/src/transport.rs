@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::DawClients;
-use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport as TransportState};
 use crate::Result;
+use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport as TransportState};
 use roam::Rx;
 
 /// Transport handle for a specific project

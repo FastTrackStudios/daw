@@ -374,9 +374,10 @@ impl FxTree {
         fn find_recursive<'a>(nodes: &'a [FxNode], guid: &str) -> Option<&'a FxNode> {
             for node in nodes {
                 if let FxNodeKind::Plugin(fx) = &node.kind
-                    && fx.guid == guid {
-                        return Some(node);
-                    }
+                    && fx.guid == guid
+                {
+                    return Some(node);
+                }
                 if let Some(found) = find_recursive(node.children(), guid) {
                     return Some(found);
                 }
@@ -397,9 +398,10 @@ impl FxTree {
             }
             for node in nodes.iter_mut() {
                 if let Some(children) = node.children_mut()
-                    && let Some(found) = find_recursive(children, id) {
-                        return Some(found);
-                    }
+                    && let Some(found) = find_recursive(children, id)
+                {
+                    return Some(found);
+                }
             }
             None
         }

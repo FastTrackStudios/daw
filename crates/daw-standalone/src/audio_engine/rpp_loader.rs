@@ -104,11 +104,7 @@ fn extract_tracks_with_items(rpp_text: &str) -> Result<(Vec<TrackItems>, u32), S
                 continue;
             }
 
-            let playrate = item
-                .playrate
-                .as_ref()
-                .map(|pr| pr.rate)
-                .unwrap_or(1.0);
+            let playrate = item.playrate.as_ref().map(|pr| pr.rate).unwrap_or(1.0);
 
             audio_items.push(AudioItem {
                 position: item.position,
@@ -134,7 +130,11 @@ fn extract_tracks_with_items(rpp_text: &str) -> Result<(Vec<TrackItems>, u32), S
     }
 
     let total_items: usize = result.iter().map(|t| t.items.len()).sum();
-    info!("Found {} audio tracks with {} total items", result.len(), total_items);
+    info!(
+        "Found {} audio tracks with {} total items",
+        result.len(),
+        total_items
+    );
     Ok((result, sample_rate))
 }
 
@@ -170,11 +170,7 @@ pub fn load_rpp(
     for file_path in &all_files {
         match resolve_audio(file_path) {
             Some(bytes) => {
-                let ext = file_path
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or("")
-                    .to_lowercase();
+                let ext = file_path.rsplit('.').next().unwrap_or("").to_lowercase();
 
                 match decoder::decode_audio_with_extension(&bytes, &ext) {
                     Some(audio) => {
@@ -243,8 +239,7 @@ pub fn load_rpp(
 
             let silence_frames = (item.position * engine_sample_rate as f64) as usize;
             let item_frames = (item.length * engine_sample_rate as f64) as usize;
-            let src_offset_frames =
-                (item.source_offset * decoded.sample_rate as f64) as usize;
+            let src_offset_frames = (item.source_offset * decoded.sample_rate as f64) as usize;
 
             for frame in 0..item_frames {
                 let dst_frame = silence_frames + frame;
@@ -265,7 +260,11 @@ pub fn load_rpp(
                 let src_offset = src_frame * decoded.channels as usize;
 
                 for ch in 0..out_channels {
-                    let src_ch = if ch < decoded.channels as usize { ch } else { 0 };
+                    let src_ch = if ch < decoded.channels as usize {
+                        ch
+                    } else {
+                        0
+                    };
                     if let Some(&sample) = decoded.samples.get(src_offset + src_ch) {
                         // Additive mix (items on the same track can overlap)
                         samples[dst_offset + ch] += sample;

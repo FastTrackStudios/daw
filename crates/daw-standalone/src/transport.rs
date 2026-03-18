@@ -4,17 +4,17 @@
 //! Each project has its own independent transport state, allowing multiple
 //! projects to play simultaneously with independent positions.
 
+use crate::platform::RwLock;
 use daw_proto::{
     PlayState, ProjectContext, Transport, TransportService,
     primitives::{Position, PositionInSeconds, Tempo, TimeSignature},
 };
 use roam::Tx;
 use std::collections::HashMap;
-use crate::platform::RwLock;
 use std::sync::Arc;
 use std::time::Duration;
-use web_time::Instant;
 use tracing::{debug, info, warn};
+use web_time::Instant;
 
 /// Runtime state wrapping Transport with playback timing for a single project
 #[derive(Clone)]
@@ -600,109 +600,109 @@ impl TransportService for StandaloneTransport {
     async fn subscribe_state(&self, _project: ProjectContext, _tx: Tx<Transport>) {
         #[cfg(not(target_arch = "wasm32"))]
         {
-        let Some(guid) = self.resolve_project(&_project).await else {
-            warn!("StandaloneTransport::subscribe_state - could not resolve project");
-            return;
-        };
-        info!(
-            "StandaloneTransport: subscribe_state for project {} - starting 60Hz stream",
-            guid
-        );
-
-        // Clone states for the spawned task
-        let states = self.states.clone();
-        let guid = guid.clone();
-        let tx = _tx;
-
-        // Spawn the streaming loop so this method returns immediately
-        // (roam needs the method to return so it can send the Response)
-        moire::task::spawn(async move {
-            // ~16ms for 60Hz
-            let interval = Duration::from_micros(16667);
-            let mut last_send = Instant::now();
-
-            loop {
-                // Sleep until next frame
-                let elapsed = last_send.elapsed();
-                if elapsed < interval {
-                    crate::platform::sleep(interval - elapsed).await;
-                }
-                last_send = Instant::now();
-
-                // Get current transport snapshot for this project
-                let snapshot = {
-                    let states = states.read().await;
-                    states
-                        .get(&guid)
-                        .map(|s| s.snapshot())
-                        .unwrap_or_else(Transport::new)
-                };
-
-                // Send the state - exit loop when client disconnects
-                if let Err(e) = tx.send(snapshot).await {
-                    debug!(
-                        "StandaloneTransport: subscribe_state stream closed for project {}: {}",
-                        guid, e
-                    );
-                    break;
-                }
-            }
-
+            let Some(guid) = self.resolve_project(&_project).await else {
+                warn!("StandaloneTransport::subscribe_state - could not resolve project");
+                return;
+            };
             info!(
-                "StandaloneTransport: subscribe_state stream ended for project {}",
+                "StandaloneTransport: subscribe_state for project {} - starting 60Hz stream",
                 guid
             );
-        });
+
+            // Clone states for the spawned task
+            let states = self.states.clone();
+            let guid = guid.clone();
+            let tx = _tx;
+
+            // Spawn the streaming loop so this method returns immediately
+            // (roam needs the method to return so it can send the Response)
+            moire::task::spawn(async move {
+                // ~16ms for 60Hz
+                let interval = Duration::from_micros(16667);
+                let mut last_send = Instant::now();
+
+                loop {
+                    // Sleep until next frame
+                    let elapsed = last_send.elapsed();
+                    if elapsed < interval {
+                        crate::platform::sleep(interval - elapsed).await;
+                    }
+                    last_send = Instant::now();
+
+                    // Get current transport snapshot for this project
+                    let snapshot = {
+                        let states = states.read().await;
+                        states
+                            .get(&guid)
+                            .map(|s| s.snapshot())
+                            .unwrap_or_else(Transport::new)
+                    };
+
+                    // Send the state - exit loop when client disconnects
+                    if let Err(e) = tx.send(snapshot).await {
+                        debug!(
+                            "StandaloneTransport: subscribe_state stream closed for project {}: {}",
+                            guid, e
+                        );
+                        break;
+                    }
+                }
+
+                info!(
+                    "StandaloneTransport: subscribe_state stream ended for project {}",
+                    guid
+                );
+            });
         } // cfg(not(wasm32))
     }
 
     async fn subscribe_all_projects(&self, _tx: Tx<daw_proto::AllProjectsTransport>) {
         #[cfg(not(target_arch = "wasm32"))]
         {
-        let tx = _tx;
-        info!("StandaloneTransport: subscribe_all_projects - starting stream for all projects");
+            let tx = _tx;
+            info!("StandaloneTransport: subscribe_all_projects - starting stream for all projects");
 
-        // Clone states for the spawned task
-        let states = self.states.clone();
+            // Clone states for the spawned task
+            let states = self.states.clone();
 
-        // Spawn the streaming loop so this method returns immediately
-        moire::task::spawn(async move {
-            // ~16ms for 60Hz batched updates
-            let interval = Duration::from_millis(16);
+            // Spawn the streaming loop so this method returns immediately
+            moire::task::spawn(async move {
+                // ~16ms for 60Hz batched updates
+                let interval = Duration::from_millis(16);
 
-            loop {
-                crate::platform::sleep(interval).await;
+                loop {
+                    crate::platform::sleep(interval).await;
 
-                // Get transport snapshots for all projects
-                let projects: Vec<daw_proto::ProjectTransportState> = {
-                    let states = states.read().await;
-                    states
-                        .iter()
-                        .map(|(guid, state)| daw_proto::ProjectTransportState {
-                            project_guid: guid.clone(),
-                            transport: state.snapshot(),
-                        })
-                        .collect()
-                };
+                    // Get transport snapshots for all projects
+                    let projects: Vec<daw_proto::ProjectTransportState> = {
+                        let states = states.read().await;
+                        states
+                            .iter()
+                            .map(|(guid, state)| daw_proto::ProjectTransportState {
+                                project_guid: guid.clone(),
+                                transport: state.snapshot(),
+                            })
+                            .collect()
+                    };
 
-                if projects.is_empty() {
-                    continue;
+                    if projects.is_empty() {
+                        continue;
+                    }
+
+                    let update = daw_proto::AllProjectsTransport { projects };
+
+                    // Send the state - exit loop when client disconnects
+                    if let Err(e) = tx.send(update).await {
+                        debug!(
+                            "StandaloneTransport: subscribe_all_projects stream closed: {}",
+                            e
+                        );
+                        break;
+                    }
                 }
 
-                let update = daw_proto::AllProjectsTransport { projects };
-
-                // Send the state - exit loop when client disconnects
-                if let Err(e) = tx.send(update).await {
-                    debug!(
-                        "StandaloneTransport: subscribe_all_projects stream closed: {}",
-                        e
-                    );
-                    break;
-                }
-            }
-
-            info!("StandaloneTransport: subscribe_all_projects stream ended");
-        });
+                info!("StandaloneTransport: subscribe_all_projects stream ended");
+            });
         } // cfg(not(wasm32))
     }
 }

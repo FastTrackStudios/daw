@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::DawClients;
-use daw_proto::{Marker, MarkerEvent, ProjectContext};
 use crate::Result;
+use daw_proto::{Marker, MarkerEvent, ProjectContext};
 use roam::Rx;
 
 /// Markers handle for a specific project

@@ -8,8 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-const RPL_PATH: &str =
-    "/Users/codywright/Music/Projects/Live Tracks/Just Friends/Battle SP26.RPL";
+const RPL_PATH: &str = "/Users/codywright/Music/Projects/Live Tracks/Just Friends/Battle SP26.RPL";
 
 fn rpl_exists() -> bool {
     Path::new(RPL_PATH).exists()
@@ -25,8 +24,7 @@ struct SongExpectation {
 }
 
 fn load_expectations() -> Vec<SongExpectation> {
-    let rpp_paths = dawfile_reaper::setlist_rpp::parse_rpl(Path::new(RPL_PATH))
-        .expect("parse RPL");
+    let rpp_paths = dawfile_reaper::setlist_rpp::parse_rpl(Path::new(RPL_PATH)).expect("parse RPL");
 
     rpp_paths
         .iter()
@@ -65,17 +63,15 @@ fn trimmed_combine_song_starts_on_measure_boundaries() {
         trim_to_bounds: true,
     };
 
-    let (combined, song_infos) = dawfile_reaper::setlist_rpp::combine_rpl(
-        Path::new(RPL_PATH),
-        &options,
-    )
-    .expect("combine failed");
+    let (combined, song_infos) =
+        dawfile_reaper::setlist_rpp::combine_rpl(Path::new(RPL_PATH), &options)
+            .expect("combine failed");
 
     assert_eq!(song_infos.len(), expectations.len());
 
     // Parse the combined project to access its tempo envelope
-    let combined_project = dawfile_reaper::parse_project_text(&combined)
-        .expect("parse combined RPP");
+    let combined_project =
+        dawfile_reaper::parse_project_text(&combined).expect("parse combined RPP");
 
     let tempo_env = combined_project
         .tempo_envelope
@@ -103,7 +99,9 @@ fn trimmed_combine_song_starts_on_measure_boundaries() {
         assert!(
             (duration - local_dur).abs() < 0.1,
             "Song {} duration {:.2} should match local bounds {:.2}",
-            i, duration, local_dur
+            i,
+            duration,
+            local_dur
         );
     }
 
@@ -114,8 +112,7 @@ fn trimmed_combine_song_starts_on_measure_boundaries() {
     // should be measure-aligned.
     println!("\n=== Measure-Aligned Gaps ===");
     for i in 1..song_infos.len() {
-        let prev_end =
-            song_infos[i - 1].global_start_seconds + song_infos[i - 1].duration_seconds;
+        let prev_end = song_infos[i - 1].global_start_seconds + song_infos[i - 1].duration_seconds;
         let gap = song_infos[i].global_start_seconds - prev_end;
 
         // The gap should be exactly 2 measures at the ending song's tempo.
@@ -132,7 +129,9 @@ fn trimmed_combine_song_starts_on_measure_boundaries() {
             "  {i}. {} @ {:.2}s → m{} b{} f{:.2}  gap={:.2}s (expect={:.2}s)",
             song_infos[i].name,
             song_infos[i].global_start_seconds,
-            measure, beat, fraction,
+            measure,
+            beat,
+            fraction,
             gap,
             expected_gap,
         );
@@ -143,7 +142,10 @@ fn trimmed_combine_song_starts_on_measure_boundaries() {
         assert!(
             (gap - expected_gap).abs() < 1.0,
             "Gap before {} should be ~{:.2}s (2 measures), got {:.2}s (diff={:.2}s)",
-            song_infos[i].name, expected_gap, gap, (gap - expected_gap).abs()
+            song_infos[i].name,
+            expected_gap,
+            gap,
+            (gap - expected_gap).abs()
         );
     }
 
@@ -191,8 +193,7 @@ fn trimmed_combine_song_starts_on_measure_boundaries() {
     // Verify no songs overlap
     println!("\n=== Song Gaps ===");
     for i in 1..song_infos.len() {
-        let prev_end =
-            song_infos[i - 1].global_start_seconds + song_infos[i - 1].duration_seconds;
+        let prev_end = song_infos[i - 1].global_start_seconds + song_infos[i - 1].duration_seconds;
         let gap = song_infos[i].global_start_seconds - prev_end;
 
         println!(
@@ -234,14 +235,11 @@ fn trimmed_combine_has_proper_folder_structure() {
         trim_to_bounds: true,
     };
 
-    let (combined, song_infos) = dawfile_reaper::setlist_rpp::combine_rpl(
-        Path::new(RPL_PATH),
-        &options,
-    )
-    .expect("combine failed");
+    let (combined, song_infos) =
+        dawfile_reaper::setlist_rpp::combine_rpl(Path::new(RPL_PATH), &options)
+            .expect("combine failed");
 
-    let project = dawfile_reaper::parse_project_text(&combined)
-        .expect("parse combined RPP");
+    let project = dawfile_reaper::parse_project_text(&combined).expect("parse combined RPP");
 
     let track_names: Vec<&str> = project.tracks.iter().map(|t| t.name.as_str()).collect();
 
@@ -291,7 +289,8 @@ fn trimmed_combine_has_proper_folder_structure() {
         assert!(
             track_names.contains(&info.name.as_str()),
             "Combined project should have folder track for '{}'. Got: {:?}",
-            info.name, track_names
+            info.name,
+            track_names
         );
     }
 
@@ -342,22 +341,21 @@ fn trimmed_combine_markers_in_correct_lanes() {
         trim_to_bounds: true,
     };
 
-    let (combined, song_infos) = dawfile_reaper::setlist_rpp::combine_rpl(
-        Path::new(RPL_PATH),
-        &options,
-    )
-    .expect("combine failed");
+    let (combined, song_infos) =
+        dawfile_reaper::setlist_rpp::combine_rpl(Path::new(RPL_PATH), &options)
+            .expect("combine failed");
 
-    let project = dawfile_reaper::parse_project_text(&combined)
-        .expect("parse combined RPP");
+    let project = dawfile_reaper::parse_project_text(&combined).expect("parse combined RPP");
 
     println!("\n=== Marker Lane Classification ===");
 
     // Song regions should be on lane 3 (SONG)
     for info in &song_infos {
-        let song_region = project.markers_regions.all.iter().find(|mr| {
-            mr.name == info.name && mr.is_region()
-        });
+        let song_region = project
+            .markers_regions
+            .all
+            .iter()
+            .find(|mr| mr.name == info.name && mr.is_region());
         if let Some(mr) = song_region {
             println!(
                 "  Song region '{}': lane={:?} pos={:.1}..{:.1}",
@@ -370,7 +368,8 @@ fn trimmed_combine_markers_in_correct_lanes() {
                 mr.lane,
                 Some(3),
                 "Song region '{}' should be on SONG lane (3), got {:?}",
-                mr.name, mr.lane
+                mr.name,
+                mr.lane
             );
         }
     }
@@ -379,19 +378,17 @@ fn trimmed_combine_markers_in_correct_lanes() {
     let section_names = ["Intro", "VS", "CH", "Chorus", "Bridge", "Outro"];
     for mr in &project.markers_regions.all {
         if mr.is_region() && mr.lane != Some(3) {
-            let is_section = section_names.iter().any(|s| {
-                mr.name.to_uppercase().starts_with(&s.to_uppercase())
-            });
+            let is_section = section_names
+                .iter()
+                .any(|s| mr.name.to_uppercase().starts_with(&s.to_uppercase()));
             if is_section {
-                println!(
-                    "  Section region '{}': lane={:?}",
-                    mr.name, mr.lane
-                );
+                println!("  Section region '{}': lane={:?}", mr.name, mr.lane);
                 assert_eq!(
                     mr.lane,
                     Some(1),
                     "Section region '{}' should be on SECTIONS lane (1), got {:?}",
-                    mr.name, mr.lane
+                    mr.name,
+                    mr.lane
                 );
             }
         }
@@ -401,15 +398,13 @@ fn trimmed_combine_markers_in_correct_lanes() {
     for mr in &project.markers_regions.all {
         let upper = mr.name.to_uppercase();
         if matches!(upper.as_str(), "SONGSTART" | "SONGEND" | "COUNT-IN") {
-            println!(
-                "  Structural marker '{}': lane={:?}",
-                mr.name, mr.lane
-            );
+            println!("  Structural marker '{}': lane={:?}", mr.name, mr.lane);
             assert_eq!(
                 mr.lane,
                 Some(2),
                 "Structural marker '{}' should be on MARKS lane (2), got {:?}",
-                mr.name, mr.lane
+                mr.name,
+                mr.lane
             );
         }
     }
@@ -418,15 +413,13 @@ fn trimmed_combine_markers_in_correct_lanes() {
     for mr in &project.markers_regions.all {
         let upper = mr.name.to_uppercase();
         if matches!(upper.as_str(), "=START" | "=END" | "PREROLL" | "POSTROLL") {
-            println!(
-                "  Bounds marker '{}': lane={:?}",
-                mr.name, mr.lane
-            );
+            println!("  Bounds marker '{}': lane={:?}", mr.name, mr.lane);
             assert_eq!(
                 mr.lane,
                 Some(4),
                 "Bounds marker '{}' should be on START/END lane (4), got {:?}",
-                mr.name, mr.lane
+                mr.name,
+                mr.lane
             );
         }
     }
@@ -436,7 +429,11 @@ fn trimmed_combine_markers_in_correct_lanes() {
         !project.ruler_lanes.is_empty(),
         "Combined project should have ruler lane definitions"
     );
-    let lane_names: Vec<&str> = project.ruler_lanes.iter().map(|l| l.name.as_str()).collect();
+    let lane_names: Vec<&str> = project
+        .ruler_lanes
+        .iter()
+        .map(|l| l.name.as_str())
+        .collect();
     println!("\n  Ruler lanes: {:?}", lane_names);
     assert!(lane_names.contains(&"SECTIONS"));
     assert!(lane_names.contains(&"MARKS"));
@@ -456,14 +453,11 @@ fn trimmed_combine_items_trimmed_to_bounds() {
         trim_to_bounds: true,
     };
 
-    let (combined, song_infos) = dawfile_reaper::setlist_rpp::combine_rpl(
-        Path::new(RPL_PATH),
-        &options,
-    )
-    .expect("combine failed");
+    let (combined, song_infos) =
+        dawfile_reaper::setlist_rpp::combine_rpl(Path::new(RPL_PATH), &options)
+            .expect("combine failed");
 
-    let project = dawfile_reaper::parse_project_text(&combined)
-        .expect("parse combined RPP");
+    let project = dawfile_reaper::parse_project_text(&combined).expect("parse combined RPP");
 
     println!("\n=== Item Bounds Verification ===");
 
@@ -491,7 +485,13 @@ fn trimmed_combine_items_trimmed_to_bounds() {
     if !overshoot_items.is_empty() {
         println!("  Items extending past total end ({:.1}s):", total_end);
         for (name, start, end) in &overshoot_items {
-            println!("    {} @ {:.1}..{:.1} (overshoot: {:.1}s)", name, start, end, end - total_end);
+            println!(
+                "    {} @ {:.1}..{:.1} (overshoot: {:.1}s)",
+                name,
+                start,
+                end,
+                end - total_end
+            );
         }
     }
     assert!(

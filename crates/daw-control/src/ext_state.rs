@@ -128,9 +128,7 @@ impl ExtState {
             Ok(value) => Ok(Some(value)),
             Err(e) => Err(Error::Other(format!(
                 "Failed to deserialize ExtState value for {}/{}: {}",
-                section,
-                key,
-                e
+                section, key, e
             ))),
         }
     }
@@ -165,8 +163,12 @@ impl ExtState {
         value: &T,
         persist: bool,
     ) -> crate::Result<()> {
-        let json_str = serde_json::to_string(value)
-            .map_err(|e| Error::Other(format!("Failed to serialize value for {}/{}: {}", section, key, e)))?;
+        let json_str = serde_json::to_string(value).map_err(|e| {
+            Error::Other(format!(
+                "Failed to serialize value for {}/{}: {}",
+                section, key, e
+            ))
+        })?;
 
         self.set(section, key, &json_str, persist).await
     }

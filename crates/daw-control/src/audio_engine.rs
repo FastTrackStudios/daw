@@ -51,7 +51,11 @@ impl AudioEngine {
     /// Directly usable for compensating visual elements to sync with audio output.
     /// Returns 0.0 if the audio engine is not running.
     pub async fn output_latency_seconds(&self) -> crate::Result<f64> {
-        Ok(self.clients.audio_engine.get_output_latency_seconds().await?)
+        Ok(self
+            .clients
+            .audio_engine
+            .get_output_latency_seconds()
+            .await?)
     }
 
     /// Check if the audio engine is currently running.

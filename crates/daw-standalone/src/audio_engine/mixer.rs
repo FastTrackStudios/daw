@@ -180,7 +180,9 @@ impl AudioEngine {
             format => return Err(format!("Unsupported sample format: {format:?}")),
         };
 
-        stream.play().map_err(|e| format!("Failed to start audio stream: {e}"))?;
+        stream
+            .play()
+            .map_err(|e| format!("Failed to start audio stream: {e}"))?;
 
         Ok(Self {
             state,

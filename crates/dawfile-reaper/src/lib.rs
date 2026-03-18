@@ -54,11 +54,11 @@ pub mod chunk_ops;
 pub mod compat;
 pub mod convert;
 pub mod diff;
+pub mod guide_gen;
 pub mod index;
 pub mod io;
 pub mod primitives;
 pub mod rpp_tree;
-pub mod guide_gen;
 pub mod setlist_rpp;
 pub mod types;
 
@@ -165,9 +165,9 @@ pub use rpp_tree::{
 pub use types::{
     parse_js_params, DecodeOptions, Envelope, FxChain, FxChainNode, FxContainer, FxEnvelopePoint,
     FxParamEnvelope, FxParamRef, FxPlugin, Item, JsParamValue, MarkerRegion,
-    MarkerRegionCollection, MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, PluginType, ReaperProject,
-    SourceBlock, SourceType, StretchMarker, TempoTimeEnvelope, TempoTimePoint, Track,
-    TrackParseOptions,
+    MarkerRegionCollection, MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, PluginType,
+    ReaperProject, SourceBlock, SourceType, StretchMarker, TempoTimeEnvelope, TempoTimePoint,
+    Track, TrackParseOptions,
 };
 
 /// Main error type for RPP parsing

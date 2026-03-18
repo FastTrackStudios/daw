@@ -1,5 +1,6 @@
 //! Standalone routing implementation
 
+use crate::platform::RwLock;
 use daw_proto::{
     ProjectContext,
     primitives::AutomationMode,
@@ -10,7 +11,6 @@ use daw_proto::{
     track::TrackRef,
 };
 use roam::Tx;
-use crate::platform::RwLock;
 use std::sync::Arc;
 
 /// Internal route state
@@ -73,11 +73,7 @@ impl StandaloneRouting {
 }
 
 impl RoutingService for StandaloneRouting {
-    async fn get_sends(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-    ) -> Vec<TrackRoute> {
+    async fn get_sends(&self, _project: ProjectContext, track: TrackRef) -> Vec<TrackRoute> {
         let track_guid = match track {
             TrackRef::Guid(g) => g,
             _ => return vec![],
@@ -90,11 +86,7 @@ impl RoutingService for StandaloneRouting {
             .collect()
     }
 
-    async fn get_receives(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-    ) -> Vec<TrackRoute> {
+    async fn get_receives(&self, _project: ProjectContext, track: TrackRef) -> Vec<TrackRoute> {
         let track_guid = match track {
             TrackRef::Guid(g) => g,
             _ => return vec![],
@@ -229,12 +221,7 @@ impl RoutingService for StandaloneRouting {
         });
     }
 
-    async fn set_volume(
-        &self,
-        _project: ProjectContext,
-        location: RouteLocation,
-        volume: f64,
-    ) {
+    async fn set_volume(&self, _project: ProjectContext, location: RouteLocation, volume: f64) {
         let track_guid = match &location.track {
             TrackRef::Guid(g) => g.clone(),
             _ => return,
@@ -252,12 +239,7 @@ impl RoutingService for StandaloneRouting {
         }
     }
 
-    async fn set_pan(
-        &self,
-        _project: ProjectContext,
-        location: RouteLocation,
-        pan: f64,
-    ) {
+    async fn set_pan(&self, _project: ProjectContext, location: RouteLocation, pan: f64) {
         let track_guid = match &location.track {
             TrackRef::Guid(g) => g.clone(),
             _ => return,
@@ -275,12 +257,7 @@ impl RoutingService for StandaloneRouting {
         }
     }
 
-    async fn set_muted(
-        &self,
-        _project: ProjectContext,
-        location: RouteLocation,
-        muted: bool,
-    ) {
+    async fn set_muted(&self, _project: ProjectContext, location: RouteLocation, muted: bool) {
         let track_guid = match &location.track {
             TrackRef::Guid(g) => g.clone(),
             _ => return,
@@ -298,12 +275,7 @@ impl RoutingService for StandaloneRouting {
         }
     }
 
-    async fn set_mono(
-        &self,
-        _project: ProjectContext,
-        location: RouteLocation,
-        mono: bool,
-    ) {
+    async fn set_mono(&self, _project: ProjectContext, location: RouteLocation, mono: bool) {
         let track_guid = match &location.track {
             TrackRef::Guid(g) => g.clone(),
             _ => return,
@@ -321,12 +293,7 @@ impl RoutingService for StandaloneRouting {
         }
     }
 
-    async fn set_phase(
-        &self,
-        _project: ProjectContext,
-        location: RouteLocation,
-        inverted: bool,
-    ) {
+    async fn set_phase(&self, _project: ProjectContext, location: RouteLocation, inverted: bool) {
         let track_guid = match &location.track {
             TrackRef::Guid(g) => g.clone(),
             _ => return,
@@ -388,11 +355,7 @@ impl RoutingService for StandaloneRouting {
         // Standalone: no-op
     }
 
-    async fn get_parent_send_enabled(
-        &self,
-        _project: ProjectContext,
-        _track: TrackRef,
-    ) -> bool {
+    async fn get_parent_send_enabled(&self, _project: ProjectContext, _track: TrackRef) -> bool {
         true // Default to enabled
     }
 

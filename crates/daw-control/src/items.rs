@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::Result;
 use crate::{DawClients, Error, MidiEditor};
 use daw_proto::{
     ItemEvent, ProjectContext, TakeEvent,
@@ -9,7 +10,6 @@ use daw_proto::{
     primitives::{Duration, PositionInSeconds},
     track::TrackRef,
 };
-use crate::Result;
 use roam::Rx;
 
 /// Items handle for a specific track

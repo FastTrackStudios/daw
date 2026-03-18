@@ -3,13 +3,13 @@
 //! In-memory region storage with mock data for testing.
 //! Each project has its own set of regions.
 
+use crate::platform::RwLock;
 use crate::project::project_guids;
 use daw_proto::{
     ProjectContext, TimeRange,
     region::{AddRegionInLaneRequest, Region, RegionEvent, RegionService},
 };
 use roam::Tx;
-use crate::platform::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -210,7 +210,10 @@ impl Default for StandaloneRegion {
 impl StandaloneRegion {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new("standalone-region-state", RegionState::default())),
+            state: Arc::new(RwLock::new(
+                "standalone-region-state",
+                RegionState::default(),
+            )),
         }
     }
 
@@ -277,11 +280,7 @@ impl RegionService for StandaloneRegion {
             .collect()
     }
 
-    async fn get_region_at(
-        &self,
-        project: ProjectContext,
-        position: f64,
-    ) -> Option<Region> {
+    async fn get_region_at(&self, project: ProjectContext, position: f64) -> Option<Region> {
         let state = self.state.read().await;
         Self::get_project_regions(&state, &project)
             .iter()
@@ -294,13 +293,7 @@ impl RegionService for StandaloneRegion {
         Self::get_project_regions(&state, &project).len()
     }
 
-    async fn add_region(
-        &self,
-        project: ProjectContext,
-        start: f64,
-        end: f64,
-        name: String,
-    ) -> u32 {
+    async fn add_region(&self, project: ProjectContext, start: f64, end: f64, name: String) -> u32 {
         let mut state = self.state.write().await;
         let id = state.next_id;
         state.next_id += 1;
@@ -340,13 +333,7 @@ impl RegionService for StandaloneRegion {
         }
     }
 
-    async fn set_region_bounds(
-        &self,
-        project: ProjectContext,
-        id: u32,
-        start: f64,
-        end: f64,
-    ) {
+    async fn set_region_bounds(&self, project: ProjectContext, id: u32, start: f64, end: f64) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)
             && let Some(regions) = state.regions_by_project.get_mut(proj_id)
@@ -402,7 +389,10 @@ impl RegionService for StandaloneRegion {
             && let Some(region) = regions.iter_mut().find(|r| r.id == Some(id))
         {
             region.lane = lane;
-            debug!("Set region {} lane to {:?} in project {}", id, lane, proj_id);
+            debug!(
+                "Set region {} lane to {:?} in project {}",
+                id, lane, proj_id
+            );
         }
     }
 
@@ -446,60 +436,60 @@ impl RegionService for StandaloneRegion {
     async fn subscribe(&self, _project: ProjectContext, _tx: Tx<RegionEvent>) {
         #[cfg(not(target_arch = "wasm32"))]
         {
-        let project = _project;
-        let tx = _tx;
-        info!("RegionService::subscribe() - starting region stream");
+            let project = _project;
+            let tx = _tx;
+            info!("RegionService::subscribe() - starting region stream");
 
-        // Clone state for the spawned task
-        let state = self.state.clone();
+            // Clone state for the spawned task
+            let state = self.state.clone();
 
-        // Spawn the streaming loop so this method returns immediately
-        // (roam needs the method to return so it can send the Response)
-        moire::task::spawn(async move {
-            // Send initial state: all regions for this project
-            let regions = {
-                let state = state.read().await;
-                StandaloneRegion::get_project_regions(&state, &project).to_vec()
-            };
-
-            if tx
-                .send(RegionEvent::RegionsChanged(regions.clone()))
-                .await
-                .is_err()
-            {
-                debug!("RegionService::subscribe() - client disconnected during initial send");
-                return;
-            }
-
-            // Poll for changes at 2Hz (regions rarely change, no need for 60Hz)
-            let mut last_regions = regions;
-
-            loop {
-                crate::platform::sleep(Duration::from_millis(500)).await;
-
-                // Check for region changes
-                let current_regions = {
+            // Spawn the streaming loop so this method returns immediately
+            // (roam needs the method to return so it can send the Response)
+            moire::task::spawn(async move {
+                // Send initial state: all regions for this project
+                let regions = {
                     let state = state.read().await;
                     StandaloneRegion::get_project_regions(&state, &project).to_vec()
                 };
 
-                if current_regions != last_regions {
-                    // Send full region list on change
-                    // (A more sophisticated implementation would send granular events)
-                    if tx
-                        .send(RegionEvent::RegionsChanged(current_regions.clone()))
-                        .await
-                        .is_err()
-                    {
-                        debug!("RegionService::subscribe() - client disconnected");
-                        break;
-                    }
-                    last_regions = current_regions;
+                if tx
+                    .send(RegionEvent::RegionsChanged(regions.clone()))
+                    .await
+                    .is_err()
+                {
+                    debug!("RegionService::subscribe() - client disconnected during initial send");
+                    return;
                 }
-            }
 
-            info!("RegionService::subscribe() - stream ended");
-        });
+                // Poll for changes at 2Hz (regions rarely change, no need for 60Hz)
+                let mut last_regions = regions;
+
+                loop {
+                    crate::platform::sleep(Duration::from_millis(500)).await;
+
+                    // Check for region changes
+                    let current_regions = {
+                        let state = state.read().await;
+                        StandaloneRegion::get_project_regions(&state, &project).to_vec()
+                    };
+
+                    if current_regions != last_regions {
+                        // Send full region list on change
+                        // (A more sophisticated implementation would send granular events)
+                        if tx
+                            .send(RegionEvent::RegionsChanged(current_regions.clone()))
+                            .await
+                            .is_err()
+                        {
+                            debug!("RegionService::subscribe() - client disconnected");
+                            break;
+                        }
+                        last_regions = current_regions;
+                    }
+                }
+
+                info!("RegionService::subscribe() - stream ended");
+            });
         } // cfg(not(wasm32))
     }
 }

@@ -35,12 +35,7 @@ pub fn get_marker_lane(low: &ReaperLow, project: ProjectContext, idx: u32) -> Op
 ///
 /// `idx` is the 0-based enumeration index.
 /// Returns `true` on success.
-pub fn set_marker_lane(
-    low: &ReaperLow,
-    project: ProjectContext,
-    idx: u32,
-    lane: u32,
-) -> bool {
+pub fn set_marker_lane(low: &ReaperLow, project: ProjectContext, idx: u32, lane: u32) -> bool {
     let get_marker = match low.pointers().GetRegionOrMarker {
         Some(f) => f,
         None => return false,
@@ -55,6 +50,13 @@ pub fn set_marker_lane(
         return false;
     }
 
-    unsafe { set_info(project.to_raw(), marker_ptr, c"I_LANENUMBER".as_ptr(), lane as f64) };
+    unsafe {
+        set_info(
+            project.to_raw(),
+            marker_ptr,
+            c"I_LANENUMBER".as_ptr(),
+            lane as f64,
+        )
+    };
     true
 }

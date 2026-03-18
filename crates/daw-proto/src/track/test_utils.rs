@@ -242,10 +242,11 @@ impl TrackGroupBuilder {
 
         // Handle empty folder case
         if child_count == 0
-            && let Some(folder) = result.first_mut() {
-                folder.folder_depth_change = FolderDepthChange::ClosesLevels(-1);
-                folder.is_folder = false; // Empty folder becomes normal track
-            }
+            && let Some(folder) = result.first_mut()
+        {
+            folder.folder_depth_change = FolderDepthChange::ClosesLevels(-1);
+            folder.is_folder = false; // Empty folder becomes normal track
+        }
 
         TrackGroup { tracks: result }
     }

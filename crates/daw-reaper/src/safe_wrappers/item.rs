@@ -51,22 +51,14 @@ pub fn count_takes(low: &ReaperLow, item: MediaItem) -> i32 {
 }
 
 /// Get a take by index within an item.
-pub fn get_take(
-    low: &ReaperLow,
-    item: MediaItem,
-    index: i32,
-) -> Option<MediaItemTake> {
+pub fn get_take(low: &ReaperLow, item: MediaItem, index: i32) -> Option<MediaItemTake> {
     let ptr = unsafe { low.GetTake(item.as_ptr(), index) };
     MediaItemTake::new(ptr)
 }
 
 /// Get a take by index, returning a medium-level newtype.
 #[deprecated(note = "use get_take instead, which now returns Option<MediaItemTake>")]
-pub fn get_take_medium(
-    low: &ReaperLow,
-    item: MediaItem,
-    index: i32,
-) -> Option<MediaItemTake> {
+pub fn get_take_medium(low: &ReaperLow, item: MediaItem, index: i32) -> Option<MediaItemTake> {
     get_take(low, item, index)
 }
 
@@ -104,31 +96,20 @@ pub fn get_take_name(low: &ReaperLow, take: MediaItemTake) -> String {
 }
 
 /// Move a media item to a different track.
-pub fn move_item_to_track(
-    low: &ReaperLow,
-    item: MediaItem,
-    track: MediaTrack,
-) {
+pub fn move_item_to_track(low: &ReaperLow, item: MediaItem, track: MediaTrack) {
     unsafe {
         low.MoveMediaItemToTrack(item.as_ptr(), track.as_ptr());
     }
 }
 
 /// Get the media item that owns a take.
-pub fn get_take_item(
-    low: &ReaperLow,
-    take: MediaItemTake,
-) -> Option<MediaItem> {
+pub fn get_take_item(low: &ReaperLow, take: MediaItemTake) -> Option<MediaItem> {
     let ptr = unsafe { low.GetMediaItemTake_Item(take.as_ptr()) };
     MediaItem::new(ptr)
 }
 
 /// Get a float info value from a media item.
-pub fn get_media_item_info_value(
-    low: &ReaperLow,
-    item: MediaItem,
-    attr: &CStr,
-) -> f64 {
+pub fn get_media_item_info_value(low: &ReaperLow, item: MediaItem, attr: &CStr) -> f64 {
     unsafe { low.GetMediaItemInfo_Value(item.as_ptr(), attr.as_ptr()) }
 }
 
@@ -146,18 +127,12 @@ pub fn get_track_media_item(
 }
 
 /// Get the track that owns a media item.
-pub fn get_media_item_track(
-    medium: &reaper_medium::Reaper,
-    item: MediaItem,
-) -> Option<MediaTrack> {
+pub fn get_media_item_track(medium: &reaper_medium::Reaper, item: MediaItem) -> Option<MediaTrack> {
     unsafe { medium.get_media_item_track(item) }
 }
 
 /// Count media items on a track.
-pub fn count_track_media_items(
-    medium: &reaper_medium::Reaper,
-    track: MediaTrack,
-) -> u32 {
+pub fn count_track_media_items(medium: &reaper_medium::Reaper, track: MediaTrack) -> u32 {
     unsafe { medium.count_track_media_items(track) }
 }
 
@@ -207,11 +182,7 @@ pub fn set_media_item_length(
 }
 
 /// Set media item selected state.
-pub fn set_media_item_selected(
-    medium: &reaper_medium::Reaper,
-    item: MediaItem,
-    selected: bool,
-) {
+pub fn set_media_item_selected(medium: &reaper_medium::Reaper, item: MediaItem, selected: bool) {
     unsafe {
         medium.set_media_item_selected(item, selected);
     }
@@ -226,11 +197,7 @@ pub fn add_media_item_to_track(
 }
 
 /// Delete a media item from a track.
-pub fn delete_track_media_item(
-    medium: &reaper_medium::Reaper,
-    track: MediaTrack,
-    item: MediaItem,
-) {
+pub fn delete_track_media_item(medium: &reaper_medium::Reaper, track: MediaTrack, item: MediaItem) {
     unsafe {
         let _ = medium.delete_track_media_item(track, item);
     }
@@ -247,10 +214,7 @@ pub fn main_on_command_ex(
 }
 
 /// Get the active take of a media item.
-pub fn get_active_take(
-    medium: &reaper_medium::Reaper,
-    item: MediaItem,
-) -> Option<MediaItemTake> {
+pub fn get_active_take(medium: &reaper_medium::Reaper, item: MediaItem) -> Option<MediaItemTake> {
     unsafe { medium.get_active_take(item) }
 }
 
@@ -284,19 +248,12 @@ pub fn set_take_info_value(
 }
 
 /// Get the pitch of a take in semitones.
-pub fn get_take_pitch(
-    medium: &reaper_medium::Reaper,
-    take: MediaItemTake,
-) -> f64 {
+pub fn get_take_pitch(medium: &reaper_medium::Reaper, take: MediaItemTake) -> f64 {
     unsafe { medium.get_set_media_item_take_info_get_pitch(take).get() }
 }
 
 /// Set the pitch of a take in semitones.
-pub fn set_take_pitch(
-    medium: &reaper_medium::Reaper,
-    take: MediaItemTake,
-    semitones: Semitones,
-) {
+pub fn set_take_pitch(medium: &reaper_medium::Reaper, take: MediaItemTake, semitones: Semitones) {
     unsafe {
         medium.get_set_media_item_take_info_set_pitch(take, semitones);
     }

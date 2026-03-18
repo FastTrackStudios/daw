@@ -50,12 +50,7 @@ impl LiveMidiService for StandaloneLiveMidi {
         // No-op
     }
 
-    async fn send_midi(
-        &self,
-        _device_id: u32,
-        _message: MidiMessage,
-        _timing: SendMidiTiming,
-    ) {
+    async fn send_midi(&self, _device_id: u32, _message: MidiMessage, _timing: SendMidiTiming) {
         // No-op
     }
 
@@ -71,11 +66,7 @@ impl LiveMidiService for StandaloneLiveMidi {
         // No-op
     }
 
-    async fn stuff_midi_message(
-        &self,
-        _target: StuffMidiTarget,
-        _message: MidiMessage,
-    ) {
+    async fn stuff_midi_message(&self, _target: StuffMidiTarget, _message: MidiMessage) {
         // No-op
     }
 }

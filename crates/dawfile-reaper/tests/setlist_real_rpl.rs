@@ -40,12 +40,19 @@ fn combine_battle_sp26_rpl() {
         match read_project(path) {
             Ok(project) => {
                 let bounds = resolve_song_bounds(&project);
-                let tempo = project.tempo_envelope.as_ref()
+                let tempo = project
+                    .tempo_envelope
+                    .as_ref()
                     .map(|e| e.default_tempo)
                     .unwrap_or(120.0);
-                println!("    ✓ {} tracks, {:.0} BPM, bounds {:.1}→{:.1}s ({:.1}s)",
-                    project.tracks.len(), tempo,
-                    bounds.start, bounds.end, bounds.end - bounds.start);
+                println!(
+                    "    ✓ {} tracks, {:.0} BPM, bounds {:.1}→{:.1}s ({:.1}s)",
+                    project.tracks.len(),
+                    tempo,
+                    bounds.start,
+                    bounds.end,
+                    bounds.end - bounds.start
+                );
                 projects.push(project);
                 names.push(name);
             }
@@ -56,7 +63,11 @@ fn combine_battle_sp26_rpl() {
     }
 
     assert!(!projects.is_empty(), "Should parse at least one project");
-    println!("\nParsed {}/{} projects successfully", projects.len(), rpp_paths.len());
+    println!(
+        "\nParsed {}/{} projects successfully",
+        projects.len(),
+        rpp_paths.len()
+    );
 
     // ── 2. Build song infos with 2-measure gap at 120 BPM ───────────
     let gap = measures_to_seconds(16, 120.0, 4);
@@ -70,13 +81,21 @@ fn combine_battle_sp26_rpl() {
 
     println!("\nSong layout:");
     for si in &song_infos {
-        println!("  {:<40} @ {:>6.1}s  ({:.1}s)", si.name, si.global_start_seconds, si.duration_seconds);
+        println!(
+            "  {:<40} @ {:>6.1}s  ({:.1}s)",
+            si.name, si.global_start_seconds, si.duration_seconds
+        );
     }
 
-    let total = song_infos.last()
+    let total = song_infos
+        .last()
         .map(|s| s.global_start_seconds + s.duration_seconds)
         .unwrap_or(0.0);
-    println!("\nTotal timeline: {:.1}s ({:.1} minutes)", total, total / 60.0);
+    println!(
+        "\nTotal timeline: {:.1}s ({:.1} minutes)",
+        total,
+        total / 60.0
+    );
 
     // ── 3. Concatenate using raw chunk approach ────────────────────
     // This preserves ALL RPP data by directly patching the text.
@@ -111,7 +130,11 @@ fn combine_battle_sp26_rpl() {
     println!("\nGenerated {} files:", paths.len());
     for path in &paths {
         let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-        println!("  {} ({:.1} KB)", path.file_name().unwrap().to_string_lossy(), size as f64 / 1024.0);
+        println!(
+            "  {} ({:.1} KB)",
+            path.file_name().unwrap().to_string_lossy(),
+            size as f64 / 1024.0
+        );
     }
 
     // ── 5. Verify shell copies have correct structure ────────────────
@@ -123,9 +146,21 @@ fn combine_battle_sp26_rpl() {
 
         let shell_text = std::fs::read_to_string(&path).unwrap();
         // Basic sanity checks
-        assert!(shell_text.contains("TEMPOENVEX"), "{} should have tempo envelope", role);
-        assert!(shell_text.contains("RULERLANE"), "{} should have ruler lanes", role);
-        assert!(shell_text.contains(&format!("NAME {:?}", role)), "{} should have role folder", role);
+        assert!(
+            shell_text.contains("TEMPOENVEX"),
+            "{} should have tempo envelope",
+            role
+        );
+        assert!(
+            shell_text.contains("RULERLANE"),
+            "{} should have ruler lanes",
+            role
+        );
+        assert!(
+            shell_text.contains(&format!("NAME {:?}", role)),
+            "{} should have role folder",
+            role
+        );
         println!("  {} ✓", role);
     }
 

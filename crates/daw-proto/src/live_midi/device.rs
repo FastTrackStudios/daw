@@ -3,8 +3,7 @@
 use facet::Facet;
 
 /// A MIDI input device
-#[derive(Clone, Debug, Facet)]
-#[derive(Default)]
+#[derive(Clone, Debug, Facet, Default)]
 pub struct MidiInputDevice {
     /// Device ID
     pub id: u32,
@@ -19,8 +18,7 @@ pub struct MidiInputDevice {
 }
 
 /// A MIDI output device
-#[derive(Clone, Debug, Facet)]
-#[derive(Default)]
+#[derive(Clone, Debug, Facet, Default)]
 pub struct MidiOutputDevice {
     /// Device ID
     pub id: u32,
@@ -33,5 +31,3 @@ pub struct MidiOutputDevice {
     /// Whether the device is connected/responding
     pub is_connected: bool,
 }
-
-

@@ -4,7 +4,10 @@
 //! using TaskSupport from reaper-high. Follows the same pattern as ReaperFx and
 //! ReaperTransport.
 
-use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent, TrackExtStateRequest, TrackRef, TrackService};
+use daw_proto::{
+    InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent, TrackExtStateRequest,
+    TrackRef, TrackService,
+};
 use reaper_high::{GroupingBehavior, Project, Reaper};
 use reaper_medium::{GangBehavior, ProjectRef};
 use roam::Tx;
@@ -199,15 +202,11 @@ fn diff_and_emit(
     current: &[CachedTrackState],
 ) {
     // Build lookup of previous tracks by GUID
-    let prev_map: HashMap<&str, &CachedTrackState> = previous
-        .iter()
-        .map(|t| (t.guid.as_str(), t))
-        .collect();
+    let prev_map: HashMap<&str, &CachedTrackState> =
+        previous.iter().map(|t| (t.guid.as_str(), t)).collect();
 
-    let curr_map: HashMap<&str, &CachedTrackState> = current
-        .iter()
-        .map(|t| (t.guid.as_str(), t))
-        .collect();
+    let curr_map: HashMap<&str, &CachedTrackState> =
+        current.iter().map(|t| (t.guid.as_str(), t)).collect();
 
     // Check for added tracks (in current but not in previous)
     for curr in current {
@@ -525,11 +524,7 @@ impl TrackService for ReaperTrack {
         .unwrap_or_default()
     }
 
-    async fn get_track(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-    ) -> Option<Track> {
+    async fn get_track(&self, project: ProjectContext, track: TrackRef) -> Option<Track> {
         main_thread::query(move || {
             let proj = resolve_project(&project)?;
             let t = resolve_track(&proj, &track)?;
@@ -578,12 +573,7 @@ impl TrackService for ReaperTrack {
     // Mute/Solo/Arm
     // =========================================================================
 
-    async fn set_muted(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-        muted: bool,
-    ) {
+    async fn set_muted(&self, project: ProjectContext, track: TrackRef, muted: bool) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -599,12 +589,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn set_soloed(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-        soloed: bool,
-    ) {
+    async fn set_soloed(&self, project: ProjectContext, track: TrackRef, soloed: bool) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -650,12 +635,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn set_armed(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-        armed: bool,
-    ) {
+    async fn set_armed(&self, project: ProjectContext, track: TrackRef, armed: bool) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -707,12 +687,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn set_record_input(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-        input: RecordInput,
-    ) {
+    async fn set_record_input(&self, project: ProjectContext, track: TrackRef, input: RecordInput) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -739,12 +714,7 @@ impl TrackService for ReaperTrack {
     // Volume/Pan
     // =========================================================================
 
-    async fn set_volume(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-        volume: f64,
-    ) {
+    async fn set_volume(&self, project: ProjectContext, track: TrackRef, volume: f64) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -774,12 +744,7 @@ impl TrackService for ReaperTrack {
     // Selection
     // =========================================================================
 
-    async fn set_selected(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-        selected: bool,
-    ) {
+    async fn set_selected(&self, project: ProjectContext, track: TrackRef, selected: bool) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -884,12 +849,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn rename_track(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-        name: String,
-    ) {
+    async fn rename_track(&self, project: ProjectContext, track: TrackRef, name: String) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -901,12 +861,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn set_track_color(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-        color: u32,
-    ) {
+    async fn set_track_color(&self, project: ProjectContext, track: TrackRef, color: u32) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -925,12 +880,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn set_visible_in_tcp(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-        visible: bool,
-    ) {
+    async fn set_visible_in_tcp(&self, project: ProjectContext, track: TrackRef, visible: bool) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -942,12 +892,7 @@ impl TrackService for ReaperTrack {
         });
     }
 
-    async fn set_visible_in_mixer(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-        visible: bool,
-    ) {
+    async fn set_visible_in_mixer(&self, project: ProjectContext, track: TrackRef, visible: bool) {
         main_thread::run(move || {
             let Some(proj) = resolve_project(&project) else {
                 return;
@@ -1040,10 +985,7 @@ impl TrackService for ReaperTrack {
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
-    async fn remove_all_tracks(
-        &self,
-        project: ProjectContext,
-    ) -> Result<(), String> {
+    async fn remove_all_tracks(&self, project: ProjectContext) -> Result<(), String> {
         main_thread::query(move || {
             let proj = resolve_project(&project).ok_or_else(|| "Project not found".to_string())?;
             let count = proj.track_count();
@@ -1073,9 +1015,8 @@ impl TrackService for ReaperTrack {
             let t = resolve_track(&proj, &track)?;
             let raw = t.raw().ok()?;
             let low = Reaper::get().medium_reaper().low();
-            let attr = std::ffi::CString::new(format!(
-                "P_EXT:{}:{}", request.section, request.key
-            )).ok()?;
+            let attr = std::ffi::CString::new(format!("P_EXT:{}:{}", request.section, request.key))
+                .ok()?;
             let mut buf = vec![0u8; 65536];
             let ok = unsafe {
                 low.GetSetMediaTrackInfo_String(
@@ -1089,11 +1030,7 @@ impl TrackService for ReaperTrack {
                 return None;
             }
             let val = crate::safe_wrappers::buffer::string_from_buffer(&buf);
-            if val.is_empty() {
-                None
-            } else {
-                Some(val)
-            }
+            if val.is_empty() { None } else { Some(val) }
         })
         .await
         .flatten()
@@ -1115,7 +1052,8 @@ impl TrackService for ReaperTrack {
             let Ok(raw) = t.raw() else { return };
             let low = Reaper::get().medium_reaper().low();
             let attr = match std::ffi::CString::new(format!(
-                "P_EXT:{}:{}", request.section, request.key
+                "P_EXT:{}:{}",
+                request.section, request.key
             )) {
                 Ok(s) => s,
                 Err(_) => return,
@@ -1141,11 +1079,16 @@ impl TrackService for ReaperTrack {
         track: TrackRef,
         request: TrackExtStateRequest,
     ) {
-        self.set_ext_state(project, track, TrackExtStateRequest {
-            section: request.section,
-            key: request.key,
-            value: String::new(),
-        }).await;
+        self.set_ext_state(
+            project,
+            track,
+            TrackExtStateRequest {
+                section: request.section,
+                key: request.key,
+                value: String::new(),
+            },
+        )
+        .await;
     }
 
     // =========================================================================

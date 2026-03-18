@@ -153,10 +153,7 @@ impl AudioAccessorService for ReaperAudioAccessor {
         .unwrap_or(false)
     }
 
-    async fn get_samples(
-        &self,
-        request: GetSamplesRequest,
-    ) -> AudioSampleData {
+    async fn get_samples(&self, request: GetSamplesRequest) -> AudioSampleData {
         let Some(ptr) = self.get_ptr(&request.accessor_id) else {
             warn!("get_samples: unknown accessor ID '{}'", request.accessor_id);
             return AudioSampleData::default();

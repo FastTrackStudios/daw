@@ -39,13 +39,7 @@ impl ExtStateService for StandaloneExtState {
         state.get(&(section, key)).cloned()
     }
 
-    async fn set_ext_state(
-        &self,
-        section: String,
-        key: String,
-        value: String,
-        _persist: bool,
-    ) {
+    async fn set_ext_state(&self, section: String, key: String, value: String, _persist: bool) {
         let mut state = self.global_state.write().unwrap();
         state.insert((section, key), value);
     }

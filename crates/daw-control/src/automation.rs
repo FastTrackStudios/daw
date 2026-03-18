@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::Result;
 use crate::{DawClients, Error};
 use daw_proto::{
     ProjectContext,
@@ -12,7 +13,6 @@ use daw_proto::{
     primitives::{AutomationMode, PositionInSeconds},
     track::TrackRef,
 };
-use crate::Result;
 
 /// Envelopes accessor for a track
 #[derive(Clone)]

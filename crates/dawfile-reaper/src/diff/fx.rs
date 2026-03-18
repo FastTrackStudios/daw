@@ -2,14 +2,11 @@
 
 use std::collections::HashMap;
 
-use crate::types::{FxChain, FxChainNode, FxContainer, FxPlugin};
 use super::envelope;
 use super::types::*;
+use crate::types::{FxChain, FxChainNode, FxContainer, FxPlugin};
 
-pub(crate) fn diff_fx_chains(
-    old: Option<&FxChain>,
-    new: Option<&FxChain>,
-) -> Option<FxChainDiff> {
+pub(crate) fn diff_fx_chains(old: Option<&FxChain>, new: Option<&FxChain>) -> Option<FxChainDiff> {
     match (old, new) {
         (None, None) => None,
         (None, Some(_)) => Some(FxChainDiff {
@@ -117,9 +114,7 @@ fn diff_fx_nodes(old: &[FxChainNode], new: &[FxChainNode]) -> Vec<FxNodeDiff> {
 
 fn diff_single_node(old: &FxChainNode, new: &FxChainNode) -> Option<FxNodeDiff> {
     match (old, new) {
-        (FxChainNode::Plugin(old_p), FxChainNode::Plugin(new_p)) => {
-            diff_plugins(old_p, new_p)
-        }
+        (FxChainNode::Plugin(old_p), FxChainNode::Plugin(new_p)) => diff_plugins(old_p, new_p),
         (FxChainNode::Container(old_c), FxChainNode::Container(new_c)) => {
             diff_containers(old_c, new_c)
         }

@@ -552,7 +552,8 @@ impl fmt::Display for Envelope {
     }
 }
 
-type ParseEnvelopeResult = Result<(Vec<EnvelopePoint>, Vec<AutomationItem>, Vec<ExtensionData>), String>;
+type ParseEnvelopeResult =
+    Result<(Vec<EnvelopePoint>, Vec<AutomationItem>, Vec<ExtensionData>), String>;
 
 impl Envelope {
     /// Create a new envelope from an RPP block
@@ -600,9 +601,7 @@ impl Envelope {
     ///
     /// let (points, automation_items, extension_data) = Envelope::parse_envelope_content(rpp_content).unwrap();
     /// ```
-    pub fn parse_envelope_content(
-        rpp_content: &str,
-    ) -> ParseEnvelopeResult {
+    pub fn parse_envelope_content(rpp_content: &str) -> ParseEnvelopeResult {
         let mut points = Vec::new();
         let mut automation_items = Vec::new();
         let mut extension_data = Vec::new();

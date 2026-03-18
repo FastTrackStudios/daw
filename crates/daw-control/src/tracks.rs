@@ -2,12 +2,12 @@
 
 use std::sync::Arc;
 
+use crate::Result;
 use crate::{DawClients, Envelopes, Error, FxChain, HardwareOutputs, Items, Receives, Sends};
 use daw_proto::{
     FxChainContext, InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent,
     TrackExtStateRequest, TrackRef,
 };
-use crate::Result;
 use roam::Rx;
 
 /// Tracks handle for a specific project
@@ -183,7 +183,7 @@ impl Tracks {
             .await?;
         if guid.is_empty() {
             return Err(Error::InvalidOperation(
-                "add_track returned empty GUID — REAPER may have refused the operation".to_string()
+                "add_track returned empty GUID — REAPER may have refused the operation".to_string(),
             ));
         }
         Ok(TrackHandle::new(

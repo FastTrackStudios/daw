@@ -34,10 +34,7 @@ pub struct SongInfo {
 ///
 /// The gap provides breathing room between songs in the combined timeline
 /// for clean transitions and visual separation.
-pub fn build_song_infos(
-    songs: &[(&str, f64)],
-    gap_seconds: f64,
-) -> Vec<SongInfo> {
+pub fn build_song_infos(songs: &[(&str, f64)], gap_seconds: f64) -> Vec<SongInfo> {
     let mut result = Vec::with_capacity(songs.len());
     let mut offset = 0.0;
 
@@ -367,8 +364,12 @@ pub fn resolve_song_bounds(project: &ReaperProject) -> SongBounds {
         let name_upper = m.name.to_uppercase();
 
         let end_pos = m.end_position.unwrap_or(m.position);
-        if end_pos > last_pos { last_pos = end_pos; }
-        if m.position > last_pos { last_pos = m.position; }
+        if end_pos > last_pos {
+            last_pos = end_pos;
+        }
+        if m.position > last_pos {
+            last_pos = m.position;
+        }
 
         match name_upper.as_str() {
             "PREROLL" | "=PREROLL" => preroll = Some(m.position),
@@ -400,7 +401,11 @@ pub fn resolve_song_bounds(project: &ReaperProject) -> SongBounds {
         .iter()
         .filter_map(|opt| *opt)
         .fold(f64::MAX, f64::min);
-    let raw_start = if raw_start == f64::MAX { 0.0 } else { raw_start };
+    let raw_start = if raw_start == f64::MAX {
+        0.0
+    } else {
+        raw_start
+    };
 
     // Pick the latest available end bound.
     // Prefer explicit end markers (=END, POSTROLL) over section-based detection.
@@ -633,9 +638,7 @@ const KEYFLOW_TRACK_NAMES: &[&str] = &["CHORDS", "LINES", "HITS"];
 /// All header track names that get merged (guide + keyflow).
 fn is_header_track(name: &str) -> bool {
     let lower = name.to_lowercase();
-    GUIDE_TRACK_NAMES
-        .iter()
-        .any(|g| g.to_lowercase() == lower)
+    GUIDE_TRACK_NAMES.iter().any(|g| g.to_lowercase() == lower)
         || KEYFLOW_TRACK_NAMES
             .iter()
             .any(|k| k.to_lowercase() == lower)
@@ -864,7 +867,9 @@ fn clone_track_with_offset(
             // Resolve relative file paths in parsed take sources
             for take in &mut item.takes {
                 if let Some(ref mut source) = take.source {
-                    if !source.file_path.is_empty() && !PathBuf::from(&source.file_path).is_absolute() {
+                    if !source.file_path.is_empty()
+                        && !PathBuf::from(&source.file_path).is_absolute()
+                    {
                         let absolute = dir.join(&source.file_path);
                         source.file_path = absolute.to_string_lossy().to_string();
                     }
@@ -878,8 +883,7 @@ fn clone_track_with_offset(
                 for line in item.raw_content.lines() {
                     let trimmed = line.trim();
                     if trimmed.starts_with("FILE ") {
-                        let file_path = trimmed.trim_start_matches("FILE ")
-                            .trim_matches('"');
+                        let file_path = trimmed.trim_start_matches("FILE ").trim_matches('"');
                         if !PathBuf::from(file_path).is_absolute() {
                             let absolute = dir.join(file_path);
                             patched_lines.push(format!("FILE \"{}\"", absolute.to_string_lossy()));
@@ -1072,9 +1076,13 @@ pub fn generate_shell_copy(master: &ReaperProject, role: &str) -> ReaperProject 
 
     for track in &master.tracks {
         let name_lower = track.name.to_lowercase();
-        let is_folder_start = track.folder.as_ref()
+        let is_folder_start = track
+            .folder
+            .as_ref()
             .map_or(false, |f| f.folder_state == FolderState::FolderParent);
-        let is_folder_end = track.folder.as_ref()
+        let is_folder_end = track
+            .folder
+            .as_ref()
             .map_or(false, |f| f.folder_state == FolderState::LastInFolder);
 
         // Track the Click/Guide folder hierarchy
@@ -1101,7 +1109,9 @@ pub fn generate_shell_copy(master: &ReaperProject, role: &str) -> ReaperProject 
 
         // Also keep individual Click/Loop/Count/Guide tracks at the top level
         // (in case they're not inside a Click/Guide folder)
-        if GUIDE_TRACK_NAMES.iter().any(|g| g.to_lowercase() == name_lower)
+        if GUIDE_TRACK_NAMES
+            .iter()
+            .any(|g| g.to_lowercase() == name_lower)
             && !is_folder_start
         {
             kept_tracks.push(track.clone());
@@ -1160,13 +1170,7 @@ pub fn generate_role_setlists(
 
 /// Standard FTS roles for setlist shell copies.
 pub const STANDARD_ROLES: &[&str] = &[
-    "Vocals",
-    "Guitar",
-    "Guitar 2",
-    "Keys",
-    "Keys 2",
-    "Bass",
-    "Drums",
+    "Vocals", "Guitar", "Guitar 2", "Keys", "Keys 2", "Bass", "Drums",
 ];
 
 /// Write all role setlists to a directory.
@@ -1210,10 +1214,14 @@ pub fn write_role_setlists(
 /// Track items, markers, regions, and tempo envelope are included.
 pub fn project_to_rpp_text(project: &ReaperProject) -> String {
     let mut out = String::new();
-    let tempo = project.tempo_envelope.as_ref()
+    let tempo = project
+        .tempo_envelope
+        .as_ref()
         .map(|e| e.default_tempo)
         .unwrap_or(120.0);
-    let (ts_num, ts_denom) = project.tempo_envelope.as_ref()
+    let (ts_num, ts_denom) = project
+        .tempo_envelope
+        .as_ref()
         .map(|e| e.default_time_signature)
         .unwrap_or((4, 4));
 
@@ -1270,11 +1278,14 @@ pub fn project_to_rpp_text(project: &ReaperProject) -> String {
         out.push_str("    ARM 0\n");
         out.push_str("    DEFSHAPE 1 -1 -1\n");
         for pt in &env.points {
-            let ts_str = pt.time_signature_encoded
+            let ts_str = pt
+                .time_signature_encoded
                 .map(|ts| format!(" {}", ts))
                 .unwrap_or_default();
-            out.push_str(&format!("    PT {:.12} {:.10} {}{}\n",
-                pt.position, pt.tempo, pt.shape, ts_str));
+            out.push_str(&format!(
+                "    PT {:.12} {:.10} {}{}\n",
+                pt.position, pt.tempo, pt.shape, ts_str
+            ));
         }
         out.push_str("  >\n");
     }
@@ -1282,9 +1293,9 @@ pub fn project_to_rpp_text(project: &ReaperProject) -> String {
     // Ruler lane definitions (FTS standard layout)
     // These must come before markers so REAPER knows the lane names
     out.push_str("  RULERHEIGHT 120 84\n");
-    out.push_str("  RULERLANE 1 8 SECTIONS 0 -1\n");  // flag 8 = default region lane
+    out.push_str("  RULERLANE 1 8 SECTIONS 0 -1\n"); // flag 8 = default region lane
     out.push_str("  RULERLANE 2 0 MARKS 0 -1\n");
-    out.push_str("  RULERLANE 3 4 SONG 0 -1\n");      // flag 4 = default marker lane
+    out.push_str("  RULERLANE 3 4 SONG 0 -1\n"); // flag 4 = default marker lane
     out.push_str("  RULERLANE 4 0 START/END 0 -1\n");
     out.push_str("  RULERLANE 5 0 KEY 0 -1\n");
     out.push_str("  RULERLANE 6 0 MODE 0 -1\n");
@@ -1311,7 +1322,11 @@ pub fn project_to_rpp_text(project: &ReaperProject) -> String {
                 "  MARKER {} {} \"\" {} {} 1 R {} {} {}\n",
                 mr.id,
                 mr.end_position.unwrap_or(mr.position),
-                mr.flags, mr.color, guid_str, mr.additional, lane
+                mr.flags,
+                mr.color,
+                guid_str,
+                mr.additional,
+                lane
             ));
         } else {
             out.push_str(&format!(
@@ -1365,12 +1380,19 @@ fn write_track_header(out: &mut String, track: &Track, prefix: &str) {
         out.push_str(&format!("{}<TRACK {{{}}}\n", prefix, track_id));
     }
     out.push_str(&format!("{}  NAME {:?}\n", prefix, track.name));
-    out.push_str(&format!("{}  PEAKCOL {}\n", prefix, track.peak_color.unwrap_or(16576)));
+    out.push_str(&format!(
+        "{}  PEAKCOL {}\n",
+        prefix,
+        track.peak_color.unwrap_or(16576)
+    ));
     out.push_str(&format!("{}  BEAT -1\n", prefix));
     out.push_str(&format!("{}  AUTOMODE 0\n", prefix));
 
     if let Some(ref vp) = track.volpan {
-        out.push_str(&format!("{}  VOLPAN {} {} -1 -1 1\n", prefix, vp.volume, vp.pan));
+        out.push_str(&format!(
+            "{}  VOLPAN {} {} -1 -1 1\n",
+            prefix, vp.volume, vp.pan
+        ));
     } else {
         out.push_str(&format!("{}  VOLPAN 1 0 -1 -1 1\n", prefix));
     }
@@ -1416,12 +1438,14 @@ fn write_item_rpp(out: &mut String, item: &Item, indent: usize, item_source_dir:
             if trimmed.starts_with("FILE ") {
                 if let Some(ref source_dir) = item_source_dir {
                     // Extract the path (may be quoted)
-                    let file_path = trimmed.trim_start_matches("FILE ")
-                        .trim_matches('"');
+                    let file_path = trimmed.trim_start_matches("FILE ").trim_matches('"');
                     if !PathBuf::from(file_path).is_absolute() {
                         let absolute = source_dir.join(file_path);
-                        out.push_str(&format!("{}  FILE {:?}\n", prefix,
-                            absolute.to_string_lossy()));
+                        out.push_str(&format!(
+                            "{}  FILE {:?}\n",
+                            prefix,
+                            absolute.to_string_lossy()
+                        ));
                         continue;
                     }
                 }
@@ -1607,7 +1631,11 @@ fn write_combined_tempoenvex(out: &mut String, rpp_paths: &[PathBuf], song_infos
         // insert a leading point from the TEMPO header.
         let first_is_at_start = points.first().map_or(false, |pt| {
             // Check if the first point is within 1ms of global_start
-            let pt_pos = pt.line.trim().split_whitespace().nth(1)
+            let pt_pos = pt
+                .line
+                .trim()
+                .split_whitespace()
+                .nth(1)
                 .and_then(|s| s.parse::<f64>().ok())
                 .unwrap_or(f64::MAX);
             (pt_pos - song.global_start_seconds).abs() < 0.001
@@ -1636,15 +1664,9 @@ fn write_combined_tempoenvex(out: &mut String, rpp_paths: &[PathBuf], song_infos
         // Insert a square boundary point at the song's end.
         // This freezes the tempo so it doesn't interpolate into the next song.
         if !is_last_song {
-            let end_tempo = points
-                .last()
-                .map(|p| p.tempo.as_str())
-                .unwrap_or(&bpm_str);
+            let end_tempo = points.last().map(|p| p.tempo.as_str()).unwrap_or(&bpm_str);
             // Shape=1 = square (instant jump, no gradual transition)
-            out.push_str(&format!(
-                "    PT {:.12} {} 1\n",
-                song_end, end_tempo
-            ));
+            out.push_str(&format!("    PT {:.12} {} 1\n", song_end, end_tempo));
         }
     }
 
@@ -1734,10 +1756,7 @@ fn force_square_shape(pt_line: &str) -> String {
 // r[impl combine.markers]
 // r[impl combine.song-folders]
 // r[impl combine.tempo-concat]
-pub fn concatenate_rpp_files_raw(
-    rpp_paths: &[PathBuf],
-    song_infos: &[SongInfo],
-) -> String {
+pub fn concatenate_rpp_files_raw(rpp_paths: &[PathBuf], song_infos: &[SongInfo]) -> String {
     assert_eq!(rpp_paths.len(), song_infos.len());
 
     let mut out = String::new();
@@ -1813,10 +1832,17 @@ pub fn concatenate_rpp_files_raw(
 
         // Write song region marker (SONG lane = 3)
         let song_end = song.global_start_seconds + song.duration_seconds + 0.1;
-        out.push_str(&format!("  MARKER {} {} {:?} 1 0 1 R {{}} 0 3\n",
-            song_idx * 100 + 1, song.global_start_seconds, song.name));
-        out.push_str(&format!("  MARKER {} {} \"\" 1 0 1 R {{}} 0 3\n",
-            song_idx * 100 + 1, song_end));
+        out.push_str(&format!(
+            "  MARKER {} {} {:?} 1 0 1 R {{}} 0 3\n",
+            song_idx * 100 + 1,
+            song.global_start_seconds,
+            song.name
+        ));
+        out.push_str(&format!(
+            "  MARKER {} {} \"\" 1 0 1 R {{}} 0 3\n",
+            song_idx * 100 + 1,
+            song_end
+        ));
 
         // Write offset markers from this project
         for line in rpp_text.lines() {
@@ -2013,16 +2039,28 @@ fn offset_marker_line(line: &str, offset: f64) -> Option<String> {
     }
     let pos: f64 = parts[2].parse().ok()?;
     let new_pos = pos + offset;
-    let rest = if parts.len() > 3 { parts[3..].join(" ") } else { String::new() };
+    let rest = if parts.len() > 3 {
+        parts[3..].join(" ")
+    } else {
+        String::new()
+    };
     Some(format!("MARKER {} {} {}", parts[1], new_pos, rest))
 }
 
 /// Classify a marker line to determine its ruler lane.
 fn classify_marker_lane_from_line(line: &str) -> u32 {
     let upper = line.to_uppercase();
-    if upper.contains("SONGSTART") || upper.contains("SONGEND") || upper.contains("COUNT-IN") || upper.contains("COUNTIN") {
+    if upper.contains("SONGSTART")
+        || upper.contains("SONGEND")
+        || upper.contains("COUNT-IN")
+        || upper.contains("COUNTIN")
+    {
         2 // MARKS
-    } else if upper.contains("=START") || upper.contains("=END") || upper.contains("PREROLL") || upper.contains("POSTROLL") {
+    } else if upper.contains("=START")
+        || upper.contains("=END")
+        || upper.contains("PREROLL")
+        || upper.contains("POSTROLL")
+    {
         4 // START/END
     } else if line.contains("\" 1 0") {
         // Regions (have flag 1 after name) go to SECTIONS
@@ -2376,7 +2414,7 @@ mod tests {
                 metronome_pattern: String::new(),
                 unknown2: 0,
                 unknown3: 0,
-                unknown4: 0
+                unknown4: 0,
             }],
             default_tempo: 120.0,
             default_time_signature: (4, 4),
@@ -2395,7 +2433,7 @@ mod tests {
                 metronome_pattern: String::new(),
                 unknown2: 0,
                 unknown3: 0,
-                unknown4: 0
+                unknown4: 0,
             }],
             default_tempo: 90.0,
             default_time_signature: (3, 4),
@@ -2422,11 +2460,19 @@ mod tests {
 
         assert!(collection.regions.len() >= 2);
 
-        let ra = collection.regions.iter().find(|r| r.name == "Song A").unwrap();
+        let ra = collection
+            .regions
+            .iter()
+            .find(|r| r.name == "Song A")
+            .unwrap();
         assert_eq!(ra.position, 0.0);
         assert_eq!(ra.end_position, Some(30.0));
 
-        let rb = collection.regions.iter().find(|r| r.name == "Song B").unwrap();
+        let rb = collection
+            .regions
+            .iter()
+            .find(|r| r.name == "Song B")
+            .unwrap();
         assert_eq!(rb.position, 30.0);
         assert_eq!(rb.end_position, Some(75.0));
     }
@@ -2499,10 +2545,16 @@ mod tests {
         let output = organize_marker_lanes_raw(input);
 
         // Should have FTS ruler lanes
-        assert!(output.contains("RULERLANE 1 8 SECTIONS"), "Missing SECTIONS lane");
+        assert!(
+            output.contains("RULERLANE 1 8 SECTIONS"),
+            "Missing SECTIONS lane"
+        );
         assert!(output.contains("RULERLANE 2 0 MARKS"), "Missing MARKS lane");
         assert!(output.contains("RULERLANE 3 4 SONG"), "Missing SONG lane");
-        assert!(output.contains("RULERLANE 4 0 START/END"), "Missing START/END lane");
+        assert!(
+            output.contains("RULERLANE 4 0 START/END"),
+            "Missing START/END lane"
+        );
 
         // Should NOT have old "Default" lane
         assert!(!output.contains("Default"), "Old lane should be replaced");
@@ -2511,28 +2563,40 @@ mod tests {
         assert!(
             output.contains("\"Intro\" 1 16777215 1 R {AAAA-BBBB} 0 1"),
             "Intro should be lane 1 (SECTIONS) with original color/GUID preserved.\nGot: {}",
-            output.lines().find(|l| l.contains("Intro")).unwrap_or("NOT FOUND")
+            output
+                .lines()
+                .find(|l| l.contains("Intro"))
+                .unwrap_or("NOT FOUND")
         );
 
         // SONGSTART → MARKS (lane 2), preserving color
         assert!(
             output.contains("SONGSTART 0 12345 1 B {CCCC-DDDD} 0 2"),
             "SONGSTART should be lane 2 (MARKS) with original data.\nGot: {}",
-            output.lines().find(|l| l.contains("SONGSTART")).unwrap_or("NOT FOUND")
+            output
+                .lines()
+                .find(|l| l.contains("SONGSTART"))
+                .unwrap_or("NOT FOUND")
         );
 
         // =END → START/END (lane 4)
         assert!(
             output.contains("\"=END\" 0 0 1 B {EEEE-FFFF} 0 4"),
             "=END should be lane 4 (START/END).\nGot: {}",
-            output.lines().find(|l| l.contains("=END")).unwrap_or("NOT FOUND")
+            output
+                .lines()
+                .find(|l| l.contains("=END"))
+                .unwrap_or("NOT FOUND")
         );
 
         // Song region should stay on SONG lane (3)
         assert!(
             output.contains("\"Belief\" 1 0 1 R {} 0 3"),
             "Song region should stay on lane 3 (SONG).\nGot: {}",
-            output.lines().find(|l| l.contains("Belief")).unwrap_or("NOT FOUND")
+            output
+                .lines()
+                .find(|l| l.contains("Belief"))
+                .unwrap_or("NOT FOUND")
         );
     }
 
@@ -2553,7 +2617,9 @@ mod tests {
             let line = output.lines().find(|l| l.contains(name)).expect(name);
             assert!(
                 line.ends_with(" 1"),
-                "{} should be on lane 1, got: {}", name, line
+                "{} should be on lane 1, got: {}",
+                name,
+                line
             );
         }
     }
@@ -2568,9 +2634,6 @@ mod tests {
             extract_marker_name("MARKER 2 10 SONGSTART 0 0 1 B {} 0 2"),
             "SONGSTART"
         );
-        assert_eq!(
-            extract_marker_name(r#"MARKER 1 10 "" 1"#),
-            ""
-        );
+        assert_eq!(extract_marker_name(r#"MARKER 1 10 "" 1"#), "");
     }
 }

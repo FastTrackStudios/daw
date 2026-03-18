@@ -13,6 +13,7 @@ use std::{
     fs::{self, File},
     future::Future,
     io::Write,
+    mem::ManuallyDrop,
     path::{Path, PathBuf},
     pin::Pin,
     process::{Child, Command},
@@ -139,8 +140,48 @@ impl ReaperProcess {
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
         let args: Vec<String> = config.args.clone();
+
+        if config.is_rig_wrapper {
+            // Rig wrapper: the bash script handles -newinst/etc via launch.json.
+            // Socket path is known from FTS_SOCKET env var (not PID-derived) so we
+            // can find it even when bwrap forks a child with a different PID.
+            let socket_path = config
+                .env
+                .iter()
+                .find(|(k, _)| k == "FTS_SOCKET")
+                .map(|(_, v)| PathBuf::from(v))
+                .ok_or_else(|| eyre::eyre!("for_rig config missing FTS_SOCKET in env"))?;
+
+            let exe = config
+                .executable
+                .as_deref()
+                .ok_or_else(|| eyre::eyre!("for_rig config missing executable"))?;
+
+            let _ = std::fs::remove_file(&socket_path);
+
+            let mut cmd = std::process::Command::new(exe);
+            cmd.args(&args);
+            for (k, v) in &env_pairs {
+                cmd.env(k, v);
+            }
+            let child = cmd
+                .spawn()
+                .map_err(|e| eyre::eyre!("Failed to spawn rig wrapper at {exe}: {e}"))?;
+
+            println!(
+                "  Spawned rig wrapper (PID {}), socket: {}",
+                child.id(),
+                socket_path.display()
+            );
+            return Ok(Self { child, socket_path });
+        }
+
         Self::spawn_inner_with_exe(
-            if env_pairs.is_empty() { None } else { Some(&env_pairs) },
+            if env_pairs.is_empty() {
+                None
+            } else {
+                Some(&env_pairs)
+            },
             &args,
             config.executable.as_deref(),
             config.resources.as_deref(),
@@ -157,8 +198,12 @@ impl ReaperProcess {
         custom_exe: Option<&str>,
         custom_resources: Option<&str>,
     ) -> Result<Self> {
-        let exe = custom_exe.map(String::from).unwrap_or_else(reaper_executable);
-        let resources = custom_resources.map(String::from).unwrap_or_else(reaper_resources);
+        let exe = custom_exe
+            .map(String::from)
+            .unwrap_or_else(reaper_executable);
+        let resources = custom_resources
+            .map(String::from)
+            .unwrap_or_else(reaper_resources);
         let mut cmd = Command::new(&exe);
         cmd.current_dir(&resources)
             .arg("-newinst")
@@ -231,9 +276,24 @@ impl Drop for ReaperProcess {
 /// ROAM driver task must live on a single runtime for the entire process.
 /// If the creating runtime drops, the driver dies and all subsequent tests
 /// get `DriverGone`. Solving this by owning a long-lived runtime here.
+///
+/// Uses `ManuallyDrop<Runtime>` so the custom `Drop` impl can consume the
+/// runtime and call `shutdown_background()` (non-blocking). This prevents
+/// the test binary from hanging indefinitely when REAPER is killed without
+/// a clean disconnect — the ROAM driver task would otherwise block `Runtime::drop`.
 struct SharedState {
-    runtime: Runtime,
+    runtime: ManuallyDrop<Runtime>,
     daw: Daw,
+}
+
+impl Drop for SharedState {
+    fn drop(&mut self) {
+        // SAFETY: `runtime` is only taken here in `drop`, never accessed afterwards.
+        let runtime = unsafe { ManuallyDrop::take(&mut self.runtime) };
+        // Non-blocking shutdown: abandon any still-running tasks (e.g. the ROAM
+        // driver task stuck waiting on a killed REAPER socket) without blocking.
+        runtime.shutdown_background();
+    }
 }
 
 static SHARED: OnceLock<SharedState> = OnceLock::new();
@@ -263,7 +323,10 @@ fn shared_daw() -> Result<Daw> {
         .map_err(|e| eyre::eyre!("Failed to build shared runtime: {e}"))?;
 
     let daw = runtime.block_on(connect_daw())?;
-    let _ = SHARED.set(SharedState { runtime, daw });
+    let _ = SHARED.set(SharedState {
+        runtime: ManuallyDrop::new(runtime),
+        daw,
+    });
     Ok(SHARED.get().unwrap().daw.clone())
 }
 
@@ -453,12 +516,32 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await?;
     let link = roam_stream::StreamLink::unix(stream);
-    let (caller, _session) = roam::initiator_conduit(roam::BareConduit::new(link))
+    let (_root_caller, session) = roam::initiator_conduit(roam::BareConduit::new(link))
         .establish::<roam::DriverCaller>(())
         .await
         .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
 
-    Ok(Daw::new(roam::ErasedCaller::new(caller)))
+    // Open a virtual connection for DAW services
+    let conn = session
+        .open_connection(
+            roam::ConnectionSettings {
+                parity: roam::Parity::Odd,
+                max_concurrent_requests: 64,
+            },
+            vec![roam::MetadataEntry {
+                key: "role",
+                value: roam::MetadataValue::String("test-client"),
+                flags: roam::MetadataFlags::NONE,
+            }],
+        )
+        .await
+        .map_err(|e| eyre::eyre!("open_connection failed: {e:?}"))?;
+
+    let mut driver = roam::Driver::new(conn, ());
+    let caller = roam::ErasedCaller::new(driver.caller());
+    moire::task::spawn(async move { driver.run().await });
+
+    Ok(Daw::new(caller))
 }
 
 /// Discover the first available `/tmp/fts-daw-*.sock` socket that is actually
@@ -808,9 +891,9 @@ pub async fn cleanup_all_projects(daw: &Daw) -> Result<()> {
 
 /// Description of a REAPER instance to spawn for multi-DAW tests.
 pub struct DawInstanceConfig {
-    /// Human-readable label (e.g., "session", "signal").
+    /// Human-readable label (e.g., "primary", "secondary").
     pub label: String,
-    /// Environment variables to set (e.g., `[("FTS_DAW_ROLE", "signal")]`).
+    /// Environment variables to set.
     pub env: Vec<(String, String)>,
     /// Extra CLI arguments for REAPER.
     pub args: Vec<String>,
@@ -818,6 +901,10 @@ pub struct DawInstanceConfig {
     pub executable: Option<String>,
     /// Custom resources path (None = derived from executable).
     pub resources: Option<String>,
+    /// When true, the executable is a rig wrapper (already contains -newinst etc.
+    /// via launch.json). The socket path is read from FTS_SOCKET in `env` rather
+    /// than being derived from the spawned PID.
+    pub is_rig_wrapper: bool,
 }
 
 impl DawInstanceConfig {
@@ -829,6 +916,28 @@ impl DawInstanceConfig {
             args: Vec::new(),
             executable: None,
             resources: None,
+            is_rig_wrapper: false,
+        }
+    }
+
+    /// Create a config targeting a rig installed by `cargo xtask setup-rigs`.
+    ///
+    /// - Executable: `~/.local/bin/{rig_id}` (the wrapper script)
+    /// - Socket: `/tmp/fts-daw-{rig_id}.sock` via `FTS_SOCKET` (avoids PID mismatch
+    ///   from the bwrap/reaper-env container forking a child with a different PID)
+    /// - REAPER launch args are provided by the rig's `launch.json` — not added here.
+    pub fn for_rig(label: &str, rig_id: &str) -> Self {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        Self {
+            label: label.to_string(),
+            env: vec![(
+                "FTS_SOCKET".to_string(),
+                format!("/tmp/fts-daw-{rig_id}.sock"),
+            )],
+            args: Vec::new(),
+            executable: Some(format!("{home}/.local/bin/{rig_id}")),
+            resources: None,
+            is_rig_wrapper: true,
         }
     }
 
@@ -844,6 +953,7 @@ impl DawInstanceConfig {
             args: Vec::new(),
             executable: Some(format!("{app_path}/Contents/MacOS/REAPER")),
             resources: Some(format!("{app_path}/Contents/Resources")),
+            is_rig_wrapper: false,
         }
     }
 
@@ -933,36 +1043,27 @@ pub fn run_multi_reaper_test(
         configs.len()
     );
 
-    // Spawn all REAPER instances
+    // Spawn instances one at a time, waiting for each socket before starting the next.
+    // This ensures the shared reaper.ini patch → launch → restore cycle is sequential,
+    // and REAPER's per-instance lock files are created before the next instance starts.
     let mut processes = Vec::with_capacity(configs.len());
     for config in &configs {
-        let env_pairs: Vec<(&str, &str)> = config
-            .env
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
-        let arg_refs: Vec<&str> = config.args.iter().map(|s| s.as_str()).collect();
-
-        let process = ReaperProcess::spawn_config(&config)
+        let process = ReaperProcess::spawn_config(config)
             .map_err(|e| eyre::eyre!("[{test_name}] Failed to spawn '{}': {e}", config.label))?;
 
         println!(
-            "  [{}] PID {}, socket: {}",
+            "  [{}] spawned PID {}, waiting for socket: {}",
             config.label,
             process.pid(),
             process.socket_path().display()
         );
-        processes.push(process);
-    }
 
-    // Wait for all sockets
-    for (i, process) in processes.iter().enumerate() {
-        process.wait_for_socket().map_err(|e| {
-            eyre::eyre!(
-                "[{test_name}] Socket timeout for '{}': {e}",
-                configs[i].label
-            )
-        })?;
+        process
+            .wait_for_socket()
+            .map_err(|e| eyre::eyre!("[{test_name}] Socket timeout for '{}': {e}", config.label))?;
+
+        println!("  [{}] ready", config.label);
+        processes.push(process);
     }
 
     // Build a runtime and connect to each

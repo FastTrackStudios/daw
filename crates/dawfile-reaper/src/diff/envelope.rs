@@ -2,13 +2,17 @@
 
 use std::collections::HashMap;
 
+use super::f64_eq;
+use super::types::*;
 use crate::types::envelope::{AutomationItem, EnvelopePoint};
 use crate::types::{Envelope, TempoTimeEnvelope, TempoTimePoint};
-use super::types::*;
-use super::f64_eq;
 
 /// Diff two lists of envelopes, matched by `(guid, envelope_type)`.
-pub(crate) fn diff_envelopes(old: &[Envelope], new: &[Envelope], options: &DiffOptions) -> Vec<EnvelopeDiff> {
+pub(crate) fn diff_envelopes(
+    old: &[Envelope],
+    new: &[Envelope],
+    options: &DiffOptions,
+) -> Vec<EnvelopeDiff> {
     let mut diffs = Vec::new();
 
     let old_map: HashMap<(&str, &str), &Envelope> = old
@@ -35,16 +39,12 @@ pub(crate) fn diff_envelopes(old: &[Envelope], new: &[Envelope], options: &DiffO
             }
             Some(&new_env) => {
                 let prop_changes = diff_envelope_properties(old_env, new_env);
-                let point_changes = diff_points(&old_env.points, &new_env.points, options.position_offset);
-                let ai_changes = diff_automation_items(
-                    &old_env.automation_items,
-                    &new_env.automation_items,
-                );
+                let point_changes =
+                    diff_points(&old_env.points, &new_env.points, options.position_offset);
+                let ai_changes =
+                    diff_automation_items(&old_env.automation_items, &new_env.automation_items);
 
-                if !prop_changes.is_empty()
-                    || !point_changes.is_empty()
-                    || !ai_changes.is_empty()
-                {
+                if !prop_changes.is_empty() || !point_changes.is_empty() || !ai_changes.is_empty() {
                     diffs.push(EnvelopeDiff {
                         guid: new_env.guid.clone(),
                         envelope_type: new_env.envelope_type.clone(),
@@ -110,7 +110,11 @@ fn diff_envelope_properties(old: &Envelope, new: &Envelope) -> Vec<PropertyChang
 /// `offset` is subtracted from new point positions before comparison.
 ///
 /// O(n + m) where n = old.len(), m = new.len().
-pub(crate) fn diff_points(old: &[EnvelopePoint], new: &[EnvelopePoint], offset: f64) -> Vec<PointChange> {
+pub(crate) fn diff_points(
+    old: &[EnvelopePoint],
+    new: &[EnvelopePoint],
+    offset: f64,
+) -> Vec<PointChange> {
     let mut changes = Vec::new();
     let mut i = 0;
     let mut j = 0;
@@ -125,7 +129,11 @@ pub(crate) fn diff_points(old: &[EnvelopePoint], new: &[EnvelopePoint], offset: 
             if !f64_eq(op.value, np.value) || op.shape != np.shape {
                 changes.push(PointChange::Modified {
                     old: snapshot(op),
-                    new: PointSnapshot { position: np_pos, value: np.value, shape: np.shape as i32 },
+                    new: PointSnapshot {
+                        position: np_pos,
+                        value: np.value,
+                        shape: np.shape as i32,
+                    },
                 });
             }
             i += 1;
@@ -134,7 +142,11 @@ pub(crate) fn diff_points(old: &[EnvelopePoint], new: &[EnvelopePoint], offset: 
             changes.push(PointChange::Removed(snapshot(op)));
             i += 1;
         } else {
-            changes.push(PointChange::Added(PointSnapshot { position: np_pos, value: np.value, shape: np.shape as i32 }));
+            changes.push(PointChange::Added(PointSnapshot {
+                position: np_pos,
+                value: np.value,
+                shape: np.shape as i32,
+            }));
             j += 1;
         }
     }
@@ -260,12 +272,16 @@ pub(crate) fn diff_tempo_envelope(
             };
 
             let ts_changed = if old_env.default_time_signature != new_env.default_time_signature {
-                Some((old_env.default_time_signature, new_env.default_time_signature))
+                Some((
+                    old_env.default_time_signature,
+                    new_env.default_time_signature,
+                ))
             } else {
                 None
             };
 
-            let point_changes = diff_tempo_points(&old_env.points, &new_env.points, options.position_offset);
+            let point_changes =
+                diff_tempo_points(&old_env.points, &new_env.points, options.position_offset);
 
             if tempo_changed.is_none() && ts_changed.is_none() && point_changes.is_empty() {
                 None
@@ -280,7 +296,11 @@ pub(crate) fn diff_tempo_envelope(
     }
 }
 
-fn diff_tempo_points(old: &[TempoTimePoint], new: &[TempoTimePoint], offset: f64) -> Vec<TempoPointChange> {
+fn diff_tempo_points(
+    old: &[TempoTimePoint],
+    new: &[TempoTimePoint],
+    offset: f64,
+) -> Vec<TempoPointChange> {
     let mut changes = Vec::new();
     let mut i = 0;
     let mut j = 0;

@@ -28,27 +28,15 @@ impl FxService for StandaloneFx {
         vec![]
     }
 
-    async fn get_fx_list(
-        &self,
-        _project: ProjectContext,
-        _context: FxChainContext,
-    ) -> Vec<Fx> {
+    async fn get_fx_list(&self, _project: ProjectContext, _context: FxChainContext) -> Vec<Fx> {
         vec![]
     }
 
-    async fn get_fx(
-        &self,
-        _project: ProjectContext,
-        _target: FxTarget,
-    ) -> Option<Fx> {
+    async fn get_fx(&self, _project: ProjectContext, _target: FxTarget) -> Option<Fx> {
         None
     }
 
-    async fn fx_count(
-        &self,
-        _project: ProjectContext,
-        _context: FxChainContext,
-    ) -> u32 {
+    async fn fx_count(&self, _project: ProjectContext, _context: FxChainContext) -> u32 {
         0
     }
 
@@ -87,11 +75,7 @@ impl FxService for StandaloneFx {
         Some(Uuid::new_v4().to_string())
     }
 
-    async fn remove_fx(
-        &self,
-        _project: ProjectContext,
-        _target: FxTarget,
-    ) -> Result<(), String> {
+    async fn remove_fx(&self, _project: ProjectContext, _target: FxTarget) -> Result<(), String> {
         Ok(())
     }
 
@@ -154,19 +138,11 @@ impl FxService for StandaloneFx {
         None
     }
 
-    async fn next_preset(
-        &self,
-        _project: ProjectContext,
-        _target: FxTarget,
-    ) -> Result<(), String> {
+    async fn next_preset(&self, _project: ProjectContext, _target: FxTarget) -> Result<(), String> {
         Ok(())
     }
 
-    async fn prev_preset(
-        &self,
-        _project: ProjectContext,
-        _target: FxTarget,
-    ) -> Result<(), String> {
+    async fn prev_preset(&self, _project: ProjectContext, _target: FxTarget) -> Result<(), String> {
         Ok(())
     }
 
@@ -179,19 +155,11 @@ impl FxService for StandaloneFx {
         Ok(())
     }
 
-    async fn open_fx_ui(
-        &self,
-        _project: ProjectContext,
-        _target: FxTarget,
-    ) -> Result<(), String> {
+    async fn open_fx_ui(&self, _project: ProjectContext, _target: FxTarget) -> Result<(), String> {
         Ok(())
     }
 
-    async fn close_fx_ui(
-        &self,
-        _project: ProjectContext,
-        _target: FxTarget,
-    ) -> Result<(), String> {
+    async fn close_fx_ui(&self, _project: ProjectContext, _target: FxTarget) -> Result<(), String> {
         Ok(())
     }
 
@@ -292,11 +260,7 @@ impl FxService for StandaloneFx {
     // Container / Tree Operations (stubs)
     // =========================================================================
 
-    async fn get_fx_tree(
-        &self,
-        _project: ProjectContext,
-        _context: FxChainContext,
-    ) -> FxTree {
+    async fn get_fx_tree(&self, _project: ProjectContext, _context: FxChainContext) -> FxTree {
         FxTree::new()
     }
 

@@ -40,13 +40,13 @@
 // Re-export daw-proto types for convenience
 // Note: We selectively re-export to avoid shadowing our local modules (fx, tracks, transport, etc.)
 pub use daw_proto::{
+    // FX types
+    AddFxAtRequest,
     // Audio engine types
     AudioEngineState,
     AudioInputChannel,
     AudioInputInfo,
     AudioLatency,
-    // FX types
-    AddFxAtRequest,
     CreateContainerRequest,
     // Error types
     DawError,
@@ -68,9 +68,9 @@ pub use daw_proto::{
     FxRef,
     FxRoutingMode,
     FxTarget,
-    InstalledFx,
     FxTree,
     FxType,
+    InstalledFx,
     // Marker types
     Marker,
     MarkerError,
@@ -349,7 +349,10 @@ impl Daw {
         if success {
             Ok(Project::new(guid, self.clients.clone()))
         } else {
-            Err(Error::InvalidOperation(format!("Failed to select project: {}", guid)))
+            Err(Error::InvalidOperation(format!(
+                "Failed to select project: {}",
+                guid
+            )))
         }
     }
 
@@ -357,12 +360,10 @@ impl Daw {
     ///
     /// Returns the newly created project handle.
     pub async fn create_project(&self) -> crate::Result<Project> {
-        let info = self
-            .clients
-            .project
-            .create()
-            .await?
-            .ok_or_else(|| Error::InvalidOperation("Failed to create new project".to_string()))?;
+        let info =
+            self.clients.project.create().await?.ok_or_else(|| {
+                Error::InvalidOperation("Failed to create new project".to_string())
+            })?;
 
         Ok(Project::new(info.guid, self.clients.clone()))
     }
@@ -389,7 +390,10 @@ impl Daw {
         if success {
             Ok(())
         } else {
-            Err(Error::InvalidOperation(format!("Failed to close project: {}", guid)))
+            Err(Error::InvalidOperation(format!(
+                "Failed to close project: {}",
+                guid
+            )))
         }
     }
 
@@ -574,4 +578,3 @@ mod global {
         }
     }
 }
-

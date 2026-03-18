@@ -181,12 +181,7 @@ impl ProjectService for StandaloneProject {
 
     // Undo stubs (no-op for standalone mock)
 
-    async fn begin_undo_block(
-        &self,
-        _project: daw_proto::ProjectContext,
-        _label: String,
-    ) {
-    }
+    async fn begin_undo_block(&self, _project: daw_proto::ProjectContext, _label: String) {}
 
     async fn end_undo_block(
         &self,
@@ -204,17 +199,11 @@ impl ProjectService for StandaloneProject {
         false
     }
 
-    async fn last_undo_label(
-        &self,
-        _project: daw_proto::ProjectContext,
-    ) -> Option<String> {
+    async fn last_undo_label(&self, _project: daw_proto::ProjectContext) -> Option<String> {
         None
     }
 
-    async fn last_redo_label(
-        &self,
-        _project: daw_proto::ProjectContext,
-    ) -> Option<String> {
+    async fn last_redo_label(&self, _project: daw_proto::ProjectContext) -> Option<String> {
         None
     }
 
@@ -249,64 +238,64 @@ impl ProjectService for StandaloneProject {
     async fn subscribe(&self, _tx: Tx<ProjectEvent>) {
         #[cfg(not(target_arch = "wasm32"))]
         {
-        let tx = _tx;
-        info!("ProjectService::subscribe() - starting project stream");
+            let tx = _tx;
+            info!("ProjectService::subscribe() - starting project stream");
 
-        // Clone self for the spawned task
-        let this = self.clone();
+            // Clone self for the spawned task
+            let this = self.clone();
 
-        // Spawn the streaming loop so this method returns immediately
-        // (roam needs the method to return so it can send the Response)
-        moire::task::spawn(async move {
-            // Send initial state: all projects
-            let projects = this.projects.as_ref().clone();
-            if tx
-                .send(ProjectEvent::ProjectsChanged(projects))
-                .await
-                .is_err()
-            {
-                debug!("ProjectService::subscribe() - client disconnected during initial send");
-                return;
-            }
+            // Spawn the streaming loop so this method returns immediately
+            // (roam needs the method to return so it can send the Response)
+            moire::task::spawn(async move {
+                // Send initial state: all projects
+                let projects = this.projects.as_ref().clone();
+                if tx
+                    .send(ProjectEvent::ProjectsChanged(projects))
+                    .await
+                    .is_err()
+                {
+                    debug!("ProjectService::subscribe() - client disconnected during initial send");
+                    return;
+                }
 
-            // Send current project
-            let current_guid = {
-                let index = *this.shared_state.current_index.read().await;
-                this.projects.get(index).map(|p| p.guid.clone())
-            };
-            if tx
-                .send(ProjectEvent::CurrentChanged(current_guid.clone()))
-                .await
-                .is_err()
-            {
-                debug!("ProjectService::subscribe() - client disconnected");
-                return;
-            }
+                // Send current project
+                let current_guid = {
+                    let index = *this.shared_state.current_index.read().await;
+                    this.projects.get(index).map(|p| p.guid.clone())
+                };
+                if tx
+                    .send(ProjectEvent::CurrentChanged(current_guid.clone()))
+                    .await
+                    .is_err()
+                {
+                    debug!("ProjectService::subscribe() - client disconnected");
+                    return;
+                }
 
-            // Poll for changes at 2Hz (current project rarely changes, no need for 60Hz)
-            let mut last_index = *this.shared_state.current_index.read().await;
+                // Poll for changes at 2Hz (current project rarely changes, no need for 60Hz)
+                let mut last_index = *this.shared_state.current_index.read().await;
 
-            loop {
-                crate::platform::sleep(Duration::from_millis(500)).await;
+                loop {
+                    crate::platform::sleep(Duration::from_millis(500)).await;
 
-                // Check for current project change
-                let current_index = *this.shared_state.current_index.read().await;
-                if current_index != last_index {
-                    last_index = current_index;
-                    let new_guid = this.projects.get(current_index).map(|p| p.guid.clone());
-                    if tx
-                        .send(ProjectEvent::CurrentChanged(new_guid))
-                        .await
-                        .is_err()
-                    {
-                        debug!("ProjectService::subscribe() - client disconnected");
-                        break;
+                    // Check for current project change
+                    let current_index = *this.shared_state.current_index.read().await;
+                    if current_index != last_index {
+                        last_index = current_index;
+                        let new_guid = this.projects.get(current_index).map(|p| p.guid.clone());
+                        if tx
+                            .send(ProjectEvent::CurrentChanged(new_guid))
+                            .await
+                            .is_err()
+                        {
+                            debug!("ProjectService::subscribe() - client disconnected");
+                            break;
+                        }
                     }
                 }
-            }
 
-            info!("ProjectService::subscribe() - stream ended");
-        });
+                info!("ProjectService::subscribe() - stream ended");
+            });
         } // cfg(not(wasm32))
     }
 }

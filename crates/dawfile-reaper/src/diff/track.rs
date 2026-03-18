@@ -2,10 +2,10 @@
 
 use std::collections::HashMap;
 
-use crate::types::Track;
-use super::{envelope, fx, item};
-use super::types::*;
 use super::f64_eq;
+use super::types::*;
+use super::{envelope, fx, item};
+use crate::types::Track;
 
 /// Track identity key — either GUID or name, depending on options.
 fn track_key<'a>(track: &'a Track, by_name: bool) -> Option<&'a str> {
@@ -114,11 +114,7 @@ fn diff_single_track(old: &Track, new: &Track, options: &DiffOptions) -> Option<
     let env_diffs = envelope::diff_envelopes(&old.envelopes, &new.envelopes, options);
     let fx_diff = fx::diff_fx_chains(old.fx_chain.as_ref(), new.fx_chain.as_ref());
 
-    if props.is_empty()
-        && item_diffs.is_empty()
-        && env_diffs.is_empty()
-        && fx_diff.is_none()
-    {
+    if props.is_empty() && item_diffs.is_empty() && env_diffs.is_empty() && fx_diff.is_none() {
         None
     } else {
         Some(TrackDiff {

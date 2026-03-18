@@ -21,8 +21,8 @@ pub mod markers;
 pub mod midi;
 pub mod peak;
 pub mod routing;
-pub mod tempo;
 pub mod ruler_lanes;
+pub mod tempo;
 pub mod time_map;
 
 /// Convenience alias for the low-level REAPER FFI struct.

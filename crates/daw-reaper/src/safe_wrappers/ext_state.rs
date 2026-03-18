@@ -11,7 +11,13 @@ pub fn get_ext_state(low: &ReaperLow, section: &CString, key: &CString) -> Optio
 }
 
 /// Set a global ext state value.
-pub fn set_ext_state(low: &ReaperLow, section: &CString, key: &CString, value: &CString, persist: bool) {
+pub fn set_ext_state(
+    low: &ReaperLow,
+    section: &CString,
+    key: &CString,
+    value: &CString,
+    persist: bool,
+) {
     unsafe {
         low.SetExtState(section.as_ptr(), key.as_ptr(), value.as_ptr(), persist);
     }
@@ -51,6 +57,11 @@ pub fn set_proj_ext_state(
     value: &CString,
 ) {
     unsafe {
-        low.SetProjExtState(project.to_raw(), section.as_ptr(), key.as_ptr(), value.as_ptr());
+        low.SetProjExtState(
+            project.to_raw(),
+            section.as_ptr(),
+            key.as_ptr(),
+            value.as_ptr(),
+        );
     }
 }

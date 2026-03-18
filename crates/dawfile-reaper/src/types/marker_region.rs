@@ -708,9 +708,7 @@ mod tests {
             .unwrap(),
         );
         // Region end: minimal fields
-        collection.add(
-            MarkerRegion::from_marker_line(r#"MARKER 1 34 "" 1"#).unwrap(),
-        );
+        collection.add(MarkerRegion::from_marker_line(r#"MARKER 1 34 "" 1"#).unwrap());
 
         collection.process_regions();
 

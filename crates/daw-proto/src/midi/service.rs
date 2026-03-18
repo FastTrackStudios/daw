@@ -1,9 +1,9 @@
 //! MIDI editing service trait
 
 use super::{MidiCC, MidiNote, MidiNoteCreate, MidiPitchBend, MidiProgramChange, MidiSysEx};
+use crate::TrackRef;
 use crate::item::{ItemRef, TakeRef};
 use crate::project::ProjectContext;
-use crate::TrackRef;
 use facet::Facet;
 use roam::service;
 

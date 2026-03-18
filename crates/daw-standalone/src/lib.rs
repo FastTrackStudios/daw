@@ -17,6 +17,8 @@
 
 #![deny(unsafe_code)]
 
+#[cfg(feature = "audio")]
+pub mod audio_engine;
 mod automation;
 mod ext_state;
 mod fx;
@@ -25,11 +27,9 @@ mod live_midi;
 mod marker;
 mod midi;
 mod midi_analysis;
+pub(crate) mod platform;
 mod position_conversion;
 mod project;
-#[cfg(feature = "audio")]
-pub mod audio_engine;
-pub(crate) mod platform;
 mod region;
 mod resource;
 mod routing;

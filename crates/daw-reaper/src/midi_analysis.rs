@@ -62,11 +62,8 @@ impl ReaperMidiAnalysis {
             if !midi_sw::take_is_midi(low, take) {
                 continue;
             }
-            let item_start_time = crate::safe_wrappers::item::get_media_item_info_value(
-                low,
-                raw_item,
-                c"D_POSITION",
-            );
+            let item_start_time =
+                crate::safe_wrappers::item::get_media_item_info_value(low, raw_item, c"D_POSITION");
             return Some((take, item_start_time));
         }
         None
@@ -234,10 +231,7 @@ impl Default for ReaperMidiAnalysis {
 }
 
 impl MidiAnalysisService for ReaperMidiAnalysis {
-    async fn source_fingerprint(
-        &self,
-        request: MidiChartRequest,
-    ) -> Result<String, String> {
+    async fn source_fingerprint(&self, request: MidiChartRequest) -> Result<String, String> {
         main_thread::query(move || {
             let Some(project) = Self::resolve_project(&request.project) else {
                 return Err("Project not found".to_string());

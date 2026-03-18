@@ -2,6 +2,7 @@
 
 use crate::StandaloneMidi;
 use crate::midi::TakeMidiData;
+use crate::platform::RwLock;
 use daw_proto::{
     MidiAnalysisService, MidiChartData, MidiChartRequest, MidiDetectedChord, ProjectContext,
 };
@@ -12,7 +13,6 @@ use keyflow::engraver::import::{
 };
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use crate::platform::RwLock;
 use std::sync::Arc;
 
 const DEFAULT_TRACK_NAME: &str = "CHORDS";
@@ -74,10 +74,7 @@ impl StandaloneMidiAnalysis {
 }
 
 impl MidiAnalysisService for StandaloneMidiAnalysis {
-    async fn source_fingerprint(
-        &self,
-        request: MidiChartRequest,
-    ) -> Result<String, String> {
+    async fn source_fingerprint(&self, request: MidiChartRequest) -> Result<String, String> {
         if !Self::track_tag_matches(request.track_tag.as_deref()) {
             return Err(format!(
                 "No track matched tag '{}'",

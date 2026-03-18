@@ -1,0 +1,21 @@
+[package]
+name = "daw-guest-example"
+version.workspace = true
+edition.workspace = true
+description = "Example guest process that connects to REAPER via SHM and calls DAW services"
+
+[[bin]]
+name = "daw-guest"
+path = "src/main.rs"
+
+[dependencies]
+daw.workspace = true
+roam.workspace = true
+roam-shm.workspace = true
+shm-primitives.workspace = true
+moire.workspace = true
+tokio = { workspace = true, features = ["time", "net", "rt"] }
+eyre = "0.6"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+libc = "0.2"

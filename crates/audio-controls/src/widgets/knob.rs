@@ -11,14 +11,14 @@ use crate::core::modulation::ModulationRange;
 use crate::core::normal::Normal;
 use crate::core::sensitivity::{DragSensitivity, ModifierKeys};
 use crate::core::value::{ValueFormatter, ValueStepping};
+use crate::theming::SvgTexture;
 use crate::theming::context::use_theme;
 use crate::theming::style::{ControlState, KnobStyle};
-use crate::theming::SvgTexture;
 
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::*;
-#[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsCast;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::*;
 
 /// Knob visual style variants.
 #[derive(Debug, Clone, Default, PartialEq)]

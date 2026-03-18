@@ -1,0 +1,43 @@
+[package]
+name = "daw-test-extension"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+name = "reaper_daw_test"
+path = "src/lib.rs"
+
+[dependencies]
+# DAW facade (reaper impl)
+daw = { workspace = true, features = ["reaper"] }
+
+# ROAM service framework
+roam.workspace = true
+roam-stream.workspace = true
+roam-shm.workspace = true
+shm-primitives.workspace = true
+shm-primitives-async.workspace = true
+
+# Async runtime
+moire.workspace = true
+tokio = { workspace = true, features = ["net", "rt-multi-thread"] }
+
+# REAPER bindings
+reaper-high.workspace = true
+reaper-medium.workspace = true
+reaper-low.workspace = true
+reaper-macros.workspace = true
+
+# Main thread dispatch
+crossbeam-channel.workspace = true
+fragile.workspace = true
+
+# File watching
+notify.workspace = true
+
+# Observability
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tempfile = "3"
+eyre = "0.6"

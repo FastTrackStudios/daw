@@ -46,13 +46,7 @@ impl ExtStateService for ReaperExtState {
         .flatten()
     }
 
-    async fn set_ext_state(
-        &self,
-        section: String,
-        key: String,
-        value: String,
-        persist: bool,
-    ) {
+    async fn set_ext_state(&self, section: String, key: String, value: String, persist: bool) {
         debug!(
             "ReaperExtState::set({}, {}, persist={})",
             section, key, persist

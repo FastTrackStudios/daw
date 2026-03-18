@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::DawClients;
-use daw_proto::{ProjectContext, TempoMapEvent, TempoPoint};
 use crate::Result;
+use daw_proto::{ProjectContext, TempoMapEvent, TempoPoint};
 use roam::Rx;
 
 /// TempoMap handle for a specific project

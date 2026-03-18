@@ -32,7 +32,6 @@
 //! }
 //! ```
 
-pub mod types;
 pub mod apply;
 mod envelope;
 mod fx;
@@ -40,6 +39,7 @@ mod item;
 mod markers;
 mod midi;
 mod track;
+pub mod types;
 
 pub use types::*;
 
@@ -110,11 +110,14 @@ pub fn diff_projects_with_options(
     let envelopes = envelope::diff_envelopes(&old.envelopes, &new.envelopes, options);
     let markers_regions =
         markers::diff_markers_regions(&old.markers_regions, &new.markers_regions, options);
-    let tempo_envelope =
-        envelope::diff_tempo_envelope(old.tempo_envelope.as_ref(), new.tempo_envelope.as_ref(), options);
+    let tempo_envelope = envelope::diff_tempo_envelope(
+        old.tempo_envelope.as_ref(),
+        new.tempo_envelope.as_ref(),
+        options,
+    );
 
-    let ruler_lanes_changed = old.ruler_lanes != new.ruler_lanes
-        || old.ruler_height != new.ruler_height;
+    let ruler_lanes_changed =
+        old.ruler_lanes != new.ruler_lanes || old.ruler_height != new.ruler_height;
 
     ProjectDiff {
         property_changes,

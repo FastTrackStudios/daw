@@ -6,8 +6,8 @@ use crate::safe_wrappers::item as item_sw;
 use crate::safe_wrappers::midi as sw;
 use daw_proto::{
     HumanizeParams, ItemRef, MidiCC, MidiCCCreate, MidiNote, MidiNoteCreate, MidiPitchBend,
-    MidiPitchBendCreate, MidiProgramChange, MidiService, MidiSysEx, MidiTakeLocation,
-    ProjectContext, PpqRange, QuantizeParams, TakeRef, TrackRef,
+    MidiPitchBendCreate, MidiProgramChange, MidiService, MidiSysEx, MidiTakeLocation, PpqRange,
+    ProjectContext, QuantizeParams, TakeRef, TrackRef,
 };
 use reaper_medium::{MediaItem, MediaItemTake, ProjectContext as ReaperProjectContext};
 use tracing::warn;
@@ -37,10 +37,7 @@ pub fn create_midi_item_on_main_thread(
 /// where note positions are in quarter-notes.
 ///
 /// Must be called from the main thread.
-pub fn add_notes_to_take_on_main_thread(
-    take: MediaItemTake,
-    notes: &[MidiNoteCreate],
-) {
+pub fn add_notes_to_take_on_main_thread(take: MediaItemTake, notes: &[MidiNoteCreate]) {
     let low = reaper_high::Reaper::get().medium_reaper().low();
 
     for note in notes {
@@ -50,13 +47,13 @@ pub fn add_notes_to_take_on_main_thread(
         sw::insert_note(
             low,
             take,
-            false,                   // selected
-            false,                   // muted
-            start_ppq,               // startppqpos
-            end_ppq,                 // endppqpos
-            note.channel as i32,     // channel
-            note.pitch as i32,       // pitch
-            note.velocity as i32,    // velocity
+            false,                // selected
+            false,                // muted
+            start_ppq,            // startppqpos
+            end_ppq,              // endppqpos
+            note.channel as i32,  // channel
+            note.pitch as i32,    // pitch
+            note.velocity as i32, // velocity
         );
     }
 
@@ -130,9 +127,7 @@ impl ReaperMidi {
                 // Use medium's get_active_take which handles this properly
                 crate::safe_wrappers::item::get_active_take(medium, item)
             }
-            TakeRef::Index(index) => {
-                item_sw::get_take(low, item, *index as i32)
-            }
+            TakeRef::Index(index) => item_sw::get_take(low, item, *index as i32),
             TakeRef::Guid(_) => crate::safe_wrappers::item::get_active_take(medium, item),
         }
     }
@@ -241,15 +236,15 @@ impl MidiService for ReaperMidi {
             let item = item_sw::get_take_item(low, take)?;
 
             // Get the item index in the project
-            let item_count = reaper.medium_reaper().count_media_items(
-                resolve_project_context(&project),
-            );
+            let item_count = reaper
+                .medium_reaper()
+                .count_media_items(resolve_project_context(&project));
             let mut item_index = None;
             for i in 0..item_count {
-                if let Some(candidate) = reaper.medium_reaper().get_media_item(
-                    resolve_project_context(&project),
-                    i,
-                ) {
+                if let Some(candidate) = reaper
+                    .medium_reaper()
+                    .get_media_item(resolve_project_context(&project), i)
+                {
                     if candidate.as_ptr() == item.as_ptr() {
                         item_index = Some(i);
                         break;
@@ -266,21 +261,13 @@ impl MidiService for ReaperMidi {
         .flatten()
     }
 
-    async fn add_note(
-        &self,
-        location: MidiTakeLocation,
-        note: MidiNoteCreate,
-    ) -> u32 {
+    async fn add_note(&self, location: MidiTakeLocation, note: MidiNoteCreate) -> u32 {
         // Delegate to add_notes with a single note
         let indices = self.add_notes(location, vec![note]).await;
         indices.into_iter().next().unwrap_or(0)
     }
 
-    async fn add_notes(
-        &self,
-        location: MidiTakeLocation,
-        notes: Vec<MidiNoteCreate>,
-    ) -> Vec<u32> {
+    async fn add_notes(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32> {
         main_thread::query(move || {
             let medium = reaper_high::Reaper::get().medium_reaper();
             let Some(take) = Self::resolve_take_for_location(medium, &location) else {
@@ -307,66 +294,31 @@ impl MidiService for ReaperMidi {
         Self::readonly_warn("delete_selected_notes");
     }
 
-    async fn set_note_pitch(
-        &self,
-        _location: MidiTakeLocation,
-        _index: u32,
-        _pitch: u8,
-    ) {
+    async fn set_note_pitch(&self, _location: MidiTakeLocation, _index: u32, _pitch: u8) {
         Self::readonly_warn("set_note_pitch");
     }
 
-    async fn set_note_velocity(
-        &self,
-        _location: MidiTakeLocation,
-        _index: u32,
-        _velocity: u8,
-    ) {
+    async fn set_note_velocity(&self, _location: MidiTakeLocation, _index: u32, _velocity: u8) {
         Self::readonly_warn("set_note_velocity");
     }
 
-    async fn set_note_position(
-        &self,
-        _location: MidiTakeLocation,
-        _index: u32,
-        _start_ppq: f64,
-    ) {
+    async fn set_note_position(&self, _location: MidiTakeLocation, _index: u32, _start_ppq: f64) {
         Self::readonly_warn("set_note_position");
     }
 
-    async fn set_note_length(
-        &self,
-        _location: MidiTakeLocation,
-        _index: u32,
-        _length_ppq: f64,
-    ) {
+    async fn set_note_length(&self, _location: MidiTakeLocation, _index: u32, _length_ppq: f64) {
         Self::readonly_warn("set_note_length");
     }
 
-    async fn set_note_channel(
-        &self,
-        _location: MidiTakeLocation,
-        _index: u32,
-        _channel: u8,
-    ) {
+    async fn set_note_channel(&self, _location: MidiTakeLocation, _index: u32, _channel: u8) {
         Self::readonly_warn("set_note_channel");
     }
 
-    async fn set_note_selected(
-        &self,
-        _location: MidiTakeLocation,
-        _index: u32,
-        _selected: bool,
-    ) {
+    async fn set_note_selected(&self, _location: MidiTakeLocation, _index: u32, _selected: bool) {
         Self::readonly_warn("set_note_selected");
     }
 
-    async fn set_note_muted(
-        &self,
-        _location: MidiTakeLocation,
-        _index: u32,
-        _muted: bool,
-    ) {
+    async fn set_note_muted(&self, _location: MidiTakeLocation, _index: u32, _muted: bool) {
         Self::readonly_warn("set_note_muted");
     }
 
@@ -383,27 +335,15 @@ impl MidiService for ReaperMidi {
         Self::readonly_warn("transpose_notes");
     }
 
-    async fn quantize_notes(
-        &self,
-        _location: MidiTakeLocation,
-        _params: QuantizeParams,
-    ) {
+    async fn quantize_notes(&self, _location: MidiTakeLocation, _params: QuantizeParams) {
         Self::readonly_warn("quantize_notes");
     }
 
-    async fn humanize_notes(
-        &self,
-        _location: MidiTakeLocation,
-        _params: HumanizeParams,
-    ) {
+    async fn humanize_notes(&self, _location: MidiTakeLocation, _params: HumanizeParams) {
         Self::readonly_warn("humanize_notes");
     }
 
-    async fn get_ccs(
-        &self,
-        _location: MidiTakeLocation,
-        _controller: Option<u8>,
-    ) -> Vec<MidiCC> {
+    async fn get_ccs(&self, _location: MidiTakeLocation, _controller: Option<u8>) -> Vec<MidiCC> {
         Vec::new()
     }
 
@@ -416,35 +356,20 @@ impl MidiService for ReaperMidi {
         Self::readonly_warn("delete_cc");
     }
 
-    async fn set_cc_value(
-        &self,
-        _location: MidiTakeLocation,
-        _index: u32,
-        _value: u8,
-    ) {
+    async fn set_cc_value(&self, _location: MidiTakeLocation, _index: u32, _value: u8) {
         Self::readonly_warn("set_cc_value");
     }
 
-    async fn get_pitch_bends(
-        &self,
-        _location: MidiTakeLocation,
-    ) -> Vec<MidiPitchBend> {
+    async fn get_pitch_bends(&self, _location: MidiTakeLocation) -> Vec<MidiPitchBend> {
         Vec::new()
     }
 
-    async fn add_pitch_bend(
-        &self,
-        _location: MidiTakeLocation,
-        _pb: MidiPitchBendCreate,
-    ) -> u32 {
+    async fn add_pitch_bend(&self, _location: MidiTakeLocation, _pb: MidiPitchBendCreate) -> u32 {
         Self::readonly_warn("add_pitch_bend");
         0
     }
 
-    async fn get_program_changes(
-        &self,
-        _location: MidiTakeLocation,
-    ) -> Vec<MidiProgramChange> {
+    async fn get_program_changes(&self, _location: MidiTakeLocation) -> Vec<MidiProgramChange> {
         Vec::new()
     }
 

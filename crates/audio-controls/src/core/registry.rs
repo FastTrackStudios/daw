@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use super::block::{definitions, BlockCategory, BlockDefinition};
+use super::block::{BlockCategory, BlockDefinition, definitions};
 
 /// Central registry of all known block definitions.
 ///
@@ -132,9 +132,10 @@ impl BlockRegistry {
         for (keywords, type_id) in NAME_HINTS {
             for keyword in *keywords {
                 if name_lower.contains(keyword)
-                    && let Some(def) = self.by_type_id.get(*type_id) {
-                        return def.clone();
-                    }
+                    && let Some(def) = self.by_type_id.get(*type_id)
+                {
+                    return def.clone();
+                }
             }
         }
 

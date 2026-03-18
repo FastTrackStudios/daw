@@ -6,8 +6,7 @@
 
 use std::path::Path;
 
-const RPL_PATH: &str =
-    "/Users/codywright/Downloads/Battle SP26 JF Tracks.RPL";
+const RPL_PATH: &str = "/Users/codywright/Downloads/Battle SP26 JF Tracks.RPL";
 
 fn rpl_exists() -> bool {
     Path::new(RPL_PATH).exists()
@@ -25,11 +24,9 @@ fn combine_rpl_produces_valid_rpp() {
     }
 
     let options = dawfile_reaper::setlist_rpp::CombineOptions::default();
-    let (combined, song_infos) = dawfile_reaper::setlist_rpp::combine_rpl(
-        Path::new(RPL_PATH),
-        &options,
-    )
-    .expect("combine_rpl failed");
+    let (combined, song_infos) =
+        dawfile_reaper::setlist_rpp::combine_rpl(Path::new(RPL_PATH), &options)
+            .expect("combine_rpl failed");
 
     // ── Song infos ──
     assert_eq!(song_infos.len(), 7, "Should have 7 songs");
@@ -94,10 +91,7 @@ fn combine_rpl_produces_valid_rpp() {
 
     // Verify all source tracks have items (the stem tracks should have items)
     let total_items: usize = project.tracks.iter().map(|t| t.items.len()).sum();
-    assert!(
-        total_items > 0,
-        "Combined project should have items"
-    );
+    assert!(total_items > 0, "Combined project should have items");
 
     // Verify song folder tracks exist
     let track_names: Vec<&str> = project.tracks.iter().map(|t| t.name.as_str()).collect();
@@ -136,13 +130,17 @@ fn combine_rpl_produces_valid_rpp() {
 
     // Verify file can be re-read
     let reread = std::fs::read_to_string(&output_path).expect("re-read");
-    let _reparsed = dawfile_reaper::read_rpp_chunk(&reread)
-        .expect("re-read combined RPP should parse");
+    let _reparsed =
+        dawfile_reaper::read_rpp_chunk(&reread).expect("re-read combined RPP should parse");
 
     // Total combined duration
     let last_song = song_infos.last().unwrap();
     let total_duration = last_song.global_start_seconds + last_song.duration_seconds;
-    println!("Total setlist duration: {:.1}s ({:.1} minutes)", total_duration, total_duration / 60.0);
+    println!(
+        "Total setlist duration: {:.1}s ({:.1} minutes)",
+        total_duration,
+        total_duration / 60.0
+    );
 }
 
 // r[verify combine.gap-measures]
@@ -157,11 +155,8 @@ fn combine_rpl_with_gap() {
         gap_measures: 2,
         trim_to_bounds: false,
     };
-    let (_, song_infos) = dawfile_reaper::setlist_rpp::combine_rpl(
-        Path::new(RPL_PATH),
-        &options,
-    )
-    .expect("combine_rpl with gap failed");
+    let (_, song_infos) = dawfile_reaper::setlist_rpp::combine_rpl(Path::new(RPL_PATH), &options)
+        .expect("combine_rpl with gap failed");
 
     // With gap_measures=2, each gap should be 2 measures at the NEXT song's tempo.
     // Gaps should be > 0 between all adjacent songs.
@@ -177,7 +172,10 @@ fn combine_rpl_with_gap() {
         );
         println!(
             "  Gap {}->{}: {:.2}s ({})",
-            i - 1, i, gap, song_infos[i].name
+            i - 1,
+            i,
+            gap,
+            song_infos[i].name
         );
     }
 }

@@ -128,8 +128,7 @@ impl Default for Position {
 }
 
 /// Time range with start and end positions
-#[derive(Debug, Clone, PartialEq, facet::Facet)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, facet::Facet, Default)]
 pub struct TimeRange {
     pub start: Position,
     pub end: Position,
@@ -182,4 +181,3 @@ impl TimeRange {
         self_start <= other_end && other_start <= self_end
     }
 }
-

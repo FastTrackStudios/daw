@@ -2,12 +2,12 @@
 //!
 //! In-memory tempo/time signature management with mock data.
 
+use crate::platform::RwLock;
 use daw_proto::{
     Position, ProjectContext, TimePosition, TimeSignature,
     tempo_map::{TempoMapEvent, TempoMapService, TempoPoint},
 };
 use roam::Tx;
-use crate::platform::RwLock;
 use std::sync::Arc;
 use tracing::debug;
 
@@ -82,7 +82,10 @@ impl Default for StandaloneTempoMap {
 impl StandaloneTempoMap {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new("standalone-tempo-map-state", TempoMapState::default())),
+            state: Arc::new(RwLock::new(
+                "standalone-tempo-map-state",
+                TempoMapState::default(),
+            )),
         }
     }
 
@@ -204,11 +207,7 @@ impl TempoMapService for StandaloneTempoMap {
         self.state.read().await.tempo_points.clone()
     }
 
-    async fn get_tempo_point(
-        &self,
-        _project: ProjectContext,
-        index: u32,
-    ) -> Option<TempoPoint> {
+    async fn get_tempo_point(&self, _project: ProjectContext, index: u32) -> Option<TempoPoint> {
         let state = self.state.read().await;
         state.tempo_points.get(index as usize).cloned()
     }
@@ -224,20 +223,12 @@ impl TempoMapService for StandaloneTempoMap {
             .unwrap_or(state.default_tempo)
     }
 
-    async fn get_time_signature_at(
-        &self,
-        _project: ProjectContext,
-        seconds: f64,
-    ) -> (i32, i32) {
+    async fn get_time_signature_at(&self, _project: ProjectContext, seconds: f64) -> (i32, i32) {
         let state = self.state.read().await;
         Self::get_active_time_signature(&state.tempo_points, seconds, state.default_time_sig)
     }
 
-    async fn time_to_qn(
-        &self,
-        _project: ProjectContext,
-        seconds: f64,
-    ) -> f64 {
+    async fn time_to_qn(&self, _project: ProjectContext, seconds: f64) -> f64 {
         let state = self.state.read().await;
         let points = &state.tempo_points;
         let mut total_qn = 0.0;
@@ -258,11 +249,7 @@ impl TempoMapService for StandaloneTempoMap {
         total_qn + (seconds - prev_time) * prev_tempo / 60.0
     }
 
-    async fn qn_to_time(
-        &self,
-        _project: ProjectContext,
-        qn: f64,
-    ) -> f64 {
+    async fn qn_to_time(&self, _project: ProjectContext, qn: f64) -> f64 {
         let state = self.state.read().await;
         let points = &state.tempo_points;
         let mut total_qn = 0.0;
@@ -283,11 +270,7 @@ impl TempoMapService for StandaloneTempoMap {
         prev_time + (qn - total_qn) * 60.0 / prev_tempo
     }
 
-    async fn time_to_musical(
-        &self,
-        _project: ProjectContext,
-        seconds: f64,
-    ) -> (i32, i32, f64) {
+    async fn time_to_musical(&self, _project: ProjectContext, seconds: f64) -> (i32, i32, f64) {
         let state = self.state.read().await;
         Self::time_to_musical_internal(
             &state.tempo_points,
@@ -315,12 +298,7 @@ impl TempoMapService for StandaloneTempoMap {
         )
     }
 
-    async fn add_tempo_point(
-        &self,
-        _project: ProjectContext,
-        seconds: f64,
-        bpm: f64,
-    ) -> u32 {
+    async fn add_tempo_point(&self, _project: ProjectContext, seconds: f64, bpm: f64) -> u32 {
         let mut state = self.state.write().await;
         let point = TempoPoint::from_seconds(seconds, bpm);
         state.tempo_points.push(point);
@@ -352,12 +330,7 @@ impl TempoMapService for StandaloneTempoMap {
         }
     }
 
-    async fn set_tempo_at_point(
-        &self,
-        _project: ProjectContext,
-        index: u32,
-        bpm: f64,
-    ) {
+    async fn set_tempo_at_point(&self, _project: ProjectContext, index: u32, bpm: f64) {
         let mut state = self.state.write().await;
         if let Some(point) = state.tempo_points.get_mut(index as usize) {
             point.bpm = bpm;
@@ -382,12 +355,7 @@ impl TempoMapService for StandaloneTempoMap {
         }
     }
 
-    async fn move_tempo_point(
-        &self,
-        _project: ProjectContext,
-        index: u32,
-        seconds: f64,
-    ) {
+    async fn move_tempo_point(&self, _project: ProjectContext, index: u32, seconds: f64) {
         let mut state = self.state.write().await;
         if let Some(point) = state.tempo_points.get_mut(index as usize) {
             point.position = Position::from_time(TimePosition::from_seconds(seconds));
@@ -409,10 +377,7 @@ impl TempoMapService for StandaloneTempoMap {
         debug!("Set default tempo to {} BPM", bpm);
     }
 
-    async fn get_default_time_signature(
-        &self,
-        _project: ProjectContext,
-    ) -> (i32, i32) {
+    async fn get_default_time_signature(&self, _project: ProjectContext) -> (i32, i32) {
         self.state.read().await.default_time_sig
     }
 

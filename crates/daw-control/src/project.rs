@@ -405,10 +405,7 @@ impl Project {
         Ok(self
             .clients
             .project
-            .get_ruler_lane_name(
-                daw_proto::ProjectContext::project(&self.guid),
-                lane_index,
-            )
+            .get_ruler_lane_name(daw_proto::ProjectContext::project(&self.guid), lane_index)
             .await?)
     }
 

@@ -46,7 +46,8 @@ fn organize_belief_project() {
         organized[ref_idx]
             .folder
             .as_ref()
-            .map_or(false, |f| f.folder_state == dawfile_reaper::types::track::FolderState::FolderParent),
+            .map_or(false, |f| f.folder_state
+                == dawfile_reaper::types::track::FolderState::FolderParent),
         "Reference should be a folder parent"
     );
 
@@ -63,7 +64,8 @@ fn organize_belief_project() {
         assert!(
             names.contains(stem),
             "Should have stem track '{}'. Got: {:?}",
-            stem, names
+            stem,
+            names
         );
     }
 
@@ -81,7 +83,8 @@ fn organize_belief_project() {
             organized[tracks_idx]
                 .folder
                 .as_ref()
-                .map_or(false, |f| f.folder_state == dawfile_reaper::types::track::FolderState::FolderParent),
+                .map_or(false, |f| f.folder_state
+                    == dawfile_reaper::types::track::FolderState::FolderParent),
             "TRACKS should be a folder parent if it exists"
         );
         println!("  Note: TRACKS folder exists (project has content tracks)");

@@ -1417,26 +1417,13 @@ impl Item {
                 v = v.replace("\\\\", "\\");
                 midi.bank_program_file = Some(v);
             } else if let Some(stripped) = line.strip_prefix("CFGEDITVIEW ") {
-                midi.cfg_edit_view = Some(
-                    stripped
-                        .split_whitespace()
-                        .map(|s| s.to_string())
-                        .collect(),
-                );
+                midi.cfg_edit_view =
+                    Some(stripped.split_whitespace().map(|s| s.to_string()).collect());
             } else if let Some(stripped) = line.strip_prefix("CFGEDIT ") {
-                midi.cfg_edit = Some(
-                    stripped
-                        .split_whitespace()
-                        .map(|s| s.to_string())
-                        .collect(),
-                );
+                midi.cfg_edit = Some(stripped.split_whitespace().map(|s| s.to_string()).collect());
             } else if let Some(stripped) = line.strip_prefix("EVTFILTER ") {
-                midi.evt_filter = Some(
-                    stripped
-                        .split_whitespace()
-                        .map(|s| s.to_string())
-                        .collect(),
-                );
+                midi.evt_filter =
+                    Some(stripped.split_whitespace().map(|s| s.to_string()).collect());
             } else if line.starts_with("<X ") || line.starts_with("<x ") {
                 let selected = line.starts_with("<x ");
                 let fields: Vec<String> = line[2..]

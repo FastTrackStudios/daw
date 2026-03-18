@@ -55,7 +55,6 @@ enum Command {
     Ping,
 
     // -- Process & Project Management --
-
     /// Launch a REAPER instance
     Launch {
         /// Config ID (e.g., "fts-tracks", "fts-signal")
@@ -97,7 +96,6 @@ enum Command {
     },
 
     // -- File Operations --
-
     /// Combine multiple RPP files into a single project
     Combine {
         /// Path to .RPL file or list of .RPP files
@@ -115,8 +113,7 @@ enum Command {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "warn".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn".into()),
         )
         .with_writer(std::io::stderr)
         .init();
@@ -131,7 +128,11 @@ async fn main() -> Result<()> {
         Command::Quit { pid } => {
             return daw_cli::cmd_quit(pid);
         }
-        Command::Combine { ref input, ref output, gap } => {
+        Command::Combine {
+            ref input,
+            ref output,
+            gap,
+        } => {
             return daw_cli::cmd_combine(input, output.as_deref(), gap);
         }
         _ => {}
@@ -145,7 +146,9 @@ async fn main() -> Result<()> {
         Command::Tracks => daw_cli::cmd_tracks(&daw, cli.json).await?,
         Command::Track { ref track } => daw_cli::cmd_track(&daw, track, cli.json).await?,
         Command::Fx { ref track } => daw_cli::cmd_fx(&daw, track, cli.json).await?,
-        Command::Params { ref track, ref fx } => daw_cli::cmd_params(&daw, track, fx, cli.json).await?,
+        Command::Params { ref track, ref fx } => {
+            daw_cli::cmd_params(&daw, track, fx, cli.json).await?
+        }
         Command::Transport => daw_cli::cmd_transport(&daw, cli.json).await?,
         Command::Markers => daw_cli::cmd_markers(&daw, cli.json).await?,
         Command::Regions => daw_cli::cmd_regions(&daw, cli.json).await?,
@@ -154,7 +157,9 @@ async fn main() -> Result<()> {
         Command::Projects => daw_cli::cmd_projects(&daw, cli.json).await?,
         Command::Open { ref path } => daw_cli::cmd_open(&daw, path, cli.json).await?,
         Command::Close { ref guid } => daw_cli::cmd_close(&daw, guid.as_deref()).await?,
-        Command::AddTrack { ref name, at } => daw_cli::cmd_add_track(&daw, name.as_deref(), at, cli.json).await?,
+        Command::AddTrack { ref name, at } => {
+            daw_cli::cmd_add_track(&daw, name.as_deref(), at, cli.json).await?
+        }
         Command::RemoveTrack { ref track } => daw_cli::cmd_remove_track(&daw, track).await?,
         // Already handled above
         Command::Launch { .. } | Command::Quit { .. } | Command::Combine { .. } => unreachable!(),

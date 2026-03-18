@@ -87,7 +87,10 @@ impl ReaperIni {
     }
 
     /// Patch multiple keys at once. Returns a map of old values for restoration.
-    pub fn patch(&self, changes: &[(&str, &str)]) -> std::io::Result<HashMap<String, Option<String>>> {
+    pub fn patch(
+        &self,
+        changes: &[(&str, &str)],
+    ) -> std::io::Result<HashMap<String, Option<String>>> {
         let mut originals = HashMap::new();
         for &(key, value) in changes {
             let old = self.set(key, value)?;

@@ -1,12 +1,14 @@
 //! Standalone item and take implementation
 
+use crate::platform::RwLock;
 use daw_proto::{
     ProjectContext,
-    item::{FadeShape, Item, ItemEvent, ItemRef, ItemService, Take, TakeEvent, TakeRef, TakeService},
+    item::{
+        FadeShape, Item, ItemEvent, ItemRef, ItemService, Take, TakeEvent, TakeRef, TakeService,
+    },
     primitives::{BeatAttachMode, Duration, PositionInSeconds},
     track::TrackRef,
 };
-use crate::platform::RwLock;
 use roam::Tx;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -152,11 +154,7 @@ impl StandaloneItem {
 }
 
 impl ItemService for StandaloneItem {
-    async fn get_items(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-    ) -> Vec<Item> {
+    async fn get_items(&self, _project: ProjectContext, track: TrackRef) -> Vec<Item> {
         let items = self.items.read().await;
         let track_guid = match track {
             TrackRef::Guid(g) => g,
@@ -169,11 +167,7 @@ impl ItemService for StandaloneItem {
             .collect()
     }
 
-    async fn get_item(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-    ) -> Option<Item> {
+    async fn get_item(&self, _project: ProjectContext, item: ItemRef) -> Option<Item> {
         let items = self.items.read().await;
         match &item {
             ItemRef::Guid(guid) => items.iter().find(|i| &i.guid == guid).map(|i| i.to_item()),
@@ -230,11 +224,7 @@ impl ItemService for StandaloneItem {
         }
     }
 
-    async fn duplicate_item(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-    ) -> Option<String> {
+    async fn duplicate_item(&self, _project: ProjectContext, item: ItemRef) -> Option<String> {
         let mut items = self.items.write().await;
         let source = Self::find_item(&mut items, &item)?.clone();
         let mut new_item = source;
@@ -257,24 +247,14 @@ impl ItemService for StandaloneItem {
         }
     }
 
-    async fn set_length(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        length: Duration,
-    ) {
+    async fn set_length(&self, _project: ProjectContext, item: ItemRef, length: Duration) {
         let mut items = self.items.write().await;
         if let Some(i) = Self::find_item(&mut items, &item) {
             i.length = length;
         }
     }
 
-    async fn move_to_track(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        track: TrackRef,
-    ) {
+    async fn move_to_track(&self, _project: ProjectContext, item: ItemRef, track: TrackRef) {
         let track_guid = match track {
             TrackRef::Guid(g) => g,
             _ => return,
@@ -292,24 +272,14 @@ impl ItemService for StandaloneItem {
         }
     }
 
-    async fn set_selected(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        selected: bool,
-    ) {
+    async fn set_selected(&self, _project: ProjectContext, item: ItemRef, selected: bool) {
         let mut items = self.items.write().await;
         if let Some(i) = Self::find_item(&mut items, &item) {
             i.selected = selected;
         }
     }
 
-    async fn set_locked(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        locked: bool,
-    ) {
+    async fn set_locked(&self, _project: ProjectContext, item: ItemRef, locked: bool) {
         let mut items = self.items.write().await;
         if let Some(i) = Self::find_item(&mut items, &item) {
             i.locked = locked;
@@ -323,12 +293,7 @@ impl ItemService for StandaloneItem {
         }
     }
 
-    async fn set_volume(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        volume: f64,
-    ) {
+    async fn set_volume(&self, _project: ProjectContext, item: ItemRef, volume: f64) {
         let mut items = self.items.write().await;
         if let Some(i) = Self::find_item(&mut items, &item) {
             i.volume = volume;
@@ -355,12 +320,7 @@ impl ItemService for StandaloneItem {
         // Stub - no-op
     }
 
-    async fn set_loop_source(
-        &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _loop_source: bool,
-    ) {
+    async fn set_loop_source(&self, _project: ProjectContext, _item: ItemRef, _loop_source: bool) {
         // Stub - no-op
     }
 
@@ -373,12 +333,7 @@ impl ItemService for StandaloneItem {
         // Stub - no-op
     }
 
-    async fn set_snap_offset(
-        &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _offset: Duration,
-    ) {
+    async fn set_snap_offset(&self, _project: ProjectContext, _item: ItemRef, _offset: Duration) {
         // Stub - no-op
     }
 
@@ -391,21 +346,11 @@ impl ItemService for StandaloneItem {
         // Stub - no-op
     }
 
-    async fn set_color(
-        &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _color: Option<u32>,
-    ) {
+    async fn set_color(&self, _project: ProjectContext, _item: ItemRef, _color: Option<u32>) {
         // Stub - no-op
     }
 
-    async fn set_group_id(
-        &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _group_id: Option<u32>,
-    ) {
+    async fn set_group_id(&self, _project: ProjectContext, _item: ItemRef, _group_id: Option<u32>) {
         // Stub - no-op
     }
 
@@ -477,19 +422,11 @@ impl TakeService for StandaloneTake {
         Some(result)
     }
 
-    async fn get_active_take(
-        &self,
-        project: ProjectContext,
-        item: ItemRef,
-    ) -> Option<Take> {
+    async fn get_active_take(&self, project: ProjectContext, item: ItemRef) -> Option<Take> {
         self.get_take(project, item, TakeRef::Active).await
     }
 
-    async fn add_take(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-    ) -> Option<String> {
+    async fn add_take(&self, _project: ProjectContext, item: ItemRef) -> Option<String> {
         let mut items = self.items.write().await;
         let item_state = match &item {
             ItemRef::Guid(guid) => items.iter_mut().find(|i| &i.guid == guid),
@@ -503,12 +440,7 @@ impl TakeService for StandaloneTake {
         Some(guid)
     }
 
-    async fn delete_take(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-    ) {
+    async fn delete_take(&self, _project: ProjectContext, item: ItemRef, take: TakeRef) {
         let mut items = self.items.write().await;
         let item_state = match &item {
             ItemRef::Guid(guid) => items.iter_mut().find(|i| &i.guid == guid),
@@ -521,12 +453,7 @@ impl TakeService for StandaloneTake {
         }
     }
 
-    async fn set_active_take(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-    ) {
+    async fn set_active_take(&self, _project: ProjectContext, item: ItemRef, take: TakeRef) {
         let mut items = self.items.write().await;
         let item_state = match &item {
             ItemRef::Guid(guid) => items.iter_mut().find(|i| &i.guid == guid),
@@ -548,13 +475,7 @@ impl TakeService for StandaloneTake {
         }
     }
 
-    async fn set_name(
-        &self,
-        _project: ProjectContext,
-        item: ItemRef,
-        take: TakeRef,
-        name: String,
-    ) {
+    async fn set_name(&self, _project: ProjectContext, item: ItemRef, take: TakeRef, name: String) {
         let mut items = self.items.write().await;
         let item_state = match &item {
             ItemRef::Guid(guid) => items.iter_mut().find(|i| &i.guid == guid),

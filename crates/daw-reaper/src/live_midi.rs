@@ -56,13 +56,7 @@ impl LiveMidiService for ReaperLiveMidi {
 
     async fn close_output_device(&self, __id: u32) {}
 
-    async fn send_midi(
-        &self,
-        _device_id: u32,
-        _message: MidiMessage,
-        _timing: SendMidiTiming,
-    ) {
-    }
+    async fn send_midi(&self, _device_id: u32, _message: MidiMessage, _timing: SendMidiTiming) {}
 
     async fn send_midi_batch(&self, __device_id: u32, _events: Vec<LiveMidiEvent>) {}
 
@@ -74,11 +68,7 @@ impl LiveMidiService for ReaperLiveMidi {
 
     // === MIDI Injection ===
 
-    async fn stuff_midi_message(
-        &self,
-        target: StuffMidiTarget,
-        message: MidiMessage,
-    ) {
+    async fn stuff_midi_message(&self, target: StuffMidiTarget, message: MidiMessage) {
         let Some((status, data1, data2)) = message.to_raw_bytes() else {
             warn!(
                 "stuff_midi_message: cannot convert {:?} to short message (SysEx/Raw not supported)",

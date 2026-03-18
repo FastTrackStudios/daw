@@ -11,8 +11,10 @@ use std::process::{Command, Stdio};
 use daw::Daw;
 use daw::service::FxType;
 use eyre::{Result, bail};
-use roam::ErasedCaller;
-use roam::SessionHandle;
+use roam::{
+    ConnectionSettings, Driver, ErasedCaller, MetadataEntry, MetadataFlags, MetadataValue, Parity,
+    SessionHandle,
+};
 use serde_json::json;
 
 /// A DAW connection that keeps the roam session alive.
@@ -147,9 +149,13 @@ pub fn spawn_reaper(config: &ReaperConfig) -> Result<u32> {
         .arg("-nosplash")
         .arg("-ignoreerrors");
 
-    let child = cmd
-        .spawn()
-        .map_err(|e| eyre::eyre!("Failed to spawn REAPER ({}) at {}: {e}", config.label, config.executable))?;
+    let child = cmd.spawn().map_err(|e| {
+        eyre::eyre!(
+            "Failed to spawn REAPER ({}) at {}: {e}",
+            config.label,
+            config.executable
+        )
+    })?;
 
     let pid = child.id();
     drop(child);
@@ -171,8 +177,8 @@ pub fn kill_reaper(pid: u32) -> bool {
 /// Returns `(Daw, pid, socket_path)` on success. The caller is responsible
 /// for calling `teardown_owned(pid, socket_path)` when done.
 pub async fn launch_and_connect(config_id: &str) -> Result<(DawConnection, u32, PathBuf)> {
-    let config = config_by_id(config_id)
-        .ok_or_else(|| eyre::eyre!("Unknown REAPER config: {config_id}"))?;
+    let config =
+        config_by_id(config_id).ok_or_else(|| eyre::eyre!("Unknown REAPER config: {config_id}"))?;
 
     eprintln!("Spawning REAPER ({})...", config.label);
     let pid = spawn_reaper(&config)?;
@@ -214,8 +220,9 @@ pub fn teardown_owned(pid: u32, socket: &PathBuf) {
 pub async fn connect(socket: Option<PathBuf>) -> Result<DawConnection> {
     let path = match socket {
         Some(p) => p,
-        None => discover_socket()
-            .ok_or_else(|| eyre::eyre!("No DAW socket found in /tmp. Is REAPER running with the FTS extension?"))?,
+        None => discover_socket().ok_or_else(|| {
+            eyre::eyre!("No DAW socket found in /tmp. Is REAPER running with the FTS extension?")
+        })?,
     };
 
     eprintln!("Connecting to {}", path.display());
@@ -229,15 +236,43 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<DawConnection> {
     .map_err(|e| eyre::eyre!("Failed to connect to {}: {}", path.display(), e))?;
 
     let link = roam_stream::StreamLink::unix(stream);
-    let (caller, session) = roam::initiator_conduit(roam::BareConduit::new(link))
+    let (_root_caller, session) = roam::initiator_conduit(roam::BareConduit::new(link))
         .establish::<roam::DriverCaller>(())
         .await
         .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
 
+    let caller = open_daw_connection(&session).await?;
+
     Ok(DawConnection {
-        daw: Daw::new(ErasedCaller::new(caller)),
+        daw: Daw::new(caller),
         _session: session,
     })
+}
+
+/// Open a DAW virtual connection on an established roam session.
+///
+/// Sends metadata identifying this as a DAW client, then creates a Driver
+/// on the virtual connection and returns an `ErasedCaller` for RPC.
+async fn open_daw_connection(session: &SessionHandle) -> Result<ErasedCaller> {
+    let conn = session
+        .open_connection(
+            ConnectionSettings {
+                parity: Parity::Odd,
+                max_concurrent_requests: 64,
+            },
+            vec![MetadataEntry {
+                key: "role",
+                value: MetadataValue::String("daw-client"),
+                flags: MetadataFlags::NONE,
+            }],
+        )
+        .await
+        .map_err(|e| eyre::eyre!("open_connection failed: {e:?}"))?;
+
+    let mut driver = Driver::new(conn, ());
+    let caller = ErasedCaller::new(driver.caller());
+    moire::task::spawn(async move { driver.run().await });
+    Ok(caller)
 }
 
 // ============================================================================
@@ -299,7 +334,10 @@ pub async fn resolve_fx_handle(
 
 pub fn format_position(pos: &daw::service::primitives::Position) -> String {
     if let Some(ref musical) = pos.musical {
-        format!("{}.{}.{:03}", musical.measure, musical.beat, musical.subdivision)
+        format!(
+            "{}.{}.{:03}",
+            musical.measure, musical.beat, musical.subdivision
+        )
     } else if let Some(ref time) = pos.time {
         let secs = time.as_seconds();
         let mins = (secs / 60.0).floor() as u32;
@@ -341,10 +379,20 @@ pub fn fx_type_str(ft: &FxType) -> &'static str {
 
 pub fn flags_str(muted: bool, soloed: bool, armed: bool) -> String {
     let mut flags = Vec::new();
-    if muted { flags.push("M"); }
-    if soloed { flags.push("S"); }
-    if armed { flags.push("R"); }
-    if flags.is_empty() { "-".to_string() } else { flags.join("") }
+    if muted {
+        flags.push("M");
+    }
+    if soloed {
+        flags.push("S");
+    }
+    if armed {
+        flags.push("R");
+    }
+    if flags.is_empty() {
+        "-".to_string()
+    } else {
+        flags.join("")
+    }
 }
 
 // ============================================================================
@@ -358,21 +406,27 @@ pub async fn cmd_info(daw: &Daw, as_json: bool) -> Result<()> {
     let transport = project.transport().get_state().await?;
 
     if as_json {
-        println!("{}", serde_json::to_string_pretty(&json!({
-            "name": info.name,
-            "path": info.path,
-            "guid": info.guid,
-            "track_count": track_count,
-            "tempo": transport.tempo.bpm,
-            "time_signature": format!("{}/{}", transport.time_signature.numerator, transport.time_signature.denominator),
-        }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "name": info.name,
+                "path": info.path,
+                "guid": info.guid,
+                "track_count": track_count,
+                "tempo": transport.tempo.bpm,
+                "time_signature": format!("{}/{}", transport.time_signature.numerator, transport.time_signature.denominator),
+            }))?
+        );
     } else {
         println!("Project: {}", info.name);
         println!("Path:    {}", info.path);
         println!("GUID:    {}", info.guid);
         println!("Tracks:  {}", track_count);
         println!("Tempo:   {:.1} BPM", transport.tempo.bpm);
-        println!("Time:    {}/{}", transport.time_signature.numerator, transport.time_signature.denominator);
+        println!(
+            "Time:    {}/{}",
+            transport.time_signature.numerator, transport.time_signature.denominator
+        );
     }
     Ok(())
 }
@@ -423,12 +477,7 @@ pub async fn cmd_tracks(daw: &Daw, as_json: bool) -> Result<()> {
             } else {
                 String::new()
             };
-            let name = format!(
-                "{}{}{}",
-                indent,
-                if t.is_folder { "[" } else { "" },
-                t.name,
-            );
+            let name = format!("{}{}{}", indent, if t.is_folder { "[" } else { "" }, t.name,);
             let name = if t.is_folder {
                 format!("{}]", name)
             } else {
@@ -453,26 +502,29 @@ pub async fn cmd_track(daw: &Daw, track_arg: &str, as_json: bool) -> Result<()> 
     let t = handle.info().await?;
 
     if as_json {
-        println!("{}", serde_json::to_string_pretty(&json!({
-            "index": t.index,
-            "name": t.name,
-            "guid": t.guid,
-            "muted": t.muted,
-            "soloed": t.soloed,
-            "armed": t.armed,
-            "selected": t.selected,
-            "volume": t.volume,
-            "volume_db": vol_to_db(t.volume),
-            "pan": t.pan,
-            "is_folder": t.is_folder,
-            "folder_depth": t.folder_depth,
-            "parent_guid": t.parent_guid,
-            "visible_in_tcp": t.visible_in_tcp,
-            "visible_in_mixer": t.visible_in_mixer,
-            "fx_count": t.fx_count,
-            "input_fx_count": t.input_fx_count,
-            "color": t.color,
-        }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "index": t.index,
+                "name": t.name,
+                "guid": t.guid,
+                "muted": t.muted,
+                "soloed": t.soloed,
+                "armed": t.armed,
+                "selected": t.selected,
+                "volume": t.volume,
+                "volume_db": vol_to_db(t.volume),
+                "pan": t.pan,
+                "is_folder": t.is_folder,
+                "folder_depth": t.folder_depth,
+                "parent_guid": t.parent_guid,
+                "visible_in_tcp": t.visible_in_tcp,
+                "visible_in_mixer": t.visible_in_mixer,
+                "fx_count": t.fx_count,
+                "input_fx_count": t.input_fx_count,
+                "color": t.color,
+            }))?
+        );
     } else {
         println!("Track #{}: {}", t.index, t.name);
         println!("  GUID:     {}", t.guid);
@@ -528,7 +580,11 @@ pub async fn cmd_fx(daw: &Daw, track_arg: &str, as_json: bool) -> Result<()> {
             println!("No FX on track \"{}\".", track_name);
             return Ok(());
         }
-        println!("FX chain for \"{}\" ({} plugins):", track_name, fx_list.len());
+        println!(
+            "FX chain for \"{}\" ({} plugins):",
+            track_name,
+            fx_list.len()
+        );
         println!();
         for f in &fx_list {
             let status = if !f.enabled {
@@ -603,7 +659,10 @@ pub async fn cmd_params(daw: &Daw, track_arg: &str, fx_arg: &str, as_json: bool)
                 }
                 if !p.step_labels.is_empty() {
                     obj["step_labels"] = json!(
-                        p.step_labels.iter().map(|(v, l)| json!({"value": v, "label": l})).collect::<Vec<_>>()
+                        p.step_labels
+                            .iter()
+                            .map(|(v, l)| json!({"value": v, "label": l}))
+                            .collect::<Vec<_>>()
                     );
                 }
                 obj
@@ -613,20 +672,23 @@ pub async fn cmd_params(daw: &Daw, track_arg: &str, fx_arg: &str, as_json: bool)
     } else {
         println!(
             "Parameters for \"{}\" on \"{}\" ({} params):",
-            fx_info.name, track_name, params.len()
+            fx_info.name,
+            track_name,
+            params.len()
         );
         println!();
-        println!(
-            "{:>4}  {:<35}  {:>8}  {}",
-            "#", "Name", "Value", "Display"
-        );
+        println!("{:>4}  {:<35}  {:>8}  {}", "#", "Name", "Value", "Display");
         println!("{}", "-".repeat(75));
 
         for p in &params {
             println!(
                 "{:>4}  {:<35}  {:>8.4}  {}",
                 p.index,
-                if p.name.len() > 35 { &p.name[..35] } else { &p.name },
+                if p.name.len() > 35 {
+                    &p.name[..35]
+                } else {
+                    &p.name
+                },
                 p.value,
                 p.formatted,
             );
@@ -640,27 +702,36 @@ pub async fn cmd_transport(daw: &Daw, as_json: bool) -> Result<()> {
     let state = project.transport().get_state().await?;
 
     if as_json {
-        println!("{}", serde_json::to_string_pretty(&json!({
-            "play_state": format!("{:?}", state.play_state),
-            "record_mode": format!("{:?}", state.record_mode),
-            "looping": state.looping,
-            "tempo": state.tempo.bpm,
-            "playrate": state.playrate,
-            "time_signature": format!("{}/{}", state.time_signature.numerator, state.time_signature.denominator),
-            "playhead": format_position(&state.playhead_position),
-            "edit_cursor": format_position(&state.edit_position),
-        }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "play_state": format!("{:?}", state.play_state),
+                "record_mode": format!("{:?}", state.record_mode),
+                "looping": state.looping,
+                "tempo": state.tempo.bpm,
+                "playrate": state.playrate,
+                "time_signature": format!("{}/{}", state.time_signature.numerator, state.time_signature.denominator),
+                "playhead": format_position(&state.playhead_position),
+                "edit_cursor": format_position(&state.edit_position),
+            }))?
+        );
     } else {
         println!("Transport");
         println!("  State:     {:?}", state.play_state);
         println!("  Playhead:  {}", format_position(&state.playhead_position));
         println!("  Edit:      {}", format_position(&state.edit_position));
         println!("  Tempo:     {:.1} BPM", state.tempo.bpm);
-        println!("  Time Sig:  {}/{}", state.time_signature.numerator, state.time_signature.denominator);
+        println!(
+            "  Time Sig:  {}/{}",
+            state.time_signature.numerator, state.time_signature.denominator
+        );
         println!("  Playrate:  {:.2}x", state.playrate);
         println!("  Looping:   {}", state.looping);
         if let Some(ref lr) = state.loop_region {
-            println!("  Loop:      {:.3}s - {:.3}s", lr.start_seconds, lr.end_seconds);
+            println!(
+                "  Loop:      {:.3}s - {:.3}s",
+                lr.start_seconds, lr.end_seconds
+            );
         }
         println!("  Record:    {:?}", state.record_mode);
     }
@@ -690,10 +761,7 @@ pub async fn cmd_markers(daw: &Daw, as_json: bool) -> Result<()> {
             println!("No markers.");
             return Ok(());
         }
-        println!(
-            "{:>4}  {:<14}  {}",
-            "ID", "Position", "Name"
-        );
+        println!("{:>4}  {:<14}  {}", "ID", "Position", "Name");
         println!("{}", "-".repeat(45));
         for m in &markers {
             println!(
@@ -731,10 +799,7 @@ pub async fn cmd_regions(daw: &Daw, as_json: bool) -> Result<()> {
             println!("No regions.");
             return Ok(());
         }
-        println!(
-            "{:>4}  {:<14}  {:<14}  {}",
-            "ID", "Start", "End", "Name"
-        );
+        println!("{:>4}  {:<14}  {:<14}  {}", "ID", "Start", "End", "Name");
         println!("{}", "-".repeat(55));
         for r in &regions {
             println!(
@@ -764,11 +829,13 @@ pub async fn cmd_ping(daw: &Daw) -> Result<()> {
 
 pub fn cmd_launch(config_id: Option<&str>) -> Result<()> {
     let id = config_id.unwrap_or("fts-tracks");
-    let config = config_by_id(id)
-        .ok_or_else(|| {
-            let known: Vec<_> = reaper_configs().iter().map(|c| c.id).collect();
-            eyre::eyre!("Unknown config \"{id}\". Known configs: {}", known.join(", "))
-        })?;
+    let config = config_by_id(id).ok_or_else(|| {
+        let known: Vec<_> = reaper_configs().iter().map(|c| c.id).collect();
+        eyre::eyre!(
+            "Unknown config \"{id}\". Known configs: {}",
+            known.join(", ")
+        )
+    })?;
 
     let pid = spawn_reaper(&config)?;
     println!("Launched {} (PID {pid})", config.label);
@@ -823,17 +890,18 @@ pub async fn cmd_projects(daw: &Daw, as_json: bool) -> Result<()> {
             println!("No open projects.");
             return Ok(());
         }
-        println!(
-            "{:>3}  {:<30}  {:<38}  {}",
-            "#", "Name", "GUID", "Path"
-        );
+        println!("{:>3}  {:<30}  {:<38}  {}", "#", "Name", "GUID", "Path");
         println!("{}", "-".repeat(100));
         for (i, p) in projects.iter().enumerate() {
             let info = p.info().await?;
             println!(
                 "{:>3}  {:<30}  {:<38}  {}",
                 i,
-                if info.name.len() > 30 { &info.name[..30] } else { &info.name },
+                if info.name.len() > 30 {
+                    &info.name[..30]
+                } else {
+                    &info.name
+                },
                 info.guid,
                 info.path,
             );
@@ -847,11 +915,14 @@ pub async fn cmd_open(daw: &Daw, path: &str, as_json: bool) -> Result<()> {
     let info = project.info().await?;
 
     if as_json {
-        println!("{}", serde_json::to_string_pretty(&json!({
-            "name": info.name,
-            "guid": info.guid,
-            "path": info.path,
-        }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "name": info.name,
+                "guid": info.guid,
+                "path": info.path,
+            }))?
+        );
     } else {
         println!("Opened project: {}", info.name);
         println!("  GUID: {}", info.guid);
@@ -875,20 +946,31 @@ pub async fn cmd_close(daw: &Daw, guid: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub async fn cmd_add_track(daw: &Daw, name: Option<&str>, at_index: Option<u32>, as_json: bool) -> Result<()> {
+pub async fn cmd_add_track(
+    daw: &Daw,
+    name: Option<&str>,
+    at_index: Option<u32>,
+    as_json: bool,
+) -> Result<()> {
     let project = daw.current_project().await?;
     let track_name = name.unwrap_or("New Track");
     let handle = project.tracks().add(track_name, at_index).await?;
     let info = handle.info().await?;
 
     if as_json {
-        println!("{}", serde_json::to_string_pretty(&json!({
-            "index": info.index,
-            "name": info.name,
-            "guid": info.guid,
-        }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&json!({
+                "index": info.index,
+                "name": info.name,
+                "guid": info.guid,
+            }))?
+        );
     } else {
-        println!("Added track #{}: {} (GUID: {})", info.index, info.name, info.guid);
+        println!(
+            "Added track #{}: {} (GUID: {})",
+            info.index, info.name, info.guid
+        );
     }
     Ok(())
 }
@@ -896,7 +978,10 @@ pub async fn cmd_add_track(daw: &Daw, name: Option<&str>, at_index: Option<u32>,
 pub async fn cmd_remove_track(daw: &Daw, track_arg: &str) -> Result<()> {
     let (guid, name) = resolve_track(daw, track_arg).await?;
     let project = daw.current_project().await?;
-    project.tracks().remove(daw::service::TrackRef::Guid(guid.clone())).await?;
+    project
+        .tracks()
+        .remove(daw::service::TrackRef::Guid(guid.clone()))
+        .await?;
     println!("Removed track \"{}\" ({})", name, guid);
     Ok(())
 }
@@ -943,7 +1028,11 @@ pub fn cmd_combine(input: &str, output: Option<&str>, gap_measures: u32) -> Resu
     std::fs::write(&output_path, &combined)?;
 
     // Print summary
-    println!("Combined {} songs → {}", song_infos.len(), output_path.display());
+    println!(
+        "Combined {} songs → {}",
+        song_infos.len(),
+        output_path.display()
+    );
     if gap_measures > 0 {
         println!("Gap: {} measure(s) between songs", gap_measures);
     }
@@ -961,11 +1050,7 @@ pub fn cmd_combine(input: &str, output: Option<&str>, gap_measures: u32) -> Resu
         total = info.global_start_seconds + info.duration_seconds;
     }
     println!();
-    println!(
-        "Total: {:.0}:{:02.0}",
-        (total / 60.0).floor(),
-        total % 60.0,
-    );
+    println!("Total: {:.0}:{:02.0}", (total / 60.0).floor(), total % 60.0,);
 
     Ok(())
 }

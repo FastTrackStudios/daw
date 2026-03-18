@@ -1,7 +1,10 @@
 //! Standalone track implementation
 
-use daw_proto::{InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent, TrackExtStateRequest, TrackRef, TrackService};
 use crate::platform::RwLock;
+use daw_proto::{
+    InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent, TrackExtStateRequest,
+    TrackRef, TrackService,
+};
 use roam::Tx;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -112,11 +115,7 @@ impl TrackService for StandaloneTrack {
         tracks.iter().map(|t| t.to_track()).collect()
     }
 
-    async fn get_track(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-    ) -> Option<Track> {
+    async fn get_track(&self, _project: ProjectContext, track: TrackRef) -> Option<Track> {
         let tracks = self.tracks.read().await;
         match &track {
             TrackRef::Guid(guid) => tracks
@@ -149,24 +148,14 @@ impl TrackService for StandaloneTrack {
         tracks.first().map(|t| t.to_track())
     }
 
-    async fn set_muted(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-        muted: bool,
-    ) {
+    async fn set_muted(&self, _project: ProjectContext, track: TrackRef, muted: bool) {
         let mut tracks = self.tracks.write().await;
         if let Some(t) = Self::find_track(&mut tracks, &track) {
             t.muted = muted;
         }
     }
 
-    async fn set_soloed(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-        soloed: bool,
-    ) {
+    async fn set_soloed(&self, _project: ProjectContext, track: TrackRef, soloed: bool) {
         let mut tracks = self.tracks.write().await;
         if let Some(t) = Self::find_track(&mut tracks, &track) {
             t.soloed = soloed;
@@ -192,12 +181,7 @@ impl TrackService for StandaloneTrack {
         }
     }
 
-    async fn set_armed(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-        armed: bool,
-    ) {
+    async fn set_armed(&self, _project: ProjectContext, track: TrackRef, armed: bool) {
         let mut tracks = self.tracks.write().await;
         if let Some(t) = Self::find_track(&mut tracks, &track) {
             t.armed = armed;
@@ -222,12 +206,7 @@ impl TrackService for StandaloneTrack {
         // No-op in standalone
     }
 
-    async fn set_volume(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-        volume: f64,
-    ) {
+    async fn set_volume(&self, _project: ProjectContext, track: TrackRef, volume: f64) {
         let mut tracks = self.tracks.write().await;
         if let Some(t) = Self::find_track(&mut tracks, &track) {
             t.volume = volume.clamp(0.0, 4.0);
@@ -241,12 +220,7 @@ impl TrackService for StandaloneTrack {
         }
     }
 
-    async fn set_selected(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-        selected: bool,
-    ) {
+    async fn set_selected(&self, _project: ProjectContext, track: TrackRef, selected: bool) {
         let mut tracks = self.tracks.write().await;
         if let Some(t) = Self::find_track(&mut tracks, &track) {
             t.selected = selected;
@@ -317,48 +291,28 @@ impl TrackService for StandaloneTrack {
         }
     }
 
-    async fn rename_track(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-        name: String,
-    ) {
+    async fn rename_track(&self, _project: ProjectContext, track: TrackRef, name: String) {
         let mut tracks = self.tracks.write().await;
         if let Some(t) = Self::find_track(&mut tracks, &track) {
             t.name = name;
         }
     }
 
-    async fn set_track_color(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-        color: u32,
-    ) {
+    async fn set_track_color(&self, _project: ProjectContext, track: TrackRef, color: u32) {
         let mut tracks = self.tracks.write().await;
         if let Some(t) = Self::find_track(&mut tracks, &track) {
             t.color = if color == 0 { None } else { Some(color) };
         }
     }
 
-    async fn set_visible_in_tcp(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-        visible: bool,
-    ) {
+    async fn set_visible_in_tcp(&self, _project: ProjectContext, track: TrackRef, visible: bool) {
         let mut tracks = self.tracks.write().await;
         if let Some(t) = Self::find_track(&mut tracks, &track) {
             t.visible_in_tcp = visible;
         }
     }
 
-    async fn set_visible_in_mixer(
-        &self,
-        _project: ProjectContext,
-        track: TrackRef,
-        visible: bool,
-    ) {
+    async fn set_visible_in_mixer(&self, _project: ProjectContext, track: TrackRef, visible: bool) {
         let mut tracks = self.tracks.write().await;
         if let Some(t) = Self::find_track(&mut tracks, &track) {
             t.visible_in_mixer = visible;
@@ -401,10 +355,7 @@ impl TrackService for StandaloneTrack {
         Ok(())
     }
 
-    async fn remove_all_tracks(
-        &self,
-        _project: ProjectContext,
-    ) -> Result<(), String> {
+    async fn remove_all_tracks(&self, _project: ProjectContext) -> Result<(), String> {
         let mut tracks = self.tracks.write().await;
         tracks.clear();
         Ok(())

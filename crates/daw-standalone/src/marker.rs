@@ -3,13 +3,13 @@
 //! In-memory marker storage with mock data for testing.
 //! Each project has its own set of markers.
 
+use crate::platform::RwLock;
 use crate::project::project_guids;
 use daw_proto::{
     Position, ProjectContext, TimePosition,
     marker::{Marker, MarkerEvent, MarkerService},
 };
 use roam::Tx;
-use crate::platform::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -183,7 +183,10 @@ impl Default for StandaloneMarker {
 impl StandaloneMarker {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(RwLock::new("standalone-marker-state", MarkerState::default())),
+            state: Arc::new(RwLock::new(
+                "standalone-marker-state",
+                MarkerState::default(),
+            )),
         }
     }
 
@@ -250,11 +253,7 @@ impl MarkerService for StandaloneMarker {
             .collect()
     }
 
-    async fn get_next_marker(
-        &self,
-        project: ProjectContext,
-        after: f64,
-    ) -> Option<Marker> {
+    async fn get_next_marker(&self, project: ProjectContext, after: f64) -> Option<Marker> {
         let state = self.state.read().await;
         Self::get_project_markers(&state, &project)
             .iter()
@@ -267,11 +266,7 @@ impl MarkerService for StandaloneMarker {
             .cloned()
     }
 
-    async fn get_previous_marker(
-        &self,
-        project: ProjectContext,
-        before: f64,
-    ) -> Option<Marker> {
+    async fn get_previous_marker(&self, project: ProjectContext, before: f64) -> Option<Marker> {
         let state = self.state.read().await;
         Self::get_project_markers(&state, &project)
             .iter()
@@ -289,12 +284,7 @@ impl MarkerService for StandaloneMarker {
         Self::get_project_markers(&state, &project).len()
     }
 
-    async fn add_marker(
-        &self,
-        project: ProjectContext,
-        position: f64,
-        name: String,
-    ) -> u32 {
+    async fn add_marker(&self, project: ProjectContext, position: f64, name: String) -> u32 {
         let mut state = self.state.write().await;
         let id = state.next_id;
         state.next_id += 1;
@@ -438,7 +428,10 @@ impl MarkerService for StandaloneMarker {
             && let Some(marker) = markers.iter_mut().find(|m| m.id == Some(id))
         {
             marker.lane = lane;
-            debug!("Set marker {} lane to {:?} in project {}", id, lane, proj_id);
+            debug!(
+                "Set marker {} lane to {:?} in project {}",
+                id, lane, proj_id
+            );
         }
     }
 
@@ -468,60 +461,60 @@ impl MarkerService for StandaloneMarker {
     async fn subscribe(&self, _project: ProjectContext, _tx: Tx<MarkerEvent>) {
         #[cfg(not(target_arch = "wasm32"))]
         {
-        let project = _project;
-        let tx = _tx;
-        info!("MarkerService::subscribe() - starting marker stream");
+            let project = _project;
+            let tx = _tx;
+            info!("MarkerService::subscribe() - starting marker stream");
 
-        // Clone state for the spawned task
-        let state = self.state.clone();
+            // Clone state for the spawned task
+            let state = self.state.clone();
 
-        // Spawn the streaming loop so this method returns immediately
-        // (roam needs the method to return so it can send the Response)
-        moire::task::spawn(async move {
-            // Send initial state: all markers for this project
-            let markers = {
-                let state = state.read().await;
-                StandaloneMarker::get_project_markers(&state, &project).to_vec()
-            };
-
-            if tx
-                .send(MarkerEvent::MarkersChanged(markers.clone()))
-                .await
-                .is_err()
-            {
-                debug!("MarkerService::subscribe() - client disconnected during initial send");
-                return;
-            }
-
-            // Poll for changes at 2Hz (markers rarely change, no need for 60Hz)
-            let mut last_markers = markers;
-
-            loop {
-                crate::platform::sleep(Duration::from_millis(500)).await;
-
-                // Check for marker changes
-                let current_markers = {
+            // Spawn the streaming loop so this method returns immediately
+            // (roam needs the method to return so it can send the Response)
+            moire::task::spawn(async move {
+                // Send initial state: all markers for this project
+                let markers = {
                     let state = state.read().await;
                     StandaloneMarker::get_project_markers(&state, &project).to_vec()
                 };
 
-                if current_markers != last_markers {
-                    // Send full marker list on change
-                    // (A more sophisticated implementation would send granular events)
-                    if tx
-                        .send(MarkerEvent::MarkersChanged(current_markers.clone()))
-                        .await
-                        .is_err()
-                    {
-                        debug!("MarkerService::subscribe() - client disconnected");
-                        break;
-                    }
-                    last_markers = current_markers;
+                if tx
+                    .send(MarkerEvent::MarkersChanged(markers.clone()))
+                    .await
+                    .is_err()
+                {
+                    debug!("MarkerService::subscribe() - client disconnected during initial send");
+                    return;
                 }
-            }
 
-            info!("MarkerService::subscribe() - stream ended");
-        });
+                // Poll for changes at 2Hz (markers rarely change, no need for 60Hz)
+                let mut last_markers = markers;
+
+                loop {
+                    crate::platform::sleep(Duration::from_millis(500)).await;
+
+                    // Check for marker changes
+                    let current_markers = {
+                        let state = state.read().await;
+                        StandaloneMarker::get_project_markers(&state, &project).to_vec()
+                    };
+
+                    if current_markers != last_markers {
+                        // Send full marker list on change
+                        // (A more sophisticated implementation would send granular events)
+                        if tx
+                            .send(MarkerEvent::MarkersChanged(current_markers.clone()))
+                            .await
+                            .is_err()
+                        {
+                            debug!("MarkerService::subscribe() - client disconnected");
+                            break;
+                        }
+                        last_markers = current_markers;
+                    }
+                }
+
+                info!("MarkerService::subscribe() - stream ended");
+            });
         } // cfg(not(wasm32))
     }
 }

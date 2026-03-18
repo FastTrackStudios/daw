@@ -84,10 +84,7 @@ fn decode_audio_with_hint(data: &[u8], hint: &Hint) -> Option<DecodedAudio> {
     let channels = track.codec_params.channels?.count() as u16;
     let sample_rate = track.codec_params.sample_rate?;
 
-    info!(
-        "Decoding audio: {} channels, {} Hz",
-        channels, sample_rate
-    );
+    info!("Decoding audio: {} channels, {} Hz", channels, sample_rate);
 
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &DecoderOptions::default())

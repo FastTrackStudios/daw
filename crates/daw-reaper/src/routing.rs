@@ -126,9 +126,7 @@ pub fn poll_and_broadcast_routing() {
             let current = CachedTrackRouting {
                 send_count: track.typed_sends(SendPartnerType::Track).count() as u32,
                 receive_count: track.receives().count() as u32,
-                hw_output_count: track
-                    .typed_sends(SendPartnerType::HardwareOutput)
-                    .count() as u32,
+                hw_output_count: track.typed_sends(SendPartnerType::HardwareOutput).count() as u32,
             };
 
             let prev = cached_state
@@ -517,11 +515,7 @@ fn send_mode_to_raw(mode: SendMode) -> i32 {
 impl RoutingService for ReaperRouting {
     // === Queries ===
 
-    async fn get_sends(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-    ) -> Vec<TrackRoute> {
+    async fn get_sends(&self, project: ProjectContext, track: TrackRef) -> Vec<TrackRoute> {
         debug!("ReaperRouting::get_sends({:?}, {:?})", project, track);
 
         main_thread::query(move || {
@@ -544,11 +538,7 @@ impl RoutingService for ReaperRouting {
         .unwrap_or_default()
     }
 
-    async fn get_receives(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-    ) -> Vec<TrackRoute> {
+    async fn get_receives(&self, project: ProjectContext, track: TrackRef) -> Vec<TrackRoute> {
         debug!("ReaperRouting::get_receives({:?}, {:?})", project, track);
 
         main_thread::query(move || {
@@ -751,12 +741,7 @@ impl RoutingService for ReaperRouting {
 
     // === Levels ===
 
-    async fn set_volume(
-        &self,
-        project: ProjectContext,
-        location: RouteLocation,
-        volume: f64,
-    ) {
+    async fn set_volume(&self, project: ProjectContext, location: RouteLocation, volume: f64) {
         debug!(
             "ReaperRouting::set_volume({:?}, {:?}, {})",
             project, location, volume
@@ -805,12 +790,7 @@ impl RoutingService for ReaperRouting {
         });
     }
 
-    async fn set_pan(
-        &self,
-        project: ProjectContext,
-        location: RouteLocation,
-        pan: f64,
-    ) {
+    async fn set_pan(&self, project: ProjectContext, location: RouteLocation, pan: f64) {
         debug!(
             "ReaperRouting::set_pan({:?}, {:?}, {})",
             project, location, pan
@@ -860,12 +840,7 @@ impl RoutingService for ReaperRouting {
 
     // === State ===
 
-    async fn set_muted(
-        &self,
-        project: ProjectContext,
-        location: RouteLocation,
-        muted: bool,
-    ) {
+    async fn set_muted(&self, project: ProjectContext, location: RouteLocation, muted: bool) {
         debug!(
             "ReaperRouting::set_muted({:?}, {:?}, {})",
             project, location, muted
@@ -916,12 +891,7 @@ impl RoutingService for ReaperRouting {
         });
     }
 
-    async fn set_mono(
-        &self,
-        project: ProjectContext,
-        location: RouteLocation,
-        mono: bool,
-    ) {
+    async fn set_mono(&self, project: ProjectContext, location: RouteLocation, mono: bool) {
         debug!(
             "ReaperRouting::set_mono({:?}, {:?}, {})",
             project, location, mono
@@ -968,12 +938,7 @@ impl RoutingService for ReaperRouting {
         });
     }
 
-    async fn set_phase(
-        &self,
-        project: ProjectContext,
-        location: RouteLocation,
-        inverted: bool,
-    ) {
+    async fn set_phase(&self, project: ProjectContext, location: RouteLocation, inverted: bool) {
         debug!(
             "ReaperRouting::set_phase({:?}, {:?}, {})",
             project, location, inverted
@@ -1170,11 +1135,7 @@ impl RoutingService for ReaperRouting {
 
     // === Parent Send (Folder routing) ===
 
-    async fn get_parent_send_enabled(
-        &self,
-        project: ProjectContext,
-        track: TrackRef,
-    ) -> bool {
+    async fn get_parent_send_enabled(&self, project: ProjectContext, track: TrackRef) -> bool {
         debug!(
             "ReaperRouting::get_parent_send_enabled({:?}, {:?})",
             project, track
@@ -1256,7 +1217,9 @@ impl RoutingService for ReaperRouting {
         };
 
         let Some(mut rx) = routing_receiver() else {
-            info!("ReaperRouting: routing broadcaster not initialized, subscriber will not receive events");
+            info!(
+                "ReaperRouting: routing broadcaster not initialized, subscriber will not receive events"
+            );
             return;
         };
 

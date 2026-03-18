@@ -107,16 +107,19 @@ impl ProjectDiff {
         }
 
         // Tracks added or removed
-        let tracks_added_or_removed = self.tracks.iter().any(|t| {
-            matches!(t.kind, ChangeKind::Added | ChangeKind::Removed)
-        });
+        let tracks_added_or_removed = self
+            .tracks
+            .iter()
+            .any(|t| matches!(t.kind, ChangeKind::Added | ChangeKind::Removed));
         if tracks_added_or_removed {
             return true;
         }
 
         // Large number of item changes on any single track (likely measure insert/delete)
         let many_item_changes = self.tracks.iter().any(|t| {
-            let item_add_remove = t.items.iter()
+            let item_add_remove = t
+                .items
+                .iter()
                 .filter(|i| matches!(i.kind, ChangeKind::Added | ChangeKind::Removed))
                 .count();
             item_add_remove >= 3
@@ -134,19 +137,44 @@ impl ProjectDiff {
         if !self.property_changes.is_empty() {
             parts.push(format!("{} property changes", self.property_changes.len()));
         }
-        let added = self.tracks.iter().filter(|t| t.kind == ChangeKind::Added).count();
-        let removed = self.tracks.iter().filter(|t| t.kind == ChangeKind::Removed).count();
-        let modified = self.tracks.iter().filter(|t| t.kind == ChangeKind::Modified).count();
-        if added > 0 { parts.push(format!("{added} tracks added")); }
-        if removed > 0 { parts.push(format!("{removed} tracks removed")); }
-        if modified > 0 { parts.push(format!("{modified} tracks modified")); }
+        let added = self
+            .tracks
+            .iter()
+            .filter(|t| t.kind == ChangeKind::Added)
+            .count();
+        let removed = self
+            .tracks
+            .iter()
+            .filter(|t| t.kind == ChangeKind::Removed)
+            .count();
+        let modified = self
+            .tracks
+            .iter()
+            .filter(|t| t.kind == ChangeKind::Modified)
+            .count();
+        if added > 0 {
+            parts.push(format!("{added} tracks added"));
+        }
+        if removed > 0 {
+            parts.push(format!("{removed} tracks removed"));
+        }
+        if modified > 0 {
+            parts.push(format!("{modified} tracks modified"));
+        }
         if !self.markers_regions.is_empty() {
-            parts.push(format!("{} marker/region changes", self.markers_regions.len()));
+            parts.push(format!(
+                "{} marker/region changes",
+                self.markers_regions.len()
+            ));
         }
         if self.tempo_envelope.is_some() {
             parts.push("tempo envelope changed".to_string());
         }
-        if parts.is_empty() { "no changes".to_string() } else { parts.join(", ") }
+        if parts.is_empty() {
+            "no changes".to_string()
+        } else {
+            parts.join(", ")
+        }
     }
 }
 
@@ -267,9 +295,21 @@ pub struct TempoEnvelopeDiff {
 /// Change to a single tempo point (matched by position).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TempoPointChange {
-    Added { position: f64, tempo: f64, time_sig: Option<(i32, i32)> },
-    Removed { position: f64, tempo: f64, time_sig: Option<(i32, i32)> },
-    Modified { position: f64, old_tempo: f64, new_tempo: f64 },
+    Added {
+        position: f64,
+        tempo: f64,
+        time_sig: Option<(i32, i32)>,
+    },
+    Removed {
+        position: f64,
+        tempo: f64,
+        time_sig: Option<(i32, i32)>,
+    },
+    Modified {
+        position: f64,
+        old_tempo: f64,
+        new_tempo: f64,
+    },
 }
 
 // ── FX ──────────────────────────────────────────────────────────────────────

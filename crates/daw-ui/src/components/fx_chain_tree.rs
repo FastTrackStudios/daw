@@ -65,11 +65,12 @@ fn spawn_fx_mutation(
         // Refresh tree
         if let Some(daw) = daw_control::Daw::try_get()
             && let Some(guid) = track_guid.read().clone()
-                && let Ok(project) = daw.current_project().await
-                    && let Ok(Some(th)) = project.tracks().by_guid(&guid).await
-                        && let Ok(new_tree) = th.fx_chain().tree().await {
-                            tree.set(new_tree);
-                        }
+            && let Ok(project) = daw.current_project().await
+            && let Ok(Some(th)) = project.tracks().by_guid(&guid).await
+            && let Ok(new_tree) = th.fx_chain().tree().await
+        {
+            tree.set(new_tree);
+        }
     });
 }
 

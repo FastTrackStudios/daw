@@ -74,11 +74,7 @@ pub fn set_tempo_marker(
 }
 
 /// Delete a tempo/time-signature marker.
-pub fn delete_tempo_marker(
-    low: &ReaperLow,
-    project: ProjectContext,
-    index: i32,
-) {
+pub fn delete_tempo_marker(low: &ReaperLow, project: ProjectContext, index: i32) {
     unsafe {
         low.DeleteTempoTimeSigMarker(project.to_raw(), index);
     }

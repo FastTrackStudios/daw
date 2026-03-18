@@ -292,9 +292,12 @@ pub fn classify_track(track: &Track) -> TrackRole {
         item.takes.iter().any(|take| {
             if let Some(ref source) = take.source {
                 let fp = source.file_path.to_lowercase();
-                fp.contains("(drums)") || fp.contains("(bass)")
-                    || fp.contains("(vocals)") || fp.contains("(guitar)")
-                    || fp.contains("(piano)") || fp.contains("(other)")
+                fp.contains("(drums)")
+                    || fp.contains("(bass)")
+                    || fp.contains("(vocals)")
+                    || fp.contains("(guitar)")
+                    || fp.contains("(piano)")
+                    || fp.contains("(other)")
             } else {
                 false
             }

@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use crate::DawClients;
-use daw_proto::{ProjectContext, Region, RegionEvent};
 use crate::Result;
+use daw_proto::{ProjectContext, Region, RegionEvent};
 use roam::Rx;
 
 /// Regions handle for a specific project

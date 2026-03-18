@@ -249,7 +249,10 @@ impl Default for ReaperTempoMap {
 /// Convert a `TempoMarkerRaw` to a `TempoPoint`.
 fn marker_to_point(m: &sw::TempoMarkerRaw) -> TempoPoint {
     let time_sig = if m.timesig_num > 0 && m.timesig_denom > 0 {
-        Some(TimeSignature::new(m.timesig_num as u32, m.timesig_denom as u32))
+        Some(TimeSignature::new(
+            m.timesig_num as u32,
+            m.timesig_denom as u32,
+        ))
     } else {
         None
     };
@@ -280,7 +283,9 @@ impl TempoMapService for ReaperTempoMap {
             let mut points = Vec::with_capacity(count as usize);
 
             for i in 0..count {
-                if let Some(m) = sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, i as i32) {
+                if let Some(m) =
+                    sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, i as i32)
+                {
                     points.push(marker_to_point(&m));
                 }
             }
@@ -291,14 +296,11 @@ impl TempoMapService for ReaperTempoMap {
         .unwrap_or_default()
     }
 
-    async fn get_tempo_point(
-        &self,
-        _project: ProjectContext,
-        index: u32,
-    ) -> Option<TempoPoint> {
+    async fn get_tempo_point(&self, _project: ProjectContext, index: u32) -> Option<TempoPoint> {
         main_thread::query(move || {
             let low = Reaper::get().medium_reaper().low();
-            sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32).map(|m| marker_to_point(&m))
+            sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32)
+                .map(|m| marker_to_point(&m))
         })
         .await
         .unwrap_or(None)
@@ -333,11 +335,7 @@ impl TempoMapService for ReaperTempoMap {
         .unwrap_or(120.0)
     }
 
-    async fn get_time_signature_at(
-        &self,
-        _project: ProjectContext,
-        seconds: f64,
-    ) -> (i32, i32) {
+    async fn get_time_signature_at(&self, _project: ProjectContext, seconds: f64) -> (i32, i32) {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -369,11 +367,7 @@ impl TempoMapService for ReaperTempoMap {
             .unwrap_or(0.0)
     }
 
-    async fn time_to_musical(
-        &self,
-        _project: ProjectContext,
-        seconds: f64,
-    ) -> (i32, i32, f64) {
+    async fn time_to_musical(&self, _project: ProjectContext, seconds: f64) -> (i32, i32, f64) {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -427,12 +421,7 @@ impl TempoMapService for ReaperTempoMap {
     // Mutation Methods
     // =========================================================================
 
-    async fn add_tempo_point(
-        &self,
-        _project: ProjectContext,
-        seconds: f64,
-        bpm: f64,
-    ) -> u32 {
+    async fn add_tempo_point(&self, _project: ProjectContext, seconds: f64, bpm: f64) -> u32 {
         debug!(
             "ReaperTempoMap: add_tempo_point at {} seconds, {} BPM",
             seconds, bpm
@@ -444,14 +433,14 @@ impl TempoMapService for ReaperTempoMap {
             let result = sw::set_tempo_marker(
                 low,
                 ReaperProjectContext::CurrentProject,
-                -1,         // add new
+                -1, // add new
                 seconds,
-                -1,         // measurepos (auto)
-                -1.0,       // beatpos (auto)
+                -1,   // measurepos (auto)
+                -1.0, // beatpos (auto)
                 bpm,
-                0,          // timesig_num (don't change)
-                0,          // timesig_denom (don't change)
-                false,      // lineartempo
+                0,     // timesig_num (don't change)
+                0,     // timesig_denom (don't change)
+                false, // lineartempo
             );
 
             if result {
@@ -475,12 +464,7 @@ impl TempoMapService for ReaperTempoMap {
         });
     }
 
-    async fn set_tempo_at_point(
-        &self,
-        _project: ProjectContext,
-        index: u32,
-        bpm: f64,
-    ) {
+    async fn set_tempo_at_point(&self, _project: ProjectContext, index: u32, bpm: f64) {
         debug!(
             "ReaperTempoMap: set_tempo_at_point index {} to {} BPM",
             index, bpm
@@ -488,7 +472,9 @@ impl TempoMapService for ReaperTempoMap {
         main_thread::run(move || {
             let low = Reaper::get().medium_reaper().low();
 
-            if let Some(m) = sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32) {
+            if let Some(m) =
+                sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32)
+            {
                 sw::set_tempo_marker(
                     low,
                     ReaperProjectContext::CurrentProject,
@@ -519,7 +505,9 @@ impl TempoMapService for ReaperTempoMap {
         main_thread::run(move || {
             let low = Reaper::get().medium_reaper().low();
 
-            if let Some(m) = sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32) {
+            if let Some(m) =
+                sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32)
+            {
                 sw::set_tempo_marker(
                     low,
                     ReaperProjectContext::CurrentProject,
@@ -536,12 +524,7 @@ impl TempoMapService for ReaperTempoMap {
         });
     }
 
-    async fn move_tempo_point(
-        &self,
-        _project: ProjectContext,
-        index: u32,
-        seconds: f64,
-    ) {
+    async fn move_tempo_point(&self, _project: ProjectContext, index: u32, seconds: f64) {
         debug!(
             "ReaperTempoMap: move_tempo_point index {} to {} seconds",
             index, seconds
@@ -549,14 +532,16 @@ impl TempoMapService for ReaperTempoMap {
         main_thread::run(move || {
             let low = Reaper::get().medium_reaper().low();
 
-            if let Some(m) = sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32) {
+            if let Some(m) =
+                sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, index as i32)
+            {
                 sw::set_tempo_marker(
                     low,
                     ReaperProjectContext::CurrentProject,
                     index as i32,
-                    seconds,    // new position
-                    -1,         // auto measure
-                    -1.0,       // auto beat
+                    seconds, // new position
+                    -1,      // auto measure
+                    -1.0,    // auto beat
                     m.bpm,
                     m.timesig_num,
                     m.timesig_denom,
@@ -592,10 +577,7 @@ impl TempoMapService for ReaperTempoMap {
         });
     }
 
-    async fn get_default_time_signature(
-        &self,
-        _project: ProjectContext,
-    ) -> (i32, i32) {
+    async fn get_default_time_signature(&self, _project: ProjectContext) -> (i32, i32) {
         main_thread::query(|| {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
@@ -635,7 +617,9 @@ impl TempoMapService for ReaperTempoMap {
 
             let mut found_at_zero = false;
             for i in 0..count {
-                if let Some(m) = sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, i as i32) {
+                if let Some(m) =
+                    sw::get_tempo_marker(low, ReaperProjectContext::CurrentProject, i as i32)
+                {
                     if m.timepos < 0.001 {
                         // Update existing marker at position 0
                         sw::set_tempo_marker(

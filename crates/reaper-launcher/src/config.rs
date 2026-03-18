@@ -49,9 +49,18 @@ impl ReaperIniConfig {
     }
 }
 
-/// Full launch configuration for a wrapper .app.
-/// Stored as `Contents/launch.json` in each wrapper bundle.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+fn default_reaper_args() -> Vec<String> {
+    vec![
+        "-newinst".to_string(),
+        "-nosplash".to_string(),
+        "-ignoreerrors".to_string(),
+    ]
+}
+
+/// Full launch configuration for a wrapper .app / Linux rig.
+/// Stored as `Contents/launch.json` (macOS) or
+/// `~/.config/fts/rigs/{id}/launch.json` (Linux).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LaunchConfig {
     /// DAW role: "signal", "session", or "testing".
     pub role: String,
@@ -60,7 +69,7 @@ pub struct LaunchConfig {
     pub rig_type: Option<String>,
     /// Path to the real REAPER executable.
     pub reaper_executable: String,
-    /// Path to REAPER's resource directory (working dir).
+    /// Path to REAPER's resource directory (working dir and UserPlugins parent).
     pub resources_dir: String,
     /// Path to reaper.ini.
     pub ini_path: String,
@@ -72,6 +81,18 @@ pub struct LaunchConfig {
     /// waits briefly then restores the original values.
     #[serde(default)]
     pub restore_ini_after_launch: bool,
+    /// Arguments passed to the REAPER executable on launch.
+    /// Defaults to `["-newinst", "-nosplash", "-ignoreerrors"]`.
+    /// Extra CLI args passed to the launcher are appended after these.
+    #[serde(default = "default_reaper_args")]
+    pub reaper_args: Vec<String>,
+}
+
+impl LaunchConfig {
+    /// Return the standard REAPER launch arguments.
+    pub fn standard_reaper_args() -> Vec<String> {
+        default_reaper_args()
+    }
 }
 
 impl LaunchConfig {
@@ -85,9 +106,8 @@ impl LaunchConfig {
 
     /// Save to a `launch.json` file.
     pub fn save(&self, path: &Path) -> Result<(), String> {
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| format!("Failed to serialize: {e}"))?;
-        std::fs::write(path, json)
-            .map_err(|e| format!("Failed to write {}: {e}", path.display()))
+        let json =
+            serde_json::to_string_pretty(self).map_err(|e| format!("Failed to serialize: {e}"))?;
+        std::fs::write(path, json).map_err(|e| format!("Failed to write {}: {e}", path.display()))
     }
 }
