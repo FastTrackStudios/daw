@@ -12,7 +12,7 @@
 //! # Usage
 //!
 //! ```sh
-//! # Start REAPER with the daw-test-extension loaded, then:
+//! # Start REAPER with the daw-bridge loaded, then:
 //! cargo run -p daw-guest-example
 //!
 //! # Or specify a custom bootstrap socket:
@@ -194,7 +194,7 @@ fn discover_bootstrap_socket() -> Result<PathBuf> {
 
     if matches.is_empty() {
         eyre::bail!(
-            "No SHM bootstrap socket found. Is REAPER running with the daw-test-extension?\n\
+            "No SHM bootstrap socket found. Is REAPER running with the daw-bridge?\n\
              Set FTS_SHM_BOOTSTRAP_SOCK to specify the path manually."
         );
     }

@@ -1,11 +1,11 @@
 [package]
-name = "daw-test-extension"
+name = "daw-bridge"
 version.workspace = true
 edition.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
-name = "reaper_daw_test"
+name = "reaper_daw_bridge"
 path = "src/lib.rs"
 
 [dependencies]

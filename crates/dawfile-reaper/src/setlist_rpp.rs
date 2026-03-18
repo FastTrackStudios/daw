@@ -974,9 +974,9 @@ pub fn concatenate_tempo_envelopes(
             // If no points were within bounds (all filtered), create a leading
             // point with the tempo that was active at local_start.
             let song_global_start = song.global_start_seconds;
-            let has_point_at_start = points.iter().any(|p| {
-                (p.position - song_global_start).abs() < 0.01
-            });
+            let has_point_at_start = points
+                .iter()
+                .any(|p| (p.position - song_global_start).abs() < 0.01);
             if !has_point_at_start {
                 let mut leading = TempoTimePoint::default();
                 leading.position = song_global_start;
@@ -986,7 +986,9 @@ pub fn concatenate_tempo_envelopes(
                     leading.time_signature_encoded = Some(65536 * denom + num);
                 }
                 // Insert at the correct position (before any points from this song)
-                let insert_idx = points.iter().position(|p| p.position > song_global_start)
+                let insert_idx = points
+                    .iter()
+                    .position(|p| p.position > song_global_start)
                     .unwrap_or(points.len());
                 points.insert(insert_idx, leading);
             }

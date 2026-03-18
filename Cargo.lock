@@ -1279,6 +1279,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-bridge"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "daw",
+ "eyre",
+ "fragile",
+ "moire",
+ "notify",
+ "reaper-high",
+ "reaper-low",
+ "reaper-macros",
+ "reaper-medium",
+ "roam",
+ "roam-shm",
+ "roam-stream",
+ "shm-primitives",
+ "shm-primitives-async",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "daw-cli"
 version = "0.1.0"
 dependencies = [
@@ -1405,31 +1430,6 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "web-time",
-]
-
-[[package]]
-name = "daw-test-extension"
-version = "0.1.0"
-dependencies = [
- "crossbeam-channel",
- "daw",
- "eyre",
- "fragile",
- "moire",
- "notify",
- "reaper-high",
- "reaper-low",
- "reaper-macros",
- "reaper-medium",
- "roam",
- "roam-shm",
- "roam-stream",
- "shm-primitives",
- "shm-primitives-async",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

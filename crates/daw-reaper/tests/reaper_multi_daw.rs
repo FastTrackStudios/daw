@@ -1,7 +1,7 @@
 //! Multi-instance REAPER integration tests.
 //!
 //! Validates that two independent REAPER instances can be spawned, connected
-//! to, and operated in parallel using the daw-test extension infrastructure.
+//! to, and operated in parallel using the daw-bridge extension infrastructure.
 //!
 //! Uses `fts-daw-test` (role = "testing") and `fts-daw-secondary` (role = "secondary").
 //! Both rigs must be installed via `cargo xtask setup-rigs` before running.

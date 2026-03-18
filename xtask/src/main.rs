@@ -491,7 +491,7 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(60);
-    let ext_log = PathBuf::from("/tmp/fts-daw-test.log");
+    let ext_log = PathBuf::from("/tmp/daw-bridge.log");
 
     // ── Rig config ─────────────────────────────────────────────────────────
     let rig_config = load_daw_test_rig();
@@ -505,12 +505,12 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
 
     // ── Step 1: Build the test extension ──────────────────────────────────
     section(ci, "reaper-test: build extension");
-    println!("Building daw-test-extension...");
+    println!("Building daw-bridge...");
     let status = Command::new("cargo")
-        .args(["build", "-p", "daw-test-extension"])
+        .args(["build", "-p", "daw-bridge"])
         .status()?;
     if !status.success() {
-        return Err("Failed to build daw-test-extension".into());
+        return Err("Failed to build daw-bridge".into());
     }
     end_section(ci);
 
@@ -544,12 +544,12 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     std::fs::create_dir_all(&user_plugins_dir)?;
 
     // REAPER expects "reaper_" prefix (not "lib" prefix) in UserPlugins.
-    let so_src_name = "libreaper_daw_test.so";
-    let so_dst_name = "reaper_daw_test.so";
+    let so_src_name = "libreaper_daw_bridge.so";
+    let so_dst_name = "reaper_daw_bridge.so";
     let so_path = workspace_root.join("target/debug").join(so_src_name);
     if !so_path.exists() {
-        let dylib_src_name = "libreaper_daw_test.dylib";
-        let dylib_dst_name = "reaper_daw_test.dylib";
+        let dylib_src_name = "libreaper_daw_bridge.dylib";
+        let dylib_dst_name = "reaper_daw_bridge.dylib";
         let dylib_path = workspace_root.join("target/debug").join(dylib_src_name);
         if dylib_path.exists() {
             install_plugin(&dylib_path, dylib_dst_name, &user_plugins_dir)?;

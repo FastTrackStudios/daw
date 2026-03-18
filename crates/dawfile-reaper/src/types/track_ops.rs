@@ -290,7 +290,9 @@ pub fn classify_track(track: &Track) -> TrackRole {
     // Check if the track has items that look like stems (demucs patterns).
     // Checks both parsed source.file_path AND raw_content FILE lines,
     // since many items only have their file info in raw_content.
-    let stem_patterns = ["(drums)", "(bass)", "(vocals)", "(guitar)", "(piano)", "(other)"];
+    let stem_patterns = [
+        "(drums)", "(bass)", "(vocals)", "(guitar)", "(piano)", "(other)",
+    ];
     let has_stem_items = track.items.iter().any(|item| {
         // Check parsed sources
         let in_parsed = item.takes.iter().any(|take| {
@@ -321,7 +323,10 @@ pub fn classify_track(track: &Track) -> TrackRole {
         });
         let in_raw = item.raw_content.lines().any(|line| {
             let trimmed = line.trim().to_lowercase();
-            trimmed.starts_with("file ") && (trimmed.ends_with(".mp3\"") || trimmed.contains("mix") || trimmed.contains("bounce"))
+            trimmed.starts_with("file ")
+                && (trimmed.ends_with(".mp3\"")
+                    || trimmed.contains("mix")
+                    || trimmed.contains("bounce"))
         });
         in_parsed || in_raw
     });

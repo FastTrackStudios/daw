@@ -1,7 +1,8 @@
-//! Minimal REAPER test extension for daw repo integration tests.
+//! REAPER ↔ DAW bridge extension.
 //!
-//! This extension's sole purpose is to load daw-reaper's service implementations
-//! and expose them via a Unix socket so `#[reaper_test]` tests can connect.
+//! Loads daw-reaper's service implementations inside REAPER and exposes them
+//! via Unix socket and SHM so external processes (tests, FTS, CLI tools)
+//! can control the DAW through roam RPC.
 
 mod guest_loader;
 mod routed_handler;
@@ -114,13 +115,13 @@ impl App {
     }
 
     fn initialize(&self) -> Result<(), Box<dyn Error>> {
-        info!("Initializing daw-test-extension...");
+        info!("Initializing daw-bridge...");
 
         self.tokio_runtime.block_on(async {
             register_daw_dispatcher().await;
         });
 
-        info!("daw-test-extension initialized");
+        info!("daw-bridge initialized");
         Ok(())
     }
 }
@@ -130,7 +131,7 @@ impl App {
 // ============================================================================
 
 async fn register_daw_dispatcher() {
-    info!("Registering DAW dispatcher for test extension...");
+    info!("Registering DAW dispatcher...");
 
     // Set TaskSupport for daw-reaper to use
     daw::reaper::set_task_support(Global::task_support());
@@ -253,7 +254,7 @@ async fn register_daw_dispatcher() {
         guest_loader::launch_guests(&bootstrap_sock);
     }
 
-    info!("DAW test dispatcher registered (16 services, socket + SHM)");
+    info!("DAW bridge registered (16 services, socket + SHM)");
 }
 
 // ============================================================================
@@ -351,9 +352,9 @@ extern "C" fn timer_callback() {
 /// REAPER extension entry point.
 #[reaper_extension_plugin]
 fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
-    // Initialize tracing to /tmp/fts-daw-test.log
-    let log_file = std::fs::File::create("/tmp/fts-daw-test.log")
-        .expect("Failed to create /tmp/fts-daw-test.log");
+    // Initialize tracing to /tmp/daw-bridge.log
+    let log_file =
+        std::fs::File::create("/tmp/daw-bridge.log").expect("Failed to create /tmp/daw-bridge.log");
     tracing_subscriber::fmt()
         .with_writer(std::sync::Mutex::new(log_file))
         .with_env_filter(
@@ -362,7 +363,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         )
         .init();
 
-    info!("daw-test-extension starting...");
+    info!("daw-bridge starting...");
 
     // Initialize REAPER high-level API
     match HighReaper::load(context).setup() {
@@ -390,6 +391,6 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     session.plugin_register_add_timer(timer_callback)?;
     drop(session);
 
-    info!("daw-test-extension initialized successfully");
+    info!("daw-bridge initialized successfully");
     Ok(())
 }
