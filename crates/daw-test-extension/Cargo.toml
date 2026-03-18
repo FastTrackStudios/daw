@@ -21,6 +21,7 @@ shm-primitives-async.workspace = true
 
 # Async runtime
 
+moire.workspace = true
 tokio = { workspace = true, features = ["net", "rt-multi-thread"] }
 
 # REAPER bindings

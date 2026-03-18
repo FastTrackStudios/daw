@@ -15,7 +15,7 @@ path = "src/main.rs"
 daw.workspace = true
 roam.workspace = true
 roam-stream.workspace = true
-
+moire.workspace = true
 tokio.workspace = true
 clap.workspace = true
 eyre.workspace = true

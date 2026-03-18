@@ -82,15 +82,7 @@ enumflags2 = "0.7"
 
 # Observability
 tracing = { version = "0.1", features = ["std"] }
-# moire is pulled in transitively via roam-core. We don't depend on it directly
-# but its moire-trace-capture sub-crate panics on NixOS glibc (no frame pointers).
-# We vendor a patched moire-trace-capture in vendor/ (see [patch.crates-io] below).
-# To re-enable moire as a direct dep (for diagnostics dashboard):
-#   1. Upstream a frame-pointer validation bypass to bearcove/moire, OR
-#   2. Wait for nixpkgs to ship glibc with frame pointers (NixOS/nixpkgs#216341)
-#   Then: uncomment below, replace tokio::spawn → moire::task::spawn,
-#   and tokio::sync::RwLock → moire::sync::RwLock.
-# moire = { version = "1.0", features = ["diagnostics"] }
+moire = { version = "1.0", features = ["diagnostics"] }
 
 # File watching
 notify = "8"

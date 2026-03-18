@@ -90,7 +90,7 @@ async fn run() -> Result<()> {
 
     let mut driver = Driver::new(conn, ());
     let caller = ErasedCaller::new(driver.caller());
-    tokio::spawn(async move { driver.run().await });
+    moire::task::spawn(async move { driver.run().await });
 
     // Step 5: Create a high-level Daw handle from the caller
     let daw = daw::Daw::new(caller);

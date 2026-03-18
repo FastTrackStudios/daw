@@ -539,7 +539,7 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
 
     let mut driver = roam::Driver::new(conn, ());
     let caller = roam::ErasedCaller::new(driver.caller());
-    tokio::spawn(async move { driver.run().await });
+    moire::task::spawn(async move { driver.run().await });
 
     Ok(Daw::new(caller))
 }

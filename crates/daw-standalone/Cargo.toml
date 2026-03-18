@@ -7,7 +7,7 @@ edition = "2024"
 daw-proto = { path = "../daw-proto" }
 roam = { workspace = true }
 tracing = { workspace = true }
-
+moire = { workspace = true }
 uuid = { version = "1", features = ["v4"] }
 keyflow = { workspace = true, features = ["engraver", "midi-import"] }
 web-time = "1"

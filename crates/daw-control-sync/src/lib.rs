@@ -141,7 +141,7 @@ impl DawSync {
 
         let mut driver = roam::Driver::new(conn, ());
         let caller = ErasedCaller::new(driver.caller());
-        tokio::spawn(async move { driver.run().await });
+        moire::task::spawn(async move { driver.run().await });
 
         Self::from_caller(caller)
     }

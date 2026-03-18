@@ -1224,7 +1224,7 @@ impl RoutingService for ReaperRouting {
         };
 
         // Spawn the forwarding loop that filters events for this project
-        tokio::spawn(async move {
+        moire::task::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(event) => {

@@ -141,7 +141,7 @@ async fn connect_guest(bootstrap_path: &Path, cycle: u32) -> Result<Daw> {
 
     let mut driver = Driver::new(conn, ());
     let caller = ErasedCaller::new(driver.caller());
-    tokio::spawn(async move { driver.run().await });
+    moire::task::spawn(async move { driver.run().await });
 
     println!("[cycle {cycle}] SHM virtual connection established");
     Ok(Daw::new(caller))

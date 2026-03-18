@@ -672,7 +672,7 @@ impl TempoMapService for ReaperTempoMap {
             return;
         };
 
-        tokio::spawn(async move {
+        moire::task::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(event) => {

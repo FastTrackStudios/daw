@@ -1287,6 +1287,7 @@ dependencies = [
  "dawfile-reaper",
  "eyre",
  "libc",
+ "moire",
  "roam",
  "roam-stream",
  "serde_json",
@@ -1314,6 +1315,7 @@ version = "0.1.0"
 dependencies = [
  "daw-control",
  "eyre",
+ "moire",
  "roam",
  "roam-stream",
  "tokio",
@@ -1327,6 +1329,7 @@ dependencies = [
  "daw",
  "eyre",
  "libc",
+ "moire",
  "roam",
  "roam-shm",
  "shm-primitives",
@@ -1368,6 +1371,7 @@ dependencies = [
  "eyre",
  "keyflow",
  "libc",
+ "moire",
  "reaper-high",
  "reaper-low",
  "reaper-medium",
@@ -1393,6 +1397,7 @@ dependencies = [
  "eyre",
  "gloo-timers",
  "keyflow",
+ "moire",
  "roam",
  "symphonia",
  "tokio",
@@ -1410,6 +1415,7 @@ dependencies = [
  "daw",
  "eyre",
  "fragile",
+ "moire",
  "notify",
  "reaper-high",
  "reaper-low",
@@ -3850,9 +3856,21 @@ version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac52dcc0ff5b4710a66626370b1bf85ba3d924fd8019e8cfa100e8dafffda4ad"
 dependencies = [
+ "moire-macros",
  "moire-macros-noop",
  "moire-tokio",
  "moire-wasm",
+]
+
+[[package]]
+name = "moire-macros"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c494331faed7953b795b7769a84e9272e6f59e34ddceebadba4715b245957bc2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unsynn",
 ]
 
 [[package]]
@@ -5127,6 +5145,7 @@ version = "0.1.0"
 dependencies = [
  "daw",
  "eyre",
+ "moire",
  "reaper-test-macro",
  "roam",
  "roam-stream",

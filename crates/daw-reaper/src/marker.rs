@@ -308,7 +308,7 @@ impl MarkerService for ReaperMarker {
 
         // Spawn the streaming loop so this method returns immediately
         // (roam needs the method to return so it can send the Response)
-        tokio::spawn(async move {
+        moire::task::spawn(async move {
             // Send initial state
             let markers = this.get_markers(project.clone()).await;
             if tx

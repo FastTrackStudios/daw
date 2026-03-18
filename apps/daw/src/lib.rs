@@ -271,7 +271,7 @@ async fn open_daw_connection(session: &SessionHandle) -> Result<ErasedCaller> {
 
     let mut driver = Driver::new(conn, ());
     let caller = ErasedCaller::new(driver.caller());
-    tokio::spawn(async move { driver.run().await });
+    moire::task::spawn(async move { driver.run().await });
     Ok(caller)
 }
 

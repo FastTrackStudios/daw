@@ -289,13 +289,13 @@ fn start_unix_socket_server(acceptor: DawConnectionAcceptor) {
 
     info!("Unix socket server listening on {}", path.display());
 
-    tokio::spawn(async move {
+    moire::task::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
                     info!("Client connected via Unix socket");
                     let acceptor = acceptor.clone();
-                    tokio::spawn(async move {
+                    moire::task::spawn(async move {
                         let link = roam_stream::StreamLink::unix(stream);
                         match roam::acceptor(roam::BareConduit::new(link))
                             .on_connection(acceptor)

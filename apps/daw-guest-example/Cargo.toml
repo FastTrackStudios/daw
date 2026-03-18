@@ -13,7 +13,7 @@ daw.workspace = true
 roam.workspace = true
 roam-shm.workspace = true
 shm-primitives.workspace = true
-
+moire.workspace = true
 tokio = { workspace = true, features = ["time", "net", "rt"] }
 eyre = "0.6"
 tracing.workspace = true

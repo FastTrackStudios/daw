@@ -8,13 +8,13 @@
 //! with an `on_connection` acceptor, then the client opens a virtual connection
 //! to get a service-specific `Driver` and `ErasedCaller`.
 
+use moire::task::JoinHandle;
 use roam::{
     AcceptedConnection, BareConduit, ConnectionAcceptor, ConnectionHandle, ConnectionId,
     ConnectionSettings, Driver, DriverCaller, DriverReplySink, ErasedCaller, Handler,
     MetadataEntry, MetadataFlags, MetadataValue, Parity,
 };
 use std::sync::Arc;
-use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
 /// Keeps the server-side acceptor task alive.
@@ -45,7 +45,7 @@ impl<H: Handler<DriverReplySink> + Clone + 'static> ConnectionAcceptor for Local
             metadata: vec![],
             setup: Box::new(move |handle: ConnectionHandle| {
                 let mut driver = Driver::new(handle, handler.as_ref().clone());
-                tokio::spawn(async move { driver.run().await });
+                moire::task::spawn(async move { driver.run().await });
             }),
         })
     }
@@ -87,7 +87,7 @@ impl LocalCaller {
         };
 
         // Server side: accept with virtual connection support
-        let handle = tokio::spawn(async move {
+        let handle = moire::task::spawn(async move {
             match roam::acceptor(BareConduit::new(server_link))
                 .on_connection(acceptor)
                 .establish::<DriverCaller>(())
@@ -127,7 +127,7 @@ impl LocalCaller {
 
         let mut driver = Driver::new(conn, ());
         let caller = ErasedCaller::new(driver.caller());
-        tokio::spawn(async move { driver.run().await });
+        moire::task::spawn(async move { driver.run().await });
 
         debug!("LocalCaller established (in-process memory channels, virtual connection)");
 

@@ -14,6 +14,7 @@ daw-proto = { path = "../daw-proto" }
 roam.workspace = true
 tracing.workspace = true
 tokio.workspace = true
+moire.workspace = true
 keyflow = { workspace = true, features = ["engraver", "midi-import"] }
 
 # RPP chunk parsing/serialization for chunk-based FX manipulation
@@ -37,4 +38,5 @@ tokio-util = "0.7"
 roam.workspace = true
 roam-shm.workspace = true
 shm-primitives.workspace = true
+moire.workspace = true
 libc = "0.2"

@@ -1071,7 +1071,7 @@ impl ItemService for ReaperItem {
             return;
         };
 
-        tokio::spawn(async move {
+        moire::task::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(event) => {
@@ -1578,7 +1578,7 @@ impl TakeService for ReaperTake {
             return;
         };
 
-        tokio::spawn(async move {
+        moire::task::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(event) => {
