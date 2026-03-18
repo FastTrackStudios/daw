@@ -629,15 +629,30 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         std::fs::write(&reaper_ini, "[reaper]\n")?;
     }
 
-    // Configure dummy audio driver to keep REAPER's main loop active.
+    // Configure audio driver to keep REAPER's main loop active.
     // Without an audio engine, the timer callback stops after ~10 ticks.
-    // audiodriver=2 is REAPER's built-in dummy audio streamer.
-    // This applies even with Xvfb — a display alone isn't enough.
+    // Default: audiodriver=0 (ALSA). On CI/headless where no real ALSA
+    // devices exist, we create an .asoundrc with a null PCM device so
+    // REAPER can open ALSA and keep its audio engine spinning.
+    // Override with FTS_AUDIO_DRIVER env var (0=ALSA, 1=JACK, 2=dummy, 3=Pulse).
     {
-        let audio_driver = std::env::var("FTS_AUDIO_DRIVER").unwrap_or_else(|_| "2".into());
+        let audio_driver = std::env::var("FTS_AUDIO_DRIVER").unwrap_or_else(|_| "0".into());
         let ini = reaper_launcher::ReaperIni::new(&reaper_ini);
         let _ = ini.set("audiodriver", &audio_driver);
-        println!("  audiodriver: {audio_driver} (dummy)");
+        println!("  audiodriver: {audio_driver}");
+
+        // Ensure ALSA has a usable device even without real hardware.
+        // The ALSA null PCM plugin silently discards audio — no kernel
+        // module required, built into alsa-lib.
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+        let asoundrc = PathBuf::from(&home).join(".asoundrc");
+        if !asoundrc.exists() {
+            std::fs::write(
+                &asoundrc,
+                "pcm.!default { type null }\nctl.!default { type null }\n",
+            )?;
+            println!("  created {} with null PCM device", asoundrc.display());
+        }
     }
     let reaper_args: Vec<String> = vec![
         "-cfgfile".into(),
