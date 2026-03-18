@@ -665,15 +665,22 @@ pub fn concatenate_tracks(projects: &[ReaperProject], songs: &[SongInfo]) -> Vec
         let mut song_content: Vec<Track> = Vec::new();
         let local_end = song.local_start + song.duration_seconds;
 
+        let source_items: usize = project.tracks.iter().map(|t| t.items.len()).sum();
+        let mut skipped_structural = 0usize;
+        let mut items_before_trim: usize = 0;
+        let mut items_after_trim: usize = 0;
+
         for track in &project.tracks {
             let name_lower = track.name.to_lowercase();
             let is_header = is_header_track(&track.name);
             let is_structural = is_structural_folder(&name_lower, track);
 
             if is_structural {
-                // Skip structural folders (Click/Guide, TRACKS, Keyflow) — we rebuild them
+                skipped_structural += 1;
                 continue;
             }
+
+            items_before_trim += track.items.len();
 
             let mut cloned = clone_track_with_offset(
                 track,
@@ -684,9 +691,9 @@ pub fn concatenate_tracks(projects: &[ReaperProject], songs: &[SongInfo]) -> Vec
             );
             cloned.track_id = None;
 
+            items_after_trim += cloned.items.len();
+
             if is_header {
-                // Merge into shared header track — clear folder settings
-                // since we'll rebuild the folder structure ourselves
                 cloned.folder = None;
                 header_tracks
                     .entry(track.name.clone())
@@ -695,11 +702,17 @@ pub fn concatenate_tracks(projects: &[ReaperProject], songs: &[SongInfo]) -> Vec
                     })
                     .or_insert(cloned);
             } else {
-                // Clear any folder settings — we'll set them ourselves
                 cloned.folder = None;
                 song_content.push(cloned);
             }
         }
+
+        eprintln!(
+            "[combine] {}: {} source items, {} structural skipped, {}/{} items before/after trim (local {:.1}..{:.1})",
+            song.name, source_items, skipped_structural,
+            items_before_trim, items_after_trim,
+            song.local_start, local_end,
+        );
 
         // Split song content into regular tracks vs reference tracks
         let mut song_tracks: Vec<Track> = Vec::new();
@@ -936,8 +949,20 @@ pub fn concatenate_tempo_envelopes(
 
         if let Some(ref envelope) = project.tempo_envelope {
             let mut last_tempo = envelope.default_tempo;
+            let local_end = song.local_start + song.duration_seconds;
 
             for point in &envelope.points {
+                // Skip points outside the song's bounds
+                if point.position < song.local_start {
+                    // Track the tempo at this point so we know what
+                    // tempo was active at local_start
+                    last_tempo = point.tempo;
+                    continue;
+                }
+                if point.position >= local_end {
+                    continue;
+                }
+
                 let mut p = point.clone();
                 p.position += offset;
                 p.shape = 1; // Force square (instant) for combined setlists
@@ -945,11 +970,29 @@ pub fn concatenate_tempo_envelopes(
                 points.push(p);
             }
 
-            // Insert a trailing tempo marker at the song's last marker position.
-            // This "freezes" the tempo at the end of the song, preventing any
-            // curve/interpolation from bleeding into the gap or next song.
-            let bounds = resolve_song_bounds(project);
-            let trailing_pos = bounds.last_marker_position + offset;
+            // Ensure there's a tempo point at the song's start position.
+            // If no points were within bounds (all filtered), create a leading
+            // point with the tempo that was active at local_start.
+            let song_global_start = song.global_start_seconds;
+            let has_point_at_start = points.iter().any(|p| {
+                (p.position - song_global_start).abs() < 0.01
+            });
+            if !has_point_at_start {
+                let mut leading = TempoTimePoint::default();
+                leading.position = song_global_start;
+                leading.tempo = last_tempo;
+                leading.shape = 1;
+                if let Some((_, num, denom, _)) = project.properties.tempo {
+                    leading.time_signature_encoded = Some(65536 * denom + num);
+                }
+                // Insert at the correct position (before any points from this song)
+                let insert_idx = points.iter().position(|p| p.position > song_global_start)
+                    .unwrap_or(points.len());
+                points.insert(insert_idx, leading);
+            }
+
+            // Insert a trailing tempo marker at the song's end to freeze tempo
+            let trailing_pos = song_global_start + song.duration_seconds;
             if trailing_pos > points.last().map(|p| p.position).unwrap_or(0.0) {
                 let mut trailing = TempoTimePoint::default();
                 trailing.position = trailing_pos;

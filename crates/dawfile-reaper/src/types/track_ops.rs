@@ -287,33 +287,43 @@ pub fn classify_track(track: &Track) -> TrackRole {
         || lower == "bounce"
         || lower == "master";
 
-    // Check if the track has items that look like stems (demucs patterns)
+    // Check if the track has items that look like stems (demucs patterns).
+    // Checks both parsed source.file_path AND raw_content FILE lines,
+    // since many items only have their file info in raw_content.
+    let stem_patterns = ["(drums)", "(bass)", "(vocals)", "(guitar)", "(piano)", "(other)"];
     let has_stem_items = track.items.iter().any(|item| {
-        item.takes.iter().any(|take| {
+        // Check parsed sources
+        let in_parsed = item.takes.iter().any(|take| {
             if let Some(ref source) = take.source {
                 let fp = source.file_path.to_lowercase();
-                fp.contains("(drums)")
-                    || fp.contains("(bass)")
-                    || fp.contains("(vocals)")
-                    || fp.contains("(guitar)")
-                    || fp.contains("(piano)")
-                    || fp.contains("(other)")
+                stem_patterns.iter().any(|p| fp.contains(p))
             } else {
                 false
             }
-        })
+        });
+        // Check raw_content FILE lines
+        let in_raw = item.raw_content.lines().any(|line| {
+            let trimmed = line.trim().to_lowercase();
+            trimmed.starts_with("file ") && stem_patterns.iter().any(|p| trimmed.contains(p))
+        });
+        in_parsed || in_raw
     });
 
     // Check if items are mp3/reference sources
     let has_mp3_items = track.items.iter().any(|item| {
-        item.takes.iter().any(|take| {
+        let in_parsed = item.takes.iter().any(|take| {
             if let Some(ref source) = take.source {
                 let fp = source.file_path.to_lowercase();
                 fp.ends_with(".mp3") || fp.contains("mix") || fp.contains("bounce")
             } else {
                 false
             }
-        })
+        });
+        let in_raw = item.raw_content.lines().any(|line| {
+            let trimmed = line.trim().to_lowercase();
+            trimmed.starts_with("file ") && (trimmed.ends_with(".mp3\"") || trimmed.contains("mix") || trimmed.contains("bounce"))
+        });
+        in_parsed || in_raw
     });
 
     if has_stem_items {
