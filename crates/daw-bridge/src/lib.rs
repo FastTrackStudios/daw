@@ -17,7 +17,7 @@ use std::cell::RefCell;
 use std::error::Error;
 use std::path::PathBuf;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use tokio::net::UnixListener;
 use tracing::{debug, info, warn};
 
@@ -334,9 +334,15 @@ fn get_app() -> Option<&'static Fragile<App>> {
 
 /// Timer callback for periodic updates (runs on main thread ~30Hz)
 extern "C" fn timer_callback() {
-    static TIMER_LOGGED: AtomicBool = AtomicBool::new(false);
-    if !TIMER_LOGGED.swap(true, Ordering::Relaxed) {
+    use std::sync::atomic::AtomicU64;
+    static TICK_COUNT: AtomicU64 = AtomicU64::new(0);
+    let tick = TICK_COUNT.fetch_add(1, Ordering::Relaxed);
+
+    // Log first tick and then every ~3 seconds (every 100 ticks at ~30Hz)
+    if tick == 0 {
         info!("timer_callback: first tick — timer is running");
+    } else if tick % 100 == 0 {
+        info!("timer_callback: tick {tick} — still running");
     }
 
     // catch_unwind prevents panics from unwinding through the C ABI boundary
