@@ -135,6 +135,7 @@ pub(crate) use daw_proto::RoutingServiceClient;
 pub(crate) use daw_proto::TakeServiceClient;
 pub(crate) use daw_proto::TempoMapServiceClient;
 pub(crate) use daw_proto::TrackServiceClient;
+pub(crate) use daw_proto::toolbar::ToolbarServiceClient;
 pub(crate) use daw_proto::transport::transport::TransportServiceClient;
 pub use roam::ErasedCaller;
 
@@ -155,6 +156,7 @@ mod project;
 mod regions;
 mod routing;
 mod tempo_map;
+mod toolbar;
 mod tracks;
 mod transport;
 
@@ -172,6 +174,7 @@ pub use self::project::Project;
 pub use self::regions::Regions;
 pub use self::routing::{HardwareOutputs, Receives, RouteHandle, Sends};
 pub use self::tempo_map::TempoMap;
+pub use self::toolbar::Toolbar;
 pub use self::tracks::{TrackHandle, Tracks};
 pub use self::transport::Transport;
 
@@ -198,6 +201,7 @@ pub struct DawClients {
     pub(crate) ext_state: ExtStateServiceClient,
     pub(crate) health: HealthServiceClient,
     pub(crate) input: InputServiceClient,
+    pub(crate) toolbar: ToolbarServiceClient,
 }
 
 impl DawClients {
@@ -223,7 +227,8 @@ impl DawClients {
             audio_engine: AudioEngineServiceClient::new(handle.clone()),
             ext_state: ExtStateServiceClient::new(handle.clone()),
             health: HealthServiceClient::new(handle.clone()),
-            input: InputServiceClient::new(handle),
+            input: InputServiceClient::new(handle.clone()),
+            toolbar: ToolbarServiceClient::new(handle),
         }
     }
 }
@@ -514,6 +519,13 @@ impl Daw {
     /// manage key filter configuration.
     pub fn input(&self) -> Input {
         Input::new(self.clients.clone())
+    }
+
+    /// Access the toolbar management service.
+    ///
+    /// Extensions use this to add, update, and remove toolbar buttons.
+    pub fn toolbar(&self) -> Toolbar {
+        Toolbar::new(self.clients.clone())
     }
 
     /// List all installed FX plugins in the DAW.

@@ -36,7 +36,7 @@ use daw::service::{
     LiveMidiServiceDispatcher, MarkerServiceDispatcher, MidiAnalysisServiceDispatcher,
     MidiServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
     RoutingServiceDispatcher, TakeServiceDispatcher, TempoMapServiceDispatcher,
-    TrackServiceDispatcher, TransportServiceDispatcher,
+    ToolbarServiceDispatcher, TrackServiceDispatcher, TransportServiceDispatcher,
 };
 
 // ============================================================================
@@ -172,6 +172,7 @@ async fn register_daw_dispatcher() {
     let health = daw::reaper::ReaperHealth::new();
     let action_registry = daw::reaper::ReaperActionRegistry::new();
     let input = daw::reaper::ReaperInput::new();
+    let toolbar = daw::reaper::ReaperToolbar::new();
 
     // Import service descriptor functions for method_id routing
     use daw::service::{
@@ -183,7 +184,8 @@ async fn register_daw_dispatcher() {
         midi_service_service_descriptor, project_service_service_descriptor,
         region_service_service_descriptor, routing_service_service_descriptor,
         take_service_service_descriptor, tempo_map_service_service_descriptor,
-        track_service_service_descriptor, transport_service_service_descriptor,
+        toolbar_service_service_descriptor, track_service_service_descriptor,
+        transport_service_service_descriptor,
     };
 
     // Compose all 16 service dispatchers via RoutedHandler
@@ -259,6 +261,10 @@ async fn register_daw_dispatcher() {
         .with(
             input_service_service_descriptor(),
             InputServiceDispatcher::new(input),
+        )
+        .with(
+            toolbar_service_service_descriptor(),
+            ToolbarServiceDispatcher::new(toolbar),
         );
 
     // Build the connection acceptor from the routed handler
@@ -273,7 +279,7 @@ async fn register_daw_dispatcher() {
         guest_loader::launch_guests(&bootstrap_sock);
     }
 
-    info!("DAW bridge registered (18 services, socket + SHM)");
+    info!("DAW bridge registered (19 services, socket + SHM)");
 }
 
 // ============================================================================
@@ -392,6 +398,9 @@ extern "C" fn timer_callback() {
             daw::reaper::poll_and_broadcast_items();
             daw::reaper::poll_and_broadcast_routing();
             daw::reaper::poll_and_broadcast_tempo_map();
+
+            // Process deferred toolbar operations
+            daw::reaper::process_toolbar_ops();
         }
     });
     if let Err(e) = result {

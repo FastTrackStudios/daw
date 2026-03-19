@@ -55,6 +55,7 @@ pub mod region;
 pub mod resource;
 pub mod routing;
 pub mod tempo_map;
+pub mod toolbar;
 pub mod track;
 pub mod transport;
 pub mod ui;
@@ -79,6 +80,7 @@ pub use project::ReaperProject;
 pub use region::ReaperRegion;
 pub use routing::ReaperRouting;
 pub use tempo_map::ReaperTempoMap;
+pub use toolbar::ReaperToolbar;
 pub use track::ReaperTrack;
 pub use transport::ReaperTransport;
 
@@ -100,3 +102,6 @@ pub use item::{init_item_broadcaster, poll_and_broadcast_items};
 
 // Re-export routing broadcaster functions
 pub use routing::{init_routing_broadcaster, poll_and_broadcast_routing};
+
+// Re-export toolbar deferred ops processor
+pub use toolbar::process_deferred_ops as process_toolbar_ops;
