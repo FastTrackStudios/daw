@@ -898,6 +898,9 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     ]);
     if let Some(ref f) = filter {
         test_cmd.arg(f);
+    } else {
+        // Skip long-running diagnostic tests that are meant to be run explicitly.
+        test_cmd.args(["--skip", "timer_responsive_for_60s"]);
     }
     test_cmd.env("FTS_SOCKET", &socket_path);
     if keep_open {
