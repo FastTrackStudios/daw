@@ -1173,45 +1173,41 @@ impl FxChainNode {
 }
 
 // ---------------------------------------------------------------------------
-// RPP Serialization
+// RPP Serialization (via RppSerialize trait)
 // ---------------------------------------------------------------------------
 
-impl FxChain {
-    /// Serialize this FX chain to valid RPP text (a complete `<FXCHAIN>...\n>` block).
-    ///
-    /// Uses 2-space indentation per nesting level, matching REAPER conventions.
-    // r[impl rpp.write.fx-chain]
-    pub fn to_rpp_string(&self) -> String {
-        let mut out = String::new();
-        out.push_str("<FXCHAIN\n");
+use super::serialize::RppSerialize;
 
-        let indent = "  ";
+// r[impl rpp.write.fx-chain]
+impl RppSerialize for FxChain {
+    fn write_rpp(&self, out: &mut String, indent: &str) {
+        out.push_str(&format!("{}<FXCHAIN\n", indent));
+
+        let inner = format!("{}  ", indent);
 
         if let Some(rect) = &self.window_rect {
             out.push_str(&format!(
                 "{}WNDRECT {} {} {} {}\n",
-                indent, rect[0], rect[1], rect[2], rect[3]
+                inner, rect[0], rect[1], rect[2], rect[3]
             ));
         }
-        out.push_str(&format!("{}SHOW {}\n", indent, self.show));
-        out.push_str(&format!("{}LASTSEL {}\n", indent, self.last_sel));
+        out.push_str(&format!("{}SHOW {}\n", inner, self.show));
+        out.push_str(&format!("{}LASTSEL {}\n", inner, self.last_sel));
         out.push_str(&format!(
             "{}DOCKED {}\n",
-            indent,
+            inner,
             if self.docked { 1 } else { 0 }
         ));
 
         for node in &self.nodes {
-            node.write_rpp(&mut out, indent);
+            node.write_rpp(out, &inner);
         }
 
-        out.push_str(">\n");
-        out
+        out.push_str(&format!("{}>\n", indent));
     }
 }
 
-impl FxChainNode {
-    /// Write this node (plugin or container) to RPP text at the given indentation.
+impl RppSerialize for FxChainNode {
     fn write_rpp(&self, out: &mut String, indent: &str) {
         match self {
             FxChainNode::Plugin(p) => p.write_rpp(out, indent),
@@ -1220,9 +1216,7 @@ impl FxChainNode {
     }
 }
 
-impl FxPlugin {
-    /// Write this plugin to RPP text at the given indentation level.
-    ///
+impl RppSerialize for FxPlugin {
     /// Emits the BYPASS preamble, the raw plugin block (preserving binary state),
     /// and post-plugin metadata (PRESETNAME, FLOATPOS, FXID, WAK).
     fn write_rpp(&self, out: &mut String, indent: &str) {
@@ -1334,7 +1328,7 @@ impl FxPlugin {
             out.push_str(&format!(
                 "{}PARM_TCP {}\n",
                 indent,
-                tcp_param.to_rpp_string()
+                tcp_param.format_rpp()
             ));
         }
     }
@@ -1342,7 +1336,7 @@ impl FxPlugin {
 
 impl FxParamRef {
     /// Format as RPP text: `0:_Main_p1__Bank` or just `0`.
-    fn to_rpp_string(&self) -> String {
+    fn format_rpp(&self) -> String {
         match &self.name {
             Some(name) => format!("{}:{}", self.index, name),
             None => format!("{}", self.index),
@@ -1350,8 +1344,7 @@ impl FxParamRef {
     }
 }
 
-impl FxParamEnvelope {
-    /// Write this parameter envelope to RPP text at the given indentation.
+impl RppSerialize for FxParamEnvelope {
     fn write_rpp(&self, out: &mut String, indent: &str) {
         // Use raw_block if available for round-trip fidelity
         if !self.raw_block.is_empty() {
@@ -1373,7 +1366,7 @@ impl FxParamEnvelope {
         out.push_str(&format!(
             "{}<PARMENV {} {} {} {}\n",
             indent,
-            self.param.to_rpp_string(),
+            self.param.format_rpp(),
             self.mode,
             self.range_max,
             self.default_value,
@@ -1409,9 +1402,7 @@ impl FxParamEnvelope {
     }
 }
 
-impl FxContainer {
-    /// Write this container to RPP text at the given indentation level.
-    ///
+impl RppSerialize for FxContainer {
     /// Emits the BYPASS preamble, the `<CONTAINER ...>` block with recursive
     /// children, and post-container metadata (FLOATPOS, FXID).
     fn write_rpp(&self, out: &mut String, indent: &str) {

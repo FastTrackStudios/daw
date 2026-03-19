@@ -16,6 +16,7 @@ use crate::convert::{
 };
 use crate::primitives::{RppBlock, RppBlockContent, Token};
 use crate::rpp_tree::{read_rpp, read_rpp_chunk, write_rpp, RChunk};
+use crate::types::serialize::RppSerialize;
 use crate::types::track::{
     FolderSettings, FolderState, MonitorMode, MuteSoloSettings, RecordMode, RecordSettings,
     Track as RppTrack, TrackSoloState, VolPanSettings,

@@ -44,6 +44,7 @@ pub mod fx_chain;
 pub mod item;
 pub mod marker_region;
 pub mod project;
+pub mod serialize;
 pub mod time_pos_utils;
 pub mod time_tempo;
 pub mod track;
@@ -67,6 +68,7 @@ pub use time_pos_utils::{
 };
 pub use time_tempo::{TempoTimeEnvelope, TempoTimePoint};
 pub use track::{Track, TrackParseOptions};
+pub use serialize::RppSerialize;
 pub use track_ops::{
     classify_track, group_by_names, group_by_predicate, group_into_folder,
     move_into_existing_folder, organize_into_fts_hierarchy, wrap_in_folder, TrackRole,

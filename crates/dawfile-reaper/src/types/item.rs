@@ -403,6 +403,23 @@ pub struct Take {
     pub source: Option<SourceBlock>,        // SOURCE block
 }
 
+impl Default for Take {
+    fn default() -> Self {
+        Self {
+            is_selected: false,
+            name: String::new(),
+            volpan: None,
+            slip_offset: 0.0,
+            playrate: None,
+            channel_mode: ChannelMode::Normal,
+            take_color: None,
+            take_guid: None,
+            rec_pass: None,
+            source: None,
+        }
+    }
+}
+
 /// Source block for a take
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SourceBlock {

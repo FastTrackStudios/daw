@@ -23,6 +23,7 @@ use daw_proto::{
     MoveToContainerRequest, ProjectContext, SetContainerChannelConfigRequest,
     SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
 };
+use dawfile_reaper::RppSerialize;
 use reaper_high::{FxChain, MAX_TRACK_CHUNK_SIZE, Reaper, Track};
 use reaper_medium::{ChunkCacheHint, FxPresetRef, TrackFxLocation, TransferBehavior};
 use roam::Tx;
