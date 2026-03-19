@@ -4,6 +4,7 @@
 
 #![deny(unsafe_code)]
 
+pub mod action_registry;
 pub mod actions;
 pub mod audio_accessor;
 pub mod audio_engine;
@@ -31,6 +32,7 @@ pub mod transport;
 pub mod ui;
 pub mod undo;
 
+pub use action_registry::*;
 pub use actions::*;
 pub use audio_accessor::*;
 pub use audio_engine::*;

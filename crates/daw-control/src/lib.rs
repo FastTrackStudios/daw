@@ -116,6 +116,7 @@ pub use daw_proto::transport::transport::Transport as TransportState;
 use std::sync::Arc;
 
 // Service clients are internal — consumers use high-level handles instead.
+pub(crate) use daw_proto::ActionRegistryServiceClient;
 pub(crate) use daw_proto::AudioEngineServiceClient;
 pub(crate) use daw_proto::AutomationServiceClient;
 pub(crate) use daw_proto::ExtStateServiceClient;
@@ -139,6 +140,7 @@ pub use roam::ErasedCaller;
 pub mod error;
 pub use error::{Error, Result};
 
+mod action_registry;
 mod audio_engine;
 mod automation;
 mod ext_state;
@@ -154,6 +156,7 @@ mod tempo_map;
 mod tracks;
 mod transport;
 
+pub use self::action_registry::ActionRegistry;
 pub use self::audio_engine::AudioEngine;
 pub use self::automation::{EnvelopeHandle, Envelopes};
 pub use self::ext_state::ExtState;
@@ -172,6 +175,7 @@ pub use self::transport::Transport;
 /// Service clients for a DAW connection
 #[derive(Clone)]
 pub struct DawClients {
+    pub(crate) action_registry: ActionRegistryServiceClient,
     pub(crate) transport: TransportServiceClient,
     pub(crate) project: ProjectServiceClient,
     pub(crate) marker: MarkerServiceClient,
@@ -196,6 +200,7 @@ impl DawClients {
     /// Create service clients from a connection handle
     pub fn new(handle: ErasedCaller) -> Self {
         Self {
+            action_registry: ActionRegistryServiceClient::new(handle.clone()),
             transport: TransportServiceClient::new(handle.clone()),
             project: ProjectServiceClient::new(handle.clone()),
             marker: MarkerServiceClient::new(handle.clone()),
@@ -491,6 +496,11 @@ impl Daw {
     /// ```
     pub fn ext_state(&self) -> ExtState {
         ExtState::new(self.clients.clone())
+    }
+
+    /// Access the action registry for registering custom REAPER actions.
+    pub fn action_registry(&self) -> ActionRegistry {
+        ActionRegistry::new(self.clients.clone())
     }
 
     /// List all installed FX plugins in the DAW.

@@ -32,6 +32,7 @@
 
 pub mod safe_wrappers;
 
+pub mod action_registry;
 pub mod audio_accessor;
 pub mod audio_engine;
 pub mod automation;
@@ -58,6 +59,7 @@ pub mod transport;
 pub mod ui;
 
 // Re-export the main types
+pub use action_registry::ReaperActionRegistry;
 pub use audio_accessor::ReaperAudioAccessor;
 pub use audio_engine::ReaperAudioEngine;
 pub use automation::ReaperAutomation;

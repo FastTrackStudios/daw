@@ -24,8 +24,8 @@ use routed_handler::{DawConnectionAcceptor, RoutedHandler};
 
 // Service dispatchers for method ID routing
 use daw::service::{
-    AudioEngineServiceDispatcher, ExtStateServiceDispatcher, FxServiceDispatcher,
-    HealthServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
+    ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, ExtStateServiceDispatcher,
+    FxServiceDispatcher, HealthServiceDispatcher, ItemServiceDispatcher, LiveMidiServiceDispatcher,
     MarkerServiceDispatcher, MidiAnalysisServiceDispatcher, MidiServiceDispatcher,
     ProjectServiceDispatcher, RegionServiceDispatcher, RoutingServiceDispatcher,
     TakeServiceDispatcher, TempoMapServiceDispatcher, TrackServiceDispatcher,
@@ -162,17 +162,19 @@ async fn register_daw_dispatcher() {
     let item = daw::reaper::ReaperItem::new();
     let take = daw::reaper::ReaperTake::new();
     let health = daw::reaper::ReaperHealth::new();
+    let action_registry = daw::reaper::ReaperActionRegistry::new();
 
     // Import service descriptor functions for method_id routing
     use daw::service::{
-        audio_engine_service_service_descriptor, ext_state_service_service_descriptor,
-        fx_service_service_descriptor, health_service_service_descriptor,
-        item_service_service_descriptor, live_midi_service_service_descriptor,
-        marker_service_service_descriptor, midi_analysis_service_service_descriptor,
-        midi_service_service_descriptor, project_service_service_descriptor,
-        region_service_service_descriptor, routing_service_service_descriptor,
-        take_service_service_descriptor, tempo_map_service_service_descriptor,
-        track_service_service_descriptor, transport_service_service_descriptor,
+        action_registry_service_service_descriptor, audio_engine_service_service_descriptor,
+        ext_state_service_service_descriptor, fx_service_service_descriptor,
+        health_service_service_descriptor, item_service_service_descriptor,
+        live_midi_service_service_descriptor, marker_service_service_descriptor,
+        midi_analysis_service_service_descriptor, midi_service_service_descriptor,
+        project_service_service_descriptor, region_service_service_descriptor,
+        routing_service_service_descriptor, take_service_service_descriptor,
+        tempo_map_service_service_descriptor, track_service_service_descriptor,
+        transport_service_service_descriptor,
     };
 
     // Compose all 16 service dispatchers via RoutedHandler
@@ -240,6 +242,10 @@ async fn register_daw_dispatcher() {
         .with(
             take_service_service_descriptor(),
             TakeServiceDispatcher::new(take),
+        )
+        .with(
+            action_registry_service_service_descriptor(),
+            ActionRegistryServiceDispatcher::new(action_registry),
         );
 
     // Build the connection acceptor from the routed handler
@@ -254,7 +260,7 @@ async fn register_daw_dispatcher() {
         guest_loader::launch_guests(&bootstrap_sock);
     }
 
-    info!("DAW bridge registered (16 services, socket + SHM)");
+    info!("DAW bridge registered (17 services, socket + SHM)");
 }
 
 // ============================================================================

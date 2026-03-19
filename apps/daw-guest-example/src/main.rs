@@ -160,6 +160,38 @@ async fn run() -> Result<()> {
         );
     }
 
+    // ── Action Registry ────────────────────────────────────────────────────
+    info!("[guest:{pid}] Testing action registry...");
+    let actions = daw.action_registry();
+
+    // Register a custom action
+    let cmd_id = actions
+        .register("fts.guest.hello", "FTS: Guest Hello World")
+        .await
+        .map_err(|e| eyre!("{e}"))?;
+    info!("[guest:{pid}] Registered action 'fts.guest.hello' → cmd_id={cmd_id}");
+
+    // Check it's registered
+    let exists = actions
+        .is_registered("fts.guest.hello")
+        .await
+        .map_err(|e| eyre!("{e}"))?;
+    info!("[guest:{pid}] is_registered('fts.guest.hello') = {exists}");
+
+    // Look up command ID
+    let looked_up = actions
+        .lookup_command_id("fts.guest.hello")
+        .await
+        .map_err(|e| eyre!("{e}"))?;
+    info!("[guest:{pid}] lookup_command_id('fts.guest.hello') = {looked_up:?}");
+
+    // Try looking up a non-existent action
+    let missing = actions
+        .is_registered("fts.nonexistent.action")
+        .await
+        .map_err(|e| eyre!("{e}"))?;
+    info!("[guest:{pid}] is_registered('fts.nonexistent.action') = {missing}");
+
     // ── Cleanup ──────────────────────────────────────────────────────────
     info!("[guest:{pid}] Cleaning up: closing test project tab...");
     let _ = tracks.remove_all().await;
