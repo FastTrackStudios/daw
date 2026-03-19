@@ -1462,6 +1462,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "reaper-launcher",
+ "reaper-test",
  "serde_json",
 ]
 
@@ -1470,6 +1471,7 @@ name = "dawfile-reaper"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "criterion",
  "daw-proto 0.1.0",
  "libc",
@@ -5156,6 +5158,7 @@ dependencies = [
  "daw",
  "eyre",
  "moire",
+ "reaper-launcher",
  "reaper-test-macro",
  "roam",
  "roam-stream",

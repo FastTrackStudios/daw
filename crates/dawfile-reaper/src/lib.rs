@@ -59,7 +59,9 @@ pub mod index;
 pub mod io;
 pub mod primitives;
 pub mod rpp_tree;
+pub mod builder;
 pub mod setlist_rpp;
+pub mod stock_fx;
 pub mod types;
 
 #[cfg(test)]
@@ -162,12 +164,17 @@ pub use rpp_tree::{
     stringify_rpp_node, tokenize as tokenize_tree, write_rpp, GuidStripPolicy, RChunk, RNode,
     RNodeTree, RToken as TreeToken,
 };
+pub use stock_fx::{
+    EqBand, EqBandType, ReaComp, ReaControlMidi, ReaDelay, ReaEq, ReaFir, ReaFirMode, ReaGate,
+    ReaInsert, ReaLimit, ReaPitch, ReaStream, ReaSynth, ReaTune, ReaVerbate, ReaVerb, ReaXcomp,
+    StockFx,
+};
 pub use types::{
     parse_js_params, DecodeOptions, Envelope, FxChain, FxChainNode, FxContainer, FxEnvelopePoint,
     FxParamEnvelope, FxParamRef, FxPlugin, Item, JsParamValue, MarkerRegion,
     MarkerRegionCollection, MidiEvent, MidiEventType, MidiSource, MidiSourceEvent, PluginType,
-    ReaperProject, SourceBlock, SourceType, StretchMarker, TempoTimeEnvelope, TempoTimePoint,
-    Track, TrackParseOptions,
+    ReaperProject, RppSerialize, SourceBlock, SourceType, StretchMarker, TempoTimeEnvelope,
+    TempoTimePoint, Track, TrackParseOptions,
 };
 
 /// Main error type for RPP parsing
