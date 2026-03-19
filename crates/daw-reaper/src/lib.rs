@@ -61,7 +61,7 @@ pub mod transport;
 pub mod ui;
 
 // Re-export the main types
-pub use action_registry::ReaperActionRegistry;
+pub use action_registry::{ReaperActionRegistry, register_extension_menu};
 pub use audio_accessor::ReaperAudioAccessor;
 pub use audio_engine::ReaperAudioEngine;
 pub use automation::ReaperAutomation;

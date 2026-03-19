@@ -6,13 +6,17 @@
 //! When a registered action is triggered, all subscribers receive an
 //! `ActionEvent::Triggered` event. Guests handle action logic — the host
 //! is domain-agnostic.
+//!
+//! Actions registered with `show_in_menu: true` are automatically added to the
+//! Extensions > FastTrackStudio menu. The menu hierarchy is derived from the
+//! command name prefix (e.g., `FTS_SESSION_*` → Session submenu).
 
 use crate::main_thread;
 use daw_proto::{ActionEvent, ActionRegistryService};
 use reaper_high::Reaper;
-use reaper_medium::{CommandId, ProjectContext};
+use reaper_medium::{CommandId, Hmenu, HookCustomMenu, MenuHookFlag, ProjectContext, ReaperStr};
 use roam::Tx;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
@@ -31,6 +35,20 @@ static REGISTERED_ACTIONS: std::sync::OnceLock<Mutex<HashMap<String, u32>>> =
 static ACTION_BROADCASTER: std::sync::OnceLock<broadcast::Sender<String>> =
     std::sync::OnceLock::new();
 
+/// Menu metadata for actions that should appear in the Extensions menu.
+static MENU_ACTIONS: std::sync::OnceLock<Mutex<Vec<MenuActionDef>>> = std::sync::OnceLock::new();
+
+/// Action metadata stored for menu building.
+#[derive(Clone)]
+struct MenuActionDef {
+    /// REAPER command name (e.g., "FTS_SESSION_TOGGLE_PLAYBACK")
+    command_name: String,
+    /// Display name shown in menu (the description from registration)
+    display_name: String,
+    /// Menu group derived from command name (e.g., "Session")
+    group: String,
+}
+
 fn registered_actions() -> &'static Mutex<HashMap<String, u32>> {
     REGISTERED_ACTIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -40,6 +58,68 @@ fn action_broadcaster() -> &'static broadcast::Sender<String> {
         let (tx, _rx) = broadcast::channel::<String>(64);
         tx
     })
+}
+
+fn menu_actions() -> &'static Mutex<Vec<MenuActionDef>> {
+    MENU_ACTIONS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Derive a menu group name from a REAPER command name.
+///
+/// `FTS_SESSION_TOGGLE_PLAYBACK` → "Session"
+/// `FTS_TRANSPORT_PLAY_STOP` → "Transport"
+/// `FTS_MARKERS_REGIONS_INSERT_MARKER` → "Markers Regions"
+///
+/// Convention: strip "FTS_" prefix, then take segments until we hit
+/// a lowercase-starting word (action names are all-caps in the prefix part,
+/// but after titlecasing they become mixed). Since the raw command name is
+/// ALL_CAPS, we use a heuristic: known domain prefixes get titlecased.
+fn derive_menu_group(command_name: &str) -> String {
+    let name = command_name.strip_prefix("FTS_").unwrap_or(command_name);
+
+    // Known domain prefixes (order matters — longest match first)
+    let known_domains = [
+        "MARKERS_REGIONS",
+        "DYNAMIC_TEMPLATE",
+        "VISIBILITY_MANAGER",
+        "AUTO_COLOR",
+        "REAPER_EXTENSION",
+        "TRANSPORT",
+        "SESSION",
+        "SIGNAL",
+        "SYNC",
+        "DAW",
+    ];
+
+    for domain in &known_domains {
+        if name.starts_with(domain) {
+            return titlecase_underscored(domain);
+        }
+    }
+
+    // Fallback: use first segment
+    name.split('_')
+        .next()
+        .map(titlecase_underscored)
+        .unwrap_or_default()
+}
+
+/// Titlecase an underscored string: "MARKERS_REGIONS" → "Markers Regions"
+fn titlecase_underscored(s: &str) -> String {
+    s.split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                Some(c) => {
+                    let upper: String = c.to_uppercase().collect();
+                    let lower: String = chars.as_str().to_lowercase();
+                    format!("{upper}{lower}")
+                }
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Notify all subscribers that an action was triggered.
@@ -53,6 +133,150 @@ fn notify_action_triggered(command_name: String) {
     }
     let _ = tx.send(command_name);
 }
+
+// ============================================================================
+// Extensions Menu
+// ============================================================================
+
+/// Register the Extensions menu hook with REAPER.
+///
+/// Call once during plugin initialization after `ReaperSession` is created.
+/// The hook is invoked each time REAPER shows the Extensions menu,
+/// dynamically building it from all registered actions with `show_in_menu`.
+pub fn register_extension_menu(session: &mut reaper_medium::ReaperSession) {
+    Reaper::get().medium_reaper().add_extensions_main_menu();
+    if let Err(e) = session.plugin_register_add_hook_custom_menu::<FtsMenuHook>() {
+        warn!("Failed to register menu hook: {:?}", e);
+    } else {
+        info!("Extensions menu hook registered");
+    }
+}
+
+/// REAPER menu hook implementation for FastTrackStudio.
+struct FtsMenuHook;
+
+impl HookCustomMenu for FtsMenuHook {
+    fn call(menuidstr: &ReaperStr, hmenu: Hmenu, flag: MenuHookFlag) {
+        let result = std::panic::catch_unwind(|| {
+            if flag != MenuHookFlag::Init || menuidstr.to_str() != "Main extensions" {
+                return;
+            }
+            build_extension_menu(hmenu);
+        });
+        if let Err(e) = result {
+            warn!("Panic in menu hook: {:?}", e);
+        }
+    }
+}
+
+/// Build the Extensions > FastTrackStudio menu from registered actions.
+fn build_extension_menu(hmenu: Hmenu) {
+    let actions = menu_actions().lock().unwrap().clone();
+    if actions.is_empty() {
+        return;
+    }
+
+    let swell = reaper_low::Swell::get();
+
+    // Group actions by their derived menu group
+    let mut groups: BTreeMap<String, Vec<MenuActionDef>> = BTreeMap::new();
+    for action in &actions {
+        groups
+            .entry(action.group.clone())
+            .or_default()
+            .push(action.clone());
+    }
+
+    // Create "FastTrackStudio" submenu
+    let fts_menu = swell.CreatePopupMenu();
+
+    let reaper = Reaper::get();
+    let medium = reaper.medium_reaper();
+
+    for (group_name, group_actions) in &mut groups {
+        // Create submenu for this group
+        let submenu = swell.CreatePopupMenu();
+
+        // Sort actions by display name
+        group_actions.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+
+        for action in group_actions.iter() {
+            let lookup = format!("_{}", action.command_name);
+            if let Some(cmd_id) = medium.named_command_lookup(lookup) {
+                let mut text_buf: Vec<u8> = action.display_name.as_bytes().to_vec();
+                text_buf.push(0);
+                let mut mii = reaper_low::raw::MENUITEMINFO {
+                    fMask: 0x40 | 0x04, // MIIM_TYPE | MIIM_ID
+                    fType: 0,           // MFT_STRING
+                    wID: cmd_id.get(),
+                    hSubMenu: std::ptr::null_mut(),
+                    dwTypeData: text_buf.as_mut_ptr() as *mut _,
+                    ..unsafe { std::mem::zeroed() }
+                };
+                let count = unsafe { swell.GetMenuItemCount(submenu) };
+                unsafe {
+                    swell.InsertMenuItem(submenu, count, 1, &mut mii);
+                }
+            }
+        }
+
+        // Add the group submenu to the FTS menu
+        let mut label_buf: Vec<u8> = group_name.as_bytes().to_vec();
+        label_buf.push(0);
+        let mut mii = reaper_low::raw::MENUITEMINFO {
+            fMask: 0x10 | 0x40 | 0x04, // MIIM_SUBMENU | MIIM_TYPE | MIIM_ID
+            fType: 0,
+            wID: 0,
+            hSubMenu: submenu,
+            dwTypeData: label_buf.as_mut_ptr() as *mut _,
+            ..unsafe { std::mem::zeroed() }
+        };
+        let count = unsafe { swell.GetMenuItemCount(fts_menu) };
+        unsafe {
+            swell.InsertMenuItem(fts_menu, count, 1, &mut mii);
+        }
+    }
+
+    // Insert "FastTrackStudio" into the Extensions menu
+    let parent = hmenu.as_ptr();
+    let mut label = b"FastTrackStudio\0".to_vec();
+
+    // Add separator before our menu if there are already items
+    let existing = unsafe { swell.GetMenuItemCount(parent) };
+    if existing > 0 {
+        let mut sep = reaper_low::raw::MENUITEMINFO {
+            fMask: 0x40,  // MIIM_TYPE
+            fType: 0x800, // MFT_SEPARATOR
+            ..unsafe { std::mem::zeroed() }
+        };
+        unsafe {
+            swell.InsertMenuItem(parent, existing, 1, &mut sep);
+        }
+    }
+
+    let mut mii = reaper_low::raw::MENUITEMINFO {
+        fMask: 0x10 | 0x40 | 0x04, // MIIM_SUBMENU | MIIM_TYPE | MIIM_ID
+        fType: 0,
+        wID: 0,
+        hSubMenu: fts_menu,
+        dwTypeData: label.as_mut_ptr() as *mut _,
+        ..unsafe { std::mem::zeroed() }
+    };
+    let pos = unsafe { swell.GetMenuItemCount(parent) };
+    unsafe {
+        swell.InsertMenuItem(parent, pos, 1, &mut mii);
+    }
+
+    debug!(
+        "Built FastTrackStudio menu ({} actions in {} groups)",
+        actions.len(),
+        groups.len()
+    );
+}
+
+// ============================================================================
+// Action Registry Service
+// ============================================================================
 
 /// REAPER action registry implementation.
 #[derive(Clone)]
@@ -71,7 +295,12 @@ impl Default for ReaperActionRegistry {
 }
 
 impl ActionRegistryService for ReaperActionRegistry {
-    async fn register_action(&self, command_name: String, description: String) -> u32 {
+    async fn register_action(
+        &self,
+        command_name: String,
+        description: String,
+        show_in_menu: bool,
+    ) -> u32 {
         // Check if already registered by us
         {
             let map = registered_actions().lock().unwrap();
@@ -142,6 +371,17 @@ impl ActionRegistryService for ReaperActionRegistry {
                     .lock()
                     .unwrap()
                     .insert(command_name.clone(), cmd_id);
+
+                // Store menu metadata if this action should appear in the menu
+                if show_in_menu {
+                    let group = derive_menu_group(&command_name);
+                    menu_actions().lock().unwrap().push(MenuActionDef {
+                        command_name: command_name.clone(),
+                        display_name: description.clone(),
+                        group,
+                    });
+                }
+
                 info!("Action '{}' registered: cmd_id={}", command_name, cmd_id);
                 cmd_id
             }
@@ -160,10 +400,13 @@ impl ActionRegistryService for ReaperActionRegistry {
             .is_some();
 
         if removed {
+            // Also remove from menu metadata
+            menu_actions()
+                .lock()
+                .unwrap()
+                .retain(|a| a.command_name != command_name);
+
             info!("Unregistered action '{}' (from tracking map)", command_name);
-            // Note: REAPER doesn't have a public API to fully unregister a command_id.
-            // The action will remain in REAPER's list until restart, but won't do
-            // anything since the closure was captured by the now-forgotten RegisteredAction.
         } else {
             debug!(
                 "Action '{}' not found in our registry (may not have been registered by us)",
@@ -178,7 +421,6 @@ impl ActionRegistryService for ReaperActionRegistry {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
-            // NamedCommandLookup expects underscore prefix for custom actions
             medium
                 .named_command_lookup(format!("_{command_name}"))
                 .is_some()

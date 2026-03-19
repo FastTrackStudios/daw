@@ -19,11 +19,30 @@ impl ActionRegistry {
     /// Register a custom REAPER action.
     ///
     /// Returns the numeric command ID assigned by REAPER, or 0 on failure.
+    /// The action will NOT appear in the Extensions menu — use
+    /// `register_in_menu` if you want it visible in menus.
     pub async fn register(&self, command_name: &str, description: &str) -> crate::Result<u32> {
         Ok(self
             .clients
             .action_registry
-            .register_action(command_name.to_string(), description.to_string())
+            .register_action(command_name.to_string(), description.to_string(), false)
+            .await?)
+    }
+
+    /// Register a custom REAPER action and show it in the Extensions menu.
+    ///
+    /// Returns the numeric command ID assigned by REAPER, or 0 on failure.
+    /// The menu hierarchy is derived from the command name prefix
+    /// (e.g., `FTS_SESSION_*` → Session submenu).
+    pub async fn register_in_menu(
+        &self,
+        command_name: &str,
+        description: &str,
+    ) -> crate::Result<u32> {
+        Ok(self
+            .clients
+            .action_registry
+            .register_action(command_name.to_string(), description.to_string(), true)
             .await?)
     }
 

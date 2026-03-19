@@ -57,9 +57,17 @@ pub trait ActionRegistryService {
     /// - `command_name`: Unique identifier (e.g., "FTS_SIGNAL_ARM"). Must be
     ///   globally unique across all extensions.
     /// - `description`: Human-readable label shown in REAPER's action list.
+    /// - `show_in_menu`: If true, the action appears in REAPER's Extensions >
+    ///   FastTrackStudio menu. The menu hierarchy is derived from the command
+    ///   name prefix (e.g., `FTS_SESSION_*` → Session submenu).
     ///
     /// Returns the numeric command ID assigned by REAPER, or 0 on failure.
-    async fn register_action(&self, command_name: String, description: String) -> u32;
+    async fn register_action(
+        &self,
+        command_name: String,
+        description: String,
+        show_in_menu: bool,
+    ) -> u32;
 
     /// Unregister a previously registered action.
     ///

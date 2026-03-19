@@ -468,10 +468,11 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         .set(Fragile::new(app))
         .expect("App already initialized");
 
-    // Register timer callback for periodic updates
+    // Register timer callback for periodic updates and Extensions menu hook
     let app = APP_INSTANCE.get().expect("App should be initialized").get();
     let mut session = app.session.borrow_mut();
     session.plugin_register_add_timer(timer_callback)?;
+    daw::reaper::register_extension_menu(&mut session);
     drop(session);
 
     info!("daw-bridge initialized successfully");
