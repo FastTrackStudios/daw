@@ -380,7 +380,14 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
 
     // Initialize REAPER high-level API
     match HighReaper::load(context).setup() {
-        Ok(_) => info!("REAPER high-level API initialized"),
+        Ok(_) => {
+            info!("REAPER high-level API initialized");
+            // Register hookcommand callback so custom action closures fire
+            // when actions are triggered via Main_OnCommandEx / KBD_OnMainActionEx.
+            if let Err(e) = HighReaper::get().wake_up() {
+                debug!("REAPER high-level API wake_up failed: {e}");
+            }
+        }
         Err(_) => debug!("REAPER high-level API already initialized"),
     }
 
