@@ -34,9 +34,10 @@ use daw::service::{
     ActionRegistryServiceDispatcher, AudioEngineServiceDispatcher, ExtStateServiceDispatcher,
     FxServiceDispatcher, HealthServiceDispatcher, InputServiceDispatcher, ItemServiceDispatcher,
     LiveMidiServiceDispatcher, MarkerServiceDispatcher, MidiAnalysisServiceDispatcher,
-    MidiServiceDispatcher, ProjectServiceDispatcher, RegionServiceDispatcher,
-    RoutingServiceDispatcher, TakeServiceDispatcher, TempoMapServiceDispatcher,
-    ToolbarServiceDispatcher, TrackServiceDispatcher, TransportServiceDispatcher,
+    MidiServiceDispatcher, PluginLoaderServiceDispatcher, ProjectServiceDispatcher,
+    RegionServiceDispatcher, RoutingServiceDispatcher, TakeServiceDispatcher,
+    TempoMapServiceDispatcher, ToolbarServiceDispatcher, TrackServiceDispatcher,
+    TransportServiceDispatcher,
 };
 
 // ============================================================================
@@ -173,6 +174,7 @@ async fn register_daw_dispatcher() {
     let action_registry = daw::reaper::ReaperActionRegistry::new();
     let input = daw::reaper::ReaperInput::new();
     let toolbar = daw::reaper::ReaperToolbar::new();
+    let plugin_loader = daw::reaper::ReaperPluginLoader::new();
 
     // Import service descriptor functions for method_id routing
     use daw::service::{
@@ -181,11 +183,11 @@ async fn register_daw_dispatcher() {
         health_service_service_descriptor, input_service_service_descriptor,
         item_service_service_descriptor, live_midi_service_service_descriptor,
         marker_service_service_descriptor, midi_analysis_service_service_descriptor,
-        midi_service_service_descriptor, project_service_service_descriptor,
-        region_service_service_descriptor, routing_service_service_descriptor,
-        take_service_service_descriptor, tempo_map_service_service_descriptor,
-        toolbar_service_service_descriptor, track_service_service_descriptor,
-        transport_service_service_descriptor,
+        midi_service_service_descriptor, plugin_loader_service_service_descriptor,
+        project_service_service_descriptor, region_service_service_descriptor,
+        routing_service_service_descriptor, take_service_service_descriptor,
+        tempo_map_service_service_descriptor, toolbar_service_service_descriptor,
+        track_service_service_descriptor, transport_service_service_descriptor,
     };
 
     // Compose all 16 service dispatchers via RoutedHandler
@@ -265,6 +267,10 @@ async fn register_daw_dispatcher() {
         .with(
             toolbar_service_service_descriptor(),
             ToolbarServiceDispatcher::new(toolbar),
+        )
+        .with(
+            plugin_loader_service_service_descriptor(),
+            PluginLoaderServiceDispatcher::new(plugin_loader),
         );
 
     // Build the connection acceptor from the routed handler
@@ -279,7 +285,7 @@ async fn register_daw_dispatcher() {
         guest_loader::launch_guests(&bootstrap_sock);
     }
 
-    info!("DAW bridge registered (19 services, socket + SHM)");
+    info!("DAW bridge registered (20 services, socket + SHM)");
 }
 
 // ============================================================================
@@ -423,6 +429,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
         .init();
 
     info!("daw-bridge starting...");
+
+    // Store plugin context for PluginLoaderService before REAPER consumes it
+    daw::reaper::set_plugin_context(context);
 
     // Initialize REAPER high-level API
     match HighReaper::load(context).setup() {

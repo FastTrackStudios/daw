@@ -135,6 +135,7 @@ pub(crate) use daw_proto::RoutingServiceClient;
 pub(crate) use daw_proto::TakeServiceClient;
 pub(crate) use daw_proto::TempoMapServiceClient;
 pub(crate) use daw_proto::TrackServiceClient;
+pub(crate) use daw_proto::plugin_loader::PluginLoaderServiceClient;
 pub(crate) use daw_proto::toolbar::ToolbarServiceClient;
 pub(crate) use daw_proto::transport::transport::TransportServiceClient;
 pub use roam::ErasedCaller;
@@ -152,6 +153,7 @@ mod items;
 mod markers;
 mod midi_analysis;
 mod midi_editor;
+mod plugin_loader;
 mod project;
 mod regions;
 mod routing;
@@ -170,6 +172,7 @@ pub use self::items::{ItemHandle, Items, ProjectItems, TakeHandle, Takes};
 pub use self::markers::Markers;
 pub use self::midi_analysis::MidiAnalysis;
 pub use self::midi_editor::MidiEditor;
+pub use self::plugin_loader::PluginLoader;
 pub use self::project::Project;
 pub use self::regions::Regions;
 pub use self::routing::{HardwareOutputs, Receives, RouteHandle, Sends};
@@ -202,6 +205,7 @@ pub struct DawClients {
     pub(crate) health: HealthServiceClient,
     pub(crate) input: InputServiceClient,
     pub(crate) toolbar: ToolbarServiceClient,
+    pub(crate) plugin_loader: PluginLoaderServiceClient,
 }
 
 impl DawClients {
@@ -228,7 +232,8 @@ impl DawClients {
             ext_state: ExtStateServiceClient::new(handle.clone()),
             health: HealthServiceClient::new(handle.clone()),
             input: InputServiceClient::new(handle.clone()),
-            toolbar: ToolbarServiceClient::new(handle),
+            toolbar: ToolbarServiceClient::new(handle.clone()),
+            plugin_loader: PluginLoaderServiceClient::new(handle),
         }
     }
 }
@@ -526,6 +531,10 @@ impl Daw {
     /// Extensions use this to add, update, and remove toolbar buttons.
     pub fn toolbar(&self) -> Toolbar {
         Toolbar::new(self.clients.clone())
+    }
+
+    pub fn plugin_loader(&self) -> PluginLoader {
+        PluginLoader::new(self.clients.clone())
     }
 
     /// List all installed FX plugins in the DAW.
