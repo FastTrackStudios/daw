@@ -605,9 +605,7 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     }
     let _ = std::fs::remove_file(&ext_log); // remove stale log from previous run
 
-    // ── Step 5: Spawn REAPER ──────────────────────────────────────────────
-    section(ci, "reaper-test: spawn REAPER");
-    let reaper_log = PathBuf::from("/tmp/fts-daw-reaper.log");
+    // ── Step 4b: Resolve REAPER paths and FHS wrapper ────────────────────
 
     // Always use the raw REAPER executable so we can pass -cfgfile.
     // The rig wrapper (fts-daw-test) has its own launch.json that may point
@@ -639,6 +637,92 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     } else {
         println!("  reaper.ini not yet created — reaper-headless will write defaults");
     }
+
+    // ── Step 4c: Pre-warm REAPER to dismiss evaluation dialog ────────────
+    // On first run, REAPER shows an evaluation nag dialog that blocks the
+    // main-thread timer in headless (NOGDK) mode. Running REAPER briefly
+    // lets it populate the [nag] token in reaper.ini so subsequent runs
+    // skip the dialog entirely.
+    let needs_prewarm = reaper_ini
+        .exists()
+        .then(|| std::fs::read_to_string(&reaper_ini).ok())
+        .flatten()
+        .map_or(true, |content| !content.contains("[nag]"));
+
+    if needs_prewarm {
+        section(ci, "reaper-test: pre-warm (dismiss evaluation dialog)");
+        println!("  [nag] section missing from reaper.ini — running REAPER briefly to populate it");
+
+        let prewarm_args: Vec<String> = vec![
+            "-cfgfile".into(),
+            reaper_ini.to_string_lossy().into_owned(),
+            "-newinst".into(),
+            "-nosplash".into(),
+            "-ignoreerrors".into(),
+        ];
+
+        let mut prewarm_child = if needs_fhs {
+            if let Some(ref fts) = fts_test {
+                let mut cmd = Command::new(fts);
+                cmd.arg(&reaper_exe);
+                cmd.args(&prewarm_args);
+                cmd.stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null());
+                cmd.spawn()
+                    .map_err(|e| format!("Failed to spawn pre-warm via fts-test: {e}"))?
+            } else {
+                let mut cmd = Command::new(&reaper_exe);
+                cmd.args(&prewarm_args);
+                cmd.stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null());
+                cmd.spawn()
+                    .map_err(|e| format!("Failed to spawn pre-warm REAPER: {e}"))?
+            }
+        } else {
+            let mut cmd = Command::new(&reaper_exe);
+            cmd.args(&prewarm_args);
+            cmd.stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            cmd.spawn()
+                .map_err(|e| format!("Failed to spawn pre-warm REAPER: {e}"))?
+        };
+
+        // Wait 10s for REAPER to initialize and write the nag token
+        println!("  Waiting 10s for REAPER to initialize...");
+        std::thread::sleep(std::time::Duration::from_secs(10));
+        let _ = prewarm_child.kill();
+        let _ = prewarm_child.wait();
+
+        // Clean up sockets/logs from the pre-warm run
+        if let Ok(entries) = std::fs::read_dir("/tmp") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with("fts-daw-") && name.ends_with(".sock") {
+                        let _ = std::fs::remove_file(&path);
+                    } else if name.starts_with("fts-daw-") && name.ends_with(".bootstrap.sock") {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
+        }
+        let _ = std::fs::remove_file(&ext_log);
+
+        // Verify the nag was written
+        let has_nag = std::fs::read_to_string(&reaper_ini)
+            .map(|c| c.contains("[nag]"))
+            .unwrap_or(false);
+        if has_nag {
+            println!("  Pre-warm complete — [nag] token written to reaper.ini");
+        } else {
+            println!("  WARNING: Pre-warm did not produce [nag] token — timer may stall");
+        }
+        end_section(ci);
+    }
+
+    // ── Step 5: Spawn REAPER ──────────────────────────────────────────────
+    section(ci, "reaper-test: spawn REAPER");
+    let reaper_log = PathBuf::from("/tmp/fts-daw-reaper.log");
 
     let reaper_args: Vec<String> = vec![
         "-cfgfile".into(),
