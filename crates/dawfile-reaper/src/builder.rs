@@ -34,8 +34,12 @@
 //! ```
 
 use crate::stock_fx::StockFx;
+use crate::types::envelope::{Envelope, EnvelopePoint, EnvelopePointShape};
 use crate::types::fx_chain::{FxChain, FxChainNode, FxPlugin, PluginType};
-use crate::types::item::{Item, SourceBlock, SourceType, Take};
+use crate::types::item::{
+    ChannelMode, FadeCurveType, FadeSettings, Item, MidiEvent, MidiSource, MidiSourceEvent,
+    PitchMode, PlayRateSettings, SourceBlock, SourceType, StretchMarker, Take,
+};
 use crate::types::marker_region::{MarkerRegion, MarkerRegionCollection};
 use crate::types::project::{ProjectProperties, ReaperProject};
 use crate::types::time_tempo::{TempoTimeEnvelope, TempoTimePoint};
@@ -126,6 +130,402 @@ impl FxBuilder {
 }
 
 // ===========================================================================
+// MidiSourceBuilder
+// ===========================================================================
+
+/// Builder for constructing MIDI source data within a take.
+///
+/// Generates REAPER's internal MIDI format: hex-encoded `E` lines with
+/// delta-tick timing. No external MIDI crate needed — REAPER uses its own
+/// simple text-based encoding.
+///
+/// # Example
+///
+/// ```
+/// use dawfile_reaper::builder::MidiSourceBuilder;
+///
+/// let midi = MidiSourceBuilder::new()
+///     .ticks_per_qn(960)
+///     .note(0, 0, 60, 96, 480)   // C4, velocity 96, half note
+///     .note(0, 0, 64, 96, 480)   // E4 at same time
+///     .cc(0, 0, 1, 64)           // Mod wheel to 64
+///     .build();
+///
+/// assert_eq!(midi.ticks_per_qn, 960);
+/// assert!(!midi.events.is_empty());
+/// ```
+pub struct MidiSourceBuilder {
+    ticks_per_qn: u32,
+    /// Events stored as (absolute_tick, MidiEvent) for sorting before build.
+    events: Vec<(u64, MidiEvent)>,
+    /// Deferred note-offs: (absolute_tick_off, channel, note, velocity)
+    pending_note_offs: Vec<(u64, u8, u8, u8)>,
+    /// Current absolute tick position for sequential event building.
+    cursor: u64,
+}
+
+impl MidiSourceBuilder {
+    /// Create a new MIDI source builder with default 960 ticks per quarter note.
+    pub fn new() -> Self {
+        Self {
+            ticks_per_qn: 960,
+            events: vec![],
+            pending_note_offs: vec![],
+            cursor: 0,
+        }
+    }
+
+    /// Set ticks per quarter note (default 960).
+    pub fn ticks_per_qn(mut self, tpq: u32) -> Self {
+        self.ticks_per_qn = tpq;
+        self
+    }
+
+    /// Add a complete note (note-on + note-off pair) at the current cursor.
+    ///
+    /// - `delta_ticks`: offset from current cursor position
+    /// - `channel`: MIDI channel (0-15)
+    /// - `note`: MIDI note number (0-127)
+    /// - `velocity`: Note-on velocity (1-127)
+    /// - `duration_ticks`: Length of the note in ticks
+    pub fn note(
+        mut self,
+        delta_ticks: u32,
+        channel: u8,
+        note: u8,
+        velocity: u8,
+        duration_ticks: u32,
+    ) -> Self {
+        let abs_tick = self.cursor + delta_ticks as u64;
+        self.events.push((
+            abs_tick,
+            MidiEvent {
+                delta_ticks: 0, // will be computed in build()
+                bytes: vec![0x90 | (channel & 0x0F), note & 0x7F, velocity & 0x7F],
+            },
+        ));
+        self.pending_note_offs
+            .push((abs_tick + duration_ticks as u64, channel, note, 0));
+        self.cursor = abs_tick;
+        self
+    }
+
+    /// Add a raw note-on event.
+    pub fn note_on(mut self, delta_ticks: u32, channel: u8, note: u8, velocity: u8) -> Self {
+        let abs_tick = self.cursor + delta_ticks as u64;
+        self.events.push((
+            abs_tick,
+            MidiEvent {
+                delta_ticks: 0,
+                bytes: vec![0x90 | (channel & 0x0F), note & 0x7F, velocity & 0x7F],
+            },
+        ));
+        self.cursor = abs_tick;
+        self
+    }
+
+    /// Add a raw note-off event.
+    pub fn note_off(mut self, delta_ticks: u32, channel: u8, note: u8, velocity: u8) -> Self {
+        let abs_tick = self.cursor + delta_ticks as u64;
+        self.events.push((
+            abs_tick,
+            MidiEvent {
+                delta_ticks: 0,
+                bytes: vec![0x80 | (channel & 0x0F), note & 0x7F, velocity & 0x7F],
+            },
+        ));
+        self.cursor = abs_tick;
+        self
+    }
+
+    /// Add a Control Change event.
+    pub fn cc(mut self, delta_ticks: u32, channel: u8, controller: u8, value: u8) -> Self {
+        let abs_tick = self.cursor + delta_ticks as u64;
+        self.events.push((
+            abs_tick,
+            MidiEvent {
+                delta_ticks: 0,
+                bytes: vec![0xB0 | (channel & 0x0F), controller & 0x7F, value & 0x7F],
+            },
+        ));
+        self.cursor = abs_tick;
+        self
+    }
+
+    /// Add a Program Change event.
+    pub fn program_change(mut self, delta_ticks: u32, channel: u8, program: u8) -> Self {
+        let abs_tick = self.cursor + delta_ticks as u64;
+        self.events.push((
+            abs_tick,
+            MidiEvent {
+                delta_ticks: 0,
+                bytes: vec![0xC0 | (channel & 0x0F), program & 0x7F],
+            },
+        ));
+        self.cursor = abs_tick;
+        self
+    }
+
+    /// Add a Pitch Bend event. `value` is 14-bit (0-16383, 8192 = center).
+    pub fn pitch_bend(mut self, delta_ticks: u32, channel: u8, value: u16) -> Self {
+        let abs_tick = self.cursor + delta_ticks as u64;
+        let lsb = (value & 0x7F) as u8;
+        let msb = ((value >> 7) & 0x7F) as u8;
+        self.events.push((
+            abs_tick,
+            MidiEvent {
+                delta_ticks: 0,
+                bytes: vec![0xE0 | (channel & 0x0F), lsb, msb],
+            },
+        ));
+        self.cursor = abs_tick;
+        self
+    }
+
+    /// Add a Channel Pressure (aftertouch) event.
+    pub fn channel_pressure(mut self, delta_ticks: u32, channel: u8, pressure: u8) -> Self {
+        let abs_tick = self.cursor + delta_ticks as u64;
+        self.events.push((
+            abs_tick,
+            MidiEvent {
+                delta_ticks: 0,
+                bytes: vec![0xD0 | (channel & 0x0F), pressure & 0x7F],
+            },
+        ));
+        self.cursor = abs_tick;
+        self
+    }
+
+    /// Add a Polyphonic Aftertouch event.
+    pub fn aftertouch(mut self, delta_ticks: u32, channel: u8, note: u8, pressure: u8) -> Self {
+        let abs_tick = self.cursor + delta_ticks as u64;
+        self.events.push((
+            abs_tick,
+            MidiEvent {
+                delta_ticks: 0,
+                bytes: vec![0xA0 | (channel & 0x0F), note & 0x7F, pressure & 0x7F],
+            },
+        ));
+        self.cursor = abs_tick;
+        self
+    }
+
+    /// Move the cursor to an absolute tick position.
+    pub fn at(mut self, absolute_tick: u64) -> Self {
+        self.cursor = absolute_tick;
+        self
+    }
+
+    /// Advance the cursor by `ticks` without adding an event.
+    pub fn advance(mut self, ticks: u32) -> Self {
+        self.cursor += ticks as u64;
+        self
+    }
+
+    /// Build the `MidiSource`, sorting events by absolute tick and computing deltas.
+    pub fn build(mut self) -> MidiSource {
+        // Merge pending note-offs into events
+        for (abs_tick, ch, note, vel) in self.pending_note_offs.drain(..) {
+            self.events.push((
+                abs_tick,
+                MidiEvent {
+                    delta_ticks: 0,
+                    bytes: vec![0x80 | (ch & 0x0F), note & 0x7F, vel & 0x7F],
+                },
+            ));
+        }
+
+        // Sort by absolute tick (stable sort preserves insertion order for same tick)
+        self.events.sort_by_key(|(tick, _)| *tick);
+
+        // Convert absolute ticks to delta ticks
+        let mut last_tick: u64 = 0;
+        let mut events = Vec::with_capacity(self.events.len());
+        let mut event_stream = Vec::with_capacity(self.events.len());
+
+        for (abs_tick, mut event) in self.events.drain(..) {
+            let delta = (abs_tick - last_tick) as u32;
+            event.delta_ticks = delta;
+            last_tick = abs_tick;
+            event_stream.push(MidiSourceEvent::Midi(event.clone()));
+            events.push(event);
+        }
+
+        MidiSource {
+            has_data: !events.is_empty(),
+            ticks_per_qn: self.ticks_per_qn,
+            ticks_timebase: Some("QN".to_string()),
+            cc_interp: None,
+            pooled_evts_guid: None,
+            events,
+            extended_events: vec![],
+            event_stream,
+            ignore_tempo: None,
+            vel_lanes: vec![],
+            bank_program_file: None,
+            cfg_edit_view: None,
+            cfg_edit: None,
+            evt_filter: None,
+            guid: None,
+            unknown_lines: vec![],
+        }
+    }
+}
+
+impl Default for MidiSourceBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ===========================================================================
+// EnvelopeBuilder
+// ===========================================================================
+
+/// Builder for constructing track envelopes (volume, pan, etc.).
+///
+/// # Example
+///
+/// ```
+/// use dawfile_reaper::builder::EnvelopeBuilder;
+///
+/// let env = EnvelopeBuilder::new("VOLENV2")
+///     .active()
+///     .visible()
+///     .linear(0.0, 1.0)
+///     .bezier(2.0, 0.5, -0.3)
+///     .linear(4.0, 1.0)
+///     .build();
+///
+/// assert_eq!(env.points.len(), 3);
+/// assert!(env.active);
+/// ```
+pub struct EnvelopeBuilder {
+    envelope: Envelope,
+}
+
+impl EnvelopeBuilder {
+    /// Create a new envelope builder for the given type (e.g. "VOLENV2", "PANENV2").
+    pub fn new(envelope_type: impl Into<String>) -> Self {
+        Self {
+            envelope: Envelope {
+                envelope_type: envelope_type.into(),
+                guid: String::new(),
+                active: false,
+                visible: false,
+                show_in_lane: false,
+                lane_height: 0,
+                armed: false,
+                default_shape: 0,
+                points: vec![],
+                automation_items: vec![],
+                extension_data: vec![],
+            },
+        }
+    }
+
+    /// Set the envelope GUID.
+    pub fn guid(mut self, guid: impl Into<String>) -> Self {
+        self.envelope.guid = guid.into();
+        self
+    }
+
+    /// Mark the envelope as active.
+    pub fn active(mut self) -> Self {
+        self.envelope.active = true;
+        self
+    }
+
+    /// Mark the envelope as visible.
+    pub fn visible(mut self) -> Self {
+        self.envelope.visible = true;
+        self
+    }
+
+    /// Show the envelope in its own lane.
+    pub fn show_in_lane(mut self) -> Self {
+        self.envelope.show_in_lane = true;
+        self
+    }
+
+    /// Set the lane height in pixels.
+    pub fn lane_height(mut self, height: i32) -> Self {
+        self.envelope.lane_height = height;
+        self
+    }
+
+    /// Arm the envelope for recording.
+    pub fn armed(mut self) -> Self {
+        self.envelope.armed = true;
+        self
+    }
+
+    /// Set the default point shape.
+    pub fn default_shape(mut self, shape: EnvelopePointShape) -> Self {
+        self.envelope.default_shape = shape as i32;
+        self
+    }
+
+    /// Add a point with a specific shape.
+    pub fn point(mut self, position: f64, value: f64, shape: EnvelopePointShape) -> Self {
+        self.envelope.points.push(EnvelopePoint {
+            position,
+            value,
+            shape,
+            time_sig: None,
+            selected: None,
+            unknown_field_6: None,
+            bezier_tension: None,
+        });
+        self
+    }
+
+    /// Add a linear-interpolated point.
+    pub fn linear(self, position: f64, value: f64) -> Self {
+        self.point(position, value, EnvelopePointShape::Linear)
+    }
+
+    /// Add a square (step) point — value jumps instantly.
+    pub fn square(self, position: f64, value: f64) -> Self {
+        self.point(position, value, EnvelopePointShape::Square)
+    }
+
+    /// Add a bezier curve point with tension (-1.0 to 1.0).
+    pub fn bezier(mut self, position: f64, value: f64, tension: f64) -> Self {
+        self.envelope.points.push(EnvelopePoint {
+            position,
+            value,
+            shape: EnvelopePointShape::Bezier,
+            time_sig: None,
+            selected: None,
+            unknown_field_6: None,
+            bezier_tension: Some(tension),
+        });
+        self
+    }
+
+    /// Add a slow-start/end curve point.
+    pub fn slow_start_end(self, position: f64, value: f64) -> Self {
+        self.point(position, value, EnvelopePointShape::SlowStartEnd)
+    }
+
+    /// Add a fast-start curve point.
+    pub fn fast_start(self, position: f64, value: f64) -> Self {
+        self.point(position, value, EnvelopePointShape::FastStart)
+    }
+
+    /// Add a fast-end curve point.
+    pub fn fast_end(self, position: f64, value: f64) -> Self {
+        self.point(position, value, EnvelopePointShape::FastEnd)
+    }
+
+    /// Build the final `Envelope`.
+    pub fn build(self) -> Envelope {
+        self.envelope
+    }
+}
+
+// ===========================================================================
 // ItemBuilder
 // ===========================================================================
 
@@ -197,9 +597,152 @@ impl ItemBuilder {
         self.take(file_path, SourceType::Wave)
     }
 
-    /// Add a MIDI source take.
+    /// Set the play rate (1.0 = normal speed).
+    pub fn playrate(mut self, rate: f64) -> Self {
+        let pr = self.item.playrate.get_or_insert(PlayRateSettings {
+            rate: 1.0,
+            preserve_pitch: false,
+            pitch_adjust: 0.0,
+            pitch_mode: PitchMode::ProjectDefault,
+            unknown_field_5: 0,
+            unknown_field_6: 0.0,
+        });
+        pr.rate = rate;
+        self
+    }
+
+    /// Set pitch adjustment in semitones (enables preserve-pitch).
+    pub fn pitch(mut self, semitones: f64) -> Self {
+        let pr = self.item.playrate.get_or_insert(PlayRateSettings {
+            rate: 1.0,
+            preserve_pitch: false,
+            pitch_adjust: 0.0,
+            pitch_mode: PitchMode::ProjectDefault,
+            unknown_field_5: 0,
+            unknown_field_6: 0.0,
+        });
+        pr.pitch_adjust = semitones;
+        pr.preserve_pitch = true;
+        self
+    }
+
+    /// Set the pitch/time-stretch mode.
+    pub fn pitch_mode(mut self, mode: PitchMode) -> Self {
+        let pr = self.item.playrate.get_or_insert(PlayRateSettings {
+            rate: 1.0,
+            preserve_pitch: false,
+            pitch_adjust: 0.0,
+            pitch_mode: PitchMode::ProjectDefault,
+            unknown_field_5: 0,
+            unknown_field_6: 0.0,
+        });
+        pr.pitch_mode = mode;
+        self
+    }
+
+    /// Set the channel mode.
+    pub fn channel_mode(mut self, mode: ChannelMode) -> Self {
+        self.item.channel_mode = mode;
+        self
+    }
+
+    /// Set the slip offset (source start offset in seconds).
+    pub fn slip_offset(mut self, offset: f64) -> Self {
+        self.item.slip_offset = offset;
+        self
+    }
+
+    /// Set fade-in time with a curve type.
+    pub fn fade_in(mut self, time: f64, curve: FadeCurveType) -> Self {
+        self.item.fade_in = Some(FadeSettings {
+            curve_type: curve,
+            time,
+            unknown_field_3: 0.0,
+            unknown_field_4: 1,
+            unknown_field_5: 0,
+            unknown_field_6: 0,
+            unknown_field_7: 0,
+        });
+        self
+    }
+
+    /// Set fade-out time with a curve type.
+    pub fn fade_out(mut self, time: f64, curve: FadeCurveType) -> Self {
+        self.item.fade_out = Some(FadeSettings {
+            curve_type: curve,
+            time,
+            unknown_field_3: 0.0,
+            unknown_field_4: 1,
+            unknown_field_5: 0,
+            unknown_field_6: 0,
+            unknown_field_7: 0,
+        });
+        self
+    }
+
+    /// Add a stretch marker at the given position.
+    pub fn stretch_marker(mut self, position: f64, source_position: f64) -> Self {
+        self.item.stretch_markers.push(StretchMarker {
+            position,
+            source_position,
+            rate: None,
+        });
+        self
+    }
+
+    /// Add a stretch marker with a specific rate.
+    pub fn stretch_marker_with_rate(
+        mut self,
+        position: f64,
+        source_position: f64,
+        rate: f64,
+    ) -> Self {
+        self.item.stretch_markers.push(StretchMarker {
+            position,
+            source_position,
+            rate: Some(rate),
+        });
+        self
+    }
+
+    /// Add an empty MIDI source take.
     pub fn source_midi(self) -> Self {
         self.take("", SourceType::Midi)
+    }
+
+    /// Add a MIDI source take with events constructed via a builder closure.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dawfile_reaper::builder::{TrackBuilder, MidiSourceBuilder};
+    ///
+    /// let track = TrackBuilder::new("Piano")
+    ///     .item(0.0, 4.0, |i| i
+    ///         .name("Piano MIDI")
+    ///         .midi(|m| m
+    ///             .note(0, 0, 60, 96, 480)    // C4
+    ///             .note(0, 0, 64, 96, 480)    // E4
+    ///             .note(0, 0, 67, 96, 480)    // G4
+    ///         )
+    ///     )
+    ///     .build();
+    /// ```
+    pub fn midi(mut self, f: impl FnOnce(MidiSourceBuilder) -> MidiSourceBuilder) -> Self {
+        let builder = f(MidiSourceBuilder::new());
+        let midi_source = builder.build();
+        self.takes.push(Take {
+            is_selected: self.takes.is_empty(),
+            name: String::new(),
+            source: Some(SourceBlock {
+                source_type: SourceType::Midi,
+                file_path: String::new(),
+                midi_data: Some(midi_source),
+                raw_content: String::new(),
+            }),
+            ..Take::default()
+        });
+        self
     }
 
     /// Add a FLAC source take.
@@ -466,6 +1009,41 @@ impl TrackBuilder {
         let builder = f(dummy);
         self.input_fx_nodes
             .push(FxChainNode::Plugin(builder.build()));
+        self
+    }
+
+    /// Add a track envelope (volume, pan, etc.) using a builder closure.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dawfile_reaper::builder::TrackBuilder;
+    ///
+    /// let track = TrackBuilder::new("Vocals")
+    ///     .envelope("VOLENV2", |e| e
+    ///         .active()
+    ///         .visible()
+    ///         .linear(0.0, 1.0)
+    ///         .bezier(2.0, 0.5, -0.3)
+    ///         .linear(4.0, 1.0)
+    ///     )
+    ///     .build();
+    ///
+    /// assert_eq!(track.envelopes.len(), 1);
+    /// ```
+    pub fn envelope(
+        mut self,
+        envelope_type: impl Into<String>,
+        f: impl FnOnce(EnvelopeBuilder) -> EnvelopeBuilder,
+    ) -> Self {
+        let builder = f(EnvelopeBuilder::new(envelope_type));
+        self.track.envelopes.push(builder.build());
+        self
+    }
+
+    /// Add a pre-built envelope directly.
+    pub fn add_envelope(mut self, env: Envelope) -> Self {
+        self.track.envelopes.push(env);
         self
     }
 
@@ -1332,5 +1910,384 @@ mod tests {
         assert_eq!(project.tracks[3].folder.as_ref().unwrap().indentation, -1);
         // Bass closes Instruments folder
         assert_eq!(project.tracks[4].folder.as_ref().unwrap().indentation, -1);
+    }
+
+    // ===================================================================
+    // MidiSourceBuilder tests
+    // ===================================================================
+
+    #[test]
+    fn test_midi_builder_single_note() {
+        let midi = MidiSourceBuilder::new()
+            .ticks_per_qn(960)
+            .note(0, 0, 60, 96, 480)
+            .build();
+
+        assert_eq!(midi.ticks_per_qn, 960);
+        assert!(midi.has_data);
+        // Should have note-on + note-off
+        assert_eq!(midi.events.len(), 2);
+
+        // Note-on at tick 0
+        assert_eq!(midi.events[0].delta_ticks, 0);
+        assert_eq!(midi.events[0].bytes, vec![0x90, 60, 96]);
+
+        // Note-off at tick 480
+        assert_eq!(midi.events[1].delta_ticks, 480);
+        assert_eq!(midi.events[1].bytes, vec![0x80, 60, 0]);
+    }
+
+    #[test]
+    fn test_midi_builder_chord() {
+        let midi = MidiSourceBuilder::new()
+            .note(0, 0, 60, 96, 960) // C4
+            .note(0, 0, 64, 96, 960) // E4
+            .note(0, 0, 67, 96, 960) // G4
+            .build();
+
+        // 3 note-ons at tick 0 + 3 note-offs at tick 960
+        assert_eq!(midi.events.len(), 6);
+
+        // All note-ons should be at delta 0
+        assert_eq!(midi.events[0].delta_ticks, 0);
+        assert_eq!(midi.events[1].delta_ticks, 0);
+        assert_eq!(midi.events[2].delta_ticks, 0);
+
+        // First note-off at delta 960
+        assert_eq!(midi.events[3].delta_ticks, 960);
+        // Subsequent note-offs at delta 0 (same tick)
+        assert_eq!(midi.events[4].delta_ticks, 0);
+        assert_eq!(midi.events[5].delta_ticks, 0);
+    }
+
+    #[test]
+    fn test_midi_builder_sequential_notes() {
+        let midi = MidiSourceBuilder::new()
+            .ticks_per_qn(960)
+            .note(0, 0, 60, 96, 960) // C4 at tick 0, 1 beat
+            .note(960, 0, 62, 96, 960) // D4 at tick 960, 1 beat
+            .build();
+
+        assert_eq!(midi.events.len(), 4);
+        // Note-on C4 at tick 0
+        assert_eq!(midi.events[0].delta_ticks, 0);
+        assert_eq!(midi.events[0].bytes[1], 60);
+        // Note-off C4 and Note-on D4 both at tick 960
+        assert_eq!(midi.events[1].delta_ticks, 960);
+    }
+
+    #[test]
+    fn test_midi_builder_cc_and_pitch_bend() {
+        let midi = MidiSourceBuilder::new()
+            .cc(0, 0, 1, 64) // Mod wheel to 64
+            .cc(480, 0, 7, 100) // Volume to 100
+            .pitch_bend(0, 0, 8192) // Center
+            .pitch_bend(480, 0, 16383) // Max bend up
+            .build();
+
+        assert_eq!(midi.events.len(), 4);
+        // CC1 at tick 0
+        assert_eq!(midi.events[0].bytes, vec![0xB0, 1, 64]);
+        // CC7 at tick 480
+        assert_eq!(midi.events[1].bytes, vec![0xB0, 7, 100]);
+        // Pitch bend center at tick 480
+        assert_eq!(midi.events[2].bytes, vec![0xE0, 0, 64]); // 8192 = 0x2000
+                                                             // Pitch bend max at tick 960
+        assert_eq!(midi.events[3].bytes, vec![0xE0, 127, 127]); // 16383 = 0x3FFF
+    }
+
+    #[test]
+    fn test_midi_builder_program_change() {
+        let midi = MidiSourceBuilder::new()
+            .program_change(0, 0, 0) // Piano
+            .program_change(0, 9, 25) // Drum kit on channel 10
+            .build();
+
+        assert_eq!(midi.events.len(), 2);
+        assert_eq!(midi.events[0].bytes, vec![0xC0, 0]);
+        assert_eq!(midi.events[1].bytes, vec![0xC9, 25]);
+    }
+
+    #[test]
+    fn test_midi_builder_channel_pressure_and_aftertouch() {
+        let midi = MidiSourceBuilder::new()
+            .channel_pressure(0, 0, 100)
+            .aftertouch(480, 0, 60, 80)
+            .build();
+
+        assert_eq!(midi.events.len(), 2);
+        assert_eq!(midi.events[0].bytes, vec![0xD0, 100]);
+        assert_eq!(midi.events[1].bytes, vec![0xA0, 60, 80]);
+    }
+
+    #[test]
+    fn test_midi_builder_absolute_positioning() {
+        let midi = MidiSourceBuilder::new()
+            .at(0)
+            .note_on(0, 0, 60, 96)
+            .at(960)
+            .note_off(0, 0, 60, 0)
+            .build();
+
+        assert_eq!(midi.events.len(), 2);
+        assert_eq!(midi.events[0].delta_ticks, 0);
+        assert_eq!(midi.events[1].delta_ticks, 960);
+    }
+
+    #[test]
+    fn test_midi_builder_serializes_to_rpp() {
+        use crate::types::serialize::RppSerialize;
+
+        let project = ReaperProjectBuilder::new()
+            .tempo(120.0)
+            .track("Piano", |t| {
+                t.item(0.0, 4.0, |i| {
+                    i.name("Piano MIDI")
+                        .midi(|m| m.ticks_per_qn(960).note(0, 0, 60, 96, 480).cc(0, 0, 1, 64))
+                })
+            })
+            .build();
+
+        let rpp = project.to_rpp_string();
+
+        // Should contain MIDI source block
+        assert!(rpp.contains("<SOURCE MIDI"));
+        assert!(rpp.contains("HASDATA 1 960 QN"));
+        // Should contain E lines with hex-encoded MIDI bytes
+        assert!(rpp.contains("E 0 90 3c 60")); // Note-on C4 vel 96
+        assert!(rpp.contains("E 0 b0 01 40")); // CC1 = 64
+        assert!(rpp.contains("E 480 80 3c 00")); // Note-off C4
+    }
+
+    #[test]
+    fn test_midi_builder_event_stream_matches_events() {
+        let midi = MidiSourceBuilder::new()
+            .note(0, 0, 60, 96, 480)
+            .cc(240, 0, 1, 64)
+            .build();
+
+        // event_stream should contain the same events in order
+        assert_eq!(midi.event_stream.len(), midi.events.len());
+        for (stream_evt, evt) in midi.event_stream.iter().zip(midi.events.iter()) {
+            if let crate::types::item::MidiSourceEvent::Midi(e) = stream_evt {
+                assert_eq!(e.delta_ticks, evt.delta_ticks);
+                assert_eq!(e.bytes, evt.bytes);
+            } else {
+                panic!("Expected Midi event in stream");
+            }
+        }
+    }
+
+    // ===================================================================
+    // EnvelopeBuilder tests
+    // ===================================================================
+
+    #[test]
+    fn test_envelope_builder_basic() {
+        let env = EnvelopeBuilder::new("VOLENV2")
+            .active()
+            .visible()
+            .guid("{VOL-GUID}")
+            .linear(0.0, 1.0)
+            .linear(4.0, 0.5)
+            .build();
+
+        assert_eq!(env.envelope_type, "VOLENV2");
+        assert!(env.active);
+        assert!(env.visible);
+        assert_eq!(env.guid, "{VOL-GUID}");
+        assert_eq!(env.points.len(), 2);
+        assert_eq!(env.points[0].value, 1.0);
+        assert_eq!(env.points[0].shape, EnvelopePointShape::Linear);
+        assert_eq!(env.points[1].value, 0.5);
+    }
+
+    #[test]
+    fn test_envelope_builder_shapes() {
+        let env = EnvelopeBuilder::new("PANENV2")
+            .linear(0.0, 0.0)
+            .square(1.0, -0.5)
+            .bezier(2.0, 0.5, 0.3)
+            .slow_start_end(3.0, 0.0)
+            .fast_start(4.0, 1.0)
+            .fast_end(5.0, -1.0)
+            .build();
+
+        assert_eq!(env.points.len(), 6);
+        assert_eq!(env.points[0].shape, EnvelopePointShape::Linear);
+        assert_eq!(env.points[1].shape, EnvelopePointShape::Square);
+        assert_eq!(env.points[2].shape, EnvelopePointShape::Bezier);
+        assert_eq!(env.points[2].bezier_tension, Some(0.3));
+        assert_eq!(env.points[3].shape, EnvelopePointShape::SlowStartEnd);
+        assert_eq!(env.points[4].shape, EnvelopePointShape::FastStart);
+        assert_eq!(env.points[5].shape, EnvelopePointShape::FastEnd);
+    }
+
+    #[test]
+    fn test_track_with_envelope() {
+        let track = TrackBuilder::new("Vocals")
+            .envelope("VOLENV2", |e| {
+                e.active()
+                    .visible()
+                    .linear(0.0, 1.0)
+                    .bezier(2.0, 0.5, -0.3)
+                    .linear(4.0, 1.0)
+            })
+            .build();
+
+        assert_eq!(track.envelopes.len(), 1);
+        assert_eq!(track.envelopes[0].envelope_type, "VOLENV2");
+        assert!(track.envelopes[0].active);
+        assert_eq!(track.envelopes[0].points.len(), 3);
+    }
+
+    #[test]
+    fn test_track_with_multiple_envelopes() {
+        let track = TrackBuilder::new("Synth")
+            .envelope("VOLENV2", |e| e.active().linear(0.0, 1.0))
+            .envelope("PANENV2", |e| e.active().linear(0.0, 0.0).linear(4.0, 0.5))
+            .build();
+
+        assert_eq!(track.envelopes.len(), 2);
+        assert_eq!(track.envelopes[0].envelope_type, "VOLENV2");
+        assert_eq!(track.envelopes[1].envelope_type, "PANENV2");
+    }
+
+    #[test]
+    fn test_envelope_serializes_to_rpp() {
+        use crate::types::serialize::RppSerialize;
+
+        let project = ReaperProjectBuilder::new()
+            .tempo(120.0)
+            .track("Vocal", |t| {
+                t.envelope("VOLENV2", |e| {
+                    e.active()
+                        .visible()
+                        .guid("{ABC-123}")
+                        .linear(0.0, 1.0)
+                        .bezier(2.0, 0.5, -0.3)
+                })
+            })
+            .build();
+
+        let rpp = project.to_rpp_string();
+        assert!(rpp.contains("<VOLENV2"));
+        assert!(rpp.contains("EGUID {ABC-123}"));
+        assert!(rpp.contains("ACT 1 -1"));
+        assert!(rpp.contains("VIS 1"));
+        assert!(rpp.contains("PT 0.000000 1.000000 0"));
+    }
+
+    // ===================================================================
+    // Extended ItemBuilder tests
+    // ===================================================================
+
+    #[test]
+    fn test_item_playrate_and_pitch() {
+        let track = TrackBuilder::new("Guitar")
+            .item(0.0, 4.0, |i| {
+                i.name("Guitar DI")
+                    .playrate(0.5) // half speed
+                    .pitch(2.0) // up 2 semitones
+                    .pitch_mode(PitchMode::ElastiquePro(0))
+                    .source_wave("guitar.wav")
+            })
+            .build();
+
+        let pr = track.items[0].playrate.as_ref().unwrap();
+        assert_eq!(pr.rate, 0.5);
+        assert_eq!(pr.pitch_adjust, 2.0);
+        assert!(pr.preserve_pitch);
+        assert_eq!(pr.pitch_mode, PitchMode::ElastiquePro(0));
+    }
+
+    #[test]
+    fn test_item_channel_mode() {
+        let track = TrackBuilder::new("Test")
+            .item(0.0, 4.0, |i| {
+                i.channel_mode(ChannelMode::MonoDownmix)
+                    .source_wave("test.wav")
+            })
+            .build();
+
+        assert_eq!(track.items[0].channel_mode, ChannelMode::MonoDownmix);
+    }
+
+    #[test]
+    fn test_item_fades() {
+        use crate::types::item::FadeCurveType;
+
+        let track = TrackBuilder::new("Test")
+            .item(0.0, 4.0, |i| {
+                i.fade_in(0.1, FadeCurveType::Linear)
+                    .fade_out(0.5, FadeCurveType::Bezier)
+                    .source_wave("test.wav")
+            })
+            .build();
+
+        let fi = track.items[0].fade_in.as_ref().unwrap();
+        assert_eq!(fi.time, 0.1);
+        assert_eq!(fi.curve_type, FadeCurveType::Linear);
+
+        let fo = track.items[0].fade_out.as_ref().unwrap();
+        assert_eq!(fo.time, 0.5);
+        assert_eq!(fo.curve_type, FadeCurveType::Bezier);
+    }
+
+    #[test]
+    fn test_item_stretch_markers() {
+        let track = TrackBuilder::new("Test")
+            .item(0.0, 4.0, |i| {
+                i.stretch_marker(0.0, 0.0)
+                    .stretch_marker(2.0, 1.8)
+                    .stretch_marker_with_rate(4.0, 3.6, 1.1)
+                    .source_wave("test.wav")
+            })
+            .build();
+
+        assert_eq!(track.items[0].stretch_markers.len(), 3);
+        assert_eq!(track.items[0].stretch_markers[1].position, 2.0);
+        assert_eq!(track.items[0].stretch_markers[1].source_position, 1.8);
+        assert_eq!(track.items[0].stretch_markers[2].rate, Some(1.1));
+    }
+
+    #[test]
+    fn test_item_slip_offset() {
+        let track = TrackBuilder::new("Test")
+            .item(0.0, 4.0, |i| i.slip_offset(1.5).source_wave("test.wav"))
+            .build();
+
+        assert_eq!(track.items[0].slip_offset, 1.5);
+    }
+
+    #[test]
+    fn test_extended_item_serializes_to_rpp() {
+        use crate::types::serialize::RppSerialize;
+
+        let project = ReaperProjectBuilder::new()
+            .tempo(120.0)
+            .track("Guitar", |t| {
+                t.item(0.0, 4.0, |i| {
+                    i.name("Guitar DI")
+                        .playrate(0.5)
+                        .pitch(2.0)
+                        .fade_in(0.1, FadeCurveType::Linear)
+                        .fade_out(0.2, FadeCurveType::Linear)
+                        .channel_mode(ChannelMode::MonoDownmix)
+                        .slip_offset(0.5)
+                        .stretch_marker(0.0, 0.0)
+                        .stretch_marker(2.0, 1.8)
+                        .source_wave("guitar.wav")
+                })
+            })
+            .build();
+
+        let rpp = project.to_rpp_string();
+        assert!(rpp.contains("PLAYRATE 0.5 1 2"));
+        assert!(rpp.contains("FADEIN 0"));
+        assert!(rpp.contains("FADEOUT 0"));
+        assert!(rpp.contains("SOFFS 0.5"));
+        assert!(rpp.contains("SM 0 0"));
+        assert!(rpp.contains("SM 2 1.8"));
     }
 }

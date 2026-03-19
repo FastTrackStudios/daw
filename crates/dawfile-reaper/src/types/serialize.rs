@@ -228,7 +228,95 @@ impl RppSerialize for SourceBlock {
 
         let inner = format!("{}  ", indent);
         out.push_str(&format!("{}<SOURCE {}\n", indent, tag));
-        if !self.file_path.is_empty() {
+
+        if let Some(midi) = &self.midi_data {
+            // Serialize MIDI source data
+            out.push_str(&format!(
+                "{}HASDATA {} {} {}\n",
+                inner,
+                if midi.has_data { 1 } else { 0 },
+                midi.ticks_per_qn,
+                midi.ticks_timebase.as_deref().unwrap_or("QN")
+            ));
+            if let Some(interp) = midi.cc_interp {
+                out.push_str(&format!("{}CCINTERP {}\n", inner, interp));
+            }
+            if let Some(ref guid) = midi.pooled_evts_guid {
+                out.push_str(&format!("{}POOLEDEVTS {}\n", inner, guid));
+            }
+
+            // Write events in stream order (preserves interleaving)
+            if !midi.event_stream.is_empty() {
+                for evt in &midi.event_stream {
+                    match evt {
+                        crate::types::item::MidiSourceEvent::Midi(e) => {
+                            out.push_str(&format!("{}E {}", inner, e.delta_ticks));
+                            for byte in &e.bytes {
+                                out.push_str(&format!(" {:02x}", byte));
+                            }
+                            out.push('\n');
+                        }
+                        crate::types::item::MidiSourceEvent::Extended(x) => {
+                            let tag_char = if x.selected { "x" } else { "X" };
+                            out.push_str(&format!(
+                                "{}<{} {}\n",
+                                inner,
+                                tag_char,
+                                x.fields.join(" ")
+                            ));
+                            for line in &x.data_lines {
+                                out.push_str(&format!("{}{}\n", inner, line));
+                            }
+                            out.push_str(&format!("{}>\n", inner));
+                        }
+                    }
+                }
+            } else {
+                // Fallback: write from events vec directly
+                for e in &midi.events {
+                    out.push_str(&format!("{}E {}", inner, e.delta_ticks));
+                    for byte in &e.bytes {
+                        out.push_str(&format!(" {:02x}", byte));
+                    }
+                    out.push('\n');
+                }
+            }
+
+            if let Some(ref ignt) = midi.ignore_tempo {
+                out.push_str(&format!(
+                    "{}IGNTEMPO {} {} {} {}\n",
+                    inner,
+                    if ignt.enabled { 1 } else { 0 },
+                    ignt.bpm,
+                    ignt.numerator,
+                    ignt.denominator
+                ));
+            }
+            for vl in &midi.vel_lanes {
+                out.push_str(&format!(
+                    "{}VELLANE {} {} {}\n",
+                    inner, vl.lane_type, vl.midi_editor_height, vl.inline_editor_height
+                ));
+            }
+            if let Some(ref bpf) = midi.bank_program_file {
+                out.push_str(&format!("{}BANKPROGRAMFILE \"{}\"\n", inner, bpf));
+            }
+            if let Some(ref cev) = midi.cfg_edit_view {
+                out.push_str(&format!("{}CFGEDITVIEW {}\n", inner, cev.join(" ")));
+            }
+            if let Some(ref ce) = midi.cfg_edit {
+                out.push_str(&format!("{}CFGEDIT {}\n", inner, ce.join(" ")));
+            }
+            if let Some(ref ef) = midi.evt_filter {
+                out.push_str(&format!("{}EVTFILTER {}\n", inner, ef.join(" ")));
+            }
+            if let Some(ref guid) = midi.guid {
+                out.push_str(&format!("{}GUID {}\n", inner, guid));
+            }
+            for line in &midi.unknown_lines {
+                out.push_str(&format!("{}{}\n", inner, line));
+            }
+        } else if !self.file_path.is_empty() {
             out.push_str(&format!(
                 "{}FILE \"{}\"\n",
                 inner,
