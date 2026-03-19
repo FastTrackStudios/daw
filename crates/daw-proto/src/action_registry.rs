@@ -5,6 +5,8 @@
 //!
 //! When a registered action is triggered (by user hotkey, toolbar button, or
 //! script), the host notifies the originating guest via a subscription stream.
+//! Guests handle the action locally — the host has no knowledge of what signal,
+//! session, or sync domains do.
 //!
 //! # Example (via daw-control)
 //!
@@ -12,27 +14,47 @@
 //! let actions = daw.action_registry();
 //!
 //! // Register a custom action
-//! let cmd_id = actions.register("fts.signal.arm", "FTS: Arm Signal Chain").await?;
+//! let cmd_id = actions.register("FTS_SIGNAL_ARM", "FTS: Arm Signal Chain").await?;
 //!
-//! // Check if an action exists
-//! let exists = actions.is_registered("fts.signal.arm").await?;
-//!
-//! // Look up a command ID by name
-//! let id = actions.lookup("fts.signal.arm").await?;
+//! // Subscribe to action triggers
+//! let (tx, rx) = daw_control::channel();
+//! actions.subscribe_actions(tx).await;
+//! while let Some(event) = rx.recv().await {
+//!     match event {
+//!         ActionEvent::Triggered { command_name } => {
+//!             // Handle the action
+//!         }
+//!     }
+//! }
 //! ```
 
-use roam::service;
+use facet::Facet;
+use roam::{Tx, service};
+
+/// Events pushed to guests when their registered actions are triggered.
+#[repr(u8)]
+#[derive(Debug, Clone, Facet)]
+pub enum ActionEvent {
+    /// A registered action was triggered by the user (hotkey, toolbar, script).
+    Triggered {
+        /// The command name that was registered (e.g., "FTS_SIGNAL_NEXT_SONG").
+        command_name: String,
+    },
+}
 
 /// Dynamic action registration for guest processes.
 ///
 /// Guest processes use this service to register REAPER actions at runtime.
 /// Registered actions appear in REAPER's action list (Actions > Show action list)
 /// and can be assigned keyboard shortcuts by the user.
+///
+/// After registering, call [`subscribe_actions`] to receive trigger events.
+/// The guest handles all action logic — the host is domain-agnostic.
 #[service]
 pub trait ActionRegistryService {
     /// Register a new REAPER action.
     ///
-    /// - `command_name`: Unique identifier (e.g., "fts.signal.arm"). Must be
+    /// - `command_name`: Unique identifier (e.g., "FTS_SIGNAL_ARM"). Must be
     ///   globally unique across all extensions.
     /// - `description`: Human-readable label shown in REAPER's action list.
     ///
@@ -54,4 +76,12 @@ pub trait ActionRegistryService {
     ///
     /// Returns `None` if the action is not registered.
     async fn lookup_command_id(&self, command_name: String) -> Option<u32>;
+
+    /// Subscribe to action trigger events.
+    ///
+    /// Streams `ActionEvent::Triggered` whenever a REAPER action registered
+    /// through this service is triggered by the user. The guest receives
+    /// events for ALL actions registered through this service, not just
+    /// its own — filter by `command_name` if needed.
+    async fn subscribe_actions(&self, tx: Tx<ActionEvent>);
 }

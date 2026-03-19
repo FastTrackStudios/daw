@@ -53,4 +53,14 @@ impl ActionRegistry {
             .lookup_command_id(command_name.to_string())
             .await?)
     }
+
+    /// Subscribe to action trigger events.
+    ///
+    /// Returns a stream of `ActionEvent::Triggered` events whenever a REAPER
+    /// action registered through this service is triggered by the user.
+    pub async fn subscribe_actions(&self) -> crate::Result<roam::Rx<daw_proto::ActionEvent>> {
+        let (tx, rx) = roam::channel::<daw_proto::ActionEvent>();
+        self.clients.action_registry.subscribe_actions(tx).await?;
+        Ok(rx)
+    }
 }

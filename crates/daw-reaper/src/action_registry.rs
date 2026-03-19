@@ -2,12 +2,18 @@
 //!
 //! Registers actions with REAPER's action system using `reaper_high::Reaper::register_action`.
 //! Tracks registered actions so they can be unregistered when a guest disconnects.
+//!
+//! When a registered action is triggered, all subscribers receive an
+//! `ActionEvent::Triggered` event. Guests handle action logic — the host
+//! is domain-agnostic.
 
 use crate::main_thread;
-use daw_proto::ActionRegistryService;
+use daw_proto::{ActionEvent, ActionRegistryService};
 use reaper_high::Reaper;
+use roam::Tx;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
 /// Tracks actions registered through this service.
@@ -17,8 +23,34 @@ use tracing::{debug, info, warn};
 static REGISTERED_ACTIONS: std::sync::OnceLock<Mutex<HashMap<String, u32>>> =
     std::sync::OnceLock::new();
 
+/// Broadcast channel for action trigger events.
+///
+/// Each subscriber gets their own `broadcast::Receiver` which forwards
+/// events to their roam `Tx<ActionEvent>`.
+static ACTION_BROADCASTER: std::sync::OnceLock<broadcast::Sender<String>> =
+    std::sync::OnceLock::new();
+
 fn registered_actions() -> &'static Mutex<HashMap<String, u32>> {
     REGISTERED_ACTIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn action_broadcaster() -> &'static broadcast::Sender<String> {
+    ACTION_BROADCASTER.get_or_init(|| {
+        let (tx, _rx) = broadcast::channel::<String>(64);
+        tx
+    })
+}
+
+/// Notify all subscribers that an action was triggered.
+///
+/// Called from the REAPER action handler closure on the main thread.
+/// Uses a broadcast channel so this is non-blocking.
+fn notify_action_triggered(command_name: String) {
+    let tx = action_broadcaster();
+    if tx.receiver_count() == 0 {
+        return;
+    }
+    let _ = tx.send(command_name);
 }
 
 /// REAPER action registry implementation.
@@ -72,16 +104,19 @@ impl ActionRegistryService for ReaperActionRegistry {
             // since actions live for the process lifetime anyway.
             let name_static: &'static str = Box::leak(name_for_query.clone().into_boxed_str());
             let desc_static: &'static str = Box::leak(desc_for_query.clone().into_boxed_str());
-            let desc_log: &'static str = desc_static;
+
+            // Capture command_name for the trigger notification
+            let trigger_name = name_for_query.clone();
 
             let action = reaper.register_action(
                 name_static,
                 desc_static,
                 None, // no default key binding
                 move || {
-                    // This closure fires when the action is triggered.
-                    // For now, just log it. Future: route to the guest that registered it.
-                    info!("Action triggered: {}", desc_log);
+                    // Notify all subscribers that this action was triggered.
+                    // Guests handle the actual logic — host is domain-agnostic.
+                    info!("Action triggered: {}", trigger_name);
+                    notify_action_triggered(trigger_name.clone());
                 },
                 reaper_high::ActionKind::NotToggleable,
             );
@@ -161,5 +196,34 @@ impl ActionRegistryService for ReaperActionRegistry {
         })
         .await
         .flatten()
+    }
+
+    async fn subscribe_actions(&self, tx: Tx<ActionEvent>) {
+        let mut rx = action_broadcaster().subscribe();
+        info!(
+            "Action event subscriber added (receivers: {})",
+            action_broadcaster().receiver_count()
+        );
+
+        moire::task::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(command_name) => {
+                        let event = ActionEvent::Triggered { command_name };
+                        if tx.send(event).await.is_err() {
+                            debug!("Action event subscriber disconnected");
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(count)) => {
+                        debug!("Action event subscriber lagged by {count} messages");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => {
+                        info!("Action broadcast channel closed");
+                        break;
+                    }
+                }
+            }
+        });
     }
 }
