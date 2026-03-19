@@ -94,3 +94,122 @@ async fn register_same_action_twice_returns_same_id(ctx: &ReaperTestContext) -> 
 
     Ok(())
 }
+
+#[reaper_test(isolated)]
+async fn register_in_menu_returns_valid_id(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let cmd_id = actions
+        .register_in_menu(
+            "FTS_SESSION_TEST_MENU_REGISTER",
+            "FTS Test: Menu Registration",
+        )
+        .await?;
+    assert!(
+        cmd_id > 0,
+        "register_in_menu should return a valid command ID"
+    );
+    ctx.log(&format!("register_in_menu cmd_id={cmd_id}"));
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn register_in_menu_is_findable(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let cmd_id = actions
+        .register_in_menu("FTS_TRANSPORT_TEST_MENU_FIND", "FTS Test: Menu Findable")
+        .await?;
+    assert!(cmd_id > 0);
+
+    let looked_up = actions
+        .lookup_command_id("FTS_TRANSPORT_TEST_MENU_FIND")
+        .await?;
+    assert_eq!(
+        looked_up,
+        Some(cmd_id),
+        "lookup should return the same ID as register_in_menu"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn register_and_register_in_menu_are_idempotent(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    // First register without menu
+    let id1 = actions
+        .register(
+            "FTS_SIGNAL_TEST_IDEMPOTENT_MENU",
+            "FTS Test: Idempotent Menu",
+        )
+        .await?;
+    assert!(id1 > 0);
+
+    // Then register again with menu — should return the same ID
+    let id2 = actions
+        .register_in_menu(
+            "FTS_SIGNAL_TEST_IDEMPOTENT_MENU",
+            "FTS Test: Idempotent Menu",
+        )
+        .await?;
+
+    assert_eq!(
+        id1, id2,
+        "register then register_in_menu for the same action should return the same ID"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn execute_command_runs_native_action(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    // 40026 = "Save project" — a safe, well-known REAPER action
+    actions.execute_command(40026).await?;
+    ctx.log("execute_command(40026) completed without error");
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn execute_named_action_for_registered_action(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    // Register an action first
+    let cmd_id = actions
+        .register("FTS_SYNC_TEST_EXEC_NAMED", "FTS Test: Execute Named Action")
+        .await?;
+    assert!(cmd_id > 0);
+
+    // Execute it by name
+    let result = actions
+        .execute_named_action("FTS_SYNC_TEST_EXEC_NAMED")
+        .await?;
+    assert!(
+        result,
+        "execute_named_action should return true for a registered action"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn execute_named_action_for_unknown_returns_false(
+    ctx: &ReaperTestContext,
+) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let result = actions
+        .execute_named_action("FTS_NONEXISTENT_ACTION_XYZ_999")
+        .await?;
+    assert!(
+        !result,
+        "execute_named_action should return false for an unknown action"
+    );
+
+    Ok(())
+}

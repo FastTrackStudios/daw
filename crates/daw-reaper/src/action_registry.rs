@@ -498,3 +498,87 @@ impl ActionRegistryService for ReaperActionRegistry {
         .unwrap_or(false)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn derive_menu_group_session() {
+        assert_eq!(derive_menu_group("FTS_SESSION_TOGGLE_PLAYBACK"), "Session");
+    }
+
+    #[test]
+    fn derive_menu_group_transport() {
+        assert_eq!(derive_menu_group("FTS_TRANSPORT_PLAY"), "Transport");
+    }
+
+    #[test]
+    fn derive_menu_group_markers_regions() {
+        assert_eq!(
+            derive_menu_group("FTS_MARKERS_REGIONS_INSERT_MARKER"),
+            "Markers Regions"
+        );
+    }
+
+    #[test]
+    fn derive_menu_group_signal() {
+        assert_eq!(derive_menu_group("FTS_SIGNAL_NEXT_SONG"), "Signal");
+    }
+
+    #[test]
+    fn derive_menu_group_sync() {
+        assert_eq!(derive_menu_group("FTS_SYNC_TOGGLE_LINK"), "Sync");
+    }
+
+    #[test]
+    fn derive_menu_group_dynamic_template() {
+        assert_eq!(
+            derive_menu_group("FTS_DYNAMIC_TEMPLATE_SORT_ALL"),
+            "Dynamic Template"
+        );
+    }
+
+    #[test]
+    fn derive_menu_group_visibility_manager() {
+        assert_eq!(
+            derive_menu_group("FTS_VISIBILITY_MANAGER_TOGGLE_DRUMS"),
+            "Visibility Manager"
+        );
+    }
+
+    #[test]
+    fn derive_menu_group_auto_color() {
+        assert_eq!(derive_menu_group("FTS_AUTO_COLOR_COLOR_ALL"), "Auto Color");
+    }
+
+    #[test]
+    fn derive_menu_group_daw() {
+        assert_eq!(derive_menu_group("FTS_DAW_SOMETHING"), "Daw");
+    }
+
+    #[test]
+    fn derive_menu_group_unknown_prefix_falls_back_to_first_segment() {
+        assert_eq!(derive_menu_group("UNKNOWN_PREFIX"), "Unknown");
+    }
+
+    #[test]
+    fn titlecase_underscored_multi_word() {
+        assert_eq!(titlecase_underscored("MARKERS_REGIONS"), "Markers Regions");
+    }
+
+    #[test]
+    fn titlecase_underscored_single_word() {
+        assert_eq!(titlecase_underscored("TRANSPORT"), "Transport");
+    }
+
+    #[test]
+    fn titlecase_underscored_two_words() {
+        assert_eq!(titlecase_underscored("AUTO_COLOR"), "Auto Color");
+    }
+
+    #[test]
+    fn titlecase_underscored_empty() {
+        assert_eq!(titlecase_underscored(""), "");
+    }
+}
