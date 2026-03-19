@@ -1,0 +1,7 @@
+[package]
+name = "fts-audio-proto"
+version.workspace = true
+edition.workspace = true
+description = "RT-safe instruction set for fts-audio VST plugin — flat fixed-size rule tables in shared memory"
+
+[dependencies]

@@ -15,6 +15,7 @@ members = [
     "crates/reaper-launcher",
     "crates/daw-allocator",
     "crates/daw-bridge",
+    "crates/fts-audio-proto",
     "crates/daw-extension-runtime",
     "apps/daw-guest-example",
     "xtask",
