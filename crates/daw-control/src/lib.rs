@@ -122,6 +122,7 @@ pub(crate) use daw_proto::AutomationServiceClient;
 pub(crate) use daw_proto::ExtStateServiceClient;
 pub(crate) use daw_proto::FxServiceClient;
 pub(crate) use daw_proto::HealthServiceClient;
+pub(crate) use daw_proto::InputServiceClient;
 pub(crate) use daw_proto::ItemServiceClient;
 pub(crate) use daw_proto::LiveMidiServiceClient;
 pub(crate) use daw_proto::MarkerServiceClient;
@@ -145,6 +146,7 @@ mod audio_engine;
 mod automation;
 mod ext_state;
 mod fx;
+mod input;
 mod items;
 mod markers;
 mod midi_analysis;
@@ -161,6 +163,7 @@ pub use self::audio_engine::AudioEngine;
 pub use self::automation::{EnvelopeHandle, Envelopes};
 pub use self::ext_state::ExtState;
 pub use self::fx::{FxChain, FxHandle, FxParamHandle};
+pub use self::input::Input;
 pub use self::items::{ItemHandle, Items, ProjectItems, TakeHandle, Takes};
 pub use self::markers::Markers;
 pub use self::midi_analysis::MidiAnalysis;
@@ -194,6 +197,7 @@ pub struct DawClients {
     pub(crate) audio_engine: AudioEngineServiceClient,
     pub(crate) ext_state: ExtStateServiceClient,
     pub(crate) health: HealthServiceClient,
+    pub(crate) input: InputServiceClient,
 }
 
 impl DawClients {
@@ -218,7 +222,8 @@ impl DawClients {
             midi_analysis: MidiAnalysisServiceClient::new(handle.clone()),
             audio_engine: AudioEngineServiceClient::new(handle.clone()),
             ext_state: ExtStateServiceClient::new(handle.clone()),
-            health: HealthServiceClient::new(handle),
+            health: HealthServiceClient::new(handle.clone()),
+            input: InputServiceClient::new(handle),
         }
     }
 }
@@ -501,6 +506,14 @@ impl Daw {
     /// Access the action registry for registering custom REAPER actions.
     pub fn action_registry(&self) -> ActionRegistry {
         ActionRegistry::new(self.clients.clone())
+    }
+
+    /// Access the input interception service.
+    ///
+    /// Extensions use this to subscribe to keyboard/mouse events and
+    /// manage key filter configuration.
+    pub fn input(&self) -> Input {
+        Input::new(self.clients.clone())
     }
 
     /// List all installed FX plugins in the DAW.
