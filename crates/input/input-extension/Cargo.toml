@@ -1,0 +1,18 @@
+[package]
+name = "input-extension"
+version.workspace = true
+edition.workspace = true
+description = "Input domain SHM extension — connects to REAPER via daw-bridge for keyboard interception"
+
+[[bin]]
+name = "input-extension"
+path = "src/main.rs"
+
+[dependencies]
+daw.workspace = true
+daw-extension-runtime.workspace = true
+input.workspace = true
+tokio = { workspace = true, features = ["time", "net", "rt"] }
+eyre.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
