@@ -7,6 +7,9 @@
 //! - [`connect_daw`] — connection + polling logic
 //! - Re-exports `#[reaper_test]` from `reaper-test-macro`
 
+#[cfg(feature = "runner")]
+pub mod runner;
+
 use daw::{Daw, Project, TrackHandle};
 use eyre::Result;
 use std::{

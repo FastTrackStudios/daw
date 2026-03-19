@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 reaper-launcher = { workspace = true, features = ["icon-gen"] }
+reaper-test = { workspace = true, features = ["runner"] }
 serde_json = "1.0"

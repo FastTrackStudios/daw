@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use reaper_test::runner::{self, TestPackage, TestRunner};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -54,16 +54,9 @@ fn reaper_dir() -> String {
     format!("{}/Reaper", fts_home())
 }
 
-/// Canonical REAPER resources directory shared by all rigs and CI.
-/// Reads `FTS_REAPER_CONFIG` (set by fts-flake), falls back to
-/// `~/.config/FastTrackStudio/Reaper`.
+/// Canonical REAPER resources directory — delegates to `runner::fts_reaper_resources`.
 fn fts_reaper_resources() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    if let Ok(p) = std::env::var("FTS_REAPER_CONFIG") {
-        // Nix env blocks set literal strings — expand $HOME at runtime
-        return PathBuf::from(p.replace("$HOME", &home));
-    }
-    PathBuf::from(format!("{home}/.config/FastTrackStudio/Reaper"))
+    runner::fts_reaper_resources()
 }
 
 fn reaper_exe() -> String {
@@ -310,7 +303,7 @@ fn setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
 
     // Resolve REAPER paths from environment (set by devenv/nix)
     let reaper_executable = std::env::var("FTS_REAPER_EXECUTABLE")
-        .unwrap_or_else(|_| which_command("reaper").unwrap_or_else(|| "reaper".to_string()));
+        .unwrap_or_else(|_| runner::which_command("reaper").unwrap_or_else(|| "reaper".to_string()));
     let reaper_resources = std::env::var("FTS_REAPER_RESOURCES").unwrap_or_else(|_| {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         format!("{home}/.config/REAPER")
@@ -491,11 +484,19 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(60);
-    let ext_log = PathBuf::from("/tmp/daw-bridge.log");
+    let resources_dir = runner::fts_reaper_resources();
+
+    let runner = TestRunner {
+        resources_dir: resources_dir.clone(),
+        extension_log: PathBuf::from("/tmp/daw-bridge.log"),
+        timeout_secs,
+        keep_open,
+        ci,
+    };
 
     // ── Rig config ─────────────────────────────────────────────────────────
     let rig_config = load_daw_test_rig();
-    section(ci, "reaper-test: rig");
+    runner::section(ci, "reaper-test: rig");
     if rig_config.is_some() {
         println!("  rig: fts-daw-test (~/.config/fts/rigs/fts-daw-test/launch.json)");
     } else {
@@ -504,7 +505,7 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     }
 
     // ── Step 1: Build the test extension ──────────────────────────────────
-    section(ci, "reaper-test: build extension");
+    runner::section(ci, "reaper-test: build extension");
     println!("Building daw-bridge...");
     let status = Command::new("cargo")
         .args(["build", "-p", "daw-bridge"])
@@ -512,10 +513,10 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     if !status.success() {
         return Err("Failed to build daw-bridge".into());
     }
-    end_section(ci);
+    runner::end_section(ci);
 
     // ── Step 1b: Build daw-guest-example ────────────────────────────────
-    section(ci, "reaper-test: build guest example");
+    runner::section(ci, "reaper-test: build guest example");
     println!("Building daw-guest-example...");
     let status = Command::new("cargo")
         .args(["build", "-p", "daw-guest-example"])
@@ -523,10 +524,10 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     if !status.success() {
         return Err("Failed to build daw-guest-example".into());
     }
-    end_section(ci);
+    runner::end_section(ci);
 
     // ── Step 2: Build test binaries (no-run) ──────────────────────────────
-    section(ci, "reaper-test: build test binaries");
+    runner::section(ci, "reaper-test: build test binaries");
     println!("Building test binaries...");
     let status = Command::new("cargo")
         .args(["test", "-p", "daw-reaper", "--no-run"])
@@ -534,16 +535,13 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     if !status.success() {
         return Err("Failed to build daw-reaper test binaries".into());
     }
-    end_section(ci);
+    runner::end_section(ci);
 
     // ── Step 3: Install the .so into REAPER's UserPlugins dir ─────────────
-    section(ci, "reaper-test: install plugin");
-    // All rigs share the same canonical REAPER resources directory.
-    let resources_dir = fts_reaper_resources();
+    runner::section(ci, "reaper-test: install plugin");
     let user_plugins_dir = resources_dir.join("UserPlugins");
     std::fs::create_dir_all(&user_plugins_dir)?;
 
-    // REAPER expects "reaper_" prefix (not "lib" prefix) in UserPlugins.
     let so_src_name = "libreaper_daw_bridge.so";
     let so_dst_name = "reaper_daw_bridge.so";
     let so_path = workspace_root.join("target/debug").join(so_src_name);
@@ -552,7 +550,7 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         let dylib_dst_name = "reaper_daw_bridge.dylib";
         let dylib_path = workspace_root.join("target/debug").join(dylib_src_name);
         if dylib_path.exists() {
-            install_plugin(&dylib_path, dylib_dst_name, &user_plugins_dir)?;
+            runner::install_plugin(&dylib_path, dylib_dst_name, &user_plugins_dir)?;
         } else {
             return Err(format!(
                 "Built library not found at {} or {}",
@@ -562,12 +560,12 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
             .into());
         }
     } else {
-        install_plugin(&so_path, so_dst_name, &user_plugins_dir)?;
+        runner::install_plugin(&so_path, so_dst_name, &user_plugins_dir)?;
     }
-    end_section(ci);
+    runner::end_section(ci);
 
     // ── Step 3b: Install daw-guest into fts-extensions/ ──────────────────
-    section(ci, "reaper-test: install guest extensions");
+    runner::section(ci, "reaper-test: install guest extensions");
     let fts_ext_dir = user_plugins_dir.join("fts-extensions");
     std::fs::create_dir_all(&fts_ext_dir)?;
     let guest_src = workspace_root.join("target/debug/daw-guest");
@@ -586,563 +584,36 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
             guest_src.display()
         );
     }
-    end_section(ci);
+    runner::end_section(ci);
 
-    // ── Step 4: Clean stale sockets and log ───────────────────────────────
-    if let Ok(entries) = std::fs::read_dir("/tmp") {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with("fts-daw-") && name.ends_with(".sock") {
-                    let _ = std::fs::remove_file(&path);
-                    println!("  Removed stale socket: {name}");
-                } else if name.starts_with("fts-daw-") && name.ends_with(".bootstrap.sock") {
-                    let _ = std::fs::remove_file(&path);
-                    println!("  Removed stale bootstrap socket: {name}");
-                }
-            }
-        }
-    }
-    let _ = std::fs::remove_file(&ext_log); // remove stale log from previous run
-
-    // ── Step 4b: Resolve REAPER paths and FHS wrapper ────────────────────
-
-    // Always use the raw REAPER executable so we can pass -cfgfile.
-    // The rig wrapper (fts-daw-test) has its own launch.json that may point
-    // to a different config dir, so we bypass it.
-    let reaper_exe = std::env::var("FTS_REAPER_EXECUTABLE")
-        .or_else(|_| which_command("reaper").ok_or(()))
-        .unwrap_or_else(|_| "reaper".to_string());
-
-    // Optional launcher prefix (e.g. "pw-jack") set by reaper-headless
-    // when PipeWire is available, so REAPER connects via PipeWire JACK.
-    let reaper_launcher = std::env::var("FTS_REAPER_LAUNCHER").ok();
-
-    let fts_test = find_fts_test();
-    let needs_fhs = std::env::var("DISPLAY").map_or(true, |d| d.is_empty());
-
-    // Build REAPER CLI args.
-    // The reaper.ini is created by fts-flake's reaper-headless on first run.
-    // If it already exists, we can patch specific settings on top of it.
-    // If it doesn't exist yet, reaper-headless will create it with proper
-    // defaults (audiodriver=1, etc.) before REAPER starts.
-    let reaper_ini = resources_dir.join("reaper.ini");
-    if reaper_ini.exists() {
-        // Patch audio driver if explicitly requested via environment
-        if let Ok(audio_driver) = std::env::var("FTS_AUDIO_DRIVER") {
-            let ini = reaper_launcher::ReaperIni::new(&reaper_ini);
-            let _ = ini.set("audiodriver", &audio_driver);
-            println!("  audiodriver: {audio_driver} (from FTS_AUDIO_DRIVER)");
-        }
-    } else {
-        println!("  reaper.ini not yet created — reaper-headless will write defaults");
-    }
-
-    // ── Step 4c: Pre-warm REAPER to dismiss evaluation dialog ────────────
-    // On first run, REAPER shows an evaluation nag dialog that blocks the
-    // main-thread timer in headless (NOGDK) mode. Running REAPER briefly
-    // lets it populate the [nag] token in reaper.ini so subsequent runs
-    // skip the dialog entirely.
-    let needs_prewarm = reaper_ini
-        .exists()
-        .then(|| std::fs::read_to_string(&reaper_ini).ok())
-        .flatten()
-        .map_or(true, |content| !content.contains("[nag]"));
-
-    if needs_prewarm {
-        section(ci, "reaper-test: pre-warm (dismiss evaluation dialog)");
-        println!("  [nag] section missing from reaper.ini — running REAPER briefly to populate it");
-
-        let prewarm_args: Vec<String> = vec![
-            "-cfgfile".into(),
-            reaper_ini.to_string_lossy().into_owned(),
-            "-newinst".into(),
-            "-nosplash".into(),
-            "-ignoreerrors".into(),
-        ];
-
-        let mut prewarm_child = if needs_fhs {
-            if let Some(ref fts) = fts_test {
-                let mut cmd = Command::new(fts);
-                cmd.arg(&reaper_exe);
-                cmd.args(&prewarm_args);
-                cmd.stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null());
-                cmd.spawn()
-                    .map_err(|e| format!("Failed to spawn pre-warm via fts-test: {e}"))?
-            } else {
-                let mut cmd = Command::new(&reaper_exe);
-                cmd.args(&prewarm_args);
-                cmd.stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null());
-                cmd.spawn()
-                    .map_err(|e| format!("Failed to spawn pre-warm REAPER: {e}"))?
-            }
-        } else {
-            let mut cmd = Command::new(&reaper_exe);
-            cmd.args(&prewarm_args);
-            cmd.stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            cmd.spawn()
-                .map_err(|e| format!("Failed to spawn pre-warm REAPER: {e}"))?
-        };
-
-        // Wait 10s for REAPER to initialize and write the nag token
-        println!("  Waiting 10s for REAPER to initialize...");
-        std::thread::sleep(std::time::Duration::from_secs(10));
-        let _ = prewarm_child.kill();
-        let _ = prewarm_child.wait();
-
-        // Clean up sockets/logs from the pre-warm run
-        if let Ok(entries) = std::fs::read_dir("/tmp") {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("fts-daw-") && name.ends_with(".sock") {
-                        let _ = std::fs::remove_file(&path);
-                    } else if name.starts_with("fts-daw-") && name.ends_with(".bootstrap.sock") {
-                        let _ = std::fs::remove_file(&path);
-                    }
-                }
-            }
-        }
-        let _ = std::fs::remove_file(&ext_log);
-
-        // Verify the nag was written
-        let has_nag = std::fs::read_to_string(&reaper_ini)
-            .map(|c| c.contains("[nag]"))
-            .unwrap_or(false);
-        if has_nag {
-            println!("  Pre-warm complete — [nag] token written to reaper.ini");
-        } else {
-            println!("  WARNING: Pre-warm did not produce [nag] token — timer may stall");
-        }
-        end_section(ci);
-    }
-
-    // ── Step 4d: Patch ini to suppress dialogs ─────────────────────────────
-    // REAPER checks for updates ~10s after startup. In NOGDK headless mode,
-    // the resulting dialog blocks the main-thread timer. Setting `lastt` to
-    // "now" makes REAPER think it already checked recently.
-    if reaper_ini.exists() {
-        let now_ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        if let Ok(content) = std::fs::read_to_string(&reaper_ini) {
-            let patched = if content.contains("lastt=") {
-                // Update existing lastt
-                content
-                    .lines()
-                    .map(|l| {
-                        if l.starts_with("lastt=") {
-                            format!("lastt={now_ts}")
-                        } else {
-                            l.to_string()
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            } else if content.contains("[verchk]") {
-                // Insert lastt after [verchk] header
-                content.replace("[verchk]", &format!("[verchk]\nlastt={now_ts}"))
-            } else {
-                // Append [verchk] section
-                format!("{content}\n[verchk]\nlastt={now_ts}\n")
-            };
-            let _ = std::fs::write(&reaper_ini, &patched);
-            println!("  Patched lastt={now_ts} in [verchk] (suppress version check dialog)");
-        }
-
-        // Dump ini for diagnostics
-        if ci {
-            if let Ok(content) = std::fs::read_to_string(&reaper_ini) {
-                println!("  reaper.ini contents:");
-                for line in content.lines() {
-                    println!("    {line}");
-                }
-            }
-        }
-    }
+    // ── Step 4: Clean, pre-warm, patch INI ────────────────────────────────
+    runner.clean_stale_sockets();
+    runner.prewarm_reaper();
+    runner.patch_ini();
 
     // ── Step 5: Spawn REAPER ──────────────────────────────────────────────
-    section(ci, "reaper-test: spawn REAPER");
-    let reaper_log = PathBuf::from("/tmp/fts-daw-reaper.log");
+    let mut reaper = runner.spawn_reaper()?;
+    reaper.wait_for_socket(&runner)?;
 
-    let reaper_args: Vec<String> = vec![
-        "-cfgfile".into(),
-        reaper_ini.to_string_lossy().into_owned(),
-        "-newinst".into(),
-        "-nosplash".into(),
-        "-ignoreerrors".into(),
-    ];
+    // ── Step 6: Run tests ─────────────────────────────────────────────────
+    let packages = vec![TestPackage {
+        package: "daw-reaper".into(),
+        features: vec![],
+        test_threads: 1,
+        default_skips: vec!["timer_responsive_for_60s".into()],
+    }];
 
-    println!("  exe:         {reaper_exe}");
-    if let Some(ref launcher) = reaper_launcher {
-        println!("  launcher:    {launcher}");
-    }
-    println!("  config dir:  {}", resources_dir.display());
-    println!("  ini:         {}", reaper_ini.display());
-    println!("  needs fhs:   {needs_fhs}");
-    if let Some(ref fts) = fts_test {
-        println!("  fts-test:    {fts}");
-    } else if needs_fhs {
-        println!("  WARNING: no fts-test found and no DISPLAY — REAPER may fail");
-    }
-    println!("  timeout:     {timeout_secs}s (REAPER_TEST_TIMEOUT_SECS)");
-    println!("  logs:");
-    println!("    REAPER process → {}", reaper_log.display());
-    println!("    extension      → {}", ext_log.display());
+    let tests_passed = runner.run_tests(&mut reaper, &packages, filter.as_deref())?;
 
-    // Redirect REAPER stdout/stderr to its own log file (keeps LV2 spam off CI output)
-    let reaper_log_file = std::fs::File::create(&reaper_log)
-        .map_err(|e| format!("Failed to create REAPER log {}: {e}", reaper_log.display()))?;
-    let reaper_log_stderr = reaper_log_file.try_clone()?;
-
-    // Build the REAPER command, optionally prefixed with a launcher (e.g. pw-jack)
-    let effective_exe: String;
-    let mut extra_prefix_args: Vec<String> = Vec::new();
-    if let Some(ref launcher) = reaper_launcher {
-        effective_exe = launcher.clone();
-        extra_prefix_args.push(reaper_exe.clone());
-    } else {
-        effective_exe = reaper_exe.clone();
-    }
-
-    let mut reaper_child = if needs_fhs {
-        if let Some(ref fts) = fts_test {
-            let mut cmd = Command::new(fts);
-            cmd.arg(&effective_exe);
-            cmd.args(&extra_prefix_args);
-            cmd.args(&reaper_args);
-            cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
-            println!(
-                "  spawning: {fts} {effective_exe} {} {}",
-                extra_prefix_args.join(" "),
-                reaper_args.join(" ")
-            );
-            cmd.spawn()
-                .map_err(|e| format!("Failed to spawn via fts-test: {e}"))?
-        } else {
-            let mut cmd = Command::new(&effective_exe);
-            cmd.args(&extra_prefix_args);
-            cmd.args(&reaper_args);
-            cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
-            println!(
-                "  spawning: {effective_exe} {} {} (no fhs wrapper)",
-                extra_prefix_args.join(" "),
-                reaper_args.join(" ")
-            );
-            cmd.spawn()
-                .map_err(|e| format!("Failed to spawn REAPER: {e}"))?
-        }
-    } else {
-        let mut cmd = Command::new(&effective_exe);
-        cmd.args(&extra_prefix_args);
-        cmd.args(&reaper_args);
-        cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
-        println!(
-            "  spawning: {effective_exe} {} {}",
-            extra_prefix_args.join(" "),
-            reaper_args.join(" ")
-        );
-        cmd.spawn()
-            .map_err(|e| format!("Failed to spawn REAPER: {e}"))?
-    };
-
-    let reaper_pid = reaper_child.id();
-    println!("  spawned PID: {reaper_pid}");
-
-    // ── Step 6: Wait for socket, tail extension log ───────────────────────
-    section(ci, "reaper-test: waiting for REAPER ready");
-    println!("  Waiting up to {timeout_secs}s for fts-daw-*.sock …");
-    println!("  Extension log: {}", ext_log.display());
-
-    let start = std::time::Instant::now();
-    let deadline = start + std::time::Duration::from_secs(timeout_secs);
-
-    // Background thread: tail the extension log and print new lines as they appear
-    let ext_log_clone = ext_log.clone();
-    let _log_tailer = std::thread::spawn(move || {
-        let mut pos = 0u64;
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-        loop {
-            if std::time::Instant::now() > deadline {
-                break;
-            }
-            if let Ok(mut f) = std::fs::File::open(&ext_log_clone) {
-                if f.seek(SeekFrom::Start(pos)).is_ok() {
-                    let reader = BufReader::new(&f);
-                    for line in reader.lines().map_while(|l| l.ok()) {
-                        println!("  [ext] {line}");
-                        pos += line.len() as u64 + 1; // +1 for newline
-                    }
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(200));
-        }
-    });
-
-    let socket_path = loop {
-        // Check if REAPER process died unexpectedly
-        match reaper_child.try_wait() {
-            Ok(Some(status)) => {
-                println!("\n  REAPER exited early with status: {status}");
-                dump_log_on_failure(&ext_log, "extension");
-                dump_log_on_failure(&reaper_log, "REAPER process");
-                return Err("REAPER process exited before socket was created".into());
-            }
-            Ok(None) => {} // still running
-            Err(e) => println!("  Warning: could not check REAPER status: {e}"),
-        }
-
-        if let Some(sock) = find_fts_daw_socket() {
-            let elapsed = start.elapsed().as_secs_f32();
-            println!("\n  Socket ready after {elapsed:.1}s: {sock}");
-            break sock;
-        }
-
-        if std::time::Instant::now() > deadline {
-            let elapsed = start.elapsed().as_secs();
-            println!("\n  Timed out after {elapsed}s");
-            let _ = reaper_child.kill();
-            let _ = reaper_child.wait();
-            dump_log_on_failure(&ext_log, "extension");
-            dump_log_on_failure(&reaper_log, "REAPER process");
-            list_tmp_sockets();
-            return Err(
-                format!("Timed out after {timeout_secs}s waiting for fts-daw-*.sock").into(),
-            );
-        }
-
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        let elapsed = start.elapsed().as_secs();
-        if elapsed % 5 == 0 && elapsed > 0 {
-            print!("\r  [{elapsed}s] waiting …   ");
-            use std::io::Write;
-            let _ = std::io::stdout().flush();
-        }
-    };
-
-    // Brief pause to let the listener fully bind
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    end_section(ci);
-
-    // ── Step 7: Run tests ─────────────────────────────────────────────────
-    section(ci, "reaper-test: run tests");
-    println!("Running cargo test -p daw-reaper …");
-    let mut test_cmd = Command::new("cargo");
-    test_cmd.args([
-        "test",
-        "-p",
-        "daw-reaper",
-        "--",
-        "--ignored",
-        "--nocapture",
-        "--test-threads=1",
-    ]);
-    if let Some(ref f) = filter {
-        test_cmd.arg(f);
-    } else {
-        // Skip long-running diagnostic tests that are meant to be run explicitly.
-        test_cmd.args(["--skip", "timer_responsive_for_60s"]);
-    }
-    test_cmd.env("FTS_SOCKET", &socket_path);
-    if keep_open {
-        test_cmd.env("FTS_KEEP_OPEN", "1");
-    }
-
-    let mut test_child = test_cmd.spawn()?;
-    let test_timeout = std::time::Duration::from_secs(60);
-    let test_start = std::time::Instant::now();
-
-    // Poll for test completion with a 60s timeout.
-    // We must kill REAPER *before* waiting for the test process to exit,
-    // because the test binary's shared tokio Runtime holds a ROAM driver
-    // task connected to REAPER — it won't shut down until the connection
-    // closes (i.e. REAPER dies).
-    let tests_passed = loop {
-        match test_child.try_wait()? {
-            Some(status) => break status.success(),
-            None if test_start.elapsed() > test_timeout => {
-                println!("Test process did not exit within 60s — killing it");
-                let _ = test_child.kill();
-                let _ = test_child.wait();
-                break false;
-            }
-            None => std::thread::sleep(std::time::Duration::from_millis(200)),
-        }
-    };
-    end_section(ci);
-
-    // ── Step 8: Kill REAPER (unless --keep-open) ──────────────────────────
-    if keep_open {
-        println!("REAPER left running (PID {reaper_pid}) — kill manually when done");
-    } else {
-        println!("Killing REAPER (PID {reaper_pid})…");
-        let _ = reaper_child.kill();
-        let _ = reaper_child.wait();
-        let _ = std::fs::remove_file(&socket_path);
-
-        // The test process may still be alive (blocked on Runtime drop waiting
-        // for the ROAM driver). Now that REAPER is dead the socket will EOF
-        // and the driver should exit. Give it a few seconds then force-kill.
-        for _ in 0..20 {
-            if test_child.try_wait()?.is_some() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(250));
-        }
-        if test_child.try_wait()?.is_none() {
-            println!("Test process still alive after REAPER killed — force killing");
-            let _ = test_child.kill();
-            let _ = test_child.wait();
-        }
-    }
-
-    // ── Step 9: Report results ────────────────────────────────────────────
+    // ── Step 7: Cleanup and report ────────────────────────────────────────
     if !tests_passed {
-        dump_log_on_failure(&ext_log, "extension");
-        dump_log_on_failure(&reaper_log, "REAPER process");
-        println!("Per-test logs: /tmp/reaper-tests/");
+        reaper.report_failure(&runner);
+        reaper.stop(&runner);
         return Err("Some tests failed".into());
     }
 
+    reaper.stop(&runner);
     println!("\nAll tests passed!");
     Ok(())
 }
 
-/// Install (symlink) the plugin library into the given UserPlugins directory.
-fn install_plugin(
-    lib_path: &Path,
-    lib_name: &str,
-    user_plugins_dir: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    std::fs::create_dir_all(user_plugins_dir)?;
-
-    let dest = user_plugins_dir.join(lib_name);
-
-    // Remove existing symlink/file
-    let _ = std::fs::remove_file(&dest);
-
-    // Create symlink
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(lib_path, &dest)?;
-    #[cfg(not(unix))]
-    std::fs::copy(lib_path, &dest)?;
-
-    println!("  Installed {} -> {}", dest.display(), lib_path.display());
-    Ok(())
-}
-
-/// Scan /tmp for any fts-daw-*.sock file and return its path as a String.
-fn find_fts_daw_socket() -> Option<String> {
-    let entries = std::fs::read_dir("/tmp").ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with("fts-daw-")
-                && name.ends_with(".sock")
-                && !name.contains(".bootstrap.")
-            {
-                return Some(path.to_string_lossy().into_owned());
-            }
-        }
-    }
-    None
-}
-
-/// Find a command on PATH.
-fn which_command(name: &str) -> Option<String> {
-    Command::new("which").arg(name).output().ok().and_then(|o| {
-        if o.status.success() {
-            String::from_utf8(o.stdout)
-                .ok()
-                .map(|s| s.trim().to_string())
-        } else {
-            None
-        }
-    })
-}
-
-/// Print a section header. In CI (GitHub Actions) emits `::group::` for collapsible logs.
-fn section(ci: bool, name: &str) {
-    if ci {
-        println!("::group::{name}");
-    } else {
-        println!("\n── {name} ──");
-    }
-}
-
-/// End a section. In CI emits `::endgroup::`.
-fn end_section(ci: bool) {
-    if ci {
-        println!("::endgroup::");
-    }
-}
-
-/// Dump the extension log to stdout (called on failure).
-fn dump_log_on_failure(log_path: &Path, label: &str) {
-    if let Ok(content) = std::fs::read_to_string(log_path) {
-        let lines: Vec<&str> = content.lines().collect();
-        let total = lines.len();
-        const MAX_TAIL: usize = 80;
-        let start = total.saturating_sub(MAX_TAIL);
-        println!(
-            "\n── {} log: {} ({} lines{})",
-            label,
-            log_path.display(),
-            total,
-            if start > 0 {
-                format!(", showing last {MAX_TAIL}")
-            } else {
-                String::new()
-            }
-        );
-        for line in &lines[start..] {
-            println!("  {line}");
-        }
-    } else {
-        println!("  (no {} log at {})", label, log_path.display());
-    }
-}
-
-/// List any fts-daw-*.sock files currently in /tmp (diagnostic helper).
-fn list_tmp_sockets() {
-    println!("  fts-daw-*.sock files in /tmp:");
-    if let Ok(entries) = std::fs::read_dir("/tmp") {
-        for entry in entries.flatten() {
-            if let Some(name) = entry.file_name().to_str().map(|s| s.to_string()) {
-                if name.starts_with("fts-daw-") && name.ends_with(".sock") {
-                    println!("    {name}");
-                }
-            }
-        }
-    }
-}
-
-/// Find the `fts-test` launcher (Xvfb + FHS wrapper).
-/// Checks PATH first, then the local devenv profile, then system nix locations.
-fn find_fts_test() -> Option<String> {
-    if let Some(p) = which_command("fts-test") {
-        return Some(p);
-    }
-
-    // Stable devenv profile symlink — works without entering the shell
-    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let devenv_fts = workspace_root.join(".devenv/profile/bin/fts-test");
-    if devenv_fts.exists() {
-        return Some(devenv_fts.to_string_lossy().into_owned());
-    }
-
-    // System/user nix profile fallbacks
-    let candidates = [
-        "/run/current-system/sw/bin/fts-test",
-        "/nix/var/nix/profiles/default/bin/fts-test",
-    ];
-    candidates
-        .iter()
-        .find(|p| PathBuf::from(p).exists())
-        .map(|s| s.to_string())
-}

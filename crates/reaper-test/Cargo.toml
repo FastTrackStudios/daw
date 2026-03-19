@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Runtime library for REAPER integration tests"
 
+[features]
+runner = ["dep:reaper-launcher"]
+
 [dependencies]
 daw = { workspace = true }
 roam = { workspace = true }
@@ -15,3 +18,6 @@ tracing = "0.1"
 
 # Re-export the proc-macro so users can do `use reaper_test::reaper_test;`
 reaper-test-macro = { path = "../reaper-test-macro" }
+
+# Runner deps (xtask only — not needed by test binaries)
+reaper-launcher = { workspace = true, optional = true }
