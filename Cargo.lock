@@ -1348,7 +1348,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "daw-guest-example"
+name = "daw-extension-runtime"
 version = "0.1.0"
 dependencies = [
  "daw",
@@ -1358,6 +1358,16 @@ dependencies = [
  "roam",
  "roam-shm",
  "shm-primitives",
+ "tracing",
+]
+
+[[package]]
+name = "daw-guest-example"
+version = "0.1.0"
+dependencies = [
+ "daw",
+ "daw-extension-runtime",
+ "eyre",
  "tokio",
  "tracing",
  "tracing-subscriber",

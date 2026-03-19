@@ -10,12 +10,8 @@ path = "src/main.rs"
 
 [dependencies]
 daw.workspace = true
-roam.workspace = true
-roam-shm.workspace = true
-shm-primitives.workspace = true
-moire.workspace = true
+daw-extension-runtime.workspace = true
 tokio = { workspace = true, features = ["time", "net", "rt"] }
 eyre = "0.6"
 tracing.workspace = true
 tracing-subscriber.workspace = true
-libc = "0.2"

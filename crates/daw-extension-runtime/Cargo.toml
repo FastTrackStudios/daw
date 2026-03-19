@@ -1,0 +1,17 @@
+[package]
+name = "daw-extension-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "SHM extension runtime — one-call connect to daw-bridge for hot-reloadable extensions"
+
+[dependencies]
+daw.workspace = true
+roam.workspace = true
+roam-shm.workspace = true
+shm-primitives.workspace = true
+moire.workspace = true
+eyre = "0.6"
+tracing.workspace = true
+libc = "0.2"

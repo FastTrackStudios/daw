@@ -14,6 +14,7 @@ members = [
     "crates/reaper-test-macro",
     "crates/reaper-launcher",
     "crates/daw-bridge",
+    "crates/daw-extension-runtime",
     "apps/daw-guest-example",
     "xtask",
 ]
@@ -34,6 +35,8 @@ daw-cli = { path = "apps/daw" }
 daw-ui = { path = "crates/daw-ui", default-features = false }
 # Widget crate stays public (standalone Dioxus widgets)
 audio-controls = { path = "crates/audio-controls" }
+# Extension runtime — for hot-reloadable processes connecting via SHM
+daw-extension-runtime = { path = "crates/daw-extension-runtime" }
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 
