@@ -62,13 +62,13 @@ pub use item::{
 };
 pub use marker_region::{MarkerRegion, MarkerRegionCollection};
 pub use project::{DecodeOptions, ReaperProject};
+pub use serialize::RppSerialize;
 pub use time_pos_utils::{
     time_to_beat_position, time_to_beat_position_structured,
     time_to_beat_position_structured_with_envelope, time_to_beat_position_with_envelope,
 };
 pub use time_tempo::{TempoTimeEnvelope, TempoTimePoint};
 pub use track::{Track, TrackParseOptions};
-pub use serialize::RppSerialize;
 pub use track_ops::{
     classify_track, group_by_names, group_by_predicate, group_into_folder,
     move_into_existing_folder, organize_into_fts_hierarchy, wrap_in_folder, TrackRole,

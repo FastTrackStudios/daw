@@ -9,40 +9,265 @@
 //! section (with offset) to detect what changed, then apply only those
 //! changes to the setlist.
 
+use dawfile_reaper::builder::{MarkerBuilder, ReaperProjectBuilder};
 use dawfile_reaper::diff::{diff_projects_with_options, ChangeKind, DiffOptions};
-use dawfile_reaper::io::read_project;
 use dawfile_reaper::setlist_rpp::{
-    self, build_song_infos_from_projects, concatenate_projects, measures_to_seconds,
-    resolve_song_bounds,
+    build_song_infos_from_projects, concatenate_projects, measures_to_seconds,
 };
-use std::path::PathBuf;
 
-fn fixture_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/setlist")
-        .join(name)
-}
-
-/// Parse the 3 fixture songs and generate the combined setlist.
+/// Build the 3 fixture songs programmatically and generate the combined setlist.
 fn setup_setlist() -> SetlistFixture {
-    let song_a = read_project(fixture_path("song_a.RPP")).unwrap();
-    let song_b = read_project(fixture_path("song_b.RPP")).unwrap();
-    let song_c = read_project(fixture_path("song_c.RPP")).unwrap();
+    // ── Song A: 120 BPM, 4/4 ──────────────────────────────────────────
+    let song_a = ReaperProjectBuilder::new()
+        .tempo(120.0)
+        .sample_rate(48000)
+        .tempo_envelope(|e| e.point(0.0, 120.0))
+        // Markers
+        .add_marker(
+            MarkerBuilder::marker(1, 0.0, "PREROLL")
+                .guid("{00000000-0000-0000-0000-00000000A001}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(2, 2.0, "Count-In")
+                .guid("{00000000-0000-0000-0000-00000000A002}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(3, 4.0, "=START")
+                .guid("{00000000-0000-0000-0000-00000000A003}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(4, 4.0, "SONGSTART")
+                .guid("{00000000-0000-0000-0000-00000000A004}")
+                .build(),
+        )
+        // Regions
+        .add_marker(
+            MarkerBuilder::region(5, 4.0, 12.0, "Verse")
+                .guid("{00000000-0000-0000-0000-00000000A005}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::region(6, 12.0, 20.0, "Chorus")
+                .guid("{00000000-0000-0000-0000-00000000A006}")
+                .build(),
+        )
+        // More markers
+        .add_marker(
+            MarkerBuilder::marker(7, 20.0, "SONGEND")
+                .guid("{00000000-0000-0000-0000-00000000A007}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(8, 20.0, "=END")
+                .guid("{00000000-0000-0000-0000-00000000A008}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(9, 22.0, "POSTROLL")
+                .guid("{00000000-0000-0000-0000-00000000A009}")
+                .build(),
+        )
+        // Tracks
+        .track("Click/Guide", |t| {
+            t.guid("{AAAAAAAA-0001-0000-0000-000000000000}")
+                .folder_start()
+        })
+        .track("Click", |t| {
+            t.guid("{AAAAAAAA-0002-0000-0000-000000000000}")
+                .folder_end(1)
+                .item(0.0, 22.0, |i| {
+                    i.name("Click Pattern A")
+                        .guid("{AAAAAAAA-I001-0000-0000-000000000000}")
+                })
+        })
+        .track("TRACKS", |t| {
+            t.guid("{AAAAAAAA-0003-0000-0000-000000000000}")
+                .folder_start()
+        })
+        .track("Guitar", |t| {
+            t.guid("{AAAAAAAA-0004-0000-0000-000000000000}")
+                .volume(0.8)
+                .item(4.0, 16.0, |i| {
+                    i.name("Guitar Recording A")
+                        .guid("{AAAAAAAA-I002-0000-0000-000000000000}")
+                })
+        })
+        .track("Bass", |t| {
+            t.guid("{AAAAAAAA-0005-0000-0000-000000000000}")
+                .volume(0.6)
+                .folder_end(1)
+                .item(4.0, 16.0, |i| {
+                    i.name("Bass Recording A")
+                        .guid("{AAAAAAAA-I003-0000-0000-000000000000}")
+                })
+        })
+        .build();
 
-    let projects = vec![&song_a, &song_b, &song_c];
+    // ── Song B: 90 BPM, 3/4 ──────────────────────────────────────────
+    let song_b = ReaperProjectBuilder::new()
+        .tempo_with_time_sig(90.0, 3, 4)
+        .sample_rate(48000)
+        .tempo_envelope(|e| e.point(0.0, 90.0).point(10.666667, 110.0))
+        // Markers
+        .add_marker(
+            MarkerBuilder::marker(1, 0.0, "Count-In")
+                .guid("{BBBBBBBB-0000-0000-0000-000000000001}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(2, 2.0, "=START")
+                .guid("{BBBBBBBB-0000-0000-0000-000000000002}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(3, 2.0, "SONGSTART")
+                .guid("{BBBBBBBB-0000-0000-0000-000000000003}")
+                .build(),
+        )
+        // Regions
+        .add_marker(
+            MarkerBuilder::region(4, 2.0, 10.0, "Bridge")
+                .guid("{BBBBBBBB-0000-0000-0000-000000000004}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::region(10, 4.0, 14.0, "Solo Section")
+                .guid("{BBBBBBBB-R000-0000-0000-000000000001}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::region(5, 10.0, 16.0, "Outro")
+                .guid("{BBBBBBBB-0000-0000-0000-000000000005}")
+                .build(),
+        )
+        // More markers
+        .add_marker(
+            MarkerBuilder::marker(6, 16.0, "SONGEND")
+                .guid("{BBBBBBBB-0000-0000-0000-000000000006}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(7, 16.0, "=END")
+                .guid("{BBBBBBBB-0000-0000-0000-000000000007}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(8, 18.0, "POSTROLL")
+                .guid("{BBBBBBBB-0000-0000-0000-000000000008}")
+                .build(),
+        )
+        // Tracks
+        .track("Click", |t| {
+            t.guid("{BBBBBBBB-0001-0000-0000-000000000000}")
+                .item(0.0, 18.0, |i| {
+                    i.name("Click Pattern B")
+                        .guid("{BBBBBBBB-I001-0000-0000-000000000000}")
+                })
+        })
+        .track("Keys", |t| {
+            t.guid("{BBBBBBBB-0002-0000-0000-000000000000}")
+                .volume(0.7)
+                .pan(0.3)
+                .item(2.0, 14.0, |i| {
+                    i.name("Keys Recording B")
+                        .guid("{BBBBBBBB-I002-0000-0000-000000000000}")
+                })
+        })
+        .track("Drums", |t| {
+            t.guid("{BBBBBBBB-0003-0000-0000-000000000000}")
+                .volume(0.9)
+                .item(2.0, 14.0, |i| {
+                    i.name("Drums Recording B")
+                        .guid("{BBBBBBBB-I003-0000-0000-000000000000}")
+                })
+        })
+        .build();
+
+    // ── Song C: 140 BPM, 4/4 ──────────────────────────────────────────
+    let song_c = ReaperProjectBuilder::new()
+        .tempo(140.0)
+        .sample_rate(48000)
+        .tempo_envelope(|e| e.point(0.0, 140.0))
+        // Markers
+        .add_marker(
+            MarkerBuilder::marker(1, 0.0, "PREROLL")
+                .guid("{CCCCCCCC-0000-0000-0000-000000000001}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(2, 1.714286, "=START")
+                .guid("{CCCCCCCC-0000-0000-0000-000000000002}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(3, 1.714286, "SONGSTART")
+                .guid("{CCCCCCCC-0000-0000-0000-000000000003}")
+                .build(),
+        )
+        // Regions
+        .add_marker(
+            MarkerBuilder::region(4, 1.714286, 6.857143, "Intro")
+                .guid("{CCCCCCCC-0000-0000-0000-000000000004}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::region(5, 6.857143, 15.428571, "Breakdown")
+                .guid("{CCCCCCCC-0000-0000-0000-000000000005}")
+                .build(),
+        )
+        // More markers
+        .add_marker(
+            MarkerBuilder::marker(6, 15.428571, "SONGEND")
+                .guid("{CCCCCCCC-0000-0000-0000-000000000006}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(7, 15.428571, "=END")
+                .guid("{CCCCCCCC-0000-0000-0000-000000000007}")
+                .build(),
+        )
+        .add_marker(
+            MarkerBuilder::marker(8, 17.142857, "POSTROLL")
+                .guid("{CCCCCCCC-0000-0000-0000-000000000008}")
+                .build(),
+        )
+        // Tracks
+        .track("Click", |t| {
+            t.guid("{CCCCCCCC-0001-0000-0000-000000000000}")
+                .item(0.0, 17.142857, |i| {
+                    i.name("Click Pattern C")
+                        .guid("{CCCCCCCC-I001-0000-0000-000000000000}")
+                })
+        })
+        .track("Guide", |t| {
+            t.guid("{CCCCCCCC-0002-0000-0000-000000000000}")
+                .item(0.0, 17.142857, |i| {
+                    i.name("Guide Cues C")
+                        .guid("{CCCCCCCC-I002-0000-0000-000000000000}")
+                })
+        })
+        .track("Synth Lead", |t| {
+            t.guid("{CCCCCCCC-0003-0000-0000-000000000000}")
+                .volume(0.75)
+                .pan(-0.5)
+                .item(1.714286, 13.714286, |i| {
+                    i.name("Synth Lead Recording C")
+                        .guid("{CCCCCCCC-I003-0000-0000-000000000000}")
+                })
+        })
+        .build();
+
     let names: Vec<&str> = vec!["Song A", "Song B", "Song C"];
     let gap = measures_to_seconds(2, 120.0, 4); // 2-measure gap at 120 BPM
 
-    let mut song_infos = build_song_infos_from_projects(
+    let song_infos = build_song_infos_from_projects(
         &[song_a.clone(), song_b.clone(), song_c.clone()],
         &names,
         gap,
     );
-
-    // Resolve bounds for offset tracking
-    let bounds_a = resolve_song_bounds(&song_a);
-    let bounds_b = resolve_song_bounds(&song_b);
-    let bounds_c = resolve_song_bounds(&song_c);
 
     let combined = concatenate_projects(
         &[song_a.clone(), song_b.clone(), song_c.clone()],

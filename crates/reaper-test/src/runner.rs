@@ -83,9 +83,7 @@ impl TestRunner {
         }
 
         section(self.ci, "reaper-test: pre-warm (dismiss evaluation dialog)");
-        println!(
-            "  [nag] section missing from reaper.ini — running REAPER briefly to populate it"
-        );
+        println!("  [nag] section missing from reaper.ini — running REAPER briefly to populate it");
 
         let reaper_exe = resolve_reaper_exe();
         let fts_test = find_fts_test();
@@ -235,7 +233,10 @@ impl TestRunner {
         } else if needs_fhs {
             println!("  WARNING: no fts-test found and no DISPLAY — REAPER may fail");
         }
-        println!("  timeout:     {}s (REAPER_TEST_TIMEOUT_SECS)", self.timeout_secs);
+        println!(
+            "  timeout:     {}s (REAPER_TEST_TIMEOUT_SECS)",
+            self.timeout_secs
+        );
         println!("  logs:");
         println!("    REAPER process → {}", reaper_log.display());
         println!("    extension      → {}", self.extension_log.display());
@@ -357,7 +358,10 @@ impl TestRunner {
                 match test_child.try_wait()? {
                     Some(status) => break status.success(),
                     None if test_start.elapsed() > test_timeout => {
-                        println!("Test process did not exit within {}s — killing it", self.timeout_secs);
+                        println!(
+                            "Test process did not exit within {}s — killing it",
+                            self.timeout_secs
+                        );
                         let _ = test_child.kill();
                         let _ = test_child.wait();
                         break false;
@@ -482,7 +486,10 @@ impl RunningReaper {
     /// Stop the REAPER process and clean up.
     pub fn stop(mut self, runner: &TestRunner) {
         if runner.keep_open {
-            println!("REAPER left running (PID {}) — kill manually when done", self.pid);
+            println!(
+                "REAPER left running (PID {}) — kill manually when done",
+                self.pid
+            );
             // Leak the child so it isn't killed on drop
             std::mem::forget(self);
             return;

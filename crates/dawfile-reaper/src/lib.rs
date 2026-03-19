@@ -50,6 +50,7 @@
 
 use thiserror::Error;
 
+pub mod builder;
 pub mod chunk_ops;
 pub mod compat;
 pub mod convert;
@@ -59,7 +60,6 @@ pub mod index;
 pub mod io;
 pub mod primitives;
 pub mod rpp_tree;
-pub mod builder;
 pub mod setlist_rpp;
 pub mod stock_fx;
 pub mod types;
@@ -166,7 +166,7 @@ pub use rpp_tree::{
 };
 pub use stock_fx::{
     EqBand, EqBandType, ReaComp, ReaControlMidi, ReaDelay, ReaEq, ReaFir, ReaFirMode, ReaGate,
-    ReaInsert, ReaLimit, ReaPitch, ReaStream, ReaSynth, ReaTune, ReaVerbate, ReaVerb, ReaXcomp,
+    ReaInsert, ReaLimit, ReaPitch, ReaStream, ReaSynth, ReaTune, ReaVerb, ReaVerbate, ReaXcomp,
     StockFx,
 };
 pub use types::{

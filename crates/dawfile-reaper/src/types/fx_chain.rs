@@ -1325,11 +1325,7 @@ impl RppSerialize for FxPlugin {
 
         // TCP-visible parameters
         for tcp_param in &self.params_on_tcp {
-            out.push_str(&format!(
-                "{}PARM_TCP {}\n",
-                indent,
-                tcp_param.format_rpp()
-            ));
+            out.push_str(&format!("{}PARM_TCP {}\n", indent, tcp_param.format_rpp()));
         }
     }
 }

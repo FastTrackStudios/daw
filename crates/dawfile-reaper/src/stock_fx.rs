@@ -72,10 +72,10 @@ struct PluginIdentity {
 /// Version marker: 0xfeed5eef
 const HEADER_76_TEMPLATE: [u8; 72] = [
     0xef, 0x5e, 0xed, 0xfe, // version 0xfeed5eef
-    0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     // param_data_size placeholder (4 bytes) + padding (4 bytes) + 0x00100000 (4 bytes)
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00,
 ];
@@ -589,12 +589,7 @@ impl ReaEq {
         let footer_size = 10;
         let param_data_size = 4 + 4 + band_data_size + footer_size;
 
-        let header = build_header_60(
-            REAEQ_ID.magic,
-            0xfeed5eee,
-            param_data_size as u32,
-            1,
-        );
+        let header = build_header_60(REAEQ_ID.magic, 0xfeed5eee, param_data_size as u32, 1);
 
         let mut state = header;
 
@@ -1031,8 +1026,7 @@ impl ReaVerbate {
         let param_bytes: Vec<u8> = params.iter().flat_map(|f| f.to_le_bytes()).collect();
         let param_data_size = (SENTINEL.len() + param_bytes.len()) as u32;
 
-        let header =
-            build_header_60(REAVERBATE_ID.magic, 0xfeed5eef, param_data_size, 0);
+        let header = build_header_60(REAVERBATE_ID.magic, 0xfeed5eef, param_data_size, 0);
 
         let mut state = header;
         state.extend_from_slice(&SENTINEL);
@@ -1850,7 +1844,10 @@ mod tests {
         let band0_enabled = u32::from_le_bytes(decoded[72..76].try_into().unwrap());
         assert_eq!(band0_enabled, 1, "band 0 should be enabled");
         let band0_freq = f64::from_le_bytes(decoded[76..84].try_into().unwrap());
-        assert!((band0_freq - 80.0).abs() < 0.001, "band 0 freq should be 80 Hz");
+        assert!(
+            (band0_freq - 80.0).abs() < 0.001,
+            "band 0 freq should be 80 Hz"
+        );
     }
 
     #[test]
@@ -2023,7 +2020,10 @@ mod tests {
     fn test_identity_only_plugins() {
         // Plugins that use identity-only (no state encoding yet)
         let plugin = ReaDelay::new().delay_ms(300.0).into_fx_plugin();
-        assert!(plugin.raw_block.contains("1919247468"), "should have VST ID");
+        assert!(
+            plugin.raw_block.contains("1919247468"),
+            "should have VST ID"
+        );
 
         let plugin = ReaVerb::new().into_fx_plugin();
         assert!(plugin.raw_block.contains("1919252066"));

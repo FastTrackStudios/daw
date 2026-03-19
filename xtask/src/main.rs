@@ -302,8 +302,9 @@ fn setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
     // ── Linux: generate desktop entries, wrapper scripts, icons ──────────
 
     // Resolve REAPER paths from environment (set by devenv/nix)
-    let reaper_executable = std::env::var("FTS_REAPER_EXECUTABLE")
-        .unwrap_or_else(|_| runner::which_command("reaper").unwrap_or_else(|| "reaper".to_string()));
+    let reaper_executable = std::env::var("FTS_REAPER_EXECUTABLE").unwrap_or_else(|_| {
+        runner::which_command("reaper").unwrap_or_else(|| "reaper".to_string())
+    });
     let reaper_resources = std::env::var("FTS_REAPER_RESOURCES").unwrap_or_else(|_| {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         format!("{home}/.config/REAPER")
@@ -616,4 +617,3 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     println!("\nAll tests passed!");
     Ok(())
 }
-

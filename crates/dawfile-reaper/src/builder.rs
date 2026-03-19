@@ -849,13 +849,7 @@ impl ReaperProjectBuilder {
     }
 
     /// Add a region spanning from `start` to `end`.
-    pub fn region(
-        mut self,
-        id: i32,
-        start: f64,
-        end: f64,
-        name: impl Into<String>,
-    ) -> Self {
+    pub fn region(mut self, id: i32, start: f64, end: f64, name: impl Into<String>) -> Self {
         self.markers_regions
             .add(MarkerBuilder::region(id, start, end, name).build());
         self
@@ -891,16 +885,8 @@ impl ReaperProjectBuilder {
         mut self,
         f: impl FnOnce(TempoEnvelopeBuilder) -> TempoEnvelopeBuilder,
     ) -> Self {
-        let default_tempo = self
-            .properties
-            .tempo
-            .map(|t| t.0 as f64)
-            .unwrap_or(120.0);
-        let (num, den) = self
-            .properties
-            .tempo
-            .map(|t| (t.1, t.2))
-            .unwrap_or((4, 4));
+        let default_tempo = self.properties.tempo.map(|t| t.0 as f64).unwrap_or(120.0);
+        let (num, den) = self.properties.tempo.map(|t| (t.1, t.2)).unwrap_or((4, 4));
         let builder = f(TempoEnvelopeBuilder::new(default_tempo, num, den));
         self.tempo_envelope = Some(builder.build());
         self
@@ -936,8 +922,6 @@ impl Default for ReaperProjectBuilder {
         Self::new()
     }
 }
-
-
 
 // ===========================================================================
 // Tests
@@ -987,10 +971,7 @@ mod tests {
 
     #[test]
     fn test_track_builder_muted_soloed_armed() {
-        let track = TrackBuilder::new("Lead")
-            .muted()
-            .armed()
-            .build();
+        let track = TrackBuilder::new("Lead").muted().armed().build();
 
         assert!(track.mutesolo.as_ref().unwrap().mute);
         assert!(track.record.as_ref().unwrap().armed);
@@ -999,12 +980,8 @@ mod tests {
     #[test]
     fn test_track_builder_with_items() {
         let track = TrackBuilder::new("Drums")
-            .item(0.0, 4.0, |i| {
-                i.name("Kick").source_wave("kick.wav")
-            })
-            .item(4.0, 4.0, |i| {
-                i.name("Snare").source_wave("snare.wav")
-            })
+            .item(0.0, 4.0, |i| i.name("Kick").source_wave("kick.wav"))
+            .item(4.0, 4.0, |i| i.name("Snare").source_wave("snare.wav"))
             .build();
 
         assert_eq!(track.items.len(), 2);
@@ -1020,13 +997,9 @@ mod tests {
         let track = TrackBuilder::new("Guitar")
             .vst("ReaEQ (Cockos)", "reaeq.dll")
             .fx(|_| {
-                FxBuilder::new(
-                    "VST: ReaComp (Cockos)",
-                    PluginType::Vst,
-                    "reacomp.dll",
-                )
-                .bypassed()
-                .fxid("{COMP-GUID}")
+                FxBuilder::new("VST: ReaComp (Cockos)", PluginType::Vst, "reacomp.dll")
+                    .bypassed()
+                    .fxid("{COMP-GUID}")
             })
             .build();
 
@@ -1053,9 +1026,7 @@ mod tests {
     fn test_track_folder_hierarchy() {
         let project = ReaperProjectBuilder::new()
             .track("Drums", |t| t.folder_start())
-            .track("Kick", |t| {
-                t.item(0.0, 4.0, |i| i.source_wave("kick.wav"))
-            })
+            .track("Kick", |t| t.item(0.0, 4.0, |i| i.source_wave("kick.wav")))
             .track("Snare", |t| {
                 t.item(0.0, 4.0, |i| i.source_wave("snare.wav"))
                     .folder_end(1)
@@ -1106,9 +1077,7 @@ mod tests {
                     .vst("ReaEQ (Cockos)", "reaeq.dll")
             })
             .track("Kick", |t| {
-                t.item(0.0, 4.0, |i| {
-                    i.name("Kick Pattern").source_wave("kick.wav")
-                })
+                t.item(0.0, 4.0, |i| i.name("Kick Pattern").source_wave("kick.wav"))
             })
             .track("Snare", |t| {
                 t.item(0.0, 4.0, |i| i.source_wave("snare.wav"))
@@ -1135,9 +1104,7 @@ mod tests {
     #[test]
     fn test_input_fx() {
         let track = TrackBuilder::new("Vocals")
-            .input_fx(|_| {
-                FxBuilder::new("VST: ReaTune (Cockos)", PluginType::Vst, "reatune.dll")
-            })
+            .input_fx(|_| FxBuilder::new("VST: ReaTune (Cockos)", PluginType::Vst, "reatune.dll"))
             .build();
 
         assert!(track.input_fx.is_some());
@@ -1159,10 +1126,7 @@ mod tests {
 
     #[test]
     fn test_add_prebuilt_track() {
-        let track = TrackBuilder::new("Custom")
-            .volume(0.5)
-            .channels(4)
-            .build();
+        let track = TrackBuilder::new("Custom").volume(0.5).channels(4).build();
 
         let project = ReaperProjectBuilder::new().add_track(track).build();
 
@@ -1262,11 +1226,7 @@ mod tests {
     fn test_tempo_envelope_builder() {
         let project = ReaperProjectBuilder::new()
             .tempo(120.0)
-            .tempo_envelope(|e| {
-                e.point(0.0, 120.0)
-                    .ramp(8.0, 140.0)
-                    .point(16.0, 120.0)
-            })
+            .tempo_envelope(|e| e.point(0.0, 120.0).ramp(8.0, 140.0).point(16.0, 120.0))
             .empty_track("Track 1")
             .build();
 
@@ -1321,9 +1281,7 @@ mod tests {
             .sample_rate(48000)
             .marker(1, 0.0, "Intro")
             .marker(2, 4.0, "Verse")
-            .tempo_envelope(|e| {
-                e.point(0.0, 120.0).ramp(8.0, 140.0)
-            })
+            .tempo_envelope(|e| e.point(0.0, 120.0).ramp(8.0, 140.0))
             .track("Guitar", |t| {
                 t.item(0.0, 8.0, |i| i.source_wave("guitar.wav"))
             })
@@ -1351,9 +1309,7 @@ mod tests {
             .lane(3)
             .build();
 
-        let project = ReaperProjectBuilder::new()
-            .add_marker(marker)
-            .build();
+        let project = ReaperProjectBuilder::new().add_marker(marker).build();
 
         assert_eq!(project.markers_regions.all.len(), 1);
         assert_eq!(project.markers_regions.all[0].name, "Custom");
@@ -1373,14 +1329,8 @@ mod tests {
         assert_eq!(project.tracks.len(), 5);
 
         // Snare closes Drums folder
-        assert_eq!(
-            project.tracks[3].folder.as_ref().unwrap().indentation,
-            -1
-        );
+        assert_eq!(project.tracks[3].folder.as_ref().unwrap().indentation, -1);
         // Bass closes Instruments folder
-        assert_eq!(
-            project.tracks[4].folder.as_ref().unwrap().indentation,
-            -1
-        );
+        assert_eq!(project.tracks[4].folder.as_ref().unwrap().indentation, -1);
     }
 }
