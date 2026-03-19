@@ -7,7 +7,9 @@ use super::envelope::Envelope;
 use super::item::{
     FadeCurveType, Item, PitchMode, SoloState, SourceBlock, SourceType, Take,
 };
+use super::marker_region::{MarkerRegion, MarkerRegionCollection};
 use super::project::ReaperProject;
+use super::time_tempo::{TempoTimeEnvelope, TempoTimePoint};
 use super::track::{
     AutomationMode, FolderState, FreeMode, MonitorMode, RecordMode, Track, TrackSoloState,
 };
@@ -654,6 +656,88 @@ impl RppSerialize for Track {
 }
 
 // ---------------------------------------------------------------------------
+// MarkerRegion
+// ---------------------------------------------------------------------------
+
+impl MarkerRegion {
+    /// Write this marker/region as RPP MARKER line(s).
+    ///
+    /// Regions emit two MARKER lines: the start (with name) and the end (with "").
+    pub fn write_marker_line(&self, out: &mut String, indent: &str) {
+        // MARKER id position name flags color locked B guid additional [lane]
+        out.push_str(&format!(
+            "{}MARKER {} {} \"{}\" {} {} {} B {} {}",
+            indent,
+            self.id,
+            self.position,
+            rpp_escape(&self.name),
+            self.flags,
+            self.color,
+            self.locked,
+            self.guid,
+            self.additional,
+        ));
+        if let Some(lane) = self.lane {
+            out.push_str(&format!(" {}", lane));
+        }
+        out.push('\n');
+
+        // Regions emit a second MARKER line for the end position
+        if let Some(end) = self.end_position {
+            out.push_str(&format!(
+                "{}MARKER {} {} \"\" {}\n",
+                indent, self.id, end, self.flags
+            ));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TempoTimeEnvelope
+// ---------------------------------------------------------------------------
+
+impl RppSerialize for TempoTimeEnvelope {
+    fn write_rpp(&self, out: &mut String, indent: &str) {
+        if self.points.is_empty() {
+            return;
+        }
+
+        let inner = format!("{}  ", indent);
+
+        out.push_str(&format!("{}<TEMPOENVEX\n", indent));
+        out.push_str(&format!("{}ACT 1 -1\n", inner));
+        out.push_str(&format!("{}VIS 1 0 1\n", inner));
+        out.push_str(&format!("{}LANEHEIGHT 0 0\n", inner));
+        out.push_str(&format!("{}ARM 0\n", inner));
+        out.push_str(&format!("{}DEFSHAPE 0 -1 -1\n", inner));
+
+        for pt in &self.points {
+            out.push_str(&format!(
+                "{}PT {:.12} {:.10} {}",
+                inner, pt.position, pt.tempo, pt.shape
+            ));
+            if let Some(ts) = pt.time_signature_encoded {
+                out.push_str(&format!(" {}", ts));
+                // When time signature is present, emit the full PT line
+                out.push_str(&format!(
+                    " {} {} {} \"{}\" {} {} {}",
+                    b(pt.selected),
+                    pt.unknown1,
+                    pt.bezier_tension,
+                    rpp_escape(&pt.metronome_pattern),
+                    pt.unknown2,
+                    pt.unknown3,
+                    pt.unknown4,
+                ));
+            }
+            out.push('\n');
+        }
+
+        out.push_str(&format!("{}>\n", indent));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ReaperProject
 // ---------------------------------------------------------------------------
 
@@ -681,6 +765,16 @@ impl RppSerialize for ReaperProject {
                 "{}TEMPO {} {} {} {}\n",
                 inner, tempo.0, tempo.1, tempo.2, tempo.3
             ));
+        }
+
+        // Tempo envelope
+        if let Some(ref tempo_env) = self.tempo_envelope {
+            tempo_env.write_rpp(out, &inner);
+        }
+
+        // Markers and regions
+        for marker in &self.markers_regions.all {
+            marker.write_marker_line(out, &inner);
         }
 
         // Tracks

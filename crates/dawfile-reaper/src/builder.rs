@@ -36,7 +36,9 @@
 use crate::stock_fx::StockFx;
 use crate::types::fx_chain::{FxChain, FxChainNode, FxPlugin, PluginType};
 use crate::types::item::{Item, SourceBlock, SourceType, Take};
+use crate::types::marker_region::{MarkerRegion, MarkerRegionCollection};
 use crate::types::project::{ProjectProperties, ReaperProject};
+use crate::types::time_tempo::{TempoTimeEnvelope, TempoTimePoint};
 use crate::types::track::{
     FolderSettings, FolderState, MuteSoloSettings, RecordSettings, Track, TrackSoloState,
     VolPanSettings,
@@ -543,6 +545,199 @@ impl TrackBuilder {
 }
 
 // ===========================================================================
+// MarkerBuilder
+// ===========================================================================
+
+/// Builder for constructing markers and regions.
+///
+/// # Example
+///
+/// ```
+/// use dawfile_reaper::builder::MarkerBuilder;
+///
+/// // Simple marker
+/// let marker = MarkerBuilder::marker(1, 4.0, "Verse 1").build();
+///
+/// // Region with start and end
+/// let region = MarkerBuilder::region(2, 4.0, 12.0, "Verse 1").lane(1).build();
+/// ```
+pub struct MarkerBuilder {
+    marker: MarkerRegion,
+}
+
+impl MarkerBuilder {
+    /// Create a marker (point) at the given position.
+    pub fn marker(id: i32, position: f64, name: impl Into<String>) -> Self {
+        Self {
+            marker: MarkerRegion {
+                id,
+                position,
+                name: name.into(),
+                color: 0,
+                flags: 0,
+                locked: 0,
+                guid: String::new(),
+                additional: 0,
+                end_position: None,
+                lane: None,
+                beat_position: None,
+            },
+        }
+    }
+
+    /// Create a region spanning from `start` to `end`.
+    pub fn region(id: i32, start: f64, end: f64, name: impl Into<String>) -> Self {
+        Self {
+            marker: MarkerRegion {
+                id,
+                position: start,
+                name: name.into(),
+                color: 0,
+                flags: 1, // region flag
+                locked: 0,
+                guid: String::new(),
+                additional: 0,
+                end_position: Some(end),
+                lane: None,
+                beat_position: None,
+            },
+        }
+    }
+
+    /// Set the marker/region color (REAPER color integer).
+    pub fn color(mut self, color: i32) -> Self {
+        self.marker.color = color;
+        self
+    }
+
+    /// Assign to a ruler lane (v7.62+). 0 = default lane.
+    pub fn lane(mut self, lane: i32) -> Self {
+        self.marker.lane = Some(lane);
+        self
+    }
+
+    /// Set the GUID for this marker/region.
+    pub fn guid(mut self, guid: impl Into<String>) -> Self {
+        self.marker.guid = guid.into();
+        self
+    }
+
+    /// Lock this marker/region.
+    pub fn locked(mut self) -> Self {
+        self.marker.locked = 1;
+        self
+    }
+
+    /// Set flags bitfield.
+    pub fn flags(mut self, flags: i32) -> Self {
+        self.marker.flags = flags;
+        self
+    }
+
+    /// Build the final `MarkerRegion`.
+    pub fn build(self) -> MarkerRegion {
+        self.marker
+    }
+}
+
+// ===========================================================================
+// TempoEnvelopeBuilder
+// ===========================================================================
+
+/// Builder for constructing tempo/time-signature envelopes.
+///
+/// # Example
+///
+/// ```
+/// use dawfile_reaper::builder::TempoEnvelopeBuilder;
+///
+/// let envelope = TempoEnvelopeBuilder::new(120.0, 4, 4)
+///     .point(0.0, 120.0)
+///     .point_with_time_sig(8.0, 140.0, 3, 4)
+///     .ramp(16.0, 100.0)  // linear ramp to 100 BPM
+///     .build();
+///
+/// assert_eq!(envelope.points.len(), 3);
+/// ```
+pub struct TempoEnvelopeBuilder {
+    envelope: TempoTimeEnvelope,
+}
+
+impl TempoEnvelopeBuilder {
+    /// Create a new tempo envelope with the given default tempo and time signature.
+    pub fn new(default_tempo: f64, numerator: i32, denominator: i32) -> Self {
+        Self {
+            envelope: TempoTimeEnvelope::new(default_tempo, (numerator, denominator)),
+        }
+    }
+
+    /// Add a tempo point at the given position (seconds) with square shape (instant jump).
+    pub fn point(mut self, position: f64, tempo: f64) -> Self {
+        self.envelope.points.push(TempoTimePoint {
+            position,
+            tempo,
+            shape: 1, // square = instant
+            ..TempoTimePoint::default()
+        });
+        self
+    }
+
+    /// Add a tempo point with a time signature change.
+    ///
+    /// Time signature is encoded as `65536 * denominator + numerator`.
+    pub fn point_with_time_sig(
+        mut self,
+        position: f64,
+        tempo: f64,
+        numerator: i32,
+        denominator: i32,
+    ) -> Self {
+        self.envelope.points.push(TempoTimePoint {
+            position,
+            tempo,
+            shape: 1,
+            time_signature_encoded: Some(65536 * denominator + numerator),
+            ..TempoTimePoint::default()
+        });
+        self
+    }
+
+    /// Add a linear ramp point — tempo ramps linearly from the previous point to this one.
+    pub fn ramp(mut self, position: f64, tempo: f64) -> Self {
+        self.envelope.points.push(TempoTimePoint {
+            position,
+            tempo,
+            shape: 0, // linear
+            ..TempoTimePoint::default()
+        });
+        self
+    }
+
+    /// Add a bezier curve tempo point with the given tension (-1.0 to 1.0).
+    pub fn bezier(mut self, position: f64, tempo: f64, tension: f64) -> Self {
+        self.envelope.points.push(TempoTimePoint {
+            position,
+            tempo,
+            shape: 5, // bezier
+            bezier_tension: tension,
+            ..TempoTimePoint::default()
+        });
+        self
+    }
+
+    /// Add a raw `TempoTimePoint` directly.
+    pub fn raw_point(mut self, point: TempoTimePoint) -> Self {
+        self.envelope.points.push(point);
+        self
+    }
+
+    /// Build the final `TempoTimeEnvelope`.
+    pub fn build(self) -> TempoTimeEnvelope {
+        self.envelope
+    }
+}
+
+// ===========================================================================
 // ReaperProjectBuilder
 // ===========================================================================
 
@@ -572,6 +767,8 @@ pub struct ReaperProjectBuilder {
     timestamp: i64,
     properties: ProjectProperties,
     tracks: Vec<Track>,
+    markers_regions: MarkerRegionCollection,
+    tempo_envelope: Option<TempoTimeEnvelope>,
 }
 
 impl ReaperProjectBuilder {
@@ -583,6 +780,8 @@ impl ReaperProjectBuilder {
             timestamp: 0,
             properties: ProjectProperties::new(),
             tracks: vec![],
+            markers_regions: MarkerRegionCollection::new(),
+            tempo_envelope: None,
         }
     }
 
@@ -642,6 +841,77 @@ impl ReaperProjectBuilder {
         self
     }
 
+    /// Add a marker at the given position.
+    pub fn marker(mut self, id: i32, position: f64, name: impl Into<String>) -> Self {
+        self.markers_regions
+            .add(MarkerBuilder::marker(id, position, name).build());
+        self
+    }
+
+    /// Add a region spanning from `start` to `end`.
+    pub fn region(
+        mut self,
+        id: i32,
+        start: f64,
+        end: f64,
+        name: impl Into<String>,
+    ) -> Self {
+        self.markers_regions
+            .add(MarkerBuilder::region(id, start, end, name).build());
+        self
+    }
+
+    /// Add a pre-built `MarkerRegion` directly.
+    pub fn add_marker(mut self, marker: MarkerRegion) -> Self {
+        self.markers_regions.add(marker);
+        self
+    }
+
+    /// Set the tempo envelope using a builder closure.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use dawfile_reaper::builder::ReaperProjectBuilder;
+    /// use dawfile_reaper::RppSerialize;
+    ///
+    /// let project = ReaperProjectBuilder::new()
+    ///     .tempo(120.0)
+    ///     .tempo_envelope(|e| e
+    ///         .point(0.0, 120.0)
+    ///         .ramp(8.0, 140.0)
+    ///         .point(16.0, 120.0)
+    ///     )
+    ///     .build();
+    ///
+    /// let rpp = project.to_rpp_string();
+    /// assert!(rpp.contains("TEMPOENVEX"));
+    /// ```
+    pub fn tempo_envelope(
+        mut self,
+        f: impl FnOnce(TempoEnvelopeBuilder) -> TempoEnvelopeBuilder,
+    ) -> Self {
+        let default_tempo = self
+            .properties
+            .tempo
+            .map(|t| t.0 as f64)
+            .unwrap_or(120.0);
+        let (num, den) = self
+            .properties
+            .tempo
+            .map(|t| (t.1, t.2))
+            .unwrap_or((4, 4));
+        let builder = f(TempoEnvelopeBuilder::new(default_tempo, num, den));
+        self.tempo_envelope = Some(builder.build());
+        self
+    }
+
+    /// Set a pre-built tempo envelope directly.
+    pub fn set_tempo_envelope(mut self, envelope: TempoTimeEnvelope) -> Self {
+        self.tempo_envelope = Some(envelope);
+        self
+    }
+
     /// Build the final ReaperProject.
     pub fn build(self) -> ReaperProject {
         ReaperProject {
@@ -653,8 +923,8 @@ impl ReaperProjectBuilder {
             items: vec![],
             envelopes: vec![],
             fx_chains: vec![],
-            markers_regions: Default::default(),
-            tempo_envelope: None,
+            markers_regions: self.markers_regions,
+            tempo_envelope: self.tempo_envelope,
             ruler_lanes: vec![],
             ruler_height: None,
         }
@@ -666,6 +936,8 @@ impl Default for ReaperProjectBuilder {
         Self::new()
     }
 }
+
+
 
 // ===========================================================================
 // Tests
@@ -935,6 +1207,157 @@ mod tests {
         assert_eq!(track.items[0].takes.len(), 2);
         assert!(track.items[0].takes[0].is_selected);
         assert!(!track.items[0].takes[1].is_selected);
+    }
+
+    #[test]
+    fn test_project_with_markers() {
+        let project = ReaperProjectBuilder::new()
+            .tempo(120.0)
+            .marker(1, 0.0, "Intro")
+            .marker(2, 4.0, "Verse 1")
+            .region(3, 4.0, 12.0, "Verse Section")
+            .marker(4, 12.0, "Chorus")
+            .empty_track("Track 1")
+            .build();
+
+        assert_eq!(project.markers_regions.markers.len(), 3);
+        assert_eq!(project.markers_regions.regions.len(), 1);
+        assert_eq!(project.markers_regions.all.len(), 4);
+
+        let rpp = project.to_rpp_string();
+        assert!(rpp.contains("MARKER 1 0 \"Intro\""));
+        assert!(rpp.contains("MARKER 2 4 \"Verse 1\""));
+        assert!(rpp.contains("MARKER 3 4 \"Verse Section\""));
+        assert!(rpp.contains("MARKER 4 12 \"Chorus\""));
+    }
+
+    #[test]
+    fn test_marker_with_lane() {
+        let marker = MarkerBuilder::marker(1, 0.0, "=START")
+            .lane(2)
+            .color(0xFF0000)
+            .locked()
+            .guid("{TEST-GUID}")
+            .build();
+
+        assert_eq!(marker.lane, Some(2));
+        assert_eq!(marker.color, 0xFF0000);
+        assert_eq!(marker.locked, 1);
+        assert_eq!(marker.guid, "{TEST-GUID}");
+        assert!(marker.is_marker());
+    }
+
+    #[test]
+    fn test_region_builder() {
+        let region = MarkerBuilder::region(5, 4.0, 12.0, "Verse 1")
+            .lane(1)
+            .build();
+
+        assert!(region.is_region());
+        assert_eq!(region.duration(), Some(8.0));
+        assert_eq!(region.lane, Some(1));
+    }
+
+    #[test]
+    fn test_tempo_envelope_builder() {
+        let project = ReaperProjectBuilder::new()
+            .tempo(120.0)
+            .tempo_envelope(|e| {
+                e.point(0.0, 120.0)
+                    .ramp(8.0, 140.0)
+                    .point(16.0, 120.0)
+            })
+            .empty_track("Track 1")
+            .build();
+
+        let env = project.tempo_envelope.as_ref().unwrap();
+        assert_eq!(env.points.len(), 3);
+        assert_eq!(env.points[0].tempo, 120.0);
+        assert_eq!(env.points[0].shape, 1); // square
+        assert_eq!(env.points[1].tempo, 140.0);
+        assert_eq!(env.points[1].shape, 0); // linear ramp
+        assert_eq!(env.points[2].tempo, 120.0);
+
+        let rpp = project.to_rpp_string();
+        assert!(rpp.contains("<TEMPOENVEX"));
+        assert!(rpp.contains("PT"));
+    }
+
+    #[test]
+    fn test_tempo_envelope_with_time_sig() {
+        let env = TempoEnvelopeBuilder::new(120.0, 4, 4)
+            .point_with_time_sig(0.0, 120.0, 4, 4)
+            .point_with_time_sig(8.0, 100.0, 3, 4)
+            .build();
+
+        assert_eq!(env.points.len(), 2);
+        assert_eq!(
+            env.points[0].time_signature_encoded,
+            Some(65536 * 4 + 4) // 262148
+        );
+        assert_eq!(env.points[0].time_signature(), Some((4, 4)));
+        assert_eq!(
+            env.points[1].time_signature_encoded,
+            Some(65536 * 4 + 3) // 262147
+        );
+        assert_eq!(env.points[1].time_signature(), Some((3, 4)));
+    }
+
+    #[test]
+    fn test_tempo_envelope_bezier() {
+        let env = TempoEnvelopeBuilder::new(120.0, 4, 4)
+            .point(0.0, 120.0)
+            .bezier(8.0, 160.0, 0.5)
+            .build();
+
+        assert_eq!(env.points[1].shape, 5);
+        assert_eq!(env.points[1].bezier_tension, 0.5);
+    }
+
+    #[test]
+    fn test_project_markers_and_tempo_serialize_roundtrip() {
+        let project = ReaperProjectBuilder::new()
+            .tempo(120.0)
+            .sample_rate(48000)
+            .marker(1, 0.0, "Intro")
+            .marker(2, 4.0, "Verse")
+            .tempo_envelope(|e| {
+                e.point(0.0, 120.0).ramp(8.0, 140.0)
+            })
+            .track("Guitar", |t| {
+                t.item(0.0, 8.0, |i| i.source_wave("guitar.wav"))
+            })
+            .build();
+
+        let rpp = project.to_rpp_string();
+
+        // Verify it parses back
+        let parsed = crate::io::parse_project_text(&rpp).expect("should parse builder output");
+        assert_eq!(parsed.tracks.len(), 1);
+        assert_eq!(parsed.tracks[0].name, "Guitar");
+
+        // Markers should be in the output
+        assert!(rpp.contains("MARKER 1 0 \"Intro\""));
+        assert!(rpp.contains("MARKER 2 4 \"Verse\""));
+
+        // Tempo envelope
+        assert!(rpp.contains("<TEMPOENVEX"));
+    }
+
+    #[test]
+    fn test_add_prebuilt_marker() {
+        let marker = MarkerBuilder::marker(1, 5.0, "Custom")
+            .color(0x00FF00)
+            .lane(3)
+            .build();
+
+        let project = ReaperProjectBuilder::new()
+            .add_marker(marker)
+            .build();
+
+        assert_eq!(project.markers_regions.all.len(), 1);
+        assert_eq!(project.markers_regions.all[0].name, "Custom");
+        assert_eq!(project.markers_regions.all[0].lane, Some(3));
     }
 
     #[test]
