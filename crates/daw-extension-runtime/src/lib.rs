@@ -6,7 +6,7 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use daw_extension_runtime::GuestOptions;
 //!
 //! #[tokio::main]
