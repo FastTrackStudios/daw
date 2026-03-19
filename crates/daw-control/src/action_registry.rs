@@ -63,4 +63,26 @@ impl ActionRegistry {
         self.clients.action_registry.subscribe_actions(tx).await?;
         Ok(rx)
     }
+
+    /// Execute a native DAW command by numeric ID.
+    ///
+    /// Maps to `Main_OnCommandEx(command_id, 0, current_project)` in REAPER.
+    pub async fn execute_command(&self, command_id: u32) -> crate::Result<()> {
+        self.clients
+            .action_registry
+            .execute_command(command_id)
+            .await?;
+        Ok(())
+    }
+
+    /// Execute a named action (custom or native).
+    ///
+    /// Returns `true` if the command was found and executed.
+    pub async fn execute_named_action(&self, command_name: &str) -> crate::Result<bool> {
+        Ok(self
+            .clients
+            .action_registry
+            .execute_named_action(command_name.to_string())
+            .await?)
+    }
 }

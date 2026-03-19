@@ -10,6 +10,7 @@
 use crate::main_thread;
 use daw_proto::{ActionEvent, ActionRegistryService};
 use reaper_high::Reaper;
+use reaper_medium::{CommandId, ProjectContext};
 use roam::Tx;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -225,5 +226,33 @@ impl ActionRegistryService for ReaperActionRegistry {
                 }
             }
         });
+    }
+
+    async fn execute_command(&self, command_id: u32) {
+        main_thread::query(move || {
+            Reaper::get().medium_reaper().main_on_command_ex(
+                CommandId::new(command_id),
+                0,
+                ProjectContext::CurrentProject,
+            );
+        })
+        .await;
+    }
+
+    async fn execute_named_action(&self, command_name: String) -> bool {
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            let lookup = format!("_{command_name}");
+            if let Some(cmd_id) = medium.named_command_lookup(lookup) {
+                medium.main_on_command_ex(cmd_id, 0, ProjectContext::CurrentProject);
+                true
+            } else {
+                warn!("Named action not found: {}", command_name);
+                false
+            }
+        })
+        .await
+        .unwrap_or(false)
     }
 }

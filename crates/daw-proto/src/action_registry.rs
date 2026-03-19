@@ -84,4 +84,17 @@ pub trait ActionRegistryService {
     /// events for ALL actions registered through this service, not just
     /// its own — filter by `command_name` if needed.
     async fn subscribe_actions(&self, tx: Tx<ActionEvent>);
+
+    /// Execute a native DAW command by numeric ID.
+    ///
+    /// This maps to `Main_OnCommandEx(command_id, 0, current_project)`.
+    /// Use for REAPER built-in actions (e.g., 40044 for play/stop,
+    /// 40157 for insert marker, 40306 for insert region).
+    async fn execute_command(&self, command_id: u32);
+
+    /// Execute a named action (custom or native).
+    ///
+    /// Looks up the command by name (e.g., "_FTS_SIGNAL_ARM") and executes it.
+    /// Returns `true` if the command was found and executed.
+    async fn execute_named_action(&self, command_name: String) -> bool;
 }
