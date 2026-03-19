@@ -12,6 +12,9 @@ path = "src/lib.rs"
 # DAW facade (reaper impl)
 daw = { workspace = true, features = ["reaper"] }
 
+# RT-aware allocator
+daw-allocator.workspace = true
+
 # ROAM service framework
 roam.workspace = true
 roam-stream.workspace = true

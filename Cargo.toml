@@ -13,6 +13,7 @@ members = [
     "crates/reaper-test",
     "crates/reaper-test-macro",
     "crates/reaper-launcher",
+    "crates/daw-allocator",
     "crates/daw-bridge",
     "crates/daw-extension-runtime",
     "apps/daw-guest-example",
@@ -35,6 +36,8 @@ daw-cli = { path = "apps/daw" }
 daw-ui = { path = "crates/daw-ui", default-features = false }
 # Widget crate stays public (standalone Dioxus widgets)
 audio-controls = { path = "crates/audio-controls" }
+# RT-aware allocator — offloads RT deallocation to background thread
+daw-allocator = { path = "crates/daw-allocator" }
 # Extension runtime — for hot-reloadable processes connecting via SHM
 daw-extension-runtime = { path = "crates/daw-extension-runtime" }
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,

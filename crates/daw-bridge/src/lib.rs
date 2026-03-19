@@ -8,6 +8,13 @@ mod guest_loader;
 mod routed_handler;
 mod shm_host;
 
+// ============================================================================
+// RT-safe Global Allocator
+// ============================================================================
+
+#[global_allocator]
+static ALLOCATOR: daw_allocator::FtsAllocator = daw_allocator::FtsAllocator::new();
+
 use fragile::Fragile;
 use reaper_high::{MainTaskMiddleware, Reaper as HighReaper};
 use reaper_low::PluginContext;
@@ -37,6 +44,7 @@ use daw::service::{
 // ============================================================================
 
 use crossbeam_channel::{Receiver, Sender};
+use daw_allocator::{FtsRuntime, FtsRuntimeConfig, RtDetector};
 use reaper_high::{MainThreadTask, TaskSupport};
 
 static GLOBAL: OnceLock<Global> = OnceLock::new();
@@ -333,6 +341,25 @@ fn start_unix_socket_server(acceptor: DawConnectionAcceptor) {
 }
 
 // ============================================================================
+// RT Thread Detection
+// ============================================================================
+
+/// Wraps REAPER's `IsInRealTimeAudio()` function pointer for RT detection.
+struct ReaperRtDetector {
+    is_in_rt_audio: unsafe extern "C" fn() -> i32,
+}
+
+// Safety: The function pointer is a static C function — safe to call from any thread.
+unsafe impl Send for ReaperRtDetector {}
+unsafe impl Sync for ReaperRtDetector {}
+
+impl RtDetector for ReaperRtDetector {
+    fn is_rt_thread(&self) -> bool {
+        unsafe { (self.is_in_rt_audio)() != 0 }
+    }
+}
+
+// ============================================================================
 // Timer Callback & Entry Point
 // ============================================================================
 
@@ -350,8 +377,13 @@ extern "C" fn timer_callback() {
         if let Some(app_fragile) = get_app() {
             let app = app_fragile.get();
 
-            // Process main-thread task queue
+            // Process main-thread task queue (reaper-high TaskSupport)
             app.process_tasks();
+
+            // Process daw-allocator main-thread tasks (closures from any thread)
+            if let Some(runtime) = FtsRuntime::try_get() {
+                runtime.process_main_thread_tasks();
+            }
 
             // Poll all broadcasters for state changes
             daw::reaper::poll_and_broadcast();
@@ -394,6 +426,23 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
             }
         }
         Err(_) => debug!("REAPER high-level API already initialized"),
+    }
+
+    // Initialize RT-safe allocator runtime.
+    // Must happen after REAPER loads but before any RT audio processing.
+    let reaper = HighReaper::get();
+    if let Some(is_in_rt_audio) = reaper.medium_reaper().low().pointers().IsInRealTimeAudio {
+        let detector = ReaperRtDetector { is_in_rt_audio };
+        FtsRuntime::init(
+            &ALLOCATOR,
+            FtsRuntimeConfig {
+                dealloc_channel_capacity: 10_000,
+                rt_detector: Box::new(detector),
+            },
+        );
+        info!("RT allocator initialized (async deallocation enabled)");
+    } else {
+        warn!("IsInRealTimeAudio not available — RT allocator running without async deallocation");
     }
 
     // Create a medium-level API session

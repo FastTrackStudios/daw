@@ -1279,11 +1279,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-allocator"
+version = "0.1.0"
+
+[[package]]
 name = "daw-bridge"
 version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "daw",
+ "daw-allocator",
  "eyre",
  "fragile",
  "moire",
