@@ -50,7 +50,7 @@ impl Input {
         Ok(self.clients.input.is_enabled().await?)
     }
 
-    /// Execute a REAPER action by command name or numeric ID.
+    /// Execute a DAW action by command name or numeric ID.
     ///
     /// Extensions call this after resolving a keybinding to an action.
     pub async fn execute_action(&self, action_id: &str) -> crate::Result<()> {

@@ -3,10 +3,13 @@
 //! Registers a TranslateAccel handler that intercepts keyboard events
 //! and streams them to extension processes via a broadcast channel.
 //! The key filter is evaluated synchronously — no SHM round-trip per keypress.
+//!
+//! VK codes from Windows/SWELL are converted to platform-agnostic `KeyCode`
+//! before being sent to extensions.
 
 use crate::main_thread;
 use daw_proto::{
-    InputContext, InputEvent, InputService, KeyFilter, KeyModifiers, KeyMsgKind, RawKeyEvent,
+    InputContext, InputEvent, InputService, KeyCode, KeyEvent, KeyFilter, KeyModifiers, KeyMsgKind,
 };
 use reaper_high::Reaper;
 use reaper_medium::{
@@ -81,6 +84,12 @@ impl TranslateAccel for InputAccelHandler {
 
         let vk_code = msg.key().get() as u32;
 
+        // Convert VK code to platform-agnostic KeyCode
+        let key = match vk_to_keycode(vk_code) {
+            Some(k) => k,
+            None => return TranslateAccelResult::NotOurWindow,
+        };
+
         // Detect if a text field is focused (using SWELL/Win32 focus check)
         let is_text_focused = is_text_field_focused();
 
@@ -95,9 +104,9 @@ impl TranslateAccel for InputAccelHandler {
             match &*filter {
                 KeyFilter::PassAll => false,
                 KeyFilter::EatAll => true,
-                KeyFilter::EatMatching { patterns } => patterns
-                    .iter()
-                    .any(|p| matches_filter(p, vk_code, &modifiers)),
+                KeyFilter::EatMatching { patterns } => {
+                    patterns.iter().any(|p| matches_filter(p, &key, &modifiers))
+                }
             }
         };
 
@@ -107,8 +116,8 @@ impl TranslateAccel for InputAccelHandler {
 
         // Build event and broadcast
         let context = detect_input_context();
-        let event = InputEvent::Key(RawKeyEvent {
-            vk_code,
+        let event = InputEvent::Key(KeyEvent {
+            key,
             modifiers,
             msg_kind,
             context,
@@ -160,11 +169,70 @@ fn detect_input_context() -> InputContext {
 }
 
 // =========================================================================
-// EatMatching filter evaluation (proper implementation)
+// VK code → KeyCode conversion (REAPER-specific)
 // =========================================================================
 
-fn matches_filter(pattern: &daw_proto::KeyPattern, vk_code: u32, modifiers: &KeyModifiers) -> bool {
-    if pattern.vk_code != vk_code {
+/// Convert a Windows/SWELL virtual key code to a platform-agnostic `KeyCode`.
+///
+/// Returns `None` for unmapped or irrelevant VK codes.
+fn vk_to_keycode(vk: u32) -> Option<KeyCode> {
+    match vk {
+        // Letters A–Z (0x41–0x5A)
+        0x41..=0x5A => {
+            let ch = (vk as u8) as char;
+            Some(KeyCode::Character(ch.to_lowercase().to_string()))
+        }
+        // Digits 0–9 (0x30–0x39)
+        0x30..=0x39 => {
+            let ch = (vk as u8) as char;
+            Some(KeyCode::Character(ch.to_string()))
+        }
+        // Function keys F1–F24 (0x70–0x87)
+        0x70..=0x87 => Some(KeyCode::F((vk - 0x70 + 1) as u8)),
+        // Navigation
+        0x25 => Some(KeyCode::ArrowLeft),
+        0x26 => Some(KeyCode::ArrowUp),
+        0x27 => Some(KeyCode::ArrowRight),
+        0x28 => Some(KeyCode::ArrowDown),
+        0x24 => Some(KeyCode::Home),
+        0x23 => Some(KeyCode::End),
+        0x21 => Some(KeyCode::PageUp),
+        0x22 => Some(KeyCode::PageDown),
+        0x2D => Some(KeyCode::Insert),
+        // Editing keys
+        0x0D => Some(KeyCode::Enter),
+        0x1B => Some(KeyCode::Escape),
+        0x09 => Some(KeyCode::Tab),
+        0x08 => Some(KeyCode::Backspace),
+        0x2E => Some(KeyCode::Delete),
+        // Space
+        0x20 => Some(KeyCode::Character(" ".to_string())),
+        // Common punctuation via OEM keys
+        0xBA => Some(KeyCode::Character(";".to_string())),
+        0xBB => Some(KeyCode::Character("=".to_string())),
+        0xBC => Some(KeyCode::Character(",".to_string())),
+        0xBD => Some(KeyCode::Character("-".to_string())),
+        0xBE => Some(KeyCode::Character(".".to_string())),
+        0xBF => Some(KeyCode::Character("/".to_string())),
+        0xC0 => Some(KeyCode::Character("`".to_string())),
+        0xDB => Some(KeyCode::Character("[".to_string())),
+        0xDC => Some(KeyCode::Character("\\".to_string())),
+        0xDD => Some(KeyCode::Character("]".to_string())),
+        0xDE => Some(KeyCode::Character("'".to_string())),
+        _ => None,
+    }
+}
+
+// =========================================================================
+// EatMatching filter evaluation
+// =========================================================================
+
+fn matches_filter(
+    pattern: &daw_proto::KeyPattern,
+    key: &KeyCode,
+    modifiers: &KeyModifiers,
+) -> bool {
+    if pattern.key != *key {
         return false;
     }
     if pattern.exact_modifiers {

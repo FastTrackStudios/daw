@@ -1,46 +1,83 @@
-//! Input Service — Raw keyboard/mouse event interception and streaming.
+//! Input Service — keyboard/mouse event interception and streaming.
 //!
-//! The host intercepts input events via REAPER's TranslateAccel hook and
-//! streams them to extension processes over SHM. Extensions process keybindings,
-//! modal editing, and command resolution — then call back to execute actions.
+//! The host intercepts input events from the DAW and streams them to extension
+//! processes over SHM. Extensions process keybindings, modal editing, and
+//! command resolution — then call back to execute actions.
 //!
 //! # Latency Design
 //!
-//! TranslateAccel runs synchronously on REAPER's main thread. To avoid per-keypress
-//! SHM round-trips, the extension uploads a [`KeyFilter`] that the host evaluates
-//! locally. Eaten keys are streamed asynchronously to the extension.
+//! The host's keyboard hook runs synchronously on the DAW's main thread.
+//! To avoid per-keypress SHM round-trips, the extension uploads a [`KeyFilter`]
+//! that the host evaluates locally. Eaten keys are streamed asynchronously.
+//!
+//! # Platform Agnosticism
+//!
+//! The wire format uses [`KeyCode`] — a platform-agnostic key representation.
+//! The host is responsible for converting platform-specific key codes (e.g.
+//! Windows VK codes) into `KeyCode` before streaming to extensions.
 
 use facet::Facet;
 use roam::{Tx, service};
 
 // =========================================================================
+// Platform-agnostic key code
+// =========================================================================
+
+/// Platform-agnostic keyboard key code.
+///
+/// The host converts platform-specific codes (Windows VK, macOS keycodes)
+/// into this enum before streaming to extensions.
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Facet)]
+pub enum KeyCode {
+    /// A printable character key (lowercase). Space is `" "`.
+    Character(String),
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    Enter,
+    Escape,
+    Tab,
+    Backspace,
+    Delete,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+    Insert,
+    /// Function key (1–24).
+    F(u8),
+}
+
+// =========================================================================
 // Key event types
 // =========================================================================
 
-/// Raw keyboard event from REAPER's TranslateAccel hook.
+/// Keyboard event from the host's input hook.
 #[derive(Debug, Clone, Facet)]
-pub struct RawKeyEvent {
-    /// Windows virtual key code (0–255).
-    pub vk_code: u32,
+pub struct KeyEvent {
+    /// Platform-agnostic key code.
+    pub key: KeyCode,
     /// Active modifier keys.
     pub modifiers: KeyModifiers,
     /// Type of keyboard message.
     pub msg_kind: KeyMsgKind,
-    /// Which REAPER window context has focus.
+    /// Which DAW window context has focus.
     pub context: InputContext,
     /// Whether a text input field currently has focus.
     pub is_text_focused: bool,
 }
 
 /// Modifier key state at the time of a key event.
-#[derive(Debug, Clone, Copy, Default, Facet)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Facet)]
 pub struct KeyModifiers {
     pub ctrl: bool,
     pub alt: bool,
     pub shift: bool,
 }
 
-/// Type of keyboard message from Windows/SWELL.
+/// Type of keyboard message.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, Facet)]
 pub enum KeyMsgKind {
@@ -51,7 +88,7 @@ pub enum KeyMsgKind {
     Char,
 }
 
-/// Which REAPER window context has focus.
+/// Which DAW window context has focus.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, Facet)]
 pub enum InputContext {
@@ -63,7 +100,7 @@ pub enum InputContext {
     MidiInline,
     /// Media explorer.
     MediaExplorer,
-    /// Global context (applies to both main and MIDI).
+    /// Global context (applies everywhere).
     Global,
 }
 
@@ -71,7 +108,7 @@ pub enum InputContext {
 // Key filter (uploaded from extension to host)
 // =========================================================================
 
-/// Describes which keys the host should eat (intercept) in TranslateAccel.
+/// Describes which keys the host should eat (intercept).
 ///
 /// The extension uploads this filter to the host. The host evaluates it
 /// synchronously — no SHM round-trip per keypress.
@@ -80,7 +117,7 @@ pub enum InputContext {
 pub enum KeyFilter {
     /// Eat all keys (except when text fields are focused).
     EatAll,
-    /// Pass all keys through to REAPER (extension is passive).
+    /// Pass all keys through to the DAW (extension is passive).
     PassAll,
     /// Eat only keys matching specific patterns.
     EatMatching { patterns: Vec<KeyPattern> },
@@ -89,8 +126,8 @@ pub enum KeyFilter {
 /// A specific key + modifier combination to match against.
 #[derive(Debug, Clone, Facet)]
 pub struct KeyPattern {
-    /// Virtual key code to match.
-    pub vk_code: u32,
+    /// Key to match.
+    pub key: KeyCode,
     /// Required modifier state.
     pub modifiers: KeyModifiers,
     /// If true, modifiers must match exactly (no extra modifiers allowed).
@@ -106,7 +143,7 @@ pub struct KeyPattern {
 #[derive(Debug, Clone, Facet)]
 pub enum InputEvent {
     /// A keyboard event that was eaten by the filter.
-    Key(RawKeyEvent),
+    Key(KeyEvent),
     /// A mouse wheel event.
     MouseWheel {
         delta: i16,
