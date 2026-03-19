@@ -720,6 +720,52 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         end_section(ci);
     }
 
+    // ── Step 4d: Patch ini to suppress dialogs ─────────────────────────────
+    // REAPER checks for updates ~10s after startup. In NOGDK headless mode,
+    // the resulting dialog blocks the main-thread timer. Setting `lastt` to
+    // "now" makes REAPER think it already checked recently.
+    if reaper_ini.exists() {
+        let now_ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        if let Ok(content) = std::fs::read_to_string(&reaper_ini) {
+            let patched = if content.contains("lastt=") {
+                // Update existing lastt
+                content
+                    .lines()
+                    .map(|l| {
+                        if l.starts_with("lastt=") {
+                            format!("lastt={now_ts}")
+                        } else {
+                            l.to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else if content.contains("[verchk]") {
+                // Insert lastt after [verchk] header
+                content.replace("[verchk]", &format!("[verchk]\nlastt={now_ts}"))
+            } else {
+                // Append [verchk] section
+                format!("{content}\n[verchk]\nlastt={now_ts}\n")
+            };
+            let _ = std::fs::write(&reaper_ini, &patched);
+            println!("  Patched lastt={now_ts} in [verchk] (suppress version check dialog)");
+        }
+
+        // Dump ini for diagnostics
+        if ci {
+            if let Ok(content) = std::fs::read_to_string(&reaper_ini) {
+                println!("  reaper.ini contents:");
+                for line in content.lines() {
+                    println!("    {line}");
+                }
+            }
+        }
+    }
+
     // ── Step 5: Spawn REAPER ──────────────────────────────────────────────
     section(ci, "reaper-test: spawn REAPER");
     let reaper_log = PathBuf::from("/tmp/fts-daw-reaper.log");
