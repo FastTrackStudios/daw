@@ -14,7 +14,9 @@
 use crate::main_thread;
 use daw_proto::{ActionEvent, ActionRegistryService};
 use reaper_high::Reaper;
-use reaper_medium::{CommandId, Hmenu, HookCustomMenu, MenuHookFlag, ProjectContext, ReaperStr};
+use reaper_medium::{
+    CommandId, Hmenu, HookCustomMenu, MenuHookFlag, OwnedGaccelRegister, ProjectContext, ReaperStr,
+};
 use roam::Tx;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
@@ -351,17 +353,36 @@ impl ActionRegistryService for ReaperActionRegistry {
                 reaper_high::ActionKind::NotToggleable,
             );
 
-            let cmd_id = action.command_id().get();
+            let cmd_id = action.command_id();
+
+            // reaper_high::register_action only stores the command in its internal
+            // map and calls plugin_register_add_command_id. It does NOT register the
+            // gaccel (action list entry) when the session is already awake — that
+            // only happens during wake_up(). Since daw-bridge calls wake_up() at
+            // init time, any actions registered later by guests never appear in
+            // REAPER's action list. Fix: register the gaccel ourselves.
+            {
+                let gaccel = OwnedGaccelRegister::without_key_binding(cmd_id, desc_static);
+                let mut session = reaper.medium_session();
+                if let Err(e) = session.plugin_register_add_gaccel(gaccel) {
+                    warn!(
+                        "Failed to register gaccel for '{}': {:?}",
+                        name_for_query, e
+                    );
+                }
+            }
+
+            let cmd_id_val = cmd_id.get();
             info!(
                 "Registered action '{}' → cmd_id={} (\"{}\")",
-                name_for_query, cmd_id, desc_for_query
+                name_for_query, cmd_id_val, desc_for_query
             );
 
             // Leak the RegisteredAction so it stays alive (action stays registered).
             // We'll track the command_name → cmd_id mapping ourselves.
             std::mem::forget(action);
 
-            cmd_id
+            cmd_id_val
         })
         .await;
 

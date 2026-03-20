@@ -1,8 +1,8 @@
 //! Example DAW guest process — connects to REAPER via SHM bootstrap.
 //!
-//! This demonstrates the hot-reloadable guest pattern using `daw-extension-runtime`:
-//! 1. One-call connect to daw-bridge via SHM
-//! 2. Call DAW services (transport, project, tracks, FX, actions) via zero-copy SHM RPC
+//! Connects to daw-bridge, registers a test action, subscribes to action
+//! events, and stays alive waiting for triggers. This is the minimal
+//! lifecycle a real guest extension should follow.
 //!
 //! You can rebuild and restart this binary without restarting REAPER.
 //!
@@ -45,111 +45,43 @@ async fn run() -> Result<()> {
     })
     .await?;
 
-    // ── Transport ────────────────────────────────────────────────────────
-    let project = daw.current_project().await.map_err(|e| eyre!("{e}"))?;
-    let transport = project.transport();
+    info!("[guest:{pid}] Connected to daw-bridge via SHM");
 
-    info!("[guest:{pid}] Querying transport state...");
-    let state = transport.get_state().await.map_err(|e| eyre!("{e}"))?;
-    info!(
-        "[guest:{pid}] Transport: tempo={:.1} BPM, playing={}, looping={}",
-        state.tempo,
-        state.play_state == daw::service::PlayState::Playing,
-        state.looping,
-    );
-
-    // ── Project ──────────────────────────────────────────────────────────
-    info!("[guest:{pid}] Creating new project tab...");
-    let test_project = daw.create_project().await.map_err(|e| eyre!("{e}"))?;
-    info!(
-        "[guest:{pid}] Created project: guid={}",
-        test_project.guid()
-    );
-
-    // ── Tracks ───────────────────────────────────────────────────────────
-    info!("[guest:{pid}] Adding tracks...");
-    let tracks = test_project.tracks();
-    let track_a = tracks
-        .add("SHM-Track-A", None)
-        .await
-        .map_err(|e| eyre!("{e}"))?;
-    let track_b = tracks
-        .add("SHM-Track-B", None)
-        .await
-        .map_err(|e| eyre!("{e}"))?;
-    let track_a_info = track_a.info().await.map_err(|e| eyre!("{e}"))?;
-    let track_b_info = track_b.info().await.map_err(|e| eyre!("{e}"))?;
-    info!(
-        "[guest:{pid}] Added tracks: A={}, B={}",
-        track_a_info.name, track_b_info.name
-    );
-
-    let all_tracks = tracks.all().await.map_err(|e| eyre!("{e}"))?;
-    info!("[guest:{pid}] Project has {} tracks", all_tracks.len());
-
-    // ── FX ───────────────────────────────────────────────────────────────
-    info!("[guest:{pid}] Adding ReaEQ to Track A...");
-    let fx = track_a
-        .fx_chain()
-        .add("ReaEQ")
-        .await
-        .map_err(|e| eyre!("{e}"))?;
-    let fx_info = fx.info().await.map_err(|e| eyre!("{e}"))?;
-    info!(
-        "[guest:{pid}] Added FX: {} (guid={})",
-        fx_info.name,
-        fx.guid()
-    );
-
-    let params = fx.parameters().await.map_err(|e| eyre!("{e}"))?;
-    info!("[guest:{pid}] FX has {} parameters", params.len());
-    if let Some(first) = params.first() {
-        info!(
-            "[guest:{pid}] First param: '{}' = {:.4}",
-            first.name, first.value
-        );
-    }
-
-    // ── Action Registry ────────────────────────────────────────────────────
-    info!("[guest:{pid}] Testing action registry...");
+    // ── Register actions ───────────────────────────────────────────────
     let actions = daw.action_registry();
 
-    // Register a custom action
     let cmd_id = actions
-        .register("fts.guest.hello", "FTS: Guest Hello World")
+        .register("FTS_GUEST_HELLO", "FTS: Guest Hello World")
         .await
         .map_err(|e| eyre!("{e}"))?;
-    info!("[guest:{pid}] Registered action 'fts.guest.hello' → cmd_id={cmd_id}");
+    info!("[guest:{pid}] Registered action 'FTS_GUEST_HELLO' → cmd_id={cmd_id}");
 
-    // Check it's registered
-    let exists = actions
-        .is_registered("fts.guest.hello")
+    // ── Subscribe to action events ─────────────────────────────────────
+    let mut rx = actions
+        .subscribe_actions()
         .await
         .map_err(|e| eyre!("{e}"))?;
-    info!("[guest:{pid}] is_registered('fts.guest.hello') = {exists}");
 
-    // Look up command ID
-    let looked_up = actions
-        .lookup_command_id("fts.guest.hello")
-        .await
-        .map_err(|e| eyre!("{e}"))?;
-    info!("[guest:{pid}] lookup_command_id('fts.guest.hello') = {looked_up:?}");
+    info!("[guest:{pid}] Ready — waiting for action triggers");
 
-    // Try looking up a non-existent action
-    let missing = actions
-        .is_registered("fts.nonexistent.action")
-        .await
-        .map_err(|e| eyre!("{e}"))?;
-    info!("[guest:{pid}] is_registered('fts.nonexistent.action') = {missing}");
+    // ── Event loop ─────────────────────────────────────────────────────
+    loop {
+        match rx.recv().await {
+            Ok(Some(item)) => {
+                let daw::service::ActionEvent::Triggered { ref command_name } = *item;
+                println!(">>> HOT RELOAD WORKS! Action: {command_name} <<<");
+                info!("[guest:{pid}] Action triggered: {command_name}");
+            }
+            Ok(None) => {
+                info!("[guest:{pid}] Action event stream ended");
+                break;
+            }
+            Err(e) => {
+                info!("[guest:{pid}] Action event stream error: {e:?}");
+                break;
+            }
+        }
+    }
 
-    // ── Cleanup ──────────────────────────────────────────────────────────
-    info!("[guest:{pid}] Cleaning up: closing test project tab...");
-    let _ = tracks.remove_all().await;
-    let _ = daw.close_project(test_project.guid().to_string()).await;
-
-    info!(
-        "[guest:{pid}] Done. All DAW services available over SHM virtual connection. \
-         Guest can be rebuilt and restarted without touching REAPER."
-    );
     Ok(())
 }

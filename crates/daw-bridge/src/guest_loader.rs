@@ -5,13 +5,16 @@
 //! or replaced (e.g. via symlink update or cargo build), the old process is
 //! killed and the new binary is launched automatically.
 //!
+//! For symlinked binaries, we also watch the symlink target so that rebuilds
+//! (which modify the target, not the symlink) trigger a hot-reload.
+//!
 //! This enables the hot-reload workflow:
 //! 1. Symlink your guest binary into `fts-extensions/`
 //! 2. Rebuild it (`cargo build -p my-guest`)
 //! 3. The watcher detects the change, kills the old process, spawns the new one
 //! 4. The new guest connects to REAPER via SHM — no restart needed
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::Mutex;
@@ -20,24 +23,83 @@ use notify::{EventKind, RecursiveMode, Watcher};
 use reaper_high::Reaper;
 use tracing::{info, warn};
 
+#[cfg(target_os = "linux")]
+use std::os::unix::process::CommandExt;
+
+/// Read the `.fts-ignore` file from the extensions directory.
+///
+/// Each non-empty, non-comment line is treated as an exact filename to skip.
+/// Returns an empty set if the file doesn't exist.
+fn read_ignore_list(extensions_dir: &PathBuf) -> HashSet<String> {
+    let ignore_path = extensions_dir.join(".fts-ignore");
+    let content = match std::fs::read_to_string(&ignore_path) {
+        Ok(c) => c,
+        Err(_) => return HashSet::new(),
+    };
+
+    let names: HashSet<String> = content
+        .lines()
+        .map(|line| line.trim())
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| line.to_string())
+        .collect();
+
+    if !names.is_empty() {
+        info!(
+            "Loaded .fts-ignore ({} entries): {:?}",
+            names.len(),
+            names
+        );
+    }
+
+    names
+}
+
 /// Tracked guest processes, keyed by filename.
 struct GuestRegistry {
     children: HashMap<String, Child>,
     bootstrap_sock: String,
     extensions_dir: PathBuf,
+    ignore_list: HashSet<String>,
+    /// Maps resolved symlink target path → guest name in fts-extensions/.
+    /// Used to map inotify events on target files back to the guest name.
+    symlink_targets: HashMap<PathBuf, String>,
 }
 
 impl GuestRegistry {
     fn new(bootstrap_sock: String, extensions_dir: PathBuf) -> Self {
+        let ignore_list = read_ignore_list(&extensions_dir);
         Self {
             children: HashMap::new(),
             bootstrap_sock,
             extensions_dir,
+            ignore_list,
+            symlink_targets: HashMap::new(),
         }
+    }
+
+    /// Check if a guest name is blacklisted via `.fts-ignore`.
+    fn is_ignored(&self, name: &str) -> bool {
+        self.ignore_list.contains(name)
+    }
+
+    /// Reload the ignore list from disk (e.g. when `.fts-ignore` itself changes).
+    fn reload_ignore_list(&mut self) {
+        self.ignore_list = read_ignore_list(&self.extensions_dir);
+    }
+
+    /// Resolve a symlink target path to the guest name it belongs to.
+    fn resolve_target_to_name(&self, path: &std::path::Path) -> Option<String> {
+        self.symlink_targets.get(path).cloned()
     }
 
     /// Launch (or relaunch) a guest by filename.
     fn launch(&mut self, name: &str) {
+        if self.is_ignored(name) {
+            info!("Skipping ignored guest extension: {}", name);
+            return;
+        }
+
         let path = self.extensions_dir.join(name);
 
         // Check it's a file and executable
@@ -60,10 +122,21 @@ impl GuestRegistry {
 
         info!("Launching guest extension: {}", name);
 
-        match Command::new(&path)
-            .env("FTS_SHM_BOOTSTRAP_SOCK", &self.bootstrap_sock)
-            .spawn()
-        {
+        let mut cmd = Command::new(&path);
+        cmd.env("FTS_SHM_BOOTSTRAP_SOCK", &self.bootstrap_sock);
+
+        // On Linux, ask the kernel to send SIGTERM to the child when the parent
+        // (REAPER) dies. This prevents orphaned extension processes when REAPER
+        // is killed or crashes without running cleanup.
+        #[cfg(target_os = "linux")]
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+                Ok(())
+            });
+        }
+
+        match cmd.spawn() {
             Ok(child) => {
                 info!("Guest '{}' spawned (pid {})", name, child.id());
                 self.children.insert(name.to_string(), child);
@@ -79,7 +152,7 @@ impl GuestRegistry {
         if let Some(mut child) = self.children.remove(name) {
             match child.try_wait() {
                 Ok(Some(_status)) => {
-                    // Already exited
+                    info!("Guest '{}' already exited", name);
                 }
                 Ok(None) => {
                     info!("Killing guest '{}' (pid {})", name, child.id());
@@ -113,6 +186,49 @@ impl GuestRegistry {
             }
         }
     }
+
+    /// Collect symlink targets for all entries in the extensions directory.
+    /// Returns the resolved paths that need to be watched.
+    fn collect_symlink_targets(&mut self) -> Vec<PathBuf> {
+        let mut targets = Vec::new();
+        let entries = match std::fs::read_dir(&self.extensions_dir) {
+            Ok(e) => e,
+            Err(_) => return targets,
+        };
+
+        for entry in entries.flatten() {
+            let link_path = entry.path();
+            if !link_path.is_symlink() {
+                continue;
+            }
+            let name = match entry.file_name().to_str() {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            if self.is_ignored(&name) {
+                continue;
+            }
+            match std::fs::canonicalize(&link_path) {
+                Ok(target) => {
+                    info!(
+                        "Watching symlink target for '{}': {}",
+                        name,
+                        target.display()
+                    );
+                    self.symlink_targets.insert(target.clone(), name);
+                    targets.push(target);
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to resolve symlink for '{}': {}",
+                        name, e
+                    );
+                }
+            }
+        }
+
+        targets
+    }
 }
 
 /// Discover the `fts-extensions/` directory inside REAPER's UserPlugins.
@@ -145,6 +261,8 @@ fn fts_extensions_dir() -> Option<PathBuf> {
 ///
 /// When a file in `fts-extensions/` is created, modified, or replaced,
 /// the corresponding guest process is (re)launched automatically.
+/// For symlinks, the resolved target is also watched so that rebuilding
+/// the target binary triggers a hot-reload.
 pub fn launch_guests(bootstrap_sock: &str) {
     let dir = match fts_extensions_dir() {
         Some(d) => d,
@@ -157,9 +275,11 @@ pub fn launch_guests(bootstrap_sock: &str) {
     )));
 
     // Initial scan
+    let symlink_targets;
     {
         let mut reg = registry.lock().unwrap();
         reg.scan_and_launch_all();
+        symlink_targets = reg.collect_symlink_targets();
     }
 
     // Start file watcher
@@ -189,18 +309,48 @@ pub fn launch_guests(bootstrap_sock: &str) {
             let mut reg = watch_registry.lock().unwrap();
 
             for path in &event.paths {
+                // Check if this is a symlink target change
+                if let Some(guest_name) = reg.resolve_target_to_name(path) {
+                    if matches!(
+                        event.kind,
+                        EventKind::Create(_) | EventKind::Modify(_)
+                    ) {
+                        info!(
+                            "Detected symlink target change for '{}' ({}) — hot-reloading",
+                            guest_name,
+                            path.display()
+                        );
+                        reg.launch(&guest_name);
+                    }
+                    continue;
+                }
+
                 let name = match path.file_name().and_then(|n| n.to_str()) {
                     Some(n) => n.to_string(),
                     None => continue,
                 };
 
+                // Reload ignore list when .fts-ignore itself changes
+                if name == ".fts-ignore" {
+                    info!("Detected .fts-ignore change — reloading ignore list");
+                    reg.reload_ignore_list();
+                    continue;
+                }
+
                 match event.kind {
                     EventKind::Create(_) | EventKind::Modify(_) => {
-                        info!(
-                            "Detected change in fts-extensions: {} — (re)launching",
-                            name
-                        );
-                        reg.launch(&name);
+                        if reg.is_ignored(&name) {
+                            info!(
+                                "Detected change in fts-extensions: {} — skipped (ignored)",
+                                name
+                            );
+                        } else {
+                            info!(
+                                "Detected change in fts-extensions: {} — (re)launching",
+                                name
+                            );
+                            reg.launch(&name);
+                        }
                     }
                     EventKind::Remove(_) => {
                         info!(
@@ -220,6 +370,7 @@ pub fn launch_guests(bootstrap_sock: &str) {
             }
         };
 
+    // Watch the extensions directory itself (for new files, non-symlink changes)
     if let Err(e) = watcher.watch(&watch_dir, RecursiveMode::NonRecursive) {
         warn!(
             "Failed to watch fts-extensions dir {}: {}",
@@ -229,9 +380,21 @@ pub fn launch_guests(bootstrap_sock: &str) {
         return;
     }
 
+    // Watch each symlink target so rebuilds trigger hot-reload
+    for target in &symlink_targets {
+        if let Err(e) = watcher.watch(target, RecursiveMode::NonRecursive) {
+            warn!(
+                "Failed to watch symlink target {}: {}",
+                target.display(),
+                e
+            );
+        }
+    }
+
     info!(
-        "Watching fts-extensions directory for changes: {}",
-        watch_dir.display()
+        "Watching fts-extensions directory for changes: {} ({} symlink targets)",
+        watch_dir.display(),
+        symlink_targets.len()
     );
 
     // Keep the watcher alive by leaking it — it runs for the lifetime of REAPER.
