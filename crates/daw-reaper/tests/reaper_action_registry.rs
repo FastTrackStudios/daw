@@ -168,9 +168,9 @@ async fn register_and_register_in_menu_are_idempotent(ctx: &ReaperTestContext) -
 async fn execute_command_runs_native_action(ctx: &ReaperTestContext) -> eyre::Result<()> {
     let actions = ctx.daw.action_registry();
 
-    // 40026 = "Save project" — a safe, well-known REAPER action
-    actions.execute_command(40026).await?;
-    ctx.log("execute_command(40026) completed without error");
+    // 40029 = "Undo" — a safe, well-known REAPER action that never shows a dialog
+    actions.execute_command(40029).await?;
+    ctx.log("execute_command(40029) completed without error");
 
     Ok(())
 }
