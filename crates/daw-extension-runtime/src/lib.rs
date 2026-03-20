@@ -37,7 +37,7 @@ use roam::{
 use roam_shm::bootstrap::{BootstrapStatus, encode_request};
 use roam_shm::{Segment, ShmLink};
 use shm_primitives::PeerId;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Options for connecting to daw-bridge as an SHM guest.
 pub struct GuestOptions<'a> {
@@ -221,6 +221,101 @@ fn connect_shm(bootstrap_path: &Path) -> Result<ShmLink> {
         roam_shm::guest_link_from_raw(segment, peer_id, doorbell_fd, mmap_rx_fd, mmap_tx_fd, true)
     }
     .map_err(|e| eyre!("build guest link: {e}"))
+}
+
+/// An action to register with REAPER via the action registry.
+pub struct ActionDef {
+    /// REAPER command name (e.g., "FTS_SYNC_TOGGLE_LINK").
+    pub command_name: &'static str,
+    /// Human-readable description shown in REAPER's action list.
+    pub description: &'static str,
+}
+
+/// Result of registering actions with REAPER.
+pub struct ActionRegistration {
+    /// Receiver for action trigger events.
+    pub rx: roam::Rx<daw::service::ActionEvent>,
+    /// Number of actions successfully registered and confirmed in the action list.
+    pub registered: usize,
+    /// Number of actions that failed to register or weren't found in the action list.
+    pub failed: usize,
+}
+
+/// Register a set of actions with REAPER and subscribe to trigger events.
+///
+/// For each action:
+/// 1. Calls `register()` to get a command ID
+/// 2. Calls `is_in_action_list()` to verify the gaccel was actually registered
+/// 3. Logs success/failure for each action
+///
+/// Returns an [`ActionRegistration`] with the event receiver and counts.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let reg = daw_extension_runtime::register_actions(&daw, &[
+///     ActionDef { command_name: "FTS_SYNC_TOGGLE_LINK", description: "Toggle Ableton Link" },
+///     ActionDef { command_name: "FTS_SYNC_LINK_OFF", description: "Disable Link" },
+/// ]).await?;
+///
+/// // Use reg.rx to receive action trigger events
+/// ```
+pub async fn register_actions(daw: &daw::Daw, actions: &[ActionDef]) -> Result<ActionRegistration> {
+    let pid = std::process::id();
+    let registry = daw.action_registry();
+    let mut registered = 0usize;
+    let mut failed = 0usize;
+
+    for action in actions {
+        let cmd_id = registry
+            .register(action.command_name, action.description)
+            .await
+            .map_err(|e| eyre!("register '{}': {e}", action.command_name))?;
+
+        if cmd_id == 0 {
+            warn!(
+                "[guest:{pid}] Failed to register action: {} (cmd_id=0)",
+                action.command_name
+            );
+            failed += 1;
+            continue;
+        }
+
+        let in_list = registry
+            .is_in_action_list(action.command_name)
+            .await
+            .unwrap_or(false);
+
+        if in_list {
+            info!(
+                "[guest:{pid}] Registered {} (cmd_id={cmd_id}) — confirmed in action list",
+                action.command_name
+            );
+            registered += 1;
+        } else {
+            warn!(
+                "[guest:{pid}] Registered {} (cmd_id={cmd_id}) — NOT in action list!",
+                action.command_name
+            );
+            failed += 1;
+        }
+    }
+
+    info!(
+        "[guest:{pid}] Action registration: {registered} OK, {failed} failed (of {} total)",
+        actions.len()
+    );
+
+    let rx = registry
+        .subscribe_actions()
+        .await
+        .map_err(|e| eyre!("subscribe_actions: {e}"))?;
+
+    Ok(ActionRegistration {
+        rx,
+        registered,
+        failed,
+    })
 }
 
 /// Generate a unique session ID for this guest connection.

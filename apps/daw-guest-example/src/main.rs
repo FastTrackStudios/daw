@@ -16,8 +16,8 @@
 //! FTS_SHM_BOOTSTRAP_SOCK=/tmp/fts-daw-12345.bootstrap.sock cargo run -p daw-guest-example
 //! ```
 
-use daw_extension_runtime::GuestOptions;
-use eyre::{Result, eyre};
+use daw_extension_runtime::{ActionDef, GuestOptions};
+use eyre::Result;
 use tracing::info;
 
 fn main() -> Result<()> {
@@ -47,20 +47,16 @@ async fn run() -> Result<()> {
 
     info!("[guest:{pid}] Connected to daw-bridge via SHM");
 
-    // ── Register actions ───────────────────────────────────────────────
-    let actions = daw.action_registry();
+    // Register actions and subscribe to events
+    let reg = daw_extension_runtime::register_actions(&daw, &[
+        ActionDef {
+            command_name: "FTS_GUEST_HELLO",
+            description: "FTS: Guest Hello World",
+        },
+    ])
+    .await?;
 
-    let cmd_id = actions
-        .register("FTS_GUEST_HELLO", "FTS: Guest Hello World")
-        .await
-        .map_err(|e| eyre!("{e}"))?;
-    info!("[guest:{pid}] Registered action 'FTS_GUEST_HELLO' → cmd_id={cmd_id}");
-
-    // ── Subscribe to action events ─────────────────────────────────────
-    let mut rx = actions
-        .subscribe_actions()
-        .await
-        .map_err(|e| eyre!("{e}"))?;
+    let mut rx = reg.rx;
 
     info!("[guest:{pid}] Ready — waiting for action triggers");
 
