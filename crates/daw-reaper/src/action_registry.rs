@@ -40,6 +40,14 @@ static ACTION_BROADCASTER: std::sync::OnceLock<broadcast::Sender<String>> =
 /// Menu metadata for actions that should appear in the Extensions menu.
 static MENU_ACTIONS: std::sync::OnceLock<Mutex<Vec<MenuActionDef>>> = std::sync::OnceLock::new();
 
+/// Toggle state for toggleable actions.
+///
+/// Maps command_name → current on/off state. REAPER queries toggle state
+/// synchronously on the main thread, so we store it here for instant access.
+/// Guests update this via `set_toggle_state`.
+static TOGGLE_STATES: std::sync::OnceLock<Mutex<HashMap<String, bool>>> =
+    std::sync::OnceLock::new();
+
 /// Action metadata stored for menu building.
 #[derive(Clone)]
 struct MenuActionDef {
@@ -64,6 +72,21 @@ fn action_broadcaster() -> &'static broadcast::Sender<String> {
 
 fn menu_actions() -> &'static Mutex<Vec<MenuActionDef>> {
     MENU_ACTIONS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn toggle_states() -> &'static Mutex<HashMap<String, bool>> {
+    TOGGLE_STATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Read toggle state for a command. Called from REAPER's main thread
+/// via the `ActionKind::Toggleable` closure.
+fn read_toggle_state(command_name: &str) -> bool {
+    toggle_states()
+        .lock()
+        .unwrap()
+        .get(command_name)
+        .copied()
+        .unwrap_or(false)
 }
 
 /// Derive a menu group name from a REAPER command name.
@@ -302,6 +325,7 @@ impl ActionRegistryService for ReaperActionRegistry {
         command_name: String,
         description: String,
         show_in_menu: bool,
+        toggleable: bool,
     ) -> u32 {
         // Check if already registered by us
         {
@@ -313,6 +337,14 @@ impl ActionRegistryService for ReaperActionRegistry {
                 );
                 return cmd_id;
             }
+        }
+
+        // If toggleable, initialize toggle state to off
+        if toggleable {
+            toggle_states()
+                .lock()
+                .unwrap()
+                .insert(command_name.clone(), false);
         }
 
         let name_for_query = command_name.clone();
@@ -340,6 +372,17 @@ impl ActionRegistryService for ReaperActionRegistry {
             // Capture command_name for the trigger notification
             let trigger_name = name_for_query.clone();
 
+            let kind = if toggleable {
+                // For toggleable actions, read state from the shared toggle map.
+                // Guests update this via set_toggle_state().
+                let state_key = name_for_query.clone();
+                reaper_high::ActionKind::Toggleable(Box::new(move || {
+                    read_toggle_state(&state_key)
+                }))
+            } else {
+                reaper_high::ActionKind::NotToggleable
+            };
+
             let action = reaper.register_action(
                 name_static,
                 desc_static,
@@ -350,7 +393,7 @@ impl ActionRegistryService for ReaperActionRegistry {
                     info!("Action triggered: {}", trigger_name);
                     notify_action_triggered(trigger_name.clone());
                 },
-                reaper_high::ActionKind::NotToggleable,
+                kind,
             );
 
             let cmd_id = action.command_id();
@@ -545,6 +588,27 @@ impl ActionRegistryService for ReaperActionRegistry {
         })
         .await
         .unwrap_or(false)
+    }
+
+    async fn set_toggle_state(&self, command_name: String, is_on: bool) {
+        let mut states = toggle_states().lock().unwrap();
+        if states.contains_key(&command_name) {
+            states.insert(command_name.clone(), is_on);
+            debug!("Toggle state for '{}' set to {}", command_name, is_on);
+        } else {
+            debug!(
+                "Ignoring set_toggle_state for '{}' — not registered as toggleable",
+                command_name
+            );
+        }
+    }
+
+    async fn get_toggle_state(&self, command_name: String) -> Option<bool> {
+        toggle_states()
+            .lock()
+            .unwrap()
+            .get(&command_name)
+            .copied()
     }
 }
 

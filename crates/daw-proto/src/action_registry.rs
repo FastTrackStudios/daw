@@ -60,6 +60,8 @@ pub trait ActionRegistryService {
     /// - `show_in_menu`: If true, the action appears in REAPER's Extensions >
     ///   FastTrackStudio menu. The menu hierarchy is derived from the command
     ///   name prefix (e.g., `FTS_SESSION_*` → Session submenu).
+    /// - `toggleable`: If true, REAPER shows an on/off indicator for this action.
+    ///   Use [`set_toggle_state`] to update the state from the guest.
     ///
     /// Returns the numeric command ID assigned by REAPER, or 0 on failure.
     async fn register_action(
@@ -67,6 +69,7 @@ pub trait ActionRegistryService {
         command_name: String,
         description: String,
         show_in_menu: bool,
+        toggleable: bool,
     ) -> u32;
 
     /// Unregister a previously registered action.
@@ -113,4 +116,18 @@ pub trait ActionRegistryService {
     /// Looks up the command by name (e.g., "_FTS_SIGNAL_ARM") and executes it.
     /// Returns `true` if the command was found and executed.
     async fn execute_named_action(&self, command_name: String) -> bool;
+
+    /// Set the toggle state for a toggleable action.
+    ///
+    /// Guests call this to update the on/off state that REAPER displays.
+    /// REAPER queries toggle state synchronously on the main thread, so the
+    /// host stores the state and returns it immediately when asked.
+    ///
+    /// Has no effect if the action was not registered as toggleable.
+    async fn set_toggle_state(&self, command_name: String, is_on: bool);
+
+    /// Get the current toggle state for a toggleable action.
+    ///
+    /// Returns `None` if the action is not registered or not toggleable.
+    async fn get_toggle_state(&self, command_name: String) -> Option<bool>;
 }

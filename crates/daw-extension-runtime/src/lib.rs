@@ -229,6 +229,8 @@ pub struct ActionDef {
     pub command_name: &'static str,
     /// Human-readable description shown in REAPER's action list.
     pub description: &'static str,
+    /// Whether this action has an on/off toggle state in REAPER.
+    pub toggleable: bool,
 }
 
 /// Result of registering actions with REAPER.
@@ -267,10 +269,17 @@ pub async fn register_actions(daw: &daw::Daw, actions: &[ActionDef]) -> Result<A
     let mut failed = 0usize;
 
     for action in actions {
-        let cmd_id = registry
-            .register(action.command_name, action.description)
-            .await
-            .map_err(|e| eyre!("register '{}': {e}", action.command_name))?;
+        let cmd_id = if action.toggleable {
+            registry
+                .register_toggle(action.command_name, action.description)
+                .await
+                .map_err(|e| eyre!("register_toggle '{}': {e}", action.command_name))?
+        } else {
+            registry
+                .register(action.command_name, action.description)
+                .await
+                .map_err(|e| eyre!("register '{}': {e}", action.command_name))?
+        };
 
         if cmd_id == 0 {
             warn!(

@@ -52,6 +52,7 @@ async fn run() -> Result<()> {
         ActionDef {
             command_name: "FTS_GUEST_HELLO",
             description: "FTS: Guest Hello World",
+            toggleable: false,
         },
     ])
     .await?;
