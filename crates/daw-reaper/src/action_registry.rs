@@ -450,6 +450,34 @@ impl ActionRegistryService for ReaperActionRegistry {
         .unwrap_or(false)
     }
 
+    async fn is_in_action_list(&self, command_name: String) -> bool {
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+
+            // First resolve the command name to a command ID
+            let cmd_id = match medium.named_command_lookup(format!("_{command_name}")) {
+                Some(id) => id,
+                None => return false,
+            };
+
+            // Enumerate the main section's action list to see if this command ID
+            // actually has a gaccel entry (i.e., appears in Actions > Show action list)
+            let section = reaper.main_section();
+            section
+                .with_raw(|s| {
+                    (0..s.action_list_cnt()).any(|i| {
+                        s.get_action_by_index(i)
+                            .map(|a| a.cmd() == cmd_id)
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
+        })
+        .await
+        .unwrap_or(false)
+    }
+
     async fn lookup_command_id(&self, command_name: String) -> Option<u32> {
         main_thread::query(move || {
             let reaper = Reaper::get();

@@ -168,9 +168,16 @@ async fn shm_guest_register_action(_ctx: &ReaperTestContext) -> eyre::Result<()>
     println!("Registered action: cmd_id={cmd_id}");
     assert!(cmd_id > 0, "register via SHM should return a valid command ID");
 
-    // Verify it's registered
+    // Verify it has a command ID
     let exists = actions.is_registered("FTS_TEST_SHM_REGISTER").await?;
-    assert!(exists, "action registered via SHM should be findable");
+    assert!(exists, "action registered via SHM should have a command ID");
+
+    // Verify it's actually in REAPER's action list (gaccel registered)
+    let in_list = actions.is_in_action_list("FTS_TEST_SHM_REGISTER").await?;
+    assert!(
+        in_list,
+        "action registered via SHM should appear in REAPER's action list"
+    );
 
     // Look up command ID
     let looked_up = actions

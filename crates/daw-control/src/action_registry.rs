@@ -64,6 +64,19 @@ impl ActionRegistry {
             .await?)
     }
 
+    /// Check if an action is actually in REAPER's action list (main section).
+    ///
+    /// Unlike `is_registered` which only checks the command ID registry,
+    /// this verifies the action has a gaccel entry and appears in
+    /// Actions > Show action list.
+    pub async fn is_in_action_list(&self, command_name: &str) -> crate::Result<bool> {
+        Ok(self
+            .clients
+            .action_registry
+            .is_in_action_list(command_name.to_string())
+            .await?)
+    }
+
     /// Look up the numeric command ID for a named action.
     pub async fn lookup_command_id(&self, command_name: &str) -> crate::Result<Option<u32>> {
         Ok(self

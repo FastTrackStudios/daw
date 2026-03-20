@@ -93,6 +93,14 @@ pub trait ActionRegistryService {
     /// its own — filter by `command_name` if needed.
     async fn subscribe_actions(&self, tx: Tx<ActionEvent>);
 
+    /// Check if an action is actually present in REAPER's action list (main section).
+    ///
+    /// Unlike [`is_registered`], which only checks `NamedCommandLookup` (the command
+    /// ID registry), this enumerates REAPER's action list to verify the action's
+    /// gaccel entry exists. An action can have a command ID without being in the
+    /// action list if the gaccel registration was missed.
+    async fn is_in_action_list(&self, command_name: String) -> bool;
+
     /// Execute a native DAW command by numeric ID.
     ///
     /// This maps to `Main_OnCommandEx(command_id, 0, current_project)`.

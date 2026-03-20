@@ -43,9 +43,18 @@ async fn is_registered_returns_true_for_known_action(ctx: &ReaperTestContext) ->
         .await?;
     assert!(cmd_id > 0);
 
-    // Check it's registered
+    // Check it has a command ID
     let exists = actions.is_registered("fts.test.is_registered").await?;
     assert!(exists, "action should be registered after register()");
+
+    // Check it's actually in REAPER's action list (not just command ID registry)
+    let in_list = actions
+        .is_in_action_list("fts.test.is_registered")
+        .await?;
+    assert!(
+        in_list,
+        "action should appear in REAPER's action list after register()"
+    );
 
     Ok(())
 }
