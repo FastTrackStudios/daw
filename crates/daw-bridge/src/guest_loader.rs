@@ -64,7 +64,15 @@ struct GuestRegistry {
     /// Maps resolved symlink target path → guest name in fts-extensions/.
     /// Used to map inotify events on target files back to the guest name.
     symlink_targets: HashMap<PathBuf, String>,
+    /// Maps resolved symlink target **directory** → guest name.
+    /// Used when watching directories (inotify events come from the dir).
+    symlink_target_dirs: HashMap<PathBuf, String>,
+    /// Consecutive restart count per guest (reset on successful file-watcher reload).
+    restart_count: HashMap<String, u32>,
 }
+
+/// Max consecutive auto-restarts before giving up (prevents crash loops).
+const MAX_AUTO_RESTARTS: u32 = 3;
 
 impl GuestRegistry {
     fn new(bootstrap_sock: String, extensions_dir: PathBuf) -> Self {
@@ -75,6 +83,8 @@ impl GuestRegistry {
             extensions_dir,
             ignore_list,
             symlink_targets: HashMap::new(),
+            symlink_target_dirs: HashMap::new(),
+            restart_count: HashMap::new(),
         }
     }
 
@@ -88,9 +98,28 @@ impl GuestRegistry {
         self.ignore_list = read_ignore_list(&self.extensions_dir);
     }
 
-    /// Resolve a symlink target path to the guest name it belongs to.
+    /// Resolve a path to the guest name it belongs to.
+    /// Checks exact symlink target match first, then checks if the path is
+    /// inside a watched symlink target directory.
     fn resolve_target_to_name(&self, path: &std::path::Path) -> Option<String> {
-        self.symlink_targets.get(path).cloned()
+        // Direct file match
+        if let Some(name) = self.symlink_targets.get(path) {
+            return Some(name.clone());
+        }
+        // Check if the event path is inside a watched directory
+        if let Some(parent) = path.parent() {
+            if let Some(name) = self.symlink_target_dirs.get(parent) {
+                // Only match if the filename matches the target binary name
+                if let Some(target_path) = self.symlink_targets.iter().find_map(|(target, n)| {
+                    if n == name { Some(target) } else { None }
+                }) {
+                    if path.file_name() == target_path.file_name() {
+                        return Some(name.clone());
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Launch (or relaunch) a guest by filename.
@@ -166,6 +195,51 @@ impl GuestRegistry {
         }
     }
 
+    /// Check all tracked children and relaunch any that have exited unexpectedly.
+    /// Respects a per-guest restart limit to prevent infinite crash loops.
+    fn reap_and_restart(&mut self) {
+        // Collect names of exited children first to avoid borrow issues
+        let exited: Vec<String> = self
+            .children
+            .iter_mut()
+            .filter_map(|(name, child)| match child.try_wait() {
+                Ok(Some(status)) => {
+                    info!(
+                        "Guest '{}' exited ({})",
+                        name, status
+                    );
+                    Some(name.clone())
+                }
+                Ok(None) => None, // still running
+                Err(e) => {
+                    warn!("Failed to check guest '{}': {}", name, e);
+                    None
+                }
+            })
+            .collect();
+
+        for name in exited {
+            self.children.remove(&name);
+
+            let count = self.restart_count.entry(name.clone()).or_insert(0);
+            *count += 1;
+            if *count > MAX_AUTO_RESTARTS {
+                warn!(
+                    "Guest '{}' has crashed {} times — not restarting (use hot-reload to reset)",
+                    name, count
+                );
+                continue;
+            }
+            info!("Auto-restarting guest '{}' (attempt {}/{})", name, count, MAX_AUTO_RESTARTS);
+            self.launch(&name);
+        }
+    }
+
+    /// Reset the restart counter for a guest (called on intentional hot-reload).
+    fn reset_restart_count(&mut self, name: &str) {
+        self.restart_count.remove(name);
+    }
+
     /// Initial scan: launch all executables in the directory.
     fn scan_and_launch_all(&mut self) {
         let entries = match std::fs::read_dir(&self.extensions_dir) {
@@ -188,12 +262,15 @@ impl GuestRegistry {
     }
 
     /// Collect symlink targets for all entries in the extensions directory.
-    /// Returns the resolved paths that need to be watched.
+    /// Returns the **directories** containing the resolved targets — we watch
+    /// directories rather than individual files because cargo build uses atomic
+    /// rename, which replaces the inode and breaks inotify file watches.
     fn collect_symlink_targets(&mut self) -> Vec<PathBuf> {
-        let mut targets = Vec::new();
+        let mut dirs = Vec::new();
+        let mut seen_dirs = HashSet::new();
         let entries = match std::fs::read_dir(&self.extensions_dir) {
             Ok(e) => e,
-            Err(_) => return targets,
+            Err(_) => return dirs,
         };
 
         for entry in entries.flatten() {
@@ -210,13 +287,23 @@ impl GuestRegistry {
             }
             match std::fs::canonicalize(&link_path) {
                 Ok(target) => {
-                    info!(
-                        "Watching symlink target for '{}': {}",
-                        name,
-                        target.display()
-                    );
-                    self.symlink_targets.insert(target.clone(), name);
-                    targets.push(target);
+                    // Record exact file → name mapping (for resolve_target_to_name)
+                    self.symlink_targets.insert(target.clone(), name.clone());
+
+                    // Watch the parent directory instead of the file itself
+                    if let Some(target_dir) = target.parent() {
+                        let target_dir = target_dir.to_path_buf();
+                        info!(
+                            "Watching symlink target dir for '{}': {} (target: {})",
+                            name,
+                            target_dir.display(),
+                            target.display()
+                        );
+                        self.symlink_target_dirs.insert(target_dir.clone(), name);
+                        if seen_dirs.insert(target_dir.clone()) {
+                            dirs.push(target_dir);
+                        }
+                    }
                 }
                 Err(e) => {
                     warn!(
@@ -227,7 +314,7 @@ impl GuestRegistry {
             }
         }
 
-        targets
+        dirs
     }
 }
 
@@ -309,7 +396,7 @@ pub fn launch_guests(bootstrap_sock: &str) {
             let mut reg = watch_registry.lock().unwrap();
 
             for path in &event.paths {
-                // Check if this is a symlink target change
+                // Check if this is a symlink target change (directory or file)
                 if let Some(guest_name) = reg.resolve_target_to_name(path) {
                     if matches!(
                         event.kind,
@@ -320,6 +407,8 @@ pub fn launch_guests(bootstrap_sock: &str) {
                             guest_name,
                             path.display()
                         );
+                        // Intentional hot-reload: reset crash counter
+                        reg.reset_restart_count(&guest_name);
                         reg.launch(&guest_name);
                     }
                     continue;
@@ -349,6 +438,8 @@ pub fn launch_guests(bootstrap_sock: &str) {
                                 "Detected change in fts-extensions: {} — (re)launching",
                                 name
                             );
+                            // Intentional hot-reload: reset crash counter
+                            reg.reset_restart_count(&name);
                             reg.launch(&name);
                         }
                     }
@@ -380,26 +471,42 @@ pub fn launch_guests(bootstrap_sock: &str) {
         return;
     }
 
-    // Watch each symlink target so rebuilds trigger hot-reload
-    for target in &symlink_targets {
-        if let Err(e) = watcher.watch(target, RecursiveMode::NonRecursive) {
+    // Watch each symlink target directory so rebuilds trigger hot-reload.
+    // We watch directories (not files) because cargo build uses atomic rename,
+    // which replaces the inode and would break an inotify watch on the file itself.
+    for target_dir in &symlink_targets {
+        if let Err(e) = watcher.watch(target_dir, RecursiveMode::NonRecursive) {
             warn!(
-                "Failed to watch symlink target {}: {}",
-                target.display(),
+                "Failed to watch symlink target dir {}: {}",
+                target_dir.display(),
                 e
             );
         }
     }
 
     info!(
-        "Watching fts-extensions directory for changes: {} ({} symlink targets)",
+        "Watching fts-extensions directory for changes: {} ({} symlink target dirs)",
         watch_dir.display(),
         symlink_targets.len()
     );
 
+    // Spawn a monitoring thread that periodically checks for crashed/killed
+    // guest processes and auto-restarts them.
+    let monitor_registry = std::sync::Arc::clone(&registry);
+    std::thread::Builder::new()
+        .name("fts-guest-monitor".to_string())
+        .spawn(move || {
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                let mut reg = monitor_registry.lock().unwrap();
+                reg.reap_and_restart();
+            }
+        })
+        .expect("failed to spawn guest monitor thread");
+
     // Keep the watcher alive by leaking it — it runs for the lifetime of REAPER.
     // The watcher's background thread will be cleaned up when the process exits.
     std::mem::forget(watcher);
-    // Keep registry alive too (watcher callback holds an Arc to it)
+    // Keep registry alive too (watcher callback and monitor thread hold Arcs to it)
     std::mem::forget(registry);
 }
