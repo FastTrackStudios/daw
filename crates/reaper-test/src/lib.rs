@@ -144,15 +144,17 @@ impl ReaperProcess {
             .collect();
         let args: Vec<String> = config.args.clone();
 
+        // Check if FTS_SOCKET is explicitly set (deterministic socket path).
+        // This avoids relying on PID matching, which breaks when REAPER forks
+        // internally (the child PID differs from the spawned PID).
+        let explicit_socket = config
+            .env
+            .iter()
+            .find(|(k, _)| k == "FTS_SOCKET")
+            .map(|(_, v)| PathBuf::from(v));
+
         if config.is_rig_wrapper {
-            // Rig wrapper: the bash script handles -newinst/etc via launch.json.
-            // Socket path is known from FTS_SOCKET env var (not PID-derived) so we
-            // can find it even when bwrap forks a child with a different PID.
-            let socket_path = config
-                .env
-                .iter()
-                .find(|(k, _)| k == "FTS_SOCKET")
-                .map(|(_, v)| PathBuf::from(v))
+            let socket_path = explicit_socket
                 .ok_or_else(|| eyre::eyre!("for_rig config missing FTS_SOCKET in env"))?;
 
             let exe = config
@@ -173,6 +175,41 @@ impl ReaperProcess {
 
             println!(
                 "  Spawned rig wrapper (PID {}), socket: {}",
+                child.id(),
+                socket_path.display()
+            );
+            return Ok(Self { child, socket_path });
+        }
+
+        if let Some(socket_path) = explicit_socket {
+            // Explicit socket path — spawn REAPER and use the given path
+            // instead of deriving from PID.
+            let exe = config
+                .executable
+                .clone()
+                .unwrap_or_else(reaper_executable);
+
+            let _ = std::fs::remove_file(&socket_path);
+
+            let mut cmd = Command::new(&exe);
+            cmd.arg("-newinst")
+                .arg("-nosplash")
+                .arg("-ignoreerrors");
+            for arg in &args {
+                cmd.arg(arg);
+            }
+            for (k, v) in &env_pairs {
+                cmd.env(k, v);
+            }
+
+            println!("  CMD: {exe} {:?}", cmd.get_args().collect::<Vec<_>>());
+
+            let child = cmd
+                .spawn()
+                .map_err(|e| eyre::eyre!("Failed to spawn REAPER at {exe}: {e}"))?;
+
+            println!(
+                "  Spawned REAPER (PID {}), socket: {}",
                 child.id(),
                 socket_path.display()
             );
@@ -222,6 +259,9 @@ impl ReaperProcess {
                 cmd.env(key, value);
             }
         }
+
+        // Debug: show actual command being run
+        println!("  CMD: {exe} {:?}", cmd.get_args().collect::<Vec<_>>());
 
         let child = cmd
             .spawn()
@@ -519,10 +559,27 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await?;
     let link = roam_stream::StreamLink::unix(stream);
-    let (_root_caller, session) = roam::initiator_conduit(roam::BareConduit::new(link))
-        .establish::<roam::DriverCaller>(())
-        .await
-        .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
+    let handshake = roam::HandshakeResult {
+        role: roam::SessionRole::Initiator,
+        our_settings: roam::ConnectionSettings {
+            parity: roam::Parity::Odd,
+            max_concurrent_requests: 64,
+        },
+        peer_settings: roam::ConnectionSettings {
+            parity: roam::Parity::Even,
+            max_concurrent_requests: 64,
+        },
+        peer_supports_retry: true,
+        session_resume_key: None,
+        peer_resume_key: None,
+        our_schema: vec![],
+        peer_schema: vec![],
+    };
+    let (_root_caller, session) =
+        roam::initiator_conduit(roam::BareConduit::new(link), handshake)
+            .establish::<roam::DriverCaller>(())
+            .await
+            .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
 
     // Open a virtual connection for DAW services
     let conn = session
@@ -974,6 +1031,29 @@ impl DawInstanceConfig {
         self.args.push(arg.to_string());
         self
     }
+
+    /// Use the FastTrackStudio REAPER config directory.
+    ///
+    /// Adds `-cfgfile ~/.config/FastTrackStudio/Reaper/reaper.ini` so the instance
+    /// uses the FTS config (which has `audiodriver=2` for headless playback, extensions, etc.)
+    pub fn with_fts_config(mut self) -> Self {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let ini = std::env::var("FTS_REAPER_CONFIG")
+            .map(|p| format!("{p}/reaper.ini"))
+            .unwrap_or_else(|_| format!("{home}/.config/FastTrackStudio/Reaper/reaper.ini"));
+        self.args.extend(["-cfgfile".to_string(), ini]);
+        self
+    }
+
+    /// Set `FTS_SOCKET` to a deterministic path based on the label.
+    ///
+    /// This avoids PID-based socket paths which can fail when REAPER forks
+    /// internally (the child PID differs from the spawned PID).
+    pub fn with_socket(mut self, path: &str) -> Self {
+        self.env
+            .push(("FTS_SOCKET".to_string(), path.to_string()));
+        self
+    }
 }
 
 /// A connected REAPER instance for multi-DAW tests.
@@ -986,6 +1066,69 @@ pub struct DawInstance {
     pub pid: u32,
     /// Socket path used for the connection.
     pub socket_path: PathBuf,
+}
+
+impl DawInstance {
+    /// Poll an ExtState key until it matches `expected`, with retries.
+    pub async fn poll_ext_state(
+        &self,
+        section: &str,
+        key: &str,
+        expected: &str,
+        retries: u32,
+        interval_ms: u64,
+    ) -> Result<()> {
+        let ext = self.daw.ext_state();
+        let mut last_val = String::new();
+        for i in 0..retries {
+            match ext.get(section, key).await {
+                Ok(Some(val)) => {
+                    if val == expected {
+                        return Ok(());
+                    }
+                    last_val = val;
+                }
+                Ok(None) => {
+                    last_val = "<none>".to_string();
+                }
+                Err(e) => {
+                    last_val = format!("<err: {e}>");
+                }
+            }
+            if i < retries - 1 {
+                tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+            }
+        }
+        Err(eyre::eyre!(
+            "[{}] ExtState {section}/{key} did not reach '{expected}' after {retries} retries (last value: '{last_val}')",
+            self.label,
+        ))
+    }
+
+    /// Poll an ExtState key until it has any non-empty value.
+    pub async fn poll_ext_state_value(
+        &self,
+        section: &str,
+        key: &str,
+        retries: u32,
+        interval_ms: u64,
+    ) -> Result<String> {
+        let ext = self.daw.ext_state();
+        for i in 0..retries {
+            if let Ok(Some(val)) = ext.get(section, key).await {
+                if !val.is_empty() {
+                    return Ok(val);
+                }
+            }
+            if i < retries - 1 {
+                tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+            }
+        }
+        Err(eyre::eyre!(
+            "[{}] ExtState {section}/{key} never got a value after {retries} retries",
+            self.label,
+        ))
+    }
 }
 
 /// Context for multi-instance REAPER tests.
@@ -1009,6 +1152,93 @@ impl MultiDawTestContext {
             .iter()
             .find(|i| i.label == label)
             .unwrap_or_else(|| panic!("no instance with label '{label}'"))
+    }
+
+    /// Assert that two instances have positions within `tolerance_secs`.
+    ///
+    /// Returns `(pos_a, pos_b, drift)` on success.
+    pub async fn assert_positions_close(
+        &self,
+        label_a: &str,
+        label_b: &str,
+        tolerance_secs: f64,
+        context: &str,
+    ) -> Result<(f64, f64, f64)> {
+        let a = self.by_label(label_a);
+        let b = self.by_label(label_b);
+        let proj_a = a.daw.current_project().await?;
+        let proj_b = b.daw.current_project().await?;
+        let state_a = proj_a.transport().get_state().await?;
+        let state_b = proj_b.transport().get_state().await?;
+        let pos_a = state_a.playhead_position.time.as_ref().map(|t| t.as_seconds()).unwrap_or(0.0);
+        let pos_b = state_b.playhead_position.time.as_ref().map(|t| t.as_seconds()).unwrap_or(0.0);
+        let drift = (pos_a - pos_b).abs();
+        assert!(
+            drift < tolerance_secs,
+            "{context}: position drift {drift:.4}s exceeds {tolerance_secs}s \
+             ({label_a}={pos_a:.4}s, {label_b}={pos_b:.4}s)"
+        );
+        Ok((pos_a, pos_b, drift))
+    }
+
+    /// Connect all instances via sync extension peer mesh.
+    ///
+    /// Waits for each instance's sync extension to be ready, reads their peer IDs
+    /// and mesh ports, then triggers direct TCP connections between all of them.
+    /// Finally waits for each instance to see the expected number of peers.
+    ///
+    /// `ext_section` is typically `"FTS_SYNC_EXT"`.
+    pub async fn connect_sync_peers(&self, ext_section: &str) -> Result<()> {
+        // Wait for all extensions to report ready
+        for inst in &self.instances {
+            inst.poll_ext_state(ext_section, "status", "ready", 30, 1000)
+                .await?;
+            println!("  [{}] sync extension ready", inst.label);
+        }
+
+        // Read mesh ports and peer IDs
+        let mut peers = Vec::new();
+        for inst in &self.instances {
+            let port = inst
+                .poll_ext_state_value(ext_section, "mesh_port", 10, 500)
+                .await?;
+            let peer_id = inst
+                .poll_ext_state_value(ext_section, "peer_id", 10, 500)
+                .await?;
+            println!(
+                "  [{}] peer_id={peer_id}, mesh_port={port}",
+                inst.label
+            );
+            peers.push((inst.label.clone(), peer_id, port));
+        }
+
+        // Build connect string and trigger connections
+        let connect_str: String = peers
+            .iter()
+            .map(|(_, peer_id, port)| format!("{peer_id}@127.0.0.1:{port}"))
+            .collect::<Vec<_>>()
+            .join(",");
+
+        for inst in &self.instances {
+            inst.daw
+                .ext_state()
+                .set(ext_section, "connect_peers", &connect_str, false)
+                .await?;
+        }
+        println!("  Triggered direct peer connections: {connect_str}");
+
+        // Wait for all instances to see expected peer count
+        let expected_peers = (self.instances.len() - 1).to_string();
+        for inst in &self.instances {
+            inst.poll_ext_state(ext_section, "peer_count", &expected_peers, 30, 1000)
+                .await?;
+            println!(
+                "  [{}] connected to {} peer(s)",
+                inst.label, expected_peers
+            );
+        }
+
+        Ok(())
     }
 }
 

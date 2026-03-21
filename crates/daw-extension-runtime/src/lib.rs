@@ -32,7 +32,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use eyre::{Result, WrapErr, eyre};
 use roam::{
-    ConnectionSettings, Driver, ErasedCaller, MetadataEntry, MetadataFlags, MetadataValue, Parity,
+    ConnectionSettings, Driver, ErasedCaller, HandshakeResult, MetadataEntry, MetadataFlags,
+    MetadataValue, Parity, SessionRole,
 };
 use roam_shm::bootstrap::{BootstrapStatus, encode_request};
 use roam_shm::{Segment, ShmLink};
@@ -88,7 +89,10 @@ pub async fn connect(opts: GuestOptions<'_>) -> Result<daw::Daw> {
     info!("[guest:{pid}] SHM link established");
 
     // Step 3: Establish roam session
-    let (_root_caller, session) = roam::initiator_conduit(link)
+    // SHM connections skip the CBOR handshake (handled at the bootstrap layer),
+    // so we provide a synthetic HandshakeResult with matching settings.
+    let handshake_result = shm_handshake_result(opts.max_concurrent_requests);
+    let (_root_caller, session) = roam::initiator_conduit(link, handshake_result)
         .establish::<roam::DriverCaller>(())
         .await
         .map_err(|e| eyre!("roam handshake failed: {e:?}"))?;
@@ -325,6 +329,31 @@ pub async fn register_actions(daw: &daw::Daw, actions: &[ActionDef]) -> Result<A
         registered,
         failed,
     })
+}
+
+/// Construct a synthetic `HandshakeResult` for SHM connections.
+///
+/// SHM links handle transport-level handshaking at the bootstrap layer (session ID,
+/// segment path, file descriptors). The roam session layer still expects a
+/// `HandshakeResult` to know the connection settings — we provide one here with
+/// the initiator's perspective.
+fn shm_handshake_result(max_concurrent_requests: u32) -> HandshakeResult {
+    HandshakeResult {
+        role: SessionRole::Initiator,
+        our_settings: ConnectionSettings {
+            parity: Parity::Odd,
+            max_concurrent_requests,
+        },
+        peer_settings: ConnectionSettings {
+            parity: Parity::Even,
+            max_concurrent_requests,
+        },
+        peer_supports_retry: true,
+        session_resume_key: None,
+        peer_resume_key: None,
+        our_schema: vec![],
+        peer_schema: vec![],
+    }
 }
 
 /// Generate a unique session ID for this guest connection.

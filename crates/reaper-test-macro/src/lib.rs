@@ -190,6 +190,7 @@ pub fn reaper_test(attr: TokenStream, item: TokenStream) -> TokenStream {
                     reaper_test::DawInstanceConfig::new(#l)
                         .with_env("FTS_SYNC_NO_MDNS", "1")
                         .with_env("FTS_SYNC_NO_LINK", "1")
+                        .with_env("FTS_SYNC_ALL_DOMAINS", "1")
                         .with_fts_config()
                         .with_socket(#socket)
                 }

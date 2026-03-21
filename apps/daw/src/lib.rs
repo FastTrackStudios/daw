@@ -236,10 +236,27 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<DawConnection> {
     .map_err(|e| eyre::eyre!("Failed to connect to {}: {}", path.display(), e))?;
 
     let link = roam_stream::StreamLink::unix(stream);
-    let (_root_caller, session) = roam::initiator_conduit(roam::BareConduit::new(link))
-        .establish::<roam::DriverCaller>(())
-        .await
-        .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
+    let handshake = roam::HandshakeResult {
+        role: roam::SessionRole::Initiator,
+        our_settings: roam::ConnectionSettings {
+            parity: roam::Parity::Odd,
+            max_concurrent_requests: 64,
+        },
+        peer_settings: roam::ConnectionSettings {
+            parity: roam::Parity::Even,
+            max_concurrent_requests: 64,
+        },
+        peer_supports_retry: true,
+        session_resume_key: None,
+        peer_resume_key: None,
+        our_schema: vec![],
+        peer_schema: vec![],
+    };
+    let (_root_caller, session) =
+        roam::initiator_conduit(roam::BareConduit::new(link), handshake)
+            .establish::<roam::DriverCaller>(())
+            .await
+            .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
 
     let caller = open_daw_connection(&session).await?;
 

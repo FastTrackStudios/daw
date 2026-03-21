@@ -216,7 +216,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -227,7 +227,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -771,7 +771,7 @@ version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1292,7 +1292,7 @@ dependencies = [
  "eyre",
  "fragile",
  "libc",
- "moire",
+ "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "notify",
  "reaper-high",
  "reaper-low",
@@ -1318,7 +1318,7 @@ dependencies = [
  "dawfile-reaper",
  "eyre",
  "libc",
- "moire",
+ "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "roam",
  "roam-stream",
  "serde_json",
@@ -1346,7 +1346,7 @@ version = "0.1.0"
 dependencies = [
  "daw-control",
  "eyre",
- "moire",
+ "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "roam",
  "roam-stream",
  "tokio",
@@ -1360,7 +1360,7 @@ dependencies = [
  "daw",
  "eyre",
  "libc",
- "moire",
+ "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "roam",
  "roam-shm",
  "shm-primitives",
@@ -1413,7 +1413,7 @@ dependencies = [
  "keyflow",
  "libc",
  "libloading 0.8.9",
- "moire",
+ "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "reaper-high",
  "reaper-low",
  "reaper-medium",
@@ -1439,7 +1439,7 @@ dependencies = [
  "eyre",
  "gloo-timers",
  "keyflow",
- "moire",
+ "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "roam",
  "symphonia",
  "tokio",
@@ -2094,7 +2094,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2168,6 +2168,16 @@ dependencies = [
  "facet-reflect",
  "facet-toml",
  "facet-value",
+]
+
+[[package]]
+name = "facet-cbor"
+version = "7.3.0"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+dependencies = [
+ "facet",
+ "facet-core",
+ "facet-reflect",
 ]
 
 [[package]]
@@ -2556,6 +2566,10 @@ dependencies = [
 
 [[package]]
 name = "fts-audio-proto"
+version = "0.1.0"
+
+[[package]]
+name = "fts-devtools"
 version = "0.1.0"
 
 [[package]]
@@ -3184,7 +3198,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3226,7 +3240,7 @@ dependencies = [
  "portable-atomic",
  "portable-atomic-util",
  "serde_core",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3880,9 +3894,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac52dcc0ff5b4710a66626370b1bf85ba3d924fd8019e8cfa100e8dafffda4ad"
 dependencies = [
  "moire-macros",
- "moire-macros-noop",
- "moire-tokio",
- "moire-wasm",
+ "moire-macros-noop 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moire-tokio 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moire-wasm 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "moire"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "moire-macros-noop 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-tokio 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-wasm 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
 ]
 
 [[package]]
@@ -3903,6 +3927,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92ccdc0bf403f5ecf29c09e8e9f178caed89a914ea032e0c2d99d3824b78892d"
 
 [[package]]
+name = "moire-macros-noop"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+
+[[package]]
 name = "moire-runtime"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3912,10 +3941,26 @@ dependencies = [
  "facet",
  "facet-json",
  "facet-value",
- "moire-trace-capture",
- "moire-trace-types",
- "moire-types",
- "moire-wire",
+ "moire-trace-capture 1.0.0",
+ "moire-trace-types 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moire-types 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moire-wire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tokio",
+]
+
+[[package]]
+name = "moire-runtime"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "ctor",
+ "facet",
+ "facet-json",
+ "facet-value",
+ "moire-trace-capture 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-wire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
  "tokio",
 ]
 
@@ -3926,8 +3971,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fdb30c43038ce71c727da5a4ff01d09dd4c823486cc17b3b08661420d0ceda43"
 dependencies = [
  "ctor",
- "moire-runtime",
- "moire-types",
+ "moire-runtime 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moire-types 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parking_lot",
+ "tokio",
+]
+
+[[package]]
+name = "moire-tokio"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "moire-runtime 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
  "parking_lot",
  "tokio",
 ]
@@ -3937,7 +3993,16 @@ name = "moire-trace-capture"
 version = "1.0.0"
 dependencies = [
  "libc",
- "moire-trace-types",
+ "moire-trace-types 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "moire-trace-capture"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "libc",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
 ]
 
 [[package]]
@@ -3950,6 +4015,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "moire-trace-types"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "facet",
+]
+
+[[package]]
 name = "moire-types"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3957,7 +4030,17 @@ checksum = "667b2fc41e30d3b0f7d0d29e978d3f473afaf0e0be355202eead317e35ace200"
 dependencies = [
  "facet",
  "facet-value",
- "moire-trace-types",
+ "moire-trace-types 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "moire-types"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "facet",
+ "facet-value",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
 ]
 
 [[package]]
@@ -3972,7 +4055,22 @@ dependencies = [
  "futures-channel",
  "futures-util",
  "gloo-timers",
- "moire-types",
+ "moire-types 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "moire-wasm"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "async-channel",
+ "async-lock",
+ "event-listener",
+ "futures-channel",
+ "futures-util",
+ "gloo-timers",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
  "wasm-bindgen-futures",
 ]
 
@@ -3984,8 +4082,19 @@ checksum = "bf0ec84eeb2e23a83339cf5edc9d5a3a9ec5849416bd4051951fba416ea3e0f7"
 dependencies = [
  "facet",
  "facet-json",
- "moire-trace-types",
- "moire-types",
+ "moire-trace-types 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "moire-types 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "moire-wire"
+version = "1.0.0"
+source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+dependencies = [
+ "facet",
+ "facet-json",
+ "moire-trace-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "moire-types 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
 ]
 
 [[package]]
@@ -4154,7 +4263,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5168,7 +5277,7 @@ version = "0.1.0"
 dependencies = [
  "daw",
  "eyre",
- "moire",
+ "moire 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "reaper-launcher",
  "reaper-test-macro",
  "roam",
@@ -5296,12 +5405,11 @@ dependencies = [
 [[package]]
 name = "roam"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "facet",
- "facet-postcard",
  "roam-core",
- "roam-hash",
+ "roam-postcard",
  "roam-service-macros",
  "roam-types",
  "tracing",
@@ -5310,16 +5418,16 @@ dependencies = [
 [[package]]
 name = "roam-core"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "facet",
+ "facet-cbor",
  "facet-core",
  "facet-error",
- "facet-format",
- "facet-postcard",
  "facet-reflect",
  "getrandom 0.3.4",
- "moire",
+ "moire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
+ "roam-postcard",
  "roam-types",
  "smallvec 1.15.1",
  "tokio",
@@ -5329,20 +5437,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "roam-hash"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
-dependencies = [
- "blake3",
- "facet-core",
- "heck 0.5.0",
- "roam-types",
-]
-
-[[package]]
 name = "roam-macros-core"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
@@ -5354,16 +5451,27 @@ dependencies = [
 [[package]]
 name = "roam-macros-parse"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "proc-macro2",
  "unsynn",
 ]
 
 [[package]]
+name = "roam-postcard"
+version = "7.3.0"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+dependencies = [
+ "facet",
+ "facet-core",
+ "facet-reflect",
+ "roam-types",
+]
+
+[[package]]
 name = "roam-service-macros"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "proc-macro2",
  "roam-macros-core",
@@ -5372,11 +5480,11 @@ dependencies = [
 [[package]]
 name = "roam-shm"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
- "facet-postcard",
  "libc",
  "loom",
+ "roam-postcard",
  "roam-types",
  "shm-primitives",
  "shm-primitives-async",
@@ -5388,9 +5496,9 @@ dependencies = [
 [[package]]
 name = "roam-stream"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
- "moire",
+ "moire 1.0.0 (git+https://github.com/bearcove/moire?rev=13eac79)",
  "roam-core",
  "roam-types",
  "tokio",
@@ -5399,14 +5507,17 @@ dependencies = [
 [[package]]
 name = "roam-types"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "bitflags 2.11.0",
+ "blake3",
  "facet",
+ "facet-cbor",
  "facet-core",
  "facet-path",
  "facet-postcard",
  "futures-channel",
+ "heck 0.5.0",
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
@@ -5482,7 +5593,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5693,7 +5804,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "shm-primitives"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "libc",
  "loom",
@@ -5703,7 +5814,7 @@ dependencies = [
 [[package]]
 name = "shm-primitives-async"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#2f624f146c89fafe139770f5c2a6203a3a37e33e"
+source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
 dependencies = [
  "libc",
  "tokio",
@@ -5864,7 +5975,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6231,7 +6342,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7293,7 +7404,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

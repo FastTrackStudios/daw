@@ -116,7 +116,23 @@ fn connect_shm(bootstrap_path: &Path) -> Result<ShmLink> {
 async fn connect_guest(bootstrap_path: &Path) -> Result<Daw> {
     let link = connect_shm(bootstrap_path)?;
 
-    let (_root_caller, session) = roam::initiator_conduit(link)
+    let handshake = roam::HandshakeResult {
+        role: roam::SessionRole::Initiator,
+        our_settings: ConnectionSettings {
+            parity: Parity::Odd,
+            max_concurrent_requests: 64,
+        },
+        peer_settings: ConnectionSettings {
+            parity: Parity::Even,
+            max_concurrent_requests: 64,
+        },
+        peer_supports_retry: true,
+        session_resume_key: None,
+        peer_resume_key: None,
+        our_schema: vec![],
+        peer_schema: vec![],
+    };
+    let (_root_caller, session) = roam::initiator_conduit(link, handshake)
         .establish::<roam::DriverCaller>(())
         .await
         .map_err(|e| eyre!("roam handshake failed: {e:?}"))?;

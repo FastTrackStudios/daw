@@ -329,7 +329,23 @@ fn start_unix_socket_server(acceptor: DawConnectionAcceptor) {
                     let acceptor = acceptor.clone();
                     moire::task::spawn(async move {
                         let link = roam_stream::StreamLink::unix(stream);
-                        match roam::acceptor(roam::BareConduit::new(link))
+                        let handshake = roam::HandshakeResult {
+                            role: roam::SessionRole::Acceptor,
+                            our_settings: roam::ConnectionSettings {
+                                parity: roam::Parity::Even,
+                                max_concurrent_requests: 64,
+                            },
+                            peer_settings: roam::ConnectionSettings {
+                                parity: roam::Parity::Odd,
+                                max_concurrent_requests: 64,
+                            },
+                            peer_supports_retry: true,
+                            session_resume_key: None,
+                            peer_resume_key: None,
+                            our_schema: vec![],
+                            peer_schema: vec![],
+                        };
+                        match roam::acceptor(roam::BareConduit::new(link), handshake)
                             .on_connection(acceptor)
                             .establish::<roam::DriverCaller>(())
                             .await

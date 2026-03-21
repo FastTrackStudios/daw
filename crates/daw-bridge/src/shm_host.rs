@@ -220,7 +220,23 @@ async fn handle_bootstrap_connection(
         .into_link()
         .map_err(|e| eyre::eyre!("build host link: {}", e))?;
 
-    let (_caller, _session_handle) = roam::acceptor(link)
+    let handshake = roam::HandshakeResult {
+        role: roam::SessionRole::Acceptor,
+        our_settings: roam::ConnectionSettings {
+            parity: roam::Parity::Even,
+            max_concurrent_requests: 64,
+        },
+        peer_settings: roam::ConnectionSettings {
+            parity: roam::Parity::Odd,
+            max_concurrent_requests: 64,
+        },
+        peer_supports_retry: true,
+        session_resume_key: None,
+        peer_resume_key: None,
+        our_schema: vec![],
+        peer_schema: vec![],
+    };
+    let (_caller, _session_handle) = roam::acceptor(link, handshake)
         .on_connection(acceptor)
         .establish::<roam::DriverCaller>(())
         .await

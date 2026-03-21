@@ -88,7 +88,23 @@ impl LocalCaller {
 
         // Server side: accept with virtual connection support
         let handle = moire::task::spawn(async move {
-            match roam::acceptor(BareConduit::new(server_link))
+            let handshake = roam::HandshakeResult {
+                role: roam::SessionRole::Acceptor,
+                our_settings: ConnectionSettings {
+                    parity: Parity::Even,
+                    max_concurrent_requests: 64,
+                },
+                peer_settings: ConnectionSettings {
+                    parity: Parity::Odd,
+                    max_concurrent_requests: 64,
+                },
+                peer_supports_retry: true,
+                session_resume_key: None,
+                peer_resume_key: None,
+                our_schema: vec![],
+                peer_schema: vec![],
+            };
+            match roam::acceptor(BareConduit::new(server_link), handshake)
                 .on_connection(acceptor)
                 .establish::<DriverCaller>(())
                 .await
@@ -104,10 +120,27 @@ impl LocalCaller {
         });
 
         // Client side: establish root session
-        let (_root_caller, session) = roam::initiator_conduit(BareConduit::new(client_link))
-            .establish::<DriverCaller>(())
-            .await
-            .map_err(|e| eyre::eyre!("LocalCaller initiation failed: {:?}", e))?;
+        let handshake = roam::HandshakeResult {
+            role: roam::SessionRole::Initiator,
+            our_settings: ConnectionSettings {
+                parity: Parity::Odd,
+                max_concurrent_requests: 64,
+            },
+            peer_settings: ConnectionSettings {
+                parity: Parity::Even,
+                max_concurrent_requests: 64,
+            },
+            peer_supports_retry: true,
+            session_resume_key: None,
+            peer_resume_key: None,
+            our_schema: vec![],
+            peer_schema: vec![],
+        };
+        let (_root_caller, session) =
+            roam::initiator_conduit(BareConduit::new(client_link), handshake)
+                .establish::<DriverCaller>(())
+                .await
+                .map_err(|e| eyre::eyre!("LocalCaller initiation failed: {:?}", e))?;
 
         // Open a virtual connection for DAW services
         let conn = session
