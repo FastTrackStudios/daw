@@ -16,6 +16,7 @@ members = [
     "crates/daw-allocator",
     "crates/daw-bridge",
     "crates/fts-audio-proto",
+    "crates/fts-devtools",
     "crates/daw-extension-runtime",
     "apps/daw-guest-example",
     "xtask",
@@ -41,6 +42,8 @@ audio-controls = { path = "crates/audio-controls" }
 daw-allocator = { path = "crates/daw-allocator" }
 # Extension runtime — for hot-reloadable processes connecting via SHM
 daw-extension-runtime = { path = "crates/daw-extension-runtime" }
+# Dev tooling — REAPER extension install/symlink helpers (for xtask use)
+fts-devtools = { path = "crates/fts-devtools" }
 # NOTE: daw-proto, daw-control, daw-control-sync, daw-reaper, daw-standalone,
 # dawfile-reaper are INTERNAL. Access them through the `daw` facade crate.
 
