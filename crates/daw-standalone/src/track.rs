@@ -361,6 +361,30 @@ impl TrackService for StandaloneTrack {
         Ok(())
     }
 
+    async fn move_track(
+        &self,
+        _project: ProjectContext,
+        track: TrackRef,
+        new_index: u32,
+    ) -> Result<(), String> {
+        let mut tracks = self.tracks.write().await;
+        let current_pos = match &track {
+            TrackRef::Guid(guid) => tracks.iter().position(|t| &t.guid == guid),
+            TrackRef::Index(idx) => tracks.iter().position(|t| t.index == *idx),
+            TrackRef::Master => Some(0),
+        };
+        if let Some(pos) = current_pos {
+            let t = tracks.remove(pos);
+            let insert_at = (new_index as usize).min(tracks.len());
+            tracks.insert(insert_at, t);
+            // Re-index
+            for (i, track) in tracks.iter_mut().enumerate() {
+                track.index = i as u32;
+            }
+        }
+        Ok(())
+    }
+
     async fn get_ext_state(
         &self,
         _project: ProjectContext,

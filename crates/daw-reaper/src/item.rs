@@ -763,7 +763,7 @@ impl ItemService for ReaperItem {
         });
     }
 
-    async fn move_to_track(&self, _project: ProjectContext, item: ItemRef, track: TrackRef) {
+    async fn move_to_track(&self, project: ProjectContext, item: ItemRef, track: TrackRef) {
         debug!("ReaperItem: move_to_track");
         main_thread::run(move || {
             let reaper = Reaper::get();
@@ -771,18 +771,13 @@ impl ItemService for ReaperItem {
 
             if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
             {
-                let track_ptr = match track {
-                    TrackRef::Master => {
-                        Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
-                    }
-                    TrackRef::Index(idx) => {
-                        medium.get_track(ReaperProjectContext::CurrentProject, idx)
-                    }
-                    TrackRef::Guid(_) => None,
+                let Some(proj) = resolve_project(&project) else {
+                    return;
                 };
-
-                if let Some(new_track) = track_ptr {
-                    item_sw::move_item_to_track(medium.low(), item_ptr, new_track);
+                if let Some(resolved) = resolve_track(&proj, &track) {
+                    if let Ok(raw) = resolved.raw() {
+                        item_sw::move_item_to_track(medium.low(), item_ptr, raw);
+                    }
                 }
             }
         });

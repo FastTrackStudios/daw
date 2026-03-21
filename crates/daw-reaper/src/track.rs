@@ -1000,6 +1000,56 @@ impl TrackService for ReaperTrack {
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
     }
 
+    async fn move_track(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        new_index: u32,
+    ) -> Result<(), String> {
+        main_thread::query(move || {
+            let proj = resolve_project(&project).ok_or_else(|| "Project not found".to_string())?;
+            let t = resolve_track(&proj, &track).ok_or_else(|| "Track not found".to_string())?;
+
+            let current_index = t.index().ok_or_else(|| "Track has no index".to_string())?;
+            if current_index == new_index {
+                return Ok(());
+            }
+
+            // Capture the full track state chunk
+            let chunk = t
+                .chunk(1_000_000, reaper_medium::ChunkCacheHint::NormalMode)
+                .map_err(|e| format!("get_chunk failed: {e}"))?;
+            let chunk_str: String = chunk
+                .try_into()
+                .map_err(|_| "chunk to string conversion failed".to_string())?;
+
+            // Remove the track
+            proj.remove_track(&t);
+
+            // Insert at the new position
+            let insert_idx = if new_index > current_index {
+                // After removal, indices shift down
+                new_index.saturating_sub(1)
+            } else {
+                new_index
+            };
+            proj.insert_track_at(insert_idx)
+                .map_err(|e| format!("insert_track_at failed: {e}"))?;
+
+            // Apply the saved chunk to the newly inserted track
+            if let Some(new_track) = proj.track_by_index(insert_idx) {
+                let chunk_obj = reaper_high::Chunk::new(chunk_str);
+                new_track
+                    .set_chunk(chunk_obj)
+                    .map_err(|e| format!("set_chunk failed: {e}"))?;
+            }
+
+            Ok(())
+        })
+        .await
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()))
+    }
+
     // =========================================================================
     // Track ExtState (P_EXT)
     // =========================================================================

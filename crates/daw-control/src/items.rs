@@ -488,6 +488,15 @@ impl ItemHandle {
     // Operations
     // =========================================================================
 
+    /// Move this item to a different track
+    pub async fn move_to_track(&self, track: TrackRef) -> Result<()> {
+        self.clients
+            .item
+            .move_to_track(self.context(), self.item_ref(), track)
+            .await;
+        Ok(())
+    }
+
     /// Delete this item
     pub async fn delete(&self) -> Result<()> {
         self.clients

@@ -195,6 +195,17 @@ pub trait TrackService {
     /// Remove all tracks from the project (excluding master).
     async fn remove_all_tracks(&self, project: ProjectContext) -> Result<(), String>;
 
+    /// Move a track to a new position in the track list.
+    ///
+    /// Reorders by capturing the track's state chunk, removing it, inserting
+    /// a new track at the target index, and restoring the chunk.
+    async fn move_track(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        new_index: u32,
+    ) -> Result<(), String>;
+
     // =========================================================================
     // Track ExtState (P_EXT)
     // =========================================================================

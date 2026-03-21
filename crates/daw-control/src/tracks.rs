@@ -527,6 +527,15 @@ impl TrackHandle {
         Ok(())
     }
 
+    /// Move this track to a new position in the track list
+    pub async fn move_to_index(&self, new_index: u32) -> Result<()> {
+        self.clients
+            .track
+            .move_track(self.context(), self.track_ref(), new_index)
+            .await?;
+        Ok(())
+    }
+
     /// Set track color (0xRRGGBB format, or 0 for default)
     pub async fn set_color(&self, color: u32) -> Result<()> {
         self.clients
