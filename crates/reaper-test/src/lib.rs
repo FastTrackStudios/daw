@@ -63,33 +63,70 @@ fn fts_home() -> String {
 
 /// Resolve the REAPER executable path.
 ///
-/// Checks `$FTS_REAPER_EXECUTABLE`, falls back to `<fts_home>/Reaper/FTS-TESTING.app/Contents/MacOS/REAPER`.
+/// Checks `$FTS_REAPER_EXECUTABLE`, then `reaper` on `$PATH` (Linux),
+/// then falls back to `<fts_home>/Reaper/FTS-TESTING.app/Contents/MacOS/REAPER` (macOS).
 pub fn reaper_executable() -> String {
-    std::env::var("FTS_REAPER_EXECUTABLE").unwrap_or_else(|_| {
-        let fts = fts_home();
-        // Try FTS-TRACKS subdirectory first (production layout), then direct (dev layout)
-        let production = format!("{fts}/Reaper/FTS-TRACKS/FTS-TESTING.app/Contents/MacOS/REAPER");
-        if std::path::Path::new(&production).exists() {
-            return production;
+    if let Ok(exe) = std::env::var("FTS_REAPER_EXECUTABLE") {
+        return exe;
+    }
+
+    // On Linux, prefer `reaper` on PATH (provided by nix/devenv)
+    if cfg!(target_os = "linux") {
+        if let Some(exe) = which_command("reaper") {
+            return exe;
         }
-        format!("{fts}/Reaper/FTS-TESTING.app/Contents/MacOS/REAPER")
-    })
+    }
+
+    // macOS .app bundle fallback
+    let fts = fts_home();
+    let production = format!("{fts}/Reaper/FTS-TRACKS/FTS-TESTING.app/Contents/MacOS/REAPER");
+    if std::path::Path::new(&production).exists() {
+        return production;
+    }
+    format!("{fts}/Reaper/FTS-TESTING.app/Contents/MacOS/REAPER")
 }
 
 /// Resolve the REAPER resources path.
 ///
-/// Checks `$FTS_REAPER_RESOURCES`, falls back to auto-detected path.
+/// Checks `$FTS_REAPER_RESOURCES`, then `$FTS_REAPER_CONFIG`,
+/// then `~/.config/FastTrackStudio/Reaper` (Linux),
+/// then falls back to macOS `.app` bundle paths.
 pub fn reaper_resources() -> String {
-    std::env::var("FTS_REAPER_RESOURCES").unwrap_or_else(|_| {
-        let fts = fts_home();
-        let production = format!("{fts}/Reaper/FTS-TRACKS/FTS-TESTING.app/Contents/Resources");
-        if std::path::Path::new(&production).exists() {
-            return production;
+    if let Ok(p) = std::env::var("FTS_REAPER_RESOURCES") {
+        return p;
+    }
+
+    // On Linux, use the canonical config directory
+    if cfg!(target_os = "linux") {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        if let Ok(p) = std::env::var("FTS_REAPER_CONFIG") {
+            return p.replace("$HOME", &home);
         }
-        format!("{fts}/Reaper/FTS-TESTING.app/Contents/Resources")
-    })
+        return format!("{home}/.config/FastTrackStudio/Reaper");
+    }
+
+    // macOS .app bundle fallback
+    let fts = fts_home();
+    let production = format!("{fts}/Reaper/FTS-TRACKS/FTS-TESTING.app/Contents/Resources");
+    if std::path::Path::new(&production).exists() {
+        return production;
+    }
+    format!("{fts}/Reaper/FTS-TESTING.app/Contents/Resources")
 }
 pub const LOG_DIR: &str = "/tmp/reaper-tests";
+
+/// Find a command on PATH.
+fn which_command(name: &str) -> Option<String> {
+    Command::new("which").arg(name).output().ok().and_then(|o| {
+        if o.status.success() {
+            String::from_utf8(o.stdout)
+                .ok()
+                .map(|s| s.trim().to_string())
+        } else {
+            None
+        }
+    })
+}
 
 // ─────────────────────────────────────────────────────────────
 //  ReaperProcess — spawn/kill guard
@@ -184,17 +221,12 @@ impl ReaperProcess {
         if let Some(socket_path) = explicit_socket {
             // Explicit socket path — spawn REAPER and use the given path
             // instead of deriving from PID.
-            let exe = config
-                .executable
-                .clone()
-                .unwrap_or_else(reaper_executable);
+            let exe = config.executable.clone().unwrap_or_else(reaper_executable);
 
             let _ = std::fs::remove_file(&socket_path);
 
             let mut cmd = Command::new(&exe);
-            cmd.arg("-newinst")
-                .arg("-nosplash")
-                .arg("-ignoreerrors");
+            cmd.arg("-newinst").arg("-nosplash").arg("-ignoreerrors");
             for arg in &args {
                 cmd.arg(arg);
             }
@@ -575,11 +607,10 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
         our_schema: vec![],
         peer_schema: vec![],
     };
-    let (_root_caller, session) =
-        roam::initiator_conduit(roam::BareConduit::new(link), handshake)
-            .establish::<roam::DriverCaller>(())
-            .await
-            .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
+    let (_root_caller, session) = roam::initiator_conduit(roam::BareConduit::new(link), handshake)
+        .establish::<roam::DriverCaller>(())
+        .await
+        .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
 
     // Open a virtual connection for DAW services
     let conn = session
@@ -1006,8 +1037,16 @@ impl DawInstanceConfig {
 
     /// Create a config for a specific FTS app bundle (e.g., "FTS-VOCALS", "FTS-GUITAR").
     ///
-    /// Resolves the executable and resources paths from the FTS home directory.
+    /// On macOS, resolves `.app` bundle paths from the FTS home directory.
+    /// On Linux, converts the app name to a rig ID (e.g., "FTS-TESTING" → "fts-daw-test")
+    /// and delegates to [`Self::for_rig`].
     pub fn for_app(label: &str, app_name: &str) -> Self {
+        if cfg!(target_os = "linux") {
+            // Convert app name to rig ID convention: "FTS-TESTING" → "fts-daw-test"
+            let rig_id = format!("fts-{}", app_name.trim_start_matches("FTS-").to_lowercase());
+            return Self::for_rig(label, &rig_id);
+        }
+
         let fts = fts_home();
         let app_path = format!("{fts}/Reaper/{app_name}.app");
         Self {
@@ -1050,8 +1089,7 @@ impl DawInstanceConfig {
     /// This avoids PID-based socket paths which can fail when REAPER forks
     /// internally (the child PID differs from the spawned PID).
     pub fn with_socket(mut self, path: &str) -> Self {
-        self.env
-            .push(("FTS_SOCKET".to_string(), path.to_string()));
+        self.env.push(("FTS_SOCKET".to_string(), path.to_string()));
         self
     }
 }
@@ -1170,8 +1208,18 @@ impl MultiDawTestContext {
         let proj_b = b.daw.current_project().await?;
         let state_a = proj_a.transport().get_state().await?;
         let state_b = proj_b.transport().get_state().await?;
-        let pos_a = state_a.playhead_position.time.as_ref().map(|t| t.as_seconds()).unwrap_or(0.0);
-        let pos_b = state_b.playhead_position.time.as_ref().map(|t| t.as_seconds()).unwrap_or(0.0);
+        let pos_a = state_a
+            .playhead_position
+            .time
+            .as_ref()
+            .map(|t| t.as_seconds())
+            .unwrap_or(0.0);
+        let pos_b = state_b
+            .playhead_position
+            .time
+            .as_ref()
+            .map(|t| t.as_seconds())
+            .unwrap_or(0.0);
         let drift = (pos_a - pos_b).abs();
         assert!(
             drift < tolerance_secs,
@@ -1181,14 +1229,117 @@ impl MultiDawTestContext {
         Ok((pos_a, pos_b, drift))
     }
 
+    /// Assert that ALL instance pairs have positions within `tolerance_secs`.
+    ///
+    /// Reads all positions concurrently (parallel RPC) to minimize measurement
+    /// jitter, then checks all unique pairs.
+    /// Returns a vec of `(label_a, label_b, pos_a, pos_b, drift)` and the max drift.
+    pub async fn assert_all_positions_close(
+        &self,
+        tolerance_secs: f64,
+        context: &str,
+    ) -> Result<(Vec<(String, String, f64, f64, f64)>, f64)> {
+        // Read all positions concurrently to eliminate sequential read jitter.
+        // Each read is an independent RPC call, so they can run in parallel.
+        let mut handles = Vec::with_capacity(self.instances.len());
+        for inst in &self.instances {
+            let label = inst.label.clone();
+            let daw = inst.daw.clone();
+            handles.push(tokio::spawn(async move {
+                let proj = daw.current_project().await?;
+                let state = proj.transport().get_state().await?;
+                let pos = state.playhead_position.time.as_ref().map(|t| t.as_seconds()).unwrap_or(0.0);
+                Ok::<_, eyre::Report>((label, pos))
+            }));
+        }
+        let mut positions = Vec::with_capacity(handles.len());
+        for handle in handles {
+            positions.push(handle.await.map_err(|e| eyre::eyre!("join error: {e}"))??);
+        }
+
+        let mut results = Vec::new();
+        let mut max_drift: f64 = 0.0;
+
+        // Check all unique pairs
+        for i in 0..positions.len() {
+            for j in (i + 1)..positions.len() {
+                let drift = (positions[i].1 - positions[j].1).abs();
+                max_drift = max_drift.max(drift);
+                assert!(
+                    drift < tolerance_secs,
+                    "{context}: position drift {drift:.4}s exceeds {tolerance_secs}s \
+                     ({}={:.4}s, {}={:.4}s)",
+                    positions[i].0, positions[i].1, positions[j].0, positions[j].1,
+                );
+                results.push((
+                    positions[i].0.clone(),
+                    positions[j].0.clone(),
+                    positions[i].1,
+                    positions[j].1,
+                    drift,
+                ));
+            }
+        }
+
+        Ok((results, max_drift))
+    }
+
     /// Connect all instances via sync extension peer mesh.
     ///
-    /// Waits for each instance's sync extension to be ready, reads their peer IDs
-    /// and mesh ports, then triggers direct TCP connections between all of them.
-    /// Finally waits for each instance to see the expected number of peers.
+    /// Wait for sync peers to discover each other via mDNS.
+    ///
+    /// Waits for each instance's sync extension to be ready, then waits for
+    /// mDNS-based peer discovery to connect all instances automatically.
+    /// No manual connection strings are written — peers find each other
+    /// through Avahi/mDNS service advertisement and discovery.
     ///
     /// `ext_section` is typically `"FTS_SYNC_EXT"`.
     pub async fn connect_sync_peers(&self, ext_section: &str) -> Result<()> {
+        // Wait for all extensions to report ready
+        for inst in &self.instances {
+            inst.poll_ext_state(ext_section, "status", "ready", 30, 1000)
+                .await?;
+            println!("  [{}] sync extension ready", inst.label);
+        }
+
+        // Read peer IDs for logging
+        for inst in &self.instances {
+            let peer_id = inst
+                .poll_ext_state_value(ext_section, "peer_id", 10, 500)
+                .await?;
+            let port = inst
+                .poll_ext_state_value(ext_section, "mesh_port", 10, 500)
+                .await?;
+            println!(
+                "  [{}] peer_id={peer_id}, mesh_port={port}",
+                inst.label
+            );
+        }
+
+        println!("  Waiting for mDNS peer discovery...");
+
+        // Wait for all instances to see expected peer count via mDNS
+        let expected_peers = (self.instances.len() - 1).to_string();
+        for inst in &self.instances {
+            inst.poll_ext_state(ext_section, "peer_count", &expected_peers, 30, 1000)
+                .await?;
+            println!(
+                "  [{}] connected to {} peer(s) via mDNS",
+                inst.label, expected_peers
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Connect sync peers via direct TCP (bypasses mDNS).
+    ///
+    /// Reads peer IDs and mesh ports from each instance, then writes
+    /// a `connect_peers` ExtState entry to trigger direct TCP connections.
+    /// Use this when mDNS is disabled (`FTS_SYNC_NO_MDNS=1`).
+    ///
+    /// `ext_section` is typically `"FTS_SYNC_EXT"`.
+    pub async fn connect_sync_peers_direct(&self, ext_section: &str) -> Result<()> {
         // Wait for all extensions to report ready
         for inst in &self.instances {
             inst.poll_ext_state(ext_section, "status", "ready", 30, 1000)
@@ -1205,10 +1356,7 @@ impl MultiDawTestContext {
             let peer_id = inst
                 .poll_ext_state_value(ext_section, "peer_id", 10, 500)
                 .await?;
-            println!(
-                "  [{}] peer_id={peer_id}, mesh_port={port}",
-                inst.label
-            );
+            println!("  [{}] peer_id={peer_id}, mesh_port={port}", inst.label);
             peers.push((inst.label.clone(), peer_id, port));
         }
 
@@ -1232,10 +1380,7 @@ impl MultiDawTestContext {
         for inst in &self.instances {
             inst.poll_ext_state(ext_section, "peer_count", &expected_peers, 30, 1000)
                 .await?;
-            println!(
-                "  [{}] connected to {} peer(s)",
-                inst.label, expected_peers
-            );
+            println!("  [{}] connected to {} peer(s)", inst.label, expected_peers);
         }
 
         Ok(())
