@@ -493,6 +493,7 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         timeout_secs,
         keep_open,
         ci,
+        extension_whitelist: vec![],
     };
 
     // ── Rig config ─────────────────────────────────────────────────────────

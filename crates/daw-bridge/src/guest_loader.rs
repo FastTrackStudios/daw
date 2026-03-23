@@ -45,14 +45,38 @@ fn read_ignore_list(extensions_dir: &PathBuf) -> HashSet<String> {
         .collect();
 
     if !names.is_empty() {
-        info!(
-            "Loaded .fts-ignore ({} entries): {:?}",
-            names.len(),
-            names
-        );
+        info!("Loaded .fts-ignore ({} entries): {:?}", names.len(), names);
     }
 
     names
+}
+
+/// Read the `FTS_EXTENSION_WHITELIST` env var.
+///
+/// If set, only extensions whose filenames appear in the comma-separated list
+/// will be loaded. All others are skipped. This is useful for testing, where
+/// you want to launch REAPER with only a specific extension (e.g. just
+/// `session-extension` without `signal-extension`).
+///
+/// Example: `FTS_EXTENSION_WHITELIST=session-extension,daw-guest-example`
+fn read_whitelist() -> Option<HashSet<String>> {
+    let val = std::env::var("FTS_EXTENSION_WHITELIST").ok()?;
+    let names: HashSet<String> = val
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if !names.is_empty() {
+        info!(
+            "FTS_EXTENSION_WHITELIST active ({} entries): {:?}",
+            names.len(),
+            names
+        );
+        Some(names)
+    } else {
+        None
+    }
 }
 
 /// Tracked guest processes, keyed by filename.
@@ -61,6 +85,8 @@ struct GuestRegistry {
     bootstrap_sock: String,
     extensions_dir: PathBuf,
     ignore_list: HashSet<String>,
+    /// If set, only these extensions are loaded (overrides ignore list).
+    whitelist: Option<HashSet<String>>,
     /// Maps resolved symlink target path → guest name in fts-extensions/.
     /// Used to map inotify events on target files back to the guest name.
     symlink_targets: HashMap<PathBuf, String>,
@@ -77,20 +103,29 @@ const MAX_AUTO_RESTARTS: u32 = 3;
 impl GuestRegistry {
     fn new(bootstrap_sock: String, extensions_dir: PathBuf) -> Self {
         let ignore_list = read_ignore_list(&extensions_dir);
+        let whitelist = read_whitelist();
         Self {
             children: HashMap::new(),
             bootstrap_sock,
             extensions_dir,
             ignore_list,
+            whitelist,
             symlink_targets: HashMap::new(),
             symlink_target_dirs: HashMap::new(),
             restart_count: HashMap::new(),
         }
     }
 
-    /// Check if a guest name is blacklisted via `.fts-ignore`.
+    /// Check if a guest should be skipped.
+    ///
+    /// If a whitelist is active, only whitelisted extensions are loaded.
+    /// Otherwise, falls back to the `.fts-ignore` blacklist.
     fn is_ignored(&self, name: &str) -> bool {
-        self.ignore_list.contains(name)
+        if let Some(ref whitelist) = self.whitelist {
+            !whitelist.contains(name)
+        } else {
+            self.ignore_list.contains(name)
+        }
     }
 
     /// Reload the ignore list from disk (e.g. when `.fts-ignore` itself changes).
@@ -110,9 +145,11 @@ impl GuestRegistry {
         if let Some(parent) = path.parent() {
             if let Some(name) = self.symlink_target_dirs.get(parent) {
                 // Only match if the filename matches the target binary name
-                if let Some(target_path) = self.symlink_targets.iter().find_map(|(target, n)| {
-                    if n == name { Some(target) } else { None }
-                }) {
+                if let Some(target_path) = self
+                    .symlink_targets
+                    .iter()
+                    .find_map(|(target, n)| if n == name { Some(target) } else { None })
+                {
                     if path.file_name() == target_path.file_name() {
                         return Some(name.clone());
                     }
@@ -204,10 +241,7 @@ impl GuestRegistry {
             .iter_mut()
             .filter_map(|(name, child)| match child.try_wait() {
                 Ok(Some(status)) => {
-                    info!(
-                        "Guest '{}' exited ({})",
-                        name, status
-                    );
+                    info!("Guest '{}' exited ({})", name, status);
                     Some(name.clone())
                 }
                 Ok(None) => None, // still running
@@ -230,7 +264,10 @@ impl GuestRegistry {
                 );
                 continue;
             }
-            info!("Auto-restarting guest '{}' (attempt {}/{})", name, count, MAX_AUTO_RESTARTS);
+            info!(
+                "Auto-restarting guest '{}' (attempt {}/{})",
+                name, count, MAX_AUTO_RESTARTS
+            );
             self.launch(&name);
         }
     }
@@ -306,10 +343,7 @@ impl GuestRegistry {
                     }
                 }
                 Err(e) => {
-                    warn!(
-                        "Failed to resolve symlink for '{}': {}",
-                        name, e
-                    );
+                    warn!("Failed to resolve symlink for '{}': {}", name, e);
                 }
             }
         }
@@ -398,10 +432,7 @@ pub fn launch_guests(bootstrap_sock: &str) {
             for path in &event.paths {
                 // Check if this is a symlink target change (directory or file)
                 if let Some(guest_name) = reg.resolve_target_to_name(path) {
-                    if matches!(
-                        event.kind,
-                        EventKind::Create(_) | EventKind::Modify(_)
-                    ) {
+                    if matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
                         info!(
                             "Detected symlink target change for '{}' ({}) — hot-reloading",
                             guest_name,

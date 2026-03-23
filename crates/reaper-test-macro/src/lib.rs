@@ -180,7 +180,9 @@ pub fn reaper_test(attr: TokenStream, item: TokenStream) -> TokenStream {
     if let Some(labels) = instance_labels {
         // Multi-instance test
         // Each instance gets:
+        // - DISPLAY="": suppresses GUI windows (REAPER/SWELL works headless on Linux)
         // - FTS_SYNC_NO_MDNS: prevents mDNS cross-talk with other REAPER instances
+        // - FTS_SYNC_NO_LINK: prevents Link cross-talk on shared loopback
         // - -cfgfile: uses FTS config dir (has audiodriver=2 for headless playback)
         let label_tokens: Vec<_> = labels
             .iter()
@@ -188,9 +190,8 @@ pub fn reaper_test(attr: TokenStream, item: TokenStream) -> TokenStream {
                 let socket = format!("/tmp/fts-daw-test-{l}.sock");
                 quote! {
                     reaper_test::DawInstanceConfig::new(#l)
-                        .with_env("FTS_SYNC_NO_MDNS", "1")
+                        .with_env("DISPLAY", "")
                         .with_env("FTS_SYNC_NO_LINK", "1")
-                        .with_env("FTS_SYNC_ALL_DOMAINS", "1")
                         .with_fts_config()
                         .with_socket(#socket)
                 }

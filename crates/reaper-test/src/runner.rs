@@ -23,6 +23,9 @@ pub struct TestRunner {
     pub keep_open: bool,
     /// Running under CI (GitHub Actions) — enables `::group::` log sections.
     pub ci: bool,
+    /// If set, only these guest extensions will be loaded by daw-bridge.
+    /// Passed to REAPER as `FTS_EXTENSION_WHITELIST` env var.
+    pub extension_whitelist: Vec<String>,
 }
 
 /// A test package to run inside the spawned REAPER session.
@@ -237,6 +240,12 @@ impl TestRunner {
             "  timeout:     {}s (REAPER_TEST_TIMEOUT_SECS)",
             self.timeout_secs
         );
+        if !self.extension_whitelist.is_empty() {
+            println!(
+                "  whitelist:   {}",
+                self.extension_whitelist.join(",")
+            );
+        }
         println!("  logs:");
         println!("    REAPER process → {}", reaper_log.display());
         println!("    extension      → {}", self.extension_log.display());
@@ -256,12 +265,34 @@ impl TestRunner {
             effective_exe = reaper_exe.clone();
         }
 
+        // Whitelist env var — applied to whichever command we build
+        let whitelist_val = if self.extension_whitelist.is_empty() {
+            None
+        } else {
+            Some(self.extension_whitelist.join(","))
+        };
+
+        // Helper: apply common env vars to any REAPER command.
+        // - DISPLAY="" makes the batch REAPER headless (no visible window)
+        // - FTS_SYNC_NO_MDNS=1 prevents mDNS advertisement that would interfere
+        //   with multi-instance tests which manage their own mDNS discovery
+        // - FTS_SYNC_NO_LINK=1 prevents Ableton Link cross-talk
+        let apply_env = |cmd: &mut Command| {
+            cmd.env("DISPLAY", "");
+            cmd.env("FTS_SYNC_NO_MDNS", "1");
+            cmd.env("FTS_SYNC_NO_LINK", "1");
+            if let Some(ref wl) = whitelist_val {
+                cmd.env("FTS_EXTENSION_WHITELIST", wl);
+            }
+        };
+
         let reaper_child = if needs_fhs {
             if let Some(ref fts) = fts_test {
                 let mut cmd = Command::new(fts);
                 cmd.arg(&effective_exe);
                 cmd.args(&extra_prefix_args);
                 cmd.args(&reaper_args);
+                apply_env(&mut cmd);
                 cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
                 println!(
                     "  spawning: {fts} {effective_exe} {} {}",
@@ -274,6 +305,7 @@ impl TestRunner {
                 let mut cmd = Command::new(&effective_exe);
                 cmd.args(&extra_prefix_args);
                 cmd.args(&reaper_args);
+                apply_env(&mut cmd);
                 cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
                 println!(
                     "  spawning: {effective_exe} {} {} (no fhs wrapper)",
@@ -287,6 +319,7 @@ impl TestRunner {
             let mut cmd = Command::new(&effective_exe);
             cmd.args(&extra_prefix_args);
             cmd.args(&reaper_args);
+            apply_env(&mut cmd);
             cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
             println!(
                 "  spawning: {effective_exe} {} {}",
