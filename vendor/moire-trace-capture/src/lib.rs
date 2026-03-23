@@ -126,9 +126,13 @@ static FRAME_POINTER_VALIDATION_ONCE: Once = Once::new();
 pub fn validate_frame_pointers_or_panic() {
     FRAME_POINTER_VALIDATION_ONCE.call_once(|| {
         if let Err(reason) = platform::validate_frame_pointers_impl() {
-            panic!(
-                "frame-pointer validation failed: {reason}. \
-recompile with -C force-frame-pointers=yes"
+            // On NixOS, glibc is built without -fno-omit-frame-pointer so the
+            // frame-pointer chain breaks after only a few frames. Log instead
+            // of panicking — trace capture will still work for frames that are
+            // compiled with force-frame-pointers=yes.
+            eprintln!(
+                "moire-trace-capture: frame-pointer validation failed: {reason}. \
+Trace capture may be incomplete."
             );
         }
     });

@@ -118,11 +118,21 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
-# moire-trace-capture: tolerate broken frame-pointer chains (NixOS glibc
-# is built without -fno-omit-frame-pointer). Upstream panics; our patch
-# breaks gracefully. Remove once bearcove/moire accepts a fix upstream.
+# moire: unify crates.io moire with the git rev that roam pulls in,
+# avoiding duplicate moire-runtime #[ctor] registrations that crash.
+# moire-trace-capture: tolerate broken frame-pointer chains (NixOS glibc).
+[patch."https://github.com/bearcove/moire"]
+moire-trace-capture = { path = "../forks/moire-trace-capture" }
+
 [patch.crates-io]
-moire-trace-capture = { path = "vendor/moire-trace-capture" }
+moire = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-macros-noop = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-runtime = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-tokio = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-trace-types = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-types = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-wasm = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire-wire = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
 
 [workspace.lints.rust]
 dead_code = "allow"
