@@ -48,13 +48,14 @@ async fn run() -> Result<()> {
     info!("[guest:{pid}] Connected to daw-bridge via SHM");
 
     // Register actions and subscribe to events
-    let reg = daw_extension_runtime::register_actions(&daw, &[
-        ActionDef {
+    let reg = daw_extension_runtime::register_actions(
+        &daw,
+        &[ActionDef {
             command_name: "FTS_GUEST_HELLO",
             description: "FTS: Guest Hello World",
             toggleable: false,
-        },
-    ])
+        }],
+    )
     .await?;
 
     let mut rx = reg.rx;

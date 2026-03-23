@@ -25,7 +25,12 @@ impl ActionRegistry {
         Ok(self
             .clients
             .action_registry
-            .register_action(command_name.to_string(), description.to_string(), false, false)
+            .register_action(
+                command_name.to_string(),
+                description.to_string(),
+                false,
+                false,
+            )
             .await?)
     }
 
@@ -42,7 +47,12 @@ impl ActionRegistry {
         Ok(self
             .clients
             .action_registry
-            .register_action(command_name.to_string(), description.to_string(), true, false)
+            .register_action(
+                command_name.to_string(),
+                description.to_string(),
+                true,
+                false,
+            )
             .await?)
     }
 
@@ -58,7 +68,12 @@ impl ActionRegistry {
         Ok(self
             .clients
             .action_registry
-            .register_action(command_name.to_string(), description.to_string(), false, true)
+            .register_action(
+                command_name.to_string(),
+                description.to_string(),
+                false,
+                true,
+            )
             .await?)
     }
 
@@ -71,7 +86,12 @@ impl ActionRegistry {
         Ok(self
             .clients
             .action_registry
-            .register_action(command_name.to_string(), description.to_string(), true, true)
+            .register_action(
+                command_name.to_string(),
+                description.to_string(),
+                true,
+                true,
+            )
             .await?)
     }
 
@@ -151,11 +171,7 @@ impl ActionRegistry {
     ///
     /// REAPER will show the action as "on" (checked) or "off" in the action list
     /// and toolbar buttons. Has no effect for non-toggleable actions.
-    pub async fn set_toggle_state(
-        &self,
-        command_name: &str,
-        is_on: bool,
-    ) -> crate::Result<()> {
+    pub async fn set_toggle_state(&self, command_name: &str, is_on: bool) -> crate::Result<()> {
         self.clients
             .action_registry
             .set_toggle_state(command_name.to_string(), is_on)

@@ -76,7 +76,12 @@ impl RoutedHandler {
 }
 
 impl Handler<DriverReplySink> for RoutedHandler {
-    async fn handle(&self, call: SelfRef<roam::RequestCall<'static>>, reply: DriverReplySink, schemas: Arc<SchemaRecvTracker>) {
+    async fn handle(
+        &self,
+        call: SelfRef<roam::RequestCall<'static>>,
+        reply: DriverReplySink,
+        schemas: Arc<SchemaRecvTracker>,
+    ) {
         let method_id = call.method_id;
         if let Some(&idx) = self.method_map.get(&method_id) {
             self.handlers[idx].handle(call, reply, schemas).await;

@@ -42,7 +42,12 @@ impl std::fmt::Display for InstallError {
             Self::CreateDir(p, e) => write!(f, "failed to create {}: {e}", p.display()),
             Self::Remove(p, e) => write!(f, "failed to remove {}: {e}", p.display()),
             Self::Link(src, dst, e) => {
-                write!(f, "failed to link {} -> {}: {e}", dst.display(), src.display())
+                write!(
+                    f,
+                    "failed to link {} -> {}: {e}",
+                    dst.display(),
+                    src.display()
+                )
             }
         }
     }
@@ -165,7 +170,11 @@ pub fn install_extension(binary_path: &Path, name: &str) -> Result<(), InstallEr
 
         let dest = ext_dir.join(name);
         force_link(&binary_path, &dest)?;
-        println!("  installed: {} -> {}", dest.display(), binary_path.display());
+        println!(
+            "  installed: {} -> {}",
+            dest.display(),
+            binary_path.display()
+        );
     }
 
     Ok(())
@@ -205,7 +214,10 @@ pub fn status() {
                     if path.is_file() || path.is_symlink() {
                         if let Some(name) = path.file_name() {
                             let name = name.to_string_lossy();
-                            if name.contains("reaper_") || name.ends_with(".so") || name.ends_with(".dylib") {
+                            if name.contains("reaper_")
+                                || name.ends_with(".so")
+                                || name.ends_with(".dylib")
+                            {
                                 print_link_status(&path);
                             }
                         }

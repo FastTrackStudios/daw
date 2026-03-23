@@ -176,13 +176,13 @@ async fn shm_guest_register_action(_ctx: &ReaperTestContext) -> eyre::Result<()>
 
     // Register an action via the SHM connection
     let cmd_id = actions
-        .register(
-            "FTS_TEST_SHM_REGISTER",
-            "FTS Test: SHM Action Registration",
-        )
+        .register("FTS_TEST_SHM_REGISTER", "FTS Test: SHM Action Registration")
         .await?;
     println!("Registered action: cmd_id={cmd_id}");
-    assert!(cmd_id > 0, "register via SHM should return a valid command ID");
+    assert!(
+        cmd_id > 0,
+        "register via SHM should return a valid command ID"
+    );
 
     // Verify it has a command ID
     let exists = actions.is_registered("FTS_TEST_SHM_REGISTER").await?;
@@ -196,9 +196,7 @@ async fn shm_guest_register_action(_ctx: &ReaperTestContext) -> eyre::Result<()>
     );
 
     // Look up command ID
-    let looked_up = actions
-        .lookup_command_id("FTS_TEST_SHM_REGISTER")
-        .await?;
+    let looked_up = actions.lookup_command_id("FTS_TEST_SHM_REGISTER").await?;
     assert_eq!(
         looked_up,
         Some(cmd_id),
@@ -220,10 +218,7 @@ async fn shm_guest_action_subscribe_and_trigger(_ctx: &ReaperTestContext) -> eyr
 
     // Register
     let cmd_id = actions
-        .register(
-            "FTS_TEST_SHM_TRIGGER",
-            "FTS Test: SHM Action Trigger",
-        )
+        .register("FTS_TEST_SHM_TRIGGER", "FTS Test: SHM Action Trigger")
         .await?;
     assert!(cmd_id > 0, "register should succeed");
     println!("Registered FTS_TEST_SHM_TRIGGER → cmd_id={cmd_id}");
@@ -234,9 +229,7 @@ async fn shm_guest_action_subscribe_and_trigger(_ctx: &ReaperTestContext) -> eyr
 
     // Execute the action — this should trigger the callback on the host,
     // which broadcasts to our subscriber
-    let executed = actions
-        .execute_named_action("FTS_TEST_SHM_TRIGGER")
-        .await?;
+    let executed = actions.execute_named_action("FTS_TEST_SHM_TRIGGER").await?;
     assert!(executed, "execute_named_action should return true");
     println!("Executed FTS_TEST_SHM_TRIGGER");
 
