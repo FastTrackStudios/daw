@@ -111,21 +111,21 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # ── Local development overrides ──────────────────────────────────────
 # Uncomment to use local checkouts instead of GitHub.
 
-[patch."https://github.com/FastTrackStudios/input_actions.git"]
-actions-proto = { path = "../input_actions/crates/actions-proto" }
+# [patch."https://github.com/FastTrackStudios/input_actions.git"]
+# actions-proto = { path = "../input_actions/crates/actions-proto" }
 
-[patch."https://github.com/FastTrackStudios/keyflow.git"]
-keyflow = { path = "../keyflow/crates/keyflow" }
+# [patch."https://github.com/FastTrackStudios/keyflow.git"]
+# keyflow = { path = "../keyflow/crates/keyflow" }
 
 # [patch."https://github.com/FastTrackStudios/dock-dioxus.git"]
 # dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
 # dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
 # ── Patch remote daw.git refs from transitive deps (e.g. keyflow) ────
-[patch."https://github.com/FastTrackStudios/daw.git"]
-daw-proto = { path = "crates/daw-proto" }
-daw-control = { path = "crates/daw-control" }
-dawfile-reaper = { path = "crates/dawfile-reaper" }
+# [patch."https://github.com/FastTrackStudios/daw.git"]
+# daw-proto = { path = "crates/daw-proto" }
+# daw-control = { path = "crates/daw-control" }
+# dawfile-reaper = { path = "crates/dawfile-reaper" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
 # moire: unify crates.io moire with the git rev that vox pulls in,
