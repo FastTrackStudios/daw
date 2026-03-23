@@ -19,7 +19,7 @@ use daw_proto::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
     FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNode, FxNodeId,
     FxParamModulation, FxParameter, FxPinMappings, FxPresetIndex, FxRef, FxRoutingMode, FxService,
-    FxStateChunk, FxTarget, FxTree, FxType, InstalledFx, MoveFromContainerRequest,
+    FxStateChunk, FxTarget, FxTree, FxType, InstalledFx, LastTouchedFx, MoveFromContainerRequest,
     MoveToContainerRequest, ProjectContext, SetContainerChannelConfigRequest,
     SetNamedConfigRequest, SetParameterByNameRequest, SetParameterRequest,
 };
@@ -1450,6 +1450,48 @@ impl FxService for ReaperFx {
         })
         .await
         .unwrap_or_default()
+    }
+
+    async fn get_last_touched_fx(&self) -> Option<LastTouchedFx> {
+        debug!("ReaperFx::get_last_touched_fx()");
+
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let result = reaper.medium_reaper().get_last_touched_fx()?;
+
+            use reaper_medium::GetLastTouchedFxResult::*;
+            match result {
+                TrackFx {
+                    track_location,
+                    fx_location,
+                    param_index,
+                } => {
+                    let project = reaper.current_project();
+                    let track = match track_location {
+                        reaper_medium::TrackLocation::MasterTrack => project.master_track().ok()?,
+                        reaper_medium::TrackLocation::NormalTrack(idx) => {
+                            project.track_by_index(idx)?
+                        }
+                    };
+                    let track_guid = track.guid().to_string_without_braces();
+                    let (fx_index, is_input_fx) = match fx_location {
+                        TrackFxLocation::NormalFxChain(idx) => (idx, false),
+                        TrackFxLocation::InputFxChain(idx) => (idx, true),
+                        _ => return None,
+                    };
+                    Some(LastTouchedFx {
+                        track_guid,
+                        fx_index,
+                        param_index,
+                        is_input_fx,
+                    })
+                }
+                // Take FX not supported yet
+                _ => None,
+            }
+        })
+        .await
+        .flatten()
     }
 
     // =========================================================================

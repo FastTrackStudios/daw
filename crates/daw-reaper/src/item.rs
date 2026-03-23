@@ -1024,7 +1024,9 @@ impl ItemService for ReaperItem {
 
             if let Some(item_ptr) = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)
             {
-                let color_value = color.map(|c| c as i32).unwrap_or(0);
+                // Bit 24 (0x01000000) tells REAPER to use the custom color.
+                // Without it, the item inherits its track's color.
+                let color_value = color.map(|c| (c as i32) | 0x01000000).unwrap_or(0);
                 item_sw::set_item_info_value(
                     medium,
                     item_ptr,

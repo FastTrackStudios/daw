@@ -466,6 +466,22 @@ pub struct FxPinMappings {
 // State Chunk Types
 // =============================================================================
 
+/// Information about the last touched FX parameter.
+///
+/// Returned by `FxService::get_last_touched_fx` — identifies which FX parameter
+/// was most recently adjusted by the user in the DAW UI.
+#[derive(Clone, Debug, Facet)]
+pub struct LastTouchedFx {
+    /// GUID of the track containing the FX.
+    pub track_guid: String,
+    /// Index of the FX in the chain (0-based).
+    pub fx_index: u32,
+    /// Index of the parameter that was touched (0-based).
+    pub param_index: u32,
+    /// Whether the FX is in the input/recording FX chain (vs normal output chain).
+    pub is_input_fx: bool,
+}
+
 /// Captured binary state of a single FX plugin.
 ///
 /// Stores the FX GUID for matching on restore and the base64-encoded

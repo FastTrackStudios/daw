@@ -16,7 +16,7 @@ use super::{
     AddFxAtRequest, CreateContainerRequest, EncloseInContainerRequest, Fx, FxChainContext,
     FxChannelConfig, FxContainerChannelConfig, FxEvent, FxLatency, FxNodeId, FxParamModulation,
     FxParameter, FxPinMappings, FxPresetIndex, FxRoutingMode, FxStateChunk, FxTarget, FxTree,
-    InstalledFx, MoveFromContainerRequest, MoveToContainerRequest,
+    InstalledFx, LastTouchedFx, MoveFromContainerRequest, MoveToContainerRequest,
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
@@ -40,6 +40,13 @@ pub trait FxService {
     /// with its display name and full identifier string. No project context
     /// is needed — installed plugins are global.
     async fn list_installed_fx(&self) -> Vec<InstalledFx>;
+
+    /// Get the last touched FX parameter.
+    ///
+    /// Returns information about which FX parameter was most recently
+    /// adjusted by the user in the DAW UI. Returns `None` if no FX
+    /// parameter has been touched yet or the FX no longer exists.
+    async fn get_last_touched_fx(&self) -> Option<LastTouchedFx>;
 
     // =========================================================================
     // Chain Queries

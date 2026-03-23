@@ -67,7 +67,23 @@ struct ShmHostState {
     segment: Arc<Segment>,
     hub: HostHub,
     shm_path: PathBuf,
+    bootstrap_socket_path: PathBuf,
     _tempdir: tempfile::TempDir,
+}
+
+impl Drop for ShmHostState {
+    fn drop(&mut self) {
+        // Clean up the bootstrap socket (tempdir handles the SHM segment)
+        if let Err(e) = std::fs::remove_file(&self.bootstrap_socket_path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                warn!(
+                    "Failed to remove bootstrap socket {}: {}",
+                    self.bootstrap_socket_path.display(),
+                    e
+                );
+            }
+        }
+    }
 }
 
 /// Start the SHM bootstrap listener.
@@ -113,14 +129,15 @@ pub fn start_shm_host(handler: DawConnectionAcceptor) -> Option<String> {
 
     let hub = HostHub::new(Arc::clone(&segment));
 
+    let bootstrap_path = bootstrap_socket_path();
+
     let state = Arc::new(ShmHostState {
         segment,
         hub,
         shm_path,
+        bootstrap_socket_path: bootstrap_path.clone(),
         _tempdir: tempdir,
     });
-
-    let bootstrap_path = bootstrap_socket_path();
 
     // Remove stale socket from a previous run
     let _ = std::fs::remove_file(&bootstrap_path);

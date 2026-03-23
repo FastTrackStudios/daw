@@ -488,6 +488,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Initialize (register DAW dispatcher + socket server)
     app.initialize()?;
 
+    // Eagerly load FTS CLAP plugins that export ReaperPluginEntry.
+    // Scans UserPlugins/FX/FTS/ — gives FTS plugins direct REAPER API access.
+    daw::reaper::eager_load_fx_plugins();
+
     // Store app globally
     APP_INSTANCE
         .set(Fragile::new(app))

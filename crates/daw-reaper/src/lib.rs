@@ -30,6 +30,7 @@
 //! );
 //! ```
 
+pub mod bootstrap;
 pub mod safe_wrappers;
 
 pub mod action_registry;
@@ -76,7 +77,7 @@ pub use marker::ReaperMarker;
 pub use midi::ReaperMidi;
 pub use midi_analysis::ReaperMidiAnalysis;
 pub use peak::ReaperPeak;
-pub use plugin_loader::{ReaperPluginLoader, set_plugin_context};
+pub use plugin_loader::{ReaperPluginLoader, eager_load_fx_plugins, set_plugin_context};
 pub use position_conversion::ReaperPositionConversion;
 pub use project::ReaperProject;
 pub use region::ReaperRegion;

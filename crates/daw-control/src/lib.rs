@@ -71,6 +71,7 @@ pub use daw_proto::{
     FxTree,
     FxType,
     InstalledFx,
+    LastTouchedFx,
     // Marker types
     Marker,
     MarkerError,
@@ -543,6 +544,14 @@ impl Daw {
     /// with its display name and full identifier string.
     pub async fn installed_plugins(&self) -> crate::Result<Vec<InstalledFx>> {
         Ok(self.clients.fx.list_installed_fx().await?)
+    }
+
+    /// Get the last touched FX parameter.
+    ///
+    /// Returns information about which FX parameter was most recently
+    /// adjusted by the user in the DAW UI.
+    pub async fn last_touched_fx(&self) -> crate::Result<Option<LastTouchedFx>> {
+        Ok(self.clients.fx.get_last_touched_fx().await?)
     }
 
     /// Lightweight health check — pings the DAW and returns `true` if reachable.

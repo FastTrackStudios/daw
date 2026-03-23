@@ -412,6 +412,15 @@ impl ItemHandle {
         Ok(())
     }
 
+    /// Set item color (None to use default)
+    pub async fn set_color(&self, color: Option<u32>) -> Result<()> {
+        self.clients
+            .item
+            .set_color(self.context(), self.item_ref(), color)
+            .await?;
+        Ok(())
+    }
+
     /// Select the item
     pub async fn select(&self) -> Result<()> {
         self.clients

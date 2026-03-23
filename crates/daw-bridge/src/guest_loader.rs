@@ -23,9 +23,6 @@ use notify::{EventKind, RecursiveMode, Watcher};
 use reaper_high::Reaper;
 use tracing::{info, warn};
 
-#[cfg(target_os = "linux")]
-use std::os::unix::process::CommandExt;
-
 /// Read the `.fts-ignore` file from the extensions directory.
 ///
 /// Each non-empty, non-comment line is treated as an exact filename to skip.
@@ -191,18 +188,10 @@ impl GuestRegistry {
         let mut cmd = Command::new(&path);
         cmd.env("FTS_SHM_BOOTSTRAP_SOCK", &self.bootstrap_sock);
 
-        // On Linux, ask the kernel to send SIGTERM to the child when the parent
-        // (REAPER) dies. This prevents orphaned extension processes when REAPER
-        // is killed or crashes without running cleanup.
-        #[cfg(target_os = "linux")]
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
-                Ok(())
-            });
-        }
-
-        match cmd.spawn() {
+        // Ensure the child process dies when REAPER (parent) exits, even if
+        // REAPER is killed with SIGKILL. Cross-platform: uses prctl on Linux,
+        // death-pipe on macOS, job objects on Windows.
+        match ur_taking_me_with_you::spawn_dying_with_parent(cmd) {
             Ok(child) => {
                 info!("Guest '{}' spawned (pid {})", name, child.id());
                 self.children.insert(name.to_string(), child);

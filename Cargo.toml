@@ -59,6 +59,7 @@ vox-stream = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
 vox-shm = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
 shm-primitives = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
 shm-primitives-async = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+ur-taking-me-with-you = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
 
 # CLI
 clap = { version = "4", features = ["derive"] }

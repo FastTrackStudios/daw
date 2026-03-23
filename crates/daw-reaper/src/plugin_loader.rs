@@ -86,6 +86,116 @@ impl Default for ReaperPluginLoader {
     }
 }
 
+/// Scan `UserPlugins/FX/` for `.clap` files that export `ReaperPluginEntry`
+/// and eagerly load them. This gives FTS CLAP plugins direct REAPER API access
+/// (timers, track queries, etc.) without each extension having to load them manually.
+///
+/// Plugins that don't export the symbol are silently skipped — this is expected
+/// for third-party CLAP plugins.
+///
+/// Must be called after [`set_plugin_context`] and after REAPER's high-level API
+/// is initialized.
+pub fn eager_load_fx_plugins() {
+    let ctx = match PLUGIN_CONTEXT.get() {
+        Some(ctx) => ctx,
+        None => {
+            warn!("eager_load_fx_plugins: plugin context not set, skipping");
+            return;
+        }
+    };
+
+    let reaper = reaper_high::Reaper::get();
+    let resource_path = reaper
+        .medium_reaper()
+        .get_resource_path(|p| p.to_path_buf());
+    let fx_dir = resource_path
+        .into_std_path_buf()
+        .join("UserPlugins")
+        .join("FX")
+        .join("FTS");
+
+    if !fx_dir.exists() {
+        if let Err(e) = std::fs::create_dir_all(&fx_dir) {
+            warn!("Failed to create UserPlugins/FX/FTS/: {e}");
+            return;
+        }
+        info!("Created UserPlugins/FX/FTS/ directory");
+    }
+
+    let entries = match std::fs::read_dir(&fx_dir) {
+        Ok(e) => e,
+        Err(e) => {
+            warn!("Failed to read UserPlugins/FX/: {e}");
+            return;
+        }
+    };
+
+    type EntryFn = unsafe extern "C" fn(
+        reaper_low::raw::HINSTANCE,
+        *mut reaper_low::raw::reaper_plugin_info_t,
+    ) -> std::os::raw::c_int;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        // Follow symlinks to get the real file
+        let real_path = match std::fs::canonicalize(&path) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        // Only process .clap files (on Linux these are .so files renamed to .clap,
+        // but our bundler may produce either — check extension of the symlink name)
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if ext != "clap" && ext != "so" && ext != "dylib" {
+            continue;
+        }
+
+        let path_str = real_path.to_string_lossy().to_string();
+
+        // Skip if already loaded
+        if let Ok(plugins) = loaded_plugins().lock() {
+            if plugins.iter().any(|p| p.path == path_str) {
+                continue;
+            }
+        }
+
+        // Try to dlopen and check for ReaperPluginEntry
+        let lib = match unsafe { libloading::Library::new(&real_path) } {
+            Ok(lib) => lib,
+            Err(_) => continue,
+        };
+
+        let entry_fn = match unsafe { lib.get::<EntryFn>(b"ReaperPluginEntry\0") } {
+            Ok(f) => f,
+            Err(_) => continue, // No symbol — third-party plugin, skip silently
+        };
+
+        let name = derive_plugin_name(&path_str);
+        info!("Eager-loading FX plugin: {name} ({path_str})");
+
+        let mut raw_info = ctx.raw_info;
+        let result = unsafe { entry_fn(ctx.h_instance, &mut raw_info as *mut _) };
+
+        if result == 0 {
+            warn!("Plugin {name}: ReaperPluginEntry returned 0 (init failed)");
+            // Don't keep the library — drop it
+            continue;
+        }
+
+        info!("Plugin eager-loaded successfully: {name}");
+
+        // Keep the library alive for the process lifetime
+        if let Ok(mut plugins) = loaded_plugins().lock() {
+            plugins.push(LoadedEntry {
+                path: path_str,
+                name,
+                library: lib,
+            });
+        }
+    }
+}
+
 impl PluginLoaderService for ReaperPluginLoader {
     async fn load_plugin(&self, plugin_path: String) -> PluginLoadResult {
         // Check if already loaded
