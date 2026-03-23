@@ -16,11 +16,11 @@ use reaper_medium::{
     AccelMsgKind, AcceleratorBehavior, AcceleratorPosition, TranslateAccel, TranslateAccelArgs,
     TranslateAccelResult,
 };
-use roam::Tx;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use tokio::sync::broadcast;
 use tracing::{debug, info};
+use vox::Tx;
 
 // =========================================================================
 // Shared state between service and TranslateAccel handler

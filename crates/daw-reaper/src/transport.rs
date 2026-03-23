@@ -42,11 +42,11 @@ use reaper_medium::{
     CommandId, PositionInSeconds, ProjectContext as ReaperProjectContext, ProjectRef,
     SetEditCurPosOptions, TimeRangeType, UndoBehavior,
 };
-use roam::Tx;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::broadcast;
 use tracing::{debug, info};
+use vox::Tx;
 
 use crate::main_thread;
 
@@ -848,7 +848,7 @@ impl TransportService for ReaperTransport {
         };
 
         // Spawn the streaming loop so this method returns immediately
-        // (roam needs the method to return so it can send the Response)
+        // (vox needs the method to return so it can send the Response)
         moire::task::spawn(async move {
             loop {
                 // Wait for the next state update from the broadcaster

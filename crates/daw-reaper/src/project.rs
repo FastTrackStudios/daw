@@ -6,9 +6,9 @@
 use daw_proto::{ProjectEvent, ProjectInfo, ProjectService};
 use reaper_high::{Project, Reaper};
 use reaper_medium::{CommandId, ProjectContext, ProjectPart, ProjectRef, UndoScope};
-use roam::Tx;
 use std::time::Duration;
 use tracing::{debug, info};
+use vox::Tx;
 
 use crate::main_thread;
 use crate::project_context::{find_project_by_guid, project_guid};
@@ -679,7 +679,7 @@ impl ProjectService for ReaperProject {
 
     async fn subscribe(&self, tx: Tx<ProjectEvent>) {
         // Spawn the streaming loop so this method returns immediately
-        // (roam needs the method to return so it can send the Response)
+        // (vox needs the method to return so it can send the Response)
         let this = self.clone();
         moire::task::spawn(async move {
             this.subscribe_impl(tx).await;

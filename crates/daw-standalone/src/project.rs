@@ -2,10 +2,10 @@
 
 use crate::transport::SharedProjectState;
 use daw_proto::{ProjectEvent, ProjectInfo, ProjectService};
-use roam::Tx;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info};
+use vox::Tx;
 
 /// Well-known project GUIDs for testing
 pub mod project_guids {
@@ -245,7 +245,7 @@ impl ProjectService for StandaloneProject {
             let this = self.clone();
 
             // Spawn the streaming loop so this method returns immediately
-            // (roam needs the method to return so it can send the Response)
+            // (vox needs the method to return so it can send the Response)
             moire::task::spawn(async move {
                 // Send initial state: all projects
                 let projects = this.projects.as_ref().clone();

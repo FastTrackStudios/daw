@@ -3,7 +3,7 @@
 //! Minimal service for connection liveness checks. Returns `true` immediately
 //! with no side effects — the cheapest possible RPC round-trip.
 
-use roam::service;
+use vox::service;
 
 /// Lightweight health-check service for connection liveness probing.
 #[service]

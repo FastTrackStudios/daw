@@ -5,7 +5,7 @@
 //! issues inside DAW callbacks.
 
 use facet::Facet;
-use roam::service;
+use vox::service;
 
 /// Target toolbar for button placement.
 #[repr(u8)]

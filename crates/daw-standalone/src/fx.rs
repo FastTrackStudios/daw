@@ -8,8 +8,8 @@ use daw_proto::{
     SetContainerChannelConfigRequest, SetNamedConfigRequest, SetParameterByNameRequest,
     SetParameterRequest,
 };
-use roam::Tx;
 use uuid::Uuid;
+use vox::Tx;
 
 /// Standalone FX service implementation.
 ///

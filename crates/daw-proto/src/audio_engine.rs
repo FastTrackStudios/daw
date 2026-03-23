@@ -4,7 +4,7 @@
 //! including latency information useful for synchronization.
 
 use facet::Facet;
-use roam::service;
+use vox::service;
 
 /// Audio latency information from the audio device
 ///

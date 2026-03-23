@@ -16,9 +16,9 @@ daw = { workspace = true, features = ["reaper"] }
 daw-allocator.workspace = true
 
 # ROAM service framework
-roam.workspace = true
-roam-stream.workspace = true
-roam-shm.workspace = true
+vox.workspace = true
+vox-stream.workspace = true
+vox-shm.workspace = true
 shm-primitives.workspace = true
 shm-primitives-async.workspace = true
 

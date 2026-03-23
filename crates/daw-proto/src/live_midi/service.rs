@@ -3,7 +3,7 @@
 use super::{
     LiveMidiEvent, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming, StuffMidiTarget,
 };
-use roam::service;
+use vox::service;
 
 /// Service for real-time MIDI input/output
 ///

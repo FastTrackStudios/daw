@@ -44,9 +44,9 @@ pub use local_caller::LocalCaller;
 
 use daw_control::Daw;
 use eyre::{Context, Result};
-use roam::ErasedCaller;
 use std::sync::Arc;
 use tracing::error;
+use vox::ErasedCaller;
 
 /// Thread-safe synchronous interface to the async DAW API.
 ///
@@ -117,15 +117,15 @@ impl DawSync {
                 "Failed to connect to DAW service at {}",
                 socket_path
             ))?;
-        let link = roam_stream::StreamLink::unix(stream);
-        let handshake = roam::HandshakeResult {
-            role: roam::SessionRole::Initiator,
-            our_settings: roam::ConnectionSettings {
-                parity: roam::Parity::Odd,
+        let link = vox_stream::StreamLink::unix(stream);
+        let handshake = vox::HandshakeResult {
+            role: vox::SessionRole::Initiator,
+            our_settings: vox::ConnectionSettings {
+                parity: vox::Parity::Odd,
                 max_concurrent_requests: 64,
             },
-            peer_settings: roam::ConnectionSettings {
-                parity: roam::Parity::Even,
+            peer_settings: vox::ConnectionSettings {
+                parity: vox::Parity::Even,
                 max_concurrent_requests: 64,
             },
             peer_supports_retry: true,
@@ -135,28 +135,28 @@ impl DawSync {
             peer_schema: vec![],
         };
         let (_root_caller, session) =
-            roam::initiator_conduit(roam::BareConduit::new(link), handshake)
-                .establish::<roam::DriverCaller>(())
+            vox::initiator_conduit(vox::BareConduit::new(link), handshake)
+                .establish::<vox::DriverCaller>(())
                 .await
-                .context("Failed to establish roam session")?;
+                .context("Failed to establish vox session")?;
 
         // Open a virtual connection for DAW services
         let conn = session
             .open_connection(
-                roam::ConnectionSettings {
-                    parity: roam::Parity::Odd,
+                vox::ConnectionSettings {
+                    parity: vox::Parity::Odd,
                     max_concurrent_requests: 64,
                 },
-                vec![roam::MetadataEntry {
+                vec![vox::MetadataEntry {
                     key: "role",
-                    value: roam::MetadataValue::String("sync-client"),
-                    flags: roam::MetadataFlags::NONE,
+                    value: vox::MetadataValue::String("sync-client"),
+                    flags: vox::MetadataFlags::NONE,
                 }],
             )
             .await
             .context("Failed to open DAW virtual connection")?;
 
-        let mut driver = roam::Driver::new(conn, ());
+        let mut driver = vox::Driver::new(conn, ());
         let caller = ErasedCaller::new(driver.caller());
         moire::task::spawn(async move { driver.run().await });
 

@@ -26,11 +26,11 @@ use daw_proto::{
 use dawfile_reaper::RppSerialize;
 use reaper_high::{FxChain, MAX_TRACK_CHUNK_SIZE, Reaper, Track};
 use reaper_medium::{ChunkCacheHint, FxPresetRef, TrackFxLocation, TransferBehavior};
-use roam::Tx;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
+use vox::Tx;
 
 use crate::main_thread;
 use crate::project_context::{find_project_by_guid, project_guid};

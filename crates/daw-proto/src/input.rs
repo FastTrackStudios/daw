@@ -17,7 +17,7 @@
 //! Windows VK codes) into `KeyCode` before streaming to extensions.
 
 use facet::Facet;
-use roam::{Tx, service};
+use vox::{Tx, service};
 
 // =========================================================================
 // Platform-agnostic key code

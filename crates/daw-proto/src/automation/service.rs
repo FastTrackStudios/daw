@@ -5,7 +5,7 @@ use crate::primitives::{AutomationMode, PositionInSeconds};
 use crate::project::ProjectContext;
 use crate::track::TrackRef;
 use facet::Facet;
-use roam::service;
+use vox::service;
 
 /// Parameters for adding an envelope point
 #[derive(Clone, Debug, Facet)]

@@ -9,9 +9,9 @@ use daw_proto::{
     primitives::{BeatAttachMode, Duration, PositionInSeconds},
     track::TrackRef,
 };
-use roam::Tx;
 use std::sync::Arc;
 use uuid::Uuid;
+use vox::Tx;
 
 /// Internal item state
 #[derive(Clone)]

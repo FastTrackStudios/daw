@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::DawClients;
 use crate::Result;
 use daw_proto::{ProjectContext, Region, RegionEvent};
-use roam::Rx;
+use vox::Rx;
 
 /// Regions handle for a specific project
 ///
@@ -17,7 +17,7 @@ use roam::Rx;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+/// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// let regions = project.regions();
@@ -212,7 +212,7 @@ impl Regions {
 
     /// Subscribe to region change events for this project.
     pub async fn subscribe(&self) -> Result<Rx<RegionEvent>> {
-        let (tx, rx) = roam::channel::<RegionEvent>();
+        let (tx, rx) = vox::channel::<RegionEvent>();
         self.clients.region.subscribe(self.context(), tx).await?;
         Ok(rx)
     }

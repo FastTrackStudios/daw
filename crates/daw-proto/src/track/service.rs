@@ -5,7 +5,7 @@
 use super::{InputMonitoringMode, RecordInput, Track, TrackEvent, TrackRef};
 use crate::ProjectContext;
 use facet::Facet;
-use roam::{Tx, service};
+use vox::{Tx, service};
 
 /// Request for track-scoped extended state operations.
 ///

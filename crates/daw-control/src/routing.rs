@@ -9,7 +9,7 @@ use daw_proto::{
     routing::{RouteLocation, RouteRef, RouteType, SendMode, TrackRoute},
     track::TrackRef,
 };
-use roam::Rx;
+use vox::Rx;
 
 /// Sends accessor for a track
 #[derive(Clone)]
@@ -78,7 +78,7 @@ impl Sends {
     /// Returns a receiver that streams granular routing events for this project.
     /// The stream continues until the returned `Rx` is dropped.
     pub async fn subscribe(&self) -> Result<Rx<RoutingEvent>> {
-        let (tx, rx) = roam::channel::<RoutingEvent>();
+        let (tx, rx) = vox::channel::<RoutingEvent>();
         self.clients
             .routing
             .subscribe_routing(self.context(), tx)

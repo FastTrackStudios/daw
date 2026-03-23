@@ -1,21 +1,21 @@
-//! In-process roam caller using memory channels.
+//! In-process vox caller using memory channels.
 //!
-//! Wraps `roam::memory_link_pair` + acceptor/initiator into a reusable struct
+//! Wraps `vox::memory_link_pair` + acceptor/initiator into a reusable struct
 //! that any in-process consumer (plugins, extensions, desktop apps) can use
 //! to get an `ErasedCaller` without duplicating the boilerplate.
 //!
-//! Uses roam's virtual connection pattern: the root session is established
+//! Uses vox's virtual connection pattern: the root session is established
 //! with an `on_connection` acceptor, then the client opens a virtual connection
 //! to get a service-specific `Driver` and `ErasedCaller`.
 
 use moire::task::JoinHandle;
-use roam::{
+use std::sync::Arc;
+use tracing::{debug, warn};
+use vox::{
     AcceptedConnection, BareConduit, ConnectionAcceptor, ConnectionHandle, ConnectionId,
     ConnectionSettings, Driver, DriverCaller, DriverReplySink, ErasedCaller, Handler,
     MetadataEntry, MetadataFlags, MetadataValue, Parity,
 };
-use std::sync::Arc;
-use tracing::{debug, warn};
 
 /// Keeps the server-side acceptor task alive.
 struct KeepAlive {
@@ -34,7 +34,7 @@ impl<H: Handler<DriverReplySink> + Clone + 'static> ConnectionAcceptor for Local
         _conn_id: ConnectionId,
         peer_settings: &ConnectionSettings,
         _metadata: &[MetadataEntry],
-    ) -> Result<AcceptedConnection, roam::Metadata<'static>> {
+    ) -> Result<AcceptedConnection, vox::Metadata<'static>> {
         let handler = Arc::clone(&self.handler);
         let settings = ConnectionSettings {
             parity: peer_settings.parity.other(),
@@ -51,7 +51,7 @@ impl<H: Handler<DriverReplySink> + Clone + 'static> ConnectionAcceptor for Local
     }
 }
 
-/// In-process roam caller backed by memory channels.
+/// In-process vox caller backed by memory channels.
 ///
 /// Creates a `memory_link_pair`, spawns an acceptor task for the server side
 /// with a `ConnectionAcceptor`, and establishes an initiator on the client side.
@@ -80,7 +80,7 @@ impl LocalCaller {
     pub async fn new(
         handler: impl Handler<DriverReplySink> + Clone + 'static,
     ) -> eyre::Result<Self> {
-        let (client_link, server_link) = roam::memory_link_pair(256);
+        let (client_link, server_link) = vox::memory_link_pair(256);
 
         let acceptor = LocalAcceptor {
             handler: Arc::new(handler),
@@ -88,8 +88,8 @@ impl LocalCaller {
 
         // Server side: accept with virtual connection support
         let handle = moire::task::spawn(async move {
-            let handshake = roam::HandshakeResult {
-                role: roam::SessionRole::Acceptor,
+            let handshake = vox::HandshakeResult {
+                role: vox::SessionRole::Acceptor,
                 our_settings: ConnectionSettings {
                     parity: Parity::Even,
                     max_concurrent_requests: 64,
@@ -104,7 +104,7 @@ impl LocalCaller {
                 our_schema: vec![],
                 peer_schema: vec![],
             };
-            match roam::acceptor_conduit(BareConduit::new(server_link), handshake)
+            match vox::acceptor_conduit(BareConduit::new(server_link), handshake)
                 .on_connection(acceptor)
                 .establish::<DriverCaller>(())
                 .await
@@ -120,8 +120,8 @@ impl LocalCaller {
         });
 
         // Client side: establish root session
-        let handshake = roam::HandshakeResult {
-            role: roam::SessionRole::Initiator,
+        let handshake = vox::HandshakeResult {
+            role: vox::SessionRole::Initiator,
             our_settings: ConnectionSettings {
                 parity: Parity::Odd,
                 max_concurrent_requests: 64,
@@ -137,7 +137,7 @@ impl LocalCaller {
             peer_schema: vec![],
         };
         let (_root_caller, session) =
-            roam::initiator_conduit(BareConduit::new(client_link), handshake)
+            vox::initiator_conduit(BareConduit::new(client_link), handshake)
                 .establish::<DriverCaller>(())
                 .await
                 .map_err(|e| eyre::eyre!("LocalCaller initiation failed: {:?}", e))?;

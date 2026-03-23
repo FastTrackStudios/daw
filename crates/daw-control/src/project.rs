@@ -20,7 +20,7 @@ use daw_proto::FxChainContext;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+/// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// println!("Project GUID: {}", project.guid());
@@ -68,7 +68,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -91,7 +91,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -114,7 +114,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -138,7 +138,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -162,7 +162,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -440,7 +440,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -480,7 +480,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::{PositionInSeconds, MeasureMode};
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -517,7 +517,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::{PositionInBeats, MeasureMode};
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -555,7 +555,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInSeconds;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -587,7 +587,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInQuarterNotes;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -619,7 +619,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInQuarterNotes;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -655,7 +655,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInBeats;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -687,7 +687,7 @@ impl Project {
     /// use daw_control::Daw;
     /// use daw_proto::PositionInQuarterNotes;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///
@@ -723,7 +723,7 @@ impl Project {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///

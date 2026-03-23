@@ -1,8 +1,8 @@
 //! Minimal telemetry test
 //!
-//! This tests if roam-telemetry middleware is working correctly
+//! This tests if vox-telemetry middleware is working correctly
 
-use roam::service;
+use vox::service;
 
 #[service]
 trait TestService {

@@ -1,6 +1,6 @@
 //! Error types for daw-control
 //!
-//! Provides error handling for DAW control operations, including RPC errors from roam.
+//! Provides error handling for DAW control operations, including RPC errors from vox.
 
 use std::fmt;
 
@@ -10,11 +10,11 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Error type for daw-control
 #[derive(Debug)]
 pub enum Error {
-    /// Error from roam RPC layer
-    Roam(roam::RoamError),
+    /// Error from vox RPC layer
+    Vox(vox::VoxError),
 
-    /// RoamError with generic payload
-    RoamGeneric(String),
+    /// VoxError with generic payload
+    VoxGeneric(String),
 
     /// Project not found
     ProjectNotFound(String),
@@ -32,8 +32,8 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Roam(e) => write!(f, "RPC error: {:#?}", e),
-            Error::RoamGeneric(msg) => write!(f, "RPC error: {}", msg),
+            Error::Vox(e) => write!(f, "RPC error: {:#?}", e),
+            Error::VoxGeneric(msg) => write!(f, "RPC error: {}", msg),
             Error::ProjectNotFound(guid) => write!(f, "Project not found: {}", guid),
             Error::NoCurrentProject => write!(f, "No current project available"),
             Error::InvalidOperation(msg) => write!(f, "Invalid operation: {}", msg),
@@ -44,15 +44,15 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-impl From<roam::RoamError> for Error {
-    fn from(err: roam::RoamError) -> Self {
-        Error::Roam(err)
+impl From<vox::VoxError> for Error {
+    fn from(err: vox::VoxError) -> Self {
+        Error::Vox(err)
     }
 }
 
-impl From<roam::RoamError<String>> for Error {
-    fn from(err: roam::RoamError<String>) -> Self {
-        Error::RoamGeneric(format!("{:?}", err))
+impl From<vox::VoxError<String>> for Error {
+    fn from(err: vox::VoxError<String>) -> Self {
+        Error::VoxGeneric(format!("{:?}", err))
     }
 }
 

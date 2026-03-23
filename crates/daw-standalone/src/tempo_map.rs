@@ -7,9 +7,9 @@ use daw_proto::{
     Position, ProjectContext, TimePosition, TimeSignature,
     tempo_map::{TempoMapEvent, TempoMapService, TempoPoint},
 };
-use roam::Tx;
 use std::sync::Arc;
 use tracing::debug;
+use vox::Tx;
 
 /// Internal tempo map state
 #[derive(Clone)]

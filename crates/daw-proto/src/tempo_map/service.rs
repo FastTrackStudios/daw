@@ -4,7 +4,7 @@
 
 use super::{TempoMapEvent, TempoPoint};
 use crate::ProjectContext;
-use roam::{Tx, service};
+use vox::{Tx, service};
 
 /// Service for managing the tempo map in a DAW project
 ///

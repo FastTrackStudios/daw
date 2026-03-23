@@ -5,23 +5,23 @@
 //! an SHM handshake, and then communicate via lock-free ring buffers in
 //! shared memory — no socket overhead for RPC traffic.
 //!
-//! The bootstrap flow follows roam's `shm_host_two_guests` pattern:
+//! The bootstrap flow follows vox's `shm_host_two_guests` pattern:
 //!
 //! 1. Host creates SHM `Segment` + `HostHub`, binds bootstrap socket
 //! 2. Guest connects to bootstrap socket, sends session ID
 //! 3. Host prepares a peer slot, sends back SHM path + fds
-//! 4. Guest mmaps the segment, establishes roam session over `ShmLink`
-//! 5. Guest calls DAW services via roam RPC over SHM
+//! 4. Guest mmaps the segment, establishes vox session over `ShmLink`
+//! 5. Guest calls DAW services via vox RPC over SHM
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use roam_shm::bootstrap::decode_request;
-use roam_shm::varslot::SizeClassConfig;
-use roam_shm::{HostHub, Segment, SegmentConfig};
 use shm_primitives::FileCleanup;
 use tokio::net::UnixListener;
 use tracing::{debug, info, warn};
+use vox_shm::bootstrap::decode_request;
+use vox_shm::varslot::SizeClassConfig;
+use vox_shm::{HostHub, Segment, SegmentConfig};
 
 use crate::routed_handler::DawConnectionAcceptor;
 
@@ -74,7 +74,7 @@ struct ShmHostState {
 ///
 /// Creates an SHM segment and listens on a bootstrap Unix socket.
 /// Each connecting guest gets its own peer slot in the SHM segment
-/// and a roam session using the provided handler.
+/// and a vox session using the provided handler.
 ///
 /// Returns the bootstrap socket path on success (for passing to guest processes).
 pub fn start_shm_host(handler: DawConnectionAcceptor) -> Option<String> {
@@ -214,20 +214,20 @@ async fn handle_bootstrap_connection(
         sid
     );
 
-    // Build the host-side ShmLink and establish a roam session
+    // Build the host-side ShmLink and establish a vox session
     let link = prepared
         .host_peer
         .into_link()
         .map_err(|e| eyre::eyre!("build host link: {}", e))?;
 
-    let handshake = roam::HandshakeResult {
-        role: roam::SessionRole::Acceptor,
-        our_settings: roam::ConnectionSettings {
-            parity: roam::Parity::Even,
+    let handshake = vox::HandshakeResult {
+        role: vox::SessionRole::Acceptor,
+        our_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Even,
             max_concurrent_requests: 64,
         },
-        peer_settings: roam::ConnectionSettings {
-            parity: roam::Parity::Odd,
+        peer_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Odd,
             max_concurrent_requests: 64,
         },
         peer_supports_retry: true,
@@ -236,11 +236,11 @@ async fn handle_bootstrap_connection(
         our_schema: vec![],
         peer_schema: vec![],
     };
-    let (_caller, _session_handle) = roam::acceptor_conduit(link, handshake)
+    let (_caller, _session_handle) = vox::acceptor_conduit(link, handshake)
         .on_connection(acceptor)
-        .establish::<roam::DriverCaller>(())
+        .establish::<vox::DriverCaller>(())
         .await
-        .map_err(|e| eyre::eyre!("SHM roam handshake failed: {:?}", e))?;
+        .map_err(|e| eyre::eyre!("SHM vox handshake failed: {:?}", e))?;
 
     info!("SHM session established for session {}", sid);
 

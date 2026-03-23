@@ -5,7 +5,7 @@
 use super::{Region, RegionEvent};
 use crate::ProjectContext;
 use facet::Facet;
-use roam::{Tx, service};
+use vox::{Tx, service};
 
 /// Request for adding a region in a specific ruler lane.
 /// Groups params to stay within the 4-element Facet tuple limit.

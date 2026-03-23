@@ -1,10 +1,10 @@
 //! Main Thread Bridge
 //!
 //! REAPER APIs can only be called from the main thread. Service handlers run on
-//! tokio worker threads (dispatched by roam). This module provides the bridge
+//! tokio worker threads (dispatched by vox). This module provides the bridge
 //! between the two worlds.
 //!
-//! Inspired by helgobox's `MainThreadLayer` pattern, but adapted for roam's
+//! Inspired by helgobox's `MainThreadLayer` pattern, but adapted for vox's
 //! architecture. Instead of a Tower middleware that re-schedules the entire
 //! handler future, we provide two ergonomic helpers that each service method
 //! calls:

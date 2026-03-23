@@ -8,7 +8,7 @@ use daw_proto::{
     FxChainContext, InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent,
     TrackExtStateRequest, TrackRef,
 };
-use roam::Rx;
+use vox::Rx;
 
 /// Tracks handle for a specific project
 ///
@@ -20,7 +20,7 @@ use roam::Rx;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+/// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// let tracks = project.tracks();
@@ -235,7 +235,7 @@ impl Tracks {
     /// Returns a receiver that streams granular track events for this project.
     /// The stream continues until the returned `Rx` is dropped.
     pub async fn subscribe(&self) -> Result<Rx<TrackEvent>> {
-        let (tx, rx) = roam::channel::<TrackEvent>();
+        let (tx, rx) = vox::channel::<TrackEvent>();
         self.clients
             .track
             .subscribe_tracks(self.context(), tx)
@@ -266,7 +266,7 @@ impl std::fmt::Debug for Tracks {
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+/// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 ///

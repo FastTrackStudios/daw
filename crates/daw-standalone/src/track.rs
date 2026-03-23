@@ -5,9 +5,9 @@ use daw_proto::{
     InputMonitoringMode, ProjectContext, RecordInput, Track, TrackEvent, TrackExtStateRequest,
     TrackRef, TrackService,
 };
-use roam::Tx;
 use std::sync::Arc;
 use uuid::Uuid;
+use vox::Tx;
 
 /// Internal track state for standalone implementation
 #[derive(Clone)]

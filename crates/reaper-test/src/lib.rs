@@ -348,14 +348,14 @@ impl Drop for ReaperProcess {
 /// Shared runtime + DAW connection that persists across all tests.
 ///
 /// Each `#[reaper_test]` creates its own `#[tokio::test]` runtime, but the
-/// ROAM driver task must live on a single runtime for the entire process.
+/// VOX driver task must live on a single runtime for the entire process.
 /// If the creating runtime drops, the driver dies and all subsequent tests
 /// get `DriverGone`. Solving this by owning a long-lived runtime here.
 ///
 /// Uses `ManuallyDrop<Runtime>` so the custom `Drop` impl can consume the
 /// runtime and call `shutdown_background()` (non-blocking). This prevents
 /// the test binary from hanging indefinitely when REAPER is killed without
-/// a clean disconnect — the ROAM driver task would otherwise block `Runtime::drop`.
+/// a clean disconnect — the VOX driver task would otherwise block `Runtime::drop`.
 struct SharedState {
     runtime: ManuallyDrop<Runtime>,
     daw: Daw,
@@ -365,7 +365,7 @@ impl Drop for SharedState {
     fn drop(&mut self) {
         // SAFETY: `runtime` is only taken here in `drop`, never accessed afterwards.
         let runtime = unsafe { ManuallyDrop::take(&mut self.runtime) };
-        // Non-blocking shutdown: abandon any still-running tasks (e.g. the ROAM
+        // Non-blocking shutdown: abandon any still-running tasks (e.g. the VOX
         // driver task stuck waiting on a killed REAPER socket) without blocking.
         runtime.shutdown_background();
     }
@@ -405,7 +405,7 @@ fn shared_daw() -> Result<Daw> {
     Ok(SHARED.get().unwrap().daw.clone())
 }
 
-/// Run a future on the shared runtime (where the ROAM driver lives).
+/// Run a future on the shared runtime (where the VOX driver lives).
 ///
 /// This is the key to making parallel tests work: all DAW calls go through
 /// the same runtime that owns the driver task, so it never becomes `DriverGone`.
@@ -552,9 +552,9 @@ async fn release_batch_tab(daw: &Daw, batch: &Arc<BatchTab>) {
 //  Connection
 // ─────────────────────────────────────────────────────────────
 
-// Connection uses roam v7 initiator API (no more Connector trait)
+// Connection uses vox v7 initiator API (no more Connector trait)
 
-/// Connect to a running REAPER instance via roam over Unix socket.
+/// Connect to a running REAPER instance via vox over Unix socket.
 ///
 /// Uses `FTS_SOCKET` env var if set, otherwise discovers the first
 /// `/tmp/fts-daw-*.sock` socket. Polls until the socket exists and
@@ -590,15 +590,15 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await?;
-    let link = roam_stream::StreamLink::unix(stream);
-    let handshake = roam::HandshakeResult {
-        role: roam::SessionRole::Initiator,
-        our_settings: roam::ConnectionSettings {
-            parity: roam::Parity::Odd,
+    let link = vox_stream::StreamLink::unix(stream);
+    let handshake = vox::HandshakeResult {
+        role: vox::SessionRole::Initiator,
+        our_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Odd,
             max_concurrent_requests: 64,
         },
-        peer_settings: roam::ConnectionSettings {
-            parity: roam::Parity::Even,
+        peer_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Even,
             max_concurrent_requests: 64,
         },
         peer_supports_retry: true,
@@ -607,29 +607,29 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
         our_schema: vec![],
         peer_schema: vec![],
     };
-    let (_root_caller, session) = roam::initiator_conduit(roam::BareConduit::new(link), handshake)
-        .establish::<roam::DriverCaller>(())
+    let (_root_caller, session) = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
+        .establish::<vox::DriverCaller>(())
         .await
-        .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
+        .map_err(|e| eyre::eyre!("Failed to establish vox session: {:?}", e))?;
 
     // Open a virtual connection for DAW services
     let conn = session
         .open_connection(
-            roam::ConnectionSettings {
-                parity: roam::Parity::Odd,
+            vox::ConnectionSettings {
+                parity: vox::Parity::Odd,
                 max_concurrent_requests: 64,
             },
-            vec![roam::MetadataEntry {
+            vec![vox::MetadataEntry {
                 key: "role",
-                value: roam::MetadataValue::String("test-client"),
-                flags: roam::MetadataFlags::NONE,
+                value: vox::MetadataValue::String("test-client"),
+                flags: vox::MetadataFlags::NONE,
             }],
         )
         .await
         .map_err(|e| eyre::eyre!("open_connection failed: {e:?}"))?;
 
-    let mut driver = roam::Driver::new(conn, ());
-    let caller = roam::ErasedCaller::new(driver.caller());
+    let mut driver = vox::Driver::new(conn, ());
+    let caller = vox::ErasedCaller::new(driver.caller());
     moire::task::spawn(async move { driver.run().await });
 
     Ok(Daw::new(caller))

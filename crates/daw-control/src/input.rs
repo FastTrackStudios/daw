@@ -20,8 +20,8 @@ impl Input {
     ///
     /// Returns a stream of `InputEvent` values (keyboard, mouse wheel)
     /// that were eaten by the current key filter.
-    pub async fn subscribe(&self) -> crate::Result<roam::Rx<daw_proto::InputEvent>> {
-        let (tx, rx) = roam::channel::<daw_proto::InputEvent>();
+    pub async fn subscribe(&self) -> crate::Result<vox::Rx<daw_proto::InputEvent>> {
+        let (tx, rx) = vox::channel::<daw_proto::InputEvent>();
         self.clients.input.subscribe_input(tx).await?;
         Ok(rx)
     }

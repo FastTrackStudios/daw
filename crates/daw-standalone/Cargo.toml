@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 daw-proto = { path = "../daw-proto" }
-roam = { workspace = true }
+vox = { workspace = true }
 tracing = { workspace = true }
 moire = { workspace = true }
 uuid = { version = "1", features = ["v4"] }

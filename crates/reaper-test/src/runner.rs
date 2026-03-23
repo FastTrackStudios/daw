@@ -405,7 +405,7 @@ impl TestRunner {
             }
 
             // After tests, we need to wait for the test process to fully exit
-            // (it may be blocked on Runtime drop waiting for ROAM driver).
+            // (it may be blocked on Runtime drop waiting for VOX driver).
             // Don't kill REAPER yet — there may be more packages to run.
             for _ in 0..20 {
                 if test_child.try_wait()?.is_some() {

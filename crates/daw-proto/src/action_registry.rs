@@ -29,7 +29,7 @@
 //! ```
 
 use facet::Facet;
-use roam::{Tx, service};
+use vox::{Tx, service};
 
 /// Events pushed to guests when their registered actions are triggered.
 #[repr(u8)]

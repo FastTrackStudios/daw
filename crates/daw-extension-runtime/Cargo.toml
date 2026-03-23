@@ -8,8 +8,8 @@ description = "SHM extension runtime — one-call connect to daw-bridge for hot-
 
 [dependencies]
 daw.workspace = true
-roam.workspace = true
-roam-shm.workspace = true
+vox.workspace = true
+vox-shm.workspace = true
 shm-primitives.workspace = true
 moire.workspace = true
 eyre = "0.6"

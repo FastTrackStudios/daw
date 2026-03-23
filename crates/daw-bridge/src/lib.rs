@@ -2,7 +2,7 @@
 //!
 //! Loads daw-reaper's service implementations inside REAPER and exposes them
 //! via Unix socket and SHM so external processes (tests, FTS, CLI tools)
-//! can control the DAW through roam RPC.
+//! can control the DAW through vox RPC.
 
 mod guest_loader;
 mod routed_handler;
@@ -328,15 +328,15 @@ fn start_unix_socket_server(acceptor: DawConnectionAcceptor) {
                     info!("Client connected via Unix socket");
                     let acceptor = acceptor.clone();
                     moire::task::spawn(async move {
-                        let link = roam_stream::StreamLink::unix(stream);
-                        let handshake = roam::HandshakeResult {
-                            role: roam::SessionRole::Acceptor,
-                            our_settings: roam::ConnectionSettings {
-                                parity: roam::Parity::Even,
+                        let link = vox_stream::StreamLink::unix(stream);
+                        let handshake = vox::HandshakeResult {
+                            role: vox::SessionRole::Acceptor,
+                            our_settings: vox::ConnectionSettings {
+                                parity: vox::Parity::Even,
                                 max_concurrent_requests: 64,
                             },
-                            peer_settings: roam::ConnectionSettings {
-                                parity: roam::Parity::Odd,
+                            peer_settings: vox::ConnectionSettings {
+                                parity: vox::Parity::Odd,
                                 max_concurrent_requests: 64,
                             },
                             peer_supports_retry: true,
@@ -345,9 +345,9 @@ fn start_unix_socket_server(acceptor: DawConnectionAcceptor) {
                             our_schema: vec![],
                             peer_schema: vec![],
                         };
-                        match roam::acceptor_conduit(roam::BareConduit::new(link), handshake)
+                        match vox::acceptor_conduit(vox::BareConduit::new(link), handshake)
                             .on_connection(acceptor)
-                            .establish::<roam::DriverCaller>(())
+                            .establish::<vox::DriverCaller>(())
                             .await
                         {
                             Ok((_caller, _session_handle)) => {

@@ -4,7 +4,7 @@ use super::{AudioSampleData, GetSamplesRequest};
 use crate::item::{ItemRef, TakeRef};
 use crate::project::ProjectContext;
 use crate::track::TrackRef;
-use roam::service;
+use vox::service;
 
 /// Service for creating audio accessors that provide random-access sample reading.
 ///

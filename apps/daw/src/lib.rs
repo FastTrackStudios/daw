@@ -2,7 +2,7 @@
 //!
 //! Provides socket discovery, connection management, track/FX resolution,
 //! formatting helpers, and command implementations for querying a running
-//! REAPER instance via the roam RPC protocol.
+//! REAPER instance via the vox RPC protocol.
 
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
@@ -11,16 +11,16 @@ use std::process::{Command, Stdio};
 use daw::Daw;
 use daw::service::FxType;
 use eyre::{Result, bail};
-use roam::{
+use serde_json::json;
+use vox::{
     ConnectionSettings, Driver, ErasedCaller, MetadataEntry, MetadataFlags, MetadataValue, Parity,
     SessionHandle,
 };
-use serde_json::json;
 
-/// A DAW connection that keeps the roam session alive.
+/// A DAW connection that keeps the vox session alive.
 ///
 /// The `SessionHandle` must be kept alive for the duration of use —
-/// dropping it closes the underlying roam session and all RPC calls will fail.
+/// dropping it closes the underlying vox session and all RPC calls will fail.
 pub struct DawConnection {
     pub daw: Daw,
     _session: SessionHandle,
@@ -235,15 +235,15 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<DawConnection> {
     .map_err(|_| eyre::eyre!("Timed out connecting to {}", path.display()))?
     .map_err(|e| eyre::eyre!("Failed to connect to {}: {}", path.display(), e))?;
 
-    let link = roam_stream::StreamLink::unix(stream);
-    let handshake = roam::HandshakeResult {
-        role: roam::SessionRole::Initiator,
-        our_settings: roam::ConnectionSettings {
-            parity: roam::Parity::Odd,
+    let link = vox_stream::StreamLink::unix(stream);
+    let handshake = vox::HandshakeResult {
+        role: vox::SessionRole::Initiator,
+        our_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Odd,
             max_concurrent_requests: 64,
         },
-        peer_settings: roam::ConnectionSettings {
-            parity: roam::Parity::Even,
+        peer_settings: vox::ConnectionSettings {
+            parity: vox::Parity::Even,
             max_concurrent_requests: 64,
         },
         peer_supports_retry: true,
@@ -252,10 +252,10 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<DawConnection> {
         our_schema: vec![],
         peer_schema: vec![],
     };
-    let (_root_caller, session) = roam::initiator_conduit(roam::BareConduit::new(link), handshake)
-        .establish::<roam::DriverCaller>(())
+    let (_root_caller, session) = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
+        .establish::<vox::DriverCaller>(())
         .await
-        .map_err(|e| eyre::eyre!("Failed to establish roam session: {:?}", e))?;
+        .map_err(|e| eyre::eyre!("Failed to establish vox session: {:?}", e))?;
 
     let caller = open_daw_connection(&session).await?;
 
@@ -265,7 +265,7 @@ pub async fn connect(socket: Option<PathBuf>) -> Result<DawConnection> {
     })
 }
 
-/// Open a DAW virtual connection on an established roam session.
+/// Open a DAW virtual connection on an established vox session.
 ///
 /// Sends metadata identifying this as a DAW client, then creates a Driver
 /// on the virtual connection and returns an `ErasedCaller` for RPC.

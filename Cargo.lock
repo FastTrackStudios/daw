@@ -5,11 +5,10 @@ version = 4
 [[package]]
 name = "actions-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/input_actions.git?branch=main#ab7e3ecbb423aa9fdb73565396db1759f62a329d"
 dependencies = [
  "convert_case 0.6.0",
  "facet",
- "roam",
+ "vox",
 ]
 
 [[package]]
@@ -1272,7 +1271,7 @@ version = "0.1.0"
 dependencies = [
  "daw-control",
  "daw-control-sync",
- "daw-proto 0.1.0",
+ "daw-proto",
  "daw-reaper",
  "daw-standalone",
  "dawfile-reaper",
@@ -1298,15 +1297,15 @@ dependencies = [
  "reaper-low",
  "reaper-macros",
  "reaper-medium",
- "roam",
- "roam-shm",
- "roam-stream",
  "shm-primitives",
  "shm-primitives-async",
  "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "vox",
+ "vox-shm",
+ "vox-stream",
 ]
 
 [[package]]
@@ -1319,25 +1318,25 @@ dependencies = [
  "eyre",
  "libc",
  "moire",
- "roam",
- "roam-stream",
  "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "vox",
+ "vox-stream",
 ]
 
 [[package]]
 name = "daw-control"
 version = "0.1.0"
 dependencies = [
- "daw-proto 0.1.0",
+ "daw-proto",
  "eyre",
  "facet",
  "futures",
- "roam",
  "serde",
  "serde_json",
+ "vox",
 ]
 
 [[package]]
@@ -1347,10 +1346,10 @@ dependencies = [
  "daw-control",
  "eyre",
  "moire",
- "roam",
- "roam-stream",
  "tokio",
  "tracing",
+ "vox",
+ "vox-stream",
 ]
 
 [[package]]
@@ -1361,10 +1360,10 @@ dependencies = [
  "eyre",
  "libc",
  "moire",
- "roam",
- "roam-shm",
  "shm-primitives",
  "tracing",
+ "vox",
+ "vox-shm",
 ]
 
 [[package]]
@@ -1385,19 +1384,8 @@ version = "0.1.0"
 dependencies = [
  "actions-proto",
  "facet",
- "roam",
  "thiserror 2.0.18",
-]
-
-[[package]]
-name = "daw-proto"
-version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#ee48b342cc830eb6c38acecc760754e831a3361c"
-dependencies = [
- "actions-proto",
- "facet",
- "roam",
- "thiserror 2.0.18",
+ "vox",
 ]
 
 [[package]]
@@ -1406,7 +1394,7 @@ version = "0.1.0"
 dependencies = [
  "camino",
  "daw-control",
- "daw-proto 0.1.0",
+ "daw-proto",
  "dawfile-reaper",
  "enumflags2",
  "eyre",
@@ -1418,13 +1406,13 @@ dependencies = [
  "reaper-low",
  "reaper-medium",
  "reaper-test",
- "roam",
- "roam-shm",
  "serde_json",
  "shm-primitives",
  "tokio",
  "tokio-util",
  "tracing",
+ "vox",
+ "vox-shm",
 ]
 
 [[package]]
@@ -1434,18 +1422,18 @@ dependencies = [
  "async-lock",
  "cpal",
  "daw-control",
- "daw-proto 0.1.0",
+ "daw-proto",
  "dawfile-reaper",
  "eyre",
  "gloo-timers",
  "keyflow",
  "moire",
- "roam",
  "symphonia",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "vox",
  "web-time",
 ]
 
@@ -1454,7 +1442,7 @@ name = "daw-ui"
 version = "0.1.0"
 dependencies = [
  "daw-control",
- "daw-proto 0.1.0",
+ "daw-proto",
  "dioxus",
  "dock-dioxus",
  "dock-proto",
@@ -1480,7 +1468,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "criterion",
- "daw-proto 0.1.0",
+ "daw-proto",
  "libc",
  "nom 8.0.0",
  "rayon",
@@ -1996,7 +1984,6 @@ dependencies = [
 [[package]]
 name = "engraver"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#0ccfb07e6e1e717bde16d4ef9fb423dd96310260"
 dependencies = [
  "engraver-proto",
 ]
@@ -2004,7 +1991,6 @@ dependencies = [
 [[package]]
 name = "engraver-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#0ccfb07e6e1e717bde16d4ef9fb423dd96310260"
 dependencies = [
  "anyrender",
  "bitflags 2.11.0",
@@ -2172,8 +2158,8 @@ dependencies = [
 
 [[package]]
 name = "facet-cbor"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
 dependencies = [
  "facet",
  "facet-core",
@@ -3320,11 +3306,10 @@ dependencies = [
 [[package]]
 name = "keyflow"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#0ccfb07e6e1e717bde16d4ef9fb423dd96310260"
 dependencies = [
  "color-eyre",
  "colored",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "derive_more 1.0.0",
  "engraver",
  "facet",
@@ -3340,24 +3325,22 @@ dependencies = [
 [[package]]
 name = "keyflow-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#0ccfb07e6e1e717bde16d4ef9fb423dd96310260"
 dependencies = [
  "color-palette",
- "daw-proto 0.1.0 (git+https://github.com/FastTrackStudios/daw.git?branch=main)",
+ "daw-proto",
  "facet",
  "helgoboss-midi",
  "music-catalog",
- "roam",
  "serde",
  "thiserror 2.0.18",
  "tracing",
  "uuid",
+ "vox",
 ]
 
 [[package]]
 name = "keyflow-text"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/keyflow.git?branch=main#0ccfb07e6e1e717bde16d4ef9fb423dd96310260"
 dependencies = [
  "keyflow-proto",
  "tracing",
@@ -4818,7 +4801,7 @@ version = "3.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e67ba7e9b2b56446f1d419b1d807906278ffa1a658a8a5d8a39dcb1f5a78614f"
 dependencies = [
- "toml_edit 0.25.5+spec-1.1.0",
+ "toml_edit 0.25.7+spec-1.1.0",
 ]
 
 [[package]]
@@ -5183,10 +5166,10 @@ dependencies = [
  "moire",
  "reaper-launcher",
  "reaper-test-macro",
- "roam",
- "roam-stream",
  "tokio",
  "tracing",
+ "vox",
+ "vox-stream",
 ]
 
 [[package]]
@@ -5303,142 +5286,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
 dependencies = [
  "bytemuck",
-]
-
-[[package]]
-name = "roam"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
-dependencies = [
- "facet",
- "roam-core",
- "roam-postcard",
- "roam-service-macros",
- "roam-types",
- "tracing",
-]
-
-[[package]]
-name = "roam-core"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
-dependencies = [
- "facet",
- "facet-cbor",
- "facet-core",
- "facet-error",
- "facet-reflect",
- "getrandom 0.3.4",
- "moire",
- "roam-postcard",
- "roam-types",
- "smallvec 1.15.1",
- "tokio",
- "tracing",
- "wasm-bindgen-futures",
- "zerocopy",
-]
-
-[[package]]
-name = "roam-macros-core"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
-dependencies = [
- "facet-cargo-toml",
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "roam-macros-parse",
-]
-
-[[package]]
-name = "roam-macros-parse"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
-dependencies = [
- "proc-macro2",
- "unsynn",
-]
-
-[[package]]
-name = "roam-postcard"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
-dependencies = [
- "facet",
- "facet-core",
- "facet-reflect",
- "roam-schema",
-]
-
-[[package]]
-name = "roam-schema"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
-dependencies = [
- "blake3",
- "facet",
- "facet-cbor",
- "facet-core",
- "indexmap",
-]
-
-[[package]]
-name = "roam-service-macros"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
-dependencies = [
- "proc-macro2",
- "roam-macros-core",
-]
-
-[[package]]
-name = "roam-shm"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
-dependencies = [
- "libc",
- "loom",
- "roam-postcard",
- "roam-types",
- "shm-primitives",
- "shm-primitives-async",
- "tempfile",
- "tracing",
- "zerocopy",
-]
-
-[[package]]
-name = "roam-stream"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
-dependencies = [
- "moire",
- "roam-core",
- "roam-types",
- "tokio",
-]
-
-[[package]]
-name = "roam-types"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
-dependencies = [
- "bitflags 2.11.0",
- "blake3",
- "facet",
- "facet-cbor",
- "facet-core",
- "facet-path",
- "futures-channel",
- "heck 0.5.0",
- "indexmap",
- "moire",
- "roam-postcard",
- "roam-schema",
- "smallvec 1.15.1",
- "structstruck",
- "tokio",
 ]
 
 [[package]]
@@ -5721,8 +5568,8 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shm-primitives"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
 dependencies = [
  "libc",
  "loom",
@@ -5731,8 +5578,8 @@ dependencies = [
 
 [[package]]
 name = "shm-primitives-async"
-version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
 dependencies = [
  "libc",
  "tokio",
@@ -6478,9 +6325,9 @@ checksum = "22cddaf88f4fbc13c51aebbf5f8eceb5c7c5a9da2ac40a13519eb5b0a0e8f11c"
 
 [[package]]
 name = "toml_datetime"
-version = "1.0.1+spec-1.1.0"
+version = "1.1.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b320e741db58cac564e26c607d3cc1fdc4a88fd36c879568c07856ed83ff3e9"
+checksum = "97251a7c317e03ad83774a8752a7e81fb6067740609f75ea2b585b569a59198f"
 dependencies = [
  "serde_core",
 ]
@@ -6498,21 +6345,21 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.25.5+spec-1.1.0"
+version = "0.25.7+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ca1a40644a28bce036923f6a431df0b34236949d111cc07cb6dca830c9ef2e1"
+checksum = "d15b06e6c39068c203e7c1d0bc3944796d867449e7668ef7fa5ea43727cb846e"
 dependencies = [
  "indexmap",
- "toml_datetime 1.0.1+spec-1.1.0",
+ "toml_datetime 1.1.0+spec-1.1.0",
  "toml_parser",
  "winnow 1.0.0",
 ]
 
 [[package]]
 name = "toml_parser"
-version = "1.0.10+spec-1.1.0"
+version = "1.1.0+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7df25b4befd31c4816df190124375d5a20c6b6921e2cad937316de3fccd63420"
+checksum = "2334f11ee363607eb04df9b8fc8a13ca1715a72ba8662a26ac285c98aabb4011"
 dependencies = [
  "winnow 1.0.0",
 ]
@@ -6930,6 +6777,142 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vox"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+dependencies = [
+ "facet",
+ "tracing",
+ "vox-core",
+ "vox-postcard",
+ "vox-service-macros",
+ "vox-types",
+]
+
+[[package]]
+name = "vox-core"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+dependencies = [
+ "facet",
+ "facet-cbor",
+ "facet-core",
+ "facet-error",
+ "facet-reflect",
+ "getrandom 0.3.4",
+ "moire",
+ "smallvec 1.15.1",
+ "tokio",
+ "tracing",
+ "vox-postcard",
+ "vox-types",
+ "wasm-bindgen-futures",
+ "zerocopy",
+]
+
+[[package]]
+name = "vox-macros-core"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+dependencies = [
+ "facet-cargo-toml",
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "vox-macros-parse",
+]
+
+[[package]]
+name = "vox-macros-parse"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+dependencies = [
+ "proc-macro2",
+ "unsynn",
+]
+
+[[package]]
+name = "vox-postcard"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+dependencies = [
+ "facet",
+ "facet-core",
+ "facet-reflect",
+ "vox-schema",
+]
+
+[[package]]
+name = "vox-schema"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+dependencies = [
+ "blake3",
+ "facet",
+ "facet-cbor",
+ "facet-core",
+ "indexmap",
+]
+
+[[package]]
+name = "vox-service-macros"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+dependencies = [
+ "proc-macro2",
+ "vox-macros-core",
+]
+
+[[package]]
+name = "vox-shm"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+dependencies = [
+ "libc",
+ "loom",
+ "shm-primitives",
+ "shm-primitives-async",
+ "tempfile",
+ "tracing",
+ "vox-postcard",
+ "vox-types",
+ "zerocopy",
+]
+
+[[package]]
+name = "vox-stream"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+dependencies = [
+ "moire",
+ "tokio",
+ "vox-core",
+ "vox-types",
+]
+
+[[package]]
+name = "vox-types"
+version = "0.2.0"
+source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+dependencies = [
+ "bitflags 2.11.0",
+ "blake3",
+ "facet",
+ "facet-cbor",
+ "facet-core",
+ "facet-path",
+ "futures-channel",
+ "heck 0.5.0",
+ "indexmap",
+ "moire",
+ "smallvec 1.15.1",
+ "structstruck",
+ "tokio",
+ "vox-postcard",
+ "vox-schema",
+]
 
 [[package]]
 name = "vst"

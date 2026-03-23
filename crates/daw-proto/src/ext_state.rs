@@ -11,7 +11,7 @@
 //! This keeps the proto layer free of serde dependencies.
 
 use crate::project::ProjectContext;
-use roam::service;
+use vox::service;
 
 /// Service for persistent key-value storage (REAPER's ExtState API).
 ///

@@ -4,7 +4,7 @@ use super::{TakePeakData, TrackPeak};
 use crate::item::{ItemRef, TakeRef};
 use crate::project::ProjectContext;
 use crate::track::TrackRef;
-use roam::service;
+use vox::service;
 
 /// Service for reading track peak meters and take waveform data
 ///

@@ -31,14 +31,14 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use eyre::{Result, WrapErr, eyre};
-use roam::{
+use shm_primitives::PeerId;
+use tracing::{debug, warn};
+use vox::{
     ConnectionSettings, Driver, ErasedCaller, HandshakeResult, MetadataEntry, MetadataFlags,
     MetadataValue, Parity, SessionRole,
 };
-use roam_shm::bootstrap::{BootstrapStatus, encode_request};
-use roam_shm::{Segment, ShmLink};
-use shm_primitives::PeerId;
-use tracing::{debug, warn};
+use vox_shm::bootstrap::{BootstrapStatus, encode_request};
+use vox_shm::{Segment, ShmLink};
 
 /// Options for connecting to daw-bridge as an SHM guest.
 pub struct GuestOptions<'a> {
@@ -68,7 +68,7 @@ impl Default for GuestOptions<'_> {
 /// This performs the full bootstrap sequence:
 /// 1. Discover the SHM bootstrap socket
 /// 2. Perform SHM handshake (send session ID, receive segment path + fds)
-/// 3. Establish a roam session over the ShmLink
+/// 3. Establish a vox session over the ShmLink
 /// 4. Open a virtual connection with role metadata
 /// 5. Return a [`daw::Daw`] handle wired to the connection
 pub async fn connect(opts: GuestOptions<'_>) -> Result<daw::Daw> {
@@ -88,15 +88,15 @@ pub async fn connect(opts: GuestOptions<'_>) -> Result<daw::Daw> {
     let link = connect_shm(&bootstrap_sock)?;
     debug!("[guest:{pid}] SHM link established");
 
-    // Step 3: Establish roam session
+    // Step 3: Establish vox session
     // SHM connections skip the CBOR handshake (handled at the bootstrap layer),
     // so we provide a synthetic HandshakeResult with matching settings.
     let handshake_result = shm_handshake_result(opts.max_concurrent_requests);
-    let (_root_caller, session) = roam::initiator_conduit(link, handshake_result)
-        .establish::<roam::DriverCaller>(())
+    let (_root_caller, session) = vox::initiator_conduit(link, handshake_result)
+        .establish::<vox::DriverCaller>(())
         .await
-        .map_err(|e| eyre!("roam handshake failed: {e:?}"))?;
-    debug!("[guest:{pid}] Roam session established");
+        .map_err(|e| eyre!("vox handshake failed: {e:?}"))?;
+    debug!("[guest:{pid}] Vox session established");
 
     // Step 4: Open virtual connection
     // Leak the role string — guest connections live for the process lifetime.
@@ -222,7 +222,7 @@ fn connect_shm(bootstrap_path: &Path) -> Result<ShmLink> {
     }
 
     unsafe {
-        roam_shm::guest_link_from_raw(segment, peer_id, doorbell_fd, mmap_rx_fd, mmap_tx_fd, true)
+        vox_shm::guest_link_from_raw(segment, peer_id, doorbell_fd, mmap_rx_fd, mmap_tx_fd, true)
     }
     .map_err(|e| eyre!("build guest link: {e}"))
 }
@@ -240,7 +240,7 @@ pub struct ActionDef {
 /// Result of registering actions with REAPER.
 pub struct ActionRegistration {
     /// Receiver for action trigger events.
-    pub rx: roam::Rx<daw::service::ActionEvent>,
+    pub rx: vox::Rx<daw::service::ActionEvent>,
     /// Number of actions successfully registered and confirmed in the action list.
     pub registered: usize,
     /// Number of actions that failed to register or weren't found in the action list.
@@ -330,7 +330,7 @@ pub async fn register_actions(daw: &daw::Daw, actions: &[ActionDef]) -> Result<A
 /// Construct a synthetic `HandshakeResult` for SHM connections.
 ///
 /// SHM links handle transport-level handshaking at the bootstrap layer (session ID,
-/// segment path, file descriptors). The roam session layer still expects a
+/// segment path, file descriptors). The vox session layer still expects a
 /// `HandshakeResult` to know the connection settings — we provide one here with
 /// the initiator's perspective.
 fn shm_handshake_result(max_concurrent_requests: u32) -> HandshakeResult {

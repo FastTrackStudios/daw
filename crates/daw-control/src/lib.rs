@@ -8,7 +8,7 @@
 //! ```no_run
 //! use daw_control::Daw;
 //!
-//! # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+//! # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
 //! // Initialize global connection
 //! Daw::init(handle)?;
 //!
@@ -25,7 +25,7 @@
 //! ```no_run
 //! use daw_control::Daw;
 //!
-//! # async fn example(handle1: roam::ErasedCaller, handle2: roam::ErasedCaller) -> daw_control::Result<()> {
+//! # async fn example(handle1: vox::ErasedCaller, handle2: vox::ErasedCaller) -> daw_control::Result<()> {
 //! // Create Daw instances for each host
 //! let daw1 = Daw::new(handle1);
 //! let daw2 = Daw::new(handle2);
@@ -138,7 +138,7 @@ pub(crate) use daw_proto::TrackServiceClient;
 pub(crate) use daw_proto::plugin_loader::PluginLoaderServiceClient;
 pub(crate) use daw_proto::toolbar::ToolbarServiceClient;
 pub(crate) use daw_proto::transport::transport::TransportServiceClient;
-pub use roam::ErasedCaller;
+pub use vox::ErasedCaller;
 
 pub mod error;
 pub use error::{Error, Result};
@@ -250,7 +250,7 @@ impl DawClients {
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+/// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// project.transport().play().await?;
@@ -273,7 +273,7 @@ impl Daw {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// daw.current_project().await?.transport().play().await?;
     /// # Ok(())
@@ -466,8 +466,8 @@ impl Daw {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn subscribe_projects(&self) -> crate::Result<roam::Rx<ProjectEvent>> {
-        let (tx, rx) = roam::channel::<ProjectEvent>();
+    pub async fn subscribe_projects(&self) -> crate::Result<vox::Rx<ProjectEvent>> {
+        let (tx, rx) = vox::channel::<ProjectEvent>();
         self.clients.project.subscribe(tx).await?;
         Ok(rx)
     }
@@ -572,7 +572,7 @@ impl Daw {
 
 // ============================================================================
 // Global singleton support (for backwards compatibility / single-host usage)
-// Not available on WASM — roam's ErasedCallerDyn uses MaybeSend/MaybeSync
+// Not available on WASM — vox's ErasedCallerDyn uses MaybeSend/MaybeSync
 // which are empty traits on wasm32, so Daw is not Sync and can't be in a static.
 // ============================================================================
 

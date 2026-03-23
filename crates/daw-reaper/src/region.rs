@@ -12,10 +12,10 @@ use daw_proto::{ProjectContext, Region, RegionEvent, RegionService, TimeRange};
 use reaper_medium::{
     MarkerOrRegionPosition, PositionInSeconds, ProjectContext as ReaperProjectContext,
 };
-use roam::Tx;
 use std::ffi::CString;
 use std::time::Duration;
 use tracing::{debug, info};
+use vox::Tx;
 
 // =============================================================================
 // Public sync helper — callable directly from the main thread
@@ -356,7 +356,7 @@ impl RegionService for ReaperRegion {
         let this = self.clone();
 
         // Spawn the streaming loop so this method returns immediately
-        // (roam needs the method to return so it can send the Response)
+        // (vox needs the method to return so it can send the Response)
         moire::task::spawn(async move {
             // Send initial state
             let regions = this.get_regions(project.clone()).await;

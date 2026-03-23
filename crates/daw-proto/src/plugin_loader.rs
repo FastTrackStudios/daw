@@ -6,7 +6,7 @@
 //! space at startup.
 
 use facet::Facet;
-use roam::service;
+use vox::service;
 
 /// Result of a plugin load operation.
 #[repr(u8)]

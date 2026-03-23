@@ -17,11 +17,11 @@ use reaper_medium::{
     ProjectContext as ReaperProjectContext, ProjectRef, Semitones, TakeAttributeKey,
     UiRefreshBehavior,
 };
-use roam::Tx;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::broadcast;
 use tracing::{debug, info};
+use vox::Tx;
 
 // =============================================================================
 // Helpers

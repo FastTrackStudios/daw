@@ -4,7 +4,7 @@
 
 use super::{Marker, MarkerEvent};
 use crate::ProjectContext;
-use roam::{Tx, service};
+use vox::{Tx, service};
 
 /// Service for managing markers in a DAW project
 ///

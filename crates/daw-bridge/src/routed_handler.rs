@@ -1,4 +1,4 @@
-//! Handler composition and connection acceptance for roam v7.
+//! Handler composition and connection acceptance for vox v7.
 //!
 //! - `RoutedHandler`: routes incoming calls to the correct service dispatcher
 //!   by matching `method_id` against each service's known methods.
@@ -8,14 +8,14 @@
 //!   connections with metadata to specify their role; the acceptor decides
 //!   which services to expose.
 
-use roam::{
-    AcceptedConnection, ConnectionAcceptor, ConnectionHandle, ConnectionId, ConnectionSettings,
-    Driver, DriverReplySink, Handler, MetadataEntry, MetadataValue, MethodId, ReplySink, RoamError,
-    SchemaRecvTracker, SelfRef, ServiceDescriptor,
-};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
+use vox::{
+    AcceptedConnection, ConnectionAcceptor, ConnectionHandle, ConnectionId, ConnectionSettings,
+    Driver, DriverReplySink, Handler, MetadataEntry, MetadataValue, MethodId, ReplySink,
+    SchemaRecvTracker, SelfRef, ServiceDescriptor, VoxError,
+};
 
 // ============================================================================
 // RoutedHandler — method-ID-based dispatch
@@ -25,7 +25,7 @@ use tracing::info;
 trait DynHandler: Send + Sync + 'static {
     fn handle(
         &self,
-        call: SelfRef<roam::RequestCall<'static>>,
+        call: SelfRef<vox::RequestCall<'static>>,
         reply: DriverReplySink,
         schemas: Arc<SchemaRecvTracker>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>>;
@@ -35,7 +35,7 @@ trait DynHandler: Send + Sync + 'static {
 impl<H: Handler<DriverReplySink>> DynHandler for H {
     fn handle(
         &self,
-        call: SelfRef<roam::RequestCall<'static>>,
+        call: SelfRef<vox::RequestCall<'static>>,
         reply: DriverReplySink,
         schemas: Arc<SchemaRecvTracker>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + '_>> {
@@ -78,7 +78,7 @@ impl RoutedHandler {
 impl Handler<DriverReplySink> for RoutedHandler {
     async fn handle(
         &self,
-        call: SelfRef<roam::RequestCall<'static>>,
+        call: SelfRef<vox::RequestCall<'static>>,
         reply: DriverReplySink,
         schemas: Arc<SchemaRecvTracker>,
     ) {
@@ -87,7 +87,7 @@ impl Handler<DriverReplySink> for RoutedHandler {
             self.handlers[idx].handle(call, reply, schemas).await;
         } else {
             reply
-                .send_error(RoamError::<core::convert::Infallible>::UnknownMethod)
+                .send_error(VoxError::<core::convert::Infallible>::UnknownMethod)
                 .await;
         }
     }
@@ -122,7 +122,7 @@ impl ConnectionAcceptor for DawConnectionAcceptor {
         conn_id: ConnectionId,
         peer_settings: &ConnectionSettings,
         metadata: &[MetadataEntry],
-    ) -> Result<AcceptedConnection, roam::Metadata<'static>> {
+    ) -> Result<AcceptedConnection, vox::Metadata<'static>> {
         let role = metadata
             .iter()
             .find(|e| e.key == "role")

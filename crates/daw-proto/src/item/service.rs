@@ -3,7 +3,7 @@
 use super::{FadeShape, Item, ItemEvent, ItemRef, SourceType, Take, TakeEvent, TakeRef};
 use crate::primitives::{BeatAttachMode, Duration, PositionInSeconds};
 use crate::{ProjectContext, TrackRef};
-use roam::{Tx, service};
+use vox::{Tx, service};
 
 /// Service for managing items on tracks
 ///

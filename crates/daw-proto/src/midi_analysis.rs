@@ -5,7 +5,7 @@
 
 use crate::ProjectContext;
 use facet::Facet;
-use roam::service;
+use vox::service;
 
 /// Request to generate chart/chord data from a DAW project.
 #[derive(Clone, Debug, Facet)]

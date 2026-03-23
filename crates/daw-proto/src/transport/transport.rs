@@ -7,8 +7,8 @@ use crate::ProjectContext;
 use crate::primitives::{Position, Tempo, TimeSignature};
 use crate::transport::error::TransportError;
 use facet::Facet;
-use roam::Tx;
-use roam::service;
+use vox::Tx;
+use vox::service;
 
 /// Current playback state
 #[repr(u8)]

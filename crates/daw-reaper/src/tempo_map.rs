@@ -29,11 +29,11 @@ use daw_proto::{
 };
 use reaper_high::{Project, Reaper};
 use reaper_medium::{MeasureMode, ProjectContext as ReaperProjectContext, ProjectRef};
-use roam::Tx;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::broadcast;
 use tracing::{debug, info};
+use vox::Tx;
 
 // =============================================================================
 // Tempo Map Change Detection — broadcaster + cache + poll

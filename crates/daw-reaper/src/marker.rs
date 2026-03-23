@@ -9,10 +9,10 @@ use crate::safe_wrappers::markers as sw;
 use crate::safe_wrappers::ruler_lanes;
 use daw_proto::{Marker, MarkerEvent, MarkerService, Position, ProjectContext, TimePosition};
 use reaper_medium::{BookmarkRef, MarkerOrRegionPosition, ProjectContext as ReaperProjectContext};
-use roam::Tx;
 use std::ffi::CString;
 use std::time::Duration;
 use tracing::{debug, info};
+use vox::Tx;
 
 /// REAPER marker implementation.
 ///
@@ -307,7 +307,7 @@ impl MarkerService for ReaperMarker {
         let this = self.clone();
 
         // Spawn the streaming loop so this method returns immediately
-        // (roam needs the method to return so it can send the Response)
+        // (vox needs the method to return so it can send the Response)
         moire::task::spawn(async move {
             // Send initial state
             let markers = this.get_markers(project.clone()).await;

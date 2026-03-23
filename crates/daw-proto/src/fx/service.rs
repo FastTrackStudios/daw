@@ -21,8 +21,8 @@ use super::{
     SetParameterRequest,
 };
 use crate::ProjectContext;
-use roam::Tx;
-use roam::service;
+use vox::Tx;
+use vox::service;
 
 /// Service for managing FX (audio plugins) in a DAW project
 ///

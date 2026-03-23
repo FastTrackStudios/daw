@@ -2,8 +2,8 @@
 //!
 //! Provides access to REAPER resource directories and configuration files.
 
-use roam::service;
 use std::path::PathBuf;
+use vox::service;
 
 /// Service for accessing REAPER resource paths and configuration locations
 #[service]

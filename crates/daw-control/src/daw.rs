@@ -16,7 +16,7 @@ use crate::Result;
 /// #[tokio::main]
 /// async fn main() -> daw_control::Result<()> {
 ///     // Initialize the global connection
-///     let handle = roam::connect("unix:///tmp/fts-daw.sock").await?;
+///     let handle = vox::connect("unix:///tmp/fts-daw.sock").await?;
 ///     Daw::init(handle)?;
 ///
 ///     // Get current project
@@ -42,12 +42,12 @@ impl Daw {
     /// ```no_run
     /// # use daw_proto::client::Daw;
     /// # async {
-    /// let handle = roam::connect("unix:///tmp/fts-daw.sock").await?;
+    /// let handle = vox::connect("unix:///tmp/fts-daw.sock").await?;
     /// Daw::init(handle)?;
     /// # Ok::<(), eyre::Error>(())
     /// # };
     /// ```
-    pub fn init(handle: roam::session::ConnectionHandle) -> Result<()> {
+    pub fn init(handle: vox::session::ConnectionHandle) -> Result<()> {
         DawConnection::init_globally(handle).map_err(|_| Error::Other("DAW already initialized".to_string()))
     }
 

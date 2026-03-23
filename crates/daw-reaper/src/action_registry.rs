@@ -17,11 +17,11 @@ use reaper_high::Reaper;
 use reaper_medium::{
     CommandId, Hmenu, HookCustomMenu, MenuHookFlag, OwnedGaccelRegister, ProjectContext, ReaperStr,
 };
-use roam::Tx;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
+use vox::Tx;
 
 /// Tracks actions registered through this service.
 ///
@@ -33,7 +33,7 @@ static REGISTERED_ACTIONS: std::sync::OnceLock<Mutex<HashMap<String, u32>>> =
 /// Broadcast channel for action trigger events.
 ///
 /// Each subscriber gets their own `broadcast::Receiver` which forwards
-/// events to their roam `Tx<ActionEvent>`.
+/// events to their vox `Tx<ActionEvent>`.
 static ACTION_BROADCASTER: std::sync::OnceLock<broadcast::Sender<String>> =
     std::sync::OnceLock::new();
 

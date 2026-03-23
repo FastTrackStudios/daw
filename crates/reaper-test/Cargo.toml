@@ -9,8 +9,8 @@ runner = ["dep:reaper-launcher"]
 
 [dependencies]
 daw = { workspace = true }
-roam = { workspace = true }
-roam-stream = { workspace = true }
+vox = { workspace = true }
+vox-stream = { workspace = true }
 moire.workspace = true
 eyre = "0.6"
 tokio = { version = "1", features = ["time", "process", "rt", "rt-multi-thread", "net"] }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::DawClients;
 use crate::Result;
 use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport as TransportState};
-use roam::Rx;
+use vox::Rx;
 
 /// Transport handle for a specific project
 ///
@@ -19,7 +19,7 @@ use roam::Rx;
 /// ```no_run
 /// use daw_control::Daw;
 ///
-/// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+/// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
 /// let daw = Daw::new(handle);
 /// let project = daw.current_project().await?;
 /// let transport = project.transport();
@@ -314,7 +314,7 @@ impl Transport {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     /// let transport = project.transport();
@@ -351,7 +351,7 @@ impl Transport {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     /// let transport = project.transport();
@@ -368,7 +368,7 @@ impl Transport {
     /// ```
     pub async fn subscribe_state(&self) -> Result<Rx<TransportState>> {
         // Create a channel pair
-        let (tx, rx) = roam::channel::<TransportState>();
+        let (tx, rx) = vox::channel::<TransportState>();
 
         // Call the service method to start the stream
         self.clients
@@ -393,7 +393,7 @@ impl Transport {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     /// let transport = project.transport();
@@ -412,7 +412,7 @@ impl Transport {
     /// ```
     pub async fn subscribe_all_projects(&self) -> Result<Rx<daw_proto::AllProjectsTransport>> {
         // Create a channel pair
-        let (tx, rx) = roam::channel::<daw_proto::AllProjectsTransport>();
+        let (tx, rx) = vox::channel::<daw_proto::AllProjectsTransport>();
 
         // Call the service method to start the stream
         self.clients.transport.subscribe_all_projects(tx).await?;

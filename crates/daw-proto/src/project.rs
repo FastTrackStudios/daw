@@ -12,7 +12,7 @@
 
 use crate::UndoScope;
 use facet::Facet;
-use roam::{Tx, service};
+use vox::{Tx, service};
 
 /// Context specifying which project to operate on
 ///

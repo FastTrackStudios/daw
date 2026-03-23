@@ -53,12 +53,12 @@ fts-devtools = { path = "crates/fts-devtools" }
 # Facet reflection - use crates.io 0.44.x
 facet = { version = "0.44" }
 
-# ROAM service framework (latest main)
-roam = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-stream = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-roam-shm = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-shm-primitives = { git = "https://github.com/bearcove/roam.git", branch = "main" }
-shm-primitives-async = { git = "https://github.com/bearcove/roam.git", branch = "main" }
+# VOX service framework (pinned)
+vox = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-stream = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+vox-shm = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+shm-primitives = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+shm-primitives-async = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
 
 # CLI
 clap = { version = "4", features = ["derive"] }
@@ -109,19 +109,25 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # ── Local development overrides ──────────────────────────────────────
 # Uncomment to use local checkouts instead of GitHub.
-#
-# [patch."https://github.com/FastTrackStudios/input_actions.git"]
-# actions-proto = { path = "../input_actions/crates/actions-proto" }
-#
-# [patch."https://github.com/FastTrackStudios/keyflow.git"]
-# keyflow = { path = "../keyflow/crates/keyflow" }
-#
+
+[patch."https://github.com/FastTrackStudios/input_actions.git"]
+actions-proto = { path = "../input_actions/crates/actions-proto" }
+
+[patch."https://github.com/FastTrackStudios/keyflow.git"]
+keyflow = { path = "../keyflow/crates/keyflow" }
+
 # [patch."https://github.com/FastTrackStudios/dock-dioxus.git"]
 # dock-dioxus = { path = "../dock-dioxus/crates/dock-dioxus" }
 # dock-proto = { path = "../dock-dioxus/crates/dock-proto" }
 
+# ── Patch remote daw.git refs from transitive deps (e.g. keyflow) ────
+[patch."https://github.com/FastTrackStudios/daw.git"]
+daw-proto = { path = "crates/daw-proto" }
+daw-control = { path = "crates/daw-control" }
+dawfile-reaper = { path = "crates/dawfile-reaper" }
+
 # ── Vendored patches ──────────────────────────────────────────────────
-# moire: unify crates.io moire with the git rev that roam pulls in,
+# moire: unify crates.io moire with the git rev that vox pulls in,
 # avoiding duplicate moire-runtime #[ctor] registrations that crash.
 # moire-trace-capture: tolerate broken frame-pointer chains (NixOS glibc).
 [patch."https://github.com/bearcove/moire"]

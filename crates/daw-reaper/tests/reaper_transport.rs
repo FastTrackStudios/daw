@@ -2,7 +2,7 @@
 //!
 //! Each test exercises a single transport action against a live REAPER
 //! instance, verifying that every method in the `TransportService` trait
-//! works end-to-end through the roam RPC layer.
+//! works end-to-end through the vox RPC layer.
 //!
 //! Run with:
 //!

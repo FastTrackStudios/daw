@@ -10,10 +10,10 @@ use daw_proto::{
 };
 use reaper_high::{GroupingBehavior, Project, Reaper};
 use reaper_medium::{GangBehavior, ProjectRef};
-use roam::Tx;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use tokio::sync::broadcast;
+use vox::Tx;
 
 use crate::main_thread;
 use crate::project_context::{find_project_by_guid, project_guid};

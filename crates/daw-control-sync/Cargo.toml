@@ -11,8 +11,8 @@ tokio = { version = "1", features = ["rt", "sync", "time", "net"] }
 
 # DAW control protocol
 daw-control = { path = "../daw-control" }
-roam.workspace = true
-roam-stream.workspace = true
+vox.workspace = true
+vox-stream.workspace = true
 moire.workspace = true
 
 # Error handling

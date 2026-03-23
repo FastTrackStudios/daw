@@ -17,12 +17,12 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use daw_control::Daw;
 use eyre::{Result, eyre};
-use roam::{
+use shm_primitives::PeerId;
+use vox::{
     ConnectionSettings, Driver, ErasedCaller, MetadataEntry, MetadataFlags, MetadataValue, Parity,
 };
-use roam_shm::bootstrap::{BootstrapStatus, encode_request};
-use roam_shm::{Segment, ShmLink};
-use shm_primitives::PeerId;
+use vox_shm::bootstrap::{BootstrapStatus, encode_request};
+use vox_shm::{Segment, ShmLink};
 
 use reaper_test::reaper_test;
 
@@ -108,7 +108,7 @@ fn connect_shm(bootstrap_path: &Path) -> Result<ShmLink> {
     }
 
     unsafe {
-        roam_shm::guest_link_from_raw(segment, peer_id, doorbell_fd, mmap_rx_fd, mmap_tx_fd, true)
+        vox_shm::guest_link_from_raw(segment, peer_id, doorbell_fd, mmap_rx_fd, mmap_tx_fd, true)
     }
     .map_err(|e| eyre!("build guest link: {e}"))
 }
@@ -116,8 +116,8 @@ fn connect_shm(bootstrap_path: &Path) -> Result<ShmLink> {
 async fn connect_guest(bootstrap_path: &Path) -> Result<Daw> {
     let link = connect_shm(bootstrap_path)?;
 
-    let handshake = roam::HandshakeResult {
-        role: roam::SessionRole::Initiator,
+    let handshake = vox::HandshakeResult {
+        role: vox::SessionRole::Initiator,
         our_settings: ConnectionSettings {
             parity: Parity::Odd,
             max_concurrent_requests: 64,
@@ -132,10 +132,10 @@ async fn connect_guest(bootstrap_path: &Path) -> Result<Daw> {
         our_schema: vec![],
         peer_schema: vec![],
     };
-    let (_root_caller, session) = roam::initiator_conduit(link, handshake)
-        .establish::<roam::DriverCaller>(())
+    let (_root_caller, session) = vox::initiator_conduit(link, handshake)
+        .establish::<vox::DriverCaller>(())
         .await
-        .map_err(|e| eyre!("roam handshake failed: {e:?}"))?;
+        .map_err(|e| eyre!("vox handshake failed: {e:?}"))?;
 
     let conn = session
         .open_connection(

@@ -10,7 +10,7 @@ use daw_proto::{
     primitives::{Duration, PositionInSeconds},
     track::TrackRef,
 };
-use roam::Rx;
+use vox::Rx;
 
 /// Items handle for a specific track
 ///
@@ -266,7 +266,7 @@ impl ProjectItems {
     /// Returns a receiver that streams granular item events for this project.
     /// The stream continues until the returned `Rx` is dropped.
     pub async fn subscribe(&self) -> Result<Rx<ItemEvent>> {
-        let (tx, rx) = roam::channel::<ItemEvent>();
+        let (tx, rx) = vox::channel::<ItemEvent>();
         self.clients
             .item
             .subscribe_items(self.context(), tx)
@@ -279,7 +279,7 @@ impl ProjectItems {
     /// Returns a receiver that streams granular take events for this project.
     /// The stream continues until the returned `Rx` is dropped.
     pub async fn subscribe_takes(&self) -> Result<Rx<TakeEvent>> {
-        let (tx, rx) = roam::channel::<TakeEvent>();
+        let (tx, rx) = vox::channel::<TakeEvent>();
         self.clients
             .take
             .subscribe_takes(self.context(), tx)
@@ -842,7 +842,7 @@ impl TakeHandle {
     /// ```no_run
     /// use daw_control::Daw;
     ///
-    /// # async fn example(handle: roam::ErasedCaller) -> daw_control::Result<()> {
+    /// # async fn example(handle: vox::ErasedCaller) -> daw_control::Result<()> {
     /// let daw = Daw::new(handle);
     /// let project = daw.current_project().await?;
     ///

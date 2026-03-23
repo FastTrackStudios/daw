@@ -9,11 +9,11 @@ use daw_proto::{
     PlayState, ProjectContext, Transport, TransportService,
     primitives::{Position, PositionInSeconds, Tempo, TimeSignature},
 };
-use roam::Tx;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info, warn};
+use vox::Tx;
 use web_time::Instant;
 
 /// Runtime state wrapping Transport with playback timing for a single project
@@ -615,7 +615,7 @@ impl TransportService for StandaloneTransport {
             let tx = _tx;
 
             // Spawn the streaming loop so this method returns immediately
-            // (roam needs the method to return so it can send the Response)
+            // (vox needs the method to return so it can send the Response)
             moire::task::spawn(async move {
                 // ~16ms for 60Hz
                 let interval = Duration::from_micros(16667);
