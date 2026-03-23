@@ -356,7 +356,7 @@ impl ActionRegistryService for ReaperActionRegistry {
             // First check if someone else already registered this command name
             let medium = reaper.medium_reaper();
             if let Some(existing) = medium.named_command_lookup(format!("_{name_for_query}")) {
-                info!(
+                debug!(
                     "Action '{}' already exists in REAPER (cmd_id={})",
                     name_for_query,
                     existing.get()
@@ -376,9 +376,7 @@ impl ActionRegistryService for ReaperActionRegistry {
                 // For toggleable actions, read state from the shared toggle map.
                 // Guests update this via set_toggle_state().
                 let state_key = name_for_query.clone();
-                reaper_high::ActionKind::Toggleable(Box::new(move || {
-                    read_toggle_state(&state_key)
-                }))
+                reaper_high::ActionKind::Toggleable(Box::new(move || read_toggle_state(&state_key)))
             } else {
                 reaper_high::ActionKind::NotToggleable
             };
@@ -416,7 +414,7 @@ impl ActionRegistryService for ReaperActionRegistry {
             }
 
             let cmd_id_val = cmd_id.get();
-            info!(
+            debug!(
                 "Registered action '{}' → cmd_id={} (\"{}\")",
                 name_for_query, cmd_id_val, desc_for_query
             );
@@ -446,7 +444,7 @@ impl ActionRegistryService for ReaperActionRegistry {
                     });
                 }
 
-                info!("Action '{}' registered: cmd_id={}", command_name, cmd_id);
+                debug!("Action '{}' registered: cmd_id={}", command_name, cmd_id);
                 cmd_id
             }
             _ => {
@@ -604,11 +602,7 @@ impl ActionRegistryService for ReaperActionRegistry {
     }
 
     async fn get_toggle_state(&self, command_name: String) -> Option<bool> {
-        toggle_states()
-            .lock()
-            .unwrap()
-            .get(&command_name)
-            .copied()
+        toggle_states().lock().unwrap().get(&command_name).copied()
     }
 }
 

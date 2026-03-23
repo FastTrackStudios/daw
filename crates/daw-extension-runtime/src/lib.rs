@@ -38,7 +38,7 @@ use roam::{
 use roam_shm::bootstrap::{BootstrapStatus, encode_request};
 use roam_shm::{Segment, ShmLink};
 use shm_primitives::PeerId;
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 /// Options for connecting to daw-bridge as an SHM guest.
 pub struct GuestOptions<'a> {
@@ -79,14 +79,14 @@ pub async fn connect(opts: GuestOptions<'_>) -> Result<daw::Daw> {
         Some(path) => path,
         None => discover_bootstrap_socket()?,
     };
-    info!(
+    debug!(
         "[guest:{pid}] Connecting via bootstrap socket: {}",
         bootstrap_sock.display()
     );
 
     // Step 2: SHM handshake
     let link = connect_shm(&bootstrap_sock)?;
-    info!("[guest:{pid}] SHM link established");
+    debug!("[guest:{pid}] SHM link established");
 
     // Step 3: Establish roam session
     // SHM connections skip the CBOR handshake (handled at the bootstrap layer),
@@ -96,7 +96,7 @@ pub async fn connect(opts: GuestOptions<'_>) -> Result<daw::Daw> {
         .establish::<roam::DriverCaller>(())
         .await
         .map_err(|e| eyre!("roam handshake failed: {e:?}"))?;
-    info!("[guest:{pid}] Roam session established");
+    debug!("[guest:{pid}] Roam session established");
 
     // Step 4: Open virtual connection
     // Leak the role string — guest connections live for the process lifetime.
@@ -122,7 +122,7 @@ pub async fn connect(opts: GuestOptions<'_>) -> Result<daw::Daw> {
 
     // Step 5: Return Daw handle
     let daw = daw::Daw::new(caller);
-    info!("[guest:{pid}] Connected as role={role}");
+    debug!("[guest:{pid}] Connected as role={role}");
     Ok(daw)
 }
 
@@ -201,7 +201,7 @@ fn connect_shm(bootstrap_path: &Path) -> Result<ShmLink> {
 
     let shm_path = std::str::from_utf8(&received.response.payload)
         .map_err(|e| eyre!("bootstrap payload not utf-8: {e}"))?;
-    info!("Attaching to SHM segment at {}", shm_path);
+    debug!("Attaching to SHM segment at {}", shm_path);
 
     let segment = Arc::new(
         Segment::attach(Path::new(shm_path))
@@ -300,21 +300,17 @@ pub async fn register_actions(daw: &daw::Daw, actions: &[ActionDef]) -> Result<A
             .unwrap_or(false);
 
         if in_list {
-            info!(
-                "[guest:{pid}] Registered {} (cmd_id={cmd_id}) — confirmed in action list",
-                action.command_name
-            );
             registered += 1;
         } else {
             warn!(
-                "[guest:{pid}] Registered {} (cmd_id={cmd_id}) — NOT in action list!",
+                "[guest:{pid}] Action NOT in action list after registration: {} (cmd_id={cmd_id})",
                 action.command_name
             );
             failed += 1;
         }
     }
 
-    info!(
+    debug!(
         "[guest:{pid}] Action registration: {registered} OK, {failed} failed (of {} total)",
         actions.len()
     );
