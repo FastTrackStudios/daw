@@ -176,10 +176,7 @@ impl Tracks {
     /// items, FX, routing, and automation. Creates new tracks only for
     /// unmatched nodes. Reorders everything to match the hierarchy and sets
     /// folder depths and colors — all in one main-thread tick.
-    pub async fn apply_hierarchy(
-        &self,
-        hierarchy: daw_proto::TrackHierarchy,
-    ) -> Result<()> {
+    pub async fn apply_hierarchy(&self, hierarchy: daw_proto::TrackHierarchy) -> Result<()> {
         self.clients
             .track
             .apply_hierarchy(self.context(), hierarchy)

@@ -345,7 +345,7 @@ fn start_unix_socket_server(acceptor: DawConnectionAcceptor) {
                             our_schema: vec![],
                             peer_schema: vec![],
                         };
-                        match roam::acceptor(roam::BareConduit::new(link), handshake)
+                        match roam::acceptor_conduit(roam::BareConduit::new(link), handshake)
                             .on_connection(acceptor)
                             .establish::<roam::DriverCaller>(())
                             .await

@@ -1248,7 +1248,12 @@ impl MultiDawTestContext {
             handles.push(tokio::spawn(async move {
                 let proj = daw.current_project().await?;
                 let state = proj.transport().get_state().await?;
-                let pos = state.playhead_position.time.as_ref().map(|t| t.as_seconds()).unwrap_or(0.0);
+                let pos = state
+                    .playhead_position
+                    .time
+                    .as_ref()
+                    .map(|t| t.as_seconds())
+                    .unwrap_or(0.0);
                 Ok::<_, eyre::Report>((label, pos))
             }));
         }
@@ -1269,7 +1274,10 @@ impl MultiDawTestContext {
                     drift < tolerance_secs,
                     "{context}: position drift {drift:.4}s exceeds {tolerance_secs}s \
                      ({}={:.4}s, {}={:.4}s)",
-                    positions[i].0, positions[i].1, positions[j].0, positions[j].1,
+                    positions[i].0,
+                    positions[i].1,
+                    positions[j].0,
+                    positions[j].1,
                 );
                 results.push((
                     positions[i].0.clone(),
@@ -1310,10 +1318,7 @@ impl MultiDawTestContext {
             let port = inst
                 .poll_ext_state_value(ext_section, "mesh_port", 10, 500)
                 .await?;
-            println!(
-                "  [{}] peer_id={peer_id}, mesh_port={port}",
-                inst.label
-            );
+            println!("  [{}] peer_id={peer_id}, mesh_port={port}", inst.label);
         }
 
         println!("  Waiting for mDNS peer discovery...");

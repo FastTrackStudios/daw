@@ -1392,7 +1392,7 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#27d2429bbe0d02ab403b7a9288afaee8e77f13de"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#ee48b342cc830eb6c38acecc760754e831a3361c"
 dependencies = [
  "actions-proto",
  "facet",
@@ -2173,7 +2173,7 @@ dependencies = [
 [[package]]
 name = "facet-cbor"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
 dependencies = [
  "facet",
  "facet-core",
@@ -2291,21 +2291,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77e7b83cb0de7c00d6e76f08d36b047d6cb9efc39e10744dbcf7a4a5a19c4903"
 dependencies = [
  "facet-core",
-]
-
-[[package]]
-name = "facet-postcard"
-version = "0.44.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7578186a9babca46fe08118e9a856b1ef158ae24b3a7a551926273ad1ad5e52a"
-dependencies = [
- "camino",
- "facet-core",
- "facet-format",
- "facet-path",
- "facet-reflect",
- "facet-value",
- "tracing",
 ]
 
 [[package]]
@@ -3278,7 +3263,7 @@ dependencies = [
  "cesu8",
  "cfg-if",
  "combine",
- "jni-sys",
+ "jni-sys 0.3.1",
  "log",
  "thiserror 1.0.69",
  "walkdir",
@@ -3287,9 +3272,31 @@ dependencies = [
 
 [[package]]
 name = "jni-sys"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8eaf4bc02d17cbdd7ff4c7438cafcdf7fb9a4613313ad11b4f8fefe7d3fa0130"
+checksum = "41a652e1f9b6e0275df1f15b32661cf0d4b78d4d87ddec5e0c3c20f097433258"
+dependencies = [
+ "jni-sys 0.4.1",
+]
+
+[[package]]
+name = "jni-sys"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6377a88cb3910bee9b0fa88d4f42e1d2da8e79915598f65fb0c7ee14c878af2"
+dependencies = [
+ "jni-sys-macros",
+]
+
+[[package]]
+name = "jni-sys-macros"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38c0b942f458fe50cdac086d2f946512305e5631e720728f2a61aabcd47a6264"
+dependencies = [
+ "quote",
+ "syn 2.0.117",
+]
 
 [[package]]
 name = "js-sys"
@@ -3943,6 +3950,7 @@ dependencies = [
 [[package]]
 name = "moire-trace-capture"
 version = "1.0.0"
+source = "git+https://github.com/FastTrackStudios/moire-trace-capture.git?branch=main#e62bf340b809e5f89a3f95251f655e7803fc8373"
 dependencies = [
  "libc",
  "moire-trace-types",
@@ -4049,7 +4057,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3f42e7bbe13d351b6bead8286a43aac9534b82bd3cc43e47037f012ebfd62d4"
 dependencies = [
  "bitflags 2.11.0",
- "jni-sys",
+ "jni-sys 0.3.1",
  "log",
  "ndk-sys",
  "num_enum 0.7.6",
@@ -4069,7 +4077,7 @@ version = "0.6.0+11769913"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
- "jni-sys",
+ "jni-sys 0.3.1",
 ]
 
 [[package]]
@@ -5300,7 +5308,7 @@ dependencies = [
 [[package]]
 name = "roam"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
 dependencies = [
  "facet",
  "roam-core",
@@ -5313,7 +5321,7 @@ dependencies = [
 [[package]]
 name = "roam-core"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
 dependencies = [
  "facet",
  "facet-cbor",
@@ -5334,7 +5342,7 @@ dependencies = [
 [[package]]
 name = "roam-macros-core"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
 dependencies = [
  "facet-cargo-toml",
  "heck 0.5.0",
@@ -5346,7 +5354,7 @@ dependencies = [
 [[package]]
 name = "roam-macros-parse"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -5355,18 +5363,30 @@ dependencies = [
 [[package]]
 name = "roam-postcard"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
 dependencies = [
  "facet",
  "facet-core",
  "facet-reflect",
- "roam-types",
+ "roam-schema",
+]
+
+[[package]]
+name = "roam-schema"
+version = "7.3.0"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
+dependencies = [
+ "blake3",
+ "facet",
+ "facet-cbor",
+ "facet-core",
+ "indexmap",
 ]
 
 [[package]]
 name = "roam-service-macros"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
 dependencies = [
  "proc-macro2",
  "roam-macros-core",
@@ -5375,7 +5395,7 @@ dependencies = [
 [[package]]
 name = "roam-shm"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
 dependencies = [
  "libc",
  "loom",
@@ -5391,7 +5411,7 @@ dependencies = [
 [[package]]
 name = "roam-stream"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
 dependencies = [
  "moire",
  "roam-core",
@@ -5402,7 +5422,7 @@ dependencies = [
 [[package]]
 name = "roam-types"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
 dependencies = [
  "bitflags 2.11.0",
  "blake3",
@@ -5410,9 +5430,12 @@ dependencies = [
  "facet-cbor",
  "facet-core",
  "facet-path",
- "facet-postcard",
  "futures-channel",
  "heck 0.5.0",
+ "indexmap",
+ "moire",
+ "roam-postcard",
+ "roam-schema",
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
@@ -5699,7 +5722,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "shm-primitives"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
 dependencies = [
  "libc",
  "loom",
@@ -5709,7 +5732,7 @@ dependencies = [
 [[package]]
 name = "shm-primitives-async"
 version = "7.3.0"
-source = "git+https://github.com/bearcove/roam.git?branch=main#6d9ea5a5e29d86c596bbb13e86ec92c88751b458"
+source = "git+https://github.com/bearcove/roam.git?branch=main#e60a7785a666cecdf2ec76181120d01e62f7fbef"
 dependencies = [
  "libc",
  "tokio",

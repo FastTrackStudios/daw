@@ -241,10 +241,7 @@ impl TestRunner {
             self.timeout_secs
         );
         if !self.extension_whitelist.is_empty() {
-            println!(
-                "  whitelist:   {}",
-                self.extension_whitelist.join(",")
-            );
+            println!("  whitelist:   {}", self.extension_whitelist.join(","));
         }
         println!("  logs:");
         println!("    REAPER process → {}", reaper_log.display());

@@ -542,10 +542,7 @@ fn apply_hierarchy_on_main_thread(
     let mut existing_by_name: HashMap<String, Vec<String>> = HashMap::new();
     for i in 0..proj.track_count() {
         if let Some(t) = proj.track_by_index(i) {
-            let name = t
-                .name()
-                .map(|n| n.to_str().to_string())
-                .unwrap_or_default();
+            let name = t.name().map(|n| n.to_str().to_string()).unwrap_or_default();
             existing_by_name
                 .entry(name)
                 .or_default()
@@ -616,8 +613,7 @@ fn apply_hierarchy_on_main_thread(
                     .unwrap_or_else(|| {
                         // Item track doesn't exist — create it
                         let idx = proj.track_count();
-                        let new_track =
-                            proj.insert_track_at(idx).expect("insert_track_at failed");
+                        let new_track = proj.insert_track_at(idx).expect("insert_track_at failed");
                         new_track.set_name(item_name.as_str());
                         let guid = new_track.guid().to_string_without_braces();
                         claimed_guids.insert(guid.clone());
@@ -723,7 +719,12 @@ fn apply_hierarchy_on_main_thread(
 
     eprintln!(
         "[daw-bridge] apply_hierarchy: {} targets ({} moves), build={:?} reorder={:?} props={:?} total={:?}",
-        targets.len(), moves, t_build, t_reorder, t_props, t0.elapsed()
+        targets.len(),
+        moves,
+        t_build,
+        t_reorder,
+        t_props,
+        t0.elapsed()
     );
 
     Ok(())
@@ -1303,7 +1304,10 @@ impl TrackService for ReaperTrack {
         })
         .await
         .unwrap_or_else(|| Err("main thread unavailable".to_string()));
-        eprintln!("[daw-bridge] apply_hierarchy RPC round-trip: {:?}", t0.elapsed());
+        eprintln!(
+            "[daw-bridge] apply_hierarchy RPC round-trip: {:?}",
+            t0.elapsed()
+        );
         result
     }
 

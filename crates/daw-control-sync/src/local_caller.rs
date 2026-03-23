@@ -104,7 +104,7 @@ impl LocalCaller {
                 our_schema: vec![],
                 peer_schema: vec![],
             };
-            match roam::acceptor(BareConduit::new(server_link), handshake)
+            match roam::acceptor_conduit(BareConduit::new(server_link), handshake)
                 .on_connection(acceptor)
                 .establish::<DriverCaller>(())
                 .await

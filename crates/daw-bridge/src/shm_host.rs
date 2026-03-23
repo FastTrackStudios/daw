@@ -236,7 +236,7 @@ async fn handle_bootstrap_connection(
         our_schema: vec![],
         peer_schema: vec![],
     };
-    let (_caller, _session_handle) = roam::acceptor(link, handshake)
+    let (_caller, _session_handle) = roam::acceptor_conduit(link, handshake)
         .on_connection(acceptor)
         .establish::<roam::DriverCaller>(())
         .await
