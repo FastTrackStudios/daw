@@ -5,7 +5,7 @@ edition.workspace = true
 description = "Input domain SHM extension — connects to REAPER via daw-bridge for keyboard interception"
 
 [[bin]]
-name = "input-extension"
+name = "input"
 path = "src/main.rs"
 
 [dependencies]
