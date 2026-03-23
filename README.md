@@ -103,7 +103,7 @@ kf midi-pdf recording.mid -o sheet.pdf --chart-output generated.kf
                     ┌────────────┼────────────┐
                     │            │             │
               engraver-proto  keyflow-ui    services
-              (layout+render) (Dioxus UI)  (Roam RPC)
+              (layout+render) (Dioxus UI)  (Vox RPC)
                     │            │
                ┌────┴────┐      │
                │  PDF/SVG │   WGPU
@@ -117,7 +117,7 @@ kf midi-pdf recording.mid -o sheet.pdf --chart-output generated.kf
 | Crate | Role |
 |-------|------|
 | [Facet](https://github.com/nicholasgasior/facet) | Reflection, serialization, RPC shapes |
-| [Roam](https://github.com/nicholasgasior/roam) | RPC framework for services |
+| [Vox](https://github.com/nicholasgasior/vox) | RPC framework for services |
 | [Vello](https://github.com/linebender/vello) | GPU-accelerated 2D rendering |
 | [Dioxus](https://dioxuslabs.com) | Reactive UI framework |
 | [Peniko](https://github.com/linebender/peniko) / [Kurbo](https://github.com/linebender/kurbo) | Painting primitives and geometry |
