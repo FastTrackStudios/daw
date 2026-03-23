@@ -385,6 +385,14 @@ impl TrackService for StandaloneTrack {
         Ok(())
     }
 
+    async fn apply_hierarchy(
+        &self,
+        _project: ProjectContext,
+        _hierarchy: daw_proto::TrackHierarchy,
+    ) -> Result<(), String> {
+        Err("apply_hierarchy not implemented for standalone".to_string())
+    }
+
     async fn get_ext_state(
         &self,
         _project: ProjectContext,

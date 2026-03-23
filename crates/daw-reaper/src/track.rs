@@ -504,6 +504,244 @@ pub fn set_folder_depth_on_main_thread(track_guid: &str, depth: i32) -> Result<(
 }
 
 // =============================================================================
+// Bulk Hierarchy Application (single main-thread tick)
+// =============================================================================
+
+/// Apply a TrackHierarchy to the current project in one shot.
+///
+/// The hierarchy contains folder/group nodes whose `items` field lists the
+/// original track names that belong under them. This function:
+///
+/// 1. Builds a flat target track list by expanding hierarchy nodes:
+///    - Folder nodes with children → new empty folder track (structural)
+///    - Nodes with items → each item maps to an existing track (by name)
+///    - Empty leaf nodes → new empty track
+///
+/// 2. Matches items to existing tracks by name, preserving their FX,
+///    routing, envelopes, media items, etc.
+///
+/// 3. Reorders matched tracks + inserts new folder tracks so the final
+///    track order matches the hierarchy. All in one main-thread tick.
+///
+/// 4. Sets folder depths and colors on every track.
+fn apply_hierarchy_on_main_thread(
+    proj: &Project,
+    hierarchy: &daw_proto::TrackHierarchy,
+) -> Result<(), String> {
+    use std::collections::HashSet;
+    use std::time::Instant;
+
+    let t0 = Instant::now();
+
+    if hierarchy.tracks.is_empty() {
+        return Ok(());
+    }
+
+    // Step 1: Build a name→GUID lookup of all existing tracks.
+    // If multiple tracks share a name, we'll claim them FIFO.
+    let mut existing_by_name: HashMap<String, Vec<String>> = HashMap::new();
+    for i in 0..proj.track_count() {
+        if let Some(t) = proj.track_by_index(i) {
+            let name = t
+                .name()
+                .map(|n| n.to_str().to_string())
+                .unwrap_or_default();
+            existing_by_name
+                .entry(name)
+                .or_default()
+                .push(t.guid().to_string_without_braces());
+        }
+    }
+
+    // Track which GUIDs we've already claimed
+    let mut claimed_guids: HashSet<String> = HashSet::new();
+
+    /// Claim the first unclaimed GUID for a given track name
+    fn claim_guid(
+        existing_by_name: &HashMap<String, Vec<String>>,
+        claimed: &mut HashSet<String>,
+        name: &str,
+    ) -> Option<String> {
+        if let Some(guids) = existing_by_name.get(name) {
+            for guid in guids {
+                if !claimed.contains(guid) {
+                    claimed.insert(guid.clone());
+                    return Some(guid.clone());
+                }
+            }
+        }
+        None
+    }
+
+    // Step 2: Build the flat target list.
+    //
+    // Each entry is (guid, folder_depth, color):
+    // - guid: existing track GUID (reused) or newly created track GUID
+    // - folder_depth: the raw folder depth value for this position
+    // - color: optional color to apply
+    struct TargetTrack {
+        guid: String,
+        folder_depth: i32,
+        color: Option<u32>,
+    }
+    let mut targets: Vec<TargetTrack> = Vec::new();
+
+    for node in &hierarchy.tracks {
+        if node.is_folder || node.items.is_empty() {
+            // Folder track or empty leaf — try to match by node name first,
+            // otherwise create a new structural track
+            let guid = claim_guid(&existing_by_name, &mut claimed_guids, &node.name)
+                .unwrap_or_else(|| {
+                    let idx = proj.track_count();
+                    let new_track = proj.insert_track_at(idx).expect("insert_track_at failed");
+                    new_track.set_name(node.name.as_str());
+                    let guid = new_track.guid().to_string_without_braces();
+                    claimed_guids.insert(guid.clone());
+                    guid
+                });
+            targets.push(TargetTrack {
+                guid,
+                folder_depth: node.folder_depth_change.to_raw_value(),
+                color: node.color,
+            });
+        }
+
+        // Expand items: each item maps to an existing track by its original name.
+        // Items appear AFTER the node they belong to (under the folder).
+        if !node.items.is_empty() {
+            let is_also_folder = node.is_folder;
+            let num_items = node.items.len();
+            for (item_idx, item_name) in node.items.iter().enumerate() {
+                let guid = claim_guid(&existing_by_name, &mut claimed_guids, item_name)
+                    .unwrap_or_else(|| {
+                        // Item track doesn't exist — create it
+                        let idx = proj.track_count();
+                        let new_track =
+                            proj.insert_track_at(idx).expect("insert_track_at failed");
+                        new_track.set_name(item_name.as_str());
+                        let guid = new_track.guid().to_string_without_braces();
+                        claimed_guids.insert(guid.clone());
+                        guid
+                    });
+
+                // If this node is NOT a folder (leaf node with items), the folder
+                // depth from the node applies to the LAST item, not the node itself.
+                let folder_depth = if !is_also_folder && item_idx == num_items - 1 {
+                    node.folder_depth_change.to_raw_value()
+                } else {
+                    0 // normal track
+                };
+
+                targets.push(TargetTrack {
+                    guid,
+                    folder_depth,
+                    color: node.color,
+                });
+            }
+        }
+    }
+
+    let t_build = t0.elapsed();
+
+    // Step 3: Reorder tracks to match target order.
+    // Process from top to bottom — move each track to its target index.
+    let t1 = Instant::now();
+    let mut moves = 0u32;
+    for (target_idx, entry) in targets.iter().enumerate() {
+        let target_idx = target_idx as u32;
+
+        let current_idx = find_track_index_by_guid(proj, &entry.guid);
+        let Some(current_idx) = current_idx else {
+            continue;
+        };
+
+        if current_idx == target_idx {
+            continue;
+        }
+
+        // Move via chunk save/remove/insert/restore
+        let Some(track) = proj.track_by_index(current_idx) else {
+            continue;
+        };
+
+        let chunk = track
+            .chunk(1_000_000, reaper_medium::ChunkCacheHint::NormalMode)
+            .map_err(|e| format!("get_chunk failed: {e}"))?;
+        let chunk_str: String = chunk
+            .try_into()
+            .map_err(|_| "chunk to string conversion failed".to_string())?;
+
+        proj.remove_track(&track);
+
+        // After removal, indices shift
+        let insert_idx = if target_idx > current_idx {
+            target_idx.saturating_sub(1)
+        } else {
+            target_idx
+        };
+
+        proj.insert_track_at(insert_idx)
+            .map_err(|e| format!("insert_track_at failed: {e}"))?;
+
+        if let Some(new_track) = proj.track_by_index(insert_idx) {
+            let chunk_obj = reaper_high::Chunk::new(chunk_str);
+            new_track
+                .set_chunk(chunk_obj)
+                .map_err(|e| format!("set_chunk failed: {e}"))?;
+        }
+        moves += 1;
+    }
+    let t_reorder = t1.elapsed();
+
+    // Step 4: Set folder depths and colors on all tracks
+    let t2 = Instant::now();
+    for (i, entry) in targets.iter().enumerate() {
+        let Some(track) = proj.track_by_index(i as u32) else {
+            continue;
+        };
+
+        // Set folder depth
+        if let Ok(raw) = track.raw() {
+            routing_sw::set_media_track_info_value(
+                Reaper::get().medium_reaper(),
+                raw,
+                reaper_medium::TrackAttributeKey::FolderDepth,
+                entry.folder_depth as f64,
+            );
+        }
+
+        // Set color
+        if let Some(color) = entry.color {
+            let r = ((color >> 16) & 0xFF) as u8;
+            let g = ((color >> 8) & 0xFF) as u8;
+            let b = (color & 0xFF) as u8;
+            track.set_custom_color(Some(reaper_medium::RgbColor::rgb(r, g, b)));
+        }
+    }
+
+    let t_props = t2.elapsed();
+
+    eprintln!(
+        "[daw-bridge] apply_hierarchy: {} targets ({} moves), build={:?} reorder={:?} props={:?} total={:?}",
+        targets.len(), moves, t_build, t_reorder, t_props, t0.elapsed()
+    );
+
+    Ok(())
+}
+
+/// Find a track's current index by GUID.
+fn find_track_index_by_guid(proj: &Project, guid: &str) -> Option<u32> {
+    for i in 0..proj.track_count() {
+        if let Some(t) = proj.track_by_index(i) {
+            if t.guid().to_string_without_braces() == guid {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
+// =============================================================================
 // TrackService Implementation
 // =============================================================================
 
@@ -1048,6 +1286,25 @@ impl TrackService for ReaperTrack {
         })
         .await
         .unwrap_or_else(|| Err("main thread unavailable".to_string()))
+    }
+
+    // =========================================================================
+    // Bulk Operations
+    // =========================================================================
+
+    async fn apply_hierarchy(
+        &self,
+        project: ProjectContext,
+        hierarchy: daw_proto::TrackHierarchy,
+    ) -> Result<(), String> {
+        let t0 = std::time::Instant::now();
+        let result = main_thread::query_undoable(project, "FTS: Apply hierarchy", move |proj| {
+            apply_hierarchy_on_main_thread(&proj, &hierarchy)
+        })
+        .await
+        .unwrap_or_else(|| Err("main thread unavailable".to_string()));
+        eprintln!("[daw-bridge] apply_hierarchy RPC round-trip: {:?}", t0.elapsed());
+        result
     }
 
     // =========================================================================

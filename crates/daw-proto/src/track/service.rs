@@ -207,6 +207,26 @@ pub trait TrackService {
     ) -> Result<(), String>;
 
     // =========================================================================
+    // Bulk Operations
+    // =========================================================================
+
+    /// Apply a track hierarchy atomically in a single operation.
+    ///
+    /// Matches hierarchy nodes to existing tracks by name, preserving their
+    /// items, FX, routing, and automation. Creates new tracks only for nodes
+    /// that don't match any existing track (typically folder parents). Reorders
+    /// all matched/created tracks to match the hierarchy order and sets folder
+    /// depths and colors.
+    ///
+    /// This executes as a single main-thread operation, avoiding per-track
+    /// round-trips through the timer.
+    async fn apply_hierarchy(
+        &self,
+        project: ProjectContext,
+        hierarchy: super::TrackHierarchy,
+    ) -> Result<(), String>;
+
+    // =========================================================================
     // Track ExtState (P_EXT)
     // =========================================================================
 

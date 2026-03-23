@@ -167,6 +167,27 @@ impl Tracks {
     }
 
     // =========================================================================
+    // Bulk Operations
+    // =========================================================================
+
+    /// Apply a track hierarchy atomically in a single operation.
+    ///
+    /// Matches hierarchy nodes to existing tracks by name, preserving their
+    /// items, FX, routing, and automation. Creates new tracks only for
+    /// unmatched nodes. Reorders everything to match the hierarchy and sets
+    /// folder depths and colors — all in one main-thread tick.
+    pub async fn apply_hierarchy(
+        &self,
+        hierarchy: daw_proto::TrackHierarchy,
+    ) -> Result<()> {
+        self.clients
+            .track
+            .apply_hierarchy(self.context(), hierarchy)
+            .await
+            .map_err(|e| Error::Other(format!("{:?}", e)))
+    }
+
+    // =========================================================================
     // Track Creation / Deletion
     // =========================================================================
 
