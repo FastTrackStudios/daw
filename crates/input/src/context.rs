@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 /// Execution context carrying tags (boolean flags) and variables (key-value pairs).
 ///
 /// This is a local version of the `ActionContext` from `actions-proto`,
-/// kept self-contained to avoid the upstream `roam-session` breakage.
+/// kept self-contained to avoid the upstream `vox-session` breakage.
 #[derive(Debug, Clone, Default)]
 pub struct ActionContext {
     tags: HashSet<String>,

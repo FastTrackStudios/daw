@@ -5,7 +5,7 @@
 /// A keyboard key code.
 ///
 /// Mirrors the `KeyCode` from `actions-keybindings` so the input crate can
-/// remain self-contained while the upstream `roam-session` dependency is broken.
+/// remain self-contained while the upstream `vox-session` dependency is broken.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum KeyCode {
     /// A printable character key (lowercase). Space is `" "`.
