@@ -3897,7 +3897,7 @@ dependencies = [
 [[package]]
 name = "moire"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
 dependencies = [
  "moire-macros",
  "moire-macros-noop",
@@ -3908,7 +3908,7 @@ dependencies = [
 [[package]]
 name = "moire-macros"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3918,12 +3918,12 @@ dependencies = [
 [[package]]
 name = "moire-macros-noop"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
 
 [[package]]
 name = "moire-runtime"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
 dependencies = [
  "ctor",
  "facet",
@@ -3939,7 +3939,7 @@ dependencies = [
 [[package]]
 name = "moire-tokio"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
 dependencies = [
  "moire-runtime",
  "moire-types",
@@ -3950,7 +3950,7 @@ dependencies = [
 [[package]]
 name = "moire-trace-capture"
 version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire-trace-capture.git?branch=main#e62bf340b809e5f89a3f95251f655e7803fc8373"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
 dependencies = [
  "libc",
  "moire-trace-types",
@@ -3959,7 +3959,7 @@ dependencies = [
 [[package]]
 name = "moire-trace-types"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
 dependencies = [
  "facet",
 ]
@@ -3967,7 +3967,7 @@ dependencies = [
 [[package]]
 name = "moire-types"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
 dependencies = [
  "facet",
  "facet-value",
@@ -3977,7 +3977,7 @@ dependencies = [
 [[package]]
 name = "moire-wasm"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
 dependencies = [
  "async-channel",
  "async-lock",
@@ -3992,7 +3992,7 @@ dependencies = [
 [[package]]
 name = "moire-wire"
 version = "1.0.0"
-source = "git+https://github.com/bearcove/moire?rev=13eac79#13eac79c1b128282dd792a611319d0a1016ad15d"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
 dependencies = [
  "facet",
  "facet-json",

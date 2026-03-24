@@ -128,21 +128,30 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # dawfile-reaper = { path = "crates/dawfile-reaper" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
-# moire: unify crates.io moire with the git rev that vox pulls in,
-# avoiding duplicate moire-runtime #[ctor] registrations that crash.
-# moire-trace-capture: tolerate broken frame-pointer chains (NixOS glibc).
+# moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
+# All moire crates must point to the same fork rev to avoid duplicate
+# moire-runtime #[ctor] registrations that crash CLAP plugin scanning.
 [patch."https://github.com/bearcove/moire"]
-moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire-trace-capture.git", branch = "main" }
+moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-trace-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-wasm = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-wire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
 
 [patch.crates-io]
-moire = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-macros-noop = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-runtime = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-tokio = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-trace-types = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-types = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-wasm = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
-moire-wire = { git = "https://github.com/bearcove/moire", rev = "13eac79" }
+moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-trace-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-wasm = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire-wire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
 
 [workspace.lints.rust]
 dead_code = "allow"
