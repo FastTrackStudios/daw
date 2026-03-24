@@ -136,26 +136,26 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # All moire crates must point to the same fork rev to avoid duplicate
 # moire-runtime #[ctor] registrations that crash CLAP plugin scanning.
 [patch."https://github.com/bearcove/moire"]
-moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-trace-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-wasm = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-wire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-trace-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-wasm = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-wire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
 
 [patch.crates-io]
-moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-trace-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-wasm = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
-moire-wire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "663dbdc" }
+moire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-macros-noop = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-runtime = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-tokio = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-trace-capture = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-trace-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-types = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-wasm = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
+moire-wire = { git = "https://github.com/FastTrackStudios/moire.git", rev = "6d856f2" }
 
 [workspace.lints.rust]
 dead_code = "allow"
