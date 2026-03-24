@@ -395,6 +395,83 @@ impl DawMainThread {
 
         items
     }
+
+    // ── Routing ──────────────────────────────────────────────────────────
+
+    /// Get the number of sends from a track.
+    pub fn send_count(&self, track_guid: &str) -> u32 {
+        let reaper = Reaper::get();
+        let project = reaper.current_project();
+        let Some(track) = find_track_by_guid(&project, track_guid) else {
+            return 0;
+        };
+        let hw_count = track.typed_send_count(reaper_high::SendPartnerType::HardwareOutput);
+        let total = track.send_count();
+        total.saturating_sub(hw_count)
+    }
+
+    /// Get the destination track GUID for a send by index.
+    pub fn send_dest_guid(&self, track_guid: &str, send_index: u32) -> Option<String> {
+        let reaper = Reaper::get();
+        let project = reaper.current_project();
+        let track = find_track_by_guid(&project, track_guid)?;
+        let hw_count = track.typed_send_count(reaper_high::SendPartnerType::HardwareOutput);
+        let route = track.send_by_index(hw_count + send_index)?;
+        match route.partner()? {
+            reaper_high::TrackRoutePartner::Track(dest) => {
+                Some(dest.guid().to_string_without_braces())
+            }
+            _ => None,
+        }
+    }
+
+    /// Add a send from source track to destination track. Returns the send index.
+    pub fn add_send(&self, source_guid: &str, dest_guid: &str) -> Option<u32> {
+        let reaper = Reaper::get();
+        let project = reaper.current_project();
+        let source = find_track_by_guid(&project, source_guid)?;
+        let dest = find_track_by_guid(&project, dest_guid)?;
+        let low = reaper.medium_reaper().low();
+        let route_idx =
+            unsafe { low.CreateTrackSend(source.raw().ok()?.as_ptr(), dest.raw().ok()?.as_ptr()) };
+        if route_idx >= 0 {
+            Some(route_idx as u32)
+        } else {
+            None
+        }
+    }
+
+    /// Mute or unmute a send by index.
+    pub fn set_send_muted(&self, track_guid: &str, send_index: u32, muted: bool) {
+        let reaper = Reaper::get();
+        let project = reaper.current_project();
+        let Some(track) = find_track_by_guid(&project, track_guid) else {
+            return;
+        };
+        let hw_count = track.typed_send_count(reaper_high::SendPartnerType::HardwareOutput);
+        let Some(route) = track.send_by_index(hw_count + send_index) else {
+            return;
+        };
+        if muted {
+            let _ = route.mute();
+        } else {
+            let _ = route.unmute();
+        }
+    }
+
+    /// Check if a send is muted.
+    pub fn is_send_muted(&self, track_guid: &str, send_index: u32) -> bool {
+        let reaper = Reaper::get();
+        let project = reaper.current_project();
+        let Some(track) = find_track_by_guid(&project, track_guid) else {
+            return false;
+        };
+        let hw_count = track.typed_send_count(reaper_high::SendPartnerType::HardwareOutput);
+        let Some(route) = track.send_by_index(hw_count + send_index) else {
+            return false;
+        };
+        route.is_muted().unwrap_or(false)
+    }
 }
 
 // =============================================================================
