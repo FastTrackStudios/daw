@@ -175,18 +175,17 @@ pub fn create_plugin_daw(
     let _ = bootstrap.session.plugin_register_add_timer(internal_timer);
     let _ = Box::leak(Box::new(bootstrap.session));
 
-    // Create a dedicated tokio runtime on a separate thread.
-    // Plugin::initialize() may be called from within another runtime
-    // (e.g. during REAPER tests), so we spawn a new thread to avoid
-    // nested runtime panics.
-    let result = std::thread::spawn(|| {
+    // Create the handler on the main thread (needs REAPER statics),
+    // then spawn a thread for LocalCaller creation (needs a clean runtime).
+    let handler = crate::plugin_services::create_daw_handler();
+
+    let result = std::thread::spawn(move || {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .ok()?;
 
         let daw = runtime.block_on(async {
-            let handler = crate::plugin_services::create_daw_handler();
             let local = LocalCaller::new(handler).await.ok()?;
             let caller = local.erased_caller();
             let _ = Box::leak(Box::new(local)); // Keep server alive
