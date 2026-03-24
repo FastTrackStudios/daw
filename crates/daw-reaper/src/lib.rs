@@ -31,6 +31,7 @@
 //! ```
 
 pub mod bootstrap;
+pub use bootstrap::PluginHost;
 pub mod safe_wrappers;
 
 pub mod action_registry;

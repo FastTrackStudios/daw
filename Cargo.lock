@@ -2188,13 +2188,11 @@ dependencies = [
 name = "example-plugin"
 version = "0.1.0"
 dependencies = [
- "crossbeam-channel",
  "daw",
  "eyre",
  "nih_plug",
  "reaper-test",
  "tokio",
- "tracing",
 ]
 
 [[package]]
