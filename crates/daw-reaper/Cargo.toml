@@ -27,6 +27,7 @@ reaper-low.workspace = true
 enumflags2.workspace = true
 camino = "1"
 libloading = "0.8"
+crossbeam-channel.workspace = true
 
 [dev-dependencies]
 daw-control = { path = "../daw-control" }

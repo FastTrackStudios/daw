@@ -40,3 +40,99 @@ pub use reaper_high::{
 
 // reaper-medium: session registration for timer callbacks and play state
 pub use reaper_medium::{ProjectContext as ReaperProjectContext, ReaperSession};
+
+/// Initialize daw-reaper from a CLAP host context.
+///
+/// CLAP plugins call this during `initialize()` with the raw `clap_host*`
+/// obtained from `InitContext::raw_host_context()`. This:
+///
+/// 1. Calls `host->get_extension("cockos.reaper_extension")` to get `reaper_plugin_info_t*`
+/// 2. Builds a `PluginContext` from it
+/// 3. Initializes reaper-high (`HighReaper`)
+/// 4. Sets up `TaskSupport` and `MainTaskMiddleware` for main-thread dispatch
+/// 5. Registers a timer callback for periodic work
+///
+/// Returns a [`ReaperSession`] that can be used to register timer callbacks,
+/// or `None` if REAPER API is not available (e.g. running in a non-REAPER host).
+///
+/// # Safety
+///
+/// `raw_clap_host` must be a valid `*const clap_host` pointer from the CLAP host.
+pub unsafe fn init_from_clap_host(
+    raw_clap_host: *const std::ffi::c_void,
+) -> Option<ReaperBootstrap> {
+    if raw_clap_host.is_null() {
+        return None;
+    }
+
+    // Cast to clap_host and call get_extension
+    #[repr(C)]
+    struct ClapHost {
+        clap_version: [u32; 3],
+        host_data: *mut std::ffi::c_void,
+        name: *const std::ffi::c_char,
+        vendor: *const std::ffi::c_char,
+        url: *const std::ffi::c_char,
+        version: *const std::ffi::c_char,
+        get_extension: Option<
+            unsafe extern "C" fn(
+                host: *const ClapHost,
+                extension_id: *const std::ffi::c_char,
+            ) -> *const std::ffi::c_void,
+        >,
+        request_restart: Option<unsafe extern "C" fn(host: *const ClapHost)>,
+        request_process: Option<unsafe extern "C" fn(host: *const ClapHost)>,
+        request_callback: Option<unsafe extern "C" fn(host: *const ClapHost)>,
+    }
+
+    let host = raw_clap_host as *const ClapHost;
+    let get_ext = (*host).get_extension?;
+
+    let ext_id = b"cockos.reaper_extension\0";
+    let rec_ptr = get_ext(host, ext_id.as_ptr() as *const std::ffi::c_char);
+    if rec_ptr.is_null() {
+        return None; // Not running in REAPER
+    }
+
+    let rec = *(rec_ptr as *const reaper_plugin_info_t);
+
+    // Build PluginContext from the reaper_plugin_info_t
+    let static_ctx = static_plugin_context();
+    let h_instance = static_ctx.h_instance;
+    let context = match PluginContext::from_extension_plugin(h_instance, rec, static_ctx) {
+        Ok(c) => c,
+        Err(_) => return None,
+    };
+
+    // Initialize reaper-high
+    match HighReaper::load(context).setup() {
+        Ok(_) => {}
+        Err(_) => {} // Already initialized — that's fine
+    }
+
+    // Set up TaskSupport for main-thread dispatch
+    let (task_sender, task_receiver) = crossbeam_channel::unbounded();
+    let task_support = TaskSupport::new(task_sender.clone());
+    let middleware = MainTaskMiddleware::new(task_sender, task_receiver);
+
+    // Set TaskSupport for daw-reaper
+    let task_support_ref: &'static TaskSupport = Box::leak(Box::new(task_support));
+    crate::set_task_support(task_support_ref);
+
+    // Create a session for timer registration
+    let session = ReaperSession::load(context);
+
+    Some(ReaperBootstrap {
+        middleware,
+        session,
+    })
+}
+
+/// Result of [`init_from_clap_host`]. Holds the resources needed for
+/// REAPER main-thread dispatch and timer registration.
+pub struct ReaperBootstrap {
+    /// Drains main-thread tasks — call `run()` from your timer callback.
+    pub middleware: MainTaskMiddleware,
+    /// Session for registering timer callbacks with REAPER.
+    pub session: ReaperSession,
+}
