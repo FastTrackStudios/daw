@@ -106,6 +106,25 @@ pub fn _fire_timer_callbacks() {
     }
 }
 
+// ── Main Thread Sync API ─────────────────────────────────────────────────────
+
+/// Get a sync DAW handle for code running on REAPER's main thread.
+///
+/// Returns `None` if not on the main thread or not in REAPER.
+/// This is the zero-overhead path for timer callbacks.
+///
+/// ```rust,ignore
+/// fn my_timer() {
+///     let daw = daw::main_thread_daw().unwrap();
+///     let tracks = daw.track_list();
+///     daw.fx_param_set("guid", 0, 2, 0.5);
+/// }
+/// ```
+#[cfg(feature = "reaper")]
+pub fn main_thread_daw() -> Option<reaper::DawMainThread> {
+    reaper::DawMainThread::try_new()
+}
+
 // ── Service: raw protocol types & service clients ───────────────────────────
 /// Raw protocol types and service clients.
 pub mod service {

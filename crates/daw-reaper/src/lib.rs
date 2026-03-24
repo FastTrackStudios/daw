@@ -34,6 +34,8 @@ pub mod bootstrap;
 pub mod plugin_services;
 pub mod routed_handler;
 pub mod safe_wrappers;
+pub mod sync_api;
+pub use sync_api::DawMainThread;
 
 pub mod action_registry;
 pub mod audio_accessor;
