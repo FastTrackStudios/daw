@@ -28,6 +28,8 @@ enumflags2.workspace = true
 camino = "1"
 libloading = "0.8"
 crossbeam-channel.workspace = true
+daw-control = { path = "../daw-control" }
+daw-control-sync = { path = "../daw-control-sync" }
 
 [dev-dependencies]
 daw-control = { path = "../daw-control" }

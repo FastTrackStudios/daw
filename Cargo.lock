@@ -1332,6 +1332,7 @@ dependencies = [
  "daw-reaper",
  "daw-standalone",
  "dawfile-reaper",
+ "tokio",
 ]
 
 [[package]]
@@ -1451,6 +1452,7 @@ dependencies = [
  "camino",
  "crossbeam-channel",
  "daw-control",
+ "daw-control-sync",
  "daw-proto 0.1.0",
  "dawfile-reaper",
  "enumflags2",

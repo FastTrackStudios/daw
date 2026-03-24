@@ -137,133 +137,66 @@ pub struct ReaperBootstrap {
     pub session: ReaperSession,
 }
 
-// ── DAW-abstracted plugin host API ──────────────────────────────────
+// ── Plugin DAW initialization ────────────────────────────────────────
 
-/// High-level DAW host API for CLAP plugins.
+use daw_control::Daw;
+use daw_control_sync::LocalCaller;
+
+/// Create a `Daw` instance from a raw CLAP host pointer.
 ///
-/// Provides DAW-abstracted access to REAPER from within a CLAP plugin.
-/// No direct reaper-rs dependency needed — only `daw` crate types.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// fn initialize(&mut self, ..., context: &mut impl InitContext<Self>) -> bool {
-///     if let Some(host) = daw::reaper::PluginHost::init(context.raw_host_context()) {
-///         host.register_timer(my_timer_callback);
-///     }
-///     true
-/// }
-///
-/// extern "C" fn my_timer_callback() {
-///     let host = daw::reaper::PluginHost::get();
-///     host.set_ext_state("MY_PLUGIN", "status", "running");
-///     let tracks = host.track_count();
-/// }
-/// ```
-pub struct PluginHost;
+/// Called by `daw::init()` — not meant to be used directly by plugins.
+/// Returns `(Daw, runtime)` or `None` if not running in REAPER.
+pub fn create_plugin_daw(
+    raw_host_ptr: *const std::ffi::c_void,
+) -> Option<(Daw, std::sync::Arc<tokio::runtime::Runtime>)> {
+    let mut bootstrap = unsafe { init_from_clap_host(raw_host_ptr) }?;
 
-static PLUGIN_HOST_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    // Register internal timer for main-thread task draining
+    static MIDDLEWARE: std::sync::OnceLock<std::sync::Mutex<MainTaskMiddleware>> =
+        std::sync::OnceLock::new();
+    let _ = MIDDLEWARE.set(std::sync::Mutex::new(bootstrap.middleware));
 
-impl PluginHost {
-    /// Initialize DAW access from a CLAP host context.
-    ///
-    /// Call from `Plugin::initialize()` with `context.raw_host_context()`.
-    /// Returns `Some(PluginHost)` if running in REAPER, `None` otherwise.
-    pub fn init(raw_host_context: Option<*const std::ffi::c_void>) -> Option<Self> {
-        let host_ptr = raw_host_context?;
-
-        let mut bootstrap = unsafe { init_from_clap_host(host_ptr) }?;
-
-        // Register an internal timer that drains the task queue
-        static MIDDLEWARE: std::sync::OnceLock<std::sync::Mutex<MainTaskMiddleware>> =
-            std::sync::OnceLock::new();
-        let _ = MIDDLEWARE.set(std::sync::Mutex::new(bootstrap.middleware));
-
-        // Internal timer that drains tasks + calls user timers
-        extern "C" fn internal_timer() {
-            // Drain main-thread tasks
-            let mw = unsafe {
-                // SAFETY: MIDDLEWARE is set before the timer is registered
-                &*std::ptr::addr_of!(MIDDLEWARE)
-            };
-            if let Some(m) = mw.get() {
-                if let Ok(mut mw) = m.lock() {
-                    mw.run();
-                }
-            }
-
-            // Call user timer callbacks
-            let cbs = unsafe { &*std::ptr::addr_of!(USER_TIMER_CALLBACKS) };
-            if let Ok(callbacks) = cbs.lock() {
-                for cb in callbacks.iter() {
-                    cb();
-                }
+    extern "C" fn internal_timer() {
+        let mw = unsafe { &*std::ptr::addr_of!(MIDDLEWARE) };
+        if let Some(m) = mw.get() {
+            if let Ok(mut mw) = m.lock() {
+                mw.run();
             }
         }
-
-        let _ = bootstrap.session.plugin_register_add_timer(internal_timer);
-        let _ = Box::leak(Box::new(bootstrap.session));
-
-        PLUGIN_HOST_READY.store(true, std::sync::atomic::Ordering::Relaxed);
-        Some(PluginHost)
-    }
-
-    /// Get the plugin host singleton.
-    ///
-    /// Returns `Some(PluginHost)` if [`PluginHost::init`] was called.
-    pub fn get() -> Option<Self> {
-        if PLUGIN_HOST_READY.load(std::sync::atomic::Ordering::Relaxed) {
-            Some(PluginHost)
-        } else {
-            None
+        // Fire user timer callbacks registered via daw::register_timer()
+        let cbs = unsafe { &*std::ptr::addr_of!(USER_TIMER_CALLBACKS) };
+        if let Ok(callbacks) = cbs.lock() {
+            for cb in callbacks.iter() {
+                cb();
+            }
         }
     }
 
-    /// Register a callback that fires at ~30Hz on REAPER's main thread.
-    pub fn register_timer(&self, callback: fn()) {
-        if let Ok(mut cbs) = USER_TIMER_CALLBACKS.lock() {
-            cbs.push(callback);
-        }
-    }
+    let _ = bootstrap.session.plugin_register_add_timer(internal_timer);
+    let _ = Box::leak(Box::new(bootstrap.session));
 
-    /// Get the number of tracks in the current project.
-    pub fn track_count(&self) -> u32 {
-        HighReaper::get().current_project().track_count()
-    }
+    // Create tokio runtime for LocalCaller
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
 
-    /// Read a global ExtState value.
-    pub fn get_ext_state(&self, section: &str, key: &str) -> Option<String> {
-        let low = HighReaper::get().medium_reaper().low();
-        let section = std::ffi::CString::new(section).ok()?;
-        let key = std::ffi::CString::new(key).ok()?;
-        let ptr = unsafe { low.GetExtState(section.as_ptr(), key.as_ptr()) };
-        if ptr.is_null() {
-            return None;
-        }
-        let s = unsafe { std::ffi::CStr::from_ptr(ptr) }
-            .to_str()
-            .ok()?
-            .to_string();
-        if s.is_empty() { None } else { Some(s) }
-    }
+    // Create in-process Daw via LocalCaller + all REAPER services
+    let daw = runtime.block_on(async {
+        let handler = crate::plugin_services::create_daw_handler();
+        let local = LocalCaller::new(handler).await.ok()?;
+        let caller = local.erased_caller();
+        let _ = Box::leak(Box::new(local)); // Keep server alive
+        Some(Daw::new(caller))
+    })?;
 
-    /// Write a global ExtState value.
-    pub fn set_ext_state(&self, section: &str, key: &str, value: &str) {
-        let low = HighReaper::get().medium_reaper().low();
-        let section = std::ffi::CString::new(section).unwrap();
-        let key = std::ffi::CString::new(key).unwrap();
-        let val = std::ffi::CString::new(value).unwrap();
-        unsafe {
-            low.SetExtState(section.as_ptr(), key.as_ptr(), val.as_ptr(), false);
-        }
-    }
+    Some((daw, std::sync::Arc::new(runtime)))
+}
 
-    /// Show a message in REAPER's console.
-    pub fn show_console_msg(&self, msg: &str) {
-        let low = HighReaper::get().medium_reaper().low();
-        if let Ok(c_msg) = std::ffi::CString::new(msg) {
-            unsafe { low.ShowConsoleMsg(c_msg.as_ptr()) };
-        }
+/// Register an additional timer callback (called by `daw::init`).
+pub fn register_internal_timer(callback: fn()) {
+    if let Ok(mut cbs) = USER_TIMER_CALLBACKS.lock() {
+        cbs.push(callback);
     }
 }
 

@@ -1,7 +1,7 @@
 //! Example CLAP plugin with DAW API access.
 //!
-//! Uses `daw::reaper::PluginHost` — no direct reaper-rs dependency.
-//! The plugin only knows about the `daw` crate.
+//! Uses `daw::init()` / `daw::get()` — fully DAW-agnostic.
+//! The same code works in REAPER, standalone, or any future host.
 
 use nih_plug::prelude::*;
 use std::sync::Arc;
@@ -61,11 +61,9 @@ impl Plugin for ExamplePlugin {
         _buffer_config: &BufferConfig,
         context: &mut impl InitContext<Self>,
     ) -> bool {
-        // One line: get DAW host access via the CLAP host extension
-        if let Some(host) = daw::reaper::PluginHost::init(context.raw_host_context()) {
-            host.register_timer(timer_callback);
-        }
-
+        // One line — DAW-agnostic initialization
+        daw::init(context.raw_host_context());
+        daw::register_timer(timer_callback);
         true
     }
 
@@ -95,23 +93,32 @@ impl ClapPlugin for ExamplePlugin {
 
 nih_export_clap!(ExamplePlugin);
 
-/// Timer callback — runs at ~30Hz on the DAW's main thread.
-/// Uses only `daw::reaper::PluginHost` — no reaper-rs.
+/// Timer callback — uses `daw::get()` for fully DAW-agnostic access.
 fn timer_callback() {
-    let Some(host) = daw::reaper::PluginHost::get() else {
-        return;
-    };
+    let Some(daw) = daw::get() else { return };
 
-    let track_count = host.track_count();
+    let result = daw::block_on(async {
+        let ext = daw.ext_state();
+        let project = daw.current_project().await.ok()?;
+        let all_tracks = project.tracks().all().await.ok()?;
+        let count = all_tracks.len();
 
-    // Write to ExtState so integration tests can verify
-    host.set_ext_state(
-        "FTS_EXAMPLE_PLUGIN",
-        "track_count",
-        &track_count.to_string(),
-    );
+        let _ = ext
+            .set(
+                "FTS_EXAMPLE_PLUGIN",
+                "track_count",
+                &count.to_string(),
+                false,
+            )
+            .await;
 
-    static TICK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-    let tick = TICK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    host.set_ext_state("FTS_EXAMPLE_PLUGIN", "tick", &tick.to_string());
+        static TICK: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let tick = TICK.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let _ = ext
+            .set("FTS_EXAMPLE_PLUGIN", "tick", &tick.to_string(), false)
+            .await;
+
+        Some(())
+    });
+    let _ = result;
 }

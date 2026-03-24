@@ -31,7 +31,8 @@
 //! ```
 
 pub mod bootstrap;
-pub use bootstrap::PluginHost;
+pub mod plugin_services;
+pub mod routed_handler;
 pub mod safe_wrappers;
 
 pub mod action_registry;

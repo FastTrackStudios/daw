@@ -10,6 +10,9 @@ authors.workspace = true
 daw-proto = { path = "../daw-proto" }
 daw-control = { path = "../daw-control" }
 
+# Runtime (needed for block_on in plugin context)
+tokio.workspace = true
+
 # Feature-gated internal crates
 daw-control-sync = { path = "../daw-control-sync", optional = true }
 daw-reaper = { path = "../daw-reaper", optional = true }
