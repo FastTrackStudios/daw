@@ -1,11 +1,11 @@
 [package]
-name = "daw-guest-example"
+name = "example-extension"
 version.workspace = true
 edition.workspace = true
-description = "Example guest process that connects to REAPER via SHM and calls DAW services"
+description = "Example SHM guest extension — connects to REAPER via daw-bridge and registers actions"
 
 [[bin]]
-name = "daw-guest"
+name = "example-extension"
 path = "src/main.rs"
 
 [dependencies]

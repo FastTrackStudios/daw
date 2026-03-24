@@ -18,7 +18,8 @@ members = [
     "crates/fts-audio-proto",
     "crates/fts-devtools",
     "crates/daw-extension-runtime",
-    "apps/daw-guest-example",
+    "apps/example-extension",
+    "apps/example-plugin",
     "xtask",
 ]
 resolver = "2"
@@ -63,6 +64,9 @@ ur-taking-me-with-you = { git = "https://github.com/bearcove/vox.git", rev = "53
 
 # CLI
 clap = { version = "4", features = ["derive"] }
+
+# Plugin framework
+nih_plug = { git = "https://github.com/FastTrackStudios/nih-plug.git", branch = "reaper-embed-ui" }
 
 # Sibling repos
 actions-proto = { git = "https://github.com/FastTrackStudios/input_actions.git", branch = "main" }

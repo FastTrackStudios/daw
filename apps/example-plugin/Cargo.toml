@@ -1,0 +1,21 @@
+[package]
+name = "example-plugin"
+version.workspace = true
+edition.workspace = true
+description = "Example CLAP plugin that accesses the REAPER API via daw-reaper"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+# Plugin framework
+nih_plug.workspace = true
+
+# DAW API access (reaper-rs wrappers)
+daw = { path = "../../crates/daw", features = ["sync", "reaper"] }
+
+# Concurrency
+crossbeam-channel.workspace = true
+
+# Observability
+tracing.workspace = true
