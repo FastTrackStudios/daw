@@ -232,30 +232,17 @@ impl MidiService for ReaperMidi {
             let take = create_midi_item_on_main_thread(raw_track, start_seconds, end_seconds)?;
 
             // Build a MidiTakeLocation from the item/take we just created
-            let low = reaper.medium_reaper().low();
+            let medium = reaper.medium_reaper();
+            let low = medium.low();
             let item = item_sw::get_take_item(low, take)?;
 
-            // Get the item index in the project
-            let item_count = reaper
-                .medium_reaper()
-                .count_media_items(resolve_project_context(&project));
-            let mut item_index = None;
-            for i in 0..item_count {
-                if let Some(candidate) = reaper
-                    .medium_reaper()
-                    .get_media_item(resolve_project_context(&project), i)
-                {
-                    if candidate.as_ptr() == item.as_ptr() {
-                        item_index = Some(i);
-                        break;
-                    }
-                }
+            // Extract the item GUID
+            let item_guid = crate::item::item_guid_string(medium, item);
+            if item_guid.is_empty() {
+                return None;
             }
 
-            Some(MidiTakeLocation::active(
-                project,
-                ItemRef::Index(item_index.unwrap_or(0)),
-            ))
+            Some(MidiTakeLocation::active(project, ItemRef::Guid(item_guid)))
         })
         .await
         .flatten()

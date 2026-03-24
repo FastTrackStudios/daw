@@ -38,6 +38,8 @@ pub struct TestPackage {
     pub test_threads: u32,
     /// Tests to always skip when no filter is specified.
     pub default_skips: Vec<String>,
+    /// Optional test binary name (`--test <name>`) to run a specific integration test file.
+    pub test_binary: Option<String>,
 }
 
 /// A running REAPER process, ready for tests.
@@ -357,6 +359,11 @@ impl TestRunner {
             if !pkg.features.is_empty() {
                 test_cmd.arg("--features");
                 test_cmd.arg(pkg.features.join(","));
+            }
+
+            // Filter to a specific test binary (integration test file)
+            if let Some(ref bin) = pkg.test_binary {
+                test_cmd.args(["--test", bin]);
             }
 
             test_cmd.args([

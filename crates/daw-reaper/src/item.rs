@@ -4,7 +4,7 @@
 //! via [`crate::main_thread`].
 
 use crate::main_thread;
-use crate::project_context::project_guid as project_guid_from;
+use crate::project_context::{project_guid as project_guid_from, resolve_project_context};
 use crate::safe_wrappers::item as item_sw;
 use crate::track::{resolve_project, resolve_track};
 use daw_proto::{
@@ -28,7 +28,7 @@ use vox::Tx;
 // =============================================================================
 
 /// Extract a REAPER item's GUID as a braced string (e.g., "{XXXXXXXX-XXXX-...}")
-fn item_guid_string(medium: &reaper_medium::Reaper, item: MediaItem) -> String {
+pub(crate) fn item_guid_string(medium: &reaper_medium::Reaper, item: MediaItem) -> String {
     let guid_ptr = unsafe {
         medium.low().GetSetMediaItemInfo(
             item.as_ptr(),
@@ -385,40 +385,14 @@ impl ReaperItem {
 
         let item = match item_ref {
             ItemRef::Guid(guid) => {
-                // Iterate all items in the project and match GUID
-                let item_count = medium.count_media_items(project);
-                for i in 0..item_count {
-                    if let Some(candidate) = medium.get_media_item(project, i) {
-                        let guid_ptr = unsafe {
-                            medium.low().GetSetMediaItemInfo(
-                                candidate.as_ptr(),
-                                b"GUID\0".as_ptr() as _,
-                                std::ptr::null_mut(),
-                            ) as *const reaper_low::raw::GUID
-                        };
-                        if !guid_ptr.is_null() {
-                            let g = unsafe { &*guid_ptr };
-                            let item_guid = format!(
-                                "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
-                                g.Data1,
-                                g.Data2,
-                                g.Data3,
-                                g.Data4[0],
-                                g.Data4[1],
-                                g.Data4[2],
-                                g.Data4[3],
-                                g.Data4[4],
-                                g.Data4[5],
-                                g.Data4[6],
-                                g.Data4[7]
-                            );
-                            if item_guid == *guid {
-                                return Some(candidate);
-                            }
-                        }
+                // Try the specified project first, then fall back to CurrentProject
+                Self::find_item_by_guid(medium, project, guid).or_else(|| {
+                    if !matches!(project, ReaperProjectContext::CurrentProject) {
+                        Self::find_item_by_guid(medium, ReaperProjectContext::CurrentProject, guid)
+                    } else {
+                        None
                     }
-                }
-                return None;
+                })?
             }
             ItemRef::Index(idx) => {
                 let track = medium.get_track(project, 0)?;
@@ -430,6 +404,47 @@ impl ReaperItem {
             return None;
         }
         Some(item)
+    }
+
+    /// Find a media item by GUID within a specific project context.
+    fn find_item_by_guid(
+        medium: &reaper_medium::Reaper,
+        project: ReaperProjectContext,
+        guid: &str,
+    ) -> Option<MediaItem> {
+        let item_count = medium.count_media_items(project);
+        for i in 0..item_count {
+            if let Some(candidate) = medium.get_media_item(project, i) {
+                let guid_ptr = unsafe {
+                    medium.low().GetSetMediaItemInfo(
+                        candidate.as_ptr(),
+                        b"GUID\0".as_ptr() as _,
+                        std::ptr::null_mut(),
+                    ) as *const reaper_low::raw::GUID
+                };
+                if !guid_ptr.is_null() {
+                    let g = unsafe { &*guid_ptr };
+                    let item_guid = format!(
+                        "{{{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}}}",
+                        g.Data1,
+                        g.Data2,
+                        g.Data3,
+                        g.Data4[0],
+                        g.Data4[1],
+                        g.Data4[2],
+                        g.Data4[3],
+                        g.Data4[4],
+                        g.Data4[5],
+                        g.Data4[6],
+                        g.Data4[7]
+                    );
+                    if item_guid == *guid {
+                        return Some(candidate);
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Convert MediaItem to Item struct
@@ -533,21 +548,23 @@ impl ItemService for ReaperItem {
     // Queries
     // =========================================================================
 
-    async fn get_items(&self, _project: ProjectContext, track: TrackRef) -> Vec<Item> {
+    async fn get_items(&self, project: ProjectContext, track: TrackRef) -> Vec<Item> {
         main_thread::query(move || {
             let reaper = Reaper::get();
             let medium = reaper.medium_reaper();
             let mut items = Vec::new();
+            let proj_ctx = resolve_project_context(&project);
 
             // Resolve track
-            let track_ptr = match track {
-                TrackRef::Master => {
-                    Some(medium.get_master_track(ReaperProjectContext::CurrentProject))
-                }
-                TrackRef::Index(idx) => medium.get_track(ReaperProjectContext::CurrentProject, idx),
+            let track_ptr = match &track {
+                TrackRef::Master => Some(medium.get_master_track(proj_ctx)),
+                TrackRef::Index(idx) => medium.get_track(proj_ctx, *idx),
                 TrackRef::Guid(_) => {
-                    // GUID lookup not directly supported
-                    None
+                    // Use project-aware track resolution for GUID lookups
+                    resolve_project(&project)
+                        .or_else(|| Some(reaper.current_project()))
+                        .and_then(|proj| resolve_track(&proj, &track))
+                        .and_then(|t| t.raw().ok())
                 }
             };
 
@@ -569,9 +586,10 @@ impl ItemService for ReaperItem {
         .unwrap_or_default()
     }
 
-    async fn get_item(&self, _project: ProjectContext, item: ItemRef) -> Option<Item> {
+    async fn get_item(&self, project: ProjectContext, item: ItemRef) -> Option<Item> {
         main_thread::query(move || {
-            let item_ptr = Self::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+            let proj_ctx = resolve_project_context(&project);
+            let item_ptr = Self::resolve_item(&item, proj_ctx)?;
             Self::media_item_to_item(item_ptr)
         })
         .await
@@ -1602,13 +1620,12 @@ impl TakeService for ReaperTake {
 // Helper Functions
 // =============================================================================
 
-/// Extract GUID from a REAPER state chunk
+/// Extract item GUID from a REAPER state chunk.
+///
+/// Uses the `IGUID` field (item GUID), not `GUID` (which is the take GUID).
 fn extract_guid_from_chunk(chunk: &str) -> Option<String> {
-    // Look for GUID line like: GUID {12345678-1234-1234-1234-123456789ABC}
     for line in chunk.lines() {
-        if line.starts_with("GUID ")
-            && let Some(guid_part) = line.strip_prefix("GUID ")
-        {
+        if let Some(guid_part) = line.strip_prefix("IGUID ") {
             return Some(guid_part.trim().to_string());
         }
     }

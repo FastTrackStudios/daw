@@ -603,6 +603,7 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         features: vec![],
         test_threads: 1,
         default_skips: vec!["timer_responsive_for_60s".into()],
+        test_binary: None,
     }];
 
     let tests_passed = runner.run_tests(&mut reaper, &packages, filter.as_deref())?;

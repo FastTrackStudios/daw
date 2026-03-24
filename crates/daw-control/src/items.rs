@@ -59,11 +59,13 @@ impl Items {
 
     /// Get item by index
     pub async fn by_index(&self, index: u32) -> Result<Option<ItemHandle>> {
-        let item = self
+        let items = self
             .clients
             .item
-            .get_item(self.context(), ItemRef::Index(index))
+            .get_items(self.context(), self.track_ref())
             .await?;
+
+        let item = items.into_iter().nth(index as usize);
 
         Ok(item.map(|i| {
             ItemHandle::new(
