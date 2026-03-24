@@ -1437,7 +1437,7 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
-source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#3db08ea70869aab2a6244e4855918f41014cfe26"
+source = "git+https://github.com/FastTrackStudios/daw.git?branch=main#a45338009c9f1f0777a25920ba93e036ca0fec81"
 dependencies = [
  "actions-proto",
  "facet",
@@ -3982,7 +3982,7 @@ dependencies = [
 [[package]]
 name = "moire"
 version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
 dependencies = [
  "moire-macros",
  "moire-macros-noop",
@@ -3993,7 +3993,7 @@ dependencies = [
 [[package]]
 name = "moire-macros"
 version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4003,12 +4003,12 @@ dependencies = [
 [[package]]
 name = "moire-macros-noop"
 version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
 
 [[package]]
 name = "moire-runtime"
 version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
 dependencies = [
  "ctor",
  "facet",
@@ -4024,7 +4024,7 @@ dependencies = [
 [[package]]
 name = "moire-tokio"
 version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
 dependencies = [
  "moire-runtime",
  "moire-types",
@@ -4035,7 +4035,7 @@ dependencies = [
 [[package]]
 name = "moire-trace-capture"
 version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
 dependencies = [
  "libc",
  "moire-trace-types",
@@ -4044,7 +4044,7 @@ dependencies = [
 [[package]]
 name = "moire-trace-types"
 version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
 dependencies = [
  "facet",
 ]
@@ -4052,7 +4052,7 @@ dependencies = [
 [[package]]
 name = "moire-types"
 version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
 dependencies = [
  "facet",
  "facet-value",
@@ -4062,7 +4062,7 @@ dependencies = [
 [[package]]
 name = "moire-wasm"
 version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
 dependencies = [
  "async-channel",
  "async-lock",
@@ -4077,7 +4077,7 @@ dependencies = [
 [[package]]
 name = "moire-wire"
 version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=663dbdc#663dbdc4458b8bb0443e838cd177e42d9181341f"
+source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
 dependencies = [
  "facet",
  "facet-json",
@@ -6767,9 +6767,9 @@ checksum = "383ad40bb927465ec0ce7720e033cb4ca06912855fc35db31b5755d0de75b1ee"
 
 [[package]]
 name = "unicode-segmentation"
-version = "1.12.0"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f6ccf251212114b54433ec949fd6a7841275f9ada20dddd2f29e9ceea4501493"
+checksum = "a559e63b5d8004e12f9bce88af5c6d939c58de839b7532cfe9653846cedd2a9e"
 
 [[package]]
 name = "unicode-vo"

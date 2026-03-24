@@ -175,25 +175,30 @@ pub fn create_plugin_daw(
     let _ = bootstrap.session.plugin_register_add_timer(internal_timer);
     let _ = Box::leak(Box::new(bootstrap.session));
 
-    // Create a dedicated tokio runtime for the LocalCaller.
-    // Must be multi-threaded to avoid deadlocks when init is called
-    // from within another async context (e.g. during REAPER tests).
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-        .ok()?;
+    // Create a dedicated tokio runtime on a separate thread.
+    // Plugin::initialize() may be called from within another runtime
+    // (e.g. during REAPER tests), so we spawn a new thread to avoid
+    // nested runtime panics.
+    let result = std::thread::spawn(|| {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .ok()?;
 
-    // Create in-process Daw via LocalCaller + all REAPER services
-    let daw = runtime.block_on(async {
-        let handler = crate::plugin_services::create_daw_handler();
-        let local = LocalCaller::new(handler).await.ok()?;
-        let caller = local.erased_caller();
-        let _ = Box::leak(Box::new(local)); // Keep server alive
-        Some(Daw::new(caller))
-    })?;
+        let daw = runtime.block_on(async {
+            let handler = crate::plugin_services::create_daw_handler();
+            let local = LocalCaller::new(handler).await.ok()?;
+            let caller = local.erased_caller();
+            let _ = Box::leak(Box::new(local)); // Keep server alive
+            Some(Daw::new(caller))
+        })?;
 
-    Some((daw, std::sync::Arc::new(runtime)))
+        Some((daw, std::sync::Arc::new(runtime)))
+    })
+    .join()
+    .ok()??;
+
+    Some(result)
 }
 
 /// Register an additional timer callback (called by `daw::init`).
