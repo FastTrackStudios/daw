@@ -111,15 +111,11 @@ pub fn eager_load_fx_plugins() {
     let fx_dir = resource_path
         .into_std_path_buf()
         .join("UserPlugins")
-        .join("FX")
-        .join("FTS");
+        .join("FX");
 
     if !fx_dir.exists() {
-        if let Err(e) = std::fs::create_dir_all(&fx_dir) {
-            warn!("Failed to create UserPlugins/FX/FTS/: {e}");
-            return;
-        }
-        info!("Created UserPlugins/FX/FTS/ directory");
+        info!("UserPlugins/FX/ does not exist, skipping eager load");
+        return;
     }
 
     let entries = match std::fs::read_dir(&fx_dir) {
@@ -166,12 +162,11 @@ pub fn eager_load_fx_plugins() {
             Err(_) => continue,
         };
 
+        // Only eager-load plugins that export FtsReaperInit — this avoids
+        // interfering with REAPER's own CLAP scanner which handles clap_entry.
         let entry_fn = match unsafe { lib.get::<EntryFn>(b"FtsReaperInit\0") } {
             Ok(f) => f,
-            Err(_) => match unsafe { lib.get::<EntryFn>(b"ReaperPluginEntry\0") } {
-                Ok(f) => f,
-                Err(_) => continue, // No symbol — third-party plugin, skip silently
-            },
+            Err(_) => continue, // No FtsReaperInit — let REAPER handle it normally
         };
 
         let name = derive_plugin_name(&path_str);
