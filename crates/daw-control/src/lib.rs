@@ -554,6 +554,11 @@ impl Daw {
         Ok(self.clients.fx.get_last_touched_fx().await?)
     }
 
+    /// Show a message in the DAW's console/log window.
+    pub async fn show_console_msg(&self, msg: impl Into<String>) -> crate::Result<()> {
+        Ok(self.clients.health.show_console_msg(msg.into()).await?)
+    }
+
     /// Lightweight health check — pings the DAW and returns `true` if reachable.
     ///
     /// Returns `false` if the RPC fails (connection dead). Used by the

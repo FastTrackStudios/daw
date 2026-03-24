@@ -25,4 +25,13 @@ impl HealthService for ReaperHealth {
     async fn ping(&self) -> bool {
         true
     }
+
+    async fn show_console_msg(&self, msg: String) {
+        use crate::main_thread;
+        main_thread::query(move || {
+            let reaper = reaper_high::Reaper::get();
+            reaper.show_console_msg(msg);
+        })
+        .await;
+    }
 }
