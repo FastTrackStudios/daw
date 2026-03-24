@@ -517,14 +517,14 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     }
     runner::end_section(ci);
 
-    // ── Step 1b: Build daw-guest-example ────────────────────────────────
+    // ── Step 1b: Build example-extension ────────────────────────────────
     runner::section(ci, "reaper-test: build guest example");
-    println!("Building daw-guest-example...");
+    println!("Building example-extension...");
     let status = Command::new("cargo")
-        .args(["build", "-p", "daw-guest-example"])
+        .args(["build", "-p", "example-extension"])
         .status()?;
     if !status.success() {
-        return Err("Failed to build daw-guest-example".into());
+        return Err("Failed to build example-extension".into());
     }
     runner::end_section(ci);
 
@@ -532,10 +532,17 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     runner::section(ci, "reaper-test: build test binaries");
     println!("Building test binaries...");
     let status = Command::new("cargo")
-        .args(["test", "-p", "daw-reaper", "--no-run"])
+        .args([
+            "test",
+            "-p",
+            "daw-reaper",
+            "-p",
+            "example-plugin",
+            "--no-run",
+        ])
         .status()?;
     if !status.success() {
-        return Err("Failed to build daw-reaper test binaries".into());
+        return Err("Failed to build test binaries".into());
     }
     runner::end_section(ci);
 
@@ -570,20 +577,32 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     runner::section(ci, "reaper-test: install guest extensions");
     let fts_ext_dir = user_plugins_dir.join("fts-extensions");
     std::fs::create_dir_all(&fts_ext_dir)?;
-    let guest_src = workspace_root.join("target/debug/daw-guest");
+    let guest_src = workspace_root.join("target/debug/example-extension");
     if guest_src.exists() {
-        let guest_dst = fts_ext_dir.join("daw-guest");
+        let guest_dst = fts_ext_dir.join("example-extension");
         std::fs::copy(&guest_src, &guest_dst)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&guest_dst, std::fs::Permissions::from_mode(0o755))?;
         }
-        println!("  Installed daw-guest -> {}", guest_dst.display());
+        println!("  Installed example-extension -> {}", guest_dst.display());
     } else {
         println!(
             "  WARNING: daw-guest binary not found at {}",
             guest_src.display()
+        );
+    }
+    // Install example-plugin CLAP into FX/ for scanning
+    let plugin_src = workspace_root.join("target/debug/libexample_plugin.so");
+    if plugin_src.exists() {
+        let fx_dir = user_plugins_dir.join("FX");
+        std::fs::create_dir_all(&fx_dir)?;
+        let plugin_dst = fx_dir.join("example-plugin.clap");
+        std::fs::copy(&plugin_src, &plugin_dst)?;
+        println!(
+            "  Installed example-plugin.clap -> {}",
+            plugin_dst.display()
         );
     }
     runner::end_section(ci);
@@ -598,13 +617,22 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     reaper.wait_for_socket(&runner)?;
 
     // ── Step 6: Run tests ─────────────────────────────────────────────────
-    let packages = vec![TestPackage {
-        package: "daw-reaper".into(),
-        features: vec![],
-        test_threads: 1,
-        default_skips: vec!["timer_responsive_for_60s".into()],
-        test_binary: None,
-    }];
+    let packages = vec![
+        TestPackage {
+            package: "daw-reaper".into(),
+            features: vec![],
+            test_threads: 1,
+            default_skips: vec!["timer_responsive_for_60s".into()],
+            test_binary: None,
+        },
+        TestPackage {
+            package: "example-plugin".into(),
+            features: vec![],
+            test_threads: 1,
+            default_skips: vec![],
+            test_binary: None,
+        },
+    ];
 
     let tests_passed = runner.run_tests(&mut reaper, &packages, filter.as_deref())?;
 

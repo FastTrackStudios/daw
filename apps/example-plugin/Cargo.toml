@@ -19,3 +19,9 @@ crossbeam-channel.workspace = true
 
 # Observability
 tracing.workspace = true
+
+[dev-dependencies]
+daw = { path = "../../crates/daw", features = ["sync", "reaper"] }
+reaper-test.workspace = true
+tokio = { workspace = true, features = ["time"] }
+eyre = "0.6"
