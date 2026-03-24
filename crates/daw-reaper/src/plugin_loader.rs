@@ -111,11 +111,15 @@ pub fn eager_load_fx_plugins() {
     let fx_dir = resource_path
         .into_std_path_buf()
         .join("UserPlugins")
-        .join("FX");
+        .join("FX")
+        .join("FTS");
 
     if !fx_dir.exists() {
-        info!("UserPlugins/FX/ does not exist, skipping eager load");
-        return;
+        if let Err(e) = std::fs::create_dir_all(&fx_dir) {
+            warn!("Failed to create UserPlugins/FX/FTS/: {e}");
+            return;
+        }
+        info!("Created UserPlugins/FX/FTS/ directory");
     }
 
     let entries = match std::fs::read_dir(&fx_dir) {
