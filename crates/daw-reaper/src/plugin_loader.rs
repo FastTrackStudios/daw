@@ -160,15 +160,18 @@ pub fn eager_load_fx_plugins() {
             }
         }
 
-        // Try to dlopen and check for ReaperPluginEntry
+        // Try to dlopen and check for FtsReaperInit (preferred) or ReaperPluginEntry (legacy)
         let lib = match unsafe { libloading::Library::new(&real_path) } {
             Ok(lib) => lib,
             Err(_) => continue,
         };
 
-        let entry_fn = match unsafe { lib.get::<EntryFn>(b"ReaperPluginEntry\0") } {
+        let entry_fn = match unsafe { lib.get::<EntryFn>(b"FtsReaperInit\0") } {
             Ok(f) => f,
-            Err(_) => continue, // No symbol — third-party plugin, skip silently
+            Err(_) => match unsafe { lib.get::<EntryFn>(b"ReaperPluginEntry\0") } {
+                Ok(f) => f,
+                Err(_) => continue, // No symbol — third-party plugin, skip silently
+            },
         };
 
         let name = derive_plugin_name(&path_str);
