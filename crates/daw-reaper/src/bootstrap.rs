@@ -175,8 +175,11 @@ pub fn create_plugin_daw(
     let _ = bootstrap.session.plugin_register_add_timer(internal_timer);
     let _ = Box::leak(Box::new(bootstrap.session));
 
-    // Create tokio runtime for LocalCaller
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    // Create a dedicated tokio runtime for the LocalCaller.
+    // Must be multi-threaded to avoid deadlocks when init is called
+    // from within another async context (e.g. during REAPER tests).
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
         .enable_all()
         .build()
         .ok()?;
