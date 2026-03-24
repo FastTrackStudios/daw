@@ -398,10 +398,20 @@ fn get_app() -> Option<&'static Fragile<App>> {
 }
 
 /// Timer callback for periodic updates (runs on main thread ~30Hz)
+/// Deferred eager-load of FTS CLAP plugins. Runs once on the first timer
+/// tick so REAPER's CLAP scanner has already finished scanning.
+static FX_PLUGINS_LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 extern "C" fn timer_callback() {
     // catch_unwind prevents panics from unwinding through the C ABI boundary
     // (which is UB). Any panic inside is logged and the timer keeps running.
     let result = std::panic::catch_unwind(|| {
+        // Deferred eager-load: run once after REAPER startup is complete
+        if !FX_PLUGINS_LOADED.load(std::sync::atomic::Ordering::Relaxed) {
+            FX_PLUGINS_LOADED.store(true, std::sync::atomic::Ordering::Relaxed);
+            daw::reaper::eager_load_fx_plugins();
+        }
+
         if let Some(app_fragile) = get_app() {
             let app = app_fragile.get();
 
@@ -488,9 +498,8 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Initialize (register DAW dispatcher + socket server)
     app.initialize()?;
 
-    // Eagerly load FTS CLAP plugins that export ReaperPluginEntry.
-    // Scans UserPlugins/FX/FTS/ — gives FTS plugins direct REAPER API access.
-    daw::reaper::eager_load_fx_plugins();
+    // FTS CLAP plugin eager-loading is deferred to the first timer tick
+    // so REAPER's CLAP scanner finishes first (avoids dlopen conflicts).
 
     // Store app globally
     APP_INSTANCE
