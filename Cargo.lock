@@ -1425,6 +1425,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-perf-test"
+version = "0.1.0"
+dependencies = [
+ "crossbeam-channel",
+ "daw",
+ "eyre",
+ "fragile",
+ "moire",
+ "reaper-high",
+ "reaper-low",
+ "reaper-macros",
+ "reaper-medium",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "vox",
+ "vox-stream",
+]
+
+[[package]]
 name = "daw-proto"
 version = "0.1.0"
 dependencies = [
