@@ -136,6 +136,7 @@ pub(crate) use daw_proto::RoutingServiceClient;
 pub(crate) use daw_proto::TakeServiceClient;
 pub(crate) use daw_proto::TempoMapServiceClient;
 pub(crate) use daw_proto::TrackServiceClient;
+pub(crate) use daw_proto::batch::BatchServiceClient;
 pub(crate) use daw_proto::plugin_loader::PluginLoaderServiceClient;
 pub(crate) use daw_proto::toolbar::ToolbarServiceClient;
 pub(crate) use daw_proto::transport::transport::TransportServiceClient;
@@ -147,6 +148,7 @@ pub use error::{Error, Result};
 mod action_registry;
 mod audio_engine;
 mod automation;
+pub mod batch;
 mod ext_state;
 mod fx;
 mod input;
@@ -166,6 +168,9 @@ mod transport;
 pub use self::action_registry::ActionRegistry;
 pub use self::audio_engine::AudioEngine;
 pub use self::automation::{EnvelopeHandle, Envelopes};
+pub use self::batch::{
+    BatchBuilder, BatchExtractError, BatchResponseExt, FromStepOutput, StepHandle,
+};
 pub use self::ext_state::ExtState;
 pub use self::fx::{FxChain, FxHandle, FxParamHandle};
 pub use self::input::Input;
@@ -207,6 +212,7 @@ pub struct DawClients {
     pub(crate) input: InputServiceClient,
     pub(crate) toolbar: ToolbarServiceClient,
     pub(crate) plugin_loader: PluginLoaderServiceClient,
+    pub(crate) batch: BatchServiceClient,
 }
 
 impl DawClients {
@@ -234,7 +240,8 @@ impl DawClients {
             health: HealthServiceClient::new(handle.clone()),
             input: InputServiceClient::new(handle.clone()),
             toolbar: ToolbarServiceClient::new(handle.clone()),
-            plugin_loader: PluginLoaderServiceClient::new(handle),
+            plugin_loader: PluginLoaderServiceClient::new(handle.clone()),
+            batch: BatchServiceClient::new(handle),
         }
     }
 }
@@ -565,6 +572,16 @@ impl Daw {
     /// health-check loop in `daw_registry` for fast disconnect detection.
     pub async fn healthcheck(&self) -> bool {
         self.clients.health.ping().await.unwrap_or(false)
+    }
+
+    /// Execute a batch program of instructions in a single RPC call.
+    ///
+    /// Use [`BatchBuilder`] to construct the request.
+    pub async fn execute_batch(
+        &self,
+        request: daw_proto::batch::BatchRequest,
+    ) -> crate::Result<daw_proto::batch::BatchResponse> {
+        Ok(self.clients.batch.execute(request).await?)
     }
 
     /// Inject a MIDI message into REAPER's virtual keyboard queue.

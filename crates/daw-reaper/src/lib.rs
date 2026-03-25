@@ -30,6 +30,7 @@
 //! );
 //! ```
 
+pub mod batch;
 pub mod bootstrap;
 pub mod plugin_services;
 pub mod routed_handler;

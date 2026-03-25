@@ -26,6 +26,8 @@ use daw_proto::{
     track_service_service_descriptor, transport_service_service_descriptor,
 };
 
+use daw_proto::batch::{BatchServiceDispatcher, batch_service_service_descriptor};
+
 use crate::routed_handler::RoutedHandler;
 
 /// Create a `RoutedHandler` with all REAPER DAW service implementations.
@@ -64,6 +66,7 @@ pub fn create_daw_handler() -> RoutedHandler {
     let input = crate::ReaperInput::new();
     let toolbar = crate::ReaperToolbar::new();
     let plugin_loader = crate::ReaperPluginLoader::new();
+    let batch = crate::batch::BatchExecutor::new();
 
     RoutedHandler::new()
         .with(
@@ -145,5 +148,9 @@ pub fn create_daw_handler() -> RoutedHandler {
         .with(
             plugin_loader_service_service_descriptor(),
             PluginLoaderServiceDispatcher::new(plugin_loader),
+        )
+        .with(
+            batch_service_service_descriptor(),
+            BatchServiceDispatcher::new(batch),
         )
 }
