@@ -381,7 +381,10 @@ impl ReaperItem {
     /// Resolve an ItemRef to a MediaItem pointer.
     ///
     /// Validates the pointer after resolution to guard against stale items.
-    fn resolve_item(item_ref: &ItemRef, project: ReaperProjectContext) -> Option<MediaItem> {
+    pub(crate) fn resolve_item(
+        item_ref: &ItemRef,
+        project: ReaperProjectContext,
+    ) -> Option<MediaItem> {
         let reaper = Reaper::get();
         let medium = reaper.medium_reaper();
 
@@ -450,7 +453,7 @@ impl ReaperItem {
     }
 
     /// Convert MediaItem to Item struct
-    fn media_item_to_item(item: MediaItem) -> Option<Item> {
+    pub(crate) fn media_item_to_item(item: MediaItem) -> Option<Item> {
         let reaper = Reaper::get();
         let medium = reaper.medium_reaper();
         let low = medium.low();
@@ -1134,7 +1137,7 @@ impl ReaperTake {
     }
 
     /// Resolve a TakeRef within an item
-    fn resolve_take(item: MediaItem, take_ref: &TakeRef) -> Option<MediaItemTake> {
+    pub(crate) fn resolve_take(item: MediaItem, take_ref: &TakeRef) -> Option<MediaItemTake> {
         let reaper = Reaper::get();
         let medium = reaper.medium_reaper();
         let low = medium.low();
@@ -1161,7 +1164,11 @@ impl ReaperTake {
     }
 
     /// Convert MediaItemTake to Take struct
-    fn media_take_to_take(item: MediaItem, take: MediaItemTake, index: u32) -> Option<Take> {
+    pub(crate) fn media_take_to_take(
+        item: MediaItem,
+        take: MediaItemTake,
+        index: u32,
+    ) -> Option<Take> {
         let reaper = Reaper::get();
         let medium = reaper.medium_reaper();
         let low = medium.low();

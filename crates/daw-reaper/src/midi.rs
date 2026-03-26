@@ -132,7 +132,7 @@ impl ReaperMidi {
         }
     }
 
-    fn resolve_take_for_location(
+    pub(crate) fn resolve_take_for_location(
         medium: &reaper_medium::Reaper,
         location: &MidiTakeLocation,
     ) -> Option<MediaItemTake> {
@@ -141,7 +141,7 @@ impl ReaperMidi {
         Self::resolve_take(medium, item, &location.take)
     }
 
-    fn read_notes(medium: &reaper_medium::Reaper, take: MediaItemTake) -> Vec<MidiNote> {
+    pub(crate) fn read_notes(medium: &reaper_medium::Reaper, take: MediaItemTake) -> Vec<MidiNote> {
         let low = medium.low();
         let counts = sw::count_events(low, take);
 

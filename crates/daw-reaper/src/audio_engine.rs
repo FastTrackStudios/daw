@@ -163,7 +163,7 @@ impl AudioEngineService for ReaperAudioEngine {
 
 /// Internal helper to get audio latency from REAPER.
 /// MUST be called from the main thread.
-fn get_audio_latency_internal(medium: &reaper_medium::Reaper) -> AudioLatency {
+pub(crate) fn get_audio_latency_internal(medium: &reaper_medium::Reaper) -> AudioLatency {
     // Get latency in samples
     let lat_result = medium.get_input_output_latency();
 
@@ -187,7 +187,7 @@ fn get_audio_latency_internal(medium: &reaper_medium::Reaper) -> AudioLatency {
 
 /// Get the current sample rate from REAPER.
 /// Tries audio device first, falls back to project sample rate.
-fn get_sample_rate(medium: &reaper_medium::Reaper) -> u32 {
+pub(crate) fn get_sample_rate(medium: &reaper_medium::Reaper) -> u32 {
     let low = medium.low();
 
     // First try to get audio device sample rate (most accurate when audio is running)

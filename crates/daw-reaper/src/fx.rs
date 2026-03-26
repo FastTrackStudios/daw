@@ -536,7 +536,7 @@ fn resolve_track_by_guid(project: &reaper_high::Project, guid: &str) -> Option<T
 }
 
 /// Get the FxChain for a given FxChainContext
-fn resolve_fx_chain(
+pub(crate) fn resolve_fx_chain(
     project: &reaper_high::Project,
     context: &FxChainContext,
 ) -> Option<(Track, FxChain)> {
@@ -560,7 +560,7 @@ fn resolve_fx_chain(
 }
 
 /// Resolve an FxRef to an index within the FX chain
-fn resolve_fx_index(chain: &FxChain, fx_ref: &FxRef) -> Option<u32> {
+pub(crate) fn resolve_fx_index(chain: &FxChain, fx_ref: &FxRef) -> Option<u32> {
     match fx_ref {
         FxRef::Index(idx) => {
             if *idx < chain.fx_count() {
@@ -796,7 +796,7 @@ fn parse_fx_type(sub_type: &str) -> FxType {
 /// indices (0x2000000+). When a chain is provided and the primary lookup
 /// fails, we fall back to `get_fx_guid(chain, raw_index)` which passes
 /// the encoded index directly to REAPER's `TrackFX_GetFXGUID`.
-fn build_fx_info(fx: &reaper_high::Fx, chain: Option<&FxChain>) -> Fx {
+pub(crate) fn build_fx_info(fx: &reaper_high::Fx, chain: Option<&FxChain>) -> Fx {
     let guid = fx
         .get_or_query_guid()
         .map(|g| g.to_string_without_braces())
@@ -855,7 +855,7 @@ fn build_fx_info(fx: &reaper_high::Fx, chain: Option<&FxChain>) -> Fx {
 }
 
 /// Build an FxParameter proto struct from a reaper-high FxParameter
-fn build_fx_parameter(param: &reaper_high::FxParameter) -> FxParameter {
+pub(crate) fn build_fx_parameter(param: &reaper_high::FxParameter) -> FxParameter {
     let index = param.index();
     let name = param
         .name()
@@ -1027,7 +1027,7 @@ fn build_fx_tree_from_chain(chain: &FxChain, _is_input: bool, top_level_count: u
 /// 1. `fx_type` config param == "Container" (primary, may fail with raw bytes)
 /// 2. `container_count` config param > 0 (reliable — only containers have this)
 /// 3. `info().sub_type_expression` == "Container" (uses the string-safe API)
-fn is_container_fx(fx: &reaper_high::Fx) -> bool {
+pub(crate) fn is_container_fx(fx: &reaper_high::Fx) -> bool {
     // Method 1: check fx_type via raw bytes
     if let Some(ft) = read_config_str(fx, "fx_type")
         && ft == "Container"
@@ -1062,7 +1062,7 @@ fn is_container_fx(fx: &reaper_high::Fx) -> bool {
 ///
 /// Note: `get_named_config_param` returns raw `Vec<u8>` which may contain
 /// null terminators. We strip them before converting to a string.
-fn read_config_str(fx: &reaper_high::Fx, key: &str) -> Option<String> {
+pub(crate) fn read_config_str(fx: &reaper_high::Fx, key: &str) -> Option<String> {
     fx.get_named_config_param(key, 256).ok().map(|bytes| {
         // Strip null terminators and trailing whitespace
         let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
@@ -1071,21 +1071,21 @@ fn read_config_str(fx: &reaper_high::Fx, key: &str) -> Option<String> {
 }
 
 /// Read a named config param as u32, returning 0 on failure.
-fn read_config_u32(fx: &reaper_high::Fx, key: &str) -> u32 {
+pub(crate) fn read_config_u32(fx: &reaper_high::Fx, key: &str) -> u32 {
     read_config_str(fx, key)
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(0)
 }
 
 /// Read a named config param as i32, returning 0 on failure.
-fn read_config_i32(fx: &reaper_high::Fx, key: &str) -> i32 {
+pub(crate) fn read_config_i32(fx: &reaper_high::Fx, key: &str) -> i32 {
     read_config_str(fx, key)
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(0)
 }
 
 /// Read a named config param as f64, returning 0.0 on failure.
-fn read_config_f64(fx: &reaper_high::Fx, key: &str) -> f64 {
+pub(crate) fn read_config_f64(fx: &reaper_high::Fx, key: &str) -> f64 {
     read_config_str(fx, key)
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(0.0)
@@ -1096,7 +1096,10 @@ fn read_config_f64(fx: &reaper_high::Fx, key: &str) -> f64 {
 ///
 /// This is much safer than computing stride-based addresses manually, because
 /// REAPER validates the index and returns the correct encoded FX ID directly.
-fn container_child_fx_id(container_fx: &reaper_high::Fx, child_index: u32) -> Option<u32> {
+pub(crate) fn container_child_fx_id(
+    container_fx: &reaper_high::Fx,
+    child_index: u32,
+) -> Option<u32> {
     let key = format!("container_item.{}", child_index);
     read_config_str(container_fx, &key).and_then(|s| s.parse::<u32>().ok())
 }
@@ -1230,7 +1233,7 @@ fn build_container_node(
 ///
 /// Returns the raw index suitable for `TrackFxLocation::NormalFxChain(raw)` or
 /// `TrackFxLocation::InputFxChain(raw)`.
-fn resolve_node_to_raw_index(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
+pub(crate) fn resolve_node_to_raw_index(chain: &FxChain, node_id: &FxNodeId) -> Option<u32> {
     if node_id.is_container() {
         resolve_container_path(chain, node_id)
     } else {

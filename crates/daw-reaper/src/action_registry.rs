@@ -59,7 +59,7 @@ struct MenuActionDef {
     group: String,
 }
 
-fn registered_actions() -> &'static Mutex<HashMap<String, u32>> {
+pub(crate) fn registered_actions() -> &'static Mutex<HashMap<String, u32>> {
     REGISTERED_ACTIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -74,7 +74,7 @@ fn menu_actions() -> &'static Mutex<Vec<MenuActionDef>> {
     MENU_ACTIONS.get_or_init(|| Mutex::new(Vec::new()))
 }
 
-fn toggle_states() -> &'static Mutex<HashMap<String, bool>> {
+pub(crate) fn toggle_states() -> &'static Mutex<HashMap<String, bool>> {
     TOGGLE_STATES.get_or_init(|| Mutex::new(HashMap::new()))
 }
 

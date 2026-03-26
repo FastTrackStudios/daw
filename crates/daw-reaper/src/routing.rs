@@ -341,7 +341,7 @@ pub fn find_project_by_name(name: &str) -> Option<Project> {
 // ============================================================================
 
 /// Convert a REAPER TrackRoute to a daw-proto TrackRoute
-fn convert_track_route(
+pub(crate) fn convert_track_route(
     reaper_route: &ReaperTrackRoute,
     route_type: RouteType,
     index: u32,
