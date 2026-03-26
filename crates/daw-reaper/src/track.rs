@@ -16,7 +16,7 @@ use tokio::sync::broadcast;
 use vox::Tx;
 
 use crate::main_thread;
-use crate::project_context::{find_project_by_guid, project_guid};
+use crate::project_context::{MAX_PROJECT_TABS, find_project_by_guid, project_guid};
 use crate::safe_wrappers::routing as routing_sw;
 
 // =============================================================================
@@ -166,7 +166,7 @@ pub fn poll_and_broadcast_tracks() {
     let mut seen_guids = Vec::new();
 
     // Iterate through all open projects
-    for tab_index in 0..128u32 {
+    for tab_index in 0..MAX_PROJECT_TABS {
         let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
             break;
         };

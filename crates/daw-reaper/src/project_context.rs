@@ -6,25 +6,50 @@ use daw_proto::ProjectContext;
 use reaper_high::{Project, Reaper};
 use reaper_medium::{ProjectContext as ReaperProjectContext, ProjectRef, ReaProject};
 
+/// Maximum number of project tabs to scan when enumerating or looking up projects.
+///
+/// REAPER doesn't have a hard tab limit, so this is a practical upper bound.
+/// All project-scanning loops in the codebase must use this constant to ensure
+/// consistency (e.g. `create()` can find tabs that `find_project_by_guid()` also sees).
+pub const MAX_PROJECT_TABS: u32 = 256;
+
 /// Get a stable identifier for a REAPER project tab.
 ///
-/// Uses a hash of the project file path for saved projects (stable across
-/// REAPER restarts). Falls back to the raw pointer for unsaved projects
-/// (stable for the lifetime of the tab).
-///
-/// This must match the scheme used in `transport.rs` and `fx.rs`.
+/// Uses REAPER's native `GetSetProjectInfo_String("PROJECT_GUID", ...)` which
+/// returns a stable GUID that persists across project pointer reallocations.
+/// Falls back to a hash of the file path for saved projects if the native GUID
+/// is unavailable, and finally to the raw pointer (least stable, but always works).
 pub fn project_guid(project: &Project) -> String {
+    // Try REAPER's native project GUID first — stable across pointer reallocations
+    let reaper = Reaper::get();
+    let low = reaper.medium_reaper().low();
+    let key = c"PROJECT_GUID";
+    let mut buf = [0u8; 128];
+    let buf_ptr = buf.as_mut_ptr() as *mut std::ffi::c_char;
+    let ok = unsafe {
+        low.GetSetProjectInfo_String(project.raw().as_ptr(), key.as_ptr(), buf_ptr, false)
+    };
+    if ok {
+        let guid_str = unsafe { std::ffi::CStr::from_ptr(buf_ptr) }
+            .to_string_lossy()
+            .to_string();
+        if !guid_str.is_empty() {
+            return guid_str;
+        }
+    }
+
+    // Fallback: hash the file path for saved projects
     let path = project.file().map(|p| p.to_string()).unwrap_or_default();
-    if path.is_empty() {
-        // Unsaved project — use raw pointer as fallback
-        format!("reaper-ptr-{:x}", project.raw().as_ptr() as usize)
-    } else {
+    if !path.is_empty() {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
         path.hash(&mut hasher);
-        format!("{:x}", hasher.finish())
+        return format!("{:x}", hasher.finish());
     }
+
+    // Last resort: raw pointer (unstable across REAPER reallocations)
+    format!("reaper-ptr-{:x}", project.raw().as_ptr() as usize)
 }
 
 /// Find a REAPER project by its GUID
@@ -34,8 +59,7 @@ pub fn project_guid(project: &Project) -> String {
 pub fn find_project_by_guid_raw(guid: &str) -> Option<ReaProject> {
     let reaper = Reaper::get();
 
-    // Iterate through all project tabs (max 128 is reasonable)
-    for tab_index in 0..128u32 {
+    for tab_index in 0..MAX_PROJECT_TABS {
         if let Some(result) = reaper
             .medium_reaper()
             .enum_projects(ProjectRef::Tab(tab_index), 0)
@@ -50,6 +74,7 @@ pub fn find_project_by_guid_raw(guid: &str) -> Option<ReaProject> {
         }
     }
 
+    tracing::warn!("find_project_by_guid: no tab matched guid={guid}");
     None
 }
 

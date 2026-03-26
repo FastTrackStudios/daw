@@ -20,7 +20,7 @@
 //! ```
 
 use crate::main_thread;
-use crate::project_context::project_guid as project_guid_from;
+use crate::project_context::{MAX_PROJECT_TABS, project_guid as project_guid_from};
 use crate::safe_wrappers::tempo as sw;
 use crate::safe_wrappers::time_map as tw;
 use daw_proto::{
@@ -158,7 +158,7 @@ pub fn poll_and_broadcast_tempo_map() {
     let mut seen_guids = Vec::new();
 
     // Iterate through all open projects
-    for tab_index in 0..128u32 {
+    for tab_index in 0..MAX_PROJECT_TABS {
         let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
             break;
         };

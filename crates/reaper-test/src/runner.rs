@@ -196,6 +196,26 @@ impl TestRunner {
             println!("  Patched lastt={now_ts} in [verchk] (suppress version check dialog)");
         }
 
+        // Remove stale projecttab entries so REAPER starts with a single clean tab.
+        // Previous test runs can leave 100+ empty tabs in the ini, causing create_project()
+        // to fail (REAPER's tab limit) and slowing down all project-scanning loops.
+        if let Ok(content) = std::fs::read_to_string(&reaper_ini) {
+            let original_lines = content.lines().count();
+            let cleaned: String = content
+                .lines()
+                .filter(|l| !l.starts_with("projecttab") && !l.starts_with("lastproject="))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let cleaned_lines = cleaned.lines().count();
+            let removed = original_lines - cleaned_lines;
+            if removed > 0 {
+                let _ = std::fs::write(&reaper_ini, &cleaned);
+                println!(
+                    "  Removed {removed} stale projecttab/lastproject entries from reaper.ini"
+                );
+            }
+        }
+
         // Dump ini for diagnostics in CI
         if self.ci {
             if let Ok(content) = std::fs::read_to_string(&reaper_ini) {

@@ -77,6 +77,10 @@ impl BatchExecutor {
 
 impl daw_proto::batch::BatchService for BatchExecutor {
     async fn execute(&self, request: BatchRequest) -> BatchResponse {
+        tracing::info!(
+            "BatchExecutor::execute — {} instructions",
+            request.instructions.len()
+        );
         let s = &self.inner;
         let n = request.instructions.len();
         let mut outputs: Vec<Option<StepOutput>> = vec![None; n];

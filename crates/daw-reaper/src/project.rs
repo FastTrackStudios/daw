@@ -11,7 +11,7 @@ use tracing::{debug, info};
 use vox::Tx;
 
 use crate::main_thread;
-use crate::project_context::{find_project_by_guid, project_guid};
+use crate::project_context::{MAX_PROJECT_TABS, find_project_by_guid, project_guid};
 
 // Thread-local storage for the undo block label.
 //
@@ -114,7 +114,7 @@ impl ProjectService for ReaperProject {
             let reaper = Reaper::get();
 
             // Iterate through all open project tabs
-            for i in 0..128 {
+            for i in 0..MAX_PROJECT_TABS {
                 if let Some(project) = project_by_tab(reaper, i) {
                     let info = project_to_info(&project);
                     if info.guid == project_id {
@@ -139,7 +139,7 @@ impl ProjectService for ReaperProject {
             let mut projects = Vec::new();
 
             // Iterate through all open project tabs (max 128)
-            for i in 0..128 {
+            for i in 0..MAX_PROJECT_TABS {
                 if let Some(project) = project_by_tab(reaper, i) {
                     let info = project_to_info(&project);
                     // Skip routing/utility projects
@@ -167,7 +167,7 @@ impl ProjectService for ReaperProject {
 
             // Find the tab index for the project with matching GUID
             let mut target_tab: Option<u32> = None;
-            for i in 0..128u32 {
+            for i in 0..MAX_PROJECT_TABS {
                 if let Some(project) = project_by_tab(reaper, i) {
                     let info = project_to_info(&project);
                     if info.guid == project_id {
@@ -187,7 +187,7 @@ impl ProjectService for ReaperProject {
             // Get current tab index
             let current_project = reaper.current_project();
             let mut current_tab: Option<u32> = None;
-            for i in 0..128u32 {
+            for i in 0..MAX_PROJECT_TABS {
                 if let Some(project) = project_by_tab(reaper, i) {
                     if project == current_project {
                         current_tab = Some(i);
@@ -210,7 +210,7 @@ impl ProjectService for ReaperProject {
             // Calculate shortest path (forward or backward)
             // Count total tabs first
             let mut total_tabs = 0u32;
-            for i in 0..128u32 {
+            for i in 0..MAX_PROJECT_TABS {
                 if project_by_tab(reaper, i).is_some() {
                     total_tabs = i + 1;
                 } else {
@@ -286,7 +286,7 @@ impl ProjectService for ReaperProject {
 
             // Snapshot existing tab pointers before opening
             let mut existing_ptrs = std::collections::HashSet::new();
-            for tab in 0..128u32 {
+            for tab in 0..MAX_PROJECT_TABS {
                 match project_by_tab(reaper, tab) {
                     Some(p) => {
                         existing_ptrs.insert(p.raw().as_ptr() as usize);
@@ -307,7 +307,7 @@ impl ProjectService for ReaperProject {
             medium.main_open_project(file_path, behavior);
 
             // Find the new tab by scanning for a pointer not in our snapshot
-            for tab in 0..128u32 {
+            for tab in 0..MAX_PROJECT_TABS {
                 if let Some(p) = project_by_tab(reaper, tab) {
                     let ptr = p.raw().as_ptr() as usize;
                     if !existing_ptrs.contains(&ptr) {
@@ -335,7 +335,7 @@ impl ProjectService for ReaperProject {
 
             // Snapshot existing tab pointers before creating
             let mut existing_ptrs = std::collections::HashSet::new();
-            for tab in 0..128u32 {
+            for tab in 0..MAX_PROJECT_TABS {
                 match project_by_tab(reaper, tab) {
                     Some(p) => {
                         existing_ptrs.insert(p.raw().as_ptr() as usize);
@@ -345,18 +345,22 @@ impl ProjectService for ReaperProject {
             }
             let old_count = existing_ptrs.len() as u32;
 
+            debug!("create: {old_count} existing tabs before action");
+
             // Fire REAPER action 41929 = "New project tab (ignore default template)"
             let action_new_tab = CommandId::new(41929);
             medium.main_on_command_ex(action_new_tab, 0, ProjectContext::CurrentProject);
 
             // Find the new tab by scanning for a pointer not in our snapshot
-            for tab in 0..128u32 {
+            for tab in 0..MAX_PROJECT_TABS {
                 if let Some(p) = project_by_tab(reaper, tab) {
                     let ptr = p.raw().as_ptr() as usize;
                     if !existing_ptrs.contains(&ptr) {
                         debug!("New project tab at index {} (ptr={:x})", tab, ptr);
                         return Some(project_to_info(&p));
                     }
+                } else {
+                    break;
                 }
             }
 
@@ -386,7 +390,7 @@ impl ProjectService for ReaperProject {
                 // Navigate to the target tab
                 let action_next = CommandId::new(40861);
                 let mut found = false;
-                for _ in 0..128 {
+                for _ in 0..MAX_PROJECT_TABS {
                     medium.main_on_command_ex(action_next, 0, ProjectContext::CurrentProject);
                     let now = project_to_info(&reaper.current_project());
                     if now.guid == project_id {
@@ -694,7 +698,7 @@ impl ReaperProject {
             let reaper = Reaper::get();
             let mut projects = Vec::new();
 
-            for i in 0..128 {
+            for i in 0..MAX_PROJECT_TABS {
                 if let Some(project) = project_by_tab(reaper, i) {
                     let info = project_to_info(&project);
                     if !info.name.to_uppercase().contains("FTS-ROUTING") {

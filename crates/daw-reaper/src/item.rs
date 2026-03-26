@@ -4,7 +4,9 @@
 //! via [`crate::main_thread`].
 
 use crate::main_thread;
-use crate::project_context::{project_guid as project_guid_from, resolve_project_context};
+use crate::project_context::{
+    MAX_PROJECT_TABS, project_guid as project_guid_from, resolve_project_context,
+};
 use crate::safe_wrappers::item as item_sw;
 use crate::track::{resolve_project, resolve_track};
 use daw_proto::{
@@ -136,7 +138,7 @@ pub fn poll_and_broadcast_items() {
     let mut seen_guids = Vec::new();
 
     // Iterate through all open projects
-    for tab_index in 0..128u32 {
+    for tab_index in 0..MAX_PROJECT_TABS {
         let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
             break;
         };

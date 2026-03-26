@@ -35,7 +35,9 @@
 //! - Flooding with updates for projects that aren't playing
 //! - SHM slot exhaustion from constant polling
 
-use crate::project_context::{find_project_by_guid, project_guid as project_guid_from};
+use crate::project_context::{
+    MAX_PROJECT_TABS, find_project_by_guid, project_guid as project_guid_from,
+};
 use daw_proto::{PlayState, ProjectContext, TimeSignature, Transport, TransportService};
 use reaper_high::{PlayRate, Project, Reaper, TaskSupport, Tempo as ReaperTempo};
 use reaper_medium::{
@@ -158,7 +160,7 @@ pub fn poll_and_broadcast() {
     let mut seen_guids = Vec::new();
 
     // Iterate through all open projects
-    for tab_index in 0..128u32 {
+    for tab_index in 0..MAX_PROJECT_TABS {
         let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
             // No more projects
             break;

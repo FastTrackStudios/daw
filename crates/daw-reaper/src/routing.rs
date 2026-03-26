@@ -4,7 +4,9 @@
 //! using `crate::main_thread`.
 
 use crate::main_thread;
-use crate::project_context::{find_project_by_guid, project_guid as project_guid_from};
+use crate::project_context::{
+    MAX_PROJECT_TABS, find_project_by_guid, project_guid as project_guid_from,
+};
 use crate::safe_wrappers::routing as routing_sw;
 use daw_proto::{
     AutomationMode, ChannelMapping, MidiChannelMapping, MidiDestinationChannel, MidiSourceChannel,
@@ -99,7 +101,7 @@ pub fn poll_and_broadcast_routing() {
     let mut seen_guids = Vec::new();
 
     // Iterate through all open projects
-    for tab_index in 0..128u32 {
+    for tab_index in 0..MAX_PROJECT_TABS {
         let Some(result) = medium.enum_projects(ProjectRef::Tab(tab_index), 0) else {
             break;
         };
@@ -309,7 +311,7 @@ pub fn find_project_by_name(name: &str) -> Option<Project> {
     let reaper = Reaper::get();
     let name_upper = name.to_uppercase();
 
-    for tab_index in 0..128u32 {
+    for tab_index in 0..MAX_PROJECT_TABS {
         if let Some(result) = reaper
             .medium_reaper()
             .enum_projects(reaper_medium::ProjectRef::Tab(tab_index), 0)
