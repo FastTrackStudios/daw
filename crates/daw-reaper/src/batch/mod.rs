@@ -1,13 +1,20 @@
 //! Batch executor — executes a batch program of instructions sequentially,
 //! resolving cross-step dependencies and optionally grouping mutations in
 //! a single REAPER undo block.
+//!
+//! Two execution paths:
+//! - **Sync** (default): Entire batch runs in a single `main_thread::query()` call.
+//!   Each op executes directly on REAPER's main thread at native speed (~µs per op).
+//! - **Async** (fallback): Used when any op lacks sync support. Each op goes through
+//!   the async service layer with per-op `main_thread::query()` (~33ms per op).
 
 mod dispatch;
+mod dispatch_sync;
 mod resolve;
 
 use std::sync::Arc;
 
-use daw_proto::ProjectService;
+use crate::main_thread;
 use daw_proto::batch::*;
 
 /// Inner state for the batch executor (not Clone due to ReaperAudioAccessor's Mutex).
@@ -73,21 +80,120 @@ impl BatchExecutor {
             }),
         }
     }
-}
 
-impl daw_proto::batch::BatchService for BatchExecutor {
-    async fn execute(&self, request: BatchRequest) -> BatchResponse {
-        tracing::info!(
-            "BatchExecutor::execute — {} instructions",
-            request.instructions.len()
-        );
+    /// Check if all ops in the request are supported by the sync path.
+    fn all_ops_sync_supported(request: &BatchRequest) -> bool {
+        request
+            .instructions
+            .iter()
+            .all(|i| dispatch_sync::is_sync_supported(&i.op))
+    }
+
+    /// Execute the entire batch in a single main_thread::query() call.
+    ///
+    /// All operations run synchronously on REAPER's main thread, eliminating
+    /// the ~33ms timer callback latency per operation.
+    async fn execute_sync(&self, request: BatchRequest) -> BatchResponse {
+        main_thread::query(move || {
+            use crate::project::UNDO_LABEL;
+            use crate::project_context::resolve_project_context;
+            use daw_proto::ProjectContext;
+            use reaper_high::Reaper;
+            use reaper_medium::UndoScope;
+
+            let n = request.instructions.len();
+            let mut outputs: Vec<Option<StepOutput>> = vec![None; n];
+            let mut results: Vec<StepResult> = Vec::with_capacity(n);
+            let mut failed: Vec<bool> = vec![false; n];
+
+            // Begin undo block if requested
+            if let Some(ref label) = request.options.undo_label {
+                let rctx = resolve_project_context(&ProjectContext::Current);
+                Reaper::get().medium_reaper().undo_begin_block_2(rctx);
+                UNDO_LABEL.with(|cell| cell.replace(Some(label.clone())));
+            }
+
+            for instruction in &request.instructions {
+                let step = instruction.step as usize;
+
+                // Check dependencies — skip if any dependency failed
+                let deps = instruction.op.step_dependencies();
+                let failed_dep = deps.iter().find(|&&d| {
+                    let d = d as usize;
+                    d < failed.len() && failed[d]
+                });
+
+                if let Some(&dep) = failed_dep {
+                    if step < n {
+                        failed[step] = true;
+                    }
+                    results.push(StepResult {
+                        step: instruction.step,
+                        outcome: StepOutcome::Skipped(dep),
+                    });
+                    continue;
+                }
+
+                let result = dispatch_sync::dispatch_op_sync(&instruction.op, &outputs);
+
+                match result {
+                    Ok(output) => {
+                        if step < n {
+                            outputs[step] = Some(output.clone());
+                        }
+                        results.push(StepResult {
+                            step: instruction.step,
+                            outcome: StepOutcome::Ok(output),
+                        });
+                    }
+                    Err(msg) => {
+                        if step < n {
+                            failed[step] = true;
+                        }
+                        results.push(StepResult {
+                            step: instruction.step,
+                            outcome: StepOutcome::Error(msg),
+                        });
+
+                        if request.options.fail_fast {
+                            for remaining in request.instructions.iter().skip(results.len()) {
+                                results.push(StepResult {
+                                    step: remaining.step,
+                                    outcome: StepOutcome::Skipped(instruction.step),
+                                });
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // End undo block if we started one
+            if let Some(ref label) = request.options.undo_label {
+                let rctx = resolve_project_context(&ProjectContext::Current);
+                Reaper::get().medium_reaper().undo_end_block_2(
+                    rctx,
+                    label.as_str(),
+                    UndoScope::All,
+                );
+            }
+
+            BatchResponse { results }
+        })
+        .await
+        .unwrap_or_else(|| BatchResponse { results: vec![] })
+    }
+
+    /// Execute using the async path (per-op main_thread::query, ~33ms each).
+    async fn execute_async(&self, request: BatchRequest) -> BatchResponse {
+        use daw_proto::ProjectService;
+
         let s = &self.inner;
         let n = request.instructions.len();
         let mut outputs: Vec<Option<StepOutput>> = vec![None; n];
         let mut results: Vec<StepResult> = Vec::with_capacity(n);
         let mut failed: Vec<bool> = vec![false; n];
 
-        // If undo_label is set, begin undo block on the current project
         if let Some(ref label) = request.options.undo_label {
             s.project_svc
                 .begin_undo_block(daw_proto::ProjectContext::Current, label.clone())
@@ -97,7 +203,6 @@ impl daw_proto::batch::BatchService for BatchExecutor {
         for instruction in &request.instructions {
             let step = instruction.step as usize;
 
-            // Check dependencies — skip if any dependency failed
             let deps = instruction.op.step_dependencies();
             let failed_dep = deps.iter().find(|&&d| {
                 let d = d as usize;
@@ -176,7 +281,6 @@ impl daw_proto::batch::BatchService for BatchExecutor {
             }
         }
 
-        // End undo block if we started one
         if let Some(ref label) = request.options.undo_label {
             s.project_svc
                 .end_undo_block(daw_proto::ProjectContext::Current, label.clone(), None)
@@ -184,5 +288,24 @@ impl daw_proto::batch::BatchService for BatchExecutor {
         }
 
         BatchResponse { results }
+    }
+}
+
+impl daw_proto::batch::BatchService for BatchExecutor {
+    async fn execute(&self, request: BatchRequest) -> BatchResponse {
+        let n = request.instructions.len();
+        let use_sync = Self::all_ops_sync_supported(&request);
+
+        tracing::info!(
+            "BatchExecutor::execute — {} instructions, path={}",
+            n,
+            if use_sync { "sync" } else { "async" }
+        );
+
+        if use_sync {
+            self.execute_sync(request).await
+        } else {
+            self.execute_async(request).await
+        }
     }
 }

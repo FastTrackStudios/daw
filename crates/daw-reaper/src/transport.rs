@@ -282,7 +282,7 @@ fn transport_changed(prev: &Transport, curr: &Transport) -> bool {
 
 /// Read transport state from REAPER for a specific project.
 /// **MUST be called from the main thread.**
-fn read_transport_state_for_project(
+pub(crate) fn read_transport_state_for_project(
     project: &Project,
     reaper_ctx: ReaperProjectContext,
     medium: &reaper_medium::Reaper,

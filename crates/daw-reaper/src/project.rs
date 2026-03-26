@@ -19,7 +19,7 @@ use crate::project_context::{MAX_PROJECT_TABS, find_project_by_guid, project_gui
 // REAPER's `Undo_EndBlock2` needs the label at end-time. We stash the label
 // from `begin` and retrieve it in `end` as a fallback.
 thread_local! {
-    static UNDO_LABEL: std::cell::Cell<Option<String>> = const { std::cell::Cell::new(None) };
+    pub(crate) static UNDO_LABEL: std::cell::Cell<Option<String>> = const { std::cell::Cell::new(None) };
 }
 
 /// REAPER project implementation that dispatches to the main thread via `main_thread`.
@@ -55,7 +55,7 @@ fn project_by_tab(reaper: &Reaper, tab_index: u32) -> Option<Project> {
 }
 
 /// Extract project info from a REAPER project
-fn project_to_info(project: &Project) -> ProjectInfo {
+pub(crate) fn project_to_info(project: &Project) -> ProjectInfo {
     let path = project.file().map(|p| p.to_string()).unwrap_or_default();
     let name = if path.is_empty() {
         "Untitled".to_string()
@@ -72,7 +72,7 @@ fn project_to_info(project: &Project) -> ProjectInfo {
 }
 
 /// Convert daw_proto::UndoScope to reaper_medium::UndoScope
-fn convert_undo_scope(scope: &daw_proto::UndoScope) -> UndoScope {
+pub(crate) fn convert_undo_scope(scope: &daw_proto::UndoScope) -> UndoScope {
     use enumflags2::BitFlags;
 
     match scope {

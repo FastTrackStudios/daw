@@ -375,7 +375,7 @@ pub(crate) fn resolve_track(
 }
 
 /// Convert a reaper-high Track to our daw_proto::Track
-fn build_track_info(track: &reaper_high::Track) -> Track {
+pub(crate) fn build_track_info(track: &reaper_high::Track) -> Track {
     let guid = track.guid().to_string_without_braces();
     let index = track.index().unwrap_or(0);
     let name = track
@@ -451,7 +451,7 @@ fn build_track_info(track: &reaper_high::Track) -> Track {
 /// We maintain a stack of folder GUIDs. When we encounter a folder start,
 /// we push its GUID. Children between a folder start and its close inherit
 /// the top of the stack as their parent. Negative depth pops the stack.
-fn assign_parent_guids(tracks: &mut [Track]) {
+pub(crate) fn assign_parent_guids(tracks: &mut [Track]) {
     let mut folder_stack: Vec<String> = Vec::new();
 
     for track in tracks.iter_mut() {
