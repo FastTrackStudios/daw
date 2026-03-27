@@ -324,11 +324,22 @@ impl Default for ReaperTrack {
 // Helper Functions
 // =============================================================================
 
-/// Resolve a ProjectContext to a REAPER Project
+/// Resolve a ProjectContext to a REAPER Project.
+///
+/// For GUID-based lookup, checks the current project first (O(1) FFI call)
+/// before falling back to a linear scan of all project tabs. This matters
+/// in batch execution where every op resolves a project GUID that almost
+/// always matches the current project.
 pub(crate) fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
     match ctx {
         ProjectContext::Current => Some(Reaper::get().current_project()),
-        ProjectContext::Project(guid) => find_project_by_guid(guid),
+        ProjectContext::Project(guid) => {
+            let current = Reaper::get().current_project();
+            if project_guid(&current) == *guid {
+                return Some(current);
+            }
+            find_project_by_guid(guid)
+        }
     }
 }
 
