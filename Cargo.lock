@@ -1430,6 +1430,8 @@ version = "0.1.0"
 dependencies = [
  "crossbeam-channel",
  "daw",
+ "daw-proto 0.1.0",
+ "daw-reaper",
  "eyre",
  "fragile",
  "moire",

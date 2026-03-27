@@ -12,6 +12,9 @@ path = "src/lib.rs"
 [dependencies]
 # DAW facade (reaper impl for native benchmarks)
 daw = { workspace = true, features = ["reaper"] }
+# Direct access to BatchExecutor for in-process benchmarks (no socket)
+daw-reaper = { path = "../daw-reaper" }
+daw-proto = { path = "../daw-proto" }
 
 # REAPER bindings
 reaper-high.workspace = true

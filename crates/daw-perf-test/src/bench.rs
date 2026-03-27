@@ -5,6 +5,8 @@ use std::time::{Duration, Instant};
 
 use daw::service::batch::*;
 use daw::{BatchBuilder, Daw};
+use daw_proto::batch::BatchService;
+use daw_reaper::batch::BatchExecutor;
 use tracing::info;
 
 // ============================================================================
@@ -29,14 +31,24 @@ fn log_result(label: &str, n: u32, elapsed: Duration) {
     );
 }
 
-fn log_comparison(native: Duration, individual: Duration, batch: Duration) {
+fn log_comparison(
+    native: Duration,
+    in_process: Duration,
+    batch_rpc: Duration,
+    individual: Duration,
+) {
+    let inproc_vs_native = in_process.as_secs_f64() / native.as_secs_f64();
+    let batch_vs_native = batch_rpc.as_secs_f64() / native.as_secs_f64();
     let ind_vs_native = individual.as_secs_f64() / native.as_secs_f64();
-    let batch_vs_native = batch.as_secs_f64() / native.as_secs_f64();
-    let batch_vs_individual = individual.as_secs_f64() / batch.as_secs_f64();
-    info!("  Ratios:");
-    info!("    Individual RPC / Native:  {ind_vs_native:.1}x slower");
-    info!("    Batch RPC / Native:       {batch_vs_native:.1}x slower");
-    info!("    Individual RPC / Batch:   {batch_vs_individual:.1}x (batch speedup)");
+    let batch_vs_inproc = batch_rpc.as_secs_f64() / in_process.as_secs_f64();
+    let ind_vs_batch = individual.as_secs_f64() / batch_rpc.as_secs_f64();
+    info!("  Ratios (vs native):");
+    info!("    In-process batch / Native:  {inproc_vs_native:.1}x");
+    info!("    Batch RPC / Native:         {batch_vs_native:.1}x");
+    info!("    Individual RPC / Native:    {ind_vs_native:.1}x");
+    info!("  Overhead breakdown:");
+    info!("    Batch RPC / In-process:     {batch_vs_inproc:.1}x (= socket + serialization cost)");
+    info!("    Individual RPC / Batch RPC: {ind_vs_batch:.1}x (= per-op RPC overhead)");
 }
 
 /// Connect to daw-bridge's Unix socket and return a Daw handle.
@@ -232,6 +244,86 @@ async fn native_remove_all_markers() {
         }
     })
     .await;
+}
+
+// ============================================================================
+// In-process batch benchmarks (BatchExecutor, no socket/serialization)
+// ============================================================================
+
+async fn inproc_create_tracks(executor: &BatchExecutor, n: u32) -> Duration {
+    let mut b = BatchBuilder::new().with_undo("In-proc create tracks");
+    let proj = b.current_project();
+    for i in 0..n {
+        b.add_track(&proj, format!("InprocTrack-{i}"), None);
+    }
+    let start = Instant::now();
+    executor.execute(b.build()).await;
+    start.elapsed()
+}
+
+async fn inproc_mutate_tracks(
+    executor: &BatchExecutor,
+    daw: &Daw,
+    n: u32,
+) -> eyre::Result<Duration> {
+    let project = daw.current_project().await?;
+    let all = project.tracks().all().await?;
+    let count = (all.len() as u32).min(n);
+
+    let mut b = BatchBuilder::new().with_undo("In-proc mutate tracks");
+    let proj = b.current_project();
+    for i in 0..count {
+        let tref = daw::service::TrackRef::Guid(all[i as usize].guid.clone());
+        b.rename_track(&proj, tref.clone(), format!("InprocMutated-{i}"));
+        b.set_track_volume(&proj, tref.clone(), 0.5 + (i as f64) * 0.001);
+        b.push_raw::<()>(BatchOp::Track(TrackOp::SetMuted(
+            ProjectArg::FromStep(proj.index()),
+            TrackArg::Literal(tref),
+            i % 2 == 0,
+        )));
+    }
+
+    let start = Instant::now();
+    executor.execute(b.build()).await;
+    Ok(start.elapsed())
+}
+
+async fn inproc_create_and_mutate(executor: &BatchExecutor, n: u32) -> Duration {
+    let mut b = BatchBuilder::new().with_undo("In-proc create+mutate");
+    let proj = b.current_project();
+
+    let mut handles = Vec::with_capacity(n as usize);
+    for i in 0..n {
+        let h = b.add_track(&proj, format!("InprocCM-{i}"), None);
+        handles.push(h);
+    }
+    for (i, handle) in handles.iter().enumerate() {
+        b.push_raw::<()>(BatchOp::Track(TrackOp::SetVolume(
+            ProjectArg::FromStep(proj.index()),
+            TrackArg::FromStep(handle.index()),
+            0.7,
+        )));
+        b.push_raw::<()>(BatchOp::Track(TrackOp::SetMuted(
+            ProjectArg::FromStep(proj.index()),
+            TrackArg::FromStep(handle.index()),
+            i % 2 == 0,
+        )));
+    }
+
+    let start = Instant::now();
+    executor.execute(b.build()).await;
+    start.elapsed()
+}
+
+async fn inproc_add_markers(executor: &BatchExecutor, n: u32) -> Duration {
+    let mut b = BatchBuilder::new().with_undo("In-proc add markers");
+    let proj = b.current_project();
+    for i in 0..n {
+        b.add_marker(&proj, i as f64 * 0.5, format!("InprocMarker-{i}"));
+    }
+    let start = Instant::now();
+    executor.execute(b.build()).await;
+    start.elapsed()
 }
 
 // ============================================================================
@@ -443,14 +535,19 @@ async fn batch_create_and_mutate(daw: &Daw, n: u32) -> eyre::Result<Duration> {
 
 pub async fn run_all() -> eyre::Result<()> {
     info!("╔══════════════════════════════════════════════════════════════╗");
-    info!("║          DAW Performance Benchmark Suite                    ║");
+    info!("║      DAW Performance Benchmark Suite (4-way comparison)     ║");
+    info!("║  Native | In-Process Batch | Batch RPC | Individual RPC    ║");
     info!("╚══════════════════════════════════════════════════════════════╝");
     info!("");
 
-    // Connect to daw-bridge over Unix socket
+    // Connect to daw-bridge over Unix socket (for RPC benchmarks)
     info!("Connecting to daw-bridge socket...");
     let daw = connect_to_daw_bridge().await?;
     info!("Connected.");
+
+    // Create in-process BatchExecutor (bypasses socket entirely)
+    let executor = BatchExecutor::new();
+    info!("In-process BatchExecutor created.");
     info!("");
 
     // Clean slate
@@ -460,24 +557,24 @@ pub async fn run_all() -> eyre::Result<()> {
     for &n in &[100u32, 500] {
         info!("── Create {n} tracks ──────────────────────────────");
 
-        // Native reaper-rs
         let native_elapsed = native_create_tracks(n).await;
         log_result("Native reaper-rs", n, native_elapsed);
         native_remove_all_tracks().await;
 
-        // Individual RPC
+        let inproc_elapsed = inproc_create_tracks(&executor, n).await;
+        log_result("In-process batch", n, inproc_elapsed);
+        native_remove_all_tracks().await;
+
+        let batch_elapsed = batch_create_tracks(&daw, n).await?;
+        log_result("Batch RPC", n, batch_elapsed);
+        rpc_remove_all_tracks(&daw).await?;
+
         let rpc_elapsed = rpc_create_tracks(&daw, n).await?;
         log_result("Individual RPC", n, rpc_elapsed);
         rpc_remove_all_tracks(&daw).await?;
 
-        // Batch RPC
-        let batch_elapsed = batch_create_tracks(&daw, n).await?;
-        log_result("Batch RPC", n, batch_elapsed);
-
-        log_comparison(native_elapsed, rpc_elapsed, batch_elapsed);
+        log_comparison(native_elapsed, inproc_elapsed, batch_elapsed, rpc_elapsed);
         info!("");
-
-        rpc_remove_all_tracks(&daw).await?;
     }
 
     // ── Benchmark 2: Mutate existing tracks (rename + volume + mute) ────
@@ -490,13 +587,16 @@ pub async fn run_all() -> eyre::Result<()> {
         let native_elapsed = native_mutate_tracks(n).await;
         log_result("Native reaper-rs", n * 3, native_elapsed);
 
-        let rpc_elapsed = rpc_mutate_tracks(&daw, n).await?;
-        log_result("Individual RPC", n * 3, rpc_elapsed);
+        let inproc_elapsed = inproc_mutate_tracks(&executor, &daw, n).await?;
+        log_result("In-process batch", n * 3, inproc_elapsed);
 
         let batch_elapsed = batch_mutate_tracks(&daw, n).await?;
         log_result("Batch RPC", n * 3, batch_elapsed);
 
-        log_comparison(native_elapsed, rpc_elapsed, batch_elapsed);
+        let rpc_elapsed = rpc_mutate_tracks(&daw, n).await?;
+        log_result("Individual RPC", n * 3, rpc_elapsed);
+
+        log_comparison(native_elapsed, inproc_elapsed, batch_elapsed, rpc_elapsed);
         info!("");
 
         native_remove_all_tracks().await;
@@ -504,14 +604,21 @@ pub async fn run_all() -> eyre::Result<()> {
 
     // ── Benchmark 3: Create + mutate in single batch (FromStep chains) ──
     for &n in &[100u32, 500] {
-        info!("── Create + mutate {n} tracks (3 ops each, 1 batch) ──");
+        info!("── Create + mutate {n} tracks (3 ops each) ──────────");
 
-        // Native reaper-rs
         let native_elapsed = native_create_and_mutate_tracks(n).await;
         log_result("Native reaper-rs", n * 3, native_elapsed);
         native_remove_all_tracks().await;
 
-        // For comparison: sequential create + mutate individually
+        let inproc_elapsed = inproc_create_and_mutate(&executor, n).await;
+        log_result("In-process batch", n * 3, inproc_elapsed);
+        native_remove_all_tracks().await;
+
+        let batch_elapsed = batch_create_and_mutate(&daw, n).await?;
+        log_result("Batch RPC", n * 3, batch_elapsed);
+        rpc_remove_all_tracks(&daw).await?;
+
+        // Individual RPC: sequential create + mutate
         let seq_start = Instant::now();
         {
             let project = daw.current_project().await?;
@@ -528,35 +635,30 @@ pub async fn run_all() -> eyre::Result<()> {
         log_result("Individual RPC", n * 3, seq_elapsed);
         rpc_remove_all_tracks(&daw).await?;
 
-        // Batch: create + mutate in single call
-        let batch_elapsed = batch_create_and_mutate(&daw, n).await?;
-        log_result("Batch RPC (FromStep)", n * 3, batch_elapsed);
-
-        log_comparison(native_elapsed, seq_elapsed, batch_elapsed);
+        log_comparison(native_elapsed, inproc_elapsed, batch_elapsed, seq_elapsed);
         info!("");
-
-        rpc_remove_all_tracks(&daw).await?;
     }
 
     // ── Benchmark 4: Add markers in bulk ────────────────────────────────
     for &n in &[200u32, 500] {
         info!("── Add {n} markers ──────────────────────────────────");
 
-        // Native reaper-rs
         let native_elapsed = native_add_markers(n).await;
         log_result("Native reaper-rs", n, native_elapsed);
         native_remove_all_markers().await;
 
-        // Individual RPC
+        let inproc_elapsed = inproc_add_markers(&executor, n).await;
+        log_result("In-process batch", n, inproc_elapsed);
+        native_remove_all_markers().await;
+
         let rpc_elapsed = rpc_add_markers(&daw, n).await?;
         log_result("Individual RPC", n, rpc_elapsed);
         rpc_remove_all_markers(&daw).await?;
 
-        // Batch RPC
         let batch_elapsed = batch_add_markers(&daw, n).await?;
         log_result("Batch RPC", n, batch_elapsed);
 
-        log_comparison(native_elapsed, rpc_elapsed, batch_elapsed);
+        log_comparison(native_elapsed, inproc_elapsed, batch_elapsed, rpc_elapsed);
         info!("");
 
         rpc_remove_all_markers(&daw).await?;
