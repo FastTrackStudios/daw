@@ -139,13 +139,15 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     // Logging to /tmp/daw-perf-test.log
     let log_file = std::fs::File::create("/tmp/daw-perf-test.log")
         .expect("Failed to create /tmp/daw-perf-test.log");
-    tracing_subscriber::fmt()
+    let subscriber = tracing_subscriber::fmt()
         .with_writer(std::sync::Mutex::new(log_file))
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive(tracing::Level::INFO.into()),
         )
-        .init();
+        .finish();
+    // try_init: another extension may have already set a global subscriber
+    let _ = tracing::subscriber::set_global_default(subscriber);
 
     info!("daw-perf-test starting...");
 
@@ -156,6 +158,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     }
 
     // Set TaskSupport for daw-reaper main_thread dispatch
+    Global::init();
     daw::reaper::set_task_support(Global::task_support());
 
     let session = ReaperSession::load(context);

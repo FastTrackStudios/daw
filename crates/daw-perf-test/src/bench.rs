@@ -162,6 +162,78 @@ async fn native_mutate_tracks(n: u32) -> Duration {
     start.elapsed()
 }
 
+async fn native_create_and_mutate_tracks(n: u32) -> Duration {
+    let start = Instant::now();
+    daw::reaper::main_thread::query(move || {
+        let reaper = reaper_high::Reaper::get();
+        let project = reaper.current_project();
+        for i in 0..n {
+            let name = format!("NativeCM-{i}");
+            if let Ok(track) = project.insert_track_at(project.track_count()) {
+                track.set_name(name.as_str());
+                if let Ok(vol) = reaper_medium::ReaperVolumeValue::new(0.7) {
+                    let _ = track.set_volume_smart(vol, Default::default());
+                }
+                use reaper_high::GroupingBehavior;
+                use reaper_medium::GangBehavior;
+                if i % 2 == 0 {
+                    track.mute(GangBehavior::DenyGang, GroupingBehavior::PreventGrouping);
+                } else {
+                    track.unmute(GangBehavior::DenyGang, GroupingBehavior::PreventGrouping);
+                }
+            }
+        }
+    })
+    .await;
+    start.elapsed()
+}
+
+async fn native_add_markers(n: u32) -> Duration {
+    let start = Instant::now();
+    daw::reaper::main_thread::query(move || {
+        let reaper = reaper_high::Reaper::get();
+        let medium = reaper.medium_reaper();
+        for i in 0..n {
+            if let Ok(pos) = reaper_medium::PositionInSeconds::new(i as f64 * 0.5) {
+                let name = format!("NativeMarker-{i}");
+                let _ = medium.add_project_marker_2(
+                    reaper_medium::ProjectContext::CurrentProject,
+                    reaper_medium::MarkerOrRegionPosition::Marker(pos),
+                    name.as_str(),
+                    None,
+                    None,
+                );
+            }
+        }
+    })
+    .await;
+    start.elapsed()
+}
+
+async fn native_remove_all_markers() {
+    daw::reaper::main_thread::query(move || {
+        use daw::reaper::safe_wrappers::markers as markers_sw;
+        let reaper = reaper_high::Reaper::get();
+        let low = reaper.medium_reaper().low();
+        let rctx = reaper_medium::ProjectContext::CurrentProject;
+        let mut ids = Vec::new();
+        let mut idx = 0;
+        loop {
+            let Some(result) = markers_sw::enum_project_markers(low, idx) else {
+                break;
+            };
+            idx += 1;
+            if !result.is_region {
+                ids.push(result.marker_idx);
+            }
+        }
+        for id in ids.into_iter().rev() {
+            markers_sw::delete_project_marker(low, rctx, id, false);
+        }
+    })
+    .await;
+}
+
 // ============================================================================
 // Individual RPC benchmarks
 // ============================================================================
@@ -265,6 +337,51 @@ async fn batch_mutate_tracks(daw: &Daw, n: u32) -> eyre::Result<Duration> {
             "Batch mutate tracks had {} errors",
             errors.len()
         ));
+    }
+    Ok(elapsed)
+}
+
+async fn rpc_add_markers(daw: &Daw, n: u32) -> eyre::Result<Duration> {
+    let project = daw.current_project().await?;
+    let markers = project.markers();
+    let start = Instant::now();
+    for i in 0..n {
+        markers
+            .add(i as f64 * 0.5, &format!("RpcMarker-{i}"))
+            .await?;
+    }
+    Ok(start.elapsed())
+}
+
+async fn rpc_remove_all_markers(daw: &Daw) -> eyre::Result<()> {
+    let project = daw.current_project().await?;
+    let markers = project.markers();
+    let all = markers.all().await?;
+    for m in all.iter().rev() {
+        if let Some(id) = m.id {
+            markers.remove(id).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn batch_add_markers(daw: &Daw, n: u32) -> eyre::Result<Duration> {
+    let mut b = BatchBuilder::new().with_undo("Batch add markers");
+    let proj = b.current_project();
+    for i in 0..n {
+        b.add_marker(&proj, i as f64 * 0.5, format!("BatchMarker-{i}"));
+    }
+    let start = Instant::now();
+    let response = daw.execute_batch(b.build()).await?;
+    let elapsed = start.elapsed();
+
+    let errors: Vec<_> = response
+        .results
+        .iter()
+        .filter(|r| matches!(r.outcome, StepOutcome::Error(_)))
+        .collect();
+    if !errors.is_empty() {
+        return Err(eyre::eyre!("Batch add markers had {} errors", errors.len()));
     }
     Ok(elapsed)
 }
@@ -389,6 +506,11 @@ pub async fn run_all() -> eyre::Result<()> {
     for &n in &[100u32, 500] {
         info!("── Create + mutate {n} tracks (3 ops each, 1 batch) ──");
 
+        // Native reaper-rs
+        let native_elapsed = native_create_and_mutate_tracks(n).await;
+        log_result("Native reaper-rs", n * 3, native_elapsed);
+        native_remove_all_tracks().await;
+
         // For comparison: sequential create + mutate individually
         let seq_start = Instant::now();
         {
@@ -410,11 +532,34 @@ pub async fn run_all() -> eyre::Result<()> {
         let batch_elapsed = batch_create_and_mutate(&daw, n).await?;
         log_result("Batch RPC (FromStep)", n * 3, batch_elapsed);
 
-        let speedup = seq_elapsed.as_secs_f64() / batch_elapsed.as_secs_f64();
-        info!("  Individual / Batch: {speedup:.1}x (batch speedup)");
+        log_comparison(native_elapsed, seq_elapsed, batch_elapsed);
         info!("");
 
         rpc_remove_all_tracks(&daw).await?;
+    }
+
+    // ── Benchmark 4: Add markers in bulk ────────────────────────────────
+    for &n in &[200u32, 500] {
+        info!("── Add {n} markers ──────────────────────────────────");
+
+        // Native reaper-rs
+        let native_elapsed = native_add_markers(n).await;
+        log_result("Native reaper-rs", n, native_elapsed);
+        native_remove_all_markers().await;
+
+        // Individual RPC
+        let rpc_elapsed = rpc_add_markers(&daw, n).await?;
+        log_result("Individual RPC", n, rpc_elapsed);
+        rpc_remove_all_markers(&daw).await?;
+
+        // Batch RPC
+        let batch_elapsed = batch_add_markers(&daw, n).await?;
+        log_result("Batch RPC", n, batch_elapsed);
+
+        log_comparison(native_elapsed, rpc_elapsed, batch_elapsed);
+        info!("");
+
+        rpc_remove_all_markers(&daw).await?;
     }
 
     info!("╔══════════════════════════════════════════════════════════════╗");
