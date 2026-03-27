@@ -97,7 +97,8 @@ impl BatchExecutor {
         let inner = Arc::clone(&self.inner);
         main_thread::query(move || {
             use crate::project::UNDO_LABEL;
-            use crate::project_context::resolve_project_context;
+            use crate::project_context::{project_guid, resolve_project_context};
+            use crate::track::{clear_project_cache, set_project_cache};
             use daw_proto::ProjectContext;
             use reaper_high::Reaper;
             use reaper_medium::UndoScope;
@@ -105,6 +106,11 @@ impl BatchExecutor {
             let services = dispatch_sync::SyncServices {
                 audio_accessor_svc: &inner.audio_accessor_svc,
             };
+
+            // Cache the current project GUID so resolve_project() skips FFI per op
+            let current_project = Reaper::get().current_project();
+            let current_guid = project_guid(&current_project);
+            set_project_cache(current_guid, current_project);
 
             let n = request.instructions.len();
             let mut outputs: Vec<Option<StepOutput>> = vec![None; n];
@@ -183,6 +189,7 @@ impl BatchExecutor {
                 );
             }
 
+            clear_project_cache();
             BatchResponse { results }
         })
         .await

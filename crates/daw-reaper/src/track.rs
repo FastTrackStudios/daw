@@ -324,20 +324,52 @@ impl Default for ReaperTrack {
 // Helper Functions
 // =============================================================================
 
+// Thread-local cache for the current project GUID, set by BatchExecutor::execute_sync()
+// to avoid repeated FFI calls to project_guid() on every batch op.
+thread_local! {
+    static CURRENT_PROJECT_CACHE: std::cell::RefCell<Option<(String, Project)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Cache the current project's GUID for the duration of a batch.
+/// Must be called from the main thread. Call `clear_project_cache()` when done.
+pub(crate) fn set_project_cache(guid: String, project: Project) {
+    CURRENT_PROJECT_CACHE.with(|c| {
+        *c.borrow_mut() = Some((guid, project));
+    });
+}
+
+/// Clear the project cache after a batch completes.
+pub(crate) fn clear_project_cache() {
+    CURRENT_PROJECT_CACHE.with(|c| {
+        *c.borrow_mut() = None;
+    });
+}
+
 /// Resolve a ProjectContext to a REAPER Project.
 ///
-/// For GUID-based lookup, checks the current project first (O(1) FFI call)
-/// before falling back to a linear scan of all project tabs. This matters
-/// in batch execution where every op resolves a project GUID that almost
-/// always matches the current project.
+/// For GUID-based lookup, first checks the thread-local cache (set by
+/// `execute_sync`), then the current project, then scans all tabs.
 pub(crate) fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
     match ctx {
         ProjectContext::Current => Some(Reaper::get().current_project()),
         ProjectContext::Project(guid) => {
+            // Fast path: check thread-local cache (zero FFI calls)
+            let cached = CURRENT_PROJECT_CACHE.with(|c| {
+                c.borrow()
+                    .as_ref()
+                    .filter(|(cached_guid, _)| cached_guid == guid)
+                    .map(|(_, proj)| proj.clone())
+            });
+            if let Some(proj) = cached {
+                return Some(proj);
+            }
+            // Medium path: check current project (one FFI call)
             let current = Reaper::get().current_project();
             if project_guid(&current) == *guid {
                 return Some(current);
             }
+            // Slow path: scan all project tabs
             find_project_by_guid(guid)
         }
     }
