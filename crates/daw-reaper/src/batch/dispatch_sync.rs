@@ -24,10 +24,16 @@ use reaper_medium::{
     UndoBehavior,
 };
 
+/// Service instances needed by sync dispatch for stateful operations.
+pub struct SyncServices<'a> {
+    pub audio_accessor_svc: &'a crate::ReaperAudioAccessor,
+}
+
 /// Dispatch a single batch operation synchronously on the main thread.
 pub fn dispatch_op_sync(
     op: &BatchOp,
     outputs: &[Option<StepOutput>],
+    services: &SyncServices<'_>,
 ) -> Result<StepOutput, String> {
     match op {
         BatchOp::Project(op) => dispatch_project_sync(op, outputs),
@@ -49,6 +55,10 @@ pub fn dispatch_op_sync(
         BatchOp::Peak(op) => dispatch_peak_sync(op, outputs),
         BatchOp::PositionConversion(op) => dispatch_position_conversion_sync(op, outputs),
         BatchOp::Health(op) => dispatch_health_sync(op),
+        BatchOp::AudioAccessor(op) => {
+            dispatch_audio_accessor_sync(op, outputs, services.audio_accessor_svc)
+        }
+        BatchOp::MidiAnalysis(op) => dispatch_midi_analysis_sync(op),
         // Services not yet sync-optimized — return error so caller falls back
         _ => Err(format!(
             "sync dispatch not implemented for {:?}",
@@ -80,6 +90,8 @@ pub fn is_sync_supported(op: &BatchOp) -> bool {
             | BatchOp::Peak(_)
             | BatchOp::PositionConversion(_)
             | BatchOp::Health(_)
+            | BatchOp::AudioAccessor(_)
+            | BatchOp::MidiAnalysis(_)
     )
 }
 
@@ -2597,6 +2609,159 @@ fn dispatch_position_conversion_sync(
             Ok(StepOutput::PositionInBeats(PositionInBeats::from_beats(
                 result.full_beats,
             )))
+        }
+    }
+}
+
+// =============================================================================
+// Audio Accessor dispatch
+// =============================================================================
+
+fn dispatch_audio_accessor_sync(
+    op: &AudioAccessorOp,
+    outputs: &[Option<StepOutput>],
+    svc: &crate::ReaperAudioAccessor,
+) -> Result<StepOutput, String> {
+    use crate::safe_wrappers::audio_accessor as aa_sw;
+    use crate::track::resolve_track_pub;
+
+    match op {
+        AudioAccessorOp::CreateTrackAccessor(p, t) => {
+            let ctx = resolve_project_arg(p, outputs)?;
+            let tr = resolve_track_arg(t, outputs)?;
+            let project = crate::track::resolve_project(&ctx)
+                .ok_or_else(|| "project not found".to_string())?;
+            let track =
+                resolve_track_pub(&project, &tr).ok_or_else(|| "track not found".to_string())?;
+            let raw = track.raw().map_err(|e| format!("track raw error: {}", e))?;
+            let low = Reaper::get().medium_reaper().low();
+            let accessor = aa_sw::create_track_audio_accessor(low, raw);
+            let ptr = aa_sw::SendableAccessorPtr::new(accessor);
+            Ok(StepOutput::OptStr(svc.store(ptr)))
+        }
+        AudioAccessorOp::CreateTakeAccessor(p, item_ref, take_ref) => {
+            let ctx = resolve_project_arg(p, outputs)?;
+            let reaper = Reaper::get();
+            let medium = reaper.medium_reaper();
+            let reaper_project_ctx = match &ctx {
+                ProjectContext::Current => reaper_medium::ProjectContext::CurrentProject,
+                ProjectContext::Project(guid) => {
+                    let proj = crate::project_context::find_project_by_guid(guid)
+                        .ok_or_else(|| "project not found".to_string())?;
+                    reaper_medium::ProjectContext::Proj(proj.raw())
+                }
+            };
+            let midi_item =
+                crate::midi::ReaperMidi::resolve_item(medium, reaper_project_ctx, item_ref)
+                    .ok_or_else(|| "item not found".to_string())?;
+            let midi_take = crate::midi::ReaperMidi::resolve_take(medium, midi_item, take_ref)
+                .ok_or_else(|| "take not found".to_string())?;
+            let low = medium.low();
+            let accessor = aa_sw::create_take_audio_accessor(low, midi_take);
+            let ptr = aa_sw::SendableAccessorPtr::new(accessor);
+            Ok(StepOutput::OptStr(svc.store(ptr)))
+        }
+        AudioAccessorOp::HasStateChanged(id) => {
+            let ptr = svc
+                .get_ptr(id)
+                .ok_or_else(|| format!("unknown accessor ID '{}'", id))?;
+            let low = Reaper::get().medium_reaper().low();
+            Ok(StepOutput::Bool(aa_sw::audio_accessor_state_changed(
+                low,
+                ptr.get(),
+            )))
+        }
+        AudioAccessorOp::GetSamples(req) => {
+            let ptr = svc
+                .get_ptr(&req.accessor_id)
+                .ok_or_else(|| format!("unknown accessor ID '{}'", req.accessor_id))?;
+            let low = Reaper::get().medium_reaper().low();
+            let buf_size = (req.num_channels * req.num_samples) as usize;
+            let mut buf = vec![0.0f64; buf_size];
+            let result = aa_sw::get_audio_accessor_samples(
+                low,
+                ptr.get(),
+                req.sample_rate as i32,
+                req.num_channels as i32,
+                req.start_time,
+                req.num_samples as i32,
+                &mut buf,
+            );
+            if result <= 0 {
+                return Ok(StepOutput::AudioSampleData(AudioSampleData::default()));
+            }
+            let actual_samples = result as u32;
+            let actual_size = (req.num_channels * actual_samples) as usize;
+            buf.truncate(actual_size);
+            Ok(StepOutput::AudioSampleData(AudioSampleData {
+                samples: buf,
+                sample_rate: req.sample_rate,
+                num_channels: req.num_channels,
+                num_samples: actual_samples,
+            }))
+        }
+        AudioAccessorOp::DestroyAccessor(id) => {
+            let ptr = svc
+                .remove_ptr(id)
+                .ok_or_else(|| format!("unknown accessor ID '{}'", id))?;
+            let low = Reaper::get().medium_reaper().low();
+            aa_sw::destroy_audio_accessor(low, ptr.get());
+            Ok(StepOutput::Unit)
+        }
+    }
+}
+
+// =============================================================================
+// MIDI Analysis dispatch
+// =============================================================================
+
+fn dispatch_midi_analysis_sync(op: &MidiAnalysisOp) -> Result<StepOutput, String> {
+    use crate::ReaperMidiAnalysis;
+
+    match op {
+        MidiAnalysisOp::SourceFingerprint(req) => {
+            let project = ReaperMidiAnalysis::resolve_project(&req.project)
+                .ok_or_else(|| "Project not found".to_string())?;
+            let track = ReaperMidiAnalysis::find_track_by_tag(&project, req.track_tag.as_deref())
+                .ok_or_else(|| {
+                let tag = req.track_tag.as_deref().unwrap_or("<none>");
+                format!("No track matched tag '{}'", tag)
+            })?;
+            let track_name = track
+                .name()
+                .map(|name| name.to_str().to_string())
+                .unwrap_or_else(|| "Unnamed Track".to_string());
+            let (take, item_start_time) = ReaperMidiAnalysis::get_first_midi_take(&track)
+                .ok_or_else(|| format!("Track '{}' has no MIDI take", track_name))?;
+            let notes = ReaperMidiAnalysis::read_keyflow_notes(take);
+            if notes.is_empty() {
+                return Err("No MIDI notes found".to_string());
+            }
+            let item_start_tick = ReaperMidiAnalysis::time_to_tick(project, item_start_time);
+            let import_notes = ReaperMidiAnalysis::import_notes(&notes, item_start_tick);
+            let markers = ReaperMidiAnalysis::gather_markers(project);
+            Ok(StepOutput::ResultString(Ok(
+                ReaperMidiAnalysis::make_source_fingerprint(&track_name, &import_notes, &markers),
+            )))
+        }
+        MidiAnalysisOp::GenerateChartData(req) => {
+            let project = ReaperMidiAnalysis::resolve_project(&req.project)
+                .ok_or_else(|| "Project not found".to_string())?;
+            let track = ReaperMidiAnalysis::find_track_by_tag(&project, req.track_tag.as_deref())
+                .ok_or_else(|| {
+                let tag = req.track_tag.as_deref().unwrap_or("<none>");
+                format!("No track matched tag '{}'", tag)
+            })?;
+            let track_name = track
+                .name()
+                .map(|name| name.to_str().to_string())
+                .unwrap_or_else(|| "Unnamed Track".to_string());
+            let (take, item_start_time) = ReaperMidiAnalysis::get_first_midi_take(&track)
+                .ok_or_else(|| format!("Track '{}' has no MIDI take", track_name))?;
+            let notes = ReaperMidiAnalysis::read_keyflow_notes(take);
+            Ok(StepOutput::ResultMidiChartData(
+                ReaperMidiAnalysis::build_chart_data(project, track_name, notes, item_start_time),
+            ))
         }
     }
 }

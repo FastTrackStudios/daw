@@ -29,14 +29,14 @@ impl ReaperMidiAnalysis {
         Self
     }
 
-    fn resolve_project(project: &ProjectContext) -> Option<Project> {
+    pub(crate) fn resolve_project(project: &ProjectContext) -> Option<Project> {
         match project {
             ProjectContext::Current => Some(Reaper::get().current_project()),
             ProjectContext::Project(guid) => find_project_by_guid(guid),
         }
     }
 
-    fn find_track_by_tag(project: &Project, tag: Option<&str>) -> Option<Track> {
+    pub(crate) fn find_track_by_tag(project: &Project, tag: Option<&str>) -> Option<Track> {
         let needle = tag.map(|t| t.to_ascii_lowercase());
         for track in project.tracks() {
             let name = track.name()?.to_str().to_string();
@@ -51,7 +51,7 @@ impl ReaperMidiAnalysis {
         None
     }
 
-    fn get_first_midi_take(track: &Track) -> Option<(MediaItemTake, f64)> {
+    pub(crate) fn get_first_midi_take(track: &Track) -> Option<(MediaItemTake, f64)> {
         let reaper = Reaper::get();
         let medium = reaper.medium_reaper();
         let low = medium.low();
@@ -69,7 +69,7 @@ impl ReaperMidiAnalysis {
         None
     }
 
-    fn read_keyflow_notes(take: MediaItemTake) -> Vec<KeyflowMidiNote> {
+    pub(crate) fn read_keyflow_notes(take: MediaItemTake) -> Vec<KeyflowMidiNote> {
         let low = Reaper::get().medium_reaper().low();
         let counts = midi_sw::count_events(low, take);
 
@@ -98,12 +98,12 @@ impl ReaperMidiAnalysis {
         result.full_beats
     }
 
-    fn time_to_tick(project: Project, time_seconds: f64) -> u32 {
+    pub(crate) fn time_to_tick(project: Project, time_seconds: f64) -> u32 {
         let beats = Self::get_beats_at_time(project, time_seconds);
         (beats * f64::from(REAPER_PPQ)).round().max(0.0) as u32
     }
 
-    fn gather_markers(project: Project) -> Vec<MarkerEvent> {
+    pub(crate) fn gather_markers(project: Project) -> Vec<MarkerEvent> {
         let low = Reaper::get().medium_reaper().low();
         let mut markers = Vec::new();
         let mut idx = 0;
@@ -125,7 +125,10 @@ impl ReaperMidiAnalysis {
         markers
     }
 
-    fn import_notes(notes: &[KeyflowMidiNote], item_start_tick: u32) -> Vec<ImportMidiNote> {
+    pub(crate) fn import_notes(
+        notes: &[KeyflowMidiNote],
+        item_start_tick: u32,
+    ) -> Vec<ImportMidiNote> {
         notes
             .iter()
             .map(|note| {
@@ -142,7 +145,7 @@ impl ReaperMidiAnalysis {
             .collect()
     }
 
-    fn make_source_fingerprint(
+    pub(crate) fn make_source_fingerprint(
         source_track_name: &str,
         import_notes: &[ImportMidiNote],
         markers: &[MarkerEvent],
@@ -165,7 +168,7 @@ impl ReaperMidiAnalysis {
         format!("{:x}", hasher.finish())
     }
 
-    fn build_chart_data(
+    pub(crate) fn build_chart_data(
         project: Project,
         source_track_name: String,
         notes: Vec<KeyflowMidiNote>,

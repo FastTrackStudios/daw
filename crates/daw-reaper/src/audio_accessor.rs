@@ -47,7 +47,7 @@ impl ReaperAudioAccessor {
     }
 
     /// Store a pointer and return its ID. Returns None if pointer is null.
-    fn store(&self, ptr: SendableAccessorPtr) -> Option<String> {
+    pub(crate) fn store(&self, ptr: SendableAccessorPtr) -> Option<String> {
         if ptr.is_null() {
             return None;
         }
@@ -57,12 +57,12 @@ impl ReaperAudioAccessor {
     }
 
     /// Look up a pointer by ID.
-    fn get_ptr(&self, id: &str) -> Option<SendableAccessorPtr> {
+    pub(crate) fn get_ptr(&self, id: &str) -> Option<SendableAccessorPtr> {
         self.accessors.lock().unwrap().get(id).copied()
     }
 
     /// Remove and return a pointer by ID.
-    fn remove_ptr(&self, id: &str) -> Option<SendableAccessorPtr> {
+    pub(crate) fn remove_ptr(&self, id: &str) -> Option<SendableAccessorPtr> {
         self.accessors.lock().unwrap().remove(id)
     }
 }

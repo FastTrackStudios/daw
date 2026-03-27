@@ -94,12 +94,17 @@ impl BatchExecutor {
     /// All operations run synchronously on REAPER's main thread, eliminating
     /// the ~33ms timer callback latency per operation.
     async fn execute_sync(&self, request: BatchRequest) -> BatchResponse {
+        let inner = Arc::clone(&self.inner);
         main_thread::query(move || {
             use crate::project::UNDO_LABEL;
             use crate::project_context::resolve_project_context;
             use daw_proto::ProjectContext;
             use reaper_high::Reaper;
             use reaper_medium::UndoScope;
+
+            let services = dispatch_sync::SyncServices {
+                audio_accessor_svc: &inner.audio_accessor_svc,
+            };
 
             let n = request.instructions.len();
             let mut outputs: Vec<Option<StepOutput>> = vec![None; n];
@@ -134,7 +139,7 @@ impl BatchExecutor {
                     continue;
                 }
 
-                let result = dispatch_sync::dispatch_op_sync(&instruction.op, &outputs);
+                let result = dispatch_sync::dispatch_op_sync(&instruction.op, &outputs, &services);
 
                 match result {
                     Ok(output) => {
