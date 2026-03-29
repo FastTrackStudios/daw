@@ -237,7 +237,15 @@ impl TestRunner {
         let reaper_exe = resolve_reaper_exe();
         let reaper_launcher_prefix = std::env::var("FTS_REAPER_LAUNCHER").ok();
         let fts_test = find_fts_test();
+        let reaper_env = find_reaper_env();
         let needs_fhs = std::env::var("DISPLAY").map_or(true, |d| d.is_empty());
+        // For GUI mode, use the full GUI REAPER from PATH (ignores FTS_REAPER_EXECUTABLE
+        // which points to reaper-headless). The GUI REAPER's libSwell links X11/GL.
+        let gui_reaper_exe = if !self.headless {
+            resolve_gui_reaper_exe()
+        } else {
+            reaper_exe.clone()
+        };
         let reaper_ini = self.resources_dir.join("reaper.ini");
         let reaper_log = PathBuf::from("/tmp/fts-daw-reaper.log");
 
@@ -255,11 +263,15 @@ impl TestRunner {
         }
         println!("  config dir:  {}", self.resources_dir.display());
         println!("  ini:         {}", reaper_ini.display());
+        println!("  headless:    {}", self.headless);
         println!("  needs fhs:   {needs_fhs}");
         if let Some(ref fts) = fts_test {
             println!("  fts-test:    {fts}");
         } else if needs_fhs {
             println!("  WARNING: no fts-test found and no DISPLAY — REAPER may fail");
+        }
+        if let Some(ref env) = reaper_env {
+            println!("  reaper-env:  {env}");
         }
         println!(
             "  timeout:     {}s (REAPER_TEST_TIMEOUT_SECS)",
@@ -346,7 +358,36 @@ impl TestRunner {
                 cmd.spawn()
                     .map_err(|e| format!("Failed to spawn REAPER: {e}"))?
             }
+        } else if !headless {
+            // GUI mode with a real display: use the GUI REAPER (which has X11/GL in
+            // libSwell) prefixed by reaper-env (bubblewrap FHS chroot for GL/EGL).
+            // FTS_REAPER_EXECUTABLE points to reaper-headless and is intentionally
+            // ignored here — gui_reaper_exe comes from `which reaper` (nix profile).
+            if let Some(ref env_bin) = reaper_env {
+                let mut cmd = Command::new(env_bin);
+                cmd.arg(&gui_reaper_exe);
+                cmd.args(&reaper_args);
+                apply_env(&mut cmd);
+                cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
+                println!(
+                    "  spawning: {env_bin} {gui_reaper_exe} {}",
+                    reaper_args.join(" ")
+                );
+                cmd.spawn()
+                    .map_err(|e| format!("Failed to spawn via reaper-env: {e}"))?
+            } else {
+                // reaper-env not found — fall back to plain GUI REAPER with warning
+                println!("  WARNING: reaper-env not found; plugin GUIs may fail without FHS env");
+                let mut cmd = Command::new(&gui_reaper_exe);
+                cmd.args(&reaper_args);
+                apply_env(&mut cmd);
+                cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
+                println!("  spawning: {gui_reaper_exe} {}", reaper_args.join(" "));
+                cmd.spawn()
+                    .map_err(|e| format!("Failed to spawn GUI REAPER: {e}"))?
+            }
         } else {
+            // Headless with a display: use plain reaper (no GUI windows needed)
             let mut cmd = Command::new(&effective_exe);
             cmd.args(&extra_prefix_args);
             cmd.args(&reaper_args);
@@ -631,6 +672,28 @@ pub fn find_fts_test() -> Option<String> {
         .map(|s| s.to_string())
 }
 
+/// Find the `reaper-env` FHS chroot wrapper.
+///
+/// `reaper-env` is a bubblewrap FHS chroot that provides GL/EGL libraries at
+/// standard system paths. It takes any binary as its first arg and runs it
+/// inside the chroot, preserving /nix/store access. Used as a prefix launcher
+/// for the GUI REAPER binary so that plugins using WGPU/OpenGL can find the
+/// GL/EGL libraries they need via dlopen.
+pub fn find_reaper_env() -> Option<String> {
+    if let Some(p) = which_command("reaper-env") {
+        return Some(p);
+    }
+
+    let candidates = [
+        "/run/current-system/sw/bin/reaper-env",
+        "/nix/var/nix/profiles/default/bin/reaper-env",
+    ];
+    candidates
+        .iter()
+        .find(|p| PathBuf::from(p).exists())
+        .map(|s| s.to_string())
+}
+
 /// Find a command on PATH.
 pub fn which_command(name: &str) -> Option<String> {
     Command::new("which").arg(name).output().ok().and_then(|o| {
@@ -645,10 +708,23 @@ pub fn which_command(name: &str) -> Option<String> {
 }
 
 /// Resolve the REAPER executable path from environment.
+///
+/// Uses `FTS_REAPER_EXECUTABLE` if set, then falls back to `which reaper`.
+/// `FTS_REAPER_EXECUTABLE` typically points to `reaper-headless` for CI use.
 pub fn resolve_reaper_exe() -> String {
     std::env::var("FTS_REAPER_EXECUTABLE")
         .or_else(|_| which_command("reaper").ok_or(()))
         .unwrap_or_else(|_| "reaper".to_string())
+}
+
+/// Resolve the GUI REAPER executable, ignoring `FTS_REAPER_EXECUTABLE`.
+///
+/// `FTS_REAPER_EXECUTABLE` typically points to `reaper-headless` which lacks
+/// X11/GL and cannot open plugin windows. GUI tests need the full REAPER binary
+/// that links libSwell with X11 and GL support. This function always uses
+/// `which reaper` to find the GUI binary from the user's Nix profile.
+pub fn resolve_gui_reaper_exe() -> String {
+    which_command("reaper").unwrap_or_else(|| "reaper".to_string())
 }
 
 /// Canonical REAPER resources directory shared by all rigs and CI.
