@@ -21,6 +21,9 @@ pub struct TestRunner {
     pub timeout_secs: u64,
     /// Keep REAPER open after tests for manual inspection.
     pub keep_open: bool,
+    /// Run REAPER headless (DISPLAY=""). Set to false to use the current display,
+    /// which allows plugin GUIs to actually open and render.
+    pub headless: bool,
     /// Running under CI (GitHub Actions) — enables `::group::` log sections.
     pub ci: bool,
     /// If set, only these guest extensions will be loaded by daw-bridge.
@@ -292,14 +295,23 @@ impl TestRunner {
         };
 
         // Helper: apply common env vars to any REAPER command.
-        // - DISPLAY="" makes the batch REAPER headless (no visible window)
+        // - DISPLAY="" makes REAPER headless (no visible window); pass-through when headless=false
         // - FTS_SYNC_NO_MDNS=1 prevents mDNS advertisement that would interfere
         //   with multi-instance tests which manage their own mDNS discovery
         // - FTS_SYNC_NO_LINK=1 prevents Ableton Link cross-talk
+        let headless = self.headless;
+        let reaper_log_for_nih = reaper_log.clone();
         let apply_env = |cmd: &mut Command| {
-            cmd.env("DISPLAY", "");
+            if headless {
+                cmd.env("DISPLAY", "");
+            }
+            // When not headless, inherit DISPLAY from the environment so GUI tests
+            // can open plugin windows and actually render frames.
             cmd.env("FTS_SYNC_NO_MDNS", "1");
             cmd.env("FTS_SYNC_NO_LINK", "1");
+            // Route nih_plug log output (nih_log!/nih_warn!/nih_error!) to the REAPER log
+            // so GPU/surface messages show up in the same file as other test output.
+            cmd.env("NIH_LOG", &reaper_log_for_nih);
             if let Some(ref wl) = whitelist_val {
                 cmd.env("FTS_EXTENSION_WHITELIST", wl);
             }
