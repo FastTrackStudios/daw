@@ -55,13 +55,13 @@ fts-devtools = { path = "crates/fts-devtools" }
 # Facet reflection - use crates.io 0.44.x
 facet = { version = "0.44" }
 
-# VOX service framework (pinned)
-vox = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-stream = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-vox-shm = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-shm-primitives = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-shm-primitives-async = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
-ur-taking-me-with-you = { git = "https://github.com/bearcove/vox.git", rev = "53bff48" }
+# VOX service framework (pinned to FastTrackStudios fork)
+vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-shm = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+shm-primitives = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+shm-primitives-async = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+ur-taking-me-with-you = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
 
 # CLI
 clap = { version = "4", features = ["derive"] }

@@ -9,7 +9,7 @@ source = "git+https://github.com/FastTrackStudios/input_actions.git?branch=main#
 dependencies = [
  "convert_case 0.6.0",
  "facet",
- "vox",
+ "vox 0.2.0",
 ]
 
 [[package]]
@@ -1361,7 +1361,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "ur-taking-me-with-you",
- "vox",
+ "vox 0.2.2",
  "vox-shm",
  "vox-stream",
 ]
@@ -1380,7 +1380,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "vox",
+ "vox 0.2.2",
  "vox-stream",
 ]
 
@@ -1394,7 +1394,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
- "vox",
+ "vox 0.2.2",
 ]
 
 [[package]]
@@ -1406,7 +1406,7 @@ dependencies = [
  "moire",
  "tokio",
  "tracing",
- "vox",
+ "vox 0.2.2",
  "vox-stream",
 ]
 
@@ -1420,7 +1420,7 @@ dependencies = [
  "moire",
  "shm-primitives",
  "tracing",
- "vox",
+ "vox 0.2.2",
  "vox-shm",
 ]
 
@@ -1442,7 +1442,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "vox",
+ "vox 0.2.2",
  "vox-stream",
 ]
 
@@ -1453,7 +1453,7 @@ dependencies = [
  "actions-proto",
  "facet",
  "thiserror 2.0.18",
- "vox",
+ "vox 0.2.2",
 ]
 
 [[package]]
@@ -1464,7 +1464,7 @@ dependencies = [
  "actions-proto",
  "facet",
  "thiserror 2.0.18",
- "vox",
+ "vox 0.2.0",
 ]
 
 [[package]]
@@ -1492,7 +1492,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "vox",
+ "vox 0.2.2",
  "vox-shm",
 ]
 
@@ -1514,7 +1514,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "vox",
+ "vox 0.2.2",
  "web-time",
 ]
 
@@ -2266,6 +2266,16 @@ dependencies = [
 name = "facet-cbor"
 version = "0.2.0"
 source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+dependencies = [
+ "facet",
+ "facet-core",
+ "facet-reflect",
+]
+
+[[package]]
+name = "facet-cbor"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
 dependencies = [
  "facet",
  "facet-core",
@@ -3452,7 +3462,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tracing",
  "uuid",
- "vox",
+ "vox 0.2.0",
 ]
 
 [[package]]
@@ -5361,7 +5371,7 @@ dependencies = [
  "reaper-test-macro",
  "tokio",
  "tracing",
- "vox",
+ "vox 0.2.2",
  "vox-stream",
 ]
 
@@ -5761,8 +5771,8 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "shm-primitives"
-version = "0.2.0"
-source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
 dependencies = [
  "libc",
  "loom",
@@ -5771,8 +5781,8 @@ dependencies = [
 
 [[package]]
 name = "shm-primitives-async"
-version = "0.2.0"
-source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
 dependencies = [
  "libc",
  "tokio",
@@ -6824,8 +6834,8 @@ dependencies = [
 
 [[package]]
 name = "ur-taking-me-with-you"
-version = "0.2.0"
-source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+version = "8.0.0"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
@@ -6989,10 +6999,23 @@ source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656
 dependencies = [
  "facet",
  "tracing",
- "vox-core",
- "vox-postcard",
- "vox-service-macros",
- "vox-types",
+ "vox-core 0.2.0",
+ "vox-postcard 0.2.0",
+ "vox-service-macros 0.2.0",
+ "vox-types 0.2.0",
+]
+
+[[package]]
+name = "vox"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
+dependencies = [
+ "facet",
+ "tracing",
+ "vox-core 0.2.2",
+ "vox-postcard 0.2.2",
+ "vox-service-macros 0.2.2",
+ "vox-types 0.2.2",
 ]
 
 [[package]]
@@ -7001,7 +7024,7 @@ version = "0.2.0"
 source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
 dependencies = [
  "facet",
- "facet-cbor",
+ "facet-cbor 0.2.0",
  "facet-core",
  "facet-error",
  "facet-reflect",
@@ -7010,8 +7033,29 @@ dependencies = [
  "smallvec 1.15.1",
  "tokio",
  "tracing",
- "vox-postcard",
- "vox-types",
+ "vox-postcard 0.2.0",
+ "vox-types 0.2.0",
+ "wasm-bindgen-futures",
+ "zerocopy",
+]
+
+[[package]]
+name = "vox-core"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
+dependencies = [
+ "facet",
+ "facet-cbor 0.2.2",
+ "facet-core",
+ "facet-error",
+ "facet-reflect",
+ "getrandom 0.3.4",
+ "moire",
+ "smallvec 1.15.1",
+ "tokio",
+ "tracing",
+ "vox-postcard 0.2.2",
+ "vox-types 0.2.2",
  "wasm-bindgen-futures",
  "zerocopy",
 ]
@@ -7025,13 +7069,34 @@ dependencies = [
  "heck 0.5.0",
  "proc-macro2",
  "quote",
- "vox-macros-parse",
+ "vox-macros-parse 0.2.0",
+]
+
+[[package]]
+name = "vox-macros-core"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
+dependencies = [
+ "facet-cargo-toml",
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "vox-macros-parse 0.2.2",
 ]
 
 [[package]]
 name = "vox-macros-parse"
 version = "0.2.0"
 source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+dependencies = [
+ "proc-macro2",
+ "unsynn",
+]
+
+[[package]]
+name = "vox-macros-parse"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
 dependencies = [
  "proc-macro2",
  "unsynn",
@@ -7045,7 +7110,18 @@ dependencies = [
  "facet",
  "facet-core",
  "facet-reflect",
- "vox-schema",
+ "vox-schema 0.2.0",
+]
+
+[[package]]
+name = "vox-postcard"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
+dependencies = [
+ "facet",
+ "facet-core",
+ "facet-reflect",
+ "vox-schema 0.2.2",
 ]
 
 [[package]]
@@ -7055,7 +7131,19 @@ source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656
 dependencies = [
  "blake3",
  "facet",
- "facet-cbor",
+ "facet-cbor 0.2.0",
+ "facet-core",
+ "indexmap",
+]
+
+[[package]]
+name = "vox-schema"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
+dependencies = [
+ "blake3",
+ "facet",
+ "facet-cbor 0.2.2",
  "facet-core",
  "indexmap",
 ]
@@ -7066,13 +7154,22 @@ version = "0.2.0"
 source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
 dependencies = [
  "proc-macro2",
- "vox-macros-core",
+ "vox-macros-core 0.2.0",
+]
+
+[[package]]
+name = "vox-service-macros"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
+dependencies = [
+ "proc-macro2",
+ "vox-macros-core 0.2.2",
 ]
 
 [[package]]
 name = "vox-shm"
-version = "0.2.0"
-source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
 dependencies = [
  "libc",
  "loom",
@@ -7080,20 +7177,20 @@ dependencies = [
  "shm-primitives-async",
  "tempfile",
  "tracing",
- "vox-postcard",
- "vox-types",
+ "vox-postcard 0.2.2",
+ "vox-types 0.2.2",
  "zerocopy",
 ]
 
 [[package]]
 name = "vox-stream"
-version = "0.2.0"
-source = "git+https://github.com/bearcove/vox.git?rev=53bff48#53bff486b71b828656ff17395f27e0cb631fe488"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
 dependencies = [
  "moire",
  "tokio",
- "vox-core",
- "vox-types",
+ "vox-core 0.2.2",
+ "vox-types 0.2.2",
 ]
 
 [[package]]
@@ -7104,7 +7201,7 @@ dependencies = [
  "bitflags 2.11.0",
  "blake3",
  "facet",
- "facet-cbor",
+ "facet-cbor 0.2.0",
  "facet-core",
  "facet-path",
  "futures-channel",
@@ -7114,8 +7211,30 @@ dependencies = [
  "smallvec 1.15.1",
  "structstruck",
  "tokio",
- "vox-postcard",
- "vox-schema",
+ "vox-postcard 0.2.0",
+ "vox-schema 0.2.0",
+]
+
+[[package]]
+name = "vox-types"
+version = "0.2.2"
+source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
+dependencies = [
+ "bitflags 2.11.0",
+ "blake3",
+ "facet",
+ "facet-cbor 0.2.2",
+ "facet-core",
+ "facet-path",
+ "futures-channel",
+ "heck 0.5.0",
+ "indexmap",
+ "moire",
+ "smallvec 1.15.1",
+ "structstruck",
+ "tokio",
+ "vox-postcard 0.2.2",
+ "vox-schema 0.2.2",
 ]
 
 [[package]]
