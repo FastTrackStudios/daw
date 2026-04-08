@@ -179,14 +179,14 @@ fn render_icon_png(size: u32, config: &IconConfig) -> Result<Vec<u8>, String> {
     let line_count = lines.len();
     let is_multiline = line_count > 1;
 
-    let badge_w = bg_size * 0.85;
+    let badge_w = bg_size * 0.90;
     let badge_h = if is_multiline {
-        bg_size * 0.22 * line_count as f32
+        bg_size * 0.24 * line_count as f32
     } else {
-        bg_size * 0.28
+        bg_size * 0.34
     };
     let badge_x = (sz - badge_w) / 2.0;
-    let badge_y = margin + bg_size - badge_h - bg_size * 0.05;
+    let badge_y = margin + bg_size - badge_h - bg_size * 0.04;
     let badge_radius = if is_multiline {
         badge_h * 0.25
     } else {
@@ -242,9 +242,9 @@ fn render_icon_png(size: u32, config: &IconConfig) -> Result<Vec<u8>, String> {
     let font =
         FontRef::try_from_slice(INTER_BOLD).map_err(|e| format!("Failed to load font: {e}"))?;
     let font_size = if is_multiline {
-        badge_h * 0.35
+        badge_h * 0.38
     } else {
-        badge_h * 0.60
+        badge_h * 0.65
     };
     let scale = PxScale::from(font_size);
     let scaled_font = font.as_scaled(scale);
