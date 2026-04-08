@@ -134,21 +134,10 @@ fn render_icon_png(size: u32, config: &IconConfig) -> Result<Vec<u8>, String> {
     let mut paint = Paint::default();
     paint.anti_alias = true;
 
-    // Background: dark base (#2a2a2a)
+    // Background: neutral dark gray (#2a2a2a)
     paint.set_color(
         Color::from_rgba(0.165, 0.165, 0.165, 1.0).ok_or_else(|| "Invalid bg color".to_string())?,
     );
-    pixmap.fill_path(
-        &bg_rect,
-        &paint,
-        FillRule::Winding,
-        Transform::identity(),
-        None,
-    );
-
-    // Color tint overlay on background (30% opacity)
-    paint
-        .set_color(Color::from_rgba(r, g, b, 0.3).ok_or_else(|| "Invalid tint color".to_string())?);
     pixmap.fill_path(
         &bg_rect,
         &paint,
@@ -190,14 +179,14 @@ fn render_icon_png(size: u32, config: &IconConfig) -> Result<Vec<u8>, String> {
     let line_count = lines.len();
     let is_multiline = line_count > 1;
 
-    let badge_w = bg_size * 0.55;
+    let badge_w = bg_size * 0.85;
     let badge_h = if is_multiline {
-        bg_size * 0.16 * line_count as f32
+        bg_size * 0.22 * line_count as f32
     } else {
-        bg_size * 0.18
+        bg_size * 0.28
     };
     let badge_x = (sz - badge_w) / 2.0;
-    let badge_y = margin + bg_size - badge_h - bg_size * 0.08;
+    let badge_y = margin + bg_size - badge_h - bg_size * 0.05;
     let badge_radius = if is_multiline {
         badge_h * 0.25
     } else {
@@ -253,9 +242,9 @@ fn render_icon_png(size: u32, config: &IconConfig) -> Result<Vec<u8>, String> {
     let font =
         FontRef::try_from_slice(INTER_BOLD).map_err(|e| format!("Failed to load font: {e}"))?;
     let font_size = if is_multiline {
-        badge_h * 0.30
+        badge_h * 0.35
     } else {
-        badge_h * 0.55
+        badge_h * 0.60
     };
     let scale = PxScale::from(font_size);
     let scaled_font = font.as_scaled(scale);
