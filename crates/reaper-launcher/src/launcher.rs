@@ -86,6 +86,23 @@ pub fn discover_config() -> (PathBuf, Option<String>, Vec<String>) {
 /// and wrapper scripts (Linux) that set `--config` or `FTS_LAUNCH_CONFIG`.
 pub fn launch() -> ! {
     let (config_path, rig_id, extra_args) = discover_config();
+
+    // Tell KDE/GNOME which .desktop file this window belongs to.
+    // This lets the taskbar show the correct per-rig icon instead of
+    // all REAPER instances sharing one icon via WM_CLASS.
+    if let Some(ref id) = rig_id {
+        // Safety: single-threaded at this point
+        unsafe {
+            std::env::set_var(
+                "GIO_LAUNCHED_DESKTOP_FILE_PID",
+                std::process::id().to_string(),
+            );
+            std::env::set_var("GIO_LAUNCHED_DESKTOP_FILE", format!("{id}.desktop"));
+            // KDE-specific: set the desktop file name for window matching
+            std::env::set_var("DESKTOP_FILE_ID", format!("{id}.desktop"));
+        }
+    }
+
     let config = match &rig_id {
         Some(id) => LaunchConfig::load_rig(&config_path, id).unwrap_or_else(|e| {
             panic!(
