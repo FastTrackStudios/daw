@@ -134,9 +134,17 @@ fn render_icon_png(size: u32, config: &IconConfig) -> Result<Vec<u8>, String> {
     let mut paint = Paint::default();
     paint.anti_alias = true;
 
-    // Background: neutral dark gray (#2a2a2a)
+    // Background: dark gray with a subtle color tint
+    let base = 0.165_f32;
+    let tint_strength = 0.08;
     paint.set_color(
-        Color::from_rgba(0.165, 0.165, 0.165, 1.0).ok_or_else(|| "Invalid bg color".to_string())?,
+        Color::from_rgba(
+            base + r * tint_strength,
+            base + g * tint_strength,
+            base + b * tint_strength,
+            1.0,
+        )
+        .ok_or_else(|| "Invalid bg color".to_string())?,
     );
     pixmap.fill_path(
         &bg_rect,
