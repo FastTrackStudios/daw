@@ -97,9 +97,42 @@ impl LaunchConfig {
 
 impl LaunchConfig {
     /// Load from a `launch.json` file.
+    ///
+    /// Supports two formats:
+    /// - Single rig: `{ "role": "signal", ... }`
+    /// - Multi-rig: `{ "fts-keys": { "role": "signal", ... }, ... }`
+    ///
+    /// For multi-rig files, pass `rig_id` to select which rig to load.
     pub fn load(path: &Path) -> Result<Self, String> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse {}: {e}", path.display()))
+    }
+
+    /// Load a specific rig from a multi-rig `launch.json`.
+    ///
+    /// The file is a JSON object keyed by rig id:
+    /// ```json
+    /// {
+    ///   "fts-keys": { "role": "signal", "rig_type": "keys", ... },
+    ///   "fts-drums": { "role": "signal", "rig_type": "drums", ... }
+    /// }
+    /// ```
+    pub fn load_rig(path: &Path, rig_id: &str) -> Result<Self, String> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {}: {e}", path.display()))?;
+
+        // Try parsing as multi-rig first
+        if let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, Self>>(&content) {
+            return map
+                .into_iter()
+                .find(|(k, _)| k == rig_id)
+                .map(|(_, v)| v)
+                .ok_or_else(|| format!("Rig '{rig_id}' not found in {}", path.display()));
+        }
+
+        // Fall back to single-rig format
         serde_json::from_str(&content)
             .map_err(|e| format!("Failed to parse {}: {e}", path.display()))
     }

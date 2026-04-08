@@ -23,12 +23,13 @@ use std::process::Command;
 /// 3. `../launch.json` relative to the current executable (macOS `.app` bundle)
 ///
 /// Returns the resolved path and any remaining CLI args (with `--config` stripped).
-pub fn discover_config() -> (PathBuf, Vec<String>) {
+pub fn discover_config() -> (PathBuf, Option<String>, Vec<String>) {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
-    // 1. Check for --config <path> in CLI args
+    // 1. Check for --config <path> and --rig <id> in CLI args
     let mut remaining_args = Vec::new();
     let mut config_from_cli = None;
+    let mut rig_id = None;
     let mut skip_next = false;
     for (i, arg) in args.iter().enumerate() {
         if skip_next {
@@ -46,16 +47,27 @@ pub fn discover_config() -> (PathBuf, Vec<String>) {
             config_from_cli = Some(PathBuf::from(path));
             continue;
         }
+        if arg == "--rig" {
+            if let Some(id) = args.get(i + 1) {
+                rig_id = Some(id.clone());
+                skip_next = true;
+                continue;
+            }
+        }
+        if let Some(id) = arg.strip_prefix("--rig=") {
+            rig_id = Some(id.to_string());
+            continue;
+        }
         remaining_args.push(arg.clone());
     }
 
     if let Some(path) = config_from_cli {
-        return (path, remaining_args);
+        return (path, rig_id, remaining_args);
     }
 
     // 2. Check FTS_LAUNCH_CONFIG environment variable
     if let Ok(path) = std::env::var("FTS_LAUNCH_CONFIG") {
-        return (PathBuf::from(path), remaining_args);
+        return (PathBuf::from(path), rig_id, remaining_args);
     }
 
     // 3. Fallback: ../launch.json relative to binary (macOS .app bundle layout)
@@ -65,7 +77,7 @@ pub fn discover_config() -> (PathBuf, Vec<String>) {
         .and_then(|p| p.parent()) // Contents/
         .expect("Invalid bundle structure: expected Contents/MacOS/REAPER");
 
-    (contents_dir.join("launch.json"), remaining_args)
+    (contents_dir.join("launch.json"), rig_id, remaining_args)
 }
 
 /// Launch REAPER based on config discovered via CLI arg, env var, or bundle layout.
@@ -73,13 +85,21 @@ pub fn discover_config() -> (PathBuf, Vec<String>) {
 /// This is the main entry point for both wrapper `.app` binaries (macOS)
 /// and wrapper scripts (Linux) that set `--config` or `FTS_LAUNCH_CONFIG`.
 pub fn launch() -> ! {
-    let (config_path, extra_args) = discover_config();
-    let config = LaunchConfig::load(&config_path).unwrap_or_else(|e| {
-        panic!(
-            "Failed to load launch config from {}: {e}",
-            config_path.display()
-        )
-    });
+    let (config_path, rig_id, extra_args) = discover_config();
+    let config = match &rig_id {
+        Some(id) => LaunchConfig::load_rig(&config_path, id).unwrap_or_else(|e| {
+            panic!(
+                "Failed to load rig '{id}' from {}: {e}",
+                config_path.display()
+            )
+        }),
+        None => LaunchConfig::load(&config_path).unwrap_or_else(|e| {
+            panic!(
+                "Failed to load launch config from {}: {e}",
+                config_path.display()
+            )
+        }),
+    };
 
     launch_with_config_and_args(&config, &extra_args);
 }
