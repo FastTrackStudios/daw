@@ -23,7 +23,7 @@ pub struct IconConfig {
 /// Returns `(color_rgb, badge_text)` for a given rig type identifier.
 pub fn rig_appearance(rig_type: &str) -> Option<((u8, u8, u8), &'static str)> {
     Some(match rig_type {
-        "reaper" => ((0x8b, 0x5c, 0xf6), "FTS"),
+        "reaper" => ((0xdd, 0xdd, 0xdd), "FTS"),
         "guitar" => ((0x3b, 0x82, 0xf6), "GUITAR"),
         "bass" => ((0xea, 0xb3, 0x08), "BASS"),
         "keys" => ((0x22, 0xc5, 0x5e), "KEYS"),
