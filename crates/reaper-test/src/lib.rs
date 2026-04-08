@@ -47,18 +47,13 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const REAPER_BOOT_TIMEOUT_SECS: u64 = 30;
 /// Resolve the FTS home directory.
 ///
-/// Checks `$FTS_HOME`, then `~/Music/FastTrackStudio/` (if it exists),
-/// then falls back to `~/Music/Dev/FastTrackStudio/`.
+/// Checks `$FTS_HOME`, then falls back to `~/.fasttrackstudio`.
 fn fts_home() -> String {
     if let Ok(p) = std::env::var("FTS_HOME") {
         return p;
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let production = format!("{home}/Music/FastTrackStudio");
-    if std::path::Path::new(&format!("{production}/Reaper/reaper.ini")).exists() {
-        return production;
-    }
-    format!("{home}/Music/Dev/FastTrackStudio")
+    format!("{home}/.fasttrackstudio")
 }
 
 /// Resolve the REAPER executable path.

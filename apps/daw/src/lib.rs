@@ -102,11 +102,7 @@ fn fts_home() -> String {
         return p;
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    let production = format!("{home}/Music/FastTrackStudio");
-    if std::path::Path::new(&format!("{production}/Reaper/reaper.ini")).exists() {
-        return production;
-    }
-    format!("{home}/Music/Dev/FastTrackStudio")
+    format!("{home}/.fasttrackstudio")
 }
 
 pub fn reaper_configs() -> Vec<ReaperConfig> {
