@@ -26,6 +26,7 @@ fn main() {
 fn install_icons(args: &[String]) {
     let mut id = None;
     let mut rig_type = None;
+    let mut no_tint = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -36,6 +37,10 @@ fn install_icons(args: &[String]) {
             "--rig-type" => {
                 rig_type = args.get(i + 1).map(|s| s.as_str());
                 i += 2;
+            }
+            "--no-tint" => {
+                no_tint = true;
+                i += 1;
             }
             _ => {
                 eprintln!("Unknown argument: {}", args[i]);
@@ -62,6 +67,7 @@ fn install_icons(args: &[String]) {
         badge_text: badge.to_string(),
         color,
         sizes: vec![48, 128, 256],
+        no_tint,
     };
 
     match reaper_launcher::icon_gen::generate_and_install_icons(id, &config) {

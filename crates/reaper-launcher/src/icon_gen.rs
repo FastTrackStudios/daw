@@ -14,6 +14,8 @@ pub struct IconConfig {
     pub color: (u8, u8, u8),
     /// Pixel sizes to render, e.g., `[48, 128, 256]`.
     pub sizes: Vec<u32>,
+    /// If true, skip the color tint on the background (plain dark gray).
+    pub no_tint: bool,
 }
 
 /// Known rig appearances for the standard FTS rig types.
@@ -21,6 +23,7 @@ pub struct IconConfig {
 /// Returns `(color_rgb, badge_text)` for a given rig type identifier.
 pub fn rig_appearance(rig_type: &str) -> Option<((u8, u8, u8), &'static str)> {
     Some(match rig_type {
+        "reaper" => ((0x8b, 0x5c, 0xf6), "FTS"),
         "guitar" => ((0x3b, 0x82, 0xf6), "GUITAR"),
         "bass" => ((0xea, 0xb3, 0x08), "BASS"),
         "keys" => ((0x22, 0xc5, 0x5e), "KEYS"),
@@ -134,9 +137,9 @@ fn render_icon_png(size: u32, config: &IconConfig) -> Result<Vec<u8>, String> {
     let mut paint = Paint::default();
     paint.anti_alias = true;
 
-    // Background: dark gray with a subtle color tint
+    // Background: dark gray with a subtle color tint (skip tint if no_tint flag set)
     let base = 0.165_f32;
-    let tint_strength = 0.08;
+    let tint_strength = if config.no_tint { 0.0 } else { 0.08 };
     paint.set_color(
         Color::from_rgba(
             base + r * tint_strength,
