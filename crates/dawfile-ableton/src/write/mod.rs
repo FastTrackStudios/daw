@@ -90,7 +90,7 @@ fn write_root(w: &mut AbletonXmlWriter<&mut Vec<u8>>, set: &AbletonLiveSet) -> s
     w.start("LiveSet")?;
     write_tracks(w, set)?;
     write_master_track(w, set)?;
-    write_pre_hear_track(w)?;
+    write_pre_hear_track(w, set)?;
     write_locators(w, &set.locators)?;
     write_scenes(w, &set.scenes)?;
     write_transport(w, &set.transport)?;
@@ -140,7 +140,7 @@ fn write_track_common(
     w.value_element("EffectiveName", &common.effective_name)?;
     w.value_element("UserName", &common.user_name)?;
     w.value_element("Annotation", &common.annotation)?;
-    w.value_element("MemorizedFirstClipName", "")?;
+    w.value_element("MemorizedFirstClipName", &common.memorized_first_clip_name)?;
     w.end("Name")?;
 
     w.value_int("Color", common.color as i64)?;
@@ -267,20 +267,28 @@ fn write_mixer(w: &mut AbletonXmlWriter<&mut Vec<u8>>, mixer: &MixerState) -> st
     w.end("Mixer")
 }
 
-fn write_routing(
+fn write_routing_target(
     w: &mut AbletonXmlWriter<&mut Vec<u8>>,
     tag: &str,
-    target: &str,
+    routing: &RoutingTarget,
 ) -> std::io::Result<()> {
     w.start(tag)?;
-    w.value_element("Target", target)?;
-    w.value_element("UpperDisplayString", "")?;
-    w.value_element("LowerDisplayString", "")?;
-    w.start("MpeSettings")?;
-    w.value_int("ZoneType", 0)?;
-    w.value_int("FirstNoteChannel", 1)?;
-    w.value_int("LastNoteChannel", 15)?;
-    w.end("MpeSettings")?;
+    w.value_element("Target", &routing.target)?;
+    w.value_element("UpperDisplayString", &routing.upper_display_string)?;
+    w.value_element("LowerDisplayString", &routing.lower_display_string)?;
+    if let Some(ref mpe) = routing.mpe_settings {
+        w.start("MpeSettings")?;
+        w.value_int("ZoneType", mpe.zone_type as i64)?;
+        w.value_int("FirstNoteChannel", mpe.first_note_channel as i64)?;
+        w.value_int("LastNoteChannel", mpe.last_note_channel as i64)?;
+        w.end("MpeSettings")?;
+    } else {
+        w.start("MpeSettings")?;
+        w.value_int("ZoneType", 0)?;
+        w.value_int("FirstNoteChannel", 1)?;
+        w.value_int("LastNoteChannel", 15)?;
+        w.end("MpeSettings")?;
+    }
     w.end(tag)
 }
 
@@ -292,8 +300,8 @@ fn write_audio_track(
     write_track_common(w, &track.common)?;
 
     write_device_chain_start(w, &track.common.mixer)?;
-    write_routing(w, "AudioInputRouting", &track.audio_input)?;
-    write_routing(w, "AudioOutputRouting", &track.audio_output)?;
+    write_routing_target(w, "AudioInputRouting", &track.audio_input)?;
+    write_routing_target(w, "AudioOutputRouting", &track.audio_output)?;
 
     // MainSequencer
     w.start("MainSequencer")?;
@@ -344,8 +352,8 @@ fn write_midi_track(
     write_track_common(w, &track.common)?;
 
     write_device_chain_start(w, &track.common.mixer)?;
-    write_routing(w, "MidiInputRouting", &track.midi_input)?;
-    write_routing(w, "AudioOutputRouting", &track.audio_output)?;
+    write_routing_target(w, "MidiInputRouting", &track.midi_input)?;
+    write_routing_target(w, "AudioOutputRouting", &track.audio_output)?;
 
     // MainSequencer
     w.start("MainSequencer")?;
@@ -438,19 +446,60 @@ fn write_clip_common(
     w.value_bool("Disabled", common.disabled)?;
 
     if let Some(ref fa) = common.follow_action {
-        w.start("FollowAction")?;
-        w.value_float("FollowTime", fa.follow_time)?;
-        w.value_bool("IsLinked", fa.is_linked)?;
-        w.value_int("LoopIterations", fa.loop_iterations as i64)?;
-        w.value_int("FollowActionA", fa.action_a as i64)?;
-        w.value_int("FollowActionB", fa.action_b as i64)?;
-        w.value_int("FollowChanceA", fa.chance_a as i64)?;
-        w.value_int("FollowChanceB", fa.chance_b as i64)?;
-        w.value_bool("FollowActionEnabled", fa.enabled)?;
-        w.end("FollowAction")?;
+        write_follow_action(w, fa)?;
     }
 
+    w.value_int("LaunchMode", common.launch_mode as i64)?;
+    w.value_int("LaunchQuantisation", common.launch_quantisation as i64)?;
+
+    if let Some(ref grid) = common.grid {
+        write_clip_grid(w, "Grid", grid)?;
+    }
+
+    w.value_bool("Legato", common.legato)?;
+    w.value_bool("Ram", common.ram)?;
+    w.value_float("VelocityAmount", common.velocity_amount)?;
+
+    w.start("GrooveSettings")?;
+    w.value_int("GrooveId", common.groove_id as i64)?;
+    w.end("GrooveSettings")?;
+
+    w.value_float("FreezeStart", common.freeze_start)?;
+    w.value_float("FreezeEnd", common.freeze_end)?;
+    w.value_int("TakeId", common.take_id as i64)?;
+
     Ok(())
+}
+
+fn write_follow_action(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    fa: &FollowAction,
+) -> std::io::Result<()> {
+    w.start("FollowAction")?;
+    w.value_float("FollowTime", fa.follow_time)?;
+    w.value_bool("IsLinked", fa.is_linked)?;
+    w.value_int("LoopIterations", fa.loop_iterations as i64)?;
+    w.value_int("FollowActionA", fa.action_a as i64)?;
+    w.value_int("FollowActionB", fa.action_b as i64)?;
+    w.value_int("FollowChanceA", fa.chance_a as i64)?;
+    w.value_int("FollowChanceB", fa.chance_b as i64)?;
+    w.value_bool("FollowActionEnabled", fa.enabled)?;
+    w.end("FollowAction")
+}
+
+fn write_clip_grid(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    tag: &str,
+    grid: &ClipGrid,
+) -> std::io::Result<()> {
+    w.start(tag)?;
+    w.value_int("FixedNumerator", grid.fixed_numerator as i64)?;
+    w.value_int("FixedDenominator", grid.fixed_denominator as i64)?;
+    w.value_int("GridIntervalPixel", grid.grid_interval_pixel as i64)?;
+    w.value_int("Ntoles", grid.ntoles as i64)?;
+    w.value_bool("SnapToGrid", grid.snap_to_grid)?;
+    w.value_bool("Fixed", grid.fixed)?;
+    w.end(tag)
 }
 
 fn write_audio_clip(
@@ -502,6 +551,20 @@ fn write_audio_clip(
         w.end("Fades")?;
     }
 
+    // Warp params
+    w.value_float("GranularityTones", clip.granularity_tones)?;
+    w.value_float("GranularityTexture", clip.granularity_texture)?;
+    w.value_float("FluctuationTexture", clip.fluctuation_texture)?;
+    w.value_int("TransientResolution", clip.transient_resolution as i64)?;
+    w.value_int("TransientLoopMode", clip.transient_loop_mode as i64)?;
+    w.value_float("TransientEnvelope", clip.transient_envelope)?;
+    w.value_float("ComplexProFormants", clip.complex_pro_formants)?;
+    w.value_float("ComplexProEnvelope", clip.complex_pro_envelope)?;
+
+    w.value_bool("Fade", clip.fade_on)?;
+    w.value_bool("HiQ", clip.hiq)?;
+    w.value_bool("IsSongTempoLeader", clip.is_song_tempo_leader)?;
+
     w.end("AudioClip")
 }
 
@@ -552,6 +615,18 @@ fn write_midi_clip(w: &mut AbletonXmlWriter<&mut Vec<u8>>, clip: &MidiClip) -> s
         w.value_bool("IsInKey", true)?;
     }
 
+    w.value_int("BankSelectCoarse", clip.bank_select_coarse as i64)?;
+    w.value_int("BankSelectFine", clip.bank_select_fine as i64)?;
+    w.value_int("ProgramChange", clip.program_change as i64)?;
+    w.value_int(
+        "NoteSpellingPreference",
+        clip.note_spelling_preference as i64,
+    )?;
+
+    if let Some(ref grid) = clip.expression_grid {
+        write_clip_grid(w, "ExpressionGrid", grid)?;
+    }
+
     w.end("MidiClip")
 }
 
@@ -598,15 +673,17 @@ fn write_session_audio_clips(
 
     for slot_idx in 0..num_slots {
         w.start_with_id("ClipSlot", slot_idx as i32)?;
-        if let Some(sc) = clips.iter().find(|c| c.slot_index == slot_idx) {
+        let has_stop = if let Some(sc) = clips.iter().find(|c| c.slot_index == slot_idx) {
             w.start("ClipData")?;
             write_audio_clip(w, &sc.clip)?;
             w.end("ClipData")?;
+            sc.has_stop
         } else {
             w.start("ClipData")?;
             w.end("ClipData")?;
-        }
-        w.value_bool("HasStop", true)?;
+            true
+        };
+        w.value_bool("HasStop", has_stop)?;
         w.value_bool("NeedRefreeze", true)?;
         w.end("ClipSlot")?;
     }
@@ -622,15 +699,17 @@ fn write_session_midi_clips(
 
     for slot_idx in 0..num_slots {
         w.start_with_id("ClipSlot", slot_idx as i32)?;
-        if let Some(sc) = clips.iter().find(|c| c.slot_index == slot_idx) {
+        let has_stop = if let Some(sc) = clips.iter().find(|c| c.slot_index == slot_idx) {
             w.start("ClipData")?;
             write_midi_clip(w, &sc.clip)?;
             w.end("ClipData")?;
+            sc.has_stop
         } else {
             w.start("ClipData")?;
             w.end("ClipData")?;
-        }
-        w.value_bool("HasStop", true)?;
+            true
+        };
+        w.value_bool("HasStop", has_stop)?;
         w.value_bool("NeedRefreeze", true)?;
         w.end("ClipSlot")?;
     }
@@ -710,12 +789,16 @@ fn write_master_track(
     w.end("Mixer")?;
 
     // Master output routing
+    let default_routing = RoutingTarget {
+        target: "AudioOut/External/S0".to_string(),
+        ..RoutingTarget::default()
+    };
     let output = set
         .master_track
         .as_ref()
-        .map(|m| m.audio_output.as_str())
-        .unwrap_or("AudioOut/External/S0");
-    write_routing(w, "AudioOutputRouting", output)?;
+        .map(|m| &m.audio_output)
+        .unwrap_or(&default_routing);
+    write_routing_target(w, "AudioOutputRouting", output)?;
 
     w.end("DeviceChain")?;
 
@@ -742,11 +825,23 @@ fn write_master_track(
     w.end(tag)
 }
 
-fn write_pre_hear_track(w: &mut AbletonXmlWriter<&mut Vec<u8>>) -> std::io::Result<()> {
+fn write_pre_hear_track(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    set: &AbletonLiveSet,
+) -> std::io::Result<()> {
     w.start("PreHearTrack")?;
     w.value_int("LomId", 0)?;
     w.start("DeviceChain")?;
-    write_routing(w, "AudioOutputRouting", "AudioOut/External/S1")?;
+    let default_routing = RoutingTarget {
+        target: "AudioOut/External/S1".to_string(),
+        ..RoutingTarget::default()
+    };
+    let routing = set
+        .pre_hear_track
+        .as_ref()
+        .map(|pht| &pht.audio_output)
+        .unwrap_or(&default_routing);
+    write_routing_target(w, "AudioOutputRouting", routing)?;
     w.end("DeviceChain")?;
     w.end("PreHearTrack")
 }
@@ -773,6 +868,7 @@ fn write_scenes(w: &mut AbletonXmlWriter<&mut Vec<u8>>, scenes: &[Scene]) -> std
         w.start_with_id("Scene", scene.id)?;
         w.value_element("Name", &scene.name)?;
         w.value_int("Color", scene.color as i64)?;
+        w.value_element("Annotation", &scene.annotation)?;
 
         if let Some(tempo) = scene.tempo {
             w.start("Tempo")?;
@@ -782,6 +878,13 @@ fn write_scenes(w: &mut AbletonXmlWriter<&mut Vec<u8>>, scenes: &[Scene]) -> std
         } else {
             w.value_bool("IsTempoEnabled", false)?;
         }
+
+        if let Some(ref fa) = scene.follow_action {
+            write_follow_action(w, fa)?;
+        }
+
+        w.value_int("TimeSignatureId", scene.time_signature_id as i64)?;
+        w.value_bool("IsTimeSignatureEnabled", scene.is_time_signature_enabled)?;
 
         w.end("Scene")?;
     }

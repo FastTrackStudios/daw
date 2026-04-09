@@ -45,11 +45,16 @@ pub fn parse_session_audio_clips(
         .filter(|n| n.has_tag_name("ClipSlot"))
         .enumerate()
     {
+        let has_stop = child_bool(slot, "HasStop").unwrap_or(true);
         for clip_data in slot.children() {
             for clip_node in clip_data.children() {
                 if clip_node.has_tag_name("AudioClip") {
                     if let Some(clip) = parse_audio_clip(clip_node, version) {
-                        clips.push(SessionClip { slot_index, clip });
+                        clips.push(SessionClip {
+                            slot_index,
+                            clip,
+                            has_stop,
+                        });
                     }
                 }
             }
@@ -69,11 +74,16 @@ pub fn parse_session_midi_clips(
         .filter(|n| n.has_tag_name("ClipSlot"))
         .enumerate()
     {
+        let has_stop = child_bool(slot, "HasStop").unwrap_or(true);
         for clip_data in slot.children() {
             for clip_node in clip_data.children() {
                 if clip_node.has_tag_name("MidiClip") {
                     if let Some(clip) = parse_midi_clip(clip_node, version) {
-                        clips.push(SessionClip { slot_index, clip });
+                        clips.push(SessionClip {
+                            slot_index,
+                            clip,
+                            has_stop,
+                        });
                     }
                 }
             }
@@ -125,6 +135,19 @@ fn parse_clip_common(node: Node<'_, '_>) -> ClipCommon {
 
     let envelopes = automation::parse_clip_envelopes(node);
 
+    let launch_mode = child_i32(node, "LaunchMode").unwrap_or(0);
+    let launch_quantisation = child_i32(node, "LaunchQuantisation").unwrap_or(0);
+    let grid = parse_clip_grid(node, "Grid");
+    let legato = child_bool(node, "Legato").unwrap_or(false);
+    let ram = child_bool(node, "Ram").unwrap_or(false);
+    let velocity_amount = child_f64(node, "VelocityAmount").unwrap_or(0.0);
+    let groove_id = child(node, "GrooveSettings")
+        .and_then(|gs| child_i32(gs, "GrooveId"))
+        .unwrap_or(-1);
+    let freeze_start = child_f64(node, "FreezeStart").unwrap_or(0.0);
+    let freeze_end = child_f64(node, "FreezeEnd").unwrap_or(0.0);
+    let take_id = child_i32(node, "TakeId").unwrap_or(0);
+
     ClipCommon {
         id,
         time,
@@ -136,7 +159,29 @@ fn parse_clip_common(node: Node<'_, '_>) -> ClipCommon {
         loop_settings,
         follow_action,
         envelopes,
+        launch_mode,
+        launch_quantisation,
+        grid,
+        legato,
+        ram,
+        velocity_amount,
+        groove_id,
+        freeze_start,
+        freeze_end,
+        take_id,
     }
+}
+
+fn parse_clip_grid(node: Node<'_, '_>, tag: &str) -> Option<ClipGrid> {
+    let grid_node = child(node, tag)?;
+    Some(ClipGrid {
+        fixed_numerator: child_i32(grid_node, "FixedNumerator").unwrap_or(1),
+        fixed_denominator: child_i32(grid_node, "FixedDenominator").unwrap_or(4),
+        grid_interval_pixel: child_i32(grid_node, "GridIntervalPixel").unwrap_or(20),
+        ntoles: child_i32(grid_node, "Ntoles").unwrap_or(2),
+        snap_to_grid: child_bool(grid_node, "SnapToGrid").unwrap_or(true),
+        fixed: child_bool(grid_node, "Fixed").unwrap_or(false),
+    })
 }
 
 fn parse_audio_clip(node: Node<'_, '_>, version: &AbletonVersion) -> Option<AudioClip> {
@@ -179,6 +224,18 @@ fn parse_audio_clip(node: Node<'_, '_>, version: &AbletonVersion) -> Option<Audi
         fade_out_curve_slope: child_f64(f, "FadeOutCurveSlope").unwrap_or(0.0),
     });
 
+    let granularity_tones = child_f64(node, "GranularityTones").unwrap_or(30.0);
+    let granularity_texture = child_f64(node, "GranularityTexture").unwrap_or(65.0);
+    let fluctuation_texture = child_f64(node, "FluctuationTexture").unwrap_or(25.0);
+    let transient_resolution = child_i32(node, "TransientResolution").unwrap_or(6);
+    let transient_loop_mode = child_i32(node, "TransientLoopMode").unwrap_or(2);
+    let transient_envelope = child_f64(node, "TransientEnvelope").unwrap_or(100.0);
+    let complex_pro_formants = child_f64(node, "ComplexProFormants").unwrap_or(100.0);
+    let complex_pro_envelope = child_f64(node, "ComplexProEnvelope").unwrap_or(128.0);
+    let fade_on = child_bool(node, "Fade").unwrap_or(true);
+    let hiq = child_bool(node, "HiQ").unwrap_or(true);
+    let is_song_tempo_leader = child_bool(node, "IsSongTempoLeader").unwrap_or(false);
+
     Some(AudioClip {
         common,
         sample_ref,
@@ -189,6 +246,17 @@ fn parse_audio_clip(node: Node<'_, '_>, version: &AbletonVersion) -> Option<Audi
         pitch_fine,
         sample_volume,
         fades,
+        granularity_tones,
+        granularity_texture,
+        fluctuation_texture,
+        transient_resolution,
+        transient_loop_mode,
+        transient_envelope,
+        complex_pro_formants,
+        complex_pro_envelope,
+        fade_on,
+        hiq,
+        is_song_tempo_leader,
     })
 }
 
@@ -211,10 +279,21 @@ fn parse_midi_clip(node: Node<'_, '_>, version: &AbletonVersion) -> Option<MidiC
         None
     };
 
+    let bank_select_coarse = child_i32(node, "BankSelectCoarse").unwrap_or(-1);
+    let bank_select_fine = child_i32(node, "BankSelectFine").unwrap_or(-1);
+    let program_change = child_i32(node, "ProgramChange").unwrap_or(-1);
+    let note_spelling_preference = child_i32(node, "NoteSpellingPreference").unwrap_or(3);
+    let expression_grid = parse_clip_grid(node, "ExpressionGrid");
+
     Some(MidiClip {
         common,
         key_tracks,
         scale_info,
+        bank_select_coarse,
+        bank_select_fine,
+        program_change,
+        note_spelling_preference,
+        expression_grid,
     })
 }
 

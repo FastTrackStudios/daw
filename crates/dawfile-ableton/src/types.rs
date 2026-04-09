@@ -40,6 +40,15 @@ pub struct AbletonLiveSet {
     pub groove_pool: Vec<Groove>,
     /// Tuning system (v12, opaque preservation).
     pub tuning_system: Option<TuningSystem>,
+    /// Pre-hear (cue) track.
+    pub pre_hear_track: Option<PreHearTrack>,
+}
+
+/// The pre-hear (cue) track for previewing audio.
+#[derive(Debug, Clone)]
+pub struct PreHearTrack {
+    /// Audio output routing target.
+    pub audio_output: RoutingTarget,
 }
 
 /// Ableton version info parsed from the `MinorVersion` attribute.
@@ -173,6 +182,43 @@ impl std::fmt::Display for Tonic {
     }
 }
 
+// ─── Routing types ─────────────────────────────────────────────────────────
+
+/// A routing target with display strings and MPE settings.
+#[derive(Debug, Clone)]
+pub struct RoutingTarget {
+    /// Routing target identifier string.
+    pub target: String,
+    /// Upper display string (shown in Ableton UI).
+    pub upper_display_string: String,
+    /// Lower display string (shown in Ableton UI).
+    pub lower_display_string: String,
+    /// MPE settings for this routing.
+    pub mpe_settings: Option<MpeSettings>,
+}
+
+impl Default for RoutingTarget {
+    fn default() -> Self {
+        Self {
+            target: String::new(),
+            upper_display_string: String::new(),
+            lower_display_string: String::new(),
+            mpe_settings: None,
+        }
+    }
+}
+
+/// MPE (MIDI Polyphonic Expression) settings for a routing target.
+#[derive(Debug, Clone)]
+pub struct MpeSettings {
+    /// Zone type.
+    pub zone_type: i32,
+    /// First note channel.
+    pub first_note_channel: i32,
+    /// Last note channel.
+    pub last_note_channel: i32,
+}
+
 // ─── Track types ────────────────────────────────────────────────────────────
 
 /// Common track properties shared by all track types.
@@ -204,6 +250,8 @@ pub struct TrackCommon {
     pub linked_track_group_id: i32,
     /// Track view/UI state (preserved for round-trip).
     pub view_state: Option<TrackViewState>,
+    /// Memorized first clip name (from Name element).
+    pub memorized_first_clip_name: String,
 }
 
 /// An audio track.
@@ -214,10 +262,10 @@ pub struct AudioTrack {
     pub arrangement_clips: Vec<AudioClip>,
     /// Audio clips in session view clip slots (slot_index, clip).
     pub session_clips: Vec<SessionClip<AudioClip>>,
-    /// Audio input routing target string.
-    pub audio_input: String,
-    /// Audio output routing target string.
-    pub audio_output: String,
+    /// Audio input routing target.
+    pub audio_input: RoutingTarget,
+    /// Audio output routing target.
+    pub audio_output: RoutingTarget,
     /// Monitoring mode: 0=off, 1=in, 2=auto.
     pub monitoring: i32,
     /// Whether the track is armed for recording.
@@ -236,10 +284,10 @@ pub struct MidiTrack {
     pub arrangement_clips: Vec<MidiClip>,
     /// MIDI clips in session view clip slots (slot_index, clip).
     pub session_clips: Vec<SessionClip<MidiClip>>,
-    /// MIDI input routing target string.
-    pub midi_input: String,
-    /// Audio output routing target string.
-    pub audio_output: String,
+    /// MIDI input routing target.
+    pub midi_input: RoutingTarget,
+    /// Audio output routing target.
+    pub audio_output: RoutingTarget,
     /// Monitoring mode.
     pub monitoring: i32,
     /// Whether the track is armed for recording.
@@ -248,6 +296,8 @@ pub struct MidiTrack {
     pub take_counter: i32,
     /// Take lanes for comping.
     pub take_lanes: Vec<TakeLane>,
+    /// Pitchbend range in semitones (default 48).
+    pub pitchbend_range: i32,
 }
 
 /// A return (send) track.
@@ -266,8 +316,8 @@ pub struct GroupTrack {
 #[derive(Debug, Clone)]
 pub struct MasterTrack {
     pub mixer: MixerState,
-    /// Audio output routing target string.
-    pub audio_output: String,
+    /// Audio output routing target.
+    pub audio_output: RoutingTarget,
     /// Devices on the master.
     pub devices: Vec<Device>,
 }
@@ -279,6 +329,8 @@ pub struct SessionClip<T> {
     pub slot_index: usize,
     /// The clip data.
     pub clip: T,
+    /// Whether this slot has a stop button.
+    pub has_stop: bool,
 }
 
 /// Mixer channel strip state.
@@ -354,6 +406,37 @@ pub struct ClipCommon {
     pub follow_action: Option<FollowAction>,
     /// Clip automation envelopes.
     pub envelopes: Vec<ClipEnvelope>,
+    /// Launch mode: 0=trigger, 1=gate, 2=toggle, 3=repeat.
+    pub launch_mode: i32,
+    /// Launch quantisation: 0=none, 1=8bars, 2=4bars, etc.
+    pub launch_quantisation: i32,
+    /// Grid settings for the clip.
+    pub grid: Option<ClipGrid>,
+    /// Legato mode.
+    pub legato: bool,
+    /// RAM mode (load sample into RAM).
+    pub ram: bool,
+    /// Velocity amount.
+    pub velocity_amount: f64,
+    /// Groove ID (-1 = none).
+    pub groove_id: i32,
+    /// Freeze start position.
+    pub freeze_start: f64,
+    /// Freeze end position.
+    pub freeze_end: f64,
+    /// Take ID.
+    pub take_id: i32,
+}
+
+/// Grid settings for a clip.
+#[derive(Debug, Clone)]
+pub struct ClipGrid {
+    pub fixed_numerator: i32,
+    pub fixed_denominator: i32,
+    pub grid_interval_pixel: i32,
+    pub ntoles: i32,
+    pub snap_to_grid: bool,
+    pub fixed: bool,
 }
 
 /// Loop settings for a clip.
@@ -406,6 +489,28 @@ pub struct AudioClip {
     pub sample_volume: f64,
     /// Fade settings.
     pub fades: Option<Fades>,
+    /// Granularity tones (Tones warp mode).
+    pub granularity_tones: f64,
+    /// Granularity texture (Texture warp mode).
+    pub granularity_texture: f64,
+    /// Fluctuation texture (Texture warp mode).
+    pub fluctuation_texture: f64,
+    /// Transient resolution (Beats warp mode).
+    pub transient_resolution: i32,
+    /// Transient loop mode (Beats warp mode).
+    pub transient_loop_mode: i32,
+    /// Transient envelope (Beats warp mode).
+    pub transient_envelope: f64,
+    /// Complex Pro formants.
+    pub complex_pro_formants: f64,
+    /// Complex Pro envelope.
+    pub complex_pro_envelope: f64,
+    /// Whether fading is enabled (boolean flag, separate from Fades struct).
+    pub fade_on: bool,
+    /// High quality interpolation.
+    pub hiq: bool,
+    /// Whether this clip is the song tempo leader.
+    pub is_song_tempo_leader: bool,
 }
 
 /// A MIDI clip.
@@ -416,6 +521,16 @@ pub struct MidiClip {
     pub key_tracks: Vec<KeyTrack>,
     /// Key/scale info (v11+).
     pub scale_info: Option<KeySignature>,
+    /// Bank select coarse (-1 = none).
+    pub bank_select_coarse: i32,
+    /// Bank select fine (-1 = none).
+    pub bank_select_fine: i32,
+    /// Program change (-1 = none).
+    pub program_change: i32,
+    /// Note spelling preference.
+    pub note_spelling_preference: i32,
+    /// Expression grid settings.
+    pub expression_grid: Option<ClipGrid>,
 }
 
 /// A key track groups notes by MIDI key within a clip.
@@ -617,6 +732,14 @@ pub struct Scene {
     pub color: i32,
     /// Scene tempo override (if enabled).
     pub tempo: Option<f64>,
+    /// Annotation / notes.
+    pub annotation: String,
+    /// Follow action for the scene.
+    pub follow_action: Option<FollowAction>,
+    /// Time signature ID.
+    pub time_signature_id: i32,
+    /// Whether the time signature override is enabled.
+    pub is_time_signature_enabled: bool,
 }
 
 /// Transport state.

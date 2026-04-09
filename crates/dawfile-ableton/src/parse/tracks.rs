@@ -66,9 +66,8 @@ pub fn parse_return_tracks(
 pub fn parse_master_track(node: Node<'_, '_>, version: &AbletonVersion) -> MasterTrack {
     let mixer = parse_mixer(node);
     let audio_output = descend(node, "DeviceChain.AudioOutputRouting")
-        .and_then(|r| child_value(r, "Target"))
-        .unwrap_or("")
-        .to_string();
+        .map(|r| parse_routing_target(r))
+        .unwrap_or_default();
     let devices = child(node, "DeviceChain")
         .map(|dc| devices::parse_devices(dc, version))
         .unwrap_or_default();
@@ -80,15 +79,48 @@ pub fn parse_master_track(node: Node<'_, '_>, version: &AbletonVersion) -> Maste
     }
 }
 
+/// Parse a PreHearTrack node.
+pub fn parse_pre_hear_track(node: Node<'_, '_>) -> PreHearTrack {
+    let audio_output = descend(node, "DeviceChain.AudioOutputRouting")
+        .map(|r| parse_routing_target(r))
+        .unwrap_or_default();
+    PreHearTrack { audio_output }
+}
+
+/// Parse a routing target node (e.g. AudioInputRouting, AudioOutputRouting, MidiInputRouting).
+fn parse_routing_target(node: Node<'_, '_>) -> RoutingTarget {
+    let target = child_value(node, "Target").unwrap_or("").to_string();
+    let upper_display_string = child_value(node, "UpperDisplayString")
+        .unwrap_or("")
+        .to_string();
+    let lower_display_string = child_value(node, "LowerDisplayString")
+        .unwrap_or("")
+        .to_string();
+    let mpe_settings = child(node, "MpeSettings").map(|mpe| MpeSettings {
+        zone_type: child_i32(mpe, "ZoneType").unwrap_or(0),
+        first_note_channel: child_i32(mpe, "FirstNoteChannel").unwrap_or(1),
+        last_note_channel: child_i32(mpe, "LastNoteChannel").unwrap_or(15),
+    });
+    RoutingTarget {
+        target,
+        upper_display_string,
+        lower_display_string,
+        mpe_settings,
+    }
+}
+
 fn parse_track_common(track: Node<'_, '_>, version: &AbletonVersion) -> TrackCommon {
     let id = id_attr(track);
 
-    let (user_name, effective_name, annotation) = child(track, "Name")
+    let (user_name, effective_name, annotation, memorized_first_clip_name) = child(track, "Name")
         .map(|n| {
             (
                 child_value(n, "UserName").unwrap_or("").to_string(),
                 child_value(n, "EffectiveName").unwrap_or("").to_string(),
                 child_value(n, "Annotation").unwrap_or("").to_string(),
+                child_value(n, "MemorizedFirstClipName")
+                    .unwrap_or("")
+                    .to_string(),
             )
         })
         .unwrap_or_default();
@@ -176,6 +208,7 @@ fn parse_track_common(track: Node<'_, '_>, version: &AbletonVersion) -> TrackCom
         track_delay,
         linked_track_group_id,
         view_state,
+        memorized_first_clip_name,
     }
 }
 
@@ -194,14 +227,12 @@ fn parse_audio_track(track: Node<'_, '_>, version: &AbletonVersion) -> Option<Au
         .unwrap_or_default();
 
     let audio_input = descend(track, "DeviceChain.AudioInputRouting")
-        .and_then(|r| child_value(r, "Target"))
-        .unwrap_or("")
-        .to_string();
+        .map(|r| parse_routing_target(r))
+        .unwrap_or_default();
 
     let audio_output = descend(track, "DeviceChain.AudioOutputRouting")
-        .and_then(|r| child_value(r, "Target"))
-        .unwrap_or("")
-        .to_string();
+        .map(|r| parse_routing_target(r))
+        .unwrap_or_default();
 
     let monitoring = descend(track, "DeviceChain.MainSequencer")
         .and_then(|s| child_i32(s, "MonitoringEnum"))
@@ -245,14 +276,12 @@ fn parse_midi_track(track: Node<'_, '_>, version: &AbletonVersion) -> Option<Mid
         .unwrap_or_default();
 
     let midi_input = descend(track, "DeviceChain.MidiInputRouting")
-        .and_then(|r| child_value(r, "Target"))
-        .unwrap_or("")
-        .to_string();
+        .map(|r| parse_routing_target(r))
+        .unwrap_or_default();
 
     let audio_output = descend(track, "DeviceChain.AudioOutputRouting")
-        .and_then(|r| child_value(r, "Target"))
-        .unwrap_or("")
-        .to_string();
+        .map(|r| parse_routing_target(r))
+        .unwrap_or_default();
 
     let monitoring = descend(track, "DeviceChain.MainSequencer")
         .and_then(|s| child_i32(s, "MonitoringEnum"))
@@ -268,6 +297,12 @@ fn parse_midi_track(track: Node<'_, '_>, version: &AbletonVersion) -> Option<Mid
 
     let take_lanes = parse_take_lanes(track, version);
 
+    let pitchbend_range = descend(track, "DeviceChain.MainSequencer.PitchbendRange")
+        .and_then(|n| n.attribute("Value"))
+        .and_then(|v| v.parse::<i32>().ok())
+        .or_else(|| child_i32(track, "PitchbendRange"))
+        .unwrap_or(48);
+
     Some(MidiTrack {
         common,
         arrangement_clips,
@@ -278,6 +313,7 @@ fn parse_midi_track(track: Node<'_, '_>, version: &AbletonVersion) -> Option<Mid
         is_armed,
         take_counter,
         take_lanes,
+        pitchbend_range,
     })
 }
 

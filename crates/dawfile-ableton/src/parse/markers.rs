@@ -6,7 +6,7 @@
 //! Scenes live under `LiveSet.Scenes` as `<Scene>` elements.
 
 use super::xml_helpers::*;
-use crate::types::{Locator, Scene, TransportState};
+use crate::types::{FollowAction, Locator, Scene, TransportState};
 use roxmltree::Node;
 
 /// Parse locators from the `<Locators>` element (the outer one).
@@ -44,11 +44,42 @@ pub fn parse_scenes(scenes_node: Node<'_, '_>) -> Vec<Scene> {
                 None
             };
 
+            let annotation = child_value(scene, "Annotation").unwrap_or("").to_string();
+
+            let follow_action = child(scene, "FollowAction").and_then(|fa| {
+                let enabled = child_bool(fa, "FollowActionEnabled").unwrap_or(false);
+                let follow_time = child_f64(fa, "FollowTime").unwrap_or(4.0);
+                let is_linked = child_bool(fa, "IsLinked").unwrap_or(true);
+                let loop_iterations = child_i32(fa, "LoopIterations").unwrap_or(1);
+                let action_a = child_i32(fa, "FollowActionA").unwrap_or(0);
+                let action_b = child_i32(fa, "FollowActionB").unwrap_or(0);
+                let chance_a = child_i32(fa, "FollowChanceA").unwrap_or(100);
+                let chance_b = child_i32(fa, "FollowChanceB").unwrap_or(0);
+                Some(FollowAction {
+                    follow_time,
+                    is_linked,
+                    loop_iterations,
+                    action_a,
+                    action_b,
+                    chance_a,
+                    chance_b,
+                    enabled,
+                })
+            });
+
+            let time_signature_id = child_i32(scene, "TimeSignatureId").unwrap_or(-1);
+            let is_time_signature_enabled =
+                child_bool(scene, "IsTimeSignatureEnabled").unwrap_or(false);
+
             Scene {
                 id,
                 name,
                 color,
                 tempo,
+                annotation,
+                follow_action,
+                time_signature_id,
+                is_time_signature_enabled,
             }
         })
         .collect()

@@ -102,7 +102,10 @@ pub fn parse_live_set(xml: &str) -> AbletonResult<AbletonLiveSet> {
             TuningSystem { raw_xml }
         });
 
-    // 14. Furthest bar position
+    // 14. Pre-hear track
+    let pre_hear_track = child(live_set, "PreHearTrack").map(tracks::parse_pre_hear_track);
+
+    // 15. Furthest bar position
     let max_current_end = collect_max_current_end(live_set);
     let furthest_bar = if time_signature.numerator > 0 {
         max_current_end / time_signature.numerator as f64
@@ -127,6 +130,7 @@ pub fn parse_live_set(xml: &str) -> AbletonResult<AbletonLiveSet> {
         furthest_bar,
         groove_pool,
         tuning_system,
+        pre_hear_track,
     })
 }
 
