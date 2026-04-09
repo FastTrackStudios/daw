@@ -29,10 +29,12 @@
 //! | Automation (ControlPoints) | TODO |
 //! | MIDI tracks | TODO |
 //! | Nested compositions | TODO |
+//! | Write / export | ✓ |
 //!
 //! # Example
 //!
 //! ```no_run
+//! // Read
 //! let session = dawfile_aaf::read_session("session.aaf")?;
 //!
 //! println!("Sample rate: {} Hz", session.session_sample_rate);
@@ -43,6 +45,9 @@
 //! for marker in &session.markers {
 //!     println!("  Marker @ {}: {}", marker.position, marker.comment);
 //! }
+//!
+//! // Write (round-trip)
+//! dawfile_aaf::write_session("output.aaf", &session)?;
 //! # Ok::<(), dawfile_aaf::AafError>(())
 //! ```
 //!
@@ -51,7 +56,7 @@
 //! ```rust
 //! let support = dawfile_aaf::feature_support();
 //! assert!(support.can_read(daw_proto::Capability::Tracks));
-//! assert!(!support.can_write(daw_proto::Capability::Tracks)); // read-only
+//! assert!(support.can_write(daw_proto::Capability::Tracks));
 //! ```
 
 #![deny(unsafe_code)]
@@ -61,6 +66,7 @@ pub mod error;
 pub mod io;
 pub mod parse;
 pub mod types;
+pub mod write;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -71,3 +77,4 @@ pub use types::{
     AafClip, AafComposition, AafMarker, AafSession, AafTimecode, AafTrack, AudioEssenceInfo,
     ClipKind, EditRate, TrackKind,
 };
+pub use write::write_session;

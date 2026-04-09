@@ -6,21 +6,21 @@
 use crate::types::AafSession;
 use daw_proto::capability::{Capability, FeatureSupport};
 
-/// The capability declaration for the AAF file format parser.
-///
-/// AAF is read-only in this crate: we can import session data but cannot
-/// write `.aaf` files.
+/// The capability declaration for the AAF file format.
 pub fn feature_support() -> FeatureSupport {
-    FeatureSupport::new().read_only(&[
-        Capability::Project,
-        Capability::Tracks,
-        Capability::Items,
-        Capability::Takes,
-        Capability::Markers,
-        Capability::Regions,
-        Capability::TempoMap, // TODO: not yet parsed, but AAF carries tempo markers
-        Capability::Automation, // TODO: ControlPoints on OperationGroups (gain ramps, etc.)
-    ])
+    FeatureSupport::new()
+        .read_write(&[
+            Capability::Project,
+            Capability::Tracks,
+            Capability::Items,
+            Capability::Markers,
+        ])
+        .read_only(&[
+            Capability::Takes,
+            Capability::Regions,
+            Capability::TempoMap, // TODO: not yet parsed, but AAF carries tempo markers
+            Capability::Automation, // TODO: ControlPoints on OperationGroups (gain ramps, etc.)
+        ])
 }
 
 /// Human-readable summary of a parsed AAF session.
