@@ -184,6 +184,23 @@ impl Regions {
         Ok(())
     }
 
+    /// Configure whether a track renders for this region (region render matrix).
+    ///
+    /// `track_index` is the 0-based REAPER track index.
+    /// `enable` = true to include the track, false to exclude it.
+    pub async fn set_render_track(
+        &self,
+        region_id: u32,
+        track_index: u32,
+        enable: bool,
+    ) -> Result<()> {
+        self.clients
+            .region
+            .set_region_render_matrix(self.context(), region_id, track_index, enable)
+            .await?;
+        Ok(())
+    }
+
     // =========================================================================
     // Navigation Methods
     // =========================================================================

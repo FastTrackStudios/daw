@@ -409,6 +409,60 @@ impl Project {
             .await?)
     }
 
+    // =========================================================================
+    // Project Info
+    // =========================================================================
+
+    /// Get a project info string value (e.g. `"RENDER_FILE"`, `"RENDER_PATTERN"`).
+    pub async fn get_info_string(&self, key: &str) -> crate::Result<String> {
+        Ok(self
+            .clients
+            .project
+            .get_project_info_string(
+                daw_proto::ProjectContext::project(&self.guid),
+                key.to_string(),
+            )
+            .await?)
+    }
+
+    /// Set a project info string value (e.g. `"RENDER_FILE"`, `"RENDER_PATTERN"`).
+    pub async fn set_info_string(&self, key: &str, value: &str) -> crate::Result<()> {
+        self.clients
+            .project
+            .set_project_info_string(
+                daw_proto::ProjectContext::project(&self.guid),
+                key.to_string(),
+                value.to_string(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Get a project info numeric value (e.g. `"RENDER_SETTINGS"`, `"PROJECT_SRATE"`).
+    pub async fn get_info(&self, key: &str) -> crate::Result<f64> {
+        Ok(self
+            .clients
+            .project
+            .get_project_info(
+                daw_proto::ProjectContext::project(&self.guid),
+                key.to_string(),
+            )
+            .await?)
+    }
+
+    /// Set a project info numeric value.
+    pub async fn set_info(&self, key: &str, value: f64) -> crate::Result<()> {
+        self.clients
+            .project
+            .set_project_info(
+                daw_proto::ProjectContext::project(&self.guid),
+                key.to_string(),
+                value,
+            )
+            .await?;
+        Ok(())
+    }
+
     /// Get the number of named ruler lanes.
     pub async fn ruler_lane_count(&self) -> crate::Result<u32> {
         Ok(self
