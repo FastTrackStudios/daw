@@ -5,19 +5,30 @@
 //!
 //! ## Playlist model
 //!
-//! In Pro Tools, each track has one active playlist plus zero or more alternate
-//! (inactive) playlists. In the file format:
+//! The top-level `0x1054` block holds ALL playlists (active and alternate) as a
+//! flat list of `0x1052` children, in the same order as the corresponding
+//! `0x1014` entries in `0x1015`. Each `0x1014` / `0x1052` pair is one playlist
+//! (which may be a multi-channel stereo track).
 //!
-//! - The top-level `0x1054` block holds the **active** playlist for every track.
-//!   Each child `0x1052` corresponds to one track channel and carries the
-//!   playlist name and its region placements.
-//! - `0x2428` / `0x2429` blocks wrap additional `0x1054` blocks for each
-//!   **alternate** playlist. These are empty in most sessions.
+//! To recover the "track with alternates" model:
+//! - Strip the version suffix (`.01`, `.02`, …) from each playlist name → base name.
+//! - Group by `(base_name, channel_position_within_0x1014_block)`.
+//! - The **first** `0x1014` entry for each base name = the active playlist.
+//! - Subsequent entries for the same base name = alternate playlists.
+//! - Stereo channels are distinguished by their channel position (0 = L, 1 = R),
+//!   so the two channels of a stereo alternate are handled independently.
 
 use crate::block::Block;
 use crate::content_type::ContentType;
 use crate::cursor::Cursor;
 use crate::types::{AudioRegion, NO_REGION, Playlist, Track, TrackRegion};
+
+/// Internal track entry that carries the channel position used for grouping.
+struct TrackEntry {
+    track: Track,
+    /// Zero-based channel index within its `0x1014` block (0 for mono, 0/1 for stereo).
+    channel_pos: usize,
+}
 
 /// Parse audio tracks and their region assignments (active + alternate playlists).
 pub fn parse_audio_tracks(
@@ -28,21 +39,29 @@ pub fn parse_audio_tracks(
     rate_factor: f64,
 ) -> Vec<Track> {
     // Step 1: Parse track definitions from 0x1015
-    let mut tracks = parse_track_definitions(blocks, cursor);
+    let mut entries = parse_track_definitions(blocks, cursor);
 
-    // Step 2: Assign active playlist regions to tracks
+    // Step 2: Assign regions from 0x1054 (or 0x1012 for old format)
     if version < 8 {
+        let mut tracks: Vec<Track> = entries.into_iter().map(|e| e.track).collect();
         assign_regions_old(blocks, cursor, regions, &mut tracks);
-    } else {
-        assign_regions_new(blocks, cursor, regions, &mut tracks, rate_factor);
-        // Step 2b: Parse alternate playlists from 0x2428 / 0x2429 containers
-        assign_alternate_playlists(blocks, cursor, regions, &mut tracks, rate_factor);
+        tracks.retain(|t| !t.regions.is_empty());
+        tracks.sort_by_key(|t| t.index);
+        for (i, track) in tracks.iter_mut().enumerate() {
+            track.index = i as u16;
+        }
+        return tracks;
     }
 
-    // Step 3: Remove tracks with no active regions
-    tracks.retain(|t| !t.regions.is_empty());
+    assign_regions_new(blocks, cursor, regions, &mut entries, rate_factor);
 
-    // Step 4: Sort by index and renumber
+    // Step 3: Remove entries with no active regions
+    entries.retain(|e| !e.track.regions.is_empty());
+
+    // Step 4: Group alternates under their primary track
+    let mut tracks = group_alternate_playlists(entries);
+
+    // Step 5: Sort by index and renumber
     tracks.sort_by_key(|t| t.index);
     for (i, track) in tracks.iter_mut().enumerate() {
         track.index = i as u16;
@@ -54,12 +73,15 @@ pub fn parse_audio_tracks(
 // ── Track definitions ──────────────────────────────────────────────────────
 
 /// Parse track definitions from the AudioTrackList block (0x1015).
-fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<Track> {
-    let mut tracks = Vec::new();
+///
+/// Returns one `TrackEntry` per channel, with `channel_pos` tracking which
+/// channel within its `0x1014` block the entry came from (for stereo grouping).
+fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<TrackEntry> {
+    let mut entries = Vec::new();
 
     let track_list = match find_block_recursive(blocks, ContentType::AudioTrackList) {
         Some(b) => b,
-        None => return tracks,
+        None => return entries,
     };
 
     for child in track_list.find_children(ContentType::AudioTrackInfo) {
@@ -72,7 +94,6 @@ fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<Track> 
         let (name, str_consumed) = cursor.length_prefixed_string(name_offset);
 
         // Number of channels is a u32 after name + 1 separator byte.
-        // str_consumed already includes the 4-byte length prefix, so +1 for the separator.
         let nch_offset = name_offset + str_consumed + 1;
         if nch_offset + 4 >= data.len() {
             continue;
@@ -88,25 +109,25 @@ fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<Track> 
             }
             let track_index = cursor.u16_at(idx_offset);
 
-            tracks.push(Track {
-                name: name.clone(),
-                index: track_index,
-                playlist_name: String::new(), // filled in by assign_regions_*
-                regions: Vec::new(),
-                alternate_playlists: Vec::new(),
+            entries.push(TrackEntry {
+                track: Track {
+                    name: name.clone(),
+                    index: track_index,
+                    playlist_name: String::new(),
+                    regions: Vec::new(),
+                    alternate_playlists: Vec::new(),
+                },
+                channel_pos: ch,
             });
         }
     }
 
-    tracks
+    entries
 }
 
 // ── Active playlist assignment ─────────────────────────────────────────────
 
 /// Assign regions to tracks using the old format (block 0x1012, PT 5-7).
-///
-/// In the old format there are no named playlists, so `playlist_name` is left
-/// as an empty string.
 fn assign_regions_old(
     blocks: &[Block],
     cursor: &Cursor<'_>,
@@ -150,29 +171,31 @@ fn assign_regions_old(
     }
 }
 
-/// Assign regions to tracks from a single 0x1054 block.
+/// Assign regions from the top-level 0x1054 block.
 ///
-/// Returns the playlist name for each track slot (indexed by position).
-/// Each 0x1052 block in the 0x1054 corresponds to one track slot; `track_idx`
-/// advances once per 0x1052 (matching ptformat's `count++` per track).
-fn assign_from_map_block(
-    map_block: &Block,
+/// All `0x1052` entries map 1:1 to `entries` by position — both active and
+/// alternate playlists are in the same flat list. Grouping into alternates
+/// happens later in `group_alternate_playlists`.
+fn assign_regions_new(
+    blocks: &[Block],
     cursor: &Cursor<'_>,
     regions: &[AudioRegion],
-    tracks: &mut [Track],
+    entries: &mut [TrackEntry],
     rate_factor: f64,
-    dest: AssignDest,
 ) {
+    let map_block = match find_top_level_block(blocks, ContentType::AudioRegionTrackMapNew) {
+        Some(b) => b,
+        None => return,
+    };
+
     let map_entries = map_block.find_all(ContentType::AudioRegionTrackMapEntriesNew);
     let data = cursor.data();
-    let mut track_idx = 0;
 
-    for map_entry in &map_entries {
-        if track_idx >= tracks.len() {
+    for (idx, map_entry) in map_entries.iter().enumerate() {
+        if idx >= entries.len() {
             break;
         }
 
-        // Read the playlist name from the 0x1052 block (at offset + 2)
         let playlist_name = {
             let no = map_entry.offset + 2;
             if no + 4 < data.len() {
@@ -183,131 +206,118 @@ fn assign_from_map_block(
             }
         };
 
-        let track_entries = map_entry.find_all(ContentType::AudioRegionTrackEntryNew);
-        let mut slot_regions = Vec::new();
+        let slot_regions = collect_slot_regions(map_entry, cursor, regions, rate_factor);
+        entries[idx].track.playlist_name = playlist_name;
+        entries[idx].track.regions.extend(slot_regions);
+    }
+}
 
-        for track_entry in &track_entries {
-            // Skip fade regions (byte at offset+46 == 0x01)
-            if track_entry.offset + 47 <= data.len()
-                && cursor.u8_at(track_entry.offset + 46) == 0x01
-            {
+/// Collect all region placements from a single 0x1052 block.
+fn collect_slot_regions(
+    map_entry: &Block,
+    cursor: &Cursor<'_>,
+    regions: &[AudioRegion],
+    rate_factor: f64,
+) -> Vec<TrackRegion> {
+    let data = cursor.data();
+    let mut slot_regions = Vec::new();
+
+    for track_entry in &map_entry.find_all(ContentType::AudioRegionTrackEntryNew) {
+        // Skip fade regions (byte at offset+46 == 0x01)
+        if track_entry.offset + 47 <= data.len() && cursor.u8_at(track_entry.offset + 46) == 0x01 {
+            continue;
+        }
+
+        for sub_entry in &track_entry.find_all(ContentType::AudioRegionTrackSubEntryNew) {
+            let raw_offset = sub_entry.offset + 4;
+            if raw_offset + 4 > data.len() {
+                continue;
+            }
+            let raw_index = cursor.u32_at(raw_offset) as u16;
+            if raw_index == NO_REGION {
                 continue;
             }
 
-            let sub_entries = track_entry.find_all(ContentType::AudioRegionTrackSubEntryNew);
-            for sub_entry in &sub_entries {
-                let raw_offset = sub_entry.offset + 4;
-                if raw_offset + 4 > data.len() {
-                    continue;
-                }
-                let raw_index = cursor.u32_at(raw_offset) as u16;
-                if raw_index == NO_REGION {
-                    continue;
-                }
+            let start_offset = sub_entry.offset + 9;
+            let start = if start_offset + 4 <= data.len() {
+                let raw_start = cursor.u32_at(start_offset) as u64;
+                (raw_start as f64 * rate_factor) as u64
+            } else if let Some(r) = regions.iter().find(|r| r.index == raw_index) {
+                r.start_pos
+            } else {
+                0
+            };
 
-                // Start position (u32 LE at offset+9, matches ptformat's u_endian_read4)
-                let start_offset = sub_entry.offset + 9;
-                let start = if start_offset + 4 <= data.len() {
-                    let raw_start = cursor.u32_at(start_offset) as u64;
-                    (raw_start as f64 * rate_factor) as u64
-                } else if let Some(r) = regions.iter().find(|r| r.index == raw_index) {
-                    r.start_pos
-                } else {
-                    0
-                };
-
-                slot_regions.push(TrackRegion {
-                    region_index: raw_index,
-                    start_pos: start,
-                });
-            }
+            slot_regions.push(TrackRegion {
+                region_index: raw_index,
+                start_pos: start,
+            });
         }
-
-        match dest {
-            AssignDest::Active => {
-                tracks[track_idx].playlist_name = playlist_name;
-                tracks[track_idx].regions.extend(slot_regions);
-            }
-            AssignDest::Alternate => {
-                if !slot_regions.is_empty() || !playlist_name.is_empty() {
-                    tracks[track_idx].alternate_playlists.push(Playlist {
-                        name: playlist_name,
-                        regions: slot_regions,
-                    });
-                }
-            }
-        }
-
-        track_idx += 1;
     }
+
+    slot_regions
 }
 
-#[derive(Clone, Copy)]
-enum AssignDest {
-    Active,
-    Alternate,
-}
+// ── Alternate playlist grouping ────────────────────────────────────────────
 
-/// Assign regions from the top-level 0x1054 block (the active playlist).
-fn assign_regions_new(
-    blocks: &[Block],
-    cursor: &Cursor<'_>,
-    regions: &[AudioRegion],
-    tracks: &mut [Track],
-    rate_factor: f64,
-) {
-    // The top-level 0x1054 block (not wrapped in 0x2428/0x2429) is the active playlist.
-    let map_block = match find_top_level_block(blocks, ContentType::AudioRegionTrackMapNew) {
-        Some(b) => b,
-        None => return,
-    };
-    assign_from_map_block(
-        map_block,
-        cursor,
-        regions,
-        tracks,
-        rate_factor,
-        AssignDest::Active,
-    );
-}
-
-/// Parse alternate playlists from 0x2428 / 0x2429 container blocks.
+/// Group alternate playlists under their primary track.
 ///
-/// Each container wraps a 0x1054 block with the same channel-slot layout as the
-/// active playlist. Empty slots produce no `Playlist` entry for that track.
-fn assign_alternate_playlists(
-    blocks: &[Block],
-    cursor: &Cursor<'_>,
-    regions: &[AudioRegion],
-    tracks: &mut [Track],
-    rate_factor: f64,
-) {
-    for block in blocks {
-        if block.content_type == Some(ContentType::AlternatePlaylistMap)
-            || block.content_type == Some(ContentType::AlternatePlaylistMapAlt)
-        {
-            // Find the 0x1054 inside this container
-            if let Some(map_block) = block.find_child(ContentType::AudioRegionTrackMapNew) {
-                assign_from_map_block(
-                    map_block,
-                    cursor,
-                    regions,
-                    tracks,
-                    rate_factor,
-                    AssignDest::Alternate,
-                );
-            }
+/// Groups by `(playlist_base_name, channel_pos)`. The first `TrackEntry` seen
+/// for each `(base, channel)` key is the active track; subsequent entries with
+/// the same key are alternate playlists that get attached to the primary.
+///
+/// Using `channel_pos` as a secondary key ensures that the two channels of a
+/// stereo alternate are associated with the correct stereo-channel primary,
+/// rather than being mistaken for mono alternates.
+fn group_alternate_playlists(entries: Vec<TrackEntry>) -> Vec<Track> {
+    // (base_name, channel_pos) → index in `result`
+    let mut seen: std::collections::HashMap<(String, usize), usize> =
+        std::collections::HashMap::new();
+    let mut result: Vec<Track> = Vec::new();
+
+    for entry in entries {
+        let base = playlist_base_name(&entry.track.playlist_name).to_string();
+        let key = (base.clone(), entry.channel_pos);
+
+        if let Some(&primary_idx) = seen.get(&key) {
+            // Alternate playlist — attach to the primary track
+            result[primary_idx].alternate_playlists.push(Playlist {
+                name: entry.track.playlist_name,
+                regions: entry.track.regions,
+            });
+        } else {
+            // Active (primary) track — set the track name to the base name so
+            // it matches what the user sees in the Pro Tools UI.
+            let result_idx = result.len();
+            seen.insert(key, result_idx);
+            let mut track = entry.track;
+            track.name = base;
+            result.push(track);
         }
-        // Recurse into children (containers can be nested)
-        assign_alternate_playlists(&block.children, cursor, regions, tracks, rate_factor);
     }
+
+    result
+}
+
+/// Strip the trailing version suffix (`.01`, `.02`, …) from a playlist name.
+///
+/// `"OH.04"` → `"OH"`, `"kick.13"` → `"kick"`, `"snaps 1"` → `"snaps 1"`,
+/// `"Juno.dup1.cm.01"` → `"Juno.dup1.cm"` (`.cm` has letters so it's not a suffix).
+fn playlist_base_name(name: &str) -> &str {
+    if let Some(dot_pos) = name.rfind('.') {
+        if name[dot_pos + 1..].chars().all(|c| c.is_ascii_digit()) {
+            return &name[..dot_pos];
+        }
+    }
+    name
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/// Find the first top-level block (not nested inside another known block) with
-/// the given content type. This ensures we get the active 0x1054 rather than
-/// one buried inside a 0x2428 / 0x2429 alternate-playlist container.
+/// Find the first top-level (non-nested) block with the given content type.
+///
+/// Used to find the active `0x1054` without descending into `0x2428`/`0x2429`
+/// alternate-playlist containers.
 fn find_top_level_block<'a>(blocks: &'a [Block], ct: ContentType) -> Option<&'a Block> {
     for block in blocks {
         if block.content_type == Some(ct) {
