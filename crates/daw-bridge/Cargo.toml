@@ -40,6 +40,10 @@ fragile.workspace = true
 # File watching
 notify.workspace = true
 
+# Project file import (Ableton → REAPER conversion)
+dawfile-ableton = { path = "../dawfile-ableton" }
+dawfile-reaper = { path = "../dawfile-reaper" }
+
 # Observability
 tracing.workspace = true
 tracing-subscriber.workspace = true

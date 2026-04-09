@@ -5,6 +5,7 @@
 //! can control the DAW through vox RPC.
 
 mod guest_loader;
+mod project_import;
 mod routed_handler;
 mod shm_host;
 
@@ -517,6 +518,16 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     let mut session = app.session.borrow_mut();
     session.plugin_register_add_timer(timer_callback)?;
     daw::reaper::register_extension_menu(&mut session);
+
+    // Register project file importer (Ableton .als → REAPER)
+    let import_register = reaper_medium::OwnedProjectImportRegister::new(
+        project_import::want_project_file,
+        project_import::enum_file_extensions,
+        project_import::load_project,
+    );
+    session.plugin_register_add_project_import(import_register)?;
+    info!("Project import handler registered (.als)");
+
     drop(session);
 
     info!("daw-bridge initialized successfully");
