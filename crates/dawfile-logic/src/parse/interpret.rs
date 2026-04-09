@@ -485,30 +485,48 @@ fn classify_envi_channel(name: &str) -> EnviKind {
     EnviKind::Track(TrackKind::Audio)
 }
 
-/// Heuristically extract a human-readable name from an `ivnE` payload.
+/// Extract the user-visible name from an `ivnE` (Envi) payload.
+///
+/// ## Layout (user-track Envi chunks, data_len ~467–491)
+///
+/// Empirically confirmed from Fire.logicx and FileDecrypt.logicx hex dumps:
+///
+/// | Offset | Size | Field          |
+/// |--------|------|----------------|
+/// | 0x9E   | 1    | name_length    |
+/// | 0x9F   | 1    | (padding/zero) |
+/// | 0xA0   | N    | name bytes (ASCII, NOT null-terminated) |
+///
+/// The byte immediately after the name is the first byte of the next field and
+/// may be any value — including printable ASCII — so we must use name_length to
+/// know exactly where the name ends.
+///
+/// System-channel Envi chunks (data_len < 0xA1) use a different layout and
+/// fall back to a longest-ASCII-run scan.
 fn extract_name_from_envi(data: &[u8]) -> String {
-    if data.is_empty() {
-        return String::new();
-    }
+    const NAME_LEN_OFFSET: usize = 0x9E; // 158
+    const NAME_START: usize = 0xA0; // 160
 
-    // Strategy 1: Pascal string at the start.
-    {
-        let len = data[0] as usize;
-        if len > 0 && len < 64 && data.len() > len {
-            let candidate = &data[1..=len];
-            if candidate.iter().all(|&b| b >= 0x20 && b < 0x7f) {
+    // Primary strategy: fixed-offset length-prefixed string.
+    if data.len() > NAME_LEN_OFFSET {
+        let name_len = data[NAME_LEN_OFFSET] as usize;
+        let name_end = NAME_START + name_len;
+        if name_len > 0 && name_len < 128 && name_end <= data.len() {
+            let candidate = &data[NAME_START..name_end];
+            if candidate.iter().all(|&b| b >= 0x20 && b <= 0x7e) {
                 return String::from_utf8_lossy(candidate).into_owned();
             }
         }
     }
 
-    // Strategy 2: scan for longest printable-ASCII run.
+    // Fallback for system-channel chunks (shorter data, different layout):
+    // scan for the longest printable-ASCII run of 3–64 bytes.
     let mut best: &[u8] = &[];
     let mut i = 0;
     while i < data.len() {
-        if data[i] >= 0x20 && data[i] < 0x7f {
+        if data[i] >= 0x20 && data[i] <= 0x7e {
             let start = i;
-            while i < data.len() && data[i] >= 0x20 && data[i] < 0x7f {
+            while i < data.len() && data[i] >= 0x20 && data[i] <= 0x7e {
                 i += 1;
             }
             let run = &data[start..i];

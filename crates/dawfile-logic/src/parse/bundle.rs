@@ -47,7 +47,7 @@ pub struct BundleData {
 }
 
 /// Read a `.logicx` bundle from `path`, returning metadata and the raw
-/// `ProjectData` bytes of the first (active) alternative.
+/// `ProjectData` bytes of the latest (highest-numbered) alternative.
 pub fn read_bundle(path: &Path) -> LogicResult<BundleData> {
     if !path.is_dir() {
         return Err(LogicError::NotABundle(path.to_owned()));
@@ -57,13 +57,16 @@ pub fn read_bundle(path: &Path) -> LogicResult<BundleData> {
     let info_path = path.join("Resources").join("ProjectInformation.plist");
     let (creator_version, variant_name) = read_project_information(&info_path)?;
 
-    // ── Alternatives/000/MetaData.plist ──────────────────────────────────────
-    let meta_path = path.join("Alternatives").join("000").join("MetaData.plist");
+    // ── Pick the latest alternative (highest numeric directory name) ─────────
+    let alt_dir = latest_alternative(path)?;
+
+    // ── Alternatives/NNN/MetaData.plist ──────────────────────────────────────
+    let meta_path = alt_dir.join("MetaData.plist");
     let (sample_rate, bpm, time_sig_numerator, time_sig_denominator, key, key_gender, track_count) =
         read_metadata(&meta_path)?;
 
-    // ── Alternatives/000/ProjectData ─────────────────────────────────────────
-    let project_data_path = path.join("Alternatives").join("000").join("ProjectData");
+    // ── Alternatives/NNN/ProjectData ─────────────────────────────────────────
+    let project_data_path = alt_dir.join("ProjectData");
     let project_data = std::fs::read(&project_data_path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             LogicError::MissingFile(project_data_path.clone())
@@ -86,6 +89,44 @@ pub fn read_bundle(path: &Path) -> LogicResult<BundleData> {
         },
         project_data,
     })
+}
+
+// ── Alternative selection ─────────────────────────────────────────────────────
+
+/// Return the path to the highest-numbered alternative directory under
+/// `bundle/Alternatives/`.  Falls back to `000` if none can be parsed.
+fn latest_alternative(bundle: &Path) -> LogicResult<PathBuf> {
+    let alts_dir = bundle.join("Alternatives");
+    if !alts_dir.is_dir() {
+        return Err(LogicError::MissingFile(alts_dir));
+    }
+
+    let mut best: Option<(u32, PathBuf)> = None;
+    if let Ok(entries) = std::fs::read_dir(&alts_dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if !p.is_dir() {
+                continue;
+            }
+            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                if let Ok(n) = name.parse::<u32>() {
+                    // Only consider directories that actually have a ProjectData file.
+                    if p.join("ProjectData").exists() {
+                        if best.as_ref().map_or(true, |(b, _)| n > *b) {
+                            best = Some((n, p));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    best.map(|(_, p)| p)
+        .or_else(|| {
+            let fallback = alts_dir.join("000");
+            fallback.is_dir().then_some(fallback)
+        })
+        .ok_or_else(|| LogicError::MissingFile(alts_dir.join("000")))
 }
 
 // ── plist helpers ─────────────────────────────────────────────────────────────

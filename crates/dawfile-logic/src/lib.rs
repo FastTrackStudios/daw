@@ -13,7 +13,10 @@
 //! ├── Resources/
 //! │   └── ProjectInformation.plist   # creator version, variant names
 //! └── Alternatives/
-//!     └── 000/                       # active alternative
+//!     ├── 000/                       # earliest saved alternative
+//!     │   ├── MetaData.plist
+//!     │   └── ProjectData
+//!     └── NNN/                       # latest alternative (selected automatically)
 //!         ├── MetaData.plist         # BPM, time sig, sample rate, key, track count
 //!         └── ProjectData            # binary chunk stream
 //! ```

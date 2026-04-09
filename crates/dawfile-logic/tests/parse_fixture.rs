@@ -436,3 +436,344 @@ fn layout_deep_dump() {
         println!();
     }
 }
+
+// ── Fire.logicx fixture ───────────────────────────────────────────────────────
+
+const FIRE_FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/Fire.logicx");
+
+#[test]
+fn fire_envi_meta_dump() {
+    let session = dawfile_logic::read_session(FIRE_FIXTURE).expect("parse failed");
+    let chunks = &session.chunks;
+    const TAG_ENVI: [u8; 4] = *b"ivnE";
+    const TAG_MSEQ: [u8; 4] = *b"qeSM";
+    const TAG_TRAK: [u8; 4] = *b"karT";
+
+    println!("\n=== First 12 Envi chunks (Fire) ===");
+    let mut n = 0;
+    for (ci, c) in chunks.iter().enumerate() {
+        if c.tag != TAG_ENVI {
+            continue;
+        }
+        let meta0 = u32::from_le_bytes(c.header_meta[0..4].try_into().unwrap_or([0; 4]));
+        let meta4 = u32::from_le_bytes(c.header_meta[4..8].try_into().unwrap_or([0; 4]));
+        let meta8 = u32::from_le_bytes(c.header_meta[8..12].try_into().unwrap_or([0; 4]));
+        println!(
+            "  chunk[{}] data_len={} meta[0]={} meta[4]={} meta[8]={}",
+            ci, c.data_len, meta0, meta4, meta8
+        );
+        hex_dump(&c.data, 48);
+        n += 1;
+        if n >= 12 {
+            break;
+        }
+    }
+
+    println!("\n=== First 8 non-system MSeq clips (Fire) ===");
+    let mut m = 0;
+    let mut i = 0;
+    while i < chunks.len() && m < 8 {
+        if chunks[i].tag != TAG_MSEQ {
+            i += 1;
+            continue;
+        }
+        let mseq = &chunks[i];
+        let pos = i32::from_le_bytes(mseq.header_meta[4..8].try_into().unwrap_or([0; 4])) as f64
+            / 65536.0;
+        let chan_raw = if mseq.data.len() >= 12 {
+            u32::from_le_bytes(mseq.data[8..12].try_into().unwrap_or([0; 4]))
+        } else {
+            0
+        };
+        let name = if mseq.data.len() >= 18 {
+            let nl = u16::from_le_bytes([mseq.data[16], mseq.data[17]]) as usize;
+            if mseq.data.len() >= 18 + nl {
+                String::from_utf8_lossy(&mseq.data[18..18 + nl]).into_owned()
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+        let mut j = i + 1;
+        while j < chunks.len() && chunks[j].tag != TAG_TRAK && chunks[j].tag != TAG_MSEQ {
+            j += 1;
+        }
+        let trak_dlen = if j < chunks.len() && chunks[j].tag == TAG_TRAK {
+            chunks[j].data_len
+        } else {
+            999
+        };
+        println!(
+            "  [{}] @{:.1}b  name='{}' chan_raw={} chan_seq={} trak_dlen={}",
+            i,
+            pos,
+            name,
+            chan_raw,
+            chan_raw >> 2,
+            trak_dlen
+        );
+        i += 1;
+        m += 1;
+    }
+}
+
+#[test]
+fn fire_envi_all_names() {
+    let session = dawfile_logic::read_session(FIRE_FIXTURE).expect("parse failed");
+    let chunks = &session.chunks;
+    const TAG_ENVI: [u8; 4] = *b"ivnE";
+
+    println!("\n=== All Envi chunks (seq, data_len, first_bytes, name) ===");
+    for (ci, c) in chunks.iter().enumerate() {
+        if c.tag != TAG_ENVI {
+            continue;
+        }
+        let meta4 = u32::from_le_bytes(c.header_meta[4..8].try_into().unwrap_or([0; 4]));
+        let seq = meta4 / 262_144;
+        // Show first 20 bytes of data
+        let preview: Vec<String> = c
+            .data
+            .iter()
+            .take(20)
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        // Attempt pascal string extraction
+        let pascal = if !c.data.is_empty() {
+            let len = c.data[0] as usize;
+            if len > 0 && len < 128 && c.data.len() > len {
+                let s = &c.data[1..=len];
+                if s.iter().all(|&b| b >= 0x20 && b < 0x7f) {
+                    String::from_utf8_lossy(s).into_owned()
+                } else {
+                    format!("[not-ascii len={}]", len)
+                }
+            } else {
+                format!("[len={} invalid]", len)
+            }
+        } else {
+            "[empty]".into()
+        };
+
+        // Find printable ASCII runs >= 3 chars
+        let mut runs: Vec<String> = Vec::new();
+        let mut i = 0;
+        while i < c.data.len() {
+            if c.data[i] >= 0x20 && c.data[i] < 0x7f {
+                let start = i;
+                while i < c.data.len() && c.data[i] >= 0x20 && c.data[i] < 0x7f {
+                    i += 1;
+                }
+                let run = &c.data[start..i];
+                if run.len() >= 3 {
+                    runs.push(String::from_utf8_lossy(run).into_owned());
+                }
+            } else {
+                i += 1;
+            }
+        }
+        println!(
+            "  [{}] seq={} dlen={} pascal='{}' runs={:?}",
+            ci, seq, c.data_len, pascal, runs
+        );
+    }
+}
+
+#[test]
+fn fire_audio_mseq_names() {
+    // Find all audio MSeq clips (followed by Trak with data_len=58) and show their names
+    let session = dawfile_logic::read_session(FIRE_FIXTURE).expect("parse failed");
+    let chunks = &session.chunks;
+    const TAG_MSEQ: [u8; 4] = *b"qeSM";
+    const TAG_TRAK: [u8; 4] = *b"karT";
+
+    let mut i = 0;
+    let mut count = 0;
+    while i < chunks.len() {
+        if chunks[i].tag != TAG_MSEQ {
+            i += 1;
+            continue;
+        }
+        let mseq = &chunks[i];
+        let name_len = if mseq.data.len() >= 18 {
+            u16::from_le_bytes([mseq.data[16], mseq.data[17]]) as usize
+        } else {
+            0
+        };
+        let name = if mseq.data.len() >= 18 + name_len && name_len > 0 {
+            String::from_utf8_lossy(&mseq.data[18..18 + name_len]).into_owned()
+        } else {
+            String::new()
+        };
+        // Find next Trak
+        let mut j = i + 1;
+        while j < chunks.len() && chunks[j].tag != TAG_TRAK && chunks[j].tag != TAG_MSEQ {
+            j += 1;
+        }
+        if j < chunks.len() && chunks[j].tag == TAG_TRAK && chunks[j].data_len == 58 {
+            let pos = i32::from_le_bytes(mseq.header_meta[4..8].try_into().unwrap_or([0; 4]))
+                as f64
+                / 65536.0;
+            println!("  AUDIO clip: chunk={} pos={:.1}b name='{}'", i, pos, name);
+            count += 1;
+        }
+        i += 1;
+    }
+    println!("Total audio clips (trak_dlen=58): {}", count);
+}
+
+#[test]
+fn fire_envi_name_hex() {
+    // Dump full hex of specific Envi chunks to locate name bytes exactly
+    use dawfile_logic::read_session;
+    let session = read_session(FIRE_FIXTURE).expect("parse failed");
+    let chunks = &session.chunks;
+    const TAG_ENVI: [u8; 4] = *b"ivnE";
+
+    // chunk[4307] = seq=35 "Kick}" and chunk[4346] = seq=56 "Snare"
+    for target_chunk in [4307usize, 4346, 4439] {
+        let c = &chunks[target_chunk];
+        let meta4 = u32::from_le_bytes(c.header_meta[4..8].try_into().unwrap_or([0; 4]));
+        println!(
+            "\n=== chunk[{}] seq={} dlen={} ===",
+            target_chunk,
+            meta4 / 262144,
+            c.data_len
+        );
+        for (i, row) in c.data.chunks(16).enumerate() {
+            let hex: Vec<String> = row.iter().map(|b| format!("{:02x}", b)).collect();
+            let ascii: String = row
+                .iter()
+                .map(|&b| {
+                    if b >= 0x20 && b < 0x7f {
+                        b as char
+                    } else {
+                        '.'
+                    }
+                })
+                .collect();
+            println!("  {:04x}  {}  |{}|", i * 16, hex.join(" "), ascii);
+        }
+    }
+}
+
+#[test]
+fn fire_envi_seq_range() {
+    use dawfile_logic::LogicChunk;
+    let session = dawfile_logic::read_session(FIRE_FIXTURE).expect("parse failed");
+    let chunks = &session.chunks;
+    const TAG_ENVI: [u8; 4] = *b"ivnE";
+    const TAG_MSEQ: [u8; 4] = *b"qeSM";
+
+    let mut envi_seqs: Vec<u32> = chunks
+        .iter()
+        .filter(|c| c.tag == TAG_ENVI)
+        .map(|c| {
+            let raw = u32::from_le_bytes(c.header_meta[4..8].try_into().unwrap_or([0; 4]));
+            raw / 262_144
+        })
+        .collect();
+    envi_seqs.sort();
+
+    let mseq_seqs: Vec<u32> = chunks
+        .iter()
+        .filter(|c| c.tag == TAG_MSEQ && c.data.len() >= 12)
+        .map(|c| {
+            let raw = u32::from_le_bytes(c.data[8..12].try_into().unwrap_or([0; 4]));
+            raw >> 2
+        })
+        .collect();
+
+    println!("\nEnvi count: {}", envi_seqs.len());
+    println!(
+        "Envi seq min={} max={}",
+        envi_seqs.first().unwrap_or(&0),
+        envi_seqs.last().unwrap_or(&0)
+    );
+    println!(
+        "Envi seqs (first 30): {:?}",
+        &envi_seqs[..envi_seqs.len().min(30)]
+    );
+    println!(
+        "Envi seqs (last 30): {:?}",
+        &envi_seqs[envi_seqs.len().saturating_sub(30)..]
+    );
+
+    println!("\nMSeq count: {}", mseq_seqs.len());
+    let mut mseq_unique: Vec<u32> = mseq_seqs.clone();
+    mseq_unique.sort();
+    mseq_unique.dedup();
+    println!(
+        "MSeq unique chan_seqs (first 30): {:?}",
+        &mseq_unique[..mseq_unique.len().min(30)]
+    );
+
+    // How many MSeq chan_seqs have a matching Envi?
+    let envi_set: std::collections::HashSet<u32> = envi_seqs.iter().copied().collect();
+    let matched = mseq_seqs.iter().filter(|s| envi_set.contains(s)).count();
+    let unmatched = mseq_seqs.len() - matched;
+    println!(
+        "\nMSeq clips matched by chan_seq: {} / {} (unmatched: {})",
+        matched,
+        mseq_seqs.len(),
+        unmatched
+    );
+}
+
+#[test]
+fn fire_fixture_exists() {
+    assert!(
+        std::path::Path::new(FIRE_FIXTURE).exists(),
+        "Fire fixture not found at {FIRE_FIXTURE}"
+    );
+}
+
+#[test]
+fn fire_parse_summary() {
+    let session = dawfile_logic::read_session(FIRE_FIXTURE).expect("parse failed");
+
+    println!(
+        "\nBPM: {:.2}  SR: {}  Key: {} {}",
+        session.bpm, session.sample_rate, session.key, session.key_gender
+    );
+    println!(
+        "Chunks: {}  Tracks: {}  Summing groups: {}",
+        session.chunks.len(),
+        session.tracks.len(),
+        session.summing_groups.len()
+    );
+
+    println!("\n=== Tracks ===");
+    let mut total_clips = 0usize;
+    for t in &session.tracks {
+        println!(
+            "  [chan_seq={}] {:?} '{}' clips={}",
+            t.channel,
+            t.kind,
+            t.name,
+            t.clips.len()
+        );
+        for clip in &t.clips {
+            let kind = match &clip.kind {
+                dawfile_logic::ClipKind::Audio { file_path } => {
+                    format!("AUDIO file={}", file_path.as_deref().unwrap_or("?"))
+                }
+                dawfile_logic::ClipKind::Midi { notes } => {
+                    format!("MIDI notes={}", notes.len())
+                }
+                dawfile_logic::ClipKind::Other => "OTHER".into(),
+            };
+            println!(
+                "    @ {:.2}b len={:.2}b  {}",
+                clip.position_beats, clip.length_beats, kind
+            );
+            total_clips += 1;
+        }
+    }
+    println!("\nTotal clips attached: {}", total_clips);
+
+    // Sanity assertions
+    assert!(session.chunks.len() > 100, "expected many chunks");
+    assert!(!session.tracks.is_empty(), "expected tracks");
+    assert!(session.bpm > 0.0, "expected non-zero BPM");
+}
