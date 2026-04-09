@@ -23,8 +23,11 @@ use dawfile_reaper::builder::{ItemBuilder, ReaperProjectBuilder, TrackBuilder};
 /// File extensions we handle, with human-readable descriptions for the file dialog.
 static EXTENSIONS: &[(&str, &str)] = &[
     ("als", "Ableton Live Set (*.als)"),
-    // Future: ("aaf", "AAF Session (*.aaf)"),
-    // Future: ("dawproject", "DAWproject (*.dawproject)"),
+    ("ptx", "Pro Tools Session (*.ptx)"),
+    ("ptf", "Pro Tools Session (*.ptf)"),
+    ("pts", "Pro Tools Session (*.pts)"),
+    ("aaf", "Advanced Authoring Format (*.aaf)"),
+    ("dawproject", "DAWproject (*.dawproject)"),
 ];
 
 /// Pre-computed CString pairs (extension, description), leaked for stable pointers.
@@ -118,6 +121,12 @@ fn import_file(
 
     let rpp_text = if lower.ends_with(".als") {
         import_ableton(path)?
+    } else if lower.ends_with(".ptx") || lower.ends_with(".ptf") || lower.ends_with(".pts") {
+        import_protools(path)?
+    } else if lower.ends_with(".aaf") {
+        import_aaf(path)?
+    } else if lower.ends_with(".dawproject") {
+        import_dawproject(path)?
     } else {
         return Err(format!("Unsupported format: {path}").into());
     };
@@ -383,6 +392,374 @@ fn map_builtin_fx(mut t: TrackBuilder, params: &BuiltinParams) -> TrackBuilder {
         }
     }
     t
+}
+
+// ── Color mapping ──────────────────────────────────────────────────────────
+
+// ============================================================================
+// Pro Tools → REAPER conversion
+// ============================================================================
+
+fn import_protools(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let session = dawfile_protools::read_session(path, 48000)?;
+    let sample_rate = session.session_sample_rate as f64;
+
+    let mut builder = ReaperProjectBuilder::new();
+    builder = builder.sample_rate(session.session_sample_rate as i32);
+
+    // Audio tracks
+    for track in &session.audio_tracks {
+        builder = builder.track(&track.name, |t| {
+            let mut t = t;
+            for tr in &track.regions {
+                if tr.region_index as usize >= session.audio_regions.len() {
+                    continue;
+                }
+                let region = &session.audio_regions[tr.region_index as usize];
+
+                let position_secs = tr.start_pos as f64 / sample_rate;
+                let length_secs = region.length as f64 / sample_rate;
+                let offset_secs = region.sample_offset as f64 / sample_rate;
+
+                if length_secs <= 0.0 {
+                    continue;
+                }
+
+                // Get source filename
+                let filename = session
+                    .audio_files
+                    .iter()
+                    .find(|f| f.index == region.audio_file_index)
+                    .map(|f| f.filename.as_str())
+                    .unwrap_or("");
+
+                t = t.item(position_secs, length_secs, |item| {
+                    let mut item = item.name(&region.name);
+                    if !filename.is_empty() {
+                        item = item.source_wave(filename);
+                    }
+                    if offset_secs > 0.0 {
+                        item = item.slip_offset(offset_secs);
+                    }
+                    item
+                });
+            }
+            t
+        });
+    }
+
+    // MIDI tracks
+    for track in &session.midi_tracks {
+        builder = builder.track(&track.name, |t| {
+            let mut t = t;
+            for tr in &track.regions {
+                if tr.region_index as usize >= session.midi_regions.len() {
+                    continue;
+                }
+                let region = &session.midi_regions[tr.region_index as usize];
+
+                let position_secs = tr.start_pos as f64 / sample_rate;
+                let length_secs = region.length as f64 / sample_rate;
+
+                if length_secs <= 0.0 || region.events.is_empty() {
+                    continue;
+                }
+
+                t = t.item(position_secs, length_secs, |item| {
+                    item.name(&region.name).source_midi().midi(|midi| {
+                        let mut midi = midi;
+                        for event in &region.events {
+                            midi = midi.at(event.position).note(
+                                0,
+                                0,
+                                event.note,
+                                event.velocity,
+                                event.duration as u32,
+                            );
+                        }
+                        midi
+                    })
+                });
+            }
+            t
+        });
+    }
+
+    let project = builder.build();
+    Ok(project.to_rpp_string())
+}
+
+// ============================================================================
+// AAF → REAPER conversion
+// ============================================================================
+
+fn import_aaf(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let session = dawfile_aaf::read_session(path)?;
+
+    let mut builder = ReaperProjectBuilder::new();
+    builder = builder.sample_rate(session.session_sample_rate as i32);
+
+    // Markers
+    for (i, marker) in session.markers.iter().enumerate() {
+        let pos_secs = marker.edit_rate.to_seconds(marker.position);
+        builder = builder.marker(i as i32 + 1, pos_secs, &marker.comment);
+    }
+
+    // Tracks
+    for track in &session.tracks {
+        // Skip non-audio/midi tracks
+        match track.kind {
+            dawfile_aaf::TrackKind::Audio | dawfile_aaf::TrackKind::Midi => {}
+            _ => continue,
+        }
+
+        builder = builder.track(&track.name, |t| {
+            let mut t = t;
+            for clip in &track.clips {
+                let position_secs = track.edit_rate.to_seconds(clip.start_position);
+                let length_secs = track.edit_rate.to_seconds(clip.length);
+
+                if length_secs <= 0.0 {
+                    continue;
+                }
+
+                match &clip.kind {
+                    dawfile_aaf::ClipKind::SourceClip {
+                        source_file,
+                        source_start,
+                        ..
+                    } => {
+                        t = t.item(position_secs, length_secs, |item| {
+                            let mut item = item;
+
+                            // Strip file:/// prefix from source path
+                            if let Some(path_url) = source_file {
+                                let file_path = path_url
+                                    .strip_prefix("file:///")
+                                    .or_else(|| path_url.strip_prefix("file://"))
+                                    .unwrap_or(path_url);
+                                item = item.source_wave(file_path);
+                            }
+
+                            // Source offset
+                            let offset_secs = track.edit_rate.to_seconds(*source_start);
+                            if offset_secs > 0.0 {
+                                item = item.slip_offset(offset_secs);
+                            }
+
+                            item
+                        });
+                    }
+                    dawfile_aaf::ClipKind::Filler => {
+                        // Silence gap — skip
+                    }
+                    _ => {
+                        // Transitions, operations — skip for now
+                    }
+                }
+            }
+            t
+        });
+    }
+
+    let project = builder.build();
+    Ok(project.to_rpp_string())
+}
+
+// ============================================================================
+// DAWproject → REAPER conversion
+// ============================================================================
+
+fn import_dawproject(path: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let project = dawfile_dawproject::read_project(path)?;
+
+    let mut builder = ReaperProjectBuilder::new();
+    builder = builder.tempo_with_time_sig(
+        project.transport.tempo,
+        project.transport.numerator as i32,
+        project.transport.denominator as i32,
+    );
+
+    // Markers and tempo automation from arrangement
+    if let Some(ref arr) = project.arrangement {
+        for (i, marker) in arr.markers.iter().enumerate() {
+            builder = builder.marker(i as i32 + 1, marker.time, &marker.name);
+        }
+
+        // Tempo automation
+        if !arr.tempo_automation.is_empty() {
+            builder = builder.tempo_envelope(|env| {
+                let mut env = env;
+                for tp in &arr.tempo_automation {
+                    env = env.point(tp.time, tp.bpm);
+                }
+                env
+            });
+        }
+    }
+
+    // Build tracks
+    add_dawproject_tracks(&mut builder, &project.tracks, project.arrangement.as_ref());
+
+    let rpp_project = builder.build();
+    Ok(rpp_project.to_rpp_string())
+}
+
+fn add_dawproject_tracks(
+    builder: &mut ReaperProjectBuilder,
+    tracks: &[dawfile_dawproject::Track],
+    arrangement: Option<&dawfile_dawproject::Arrangement>,
+) {
+    for track in tracks {
+        let is_folder = !track.children.is_empty();
+        let track_id = track.id.clone();
+
+        // Take ownership via std::mem::replace to work around borrow issues
+        let old = std::mem::replace(builder, ReaperProjectBuilder::new());
+        *builder = old.track(&track.name, |t| {
+            let mut t = t;
+
+            // Mixer state from channel
+            if let Some(ref ch) = track.channel {
+                t = t.volume(ch.volume).pan(ch.pan);
+                if ch.muted {
+                    t = t.muted();
+                }
+                if ch.solo {
+                    t = t.soloed();
+                }
+
+                // Devices/plugins
+                for dev in &ch.devices {
+                    if !dev.enabled {
+                        continue;
+                    }
+                    match dev.format {
+                        dawfile_dawproject::DeviceFormat::Vst2 => {
+                            t = t.vst(&dev.name, "");
+                        }
+                        dawfile_dawproject::DeviceFormat::Vst3 => {
+                            t = t.vst3(&dev.name, "");
+                        }
+                        dawfile_dawproject::DeviceFormat::Clap => {
+                            t = t.clap(&dev.name, "");
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            // Color
+            if let Some(ref color_hex) = track.color {
+                if let Some(color) = parse_hex_color(color_hex) {
+                    t = t.color(color);
+                }
+            }
+
+            if is_folder {
+                t = t.folder_start();
+            }
+
+            // Find lanes for this track in the arrangement
+            if let Some(arr) = arrangement {
+                for lane in &arr.lanes {
+                    if lane.track != track_id {
+                        continue;
+                    }
+                    if let dawfile_dawproject::LaneContent::Clips(clips) = &lane.content {
+                        for clip in clips {
+                            if !clip.enabled {
+                                continue;
+                            }
+                            let pos = clip.time;
+                            let len = clip.duration;
+                            if len <= 0.0 {
+                                continue;
+                            }
+
+                            t = t.item(pos, len, |item| {
+                                let mut item = item;
+                                if let Some(ref name) = clip.name {
+                                    item = item.name(name);
+                                }
+
+                                match &clip.content {
+                                    dawfile_dawproject::ClipContent::Audio(audio) => {
+                                        if let Some(ref file_ref) = audio.file {
+                                            item = item.source_wave(&file_ref.path);
+                                        }
+                                    }
+                                    dawfile_dawproject::ClipContent::Notes(notes) => {
+                                        item = item.source_midi().midi(|midi| {
+                                            let mut midi = midi;
+                                            for note in notes {
+                                                let tick = (note.time * 960.0) as u64;
+                                                let dur = (note.duration * 960.0) as u32;
+                                                let vel = (note.velocity * 127.0) as u8;
+                                                midi = midi.at(tick).note(
+                                                    0,
+                                                    note.channel,
+                                                    note.key,
+                                                    vel,
+                                                    dur,
+                                                );
+                                            }
+                                            midi
+                                        });
+                                    }
+                                    _ => {}
+                                }
+
+                                // Fades
+                                if let Some(fade_in) = clip.fade_in_time {
+                                    if fade_in > 0.0 {
+                                        item = item.fade_in(
+                                            fade_in,
+                                            dawfile_reaper::types::item::FadeCurveType::Linear,
+                                        );
+                                    }
+                                }
+                                if let Some(fade_out) = clip.fade_out_time {
+                                    if fade_out > 0.0 {
+                                        item = item.fade_out(
+                                            fade_out,
+                                            dawfile_reaper::types::item::FadeCurveType::Linear,
+                                        );
+                                    }
+                                }
+
+                                item
+                            });
+                        }
+                    }
+                }
+            }
+
+            t
+        });
+
+        // Recurse for child tracks
+        if !track.children.is_empty() {
+            add_dawproject_tracks(builder, &track.children, arrangement);
+
+            // Add a folder-end marker on the last child
+            // We use an empty track with folder_end to close the folder
+            let old = std::mem::replace(builder, ReaperProjectBuilder::new());
+            *builder = old.track("", |t| t.folder_end(1));
+        }
+    }
+}
+
+/// Parse a hex color string like "#FF8800" into a REAPER-compatible RGB u32.
+fn parse_hex_color(hex: &str) -> Option<u32> {
+    let hex = hex.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let r = u32::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u32::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u32::from_str_radix(&hex[4..6], 16).ok()?;
+    Some((r << 16) | (g << 8) | b)
 }
 
 // ── Color mapping ──────────────────────────────────────────────────────────
