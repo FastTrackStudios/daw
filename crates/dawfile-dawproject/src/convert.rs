@@ -5,12 +5,12 @@
 use crate::types::DawProject;
 use daw_proto::capability::{Capability, FeatureSupport};
 
-/// The capability declaration for the DawProject parser.
+/// The capability declaration for the DawProject parser/writer.
 ///
-/// DawProject is a rich open exchange format — we support reading the full
-/// set of timeline and mixer data it defines.
+/// DawProject is a rich open exchange format — we support both reading and
+/// writing the full set of timeline and mixer data it defines.
 pub fn feature_support() -> FeatureSupport {
-    FeatureSupport::new().read_only(&[
+    FeatureSupport::new().read_write(&[
         Capability::Project,
         Capability::Tracks,
         Capability::TrackRouting,

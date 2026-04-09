@@ -51,7 +51,7 @@
 //! let support = dawfile_dawproject::feature_support();
 //! assert!(support.can_read(daw_proto::Capability::Tracks));
 //! assert!(support.can_read(daw_proto::Capability::Midi));
-//! assert!(!support.can_write(daw_proto::Capability::Tracks)); // read-only
+//! assert!(support.can_write(daw_proto::Capability::Tracks)); // read-write
 //! ```
 
 #![deny(unsafe_code)]
@@ -61,9 +61,10 @@ pub mod error;
 pub mod io;
 pub mod parse;
 pub mod types;
+pub mod write;
 
 // Re-export the primary public API
 pub use convert::feature_support;
 pub use error::{DawProjectError, DawProjectResult};
-pub use io::{parse_project_bytes, read_project};
+pub use io::{parse_project_bytes, read_project, serialize_project_bytes, write_project};
 pub use types::*;

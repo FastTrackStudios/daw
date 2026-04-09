@@ -1,11 +1,12 @@
 //! File I/O entry points.
 //!
-//! High-level functions for reading DawProject files (.dawproject).
+//! High-level functions for reading and writing DawProject files (.dawproject).
 
 use crate::error::{DawProjectError, DawProjectResult};
 use crate::parse;
 use crate::types::DawProject;
-use std::io::Read;
+use crate::write;
+use std::io::{Read, Write};
 use std::path::Path;
 
 /// Read and parse a DawProject file (`.dawproject`).
@@ -51,6 +52,60 @@ pub fn parse_project_bytes(data: &[u8]) -> DawProjectResult<DawProject> {
     }
 
     Ok(project)
+}
+
+/// Write a `DawProject` to a `.dawproject` file at `path`.
+///
+/// Creates (or overwrites) the file with a ZIP archive containing
+/// `project.xml` and, if metadata is present, `metadata.xml`.
+///
+/// # Example
+///
+/// ```no_run
+/// use dawfile_dawproject::{DawProject, Transport, write_project};
+///
+/// let project = DawProject {
+///     version: "1.0".to_string(),
+///     application: None,
+///     metadata: None,
+///     transport: Transport { tempo: 120.0, numerator: 4, denominator: 4 },
+///     tracks: vec![],
+///     arrangement: None,
+///     scenes: vec![],
+/// };
+///
+/// write_project(&project, "output.dawproject")?;
+/// # Ok::<(), dawfile_dawproject::DawProjectError>(())
+/// ```
+pub fn write_project(project: &DawProject, path: impl AsRef<Path>) -> DawProjectResult<()> {
+    let bytes = serialize_project_bytes(project)?;
+    std::fs::write(path.as_ref(), bytes)?;
+    Ok(())
+}
+
+/// Serialize a `DawProject` to raw `.dawproject` ZIP bytes in memory.
+pub fn serialize_project_bytes(project: &DawProject) -> DawProjectResult<Vec<u8>> {
+    let buf = Vec::new();
+    let cursor = std::io::Cursor::new(buf);
+    let mut zip = zip::ZipWriter::new(cursor);
+
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    // project.xml
+    let project_xml = write::write_project_xml(project);
+    zip.start_file("project.xml", options)?;
+    zip.write_all(project_xml.as_bytes())?;
+
+    // metadata.xml (optional)
+    if let Some(meta) = &project.metadata {
+        let meta_xml = write::write_metadata_xml(meta);
+        zip.start_file("metadata.xml", options)?;
+        zip.write_all(meta_xml.as_bytes())?;
+    }
+
+    let cursor = zip.finish()?;
+    Ok(cursor.into_inner())
 }
 
 /// Read a named entry from a ZIP archive into a `Vec<u8>`.
