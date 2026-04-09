@@ -17,6 +17,7 @@
 //! - Everything else — Ableton built-in (e.g., `Compressor2`, `Eq8`, `Reverb`)
 
 use super::xml_helpers::*;
+use crate::devices;
 use crate::types::{AbletonVersion, Device, DeviceCategory, DeviceFormat, DevicePluginId};
 use roxmltree::Node;
 
@@ -206,6 +207,7 @@ fn parse_plugin_device(node: Node<'_, '_>) -> Option<Device> {
         parsed_id,
         processor_state,
         controller_state,
+        builtin_params: None,
     })
 }
 
@@ -259,6 +261,7 @@ fn parse_max_for_live_device(node: Node<'_, '_>) -> Device {
         parsed_id: None,
         processor_state: None,
         controller_state: None,
+        builtin_params: None,
     }
 }
 
@@ -276,6 +279,8 @@ fn parse_builtin_device(node: Node<'_, '_>, tag: &str) -> Device {
         .unwrap_or(tag)
         .to_string();
 
+    let builtin_params = devices::parse_builtin_params(tag, node);
+
     Device {
         name,
         format: DeviceFormat::Builtin,
@@ -284,6 +289,7 @@ fn parse_builtin_device(node: Node<'_, '_>, tag: &str) -> Device {
         parsed_id: None,
         processor_state: None,
         controller_state: None,
+        builtin_params,
     }
 }
 
@@ -309,6 +315,7 @@ fn parse_note_algorithm_device(node: Node<'_, '_>, tag: &str) -> Device {
         parsed_id: None,
         processor_state: None,
         controller_state: None,
+        builtin_params: None,
     }
 }
 

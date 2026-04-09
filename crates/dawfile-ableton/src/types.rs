@@ -3,6 +3,7 @@
 //! These types represent the parsed contents of an Ableton Live set file.
 //! They are format-specific (not yet mapped to `daw_proto` types).
 
+use crate::devices::BuiltinParams;
 use std::path::PathBuf;
 
 /// A parsed Ableton Live set (.als file).
@@ -625,6 +626,8 @@ pub struct Device {
     pub processor_state: Option<String>,
     /// Base64-encoded controller state.
     pub controller_state: Option<String>,
+    /// Typed parameters for recognised built-in devices.
+    pub builtin_params: Option<BuiltinParams>,
 }
 
 /// The format/type of a device.

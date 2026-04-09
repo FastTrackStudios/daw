@@ -52,6 +52,7 @@
 #![deny(unsafe_code)]
 
 pub mod convert;
+pub mod devices;
 pub mod error;
 pub mod io;
 pub mod parse;

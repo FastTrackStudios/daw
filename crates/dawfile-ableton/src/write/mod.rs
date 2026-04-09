@@ -23,6 +23,7 @@
 
 pub mod xml_writer;
 
+use crate::devices;
 use crate::error::{AbletonError, AbletonResult};
 use crate::types::*;
 use flate2::Compression;
@@ -179,6 +180,66 @@ fn write_device_chain_start(
     Ok(())
 }
 
+fn write_devices(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    device_list: &[Device],
+) -> std::io::Result<()> {
+    if device_list.is_empty() {
+        return Ok(());
+    }
+    w.start("Devices")?;
+    for dev in device_list {
+        // Only write builtin devices that have typed params for now;
+        // plugin/M4L devices require their own serialisation (processor state etc.)
+        if let Some(ref params) = dev.builtin_params {
+            // Determine the XML tag name from the params variant
+            let tag = builtin_params_tag(params);
+            let id = w.next_id();
+            w.start_with_id(tag, id)?;
+            w.value_int("LomId", 0)?;
+            w.value_int("LomIdView", 0)?;
+            w.value_bool("IsExpanded", true)?;
+
+            w.start("On")?;
+            w.value_bool("Manual", dev.is_on)?;
+            w.automation_target("AutomationTarget")?;
+            w.end("On")?;
+
+            devices::write_builtin_params(w, params)?;
+
+            w.end(tag)?;
+        }
+    }
+    w.end("Devices")
+}
+
+/// Map a [`BuiltinParams`] variant back to the Ableton XML tag name.
+fn builtin_params_tag(params: &devices::BuiltinParams) -> &'static str {
+    use devices::BuiltinParams::*;
+    match params {
+        Eq8(_) => "Eq8",
+        Compressor(_) => "Compressor2",
+        GlueCompressor(_) => "GlueCompressor",
+        Gate(_) => "Gate",
+        Limiter(_) => "Limiter",
+        MultibandDynamics(_) => "MultibandDynamics",
+        Reverb(_) => "Reverb",
+        Delay(_) => "Delay",
+        Echo(_) => "Echo",
+        AutoFilter(_) => "AutoFilter",
+        Chorus(_) => "Chorus2",
+        Phaser(_) => "Phaser",
+        Flanger(_) => "Flanger",
+        Saturator(_) => "Saturator",
+        Utility(_) => "StereoGain",
+        Tuner(_) => "Tuner",
+        Cabinet(_) => "Cabinet",
+        Erosion(_) => "Erosion",
+        Redux(_) => "Redux2",
+        Vinyl(_) => "Vinyl",
+    }
+}
+
 fn write_mixer(w: &mut AbletonXmlWriter<&mut Vec<u8>>, mixer: &MixerState) -> std::io::Result<()> {
     w.start("Mixer")?;
     w.value_int("LomId", 0)?;
@@ -302,6 +363,7 @@ fn write_audio_track(
     write_device_chain_start(w, &track.common.mixer)?;
     write_routing_target(w, "AudioInputRouting", &track.audio_input)?;
     write_routing_target(w, "AudioOutputRouting", &track.audio_output)?;
+    write_devices(w, &track.common.devices)?;
 
     // MainSequencer
     w.start("MainSequencer")?;
@@ -354,6 +416,7 @@ fn write_midi_track(
     write_device_chain_start(w, &track.common.mixer)?;
     write_routing_target(w, "MidiInputRouting", &track.midi_input)?;
     write_routing_target(w, "AudioOutputRouting", &track.audio_output)?;
+    write_devices(w, &track.common.devices)?;
 
     // MainSequencer
     w.start("MainSequencer")?;
@@ -403,6 +466,7 @@ fn write_group_track(
     w.start_with_id("GroupTrack", track.common.id)?;
     write_track_common(w, &track.common)?;
     write_device_chain_start(w, &track.common.mixer)?;
+    write_devices(w, &track.common.devices)?;
     w.end("DeviceChain")?;
     w.end("GroupTrack")
 }
@@ -414,6 +478,7 @@ fn write_return_track(
     w.start_with_id("ReturnTrack", track.common.id)?;
     write_track_common(w, &track.common)?;
     write_device_chain_start(w, &track.common.mixer)?;
+    write_devices(w, &track.common.devices)?;
     w.end("DeviceChain")?;
     w.end("ReturnTrack")
 }
@@ -799,6 +864,10 @@ fn write_master_track(
         .map(|m| &m.audio_output)
         .unwrap_or(&default_routing);
     write_routing_target(w, "AudioOutputRouting", output)?;
+
+    if let Some(ref master) = set.master_track {
+        write_devices(w, &master.devices)?;
+    }
 
     w.end("DeviceChain")?;
 
