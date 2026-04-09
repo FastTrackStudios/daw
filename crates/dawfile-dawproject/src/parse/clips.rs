@@ -2,8 +2,8 @@
 
 use super::xml_helpers::*;
 use crate::types::{
-    AudioContent, Clip, ClipContent, ClipSlot, Fade, FadeCurve, LoopSettings, Marker, Note, Scene,
-    TimeUnit, VideoContent, Warp, Warps,
+    AudioContent, Clip, ClipContent, ClipSlot, FileReference, Lane, LaneContent, LoopSettings,
+    Marker, Note, Scene, SceneContent, TimeUnit, VideoContent, Warp, Warps,
 };
 use roxmltree::Node;
 
@@ -25,8 +25,9 @@ pub fn parse_clip(node: Node<'_, '_>) -> Clip {
     let play_start = attr(node, "playStart").and_then(|v| v.parse().ok());
     let play_stop = attr(node, "playStop").and_then(|v| v.parse().ok());
     let reference = attr(node, "reference").map(str::to_string);
-    let fade_in = parse_fade(node, "FadeIn", "fadeInTime");
-    let fade_out = parse_fade(node, "FadeOut", "fadeOutTime");
+    let fade_in_time = attr(node, "fadeInTime").and_then(|v| v.parse().ok());
+    let fade_out_time = attr(node, "fadeOutTime").and_then(|v| v.parse().ok());
+    let fade_time_unit = attr(node, "fadeTimeUnit").map(TimeUnit::from_str);
     let loop_settings = parse_loop(node);
     let content = parse_clip_content(node);
 
@@ -43,34 +44,15 @@ pub fn parse_clip(node: Node<'_, '_>) -> Clip {
         play_start,
         play_stop,
         reference,
-        fade_in,
-        fade_out,
+        fade_in_time,
+        fade_out_time,
+        fade_time_unit,
         loop_settings,
         content,
     }
 }
 
-/// Parse a `<FadeIn>` or `<FadeOut>` child element, falling back to a bare
-/// duration attribute (e.g. `fadeInTime`) for compatibility with older exports.
-fn parse_fade(node: Node<'_, '_>, child_tag: &str, fallback_attr: &str) -> Option<Fade> {
-    if let Some(child_node) = child(node, child_tag) {
-        let time = attr_f64(child_node, "time", 0.0);
-        let curve = attr(child_node, "curve")
-            .map(FadeCurve::from_str)
-            .unwrap_or_default();
-        return Some(Fade { time, curve });
-    }
-    // Legacy flat attribute form
-    attr(node, fallback_attr)
-        .and_then(|v| v.parse::<f64>().ok())
-        .map(|time| Fade {
-            time,
-            curve: FadeCurve::Linear,
-        })
-}
-
 fn parse_loop(node: Node<'_, '_>) -> Option<LoopSettings> {
-    // The spec uses playStart/loopStart/loopEnd as clip-level attributes
     let loop_start = attr(node, "loopStart").and_then(|v| v.parse().ok())?;
     let loop_end = attr(node, "loopEnd").and_then(|v| v.parse().ok())?;
     let play_start = attr(node, "playStart")
@@ -85,7 +67,7 @@ fn parse_loop(node: Node<'_, '_>) -> Option<LoopSettings> {
 
 fn parse_clip_content(node: Node<'_, '_>) -> ClipContent {
     if let Some(audio_node) = child(node, "Audio") {
-        return ClipContent::Audio(parse_media(audio_node, false));
+        return ClipContent::Audio(parse_audio(audio_node));
     }
     if let Some(video_node) = child(node, "Video") {
         return ClipContent::Video(parse_video(video_node));
@@ -96,17 +78,22 @@ fn parse_clip_content(node: Node<'_, '_>) -> ClipContent {
     ClipContent::Empty
 }
 
-fn parse_media(node: Node<'_, '_>, _is_video: bool) -> AudioContent {
-    let path = attr(node, "file").map(str::to_string);
-    let embedded = attr_bool(node, "embedded", false);
+fn parse_file_reference(node: Node<'_, '_>) -> Option<FileReference> {
+    child(node, "File").map(|file_node| FileReference {
+        path: attr(file_node, "path").unwrap_or("").to_string(),
+        external: attr_bool(file_node, "external", false),
+    })
+}
+
+fn parse_audio(node: Node<'_, '_>) -> AudioContent {
+    let file = parse_file_reference(node);
     let sample_rate = attr(node, "sampleRate").and_then(|v| v.parse().ok());
     let channels = attr(node, "channels").and_then(|v| v.parse().ok());
     let duration = attr(node, "duration").and_then(|v| v.parse().ok());
     let algorithm = attr(node, "algorithm").map(str::to_string);
     let warps = child(node, "Warps").map(parse_warps).unwrap_or_default();
     AudioContent {
-        path,
-        embedded,
+        file,
         sample_rate,
         channels,
         duration,
@@ -116,16 +103,14 @@ fn parse_media(node: Node<'_, '_>, _is_video: bool) -> AudioContent {
 }
 
 fn parse_video(node: Node<'_, '_>) -> VideoContent {
-    let path = attr(node, "file").map(str::to_string);
-    let embedded = attr_bool(node, "embedded", false);
+    let file = parse_file_reference(node);
     let sample_rate = attr(node, "sampleRate").and_then(|v| v.parse().ok());
     let channels = attr(node, "channels").and_then(|v| v.parse().ok());
     let duration = attr(node, "duration").and_then(|v| v.parse().ok());
     let algorithm = attr(node, "algorithm").map(str::to_string);
     let warps = child(node, "Warps").map(parse_warps).unwrap_or_default();
     VideoContent {
-        path,
-        embedded,
+        file,
         sample_rate,
         channels,
         duration,
@@ -171,21 +156,75 @@ fn parse_scene(node: Node<'_, '_>) -> Scene {
     let name = attr(node, "name").map(str::to_string);
     let color = attr(node, "color").map(str::to_string);
     let comment = attr(node, "comment").map(str::to_string);
-    let tempo = attr(node, "tempo").and_then(|v| v.parse().ok());
-    let slots = child(node, "Slots")
-        .map(|s| children(s, "ClipSlot").map(parse_clip_slot).collect())
-        .unwrap_or_default();
+    let content = parse_scene_content(node);
     Scene {
         id,
         name,
         color,
         comment,
-        tempo,
-        slots,
+        content,
     }
 }
 
-fn parse_clip_slot(node: Node<'_, '_>) -> ClipSlot {
+/// Parse the single timeline content element inside a `<Scene>`.
+///
+/// Per spec a Scene directly contains one of: Lanes, ClipSlot, Clips, Notes,
+/// markers, Audio, Video, Points (or nothing).
+fn parse_scene_content(node: Node<'_, '_>) -> Option<SceneContent> {
+    for child_node in child_elements(node) {
+        match child_node.tag_name().name() {
+            "Lanes" => {
+                // Import the arrangement lane parser to reuse lane logic
+                let lanes = parse_scene_lanes(child_node);
+                return Some(SceneContent::Lanes(lanes));
+            }
+            "ClipSlot" => {
+                return Some(SceneContent::Slot(parse_clip_slot(child_node)));
+            }
+            "Clips" => {
+                let clips = children(child_node, "Clip").map(parse_clip).collect();
+                return Some(SceneContent::Clips(clips));
+            }
+            "Notes" => {
+                return Some(SceneContent::Notes(parse_notes(child_node)));
+            }
+            "Markers" | "markers" => {
+                let markers = children(child_node, "Marker").map(parse_marker).collect();
+                return Some(SceneContent::Markers(markers));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Parse lanes inside a scene (same structure as arrangement lanes).
+fn parse_scene_lanes(lanes_node: Node<'_, '_>) -> Vec<Lane> {
+    child_elements(lanes_node)
+        .filter_map(|n| {
+            let tag = n.tag_name().name();
+            let id = attr(n, "id").unwrap_or("").to_string();
+            let track = attr(n, "track").unwrap_or("").to_string();
+            let time_unit = attr(n, "timeUnit").map(TimeUnit::from_str);
+            let content = match tag {
+                "ClipSlot" => {
+                    LaneContent::Clips(vec![]) // ClipSlot handled differently
+                }
+                "Clips" => LaneContent::Clips(children(n, "Clip").map(parse_clip).collect()),
+                "Notes" => LaneContent::Notes(parse_notes(n)),
+                _ => return None,
+            };
+            Some(Lane {
+                id,
+                track,
+                time_unit,
+                content,
+            })
+        })
+        .collect()
+}
+
+pub fn parse_clip_slot(node: Node<'_, '_>) -> ClipSlot {
     let id = attr(node, "id").unwrap_or("").to_string();
     let has_stop = attr_bool(node, "hasStop", false);
     let time = attr(node, "time").and_then(|v| v.parse().ok());

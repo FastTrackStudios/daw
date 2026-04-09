@@ -489,10 +489,18 @@ pub struct NoiseGateParams {
 #[derive(Debug, Clone)]
 pub struct Arrangement {
     pub id: String,
+    /// Optional display name.
+    pub name: Option<String>,
+    /// Optional color.
+    pub color: Option<String>,
+    /// Optional comment / annotation.
+    pub comment: Option<String>,
     /// Default time unit for lanes that don't specify their own.
     pub time_unit: TimeUnit,
     /// Per-track content lanes.
     pub lanes: Vec<Lane>,
+    /// Global arrangement markers (separate from per-track marker lanes).
+    pub markers: Vec<Marker>,
     /// Tempo automation (BPM changes over time).
     pub tempo_automation: Vec<TempoPoint>,
     /// Time signature automation.
@@ -577,10 +585,12 @@ pub struct Clip {
     pub color: Option<String>,
     /// Annotation / comment text.
     pub comment: Option<String>,
-    /// Fade-in parameters.
-    pub fade_in: Option<Fade>,
-    /// Fade-out parameters.
-    pub fade_out: Option<Fade>,
+    /// Fade-in duration (in `fade_time_unit`).
+    pub fade_in_time: Option<f64>,
+    /// Fade-out duration (in `fade_time_unit`).
+    pub fade_out_time: Option<f64>,
+    /// Time unit for fade_in_time / fade_out_time (defaults to the clip's time unit).
+    pub fade_time_unit: Option<TimeUnit>,
     /// Whether this clip is active (false = muted/disabled).
     pub enabled: bool,
     /// Playback start offset inside the clip's content.
@@ -593,51 +603,6 @@ pub struct Clip {
     pub loop_settings: Option<LoopSettings>,
     /// Clip content.
     pub content: ClipContent,
-}
-
-/// Fade-in or fade-out envelope on a clip.
-#[derive(Debug, Clone, Copy)]
-pub struct Fade {
-    /// Fade duration (in the clip's time unit).
-    pub time: f64,
-    /// Shape of the fade curve.
-    pub curve: FadeCurve,
-}
-
-/// Curve shape for clip fades.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum FadeCurve {
-    #[default]
-    Linear,
-    ScaledLinear,
-    InversedParabolic,
-    Parabolic,
-    Logarithmic,
-    LowPass,
-}
-
-impl FadeCurve {
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "scaleLinear" => Self::ScaledLinear,
-            "inversedParabolic" => Self::InversedParabolic,
-            "parabolic" => Self::Parabolic,
-            "logarithmic" => Self::Logarithmic,
-            "lowPass" => Self::LowPass,
-            _ => Self::Linear,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Linear => "linear",
-            Self::ScaledLinear => "scaleLinear",
-            Self::InversedParabolic => "inversedParabolic",
-            Self::Parabolic => "parabolic",
-            Self::Logarithmic => "logarithmic",
-            Self::LowPass => "lowPass",
-        }
-    }
 }
 
 /// Loop settings for a clip.
@@ -657,19 +622,30 @@ pub enum ClipContent {
     Empty,
 }
 
+/// A reference to a media file (path + embedded/external flag).
+///
+/// Corresponds to the `<File>` child element of `<Audio>` / `<Video>` in DawProject XML.
+/// `external = false` means the file is embedded in the `.dawproject` ZIP archive;
+/// `external = true` means the file lives outside the archive at an absolute or
+/// project-relative path.
+#[derive(Debug, Clone)]
+pub struct FileReference {
+    pub path: String,
+    /// When `true` the file lives outside the ZIP archive.
+    pub external: bool,
+}
+
 /// An audio file reference inside a clip.
 #[derive(Debug, Clone)]
 pub struct AudioContent {
-    /// Path to the audio file (relative to the archive, or absolute).
-    pub path: Option<String>,
-    /// Whether the file is embedded inside the archive.
-    pub embedded: bool,
+    /// The file reference (`<File>` child element). `None` when no file is linked.
+    pub file: Option<FileReference>,
     /// Sample rate of the audio file.
     pub sample_rate: Option<u32>,
     /// Number of channels.
     pub channels: Option<u32>,
-    /// Duration in samples.
-    pub duration: Option<u64>,
+    /// Duration in seconds (xs:double, required by spec but stored as Option for robustness).
+    pub duration: Option<f64>,
     /// Time-stretching algorithm name.
     pub algorithm: Option<String>,
     /// Warp/time-stretch anchors.
@@ -679,11 +655,10 @@ pub struct AudioContent {
 /// A video file reference inside a clip.
 #[derive(Debug, Clone)]
 pub struct VideoContent {
-    pub path: Option<String>,
-    pub embedded: bool,
+    pub file: Option<FileReference>,
     pub sample_rate: Option<u32>,
     pub channels: Option<u32>,
-    pub duration: Option<u64>,
+    pub duration: Option<f64>,
     pub algorithm: Option<String>,
     pub warps: Warps,
 }
@@ -890,15 +865,33 @@ impl Interpolation {
 // ─── Scenes ──────────────────────────────────────────────────────────────────
 
 /// A scene in the clip launcher.
+///
+/// Per the DawProject spec a `<Scene>` directly contains a single piece of timeline
+/// content (typically `<Lanes>` for a multi-track scene row, or `<ClipSlot>` for a
+/// single slot).
 #[derive(Debug, Clone)]
 pub struct Scene {
     pub id: String,
     pub name: Option<String>,
     pub color: Option<String>,
     pub comment: Option<String>,
-    /// Optional tempo override for this scene (BPM).
-    pub tempo: Option<f64>,
-    pub slots: Vec<ClipSlot>,
+    /// Timeline content for this scene (usually Lanes containing ClipSlots).
+    pub content: Option<SceneContent>,
+}
+
+/// Content held by a scene.
+#[derive(Debug, Clone)]
+pub enum SceneContent {
+    /// Multiple per-track lanes (the typical clip-launcher layout).
+    Lanes(Vec<Lane>),
+    /// A single clip slot.
+    Slot(ClipSlot),
+    /// Bare clip list.
+    Clips(Vec<Clip>),
+    /// MIDI notes.
+    Notes(Vec<Note>),
+    /// Markers.
+    Markers(Vec<Marker>),
 }
 
 /// A clip slot in the clip launcher.

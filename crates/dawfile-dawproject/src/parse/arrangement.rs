@@ -11,12 +11,19 @@ use roxmltree::Node;
 /// Parse an `<Arrangement>` element.
 pub fn parse_arrangement(node: Node<'_, '_>) -> Arrangement {
     let id = attr(node, "id").unwrap_or("").to_string();
+    let name = attr(node, "name").map(str::to_string);
+    let color = attr(node, "color").map(str::to_string);
+    let comment = attr(node, "comment").map(str::to_string);
     let time_unit = attr(node, "timeUnit")
         .map(TimeUnit::from_str)
         .unwrap_or(TimeUnit::Beats);
 
     let lanes = child(node, "Lanes")
         .map(|n| parse_lanes(n, time_unit))
+        .unwrap_or_default();
+
+    let markers = child(node, "Markers")
+        .map(|m| children(m, "Marker").map(clips::parse_marker).collect())
         .unwrap_or_default();
 
     let tempo_automation = child(node, "TempoAutomation")
@@ -29,8 +36,12 @@ pub fn parse_arrangement(node: Node<'_, '_>) -> Arrangement {
 
     Arrangement {
         id,
+        name,
+        color,
+        comment,
         time_unit,
         lanes,
+        markers,
         tempo_automation,
         time_sig_automation,
     }

@@ -418,13 +418,39 @@ fn write_device_state(w: &mut XmlWriter, state: &Option<DeviceState>) {
 // ─── Arrangement ─────────────────────────────────────────────────────────────
 
 fn write_arrangement(w: &mut XmlWriter, arr: &Arrangement) {
-    w.open("Arrangement", &[("id", &arr.id)]);
-
-    w.open("Lanes", &[("timeUnit", arr.time_unit.as_str())]);
-    for lane in &arr.lanes {
-        write_lane(w, lane);
+    let mut attrs: Vec<(&str, &str)> = vec![("id", &arr.id)];
+    let name_s;
+    if let Some(n) = &arr.name {
+        name_s = n.clone();
+        attrs.push(("name", &name_s));
     }
-    w.close("Lanes");
+    let color_s;
+    if let Some(c) = &arr.color {
+        color_s = c.clone();
+        attrs.push(("color", &color_s));
+    }
+    let comment_s;
+    if let Some(c) = &arr.comment {
+        comment_s = c.clone();
+        attrs.push(("comment", &comment_s));
+    }
+    w.open("Arrangement", &attrs);
+
+    if !arr.lanes.is_empty() {
+        w.open("Lanes", &[("timeUnit", arr.time_unit.as_str())]);
+        for lane in &arr.lanes {
+            write_lane(w, lane);
+        }
+        w.close("Lanes");
+    }
+
+    if !arr.markers.is_empty() {
+        w.open("Markers", &[]);
+        for marker in &arr.markers {
+            write_marker(w, marker);
+        }
+        w.close("Markers");
+    }
 
     if !arr.tempo_automation.is_empty() {
         write_tempo_automation(w, &arr.tempo_automation);
@@ -611,16 +637,22 @@ fn write_clip(w: &mut XmlWriter, clip: &Clip) {
         ref_s = r.clone();
         attrs.push(("reference", &ref_s));
     }
+    let fi_s;
+    if let Some(fi) = clip.fade_in_time {
+        fi_s = format!("{fi:.6}");
+        attrs.push(("fadeInTime", &fi_s));
+    }
+    let fo_s;
+    if let Some(fo) = clip.fade_out_time {
+        fo_s = format!("{fo:.6}");
+        attrs.push(("fadeOutTime", &fo_s));
+    }
+    let ftu_s;
+    if let Some(ftu) = clip.fade_time_unit {
+        ftu_s = ftu.as_str();
+        attrs.push(("fadeTimeUnit", ftu_s));
+    }
     w.open("Clip", &attrs);
-
-    if let Some(fi) = clip.fade_in {
-        let t = format!("{:.6}", fi.time);
-        w.empty("FadeIn", &[("time", &t), ("curve", fi.curve.as_str())]);
-    }
-    if let Some(fo) = clip.fade_out {
-        let t = format!("{:.6}", fo.time);
-        w.empty("FadeOut", &[("time", &t), ("curve", fo.curve.as_str())]);
-    }
 
     if let Some(ls) = &clip.loop_settings {
         let ls_s = format!("{:.6}", ls.loop_start);
@@ -654,14 +686,6 @@ fn write_clip(w: &mut XmlWriter, clip: &Clip) {
 
 fn write_audio(w: &mut XmlWriter, audio: &AudioContent) {
     let mut attrs: Vec<(&str, &str)> = Vec::new();
-    let path_s;
-    if let Some(p) = &audio.path {
-        path_s = p.clone();
-        attrs.push(("file", &path_s));
-    }
-    if audio.embedded {
-        attrs.push(("embedded", "true"));
-    }
     let sr_s;
     if let Some(sr) = audio.sample_rate {
         sr_s = sr.to_string();
@@ -674,7 +698,7 @@ fn write_audio(w: &mut XmlWriter, audio: &AudioContent) {
     }
     let dur_s;
     if let Some(d) = audio.duration {
-        dur_s = d.to_string();
+        dur_s = format!("{d:.6}");
         attrs.push(("duration", &dur_s));
     }
     let algo_s;
@@ -682,19 +706,11 @@ fn write_audio(w: &mut XmlWriter, audio: &AudioContent) {
         algo_s = a.clone();
         attrs.push(("algorithm", &algo_s));
     }
-    write_media_element(w, "Audio", &attrs, &audio.warps);
+    write_media_element(w, "Audio", &attrs, audio.file.as_ref(), &audio.warps);
 }
 
 fn write_video(w: &mut XmlWriter, video: &VideoContent) {
     let mut attrs: Vec<(&str, &str)> = Vec::new();
-    let path_s;
-    if let Some(p) = &video.path {
-        path_s = p.clone();
-        attrs.push(("file", &path_s));
-    }
-    if video.embedded {
-        attrs.push(("embedded", "true"));
-    }
     let sr_s;
     if let Some(sr) = video.sample_rate {
         sr_s = sr.to_string();
@@ -707,7 +723,7 @@ fn write_video(w: &mut XmlWriter, video: &VideoContent) {
     }
     let dur_s;
     if let Some(d) = video.duration {
-        dur_s = d.to_string();
+        dur_s = format!("{d:.6}");
         attrs.push(("duration", &dur_s));
     }
     let algo_s;
@@ -715,31 +731,44 @@ fn write_video(w: &mut XmlWriter, video: &VideoContent) {
         algo_s = a.clone();
         attrs.push(("algorithm", &algo_s));
     }
-    write_media_element(w, "Video", &attrs, &video.warps);
+    write_media_element(w, "Video", &attrs, video.file.as_ref(), &video.warps);
 }
 
-fn write_media_element(w: &mut XmlWriter, tag: &str, attrs: &[(&str, &str)], warps: &Warps) {
-    let needs_warps_elem = !warps.warps.is_empty() || warps.content_time_unit.is_some();
-    if !needs_warps_elem {
+fn write_media_element(
+    w: &mut XmlWriter,
+    tag: &str,
+    attrs: &[(&str, &str)],
+    file: Option<&FileReference>,
+    warps: &Warps,
+) {
+    let needs_body = file.is_some() || !warps.warps.is_empty() || warps.content_time_unit.is_some();
+    if !needs_body {
         w.empty(tag, attrs);
     } else {
         w.open(tag, attrs);
-        let mut warps_attrs: Vec<(&str, &str)> = Vec::new();
-        let unit_s;
-        if let Some(unit) = warps.content_time_unit {
-            unit_s = unit.as_str();
-            warps_attrs.push(("contentTimeUnit", unit_s));
+        if let Some(file_ref) = file {
+            let external = if file_ref.external { "true" } else { "false" };
+            w.empty("File", &[("path", &file_ref.path), ("external", external)]);
         }
-        if warps.warps.is_empty() {
-            w.empty("Warps", &warps_attrs);
-        } else {
-            w.open("Warps", &warps_attrs);
-            for warp in &warps.warps {
-                let t = format!("{:.6}", warp.time);
-                let ct = format!("{:.6}", warp.content_time);
-                w.empty("Warp", &[("time", &t), ("contentTime", &ct)]);
+        let needs_warps_elem = !warps.warps.is_empty() || warps.content_time_unit.is_some();
+        if needs_warps_elem {
+            let mut warps_attrs: Vec<(&str, &str)> = Vec::new();
+            let unit_s;
+            if let Some(unit) = warps.content_time_unit {
+                unit_s = unit.as_str();
+                warps_attrs.push(("contentTimeUnit", unit_s));
             }
-            w.close("Warps");
+            if warps.warps.is_empty() {
+                w.empty("Warps", &warps_attrs);
+            } else {
+                w.open("Warps", &warps_attrs);
+                for warp in &warps.warps {
+                    let t = format!("{:.6}", warp.time);
+                    let ct = format!("{:.6}", warp.content_time);
+                    w.empty("Warp", &[("time", &t), ("contentTime", &ct)]);
+                }
+                w.close("Warps");
+            }
         }
         w.close(tag);
     }
@@ -801,37 +830,65 @@ fn write_scene(w: &mut XmlWriter, scene: &Scene) {
         comment_s = c.clone();
         attrs.push(("comment", &comment_s));
     }
-    let tempo_s;
-    if let Some(t) = scene.tempo {
-        tempo_s = format!("{t:.6}");
-        attrs.push(("tempo", &tempo_s));
-    }
     w.open("Scene", &attrs);
-    if !scene.slots.is_empty() {
-        w.wrap("Slots", &[], |w| {
-            for slot in &scene.slots {
-                let has_stop = if slot.has_stop { "true" } else { "false" };
-                let mut slot_attrs: Vec<(&str, &str)> =
-                    vec![("id", &slot.id), ("hasStop", has_stop)];
-                let time_s;
-                if let Some(t) = slot.time {
-                    time_s = format!("{t:.6}");
-                    slot_attrs.push(("time", &time_s));
-                }
-                let dur_s;
-                if let Some(d) = slot.duration {
-                    dur_s = format!("{d:.6}");
-                    slot_attrs.push(("duration", &dur_s));
-                }
-                w.open("ClipSlot", &slot_attrs);
-                if let Some(clip) = &slot.clip {
-                    write_clip(w, clip);
-                }
-                w.close("ClipSlot");
-            }
-        });
+    if let Some(content) = &scene.content {
+        write_scene_content(w, content);
     }
     w.close("Scene");
+}
+
+fn write_scene_content(w: &mut XmlWriter, content: &SceneContent) {
+    match content {
+        SceneContent::Lanes(lanes) => {
+            w.open("Lanes", &[]);
+            for lane in lanes {
+                write_lane(w, lane);
+            }
+            w.close("Lanes");
+        }
+        SceneContent::Slot(slot) => write_clip_slot(w, slot),
+        SceneContent::Clips(clips) => {
+            w.open("Clips", &[]);
+            for clip in clips {
+                write_clip(w, clip);
+            }
+            w.close("Clips");
+        }
+        SceneContent::Notes(notes) => {
+            w.open("Notes", &[]);
+            for note in notes {
+                write_note(w, note);
+            }
+            w.close("Notes");
+        }
+        SceneContent::Markers(markers) => {
+            w.open("Markers", &[]);
+            for marker in markers {
+                write_marker(w, marker);
+            }
+            w.close("Markers");
+        }
+    }
+}
+
+fn write_clip_slot(w: &mut XmlWriter, slot: &ClipSlot) {
+    let has_stop = if slot.has_stop { "true" } else { "false" };
+    let mut slot_attrs: Vec<(&str, &str)> = vec![("id", &slot.id), ("hasStop", has_stop)];
+    let time_s;
+    if let Some(t) = slot.time {
+        time_s = format!("{t:.6}");
+        slot_attrs.push(("time", &time_s));
+    }
+    let dur_s;
+    if let Some(d) = slot.duration {
+        dur_s = format!("{d:.6}");
+        slot_attrs.push(("duration", &dur_s));
+    }
+    w.open("ClipSlot", &slot_attrs);
+    if let Some(clip) = &slot.clip {
+        write_clip(w, clip);
+    }
+    w.close("ClipSlot");
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

@@ -3,7 +3,7 @@
 use dawfile_dawproject::{
     Application, Arrangement, AudioContent, AutomationPoint, AutomationPoints, AutomationTarget,
     BuiltinDeviceContent, Channel, ChannelRole, Clip, ClipContent, CompressorParams, ContentType,
-    DawProject, Device, DeviceFormat, EqBand, EqBandType, ExpressionType, Fade, FadeCurve,
+    DawProject, Device, DeviceFormat, EqBand, EqBandType, ExpressionType, FileReference,
     Interpolation, Lane, LaneContent, LimiterParams, Marker, NoiseGateParams, Note,
     ProjectMetadata, Scene, Send, TempoPoint, TimeSignaturePoint, TimeUnit, Track, Transport,
     Warps, feature_support,
@@ -80,7 +80,11 @@ fn minimal_project() -> DawProject {
         ],
         arrangement: Some(Arrangement {
             id: "arr-1".to_string(),
+            name: Some("Main Arrangement".to_string()),
+            color: None,
+            comment: None,
             time_unit: TimeUnit::Beats,
+            markers: vec![],
             lanes: vec![
                 Lane {
                     id: "lane-1".to_string(),
@@ -99,14 +103,9 @@ fn minimal_project() -> DawProject {
                         play_start: Some(0.5),
                         play_stop: Some(3.5),
                         reference: None,
-                        fade_in: Some(Fade {
-                            time: 0.25,
-                            curve: FadeCurve::Logarithmic,
-                        }),
-                        fade_out: Some(Fade {
-                            time: 0.5,
-                            curve: FadeCurve::Linear,
-                        }),
+                        fade_in_time: Some(0.25),
+                        fade_out_time: Some(0.5),
+                        fade_time_unit: Some(TimeUnit::Beats),
                         loop_settings: None,
                         content: ClipContent::Notes(vec![
                             Note {
@@ -212,8 +211,7 @@ fn minimal_project() -> DawProject {
             name: Some("Verse".to_string()),
             color: None,
             comment: Some("first verse".to_string()),
-            tempo: Some(128.0),
-            slots: vec![],
+            content: None,
         }],
     }
 }
@@ -270,12 +268,9 @@ fn round_trip_minimal() {
         assert!(clip.enabled);
         assert!((clip.play_start.unwrap() - 0.5).abs() < 0.001);
         assert!((clip.play_stop.unwrap() - 3.5).abs() < 0.001);
-        let fi = clip.fade_in.unwrap();
-        assert!((fi.time - 0.25).abs() < 0.001);
-        assert_eq!(fi.curve, FadeCurve::Logarithmic);
-        let fo = clip.fade_out.unwrap();
-        assert!((fo.time - 0.5).abs() < 0.001);
-        assert_eq!(fo.curve, FadeCurve::Linear);
+        assert!((clip.fade_in_time.unwrap() - 0.25).abs() < 0.001);
+        assert!((clip.fade_out_time.unwrap() - 0.5).abs() < 0.001);
+        assert_eq!(clip.fade_time_unit, Some(TimeUnit::Beats));
         if let ClipContent::Notes(notes) = &clip.content {
             assert_eq!(notes.len(), 2);
             assert_eq!(notes[1].key, 43);
@@ -324,10 +319,12 @@ fn round_trip_minimal() {
     assert_eq!(arr.time_sig_automation[0].numerator, 3);
     assert_eq!(arr.time_sig_automation[0].denominator, 8);
 
+    // Arrangement metadata
+    assert_eq!(arr.name.as_deref(), Some("Main Arrangement"));
+
     // Scenes
     assert_eq!(restored.scenes.len(), 1);
     assert_eq!(restored.scenes[0].comment.as_deref(), Some("first verse"));
-    assert!((restored.scenes[0].tempo.unwrap() - 128.0).abs() < 0.001);
 }
 
 #[test]
@@ -446,7 +443,11 @@ fn round_trip_builtin_devices_and_warps() {
         }],
         arrangement: Some(Arrangement {
             id: "arr".to_string(),
+            name: None,
+            color: None,
+            comment: None,
             time_unit: TimeUnit::Beats,
+            markers: vec![],
             lanes: vec![Lane {
                 id: "lane-audio".to_string(),
                 track: "t1".to_string(),
@@ -460,19 +461,22 @@ fn round_trip_builtin_devices_and_warps() {
                     name: None,
                     color: None,
                     comment: None,
-                    fade_in: None,
-                    fade_out: None,
+                    fade_in_time: None,
+                    fade_out_time: None,
+                    fade_time_unit: None,
                     enabled: true,
                     play_start: None,
                     play_stop: None,
                     reference: None,
                     loop_settings: None,
                     content: ClipContent::Audio(AudioContent {
-                        path: Some("audio/kick.wav".to_string()),
-                        embedded: false,
+                        file: Some(FileReference {
+                            path: "audio/kick.wav".to_string(),
+                            external: false,
+                        }),
                         sample_rate: Some(44100),
                         channels: Some(1),
-                        duration: Some(88200),
+                        duration: Some(88200.0),
                         algorithm: Some("beats".to_string()),
                         warps: Warps {
                             content_time_unit: Some(TimeUnit::Seconds),
@@ -493,7 +497,10 @@ fn round_trip_builtin_devices_and_warps() {
     let arr = r.arrangement.unwrap();
     if let LaneContent::Clips(clips) = &arr.lanes[0].content {
         if let ClipContent::Audio(audio) = &clips[0].content {
-            assert_eq!(audio.path.as_deref(), Some("audio/kick.wav"));
+            assert_eq!(
+                audio.file.as_ref().map(|f| f.path.as_str()),
+                Some("audio/kick.wav")
+            );
             assert_eq!(audio.warps.content_time_unit, Some(TimeUnit::Seconds));
         } else {
             panic!("expected Audio");
