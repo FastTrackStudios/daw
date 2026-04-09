@@ -1,6 +1,4 @@
 //! Parse orchestration for DawProject files.
-//!
-//! Coordinates parsing of project.xml and metadata.xml from the ZIP archive.
 
 pub mod arrangement;
 pub mod clips;
@@ -23,32 +21,25 @@ pub fn parse_project(xml: &str) -> DawProjectResult<DawProject> {
     }
 
     let version = attr(root, "version").unwrap_or("1.0").to_string();
-
-    // Version gating — only 1.x is defined
     if !version.starts_with('1') {
         return Err(DawProjectError::UnsupportedVersion(version));
     }
 
-    // Application
     let application = child(root, "Application").map(|app| Application {
         name: attr(app, "name").unwrap_or("").to_string(),
         version: attr(app, "version").unwrap_or("").to_string(),
     });
 
-    // Transport
     let transport = child(root, "Transport")
         .map(tempo::parse_transport)
         .unwrap_or_default();
 
-    // Track structure
     let track_list = child(root, "Structure")
         .map(tracks::parse_tracks)
         .unwrap_or_default();
 
-    // Arrangement
     let arrangement = child(root, "Arrangement").map(arrangement::parse_arrangement);
 
-    // Scenes (clip launcher)
     let scenes = child(root, "Scenes")
         .map(clips::parse_scenes)
         .unwrap_or_default();
@@ -56,7 +47,7 @@ pub fn parse_project(xml: &str) -> DawProjectResult<DawProject> {
     Ok(DawProject {
         version,
         application,
-        metadata: None, // populated by io.rs after parsing metadata.xml
+        metadata: None,
         transport,
         tracks: track_list,
         arrangement,
@@ -69,7 +60,6 @@ pub fn parse_metadata(xml: &str) -> DawProjectResult<ProjectMetadata> {
     let doc = roxmltree::Document::parse(xml).map_err(|e| DawProjectError::Xml(e.to_string()))?;
 
     let root = doc.root_element();
-    // The root element is <MetaData> or <Metadata>
     let mut meta = ProjectMetadata::default();
 
     let read = |name: &str| -> Option<String> {

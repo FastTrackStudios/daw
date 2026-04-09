@@ -1,6 +1,6 @@
 //! Parse device (plugin) chains from channel elements.
 
-use super::xml_helpers::*;
+use super::{tracks::parse_device_parameters, xml_helpers::*};
 use crate::types::{Device, DeviceFormat, DeviceState};
 use roxmltree::Node;
 
@@ -20,16 +20,23 @@ fn parse_device(node: Node<'_, '_>) -> Option<Device> {
         "BuiltinDevice" | "Equalizer" | "Compressor" | "Limiter" | "NoiseGate" => {
             DeviceFormat::Builtin
         }
-        // Skip unknown elements (e.g. Sends, automation lanes)
         _ => return None,
     };
 
-    let name = attr(node, "name").unwrap_or("").to_string();
+    let name = attr(node, "deviceName")
+        .or_else(|| attr(node, "name"))
+        .unwrap_or("")
+        .to_string();
     let enabled = !attr_bool(node, "bypass", false);
+    let loaded = attr_bool(node, "loaded", true);
+    let device_role = super::tracks::parse_device_role(node);
 
     let plugin_path = attr(node, "deviceFile").map(std::path::PathBuf::from);
 
-    // Look for a State child element
+    let parameters = child(node, "Parameters")
+        .map(parse_device_parameters)
+        .unwrap_or_default();
+
     let state = child(node, "State").and_then(|s| {
         if let Some(file) = attr(s, "file") {
             Some(DeviceState::File(file.to_string()))
@@ -48,8 +55,11 @@ fn parse_device(node: Node<'_, '_>) -> Option<Device> {
     Some(Device {
         name,
         format,
+        device_role,
         plugin_path,
         enabled,
+        loaded,
+        parameters,
         state,
     })
 }

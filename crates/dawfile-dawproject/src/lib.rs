@@ -40,7 +40,7 @@
 //! );
 //!
 //! for track in &project.tracks {
-//!     println!("Track: {} ({:?})", track.name, track.content_type);
+//!     println!("Track: {} ({:?})", track.name, track.content_types);
 //! }
 //! # Ok::<(), dawfile_dawproject::DawProjectError>(())
 //! ```
