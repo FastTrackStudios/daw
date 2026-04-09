@@ -58,8 +58,8 @@ fn parse_single_region(
 
     let (name, str_consumed) = cursor.length_prefixed_string(name_offset);
 
-    // Three-point data starts after name + 4 bytes
-    let three_point_offset = name_offset + str_consumed + 4;
+    // Three-point data starts immediately after the name (str_consumed already includes the 4-byte prefix)
+    let three_point_offset = name_offset + str_consumed;
     if three_point_offset + 20 >= data.len() {
         return None;
     }

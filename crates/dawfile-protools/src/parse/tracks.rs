@@ -56,8 +56,9 @@ fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<Track> 
 
         let (name, str_consumed) = cursor.length_prefixed_string(name_offset);
 
-        // Number of channels is a u32 after name + 5 bytes
-        let nch_offset = name_offset + str_consumed + 5;
+        // Number of channels is a u32 after name + 1 separator byte
+        // (str_consumed already includes the 4-byte length prefix, so only +1 for the separator)
+        let nch_offset = name_offset + str_consumed + 1;
         if nch_offset + 4 >= data.len() {
             continue;
         }
@@ -142,24 +143,28 @@ fn assign_regions_new(
     };
 
     // Navigate: 0x1054 > 0x1052 > 0x1050 > 0x104f
+    //
+    // Each 0x1052 block corresponds to one track slot (ptformat increments its
+    // track counter once per 0x1052). Within a 0x1052, each 0x1050 is one
+    // region placement on that same track. We must advance track_idx once per
+    // 0x1052, not once per 0x1050.
     let map_entries = map_block.find_all(ContentType::AudioRegionTrackMapEntriesNew);
     let mut track_idx = 0;
 
     for map_entry in &map_entries {
+        if track_idx >= tracks.len() {
+            break;
+        }
+
         let track_entries = map_entry.find_all(ContentType::AudioRegionTrackEntryNew);
+        let data = cursor.data();
 
         for track_entry in &track_entries {
-            if track_idx >= tracks.len() {
-                break;
-            }
-
-            let data = cursor.data();
-
             // Check if this is a fade region (byte at offset+46 == 0x01)
             if track_entry.offset + 47 <= data.len()
                 && cursor.u8_at(track_entry.offset + 46) == 0x01
             {
-                continue; // Skip fade regions
+                continue; // Skip fade regions — do not affect track_idx
             }
 
             let sub_entries = track_entry.find_all(ContentType::AudioRegionTrackSubEntryNew);
@@ -176,7 +181,7 @@ fn assign_regions_new(
                     continue;
                 }
 
-                // Read start position override at offset + 9
+                // Read start position at offset + 9 (u32 LE, matches ptformat's u_endian_read4)
                 let start_offset = sub_entry.offset + 9;
                 let start = if start_offset + 4 <= data.len() {
                     let raw_start = cursor.u32_at(start_offset) as u64;
@@ -187,16 +192,15 @@ fn assign_regions_new(
                     0
                 };
 
-                if track_idx < tracks.len() {
-                    tracks[track_idx].regions.push(TrackRegion {
-                        region_index: raw_index,
-                        start_pos: start,
-                    });
-                }
+                tracks[track_idx].regions.push(TrackRegion {
+                    region_index: raw_index,
+                    start_pos: start,
+                });
             }
-
-            track_idx += 1;
         }
+
+        // Advance once per 0x1052 (track slot), matching ptformat's count++
+        track_idx += 1;
     }
 }
 
