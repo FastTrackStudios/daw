@@ -80,17 +80,37 @@ pub struct MidiRegion {
     pub events: Vec<MidiEvent>,
 }
 
+/// An alternate playlist for a track.
+///
+/// In Pro Tools, each track can have multiple playlists (named arrangements of
+/// regions). The active playlist's regions are in [`Track::regions`]; any
+/// inactive alternates are stored here.
+#[derive(Debug, Clone)]
+pub struct Playlist {
+    /// Playlist name (e.g. `"Kick.01"`, `"Kick.02"`).
+    pub name: String,
+    /// Regions in this playlist.
+    pub regions: Vec<TrackRegion>,
+}
+
 /// A track (audio or MIDI) with its region assignments.
 #[derive(Debug, Clone)]
 pub struct Track {
-    /// Track name.
+    /// Track name (from the track definition block).
     pub name: String,
-    /// Track index.
+    /// Track channel index (ch_map value, used to match region assignments).
     pub index: u16,
-    /// Playlist identifier.
-    pub playlist: u16,
-    /// Regions assigned to this track, in timeline order.
+    /// Name of the active playlist (from the region-to-track map block).
+    ///
+    /// For the main playlist this matches the track name; for a comp playlist
+    /// this will have a suffix like `.01`.
+    pub playlist_name: String,
+    /// Regions on the active playlist, in timeline order.
     pub regions: Vec<TrackRegion>,
+    /// Alternate (inactive) playlists stored in the session.
+    ///
+    /// Empty unless the session was saved with alternate playlists.
+    pub alternate_playlists: Vec<Playlist>,
 }
 
 /// A region placed on a track.

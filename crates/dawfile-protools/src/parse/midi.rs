@@ -217,8 +217,9 @@ fn parse_midi_tracks(
         tracks.push(Track {
             name,
             index: tracks.len() as u16,
-            playlist: 0,
+            playlist_name: String::new(),
             regions: Vec::new(),
+            alternate_playlists: Vec::new(),
         });
     }
 

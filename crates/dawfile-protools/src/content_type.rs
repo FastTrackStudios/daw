@@ -126,6 +126,12 @@ pub enum ContentType {
     /// Compound MIDI region full map
     CompoundMidiRegionMap = 0x262c,
 
+    // ── Alternate playlists ─────────────────────────────────────────────
+    /// Alternate playlist map container (wraps a 0x1054 for inactive playlists)
+    AlternatePlaylistMap = 0x2428,
+    /// Alternate playlist map container, secondary variant
+    AlternatePlaylistMapAlt = 0x2429,
+
     // ── Markers ─────────────────────────────────────────────────────────
     /// Marker list
     MarkerList = 0x271a,
@@ -193,6 +199,9 @@ impl ContentType {
             0x2628 => Some(Self::CompoundRegionGroup),
             0x262b => Some(Self::CompoundMidiRegionContainer),
             0x262c => Some(Self::CompoundMidiRegionMap),
+
+            0x2428 => Some(Self::AlternatePlaylistMap),
+            0x2429 => Some(Self::AlternatePlaylistMapAlt),
 
             0x271a => Some(Self::MarkerList),
             0x2511 => Some(Self::SnapsBlock),

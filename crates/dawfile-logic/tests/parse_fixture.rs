@@ -262,3 +262,42 @@ fn hex_dump(data: &[u8], limit: usize) {
         println!("|");
     }
 }
+
+#[test]
+fn layout_deep_dump() {
+    let session = dawfile_logic::read_session(FIXTURE).expect("parse failed");
+
+    // All AuRg chunks — compare timeStamp (bytes 14-21) across regions
+    println!("\n=== All AuRg chunks ===");
+    for chunk in session.chunks.iter().filter(|c| c.type_name == "AuRg") {
+        println!("  offset={} len={}", chunk.offset, chunk.data_len);
+        hex_dump(&chunk.data, chunk.data.len());
+        println!();
+    }
+
+    // First 2 Trak chunks
+    println!("=== First 2 Trak chunks ===");
+    for chunk in session
+        .chunks
+        .iter()
+        .filter(|c| c.type_name == "Trak")
+        .take(2)
+    {
+        println!("  offset={} len={}", chunk.offset, chunk.data_len);
+        hex_dump(&chunk.data, 256);
+        println!();
+    }
+
+    // First 2 EvSq chunks
+    println!("=== First 2 EvSq chunks ===");
+    for chunk in session
+        .chunks
+        .iter()
+        .filter(|c| c.type_name == "EvSq")
+        .take(2)
+    {
+        println!("  offset={} len={}", chunk.offset, chunk.data_len);
+        hex_dump(&chunk.data, 256);
+        println!();
+    }
+}
