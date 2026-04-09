@@ -202,11 +202,22 @@ fn exec_reaper(config: &LaunchConfig, extra_args: &[String]) -> ! {
     std::env::set_current_dir(&config.resources_dir)
         .unwrap_or_else(|e| eprintln!("Warning: failed to chdir: {e}"));
 
-    let err = Command::new(&config.reaper_executable)
-        .args(&config.reaper_args)
-        .args(["-cfgfile", &config.ini_path])
-        .args(extra_args)
-        .exec();
+    // If FTS_REAPER_FHS is set, exec REAPER through the FHS wrapper
+    // so native libs (libGL, GDK, etc.) are available.
+    let err = if let Ok(fhs) = std::env::var("FTS_REAPER_FHS") {
+        Command::new(&fhs)
+            .arg(&config.reaper_executable)
+            .args(&config.reaper_args)
+            .args(["-cfgfile", &config.ini_path])
+            .args(extra_args)
+            .exec()
+    } else {
+        Command::new(&config.reaper_executable)
+            .args(&config.reaper_args)
+            .args(["-cfgfile", &config.ini_path])
+            .args(extra_args)
+            .exec()
+    };
 
     // exec() only returns on error
     panic!("Failed to exec REAPER: {err}");
