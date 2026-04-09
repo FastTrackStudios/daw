@@ -36,6 +36,10 @@ pub struct AbletonLiveSet {
     pub transport: TransportState,
     /// Furthest bar position (derived from max CurrentEnd values).
     pub furthest_bar: f64,
+    /// Groove pool templates.
+    pub groove_pool: Vec<Groove>,
+    /// Tuning system (v12, opaque preservation).
+    pub tuning_system: Option<TuningSystem>,
 }
 
 /// Ableton version info parsed from the `MinorVersion` attribute.
@@ -194,6 +198,12 @@ pub struct TrackCommon {
     pub devices: Vec<Device>,
     /// Per-track automation envelopes.
     pub automation_envelopes: Vec<AutomationEnvelope>,
+    /// Track delay compensation settings.
+    pub track_delay: Option<TrackDelay>,
+    /// Linked track group ID (-1 = none).
+    pub linked_track_group_id: i32,
+    /// Track view/UI state (preserved for round-trip).
+    pub view_state: Option<TrackViewState>,
 }
 
 /// An audio track.
@@ -210,6 +220,12 @@ pub struct AudioTrack {
     pub audio_output: String,
     /// Monitoring mode: 0=off, 1=in, 2=auto.
     pub monitoring: i32,
+    /// Whether the track is armed for recording.
+    pub is_armed: bool,
+    /// Take counter for recording.
+    pub take_counter: i32,
+    /// Take lanes for comping.
+    pub take_lanes: Vec<TakeLane>,
 }
 
 /// A MIDI track.
@@ -226,6 +242,12 @@ pub struct MidiTrack {
     pub audio_output: String,
     /// Monitoring mode.
     pub monitoring: i32,
+    /// Whether the track is armed for recording.
+    pub is_armed: bool,
+    /// Take counter for recording.
+    pub take_counter: i32,
+    /// Take lanes for comping.
+    pub take_lanes: Vec<TakeLane>,
 }
 
 /// A return (send) track.
@@ -274,6 +296,12 @@ pub struct MixerState {
     pub speaker_on: bool,
     /// Crossfade assignment: 0=none, 1=A, 2=B.
     pub crossfade_state: i32,
+    /// Split stereo pan left value (when pan_mode == 1).
+    pub split_stereo_pan_l: Option<f64>,
+    /// Split stereo pan right value (when pan_mode == 1).
+    pub split_stereo_pan_r: Option<f64>,
+    /// Pan mode: 0=stereo, 1=split stereo.
+    pub pan_mode: i32,
 }
 
 impl Default for MixerState {
@@ -285,6 +313,9 @@ impl Default for MixerState {
             solo: false,
             speaker_on: true,
             crossfade_state: 0,
+            split_stereo_pan_l: None,
+            split_stereo_pan_r: None,
+            pan_mode: 0,
         }
     }
 }
@@ -473,6 +504,12 @@ pub struct Device {
     pub device_id: Option<String>,
     /// Whether the device is enabled.
     pub is_on: bool,
+    /// Parsed/structured form of the device_id.
+    pub parsed_id: Option<DevicePluginId>,
+    /// Base64-encoded processor state (plugin preset data).
+    pub processor_state: Option<String>,
+    /// Base64-encoded controller state.
+    pub controller_state: Option<String>,
 }
 
 /// The format/type of a device.
@@ -488,6 +525,8 @@ pub enum DeviceFormat {
     AudioUnit,
     /// Max for Live device.
     MaxForLive,
+    /// Note algorithm / note transform (v12).
+    NoteAlgorithm,
     /// Unknown or unrecognized format.
     Unknown,
 }
@@ -506,9 +545,22 @@ pub struct AutomationEnvelope {
 /// An automation event (supports float, bool, and enum types).
 #[derive(Debug, Clone, Copy)]
 pub enum AutomationEvent {
-    Float { time: f64, value: f64 },
-    Bool { time: f64, value: bool },
-    Enum { time: f64, value: i32 },
+    Float {
+        time: f64,
+        value: f64,
+        /// Bezier control handle 1 (x, y).
+        curve_control_1: Option<(f64, f64)>,
+        /// Bezier control handle 2 (x, y).
+        curve_control_2: Option<(f64, f64)>,
+    },
+    Bool {
+        time: f64,
+        value: bool,
+    },
+    Enum {
+        time: f64,
+        value: i32,
+    },
 }
 
 impl AutomationEvent {
@@ -537,6 +589,10 @@ pub struct AutomationPoint {
     pub time: f64,
     /// Automation value.
     pub value: f64,
+    /// Bezier control handle 1 (x, y).
+    pub curve_control_1: Option<(f64, f64)>,
+    /// Bezier control handle 2 (x, y).
+    pub curve_control_2: Option<(f64, f64)>,
 }
 
 // ─── Arrangement ────────────────────────────────────────────────────────────
@@ -600,4 +656,105 @@ impl Default for TransportState {
             draw_mode: 0,
         }
     }
+}
+
+// ─── Track delay / view state ──────────────────────────────────────────────
+
+/// Track delay compensation settings.
+#[derive(Debug, Clone, Copy)]
+pub struct TrackDelay {
+    /// Delay value (in ms or samples depending on `is_sample_based`).
+    pub value: f64,
+    /// Whether the delay value is in samples (true) or milliseconds (false).
+    pub is_sample_based: bool,
+}
+
+/// Track view/UI state (preserved for round-trip fidelity).
+#[derive(Debug, Clone)]
+pub struct TrackViewState {
+    /// Session view track width.
+    pub session_track_width: Option<i32>,
+    /// Arrangement lane height.
+    pub arrangement_lane_height: Option<i32>,
+    /// Raw JSON view data.
+    pub view_data_json: Option<String>,
+}
+
+// ─── Groove pool ───────────────────────────────────────────────────────────
+
+/// A groove template from the groove pool.
+#[derive(Debug, Clone)]
+pub struct Groove {
+    /// Groove ID.
+    pub id: i32,
+    /// Groove name.
+    pub name: String,
+    /// File path (empty if not loaded from a file).
+    pub path: String,
+    /// Base note division.
+    pub base: f64,
+    /// Quantize amount (0.0-1.0).
+    pub quantize_amount: f64,
+    /// Timing amount (0.0-1.0).
+    pub timing_amount: f64,
+    /// Random amount (0.0-1.0).
+    pub random_amount: f64,
+    /// Velocity amount (0.0-1.0).
+    pub velocity_amount: f64,
+}
+
+// ─── Tuning system ─────────────────────────────────────────────────────────
+
+/// Tuning system (v12, preserved as raw XML for round-trip fidelity).
+#[derive(Debug, Clone)]
+pub struct TuningSystem {
+    /// The raw XML content of the tuning system element.
+    pub raw_xml: String,
+}
+
+// ─── Take lanes ────────────────────────────────────────────────────────────
+
+/// A take lane for comping (recording multiple takes).
+#[derive(Debug, Clone)]
+pub struct TakeLane {
+    /// Take lane ID.
+    pub id: i32,
+    /// Take lane name.
+    pub name: String,
+    /// Whether this take lane is the active (selected) one.
+    pub is_active: bool,
+    /// Audio clips in this take lane.
+    pub audio_clips: Vec<AudioClip>,
+    /// MIDI clips in this take lane.
+    pub midi_clips: Vec<MidiClip>,
+}
+
+// ─── Device plugin ID ──────────────────────────────────────────────────────
+
+/// Parsed/structured form of a device plugin identifier string.
+#[derive(Debug, Clone)]
+pub struct DevicePluginId {
+    /// Plugin format.
+    pub format: DeviceFormat,
+    /// Plugin category (instrument, effect, etc.).
+    pub category: DeviceCategory,
+    /// UUID (VST3, AU).
+    pub uuid: Option<String>,
+    /// Numeric plugin ID (VST2).
+    pub numeric_id: Option<i64>,
+    /// Name hint from the identifier string.
+    pub name_hint: Option<String>,
+}
+
+/// Category of a device plugin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeviceCategory {
+    /// Instrument (virtual instrument / synth).
+    Instrument,
+    /// Audio effect.
+    AudioEffect,
+    /// MIDI effect.
+    MidiEffect,
+    /// Unknown category.
+    Unknown,
 }

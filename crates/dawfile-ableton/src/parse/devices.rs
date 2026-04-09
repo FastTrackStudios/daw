@@ -17,7 +17,7 @@
 //! - Everything else — Ableton built-in (e.g., `Compressor2`, `Eq8`, `Reverb`)
 
 use super::xml_helpers::*;
-use crate::types::{AbletonVersion, Device, DeviceFormat};
+use crate::types::{AbletonVersion, Device, DeviceCategory, DeviceFormat, DevicePluginId};
 use roxmltree::Node;
 
 /// Rack device tag names that contain nested device chains.
@@ -26,6 +26,29 @@ const RACK_TAGS: &[&str] = &[
     "InstrumentGroupDevice",
     "MidiEffectGroupDevice",
     "DrumGroupDevice",
+];
+
+/// Known v12 note algorithm / note transform device tags.
+const NOTE_ALGORITHM_TAGS: &[&str] = &[
+    "MidiArpeggiator",
+    "MidiNoteLength",
+    "MidiPitcher",
+    "MidiRandom",
+    "MidiScale",
+    "MidiVelocity",
+    "MidiChord",
+    "NoteTransformArpeggiate",
+    "NoteTransformConnect",
+    "NoteTransformOrnament",
+    "NoteTransformQuantize",
+    "NoteTransformRecombine",
+    "NoteTransformRhythm",
+    "NoteTransformSeed",
+    "NoteTransformShape",
+    "NoteTransformSpan",
+    "NoteTransformStacks",
+    "NoteTransformStrum",
+    "NoteTransformTimeWarp",
 ];
 
 /// Parse all devices from a `DeviceChain` node, recursing into racks.
@@ -69,6 +92,8 @@ fn collect_devices_recursive(
                 // Rack device: add the rack itself, then recurse into its branches
                 out.push(parse_builtin_device(device_node, tag));
                 recurse_into_rack(device_node, version, out, depth);
+            } else if NOTE_ALGORITHM_TAGS.contains(&tag) {
+                out.push(parse_note_algorithm_device(device_node, tag));
             } else if !tag.is_empty() {
                 out.push(parse_builtin_device(device_node, tag));
             }
@@ -157,17 +182,30 @@ fn parse_plugin_device(node: Node<'_, '_>) -> Option<Device> {
         .map(|s| s.to_string());
 
     // Determine format and name from PluginDesc
-    let (name, format) = if let Some(plugin_desc) = child(node, "PluginDesc") {
-        parse_plugin_desc(plugin_desc)
-    } else {
-        ("Unknown Plugin".to_string(), DeviceFormat::Unknown)
-    };
+    let (name, format, processor_state, controller_state) =
+        if let Some(plugin_desc) = child(node, "PluginDesc") {
+            let (n, f) = parse_plugin_desc(plugin_desc);
+            let (ps, cs) = parse_plugin_states(plugin_desc);
+            (n, f, ps, cs)
+        } else {
+            (
+                "Unknown Plugin".to_string(),
+                DeviceFormat::Unknown,
+                None,
+                None,
+            )
+        };
+
+    let parsed_id = device_id.as_deref().map(parse_device_id);
 
     Some(Device {
         name,
         format,
         device_id,
         is_on,
+        parsed_id,
+        processor_state,
+        controller_state,
     })
 }
 
@@ -218,6 +256,9 @@ fn parse_max_for_live_device(node: Node<'_, '_>) -> Device {
         format: DeviceFormat::MaxForLive,
         device_id: None,
         is_on,
+        parsed_id: None,
+        processor_state: None,
+        controller_state: None,
     }
 }
 
@@ -240,5 +281,127 @@ fn parse_builtin_device(node: Node<'_, '_>, tag: &str) -> Device {
         format: DeviceFormat::Builtin,
         device_id: None,
         is_on,
+        parsed_id: None,
+        processor_state: None,
+        controller_state: None,
     }
+}
+
+fn parse_note_algorithm_device(node: Node<'_, '_>, tag: &str) -> Device {
+    let is_on = child(node, "On")
+        .and_then(|on| child_bool(on, "Manual"))
+        .unwrap_or(true);
+
+    let name = child(node, "Name")
+        .and_then(|n| {
+            child_value(n, "UserName")
+                .filter(|s| !s.is_empty())
+                .or_else(|| child_value(n, "EffectiveName"))
+        })
+        .unwrap_or(tag)
+        .to_string();
+
+    Device {
+        name,
+        format: DeviceFormat::NoteAlgorithm,
+        device_id: None,
+        is_on,
+        parsed_id: None,
+        processor_state: None,
+        controller_state: None,
+    }
+}
+
+/// Parse a device plugin identifier string into structured form.
+fn parse_device_id(raw: &str) -> DevicePluginId {
+    let parts: Vec<&str> = raw.splitn(4, ':').collect();
+
+    if parts.len() < 3 || parts[0] != "device" {
+        return DevicePluginId {
+            format: DeviceFormat::Unknown,
+            category: DeviceCategory::Unknown,
+            uuid: None,
+            numeric_id: None,
+            name_hint: None,
+        };
+    }
+
+    let format = match parts[1] {
+        "vst3" => DeviceFormat::Vst3,
+        "vst" => DeviceFormat::Vst2,
+        "au" => DeviceFormat::AudioUnit,
+        "m4l" => DeviceFormat::MaxForLive,
+        _ => DeviceFormat::Unknown,
+    };
+
+    let category = match parts[2] {
+        "audiofx" => DeviceCategory::AudioEffect,
+        "instr" => DeviceCategory::Instrument,
+        "midifx" => DeviceCategory::MidiEffect,
+        _ => DeviceCategory::Unknown,
+    };
+
+    let remainder = parts.get(3).unwrap_or(&"");
+
+    let (uuid, numeric_id, name_hint) = match format {
+        DeviceFormat::Vst3 | DeviceFormat::AudioUnit => {
+            // UUID is the remainder (may contain sub-colons for AU)
+            let uuid_str = if remainder.is_empty() {
+                None
+            } else {
+                Some(remainder.to_string())
+            };
+            (uuid_str, None, None)
+        }
+        DeviceFormat::Vst2 => {
+            // Format: <numeric_id>?n=<name>
+            if let Some(q_pos) = remainder.find("?n=") {
+                let id_str = &remainder[..q_pos];
+                let name = &remainder[q_pos + 3..];
+                (None, id_str.parse::<i64>().ok(), Some(name.to_string()))
+            } else {
+                (None, remainder.parse::<i64>().ok(), None)
+            }
+        }
+        _ => (None, None, None),
+    };
+
+    DevicePluginId {
+        format,
+        category,
+        uuid,
+        numeric_id,
+        name_hint,
+    }
+}
+
+/// Extract processor and controller state from a PluginDesc node.
+fn parse_plugin_states(plugin_desc: Node<'_, '_>) -> (Option<String>, Option<String>) {
+    // Try VST3 path: Vst3PluginInfo > Preset > Vst3Preset > ProcessorState / ControllerState
+    if let Some(vst3_info) = child(plugin_desc, "Vst3PluginInfo") {
+        if let Some(preset) = descend(vst3_info, "Preset.Vst3Preset") {
+            let ps = child(preset, "ProcessorState")
+                .and_then(|n| n.text())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            let cs = child(preset, "ControllerState")
+                .and_then(|n| n.text())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            return (ps, cs);
+        }
+    }
+
+    // Try VST2 path: VstPluginInfo > Preset > VstPreset > ProcessorState
+    if let Some(vst_info) = child(plugin_desc, "VstPluginInfo") {
+        if let Some(preset) = descend(vst_info, "Preset.VstPreset") {
+            let ps = child(preset, "Buffer")
+                .and_then(|n| n.text())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            return (ps, None);
+        }
+    }
+
+    (None, None)
 }

@@ -135,6 +135,11 @@ impl<W: Write> AbletonXmlWriter<W> {
         self.writer.write_event(Event::Empty(elem))
     }
 
+    /// Write raw XML bytes directly (for passthrough of unparsed XML fragments).
+    pub fn write_raw(&mut self, xml: &str) -> std::io::Result<()> {
+        self.writer.get_mut().write_all(xml.as_bytes())
+    }
+
     /// Consume and return the inner writer.
     pub fn into_inner(self) -> W {
         self.writer.into_inner()

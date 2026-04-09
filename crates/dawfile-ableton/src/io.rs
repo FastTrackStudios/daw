@@ -41,6 +41,11 @@ fn decompress(data: &[u8]) -> AbletonResult<Vec<u8>> {
     use flate2::read::GzDecoder;
     use std::io::Read;
 
+    // Detect pre-v8 Ableton binary format
+    if data.len() >= 2 && data[0] == 0xAB && data[1] == 0x1E {
+        return Err(AbletonError::PreVersion8);
+    }
+
     // Verify gzip magic bytes
     if data.len() < 2 || data[0] != 0x1f || data[1] != 0x8b {
         return Err(AbletonError::NotGzip);

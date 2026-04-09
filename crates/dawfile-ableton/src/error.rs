@@ -3,6 +3,10 @@
 /// Errors that can occur when parsing an Ableton Live set file.
 #[derive(Debug, thiserror::Error)]
 pub enum AbletonError {
+    /// Pre-8.2 Ableton format detected (unsupported legacy binary format).
+    #[error("pre-8.2 Ableton format (magic bytes 0xAB 0x1E) — not supported")]
+    PreVersion8,
+
     /// File does not have a valid gzip header.
     #[error("not a gzip file (expected magic bytes 1f 8b)")]
     NotGzip,

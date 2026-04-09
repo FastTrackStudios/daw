@@ -6,6 +6,7 @@
 pub mod automation;
 pub mod clips;
 pub mod devices;
+pub mod grooves;
 pub mod markers;
 pub mod samples;
 pub mod tempo;
@@ -81,7 +82,27 @@ pub fn parse_live_set(xml: &str) -> AbletonResult<AbletonLiveSet> {
         None
     };
 
-    // 12. Furthest bar position
+    // 12. Groove pool
+    let groove_pool = child(live_set, "GroovePool")
+        .map(grooves::parse_groove_pool)
+        .unwrap_or_default();
+
+    // 13. Tuning system (v12, opaque preservation)
+    let tuning_system = child(live_set, "TuningSystems")
+        .or_else(|| child(live_set, "TuningSystem"))
+        .map(|node| {
+            // Collect the raw XML text of the tuning system element.
+            // We use the document text range for round-trip fidelity.
+            let raw_xml = node
+                .document()
+                .input_text()
+                .get(node.range().start..node.range().end)
+                .unwrap_or("")
+                .to_string();
+            TuningSystem { raw_xml }
+        });
+
+    // 14. Furthest bar position
     let max_current_end = collect_max_current_end(live_set);
     let furthest_bar = if time_signature.numerator > 0 {
         max_current_end / time_signature.numerator as f64
@@ -104,6 +125,8 @@ pub fn parse_live_set(xml: &str) -> AbletonResult<AbletonLiveSet> {
         tempo_automation,
         transport,
         furthest_bar,
+        groove_pool,
+        tuning_system,
     })
 }
 

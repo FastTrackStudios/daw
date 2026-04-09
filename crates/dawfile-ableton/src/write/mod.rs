@@ -94,6 +94,10 @@ fn write_root(w: &mut AbletonXmlWriter<&mut Vec<u8>>, set: &AbletonLiveSet) -> s
     write_locators(w, &set.locators)?;
     write_scenes(w, &set.scenes)?;
     write_transport(w, &set.transport)?;
+    write_groove_pool(w, &set.groove_pool)?;
+    if let Some(ref tuning) = set.tuning_system {
+        write_tuning_system(w, tuning)?;
+    }
     w.end("LiveSet")?;
 
     w.end("Ableton")
@@ -141,7 +145,27 @@ fn write_track_common(
 
     w.value_int("Color", common.color as i64)?;
     w.value_int("TrackGroupId", common.group_id as i64)?;
+    w.value_int("LinkedTrackGroupId", common.linked_track_group_id as i64)?;
     w.value_bool("TrackUnfolded", !common.folded)?;
+
+    // Track delay
+    if let Some(ref delay) = common.track_delay {
+        w.start("TrackDelay")?;
+        w.start("Value")?;
+        w.value_float("Manual", delay.value)?;
+        w.end("Value")?;
+        w.start("IsValueSampleBased")?;
+        w.value_bool("Manual", delay.is_sample_based)?;
+        w.end("IsValueSampleBased")?;
+        w.end("TrackDelay")?;
+    }
+
+    // View state
+    if let Some(ref vs) = common.view_state {
+        if let Some(ref json) = vs.view_data_json {
+            w.text_element("ViewData", json)?;
+        }
+    }
 
     Ok(())
 }
@@ -185,6 +209,33 @@ fn write_mixer(w: &mut AbletonXmlWriter<&mut Vec<u8>>, mixer: &MixerState) -> st
     w.value_float("Max", 1.0)?;
     w.end("MidiControllerRange")?;
     w.end("Pan")?;
+
+    // Split stereo pan (if present)
+    if let Some(pan_l) = mixer.split_stereo_pan_l {
+        w.start("SplitStereoPanL")?;
+        w.value_float("Manual", pan_l)?;
+        w.automation_target("AutomationTarget")?;
+        w.start("MidiControllerRange")?;
+        w.value_float("Min", -1.0)?;
+        w.value_float("Max", 1.0)?;
+        w.end("MidiControllerRange")?;
+        w.end("SplitStereoPanL")?;
+    }
+    if let Some(pan_r) = mixer.split_stereo_pan_r {
+        w.start("SplitStereoPanR")?;
+        w.value_float("Manual", pan_r)?;
+        w.automation_target("AutomationTarget")?;
+        w.start("MidiControllerRange")?;
+        w.value_float("Min", -1.0)?;
+        w.value_float("Max", 1.0)?;
+        w.end("MidiControllerRange")?;
+        w.end("SplitStereoPanR")?;
+    }
+
+    // Pan mode
+    w.start("PanMode")?;
+    w.value_int("Manual", mixer.pan_mode as i64)?;
+    w.end("PanMode")?;
 
     // Speaker
     w.start("Speaker")?;
@@ -255,6 +306,16 @@ fn write_audio_track(
 
     w.value_int("MonitoringEnum", track.monitoring as i64)?;
 
+    // Is armed
+    w.start("IsArmed")?;
+    w.value_bool("Manual", track.is_armed)?;
+    w.end("IsArmed")?;
+
+    // Recorder with take counter
+    w.start("Recorder")?;
+    w.value_int("TakeCounter", track.take_counter as i64)?;
+    w.end("Recorder")?;
+
     // Arrangement audio clips
     w.start("Sample")?;
     w.start("ArrangerAutomation")?;
@@ -267,6 +328,10 @@ fn write_audio_track(
     w.end("Sample")?;
 
     w.end("MainSequencer")?;
+
+    // Take lanes
+    write_take_lanes(w, &track.take_lanes)?;
+
     w.end("DeviceChain")?;
     w.end("AudioTrack")
 }
@@ -293,6 +358,16 @@ fn write_midi_track(
 
     w.value_int("MonitoringEnum", track.monitoring as i64)?;
 
+    // Is armed
+    w.start("IsArmed")?;
+    w.value_bool("Manual", track.is_armed)?;
+    w.end("IsArmed")?;
+
+    // Recorder with take counter
+    w.start("Recorder")?;
+    w.value_int("TakeCounter", track.take_counter as i64)?;
+    w.end("Recorder")?;
+
     // Arrangement MIDI clips
     w.start("ClipTimeable")?;
     w.start("ArrangerAutomation")?;
@@ -305,6 +380,10 @@ fn write_midi_track(
     w.end("ClipTimeable")?;
 
     w.end("MainSequencer")?;
+
+    // Take lanes
+    write_take_lanes(w, &track.take_lanes)?;
+
     w.end("DeviceChain")?;
     w.end("MidiTrack")
 }
@@ -598,14 +677,7 @@ fn write_master_track(
         ],
     )?;
     for (i, point) in set.tempo_automation.iter().enumerate() {
-        w.empty_with_attrs(
-            "FloatEvent",
-            &[
-                ("Id", &(i + 1).to_string()),
-                ("Time", &format_float(point.time)),
-                ("Value", &format_float(point.value)),
-            ],
-        )?;
+        write_float_event(w, (i + 1) as i32, point)?;
     }
     w.end("Events")?;
     w.end("ArrangerAutomation")?;
@@ -658,14 +730,7 @@ fn write_master_track(
         w.start("Automation")?;
         w.start("Events")?;
         for (i, point) in set.tempo_automation.iter().enumerate() {
-            w.empty_with_attrs(
-                "FloatEvent",
-                &[
-                    ("Id", &i.to_string()),
-                    ("Time", &format_float(point.time)),
-                    ("Value", &format_float(point.value)),
-                ],
-            )?;
+            write_float_event(w, i as i32, point)?;
         }
         w.end("Events")?;
         w.end("Automation")?;
@@ -741,6 +806,112 @@ fn write_transport(
     )?;
     w.value_int("DrawMode", transport.draw_mode as i64)?;
     w.end("Transport")
+}
+
+// ─── Take Lanes ────────────────────────────────────────────────────────────
+
+fn write_take_lanes(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    take_lanes: &[TakeLane],
+) -> std::io::Result<()> {
+    if take_lanes.is_empty() {
+        return Ok(());
+    }
+    w.start("TakeLanes")?;
+    w.start("TakeLanes")?;
+    for lane in take_lanes {
+        w.start_with_id("TakeLane", lane.id)?;
+        w.value_element("Name", &lane.name)?;
+        w.value_bool("IsActive", lane.is_active)?;
+
+        // Audio clips in this take lane
+        if !lane.audio_clips.is_empty() {
+            w.start("Events")?;
+            for clip in &lane.audio_clips {
+                write_audio_clip(w, clip)?;
+            }
+            w.end("Events")?;
+        }
+
+        // MIDI clips in this take lane
+        if !lane.midi_clips.is_empty() {
+            w.start("Events")?;
+            for clip in &lane.midi_clips {
+                write_midi_clip(w, clip)?;
+            }
+            w.end("Events")?;
+        }
+
+        w.end("TakeLane")?;
+    }
+    w.end("TakeLanes")?;
+    w.end("TakeLanes")
+}
+
+// ─── Groove Pool ───────────────────────────────────────────────────────────
+
+fn write_groove_pool(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    grooves: &[Groove],
+) -> std::io::Result<()> {
+    w.start("GroovePool")?;
+    w.start("Grooves")?;
+    for groove in grooves {
+        w.start_with_id("Groove", groove.id)?;
+        w.value_element("Name", &groove.name)?;
+        w.start("FileRef")?;
+        w.value_element("Path", &groove.path)?;
+        w.end("FileRef")?;
+        w.value_float("Base", groove.base)?;
+        w.value_float("QuantizeAmount", groove.quantize_amount)?;
+        w.value_float("TimingAmount", groove.timing_amount)?;
+        w.value_float("RandomAmount", groove.random_amount)?;
+        w.value_float("VelocityAmount", groove.velocity_amount)?;
+        w.end("Groove")?;
+    }
+    w.end("Grooves")?;
+    w.end("GroovePool")
+}
+
+// ─── Tuning System ─────────────────────────────────────────────────────────
+
+fn write_tuning_system(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    tuning: &TuningSystem,
+) -> std::io::Result<()> {
+    w.start("TuningSystems")?;
+    // Emit the raw XML directly — the tuning system structure is complex
+    // and we preserve it verbatim from parsing.
+    w.write_raw(&tuning.raw_xml)?;
+    w.end("TuningSystems")
+}
+
+// ─── Float Events with Bezier Handles ──────────────────────────────────────
+
+fn write_float_event(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    id: i32,
+    point: &AutomationPoint,
+) -> std::io::Result<()> {
+    let id_str = id.to_string();
+    let time_str = format_float(point.time);
+    let value_str = format_float(point.value);
+
+    // Build attributes, including optional bezier curve controls
+    let mut attrs: Vec<(&str, String)> =
+        vec![("Id", id_str), ("Time", time_str), ("Value", value_str)];
+
+    if let Some((x, y)) = point.curve_control_1 {
+        attrs.push(("CurveControl1X", format_float(x)));
+        attrs.push(("CurveControl1Y", format_float(y)));
+    }
+    if let Some((x, y)) = point.curve_control_2 {
+        attrs.push(("CurveControl2X", format_float(x)));
+        attrs.push(("CurveControl2Y", format_float(y)));
+    }
+
+    let attr_refs: Vec<(&str, &str)> = attrs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    w.empty_with_attrs("FloatEvent", &attr_refs)
 }
 
 /// Format a float value the way Ableton expects.

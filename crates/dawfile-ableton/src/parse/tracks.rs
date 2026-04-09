@@ -117,6 +117,51 @@ fn parse_track_common(track: Node<'_, '_>, version: &AbletonVersion) -> TrackCom
 
     let automation_envelopes = automation::parse_track_automation(track);
 
+    // Track delay
+    let track_delay = child(track, "TrackDelay").map(|td| {
+        let value = child(td, "Value")
+            .and_then(|v| child_f64(v, "Manual"))
+            .unwrap_or(0.0);
+        let is_sample_based = child(td, "IsValueSampleBased")
+            .and_then(|v| child_bool(v, "Manual"))
+            .unwrap_or(false);
+        TrackDelay {
+            value,
+            is_sample_based,
+        }
+    });
+
+    // Linked track group ID
+    let linked_track_group_id = child_i32(track, "LinkedTrackGroupId").unwrap_or(-1);
+
+    // View state
+    let view_state = {
+        let session_track_width = descend(track, "DeviceChain.Mixer.ViewStateSesstionTrackWidth")
+            .and_then(|n| n.attribute("Value"))
+            .and_then(|v| v.parse::<i32>().ok());
+
+        let arrangement_lane_height = descend(track, "DeviceChain.AutomationLanes.AutomationLanes")
+            .and_then(|lanes| lanes.children().find(|n| n.has_tag_name("AutomationLane")))
+            .and_then(|lane| child_i32(lane, "LaneHeight"));
+
+        let view_data_json = child(track, "ViewData")
+            .and_then(|vd| vd.text())
+            .map(|s| s.to_string());
+
+        if session_track_width.is_some()
+            || arrangement_lane_height.is_some()
+            || view_data_json.is_some()
+        {
+            Some(TrackViewState {
+                session_track_width,
+                arrangement_lane_height,
+                view_data_json,
+            })
+        } else {
+            None
+        }
+    };
+
     TrackCommon {
         id,
         user_name,
@@ -128,6 +173,9 @@ fn parse_track_common(track: Node<'_, '_>, version: &AbletonVersion) -> TrackCom
         mixer,
         devices,
         automation_envelopes,
+        track_delay,
+        linked_track_group_id,
+        view_state,
     }
 }
 
@@ -159,6 +207,16 @@ fn parse_audio_track(track: Node<'_, '_>, version: &AbletonVersion) -> Option<Au
         .and_then(|s| child_i32(s, "MonitoringEnum"))
         .unwrap_or(0);
 
+    let is_armed = descend(track, "DeviceChain.MainSequencer.IsArmed")
+        .and_then(|n| child_bool(n, "Manual"))
+        .unwrap_or(false);
+
+    let take_counter = descend(track, "DeviceChain.MainSequencer.Recorder")
+        .and_then(|r| child_i32(r, "TakeCounter"))
+        .unwrap_or(0);
+
+    let take_lanes = parse_take_lanes(track, version);
+
     Some(AudioTrack {
         common,
         arrangement_clips,
@@ -166,6 +224,9 @@ fn parse_audio_track(track: Node<'_, '_>, version: &AbletonVersion) -> Option<Au
         audio_input,
         audio_output,
         monitoring,
+        is_armed,
+        take_counter,
+        take_lanes,
     })
 }
 
@@ -197,6 +258,16 @@ fn parse_midi_track(track: Node<'_, '_>, version: &AbletonVersion) -> Option<Mid
         .and_then(|s| child_i32(s, "MonitoringEnum"))
         .unwrap_or(0);
 
+    let is_armed = descend(track, "DeviceChain.MainSequencer.IsArmed")
+        .and_then(|n| child_bool(n, "Manual"))
+        .unwrap_or(false);
+
+    let take_counter = descend(track, "DeviceChain.MainSequencer.Recorder")
+        .and_then(|r| child_i32(r, "TakeCounter"))
+        .unwrap_or(0);
+
+    let take_lanes = parse_take_lanes(track, version);
+
     Some(MidiTrack {
         common,
         arrangement_clips,
@@ -204,7 +275,47 @@ fn parse_midi_track(track: Node<'_, '_>, version: &AbletonVersion) -> Option<Mid
         midi_input,
         audio_output,
         monitoring,
+        is_armed,
+        take_counter,
+        take_lanes,
     })
+}
+
+fn parse_take_lanes(track: Node<'_, '_>, version: &AbletonVersion) -> Vec<TakeLane> {
+    // Structure: DeviceChain > MainSequencer > TakeLanes > TakeLanes > TakeLane
+    let outer = match descend(track, "DeviceChain.MainSequencer.TakeLanes") {
+        Some(n) => n,
+        None => return Vec::new(),
+    };
+    // Double-nested like Locators
+    let inner = child(outer, "TakeLanes").unwrap_or(outer);
+
+    inner
+        .children()
+        .filter(|n| n.has_tag_name("TakeLane"))
+        .map(|lane| {
+            let id = id_attr(lane);
+            let name = child_value(lane, "Name").unwrap_or("").to_string();
+            let is_active = child_bool(lane, "IsActive").unwrap_or(false);
+
+            // Parse clips within the take lane
+            let audio_clips = child(lane, "Events")
+                .map(|events| clips::parse_audio_clips(events, version))
+                .unwrap_or_default();
+
+            let midi_clips = child(lane, "Events")
+                .map(|events| clips::parse_midi_clips(events, version))
+                .unwrap_or_default();
+
+            TakeLane {
+                id,
+                name,
+                is_active,
+                audio_clips,
+                midi_clips,
+            }
+        })
+        .collect()
 }
 
 fn parse_mixer(track: Node<'_, '_>) -> MixerState {
@@ -246,6 +357,16 @@ fn parse_mixer(track: Node<'_, '_>) -> MixerState {
         })
         .unwrap_or_default();
 
+    let split_stereo_pan_l =
+        child(mixer_node, "SplitStereoPanL").and_then(|v| child_f64(v, "Manual"));
+
+    let split_stereo_pan_r =
+        child(mixer_node, "SplitStereoPanR").and_then(|v| child_f64(v, "Manual"));
+
+    let pan_mode = child(mixer_node, "PanMode")
+        .and_then(|v| child_i32(v, "Manual"))
+        .unwrap_or(0);
+
     MixerState {
         volume,
         pan,
@@ -253,5 +374,8 @@ fn parse_mixer(track: Node<'_, '_>) -> MixerState {
         solo: false,
         speaker_on,
         crossfade_state,
+        split_stereo_pan_l,
+        split_stereo_pan_r,
+        pan_mode,
     }
 }

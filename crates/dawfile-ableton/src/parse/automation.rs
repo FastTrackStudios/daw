@@ -95,7 +95,16 @@ fn parse_automation_events(events_node: Node<'_, '_>) -> Vec<AutomationEvent> {
         match event.tag_name().name() {
             "FloatEvent" => {
                 if let Some(value) = event.attribute("Value").and_then(|v| v.parse::<f64>().ok()) {
-                    events.push(AutomationEvent::Float { time, value });
+                    let curve_control_1 =
+                        parse_curve_control(event, "CurveControl1X", "CurveControl1Y");
+                    let curve_control_2 =
+                        parse_curve_control(event, "CurveControl2X", "CurveControl2Y");
+                    events.push(AutomationEvent::Float {
+                        time,
+                        value,
+                        curve_control_1,
+                        curve_control_2,
+                    });
                 }
             }
             "BoolEvent" => {
@@ -113,4 +122,15 @@ fn parse_automation_events(events_node: Node<'_, '_>) -> Vec<AutomationEvent> {
     }
 
     events
+}
+
+/// Parse a pair of bezier control handle attributes from a FloatEvent.
+fn parse_curve_control(event: Node<'_, '_>, x_attr: &str, y_attr: &str) -> Option<(f64, f64)> {
+    let x = event
+        .attribute(x_attr)
+        .and_then(|v| v.parse::<f64>().ok())?;
+    let y = event
+        .attribute(y_attr)
+        .and_then(|v| v.parse::<f64>().ok())?;
+    Some((x, y))
 }
