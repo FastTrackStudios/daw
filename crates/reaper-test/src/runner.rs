@@ -56,6 +56,100 @@ pub struct RunningReaper {
 }
 
 impl TestRunner {
+    /// Create a `TestRunner` with sensible defaults.
+    ///
+    /// Only `resources_dir` is required. Everything else uses reasonable defaults:
+    /// - `extension_log`: `<resources_dir>/daw-bridge.log`
+    /// - `timeout_secs`: 60 (or `REAPER_TEST_TIMEOUT_SECS` env var)
+    /// - `headless`: true
+    /// - `keep_open`: from `FTS_KEEP_OPEN` env var
+    /// - `ci`: from `CI` env var
+    pub fn new(resources_dir: impl Into<PathBuf>) -> Self {
+        let resources_dir = resources_dir.into();
+        let timeout_secs = std::env::var("REAPER_TEST_TIMEOUT_SECS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(60);
+        Self {
+            extension_log: resources_dir.join("daw-bridge.log"),
+            resources_dir,
+            timeout_secs,
+            keep_open: std::env::var("FTS_KEEP_OPEN").unwrap_or_default() == "1",
+            headless: true,
+            ci: std::env::var("CI").is_ok(),
+            extension_whitelist: vec![],
+        }
+    }
+
+    /// Set the extension log path.
+    pub fn with_extension_log(mut self, path: impl Into<PathBuf>) -> Self {
+        self.extension_log = path.into();
+        self
+    }
+
+    /// Set the test timeout in seconds.
+    pub fn with_timeout(mut self, secs: u64) -> Self {
+        self.timeout_secs = secs;
+        self
+    }
+
+    /// Set whether to run headless (DISPLAY="").
+    pub fn with_headless(mut self, headless: bool) -> Self {
+        self.headless = headless;
+        self
+    }
+
+    /// Build and install the daw-bridge extension into the resources dir.
+    ///
+    /// `daw_workspace` should point to the root of the daw repo (containing
+    /// `crates/daw-bridge/`). Builds in release mode and symlinks into UserPlugins.
+    pub fn install_daw_bridge(
+        &self,
+        daw_workspace: &Path,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        println!("── Building daw-bridge (release) ──");
+        let status = Command::new("cargo")
+            .args(["build", "-p", "daw-bridge", "--release"])
+            .current_dir(daw_workspace)
+            .status()?;
+        if !status.success() {
+            return Err("Failed to build daw-bridge".into());
+        }
+
+        let lib_path = daw_workspace.join("target/release/libreaper_daw_bridge.so");
+        let plugins_dir = self.resources_dir.join("UserPlugins");
+        install_plugin(&lib_path, "reaper_daw_bridge.so", &plugins_dir)?;
+        Ok(())
+    }
+
+    /// Build and install a consumer extension into the resources dir.
+    ///
+    /// `workspace` should point to the workspace root. `package` is the cargo
+    /// package name (e.g. `"reaper-input-extension"`). `lib_name` is the output
+    /// library name (e.g. `"reaper_fts_input.so"`).
+    pub fn install_extension(
+        &self,
+        workspace: &Path,
+        package: &str,
+        lib_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        println!("── Building {package} (release) ──");
+        let status = Command::new("cargo")
+            .args(["build", "-p", package, "--release"])
+            .current_dir(workspace)
+            .status()?;
+        if !status.success() {
+            return Err(format!("Failed to build {package}").into());
+        }
+
+        // Derive the .so name from the package name (replace hyphens with underscores)
+        let so_stem = package.replace('-', "_");
+        let lib_path = workspace.join(format!("target/release/lib{so_stem}.so"));
+        let plugins_dir = self.resources_dir.join("UserPlugins");
+        install_plugin(&lib_path, lib_name, &plugins_dir)?;
+        Ok(())
+    }
+
     /// Remove all stale `fts-daw-*.sock` and `fts-daw-*.bootstrap.sock` files from `/tmp`.
     pub fn clean_stale_sockets(&self) {
         if let Ok(entries) = std::fs::read_dir("/tmp") {
