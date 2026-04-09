@@ -3,7 +3,7 @@
 use super::xml_helpers::*;
 use crate::types::{
     AudioContent, Clip, ClipContent, ClipSlot, Fade, FadeCurve, LoopSettings, Marker, Note, Scene,
-    TimeUnit, VideoContent, Warp,
+    TimeUnit, VideoContent, Warp, Warps,
 };
 use roxmltree::Node;
 
@@ -134,13 +134,18 @@ fn parse_video(node: Node<'_, '_>) -> VideoContent {
     }
 }
 
-fn parse_warps(node: Node<'_, '_>) -> Vec<Warp> {
-    children(node, "Warp")
+fn parse_warps(node: Node<'_, '_>) -> Warps {
+    let content_time_unit = attr(node, "contentTimeUnit").map(TimeUnit::from_str);
+    let warps = children(node, "Warp")
         .map(|w| Warp {
             time: attr_f64(w, "time", 0.0),
             content_time: attr_f64(w, "contentTime", 0.0),
         })
-        .collect()
+        .collect();
+    Warps {
+        content_time_unit,
+        warps,
+    }
 }
 
 pub fn parse_notes(notes_node: Node<'_, '_>) -> Vec<Note> {

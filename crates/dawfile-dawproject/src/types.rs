@@ -198,6 +198,8 @@ pub enum ChannelRole {
     Submix,
     /// VCA-style fader.
     Vca,
+    /// Polyphonic voice channel.
+    Voice,
 }
 
 impl ChannelRole {
@@ -207,6 +209,7 @@ impl ChannelRole {
             "effect" => Self::Effect,
             "submix" => Self::Submix,
             "vca" => Self::Vca,
+            "voice" => Self::Voice,
             _ => Self::Regular,
         }
     }
@@ -218,6 +221,7 @@ impl ChannelRole {
             Self::Effect => "effect",
             Self::Submix => "submix",
             Self::Vca => "vca",
+            Self::Voice => "voice",
         }
     }
 }
@@ -250,14 +254,22 @@ pub struct Device {
     pub device_role: Option<DeviceRole>,
     /// Format-specific plugin identifier (VST2 integer, VST3 GUID, CLAP domain-reverse ID).
     pub plugin_id: Option<String>,
+    /// Plugin vendor / manufacturer name.
+    pub vendor: Option<String>,
+    /// Plugin version string.
+    pub plugin_version: Option<String>,
+    /// Additional device identifier (secondary ID used by some DAWs).
+    pub device_id: Option<String>,
     /// Plugin file path (for external plugins).
     pub plugin_path: Option<PathBuf>,
     /// Whether the device is enabled (not bypassed).
     pub enabled: bool,
     /// Whether the device's content is currently loaded.
     pub loaded: bool,
-    /// Structured parameter values exposed by this device.
+    /// Structured parameters exposed by this device.
     pub parameters: Vec<DeviceParameter>,
+    /// Structured content for built-in device types (EQ bands, compressor knobs, etc.).
+    pub builtin_content: BuiltinDeviceContent,
     /// Raw state blob (base64 or file reference, if any).
     pub state: Option<DeviceState>,
 }
@@ -358,6 +370,117 @@ pub enum DeviceState {
     Base64(String),
     /// Path to a state file inside the archive.
     File(String),
+}
+
+// ─── Built-in device structured content ──────────────────────────────────────
+
+/// Structured content for built-in device types.
+///
+/// External plugins store opaque state; built-in devices expose named parameters
+/// in structured form defined by the DawProject spec.
+#[derive(Debug, Clone, Default)]
+pub enum BuiltinDeviceContent {
+    /// No structured content (external plugin or generic built-in).
+    #[default]
+    None,
+    /// Parametric EQ with typed bands.
+    Equalizer(Vec<EqBand>),
+    /// Dynamics compressor.
+    Compressor(CompressorParams),
+    /// Brick-wall limiter.
+    Limiter(LimiterParams),
+    /// Noise gate.
+    NoiseGate(NoiseGateParams),
+}
+
+/// A single band in a built-in Equalizer.
+#[derive(Debug, Clone)]
+pub struct EqBand {
+    /// Band XML ID.
+    pub id: String,
+    /// Filter type.
+    pub band_type: EqBandType,
+    /// Filter order (slope steepness, e.g. 1 = 6 dB/oct, 2 = 12 dB/oct).
+    pub order: Option<u32>,
+    /// Center / corner frequency in Hz.
+    pub freq: Option<f64>,
+    /// Gain in dB (shelving/bell only).
+    pub gain: Option<f64>,
+    /// Q factor (bandwidth).
+    pub q: Option<f64>,
+    /// Whether this band is active.
+    pub enabled: bool,
+}
+
+/// Filter type for an EQ band.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EqBandType {
+    HighPass,
+    LowPass,
+    BandPass,
+    HighShelf,
+    LowShelf,
+    Bell,
+    Notch,
+}
+
+impl EqBandType {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "highPass" => Some(Self::HighPass),
+            "lowPass" => Some(Self::LowPass),
+            "bandPass" => Some(Self::BandPass),
+            "highShelf" => Some(Self::HighShelf),
+            "lowShelf" => Some(Self::LowShelf),
+            "bell" => Some(Self::Bell),
+            "notch" => Some(Self::Notch),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::HighPass => "highPass",
+            Self::LowPass => "lowPass",
+            Self::BandPass => "bandPass",
+            Self::HighShelf => "highShelf",
+            Self::LowShelf => "lowShelf",
+            Self::Bell => "bell",
+            Self::Notch => "notch",
+        }
+    }
+}
+
+/// Structured parameters for the built-in Compressor device.
+#[derive(Debug, Clone, Default)]
+pub struct CompressorParams {
+    pub threshold: Option<f64>,
+    pub ratio: Option<f64>,
+    pub attack: Option<f64>,
+    pub release: Option<f64>,
+    pub input_gain: Option<f64>,
+    pub output_gain: Option<f64>,
+    pub auto_makeup: Option<bool>,
+}
+
+/// Structured parameters for the built-in Limiter device.
+#[derive(Debug, Clone, Default)]
+pub struct LimiterParams {
+    pub threshold: Option<f64>,
+    pub attack: Option<f64>,
+    pub release: Option<f64>,
+    pub input_gain: Option<f64>,
+    pub output_gain: Option<f64>,
+}
+
+/// Structured parameters for the built-in NoiseGate device.
+#[derive(Debug, Clone, Default)]
+pub struct NoiseGateParams {
+    pub threshold: Option<f64>,
+    pub range: Option<f64>,
+    pub ratio: Option<f64>,
+    pub attack: Option<f64>,
+    pub release: Option<f64>,
 }
 
 // ─── Arrangement ─────────────────────────────────────────────────────────────
@@ -550,7 +673,7 @@ pub struct AudioContent {
     /// Time-stretching algorithm name.
     pub algorithm: Option<String>,
     /// Warp/time-stretch anchors.
-    pub warps: Vec<Warp>,
+    pub warps: Warps,
 }
 
 /// A video file reference inside a clip.
@@ -562,6 +685,14 @@ pub struct VideoContent {
     pub channels: Option<u32>,
     pub duration: Option<u64>,
     pub algorithm: Option<String>,
+    pub warps: Warps,
+}
+
+/// Warp anchor collection with its time unit declaration.
+#[derive(Debug, Clone, Default)]
+pub struct Warps {
+    /// Time unit used for content-side timestamps inside each warp.
+    pub content_time_unit: Option<TimeUnit>,
     pub warps: Vec<Warp>,
 }
 

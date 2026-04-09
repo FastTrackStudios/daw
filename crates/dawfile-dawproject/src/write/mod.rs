@@ -216,6 +216,21 @@ fn write_device(w: &mut XmlWriter, device: &Device) {
         plugin_id_s = pid.clone();
         attrs.push(("pluginId", &plugin_id_s));
     }
+    let vendor_s;
+    if let Some(v) = &device.vendor {
+        vendor_s = v.clone();
+        attrs.push(("deviceVendor", &vendor_s));
+    }
+    let version_s;
+    if let Some(ver) = &device.plugin_version {
+        version_s = ver.clone();
+        attrs.push(("pluginVersion", &version_s));
+    }
+    let device_id_s;
+    if let Some(did) = &device.device_id {
+        device_id_s = did.clone();
+        attrs.push(("deviceID", &device_id_s));
+    }
     let path_s;
     if let Some(path) = &device.plugin_path {
         path_s = path.to_string_lossy().into_owned();
@@ -225,9 +240,11 @@ fn write_device(w: &mut XmlWriter, device: &Device) {
         attrs.push(("loaded", "false"));
     }
 
-    let has_body = !device.parameters.is_empty() || device.state.is_some();
+    let has_builtin = !matches!(device.builtin_content, BuiltinDeviceContent::None);
+    let has_body = !device.parameters.is_empty() || device.state.is_some() || has_builtin;
     if has_body {
         w.open(tag, &attrs);
+        write_builtin_content(w, &device.builtin_content);
         if !device.parameters.is_empty() {
             w.wrap("Parameters", &[], |w| {
                 for param in &device.parameters {
@@ -239,6 +256,65 @@ fn write_device(w: &mut XmlWriter, device: &Device) {
         w.close(tag);
     } else {
         w.empty(tag, &attrs);
+    }
+}
+
+fn write_builtin_content(w: &mut XmlWriter, content: &BuiltinDeviceContent) {
+    match content {
+        BuiltinDeviceContent::None => {}
+        BuiltinDeviceContent::Equalizer(bands) => {
+            for band in bands {
+                let mut attrs: Vec<(&str, &str)> =
+                    vec![("id", &band.id), ("type", band.band_type.as_str())];
+                let order_s;
+                if let Some(o) = band.order {
+                    order_s = o.to_string();
+                    attrs.push(("order", &order_s));
+                }
+                let enabled_str = if band.enabled { "true" } else { "false" };
+                w.open("Band", &attrs);
+                write_param_real(w, "Freq", band.freq);
+                write_param_real(w, "Gain", band.gain);
+                write_param_real(w, "Q", band.q);
+                w.empty("Enabled", &[("value", enabled_str)]);
+                w.close("Band");
+            }
+        }
+        BuiltinDeviceContent::Compressor(p) => {
+            write_param_real(w, "Threshold", p.threshold);
+            write_param_real(w, "Ratio", p.ratio);
+            write_param_real(w, "Attack", p.attack);
+            write_param_real(w, "Release", p.release);
+            write_param_real(w, "InputGain", p.input_gain);
+            write_param_real(w, "OutputGain", p.output_gain);
+            if let Some(auto) = p.auto_makeup {
+                w.empty(
+                    "AutoMakeup",
+                    &[("value", if auto { "true" } else { "false" })],
+                );
+            }
+        }
+        BuiltinDeviceContent::Limiter(p) => {
+            write_param_real(w, "Threshold", p.threshold);
+            write_param_real(w, "Attack", p.attack);
+            write_param_real(w, "Release", p.release);
+            write_param_real(w, "InputGain", p.input_gain);
+            write_param_real(w, "OutputGain", p.output_gain);
+        }
+        BuiltinDeviceContent::NoiseGate(p) => {
+            write_param_real(w, "Threshold", p.threshold);
+            write_param_real(w, "Range", p.range);
+            write_param_real(w, "Ratio", p.ratio);
+            write_param_real(w, "Attack", p.attack);
+            write_param_real(w, "Release", p.release);
+        }
+    }
+}
+
+fn write_param_real(w: &mut XmlWriter, name: &str, value: Option<f64>) {
+    if let Some(v) = value {
+        let s = format!("{v:.6}");
+        w.empty(name, &[("value", &s)]);
     }
 }
 
@@ -642,18 +718,29 @@ fn write_video(w: &mut XmlWriter, video: &VideoContent) {
     write_media_element(w, "Video", &attrs, &video.warps);
 }
 
-fn write_media_element(w: &mut XmlWriter, tag: &str, attrs: &[(&str, &str)], warps: &[Warp]) {
-    if warps.is_empty() {
+fn write_media_element(w: &mut XmlWriter, tag: &str, attrs: &[(&str, &str)], warps: &Warps) {
+    let needs_warps_elem = !warps.warps.is_empty() || warps.content_time_unit.is_some();
+    if !needs_warps_elem {
         w.empty(tag, attrs);
     } else {
         w.open(tag, attrs);
-        w.open("Warps", &[]);
-        for warp in warps {
-            let t = format!("{:.6}", warp.time);
-            let ct = format!("{:.6}", warp.content_time);
-            w.empty("Warp", &[("time", &t), ("contentTime", &ct)]);
+        let mut warps_attrs: Vec<(&str, &str)> = Vec::new();
+        let unit_s;
+        if let Some(unit) = warps.content_time_unit {
+            unit_s = unit.as_str();
+            warps_attrs.push(("contentTimeUnit", unit_s));
         }
-        w.close("Warps");
+        if warps.warps.is_empty() {
+            w.empty("Warps", &warps_attrs);
+        } else {
+            w.open("Warps", &warps_attrs);
+            for warp in &warps.warps {
+                let t = format!("{:.6}", warp.time);
+                let ct = format!("{:.6}", warp.content_time);
+                w.empty("Warp", &[("time", &t), ("contentTime", &ct)]);
+            }
+            w.close("Warps");
+        }
         w.close(tag);
     }
 }

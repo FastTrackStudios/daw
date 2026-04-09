@@ -1,10 +1,12 @@
 //! Round-trip tests: write a project, read it back, assert key fields match.
 
 use dawfile_dawproject::{
-    Application, Arrangement, AutomationPoint, AutomationPoints, AutomationTarget, Channel,
-    ChannelRole, Clip, ClipContent, ContentType, DawProject, ExpressionType, Fade, FadeCurve,
-    Interpolation, Lane, LaneContent, Marker, Note, ProjectMetadata, Scene, Send, TempoPoint,
-    TimeSignaturePoint, TimeUnit, Track, Transport, feature_support,
+    Application, Arrangement, AudioContent, AutomationPoint, AutomationPoints, AutomationTarget,
+    BuiltinDeviceContent, Channel, ChannelRole, Clip, ClipContent, CompressorParams, ContentType,
+    DawProject, Device, DeviceFormat, EqBand, EqBandType, ExpressionType, Fade, FadeCurve,
+    Interpolation, Lane, LaneContent, LimiterParams, Marker, NoiseGateParams, Note,
+    ProjectMetadata, Scene, Send, TempoPoint, TimeSignaturePoint, TimeUnit, Track, Transport,
+    Warps, feature_support,
 };
 
 fn minimal_project() -> DawProject {
@@ -326,6 +328,214 @@ fn round_trip_minimal() {
     assert_eq!(restored.scenes.len(), 1);
     assert_eq!(restored.scenes[0].comment.as_deref(), Some("first verse"));
     assert!((restored.scenes[0].tempo.unwrap() - 128.0).abs() < 0.001);
+}
+
+#[test]
+fn round_trip_builtin_devices_and_warps() {
+    use dawfile_dawproject::{parse_project_bytes, serialize_project_bytes};
+
+    let project = DawProject {
+        version: "1.0".to_string(),
+        application: None,
+        metadata: None,
+        transport: Transport {
+            tempo: 120.0,
+            numerator: 4,
+            denominator: 4,
+        },
+        tracks: vec![Track {
+            id: "t1".to_string(),
+            name: "Audio".to_string(),
+            color: None,
+            comment: None,
+            content_types: vec![ContentType::Audio],
+            loaded: true,
+            channel: Some(Channel {
+                id: "ch-voice".to_string(),
+                role: ChannelRole::Voice,
+                audio_channels: 2,
+                destination: None,
+                blend_mode: None,
+                volume: 1.0,
+                pan: 0.0,
+                muted: false,
+                solo: false,
+                sends: vec![],
+                devices: vec![
+                    Device {
+                        name: "MyEQ".to_string(),
+                        format: DeviceFormat::Equalizer,
+                        device_role: None,
+                        plugin_id: None,
+                        vendor: Some("Bitwig".to_string()),
+                        plugin_version: Some("1.2.3".to_string()),
+                        device_id: Some("eq-1".to_string()),
+                        plugin_path: None,
+                        enabled: true,
+                        loaded: true,
+                        parameters: vec![],
+                        builtin_content: BuiltinDeviceContent::Equalizer(vec![
+                            EqBand {
+                                id: "band-1".to_string(),
+                                band_type: EqBandType::Bell,
+                                order: Some(2),
+                                freq: Some(1000.0),
+                                gain: Some(3.0),
+                                q: Some(0.7),
+                                enabled: true,
+                            },
+                            EqBand {
+                                id: "band-2".to_string(),
+                                band_type: EqBandType::HighPass,
+                                order: None,
+                                freq: Some(80.0),
+                                gain: None,
+                                q: None,
+                                enabled: false,
+                            },
+                        ]),
+                        state: None,
+                    },
+                    Device {
+                        name: "MyComp".to_string(),
+                        format: DeviceFormat::Compressor,
+                        device_role: None,
+                        plugin_id: None,
+                        vendor: None,
+                        plugin_version: None,
+                        device_id: None,
+                        plugin_path: None,
+                        enabled: true,
+                        loaded: true,
+                        parameters: vec![],
+                        builtin_content: BuiltinDeviceContent::Compressor(CompressorParams {
+                            threshold: Some(-12.0),
+                            ratio: Some(4.0),
+                            attack: Some(10.0),
+                            release: Some(100.0),
+                            input_gain: None,
+                            output_gain: Some(3.0),
+                            auto_makeup: Some(true),
+                        }),
+                        state: None,
+                    },
+                    Device {
+                        name: "MyGate".to_string(),
+                        format: DeviceFormat::NoiseGate,
+                        device_role: None,
+                        plugin_id: None,
+                        vendor: None,
+                        plugin_version: None,
+                        device_id: None,
+                        plugin_path: None,
+                        enabled: true,
+                        loaded: true,
+                        parameters: vec![],
+                        builtin_content: BuiltinDeviceContent::NoiseGate(NoiseGateParams {
+                            threshold: Some(-40.0),
+                            range: Some(-80.0),
+                            ratio: Some(10.0),
+                            attack: Some(5.0),
+                            release: Some(50.0),
+                        }),
+                        state: None,
+                    },
+                ],
+            }),
+            children: vec![],
+        }],
+        arrangement: Some(Arrangement {
+            id: "arr".to_string(),
+            time_unit: TimeUnit::Beats,
+            lanes: vec![Lane {
+                id: "lane-audio".to_string(),
+                track: "t1".to_string(),
+                time_unit: None,
+                content: LaneContent::Clips(vec![Clip {
+                    id: "clip-audio".to_string(),
+                    time: 0.0,
+                    duration: 8.0,
+                    time_unit: None,
+                    content_time_unit: None,
+                    name: None,
+                    color: None,
+                    comment: None,
+                    fade_in: None,
+                    fade_out: None,
+                    enabled: true,
+                    play_start: None,
+                    play_stop: None,
+                    reference: None,
+                    loop_settings: None,
+                    content: ClipContent::Audio(AudioContent {
+                        path: Some("audio/kick.wav".to_string()),
+                        embedded: false,
+                        sample_rate: Some(44100),
+                        channels: Some(1),
+                        duration: Some(88200),
+                        algorithm: Some("beats".to_string()),
+                        warps: Warps {
+                            content_time_unit: Some(TimeUnit::Seconds),
+                            warps: vec![],
+                        },
+                    }),
+                }]),
+            }],
+            tempo_automation: vec![],
+            time_sig_automation: vec![],
+        }),
+        scenes: vec![],
+    };
+
+    let bytes = serialize_project_bytes(&project).expect("serialize");
+    let r = parse_project_bytes(&bytes).expect("parse");
+
+    let arr = r.arrangement.unwrap();
+    if let LaneContent::Clips(clips) = &arr.lanes[0].content {
+        if let ClipContent::Audio(audio) = &clips[0].content {
+            assert_eq!(audio.path.as_deref(), Some("audio/kick.wav"));
+            assert_eq!(audio.warps.content_time_unit, Some(TimeUnit::Seconds));
+        } else {
+            panic!("expected Audio");
+        }
+    }
+
+    let ch = r.tracks[0].channel.as_ref().unwrap();
+    assert_eq!(ch.role, ChannelRole::Voice);
+
+    let eq_dev = &ch.devices[0];
+    assert_eq!(eq_dev.vendor.as_deref(), Some("Bitwig"));
+    assert_eq!(eq_dev.plugin_version.as_deref(), Some("1.2.3"));
+    assert_eq!(eq_dev.device_id.as_deref(), Some("eq-1"));
+    if let BuiltinDeviceContent::Equalizer(bands) = &eq_dev.builtin_content {
+        assert_eq!(bands.len(), 2);
+        assert_eq!(bands[0].band_type, EqBandType::Bell);
+        assert_eq!(bands[0].order, Some(2));
+        assert!((bands[0].freq.unwrap() - 1000.0).abs() < 0.01);
+        assert!((bands[0].gain.unwrap() - 3.0).abs() < 0.01);
+        assert!(bands[0].enabled);
+        assert_eq!(bands[1].band_type, EqBandType::HighPass);
+        assert!(!bands[1].enabled);
+    } else {
+        panic!("expected Equalizer content");
+    }
+
+    let comp_dev = &ch.devices[1];
+    if let BuiltinDeviceContent::Compressor(p) = &comp_dev.builtin_content {
+        assert!((p.threshold.unwrap() - (-12.0)).abs() < 0.01);
+        assert!((p.ratio.unwrap() - 4.0).abs() < 0.01);
+        assert_eq!(p.auto_makeup, Some(true));
+    } else {
+        panic!("expected Compressor content");
+    }
+
+    let gate_dev = &ch.devices[2];
+    if let BuiltinDeviceContent::NoiseGate(p) = &gate_dev.builtin_content {
+        assert!((p.threshold.unwrap() - (-40.0)).abs() < 0.01);
+        assert!((p.range.unwrap() - (-80.0)).abs() < 0.01);
+    } else {
+        panic!("expected NoiseGate content");
+    }
 }
 
 #[test]
