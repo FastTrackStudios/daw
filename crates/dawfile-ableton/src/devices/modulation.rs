@@ -1,4 +1,4 @@
-//! Modulation device typed parameters (Auto Filter, Chorus, Phaser, Flanger, Saturator).
+//! Modulation device typed parameters (Auto Filter, Chorus, Chorus Legacy, Phaser, PhaserNew, Flanger, Saturator).
 
 use crate::parse::xml_helpers::*;
 use crate::write::xml_writer::AbletonXmlWriter;
@@ -390,5 +390,235 @@ pub fn write_saturator<W: Write>(
     write_param_f64(w, "PostDrive", p.post_drive)?;
     write_param_f64(w, "DryWet", p.dry_wet)?;
     write_param_bool(w, "Oversampling", p.oversampling)?;
+    Ok(())
+}
+
+// ─── Chorus Legacy ────────────────────────────────────────────────────────
+
+/// Legacy Chorus parameters (XML tag `Chorus`).
+#[derive(Debug, Clone)]
+pub struct ChorusLegacyParams {
+    pub delay_time1: f64,
+    pub high_pass_freq: f64,
+    pub delay_time2: f64,
+    pub delay2_mode: i32,
+    pub link: bool,
+    pub mod_amount: f64,
+    pub mod_freq: f64,
+    pub lfo_multiplier: bool,
+    pub feedback: f64,
+    pub feedback_sign: i32,
+    pub dry_wet: f64,
+    pub hi_quality: bool,
+}
+
+impl Default for ChorusLegacyParams {
+    fn default() -> Self {
+        Self {
+            delay_time1: 1.0,
+            high_pass_freq: 20.0,
+            delay_time2: 1.0,
+            delay2_mode: 0,
+            link: true,
+            mod_amount: 0.5,
+            mod_freq: 1.0,
+            lfo_multiplier: false,
+            feedback: 0.0,
+            feedback_sign: 0,
+            dry_wet: 0.5,
+            hi_quality: false,
+        }
+    }
+}
+
+pub fn parse_chorus_legacy(node: Node<'_, '_>) -> ChorusLegacyParams {
+    ChorusLegacyParams {
+        delay_time1: param_f64(node, "DelayTime1", 1.0),
+        high_pass_freq: param_f64(node, "HighPassFreq", 20.0),
+        delay_time2: param_f64(node, "DelayTime2", 1.0),
+        delay2_mode: param_i32(node, "Delay2Mode", 0),
+        link: param_bool(node, "Link", true),
+        mod_amount: param_f64(node, "ModAmount", 0.5),
+        mod_freq: param_f64(node, "ModFreq", 1.0),
+        lfo_multiplier: param_bool(node, "LfoMultiplier", false),
+        feedback: param_f64(node, "Feedback", 0.0),
+        feedback_sign: param_i32(node, "FeedbackSign", 0),
+        dry_wet: param_f64(node, "DryWet", 0.5),
+        hi_quality: param_bool(node, "HiQuality", false),
+    }
+}
+
+pub fn write_chorus_legacy<W: Write>(
+    w: &mut AbletonXmlWriter<W>,
+    p: &ChorusLegacyParams,
+) -> io::Result<()> {
+    write_param_f64(w, "DelayTime1", p.delay_time1)?;
+    write_param_f64(w, "HighPassFreq", p.high_pass_freq)?;
+    write_param_f64(w, "DelayTime2", p.delay_time2)?;
+    write_param_i32(w, "Delay2Mode", p.delay2_mode)?;
+    write_param_bool(w, "Link", p.link)?;
+    write_param_f64(w, "ModAmount", p.mod_amount)?;
+    write_param_f64(w, "ModFreq", p.mod_freq)?;
+    write_param_bool(w, "LfoMultiplier", p.lfo_multiplier)?;
+    write_param_f64(w, "Feedback", p.feedback)?;
+    write_param_i32(w, "FeedbackSign", p.feedback_sign)?;
+    write_param_f64(w, "DryWet", p.dry_wet)?;
+    write_param_bool(w, "HiQuality", p.hi_quality)?;
+    Ok(())
+}
+
+// ─── PhaserNew ────────────────────────────────────────────────────────────
+
+/// PhaserNew parameters (Live 12 Phaser-Flanger).
+#[derive(Debug, Clone)]
+pub struct PhaserNewParams {
+    // Modulation
+    pub modulation_amount: f64,
+    pub modulation_waveform: i32,
+    pub modulation_frequency: f64,
+    pub modulation_frequency2: f64,
+    pub modulation_sync: bool,
+    pub modulation_sync2: bool,
+    pub modulation_synced_rate: f64,
+    pub modulation_synced_rate2: f64,
+    pub modulation_phase_offset: f64,
+    pub modulation_spin_enabled: bool,
+    pub modulation_spin: f64,
+    pub modulation_duty_cycle: f64,
+    pub modulation_lfo_blend: f64,
+    pub modulation_envelope_enabled: bool,
+    pub modulation_envelope_amount: f64,
+    pub modulation_envelope_attack: f64,
+    pub modulation_envelope_release: f64,
+    // Core
+    pub mode: i32,
+    pub notches: f64,
+    pub flanger_delay_time: f64,
+    pub doubler_delay_time: f64,
+    pub modulation_blend: f64,
+    pub center_frequency: f64,
+    pub spread: f64,
+    pub feedback: f64,
+    pub warmth: f64,
+    pub safe_bass_frequency: f64,
+    pub invert_wet: bool,
+    pub output_gain: f64,
+    pub dry_wet: f64,
+}
+
+impl Default for PhaserNewParams {
+    fn default() -> Self {
+        Self {
+            modulation_amount: 50.0,
+            modulation_waveform: 0,
+            modulation_frequency: 1.0,
+            modulation_frequency2: 1.0,
+            modulation_sync: false,
+            modulation_sync2: false,
+            modulation_synced_rate: 4.0,
+            modulation_synced_rate2: 4.0,
+            modulation_phase_offset: 0.0,
+            modulation_spin_enabled: false,
+            modulation_spin: 0.0,
+            modulation_duty_cycle: 50.0,
+            modulation_lfo_blend: 0.0,
+            modulation_envelope_enabled: false,
+            modulation_envelope_amount: 0.0,
+            modulation_envelope_attack: 10.0,
+            modulation_envelope_release: 100.0,
+            mode: 0,
+            notches: 4.0,
+            flanger_delay_time: 1.0,
+            doubler_delay_time: 10.0,
+            modulation_blend: 0.0,
+            center_frequency: 1000.0,
+            spread: 0.5,
+            feedback: 0.0,
+            warmth: 0.0,
+            safe_bass_frequency: 50.0,
+            invert_wet: false,
+            output_gain: 0.0,
+            dry_wet: 0.5,
+        }
+    }
+}
+
+pub fn parse_phaser_new(node: Node<'_, '_>) -> PhaserNewParams {
+    PhaserNewParams {
+        modulation_amount: param_f64(node, "Modulation_Amount", 50.0),
+        modulation_waveform: param_i32(node, "Modulation_Waveform", 0),
+        modulation_frequency: param_f64(node, "Modulation_Frequency", 1.0),
+        modulation_frequency2: param_f64(node, "Modulation_Frequency2", 1.0),
+        modulation_sync: param_bool(node, "Modulation_Sync", false),
+        modulation_sync2: param_bool(node, "Modulation_Sync2", false),
+        modulation_synced_rate: param_f64(node, "Modulation_SyncedRate", 4.0),
+        modulation_synced_rate2: param_f64(node, "Modulation_SyncedRate2", 4.0),
+        modulation_phase_offset: param_f64(node, "Modulation_PhaseOffset", 0.0),
+        modulation_spin_enabled: param_bool(node, "Modulation_SpinEnabled", false),
+        modulation_spin: param_f64(node, "Modulation_Spin", 0.0),
+        modulation_duty_cycle: param_f64(node, "Modulation_DutyCycle", 50.0),
+        modulation_lfo_blend: param_f64(node, "Modulation_LfoBlend", 0.0),
+        modulation_envelope_enabled: param_bool(node, "Modulation_EnvelopeEnabled", false),
+        modulation_envelope_amount: param_f64(node, "Modulation_EnvelopeAmount", 0.0),
+        modulation_envelope_attack: param_f64(node, "Modulation_EnvelopeAttack", 10.0),
+        modulation_envelope_release: param_f64(node, "Modulation_EnvelopeRelease", 100.0),
+        mode: param_i32(node, "Mode", 0),
+        notches: param_f64(node, "Notches", 4.0),
+        flanger_delay_time: param_f64(node, "FlangerDelayTime", 1.0),
+        doubler_delay_time: param_f64(node, "DoublerDelayTime", 10.0),
+        modulation_blend: param_f64(node, "ModulationBlend", 0.0),
+        center_frequency: param_f64(node, "CenterFrequency", 1000.0),
+        spread: param_f64(node, "Spread", 0.5),
+        feedback: param_f64(node, "Feedback", 0.0),
+        warmth: param_f64(node, "Warmth", 0.0),
+        safe_bass_frequency: param_f64(node, "SafeBassFrequency", 50.0),
+        invert_wet: param_bool(node, "InvertWet", false),
+        output_gain: param_f64(node, "OutputGain", 0.0),
+        dry_wet: param_f64(node, "DryWet", 0.5),
+    }
+}
+
+pub fn write_phaser_new<W: Write>(
+    w: &mut AbletonXmlWriter<W>,
+    p: &PhaserNewParams,
+) -> io::Result<()> {
+    write_param_f64(w, "Modulation_Amount", p.modulation_amount)?;
+    write_param_i32(w, "Modulation_Waveform", p.modulation_waveform)?;
+    write_param_f64(w, "Modulation_Frequency", p.modulation_frequency)?;
+    write_param_f64(w, "Modulation_Frequency2", p.modulation_frequency2)?;
+    write_param_bool(w, "Modulation_Sync", p.modulation_sync)?;
+    write_param_bool(w, "Modulation_Sync2", p.modulation_sync2)?;
+    write_param_f64(w, "Modulation_SyncedRate", p.modulation_synced_rate)?;
+    write_param_f64(w, "Modulation_SyncedRate2", p.modulation_synced_rate2)?;
+    write_param_f64(w, "Modulation_PhaseOffset", p.modulation_phase_offset)?;
+    write_param_bool(w, "Modulation_SpinEnabled", p.modulation_spin_enabled)?;
+    write_param_f64(w, "Modulation_Spin", p.modulation_spin)?;
+    write_param_f64(w, "Modulation_DutyCycle", p.modulation_duty_cycle)?;
+    write_param_f64(w, "Modulation_LfoBlend", p.modulation_lfo_blend)?;
+    write_param_bool(
+        w,
+        "Modulation_EnvelopeEnabled",
+        p.modulation_envelope_enabled,
+    )?;
+    write_param_f64(w, "Modulation_EnvelopeAmount", p.modulation_envelope_amount)?;
+    write_param_f64(w, "Modulation_EnvelopeAttack", p.modulation_envelope_attack)?;
+    write_param_f64(
+        w,
+        "Modulation_EnvelopeRelease",
+        p.modulation_envelope_release,
+    )?;
+    write_param_i32(w, "Mode", p.mode)?;
+    write_param_f64(w, "Notches", p.notches)?;
+    write_param_f64(w, "FlangerDelayTime", p.flanger_delay_time)?;
+    write_param_f64(w, "DoublerDelayTime", p.doubler_delay_time)?;
+    write_param_f64(w, "ModulationBlend", p.modulation_blend)?;
+    write_param_f64(w, "CenterFrequency", p.center_frequency)?;
+    write_param_f64(w, "Spread", p.spread)?;
+    write_param_f64(w, "Feedback", p.feedback)?;
+    write_param_f64(w, "Warmth", p.warmth)?;
+    write_param_f64(w, "SafeBassFrequency", p.safe_bass_frequency)?;
+    write_param_bool(w, "InvertWet", p.invert_wet)?;
+    write_param_f64(w, "OutputGain", p.output_gain)?;
+    write_param_f64(w, "DryWet", p.dry_wet)?;
     Ok(())
 }

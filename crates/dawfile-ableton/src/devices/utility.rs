@@ -1,4 +1,4 @@
-//! Utility device typed parameters (Utility, Tuner, Cabinet, Erosion, Redux, Vinyl).
+//! Utility device typed parameters (Utility, Tuner, Cabinet, Erosion, Redux, Redux Legacy, Vinyl).
 
 use crate::parse::xml_helpers::*;
 use crate::write::xml_writer::AbletonXmlWriter;
@@ -332,5 +332,51 @@ pub fn write_vinyl<W: Write>(w: &mut AbletonXmlWriter<W>, p: &VinylParams) -> io
     write_param_f64(w, "Gain2", p.gain2)?;
     write_param_f64(w, "Freq2", p.freq2)?;
     write_param_f64(w, "Q2", p.q2)?;
+    Ok(())
+}
+
+// ─── Redux Legacy ─────────────────────────────────────────────────────────
+
+/// Redux Legacy parameters (XML tag `Redux` — older version, distinct from Redux2).
+#[derive(Debug, Clone)]
+pub struct ReduxLegacyParams {
+    pub bit_depth_on: bool,
+    pub bit_depth: f64,
+    pub sample_res_mode: bool,
+    pub sample_res_rough: f64,
+    pub sample_res_soft: f64,
+}
+
+impl Default for ReduxLegacyParams {
+    fn default() -> Self {
+        Self {
+            bit_depth_on: true,
+            bit_depth: 16.0,
+            sample_res_mode: false,
+            sample_res_rough: 1.0,
+            sample_res_soft: 1.0,
+        }
+    }
+}
+
+pub fn parse_redux_legacy(node: Node<'_, '_>) -> ReduxLegacyParams {
+    ReduxLegacyParams {
+        bit_depth_on: param_bool(node, "BitDepthOn", true),
+        bit_depth: param_f64(node, "BitDepth", 16.0),
+        sample_res_mode: param_bool(node, "SampleResMode", false),
+        sample_res_rough: param_f64(node, "SampleResRough", 1.0),
+        sample_res_soft: param_f64(node, "SampleResSoft", 1.0),
+    }
+}
+
+pub fn write_redux_legacy<W: Write>(
+    w: &mut AbletonXmlWriter<W>,
+    p: &ReduxLegacyParams,
+) -> io::Result<()> {
+    write_param_bool(w, "BitDepthOn", p.bit_depth_on)?;
+    write_param_f64(w, "BitDepth", p.bit_depth)?;
+    write_param_bool(w, "SampleResMode", p.sample_res_mode)?;
+    write_param_f64(w, "SampleResRough", p.sample_res_rough)?;
+    write_param_f64(w, "SampleResSoft", p.sample_res_soft)?;
     Ok(())
 }
