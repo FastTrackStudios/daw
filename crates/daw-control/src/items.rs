@@ -136,8 +136,6 @@ impl Items {
         end_seconds: f64,
         notes: Vec<daw_proto::MidiNoteCreate>,
     ) -> Result<Option<ItemHandle>> {
-        use daw_proto::midi::MidiTakeLocation;
-
         // Create empty MIDI item
         let location = self
             .clients
@@ -504,7 +502,7 @@ impl ItemHandle {
         self.clients
             .item
             .move_to_track(self.context(), self.item_ref(), track)
-            .await;
+            .await?;
         Ok(())
     }
 

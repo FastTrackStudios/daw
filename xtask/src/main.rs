@@ -428,6 +428,7 @@ fn setup_rigs(force: bool) -> Result<(), Box<dyn std::error::Error>> {
             badge_text: rig.badge.to_string(),
             color: rig.color,
             sizes: vec![48, 128, 256],
+            no_tint: false,
         };
         reaper_launcher::icon_gen::generate_and_install_icons(rig.id, &icon_config)?;
         println!(
@@ -488,6 +489,7 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         extension_log: PathBuf::from("/tmp/daw-bridge.log"),
         timeout_secs,
         keep_open,
+        headless: ci,
         ci,
         extension_whitelist: vec![],
     };

@@ -381,7 +381,7 @@ fn draw_text_centered(
     cx: f32,
     baseline_y: f32,
 ) {
-    use ab_glyph::{Font, ScaleFont};
+    use ab_glyph::ScaleFont;
 
     let mut total_width = 0.0_f32;
     let mut prev: Option<ab_glyph::GlyphId> = None;

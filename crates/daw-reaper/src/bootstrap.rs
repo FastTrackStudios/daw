@@ -86,20 +86,21 @@ pub unsafe fn init_from_clap_host(
     }
 
     let host = raw_clap_host as *const ClapHost;
-    let get_ext = (*host).get_extension?;
+    let get_ext = unsafe { (*host).get_extension }?;
 
     let ext_id = b"cockos.reaper_extension\0";
-    let rec_ptr = get_ext(host, ext_id.as_ptr() as *const std::ffi::c_char);
+    let rec_ptr = unsafe { get_ext(host, ext_id.as_ptr() as *const std::ffi::c_char) };
     if rec_ptr.is_null() {
         return None; // Not running in REAPER
     }
 
-    let rec = *(rec_ptr as *const reaper_plugin_info_t);
+    let rec = unsafe { *(rec_ptr as *const reaper_plugin_info_t) };
 
     // Build PluginContext from the reaper_plugin_info_t
     let static_ctx = static_plugin_context();
     let h_instance = static_ctx.h_instance;
-    let context = match PluginContext::from_extension_plugin(h_instance, rec, static_ctx) {
+    let context = match unsafe { PluginContext::from_extension_plugin(h_instance, rec, static_ctx) }
+    {
         Ok(c) => c,
         Err(_) => return None,
     };

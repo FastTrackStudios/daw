@@ -441,7 +441,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_source_channels(self.context(), self.location(), start_channel, num_channels)
-            .await;
+            .await?;
         Ok(())
     }
 
@@ -452,7 +452,7 @@ impl RouteHandle {
         self.clients
             .routing
             .set_dest_channels(self.context(), self.location(), start_channel, num_channels)
-            .await;
+            .await?;
         Ok(())
     }
 

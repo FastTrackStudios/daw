@@ -44,6 +44,7 @@ pub fn non_blocking_try_read<T>(lock: &RwLock<T>) -> Option<RwLockReadGuard<'_, 
 /// Try to write-lock an RwLock without blocking.
 ///
 /// Returns `None` if the lock is held. Recovers from poison.
+#[allow(dead_code)]
 pub fn non_blocking_try_write<T>(lock: &RwLock<T>) -> Option<RwLockWriteGuard<'_, T>> {
     match lock.try_write() {
         Ok(guard) => Some(guard),
@@ -66,6 +67,7 @@ pub fn non_blocking_try_write<T>(lock: &RwLock<T>) -> Option<RwLockWriteGuard<'_
 /// let mutex = Arc::new(Mutex::new(processor));
 /// drop(mutex.lock());  // Force allocation now
 /// ```
+#[allow(dead_code)]
 pub fn pre_lock<T>(mutex: &Mutex<T>) {
     drop(non_blocking_lock(mutex));
 }

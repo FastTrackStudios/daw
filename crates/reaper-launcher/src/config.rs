@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 /// Known `reaper.ini` config keys (from REAPER API docs).
+#[allow(dead_code)]
 pub mod keys {
     /// Maximum undo memory in MB. 0 disables undo and save prompts.
     pub const UNDO_MAX_MEM: &str = "undomaxmem";

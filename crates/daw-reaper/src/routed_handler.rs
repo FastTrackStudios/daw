@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use vox::{
-    Driver, DriverReplySink, Handler, MethodId, ReplySink, SchemaRecvTracker, SelfRef,
-    ServiceDescriptor, VoxError,
+    DriverReplySink, Handler, MethodId, ReplySink, SchemaRecvTracker, SelfRef, ServiceDescriptor,
+    VoxError,
 };
 
 /// A handler entry wrapping a concrete dispatcher behind a trait object.
