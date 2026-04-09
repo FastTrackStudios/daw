@@ -119,10 +119,16 @@ pub const PID_MOB_ANNOTATIONS: u16 = 0x440B;
 
 /// Slot ID (u32).
 pub const PID_MOB_SLOT_SLOT_ID: u16 = 0x1011;
+/// Slot ID (u32) — Avid internal format PID.
+pub const PID_MOB_SLOT_SLOT_ID_AVID: u16 = 0x4801;
 /// Slot name (UTF-16LE string, optional).
 pub const PID_MOB_SLOT_SLOT_NAME: u16 = 0x1012;
+/// Slot name (UTF-16LE string, optional) — Avid internal format PID.
+pub const PID_MOB_SLOT_SLOT_NAME_AVID: u16 = 0x4802;
 /// Physical track / output number (u32, optional).
 pub const PID_MOB_SLOT_PHYSICAL_TRACK_NUMBER: u16 = 0x1014;
+/// Physical track / output number (u32, optional) — Avid internal format PID.
+pub const PID_MOB_SLOT_PHYSICAL_TRACK_NUMBER_AVID: u16 = 0x4804;
 /// Strong ref to the Segment occupying this slot (SMPTE standard).
 pub const PID_MOB_SLOT_SEGMENT: u16 = 0x1B02;
 /// Strong ref to the Segment occupying this slot (Avid internal format).

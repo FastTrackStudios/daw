@@ -393,6 +393,11 @@ impl Properties {
         pids.iter().find_map(|&pid| self.i64_le(pid))
     }
 
+    /// Try each PID in order and return the first u32 found.
+    pub fn u32_le_any(&self, pids: &[u16]) -> Option<u32> {
+        pids.iter().find_map(|&pid| self.u32_le(pid))
+    }
+
     /// Read a 32-byte MobID from a `SF_DATA` property.
     pub fn mob_id(&self, pid: u16) -> Option<MobId> {
         let entry = self.get(pid)?;

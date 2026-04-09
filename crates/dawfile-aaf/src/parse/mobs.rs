@@ -137,9 +137,17 @@ fn parse_timeline_slot(
     master_mobs: &HashMap<MobId, MasterMobData>,
     source_mobs: &HashMap<MobId, SourceMobData>,
 ) -> AafResult<Option<AafTrack>> {
-    let slot_id = props.u32_le(PID_MOB_SLOT_SLOT_ID).unwrap_or(0);
-    let name = props.string(PID_MOB_SLOT_SLOT_NAME).unwrap_or_default();
-    let physical = props.u32_le(PID_MOB_SLOT_PHYSICAL_TRACK_NUMBER);
+    let slot_id = props
+        .u32_le_any(&[PID_MOB_SLOT_SLOT_ID, PID_MOB_SLOT_SLOT_ID_AVID])
+        .unwrap_or(0);
+    let name = props
+        .string(PID_MOB_SLOT_SLOT_NAME)
+        .or_else(|| props.string(PID_MOB_SLOT_SLOT_NAME_AVID))
+        .unwrap_or_default();
+    let physical = props.u32_le_any(&[
+        PID_MOB_SLOT_PHYSICAL_TRACK_NUMBER,
+        PID_MOB_SLOT_PHYSICAL_TRACK_NUMBER_AVID,
+    ]);
     let edit_rate = props
         .edit_rate(PID_TIMELINE_MOB_SLOT_EDIT_RATE)
         .unwrap_or(EditRate::AUDIO_48K);
@@ -344,7 +352,9 @@ fn parse_master_slot(
         return Ok(None);
     }
 
-    let slot_id = props.u32_le(PID_MOB_SLOT_SLOT_ID).unwrap_or(0);
+    let slot_id = props
+        .u32_le_any(&[PID_MOB_SLOT_SLOT_ID, PID_MOB_SLOT_SLOT_ID_AVID])
+        .unwrap_or(0);
     let edit_rate = props
         .edit_rate(PID_TIMELINE_MOB_SLOT_EDIT_RATE)
         .unwrap_or(EditRate::AUDIO_48K);

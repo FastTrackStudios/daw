@@ -214,12 +214,17 @@ fn pt_wav_external_same_directory() {
         clips, 1,
         "PT_WAV_External_same_directory should have 1 source clip"
     );
-    // Clip should have a positive length.
-    let with_len = clips_with_positive_length(&s);
-    assert!(with_len >= 1, "clip should have positive length");
-    // Note: Pro Tools AAF uses a 3-level source chain (CompositionMob →
-    // MasterMob → session SourceMob → file SourceMob). The current parser
-    // resolves only 2 levels, so source_file may be None for PT externals.
+    // Clip should have a resolved file URL.
+    for t in &s.tracks {
+        for c in &t.clips {
+            if let ClipKind::SourceClip { source_file, .. } = &c.kind {
+                assert!(
+                    source_file.is_some(),
+                    "source clip should resolve to a file URL"
+                );
+            }
+        }
+    }
 }
 
 #[test]
