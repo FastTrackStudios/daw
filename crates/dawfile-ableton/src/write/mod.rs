@@ -851,10 +851,11 @@ fn write_master_track(
     w.value_float("Manual", set.tempo)?;
     let tempo_target_id = w.automation_target("AutomationTarget")?;
 
-    // Tempo automation (inline ArrangerAutomation)
+    // Inline ArrangerAutomation: only the sentinel event.
+    // Actual tempo automation goes in AutomationEnvelopes (v10+ style)
+    // to avoid duplication on round-trip.
     w.start("ArrangerAutomation")?;
     w.start("Events")?;
-    // Always write the sentinel event
     w.empty_with_attrs(
         "FloatEvent",
         &[
@@ -863,9 +864,6 @@ fn write_master_track(
             ("Value", &format_float(set.tempo)),
         ],
     )?;
-    for (i, point) in set.tempo_automation.iter().enumerate() {
-        write_float_event(w, (i + 1) as i32, point)?;
-    }
     w.end("Events")?;
     w.end("ArrangerAutomation")?;
     w.end("Tempo")?;
