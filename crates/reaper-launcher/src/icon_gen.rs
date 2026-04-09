@@ -31,6 +31,7 @@ pub fn rig_appearance(rig_type: &str) -> Option<((u8, u8, u8), &'static str)> {
         "drum-enhancement" => ((0xf9, 0x73, 0x16), "DRUM+"),
         "vocals" => ((0xec, 0x48, 0x99), "VOCALS"),
         "session" => ((0x66, 0x9e, 0xe6), "TRACKS"),
+        "dev" => ((0x4d, 0x4d, 0x4d), "DEV"),
         "testing" => ((0x4d, 0x4d, 0x4d), "TEST"),
         _ => return None,
     })
