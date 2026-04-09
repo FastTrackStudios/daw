@@ -11,6 +11,7 @@ members = [
     "crates/dawfile-reaper",
     "crates/dawfile-protools",
     "crates/dawfile-ableton",
+    "crates/dawfile-aaf",
     "crates/dawfile-dawproject",
     "crates/daw-ui",
     "crates/reaper-test",
