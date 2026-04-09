@@ -239,7 +239,20 @@ fn collect_slot_regions(
             }
 
             let start_offset = sub_entry.offset + 9;
-            let start = if start_offset + 4 <= data.len() {
+            // Byte at offset+16 distinguishes position format:
+            //   0x00 → u32 sample position at offset+9 (normal audio tracks)
+            //   0x40 → u40 tick position at offset+9 (instrument/MIDI-derived tracks)
+            let is_tick_based =
+                sub_entry.offset + 17 <= data.len() && cursor.u8_at(sub_entry.offset + 16) == 0x40;
+
+            let start = if is_tick_based {
+                if start_offset + 5 <= data.len() {
+                    let tick_pos = cursor.u40_le(start_offset);
+                    tick_pos.saturating_sub(crate::types::ZERO_TICKS)
+                } else {
+                    0
+                }
+            } else if start_offset + 4 <= data.len() {
                 let raw_start = cursor.u32_at(start_offset) as u64;
                 (raw_start as f64 * rate_factor) as u64
             } else if let Some(r) = regions.iter().find(|r| r.index == raw_index) {
