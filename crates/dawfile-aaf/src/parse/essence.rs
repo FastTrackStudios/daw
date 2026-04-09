@@ -63,7 +63,7 @@ pub fn parse_essence_descriptor(
 
 /// Extract `AudioEssenceInfo` from a SoundDescriptor / PCMDescriptor.
 fn parse_audio_info(props: &Properties) -> Option<AudioEssenceInfo> {
-    let class = props.class_auid()?;
+    let class = props.effective_class()?;
 
     // Accept PCMDescriptor, SoundDescriptor, WAVEDescriptor, AIFCDescriptor.
     let is_audio = class == CLASS_PCM_DESCRIPTOR
@@ -124,7 +124,7 @@ fn parse_locators(
             None => continue,
         };
         let loc_props = Properties::parse(loc_props_raw, &loc_dir)?;
-        let class = match loc_props.class_auid() {
+        let class = match loc_props.effective_class() {
             Some(c) => c,
             None => continue,
         };

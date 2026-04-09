@@ -52,11 +52,13 @@ pub fn parse_segment(
         .ok_or_else(|| AafError::ObjectNotFound(segment_dir.to_path_buf()))?;
     let props = Properties::parse(props_raw, segment_dir)?;
 
-    let class = match props.class_auid() {
+    let class = match props.effective_class() {
         Some(c) => c,
         None => return Ok(Vec::new()),
     };
-    let length = props.i64_le(PID_COMPONENT_LENGTH).unwrap_or(0);
+    let length = props
+        .i64_le_any(&[PID_COMPONENT_LENGTH, PID_COMPONENT_LENGTH_AVID])
+        .unwrap_or(0);
 
     if class == CLASS_SEQUENCE {
         parse_sequence(
@@ -351,7 +353,7 @@ fn parse_selector(
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-/// Read `PID_COMPONENT_LENGTH` from a directory, or return 0.
+/// Read component length from a directory, or return 0.
 fn component_length(store: &CfbStore, dir: &Path) -> i64 {
     let raw = match store.properties(dir) {
         Some(r) => r,
@@ -359,7 +361,7 @@ fn component_length(store: &CfbStore, dir: &Path) -> i64 {
     };
     Properties::parse(raw, dir)
         .ok()
-        .and_then(|p| p.i64_le(PID_COMPONENT_LENGTH))
+        .and_then(|p| p.i64_le_any(&[PID_COMPONENT_LENGTH, PID_COMPONENT_LENGTH_AVID]))
         .unwrap_or(0)
 }
 
@@ -374,7 +376,7 @@ pub fn parse_timecode_segment(
     let raw = store.properties(seg_dir)?;
     let props = Properties::parse(raw, seg_dir).ok()?;
 
-    let class = props.class_auid()?;
+    let class = props.effective_class()?;
     if class != CLASS_TIMECODE {
         return None;
     }
@@ -393,14 +395,20 @@ pub fn parse_timecode_segment(
 
 /// Classify a DataDefinition AUID into a broad track-kind category.
 pub fn classify_data_def(data_def: Auid) -> crate::types::TrackKind {
-    use crate::parse::auid::{DATADEF_LEGACY_TC, DATADEF_PICTURE, DATADEF_SOUND, DATADEF_TIMECODE};
+    use crate::parse::auid::{
+        DATADEF_LEGACY_TC, DATADEF_OMF_PICTURE, DATADEF_OMF_SOUND, DATADEF_OMF_TIMECODE,
+        DATADEF_PICTURE, DATADEF_SOUND, DATADEF_SOUND_V2, DATADEF_TIMECODE,
+    };
     use crate::types::TrackKind;
 
-    if data_def == DATADEF_SOUND {
+    if data_def == DATADEF_SOUND || data_def == DATADEF_SOUND_V2 || data_def == DATADEF_OMF_SOUND {
         TrackKind::Audio
-    } else if data_def == DATADEF_PICTURE {
+    } else if data_def == DATADEF_PICTURE || data_def == DATADEF_OMF_PICTURE {
         TrackKind::Video
-    } else if data_def == DATADEF_TIMECODE || data_def == DATADEF_LEGACY_TC {
+    } else if data_def == DATADEF_TIMECODE
+        || data_def == DATADEF_LEGACY_TC
+        || data_def == DATADEF_OMF_TIMECODE
+    {
         TrackKind::Timecode
     } else {
         TrackKind::Other

@@ -91,7 +91,7 @@ pub fn parse_composition_mob(
             None => continue,
         };
         let slot_props = Properties::parse(slot_raw, slot_dir)?;
-        let class = match slot_props.class_auid() {
+        let class = match slot_props.effective_class() {
             Some(c) => c,
             None => continue,
         };
@@ -145,11 +145,12 @@ fn parse_timeline_slot(
         .unwrap_or(EditRate::AUDIO_48K);
     let origin = props.i64_le(PID_TIMELINE_MOB_SLOT_ORIGIN).unwrap_or(0);
 
-    // Follow strong ref to the Segment.
-    let seg_name = match props.strong_ref_name(PID_MOB_SLOT_SEGMENT) {
-        Some(n) => n,
-        None => return Ok(None),
-    };
+    // Follow strong ref to the Segment (try Avid PID first, then standard).
+    let seg_name =
+        match props.strong_ref_name_any(&[PID_MOB_SLOT_SEGMENT_AVID, PID_MOB_SLOT_SEGMENT]) {
+            Some(n) => n,
+            None => return Ok(None),
+        };
     let seg_dir = slot_dir.join(seg_name);
 
     // Determine track kind from the Segment's DataDefinition.
@@ -174,13 +175,19 @@ fn parse_tc_from_slot(
     props: &Properties,
 ) -> Option<AafTimecode> {
     let edit_rate = props.edit_rate(PID_TIMELINE_MOB_SLOT_EDIT_RATE)?;
-    let seg_name = props.strong_ref_name(PID_MOB_SLOT_SEGMENT)?;
+    let seg_name = props.strong_ref_name_any(&[PID_MOB_SLOT_SEGMENT_AVID, PID_MOB_SLOT_SEGMENT])?;
     let seg_dir = slot_dir.join(seg_name);
     parse_timecode_segment(store, &seg_dir, edit_rate)
 }
 
 /// Determine the [`TrackKind`] from a segment's `DataDefinition` property.
+///
+/// In Avid-format files, `Timecode` segments use `DATADEF_PICTURE` as their
+/// DataDefinition but have class `CLASS_TIMECODE`.  Check the segment class
+/// first so such slots are classified as `Timecode` rather than `Video`.
 fn data_def_from_segment(store: &CfbStore, seg_dir: &Path) -> TrackKind {
+    use crate::parse::auid::CLASS_TIMECODE;
+
     let raw = match store.properties(seg_dir) {
         Some(r) => r,
         None => return TrackKind::Other,
@@ -189,8 +196,15 @@ fn data_def_from_segment(store: &CfbStore, seg_dir: &Path) -> TrackKind {
         Ok(p) => p,
         Err(_) => return TrackKind::Other,
     };
-    // DataDefinition is a weak ref; value bytes are the AUID directly.
-    match props.auid(PID_COMPONENT_DATA_DEFINITION) {
+    // Class takes priority over DataDef: Avid timecode segments have Picture DataDef.
+    if props.effective_class() == Some(CLASS_TIMECODE) {
+        return TrackKind::Timecode;
+    }
+    // DataDefinition: try standard PID first, then Avid PID.
+    match props.auid_any(&[
+        PID_COMPONENT_DATA_DEFINITION,
+        PID_COMPONENT_DATA_DEFINITION_AVID,
+    ]) {
         Some(dd) => classify_data_def(dd),
         None => TrackKind::Other,
     }
@@ -207,10 +221,11 @@ fn parse_event_slot(
         .edit_rate(PID_EVENT_MOB_SLOT_EDIT_RATE)
         .unwrap_or(EditRate::VIDEO_25);
 
-    let seg_name = match props.strong_ref_name(PID_MOB_SLOT_SEGMENT) {
-        Some(n) => n,
-        None => return Ok(Vec::new()),
-    };
+    let seg_name =
+        match props.strong_ref_name_any(&[PID_MOB_SLOT_SEGMENT_AVID, PID_MOB_SLOT_SEGMENT]) {
+            Some(n) => n,
+            None => return Ok(Vec::new()),
+        };
     let seg_dir = slot_dir.join(seg_name);
 
     parse_markers_from_segment(store, &seg_dir, edit_rate)
@@ -229,7 +244,7 @@ fn parse_markers_from_segment(
         None => return Ok(Vec::new()),
     };
     let props = Properties::parse(raw, seg_dir)?;
-    let class = match props.class_auid() {
+    let class = match props.effective_class() {
         Some(c) => c,
         None => return Ok(Vec::new()),
     };
@@ -252,7 +267,9 @@ fn parse_markers_from_segment(
     }
 
     if class == CLASS_COMMENT_MARKER {
-        let position = props.i64_le(PID_EVENT_POSITION).unwrap_or(0);
+        let position = props
+            .i64_le_any(&[PID_EVENT_POSITION, PID_EVENT_POSITION_AVID])
+            .unwrap_or(0);
         // Comment text is on PID_EVENT_COMMENT or PID_COMMENT_MARKER_ANNOTATION.
         let comment = props
             .string(PID_EVENT_COMMENT)
@@ -320,7 +337,9 @@ fn parse_master_slot(
     };
     let props = Properties::parse(raw, slot_dir)?;
 
-    let class = props.class_auid().unwrap_or(crate::parse::auid::Auid::ZERO);
+    let class = props
+        .effective_class()
+        .unwrap_or(crate::parse::auid::Auid::ZERO);
     if class != CLASS_TIMELINE_MOB_SLOT {
         return Ok(None);
     }
@@ -330,10 +349,11 @@ fn parse_master_slot(
         .edit_rate(PID_TIMELINE_MOB_SLOT_EDIT_RATE)
         .unwrap_or(EditRate::AUDIO_48K);
 
-    let seg_name = match props.strong_ref_name(PID_MOB_SLOT_SEGMENT) {
-        Some(n) => n,
-        None => return Ok(None),
-    };
+    let seg_name =
+        match props.strong_ref_name_any(&[PID_MOB_SLOT_SEGMENT_AVID, PID_MOB_SLOT_SEGMENT]) {
+            Some(n) => n,
+            None => return Ok(None),
+        };
     let seg_dir = slot_dir.join(seg_name);
 
     // We need the first SourceClip in the segment to know where this slot
@@ -362,7 +382,7 @@ fn find_first_source_clip(store: &CfbStore, seg_dir: &Path) -> Option<(MobId, u3
 
     let raw = store.properties(seg_dir)?;
     let props = Properties::parse(raw, seg_dir).ok()?;
-    let class = props.class_auid()?;
+    let class = props.effective_class()?;
 
     if class == crate::parse::auid::CLASS_SOURCE_CLIP {
         let id = props

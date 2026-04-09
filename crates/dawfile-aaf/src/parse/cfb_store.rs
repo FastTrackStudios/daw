@@ -132,9 +132,12 @@ impl CfbStore {
     /// directory.
     ///
     /// Reads the `"index"` stream (format: `u32 count + N × u32 local_key`)
-    /// and returns paths in key order.  Falls back to sorted child directories
-    /// if the index stream is missing or malformed.
+    /// and returns paths in key order.  For Avid-format files the collection
+    /// directory itself does not exist; elements are stored directly in the
+    /// parent directory named `{base_name}{n}` (e.g. `Slots-4403{0}`).  Falls
+    /// back to sorted child directories as a last resort.
     pub fn vector_elements(&self, coll_dir: &Path) -> Vec<PathBuf> {
+        // Standard: try the index stream inside the collection directory.
         if let Some(idx) = self.index_bytes(coll_dir) {
             if let Some(keys) = parse_vector_index(idx) {
                 return keys
@@ -143,15 +146,27 @@ impl CfbStore {
                     .collect();
             }
         }
-        // Fallback: sorted child directories (already excludes "index" stream
-        // since streams are never stored in `all_dirs`).
+
+        // Avid fallback: elements sit directly in the *parent* directory,
+        // named `{base_name}{n}` with literal curly braces.
+        if let (Some(parent), Some(base)) = (
+            coll_dir.parent(),
+            coll_dir.file_name().and_then(|n| n.to_str()),
+        ) {
+            let elements = self.avid_collection_elements(parent, base);
+            if !elements.is_empty() {
+                return elements;
+            }
+        }
+
+        // Ultimate fallback: sorted child directories of the collection dir.
         self.child_dirs_sorted(coll_dir)
     }
 
     /// Element paths for a **strong reference set** collection directory.
     ///
     /// Set index format: `u32 count + N × (u32 local_key + 16-byte ref AUID)`.
-    /// Falls back to sorted children if index is missing/malformed.
+    /// Same Avid-pattern fallback as [`Self::vector_elements`].
     pub fn set_elements(&self, coll_dir: &Path) -> Vec<PathBuf> {
         const SET_ENTRY_SIZE: usize = 20; // 4 (local key) + 16 (AUID)
 
@@ -175,7 +190,41 @@ impl CfbStore {
                 }
             }
         }
+
+        // Avid fallback: same as vector_elements.
+        if let (Some(parent), Some(base)) = (
+            coll_dir.parent(),
+            coll_dir.file_name().and_then(|n| n.to_str()),
+        ) {
+            let elements = self.avid_collection_elements(parent, base);
+            if !elements.is_empty() {
+                return elements;
+            }
+        }
+
         self.child_dirs_sorted(coll_dir)
+    }
+
+    /// Scan `parent`'s immediate children for Avid-style collection elements
+    /// named `{base_name}{n}` (literal curly braces), sorted by `n`.
+    fn avid_collection_elements(&self, parent: &Path, base_name: &str) -> Vec<PathBuf> {
+        let prefix = format!("{}{}", base_name, "{");
+        let mut elements: Vec<(u32, PathBuf)> = self
+            .child_dirs(parent)
+            .into_iter()
+            .filter_map(|p| {
+                let name = p.file_name()?.to_str()?;
+                if name.starts_with(&prefix) && name.ends_with('}') {
+                    let n_str = &name[prefix.len()..name.len() - 1];
+                    let n: u32 = n_str.parse().ok()?;
+                    Some((n, p))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        elements.sort_by_key(|(n, _)| *n);
+        elements.into_iter().map(|(_, p)| p).collect()
     }
 }
 

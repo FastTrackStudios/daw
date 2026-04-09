@@ -124,8 +124,10 @@ pub const CLASS_RGBA_DESCRIPTOR: Auid = auid(0x0D010101, 0x0101, 0x4F00, D4_INTE
 // Common Data4 for data definition ULs
 const D4_DATADEFS: [u8; 8] = [0x06, 0x0E, 0x2B, 0x34, 0x04, 0x01, 0x01, 0x01];
 
-/// Audio/sound data definition — identifies audio tracks.
+/// Audio/sound data definition — identifies audio tracks (v1).
 pub const DATADEF_SOUND: Auid = auid(0x01030202, 0x0100, 0x0000, D4_DATADEFS);
+/// Audio/sound data definition — identifies audio tracks (v2 / Avid Media Composer).
+pub const DATADEF_SOUND_V2: Auid = auid(0x01030202, 0x0200, 0x0000, D4_DATADEFS);
 /// Picture/video data definition — identifies video tracks.
 pub const DATADEF_PICTURE: Auid = auid(0x01030201, 0x0100, 0x0000, D4_DATADEFS);
 /// SMPTE timecode data definition.
@@ -136,6 +138,21 @@ pub const DATADEF_LEGACY_TC: Auid = auid(0x01030201, 0x0300, 0x0000, D4_DATADEFS
 pub const DATADEF_EDGECODE: Auid = auid(0x01030201, 0x0400, 0x0000, D4_DATADEFS);
 /// Descriptive metadata.
 pub const DATADEF_DESCRIPTIVE: Auid = auid(0x01030201, 0x0500, 0x0000, D4_DATADEFS);
+
+// ─── Legacy OMF / Avid DataDefinition AUIDs ──────────────────────────────────
+//
+// Used by Avid Media Composer, Pro Tools, and other tools that generate
+// Avid-internal-format AAF.  The AUID is embedded in a 21-byte value
+// (5-byte header + 16-byte AUID) at PID_COMPONENT_DATA_DEFINITION_AVID.
+
+const D4_OMF_DEFS: [u8; 8] = [0x80, 0x7D, 0x00, 0x60, 0x08, 0x14, 0x3E, 0x6F];
+
+/// OMF/Avid legacy sound data definition (Pro Tools, Media Composer).
+pub const DATADEF_OMF_SOUND: Auid = auid(0x78E1EBE1, 0x6CEF, 0x11D2, D4_OMF_DEFS);
+/// OMF/Avid legacy picture data definition.
+pub const DATADEF_OMF_PICTURE: Auid = auid(0xB6BFA481, 0x6CEF, 0x11D2, D4_OMF_DEFS);
+/// OMF/Avid legacy timecode data definition.
+pub const DATADEF_OMF_TIMECODE: Auid = auid(0x7F275E00, 0x6CEF, 0x11D2, D4_OMF_DEFS);
 
 // ─── MobId ───────────────────────────────────────────────────────────────────
 

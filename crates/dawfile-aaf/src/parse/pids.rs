@@ -15,8 +15,12 @@ pub const PID_OBJ_GENERATION: u16 = 0x0102;
 
 /// DataDefinition (weak ref / 16-byte AUID) — indicates audio, video, TC, …
 pub const PID_COMPONENT_DATA_DEFINITION: u16 = 0x0B01;
+/// DataDefinition — Avid internal format PID (same semantic as 0x0B01).
+pub const PID_COMPONENT_DATA_DEFINITION_AVID: u16 = 0x0201;
 /// Length in edit units (i64).
 pub const PID_COMPONENT_LENGTH: u16 = 0x0B02;
+/// Length in edit units (i64) — Avid internal format PID (same semantic as 0x0B02).
+pub const PID_COMPONENT_LENGTH_AVID: u16 = 0x0202;
 
 // ─── Sequence ────────────────────────────────────────────────────────────────
 
@@ -47,6 +51,8 @@ pub const PID_SOURCE_CLIP_FADE_OUT_TYPE: u16 = 0x1205;
 
 /// Event position (i64 edit units within the EventMobSlot).
 pub const PID_EVENT_POSITION: u16 = 0x0C01;
+/// Event position — Avid internal format PID (same semantic as 0x0C01).
+pub const PID_EVENT_POSITION_AVID: u16 = 0x0601;
 /// Event comment text (UTF-16LE string).
 pub const PID_EVENT_COMMENT: u16 = 0x0C02;
 
@@ -117,8 +123,10 @@ pub const PID_MOB_SLOT_SLOT_ID: u16 = 0x1011;
 pub const PID_MOB_SLOT_SLOT_NAME: u16 = 0x1012;
 /// Physical track / output number (u32, optional).
 pub const PID_MOB_SLOT_PHYSICAL_TRACK_NUMBER: u16 = 0x1014;
-/// Strong ref to the Segment occupying this slot.
-pub const PID_MOB_SLOT_SEGMENT: u16 = 0x1B01;
+/// Strong ref to the Segment occupying this slot (SMPTE standard).
+pub const PID_MOB_SLOT_SEGMENT: u16 = 0x1B02;
+/// Strong ref to the Segment occupying this slot (Avid internal format).
+pub const PID_MOB_SLOT_SEGMENT_AVID: u16 = 0x4803;
 
 // ─── TimelineMobSlot ─────────────────────────────────────────────────────────
 
@@ -150,8 +158,10 @@ pub const PID_HEADER_LAST_MODIFIED: u16 = 0x3B02;
 pub const PID_HEADER_VERSION: u16 = 0x3B04;
 /// Identification list (vector of Identification objects).
 pub const PID_HEADER_IDENTIFICATION_LIST: u16 = 0x3B05;
-/// Strong ref to the ContentStorage object.
+/// Strong ref to the ContentStorage object (SMPTE standard).
 pub const PID_HEADER_CONTENT_STORAGE: u16 = 0x3B06;
+/// Strong ref to the ContentStorage object (Avid internal format).
+pub const PID_HEADER_CONTENT_STORAGE_AVID: u16 = 0x3B03;
 /// Strong ref to the Dictionary object.
 pub const PID_HEADER_DICTIONARY: u16 = 0x3B07;
 /// Object model version (u32).
@@ -166,9 +176,9 @@ pub const PID_HEADER_DESCRIPTIVE_SCHEMES: u16 = 0x3B0B;
 // ─── ContentStorage ──────────────────────────────────────────────────────────
 
 /// Unordered set of all Mob strong refs in the file.
-pub const PID_CONTENT_STORAGE_MOBS: u16 = 0x1801;
+pub const PID_CONTENT_STORAGE_MOBS: u16 = 0x1901;
 /// Unordered set of EssenceData strong refs.
-pub const PID_CONTENT_STORAGE_ESSENCE_DATA: u16 = 0x1802;
+pub const PID_CONTENT_STORAGE_ESSENCE_DATA: u16 = 0x1902;
 
 // ─── EssenceDescriptor ───────────────────────────────────────────────────────
 
