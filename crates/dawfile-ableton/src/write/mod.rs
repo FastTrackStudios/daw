@@ -108,13 +108,15 @@ fn write_tracks(
     w: &mut AbletonXmlWriter<&mut Vec<u8>>,
     set: &AbletonLiveSet,
 ) -> std::io::Result<()> {
+    let num_scenes = set.scenes.len();
+
     w.start("Tracks")?;
 
     for track in &set.audio_tracks {
-        write_audio_track(w, track)?;
+        write_audio_track(w, track, num_scenes)?;
     }
     for track in &set.midi_tracks {
-        write_midi_track(w, track)?;
+        write_midi_track(w, track, num_scenes)?;
     }
     for track in &set.group_tracks {
         write_group_track(w, track)?;
@@ -174,9 +176,10 @@ fn write_track_common(
 fn write_device_chain_start(
     w: &mut AbletonXmlWriter<&mut Vec<u8>>,
     mixer: &MixerState,
+    view_state: Option<&TrackViewState>,
 ) -> std::io::Result<()> {
     w.start("DeviceChain")?;
-    write_mixer(w, mixer)?;
+    write_mixer(w, mixer, view_state)?;
     Ok(())
 }
 
@@ -189,28 +192,166 @@ fn write_devices(
     }
     w.start("Devices")?;
     for dev in device_list {
-        // Only write builtin devices that have typed params for now;
-        // plugin/M4L devices require their own serialisation (processor state etc.)
-        if let Some(ref params) = dev.builtin_params {
-            // Determine the XML tag name from the params variant
-            let tag = builtin_params_tag(params);
-            let id = w.next_id();
-            w.start_with_id(tag, id)?;
-            w.value_int("LomId", 0)?;
-            w.value_int("LomIdView", 0)?;
-            w.value_bool("IsExpanded", true)?;
-
-            w.start("On")?;
-            w.value_bool("Manual", dev.is_on)?;
-            w.automation_target("AutomationTarget")?;
-            w.end("On")?;
-
-            devices::write_builtin_params(w, params)?;
-
-            w.end(tag)?;
+        match dev.format {
+            DeviceFormat::Vst2 | DeviceFormat::Vst3 | DeviceFormat::AudioUnit => {
+                write_plugin_device(w, dev)?;
+            }
+            DeviceFormat::MaxForLive => {
+                write_m4l_device(w, dev)?;
+            }
+            DeviceFormat::NoteAlgorithm => {
+                write_note_algorithm_device(w, dev)?;
+            }
+            DeviceFormat::Builtin | DeviceFormat::Unknown => {
+                if let Some(ref params) = dev.builtin_params {
+                    write_builtin_device(w, dev, params)?;
+                }
+                // Unknown devices without builtin_params are dropped
+                // (we don't have enough info to reconstruct them)
+            }
         }
     }
     w.end("Devices")
+}
+
+fn write_builtin_device(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    dev: &Device,
+    params: &devices::BuiltinParams,
+) -> std::io::Result<()> {
+    let tag = builtin_params_tag(params);
+    let id = w.next_id();
+    w.start_with_id(tag, id)?;
+    w.value_int("LomId", 0)?;
+    w.value_int("LomIdView", 0)?;
+    w.value_bool("IsExpanded", true)?;
+
+    w.start("On")?;
+    w.value_bool("Manual", dev.is_on)?;
+    w.automation_target("AutomationTarget")?;
+    w.end("On")?;
+
+    devices::write_builtin_params(w, params)?;
+
+    w.end(tag)
+}
+
+fn write_plugin_device(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    dev: &Device,
+) -> std::io::Result<()> {
+    let id = w.next_id();
+    w.start_with_id("PluginDevice", id)?;
+    w.value_int("LomId", 0)?;
+    w.value_int("LomIdView", 0)?;
+    w.value_bool("IsExpanded", true)?;
+
+    w.start("On")?;
+    w.value_bool("Manual", dev.is_on)?;
+    w.automation_target("AutomationTarget")?;
+    w.end("On")?;
+
+    // PluginDesc
+    w.start("PluginDesc")?;
+    match dev.format {
+        DeviceFormat::Vst3 => {
+            w.start_with_id("Vst3PluginInfo", 0)?;
+            w.value_element("Name", &dev.name)?;
+            w.start("Preset")?;
+            w.start_with_id("Vst3Preset", 0)?;
+            if let Some(ref ps) = dev.processor_state {
+                w.start("ProcessorState")?;
+                w.write_raw(ps)?;
+                w.end("ProcessorState")?;
+            }
+            if let Some(ref cs) = dev.controller_state {
+                w.start("ControllerState")?;
+                w.write_raw(cs)?;
+                w.end("ControllerState")?;
+            }
+            w.end("Vst3Preset")?;
+            w.end("Preset")?;
+            w.end("Vst3PluginInfo")?;
+        }
+        DeviceFormat::Vst2 => {
+            w.start_with_id("VstPluginInfo", 0)?;
+            w.value_element("PlugName", &dev.name)?;
+            w.start("Preset")?;
+            w.start_with_id("VstPreset", 0)?;
+            if let Some(ref ps) = dev.processor_state {
+                w.start("Buffer")?;
+                w.write_raw(ps)?;
+                w.end("Buffer")?;
+            }
+            w.end("VstPreset")?;
+            w.end("Preset")?;
+            w.end("VstPluginInfo")?;
+        }
+        DeviceFormat::AudioUnit => {
+            w.start_with_id("AuPluginInfo", 0)?;
+            w.value_element("Name", &dev.name)?;
+            w.end("AuPluginInfo")?;
+        }
+        _ => {}
+    }
+    w.end("PluginDesc")?;
+
+    // SourceContext with device ID
+    if let Some(ref device_id) = dev.device_id {
+        w.start("SourceContext")?;
+        w.start("Value")?;
+        w.start_with_id("BranchSourceContext", 0)?;
+        w.value_element("BranchDeviceId", device_id)?;
+        w.end("BranchSourceContext")?;
+        w.end("Value")?;
+        w.end("SourceContext")?;
+    } else {
+        w.empty("SourceContext")?;
+    }
+
+    w.end("PluginDevice")
+}
+
+fn write_m4l_device(w: &mut AbletonXmlWriter<&mut Vec<u8>>, dev: &Device) -> std::io::Result<()> {
+    // Default to MxDeviceAudioEffect since we don't store the original tag
+    let tag = "MxDeviceAudioEffect";
+    let id = w.next_id();
+    w.start_with_id(tag, id)?;
+    w.value_int("LomId", 0)?;
+    w.value_int("LomIdView", 0)?;
+    w.value_bool("IsExpanded", true)?;
+
+    w.start("On")?;
+    w.value_bool("Manual", dev.is_on)?;
+    w.automation_target("AutomationTarget")?;
+    w.end("On")?;
+
+    w.start("Name")?;
+    w.value_element("UserName", &dev.name)?;
+    w.value_element("EffectiveName", &dev.name)?;
+    w.end("Name")?;
+
+    w.end(tag)
+}
+
+fn write_note_algorithm_device(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    dev: &Device,
+) -> std::io::Result<()> {
+    // The `name` field stores the XML class name (e.g. "NoteTransformArpeggiate")
+    let tag = &dev.name;
+    let id = w.next_id();
+    w.start_with_id(tag, id)?;
+    w.value_int("LomId", 0)?;
+    w.value_int("LomIdView", 0)?;
+    w.value_bool("IsExpanded", true)?;
+
+    w.start("On")?;
+    w.value_bool("Manual", dev.is_on)?;
+    w.automation_target("AutomationTarget")?;
+    w.end("On")?;
+
+    w.end(tag)
 }
 
 /// Map a [`BuiltinParams`] variant back to the Ableton XML tag name.
@@ -283,7 +424,11 @@ fn builtin_params_tag(params: &devices::BuiltinParams) -> &'static str {
     }
 }
 
-fn write_mixer(w: &mut AbletonXmlWriter<&mut Vec<u8>>, mixer: &MixerState) -> std::io::Result<()> {
+fn write_mixer(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    mixer: &MixerState,
+    view_state: Option<&TrackViewState>,
+) -> std::io::Result<()> {
     w.start("Mixer")?;
     w.value_int("LomId", 0)?;
     w.value_int("LomIdView", 0)?;
@@ -368,6 +513,13 @@ fn write_mixer(w: &mut AbletonXmlWriter<&mut Vec<u8>>, mixer: &MixerState) -> st
     }
     w.end("Sends")?;
 
+    // Session track width (note: "Sesstion" is Ableton's actual typo)
+    if let Some(vs) = view_state {
+        if let Some(width) = vs.session_track_width {
+            w.value_int("ViewStateSesstionTrackWidth", width as i64)?;
+        }
+    }
+
     w.end("Mixer")
 }
 
@@ -399,11 +551,12 @@ fn write_routing_target(
 fn write_audio_track(
     w: &mut AbletonXmlWriter<&mut Vec<u8>>,
     track: &AudioTrack,
+    num_scenes: usize,
 ) -> std::io::Result<()> {
     w.start_with_id("AudioTrack", track.common.id)?;
     write_track_common(w, &track.common)?;
 
-    write_device_chain_start(w, &track.common.mixer)?;
+    write_device_chain_start(w, &track.common.mixer, track.common.view_state.as_ref())?;
     write_routing_target(w, "AudioInputRouting", &track.audio_input)?;
     write_routing_target(w, "AudioOutputRouting", &track.audio_output)?;
     write_devices(w, &track.common.devices)?;
@@ -414,7 +567,7 @@ fn write_audio_track(
 
     // ClipSlotList (session clips)
     w.start("ClipSlotList")?;
-    write_session_audio_clips(w, &track.session_clips)?;
+    write_session_audio_clips(w, &track.session_clips, num_scenes)?;
     w.end("ClipSlotList")?;
 
     w.value_int("MonitoringEnum", track.monitoring as i64)?;
@@ -446,17 +599,22 @@ fn write_audio_track(
     write_take_lanes(w, &track.take_lanes)?;
 
     w.end("DeviceChain")?;
+
+    // Per-track automation envelopes
+    write_track_automation(w, &track.common.automation_envelopes)?;
+
     w.end("AudioTrack")
 }
 
 fn write_midi_track(
     w: &mut AbletonXmlWriter<&mut Vec<u8>>,
     track: &MidiTrack,
+    num_scenes: usize,
 ) -> std::io::Result<()> {
     w.start_with_id("MidiTrack", track.common.id)?;
     write_track_common(w, &track.common)?;
 
-    write_device_chain_start(w, &track.common.mixer)?;
+    write_device_chain_start(w, &track.common.mixer, track.common.view_state.as_ref())?;
     write_routing_target(w, "MidiInputRouting", &track.midi_input)?;
     write_routing_target(w, "AudioOutputRouting", &track.audio_output)?;
     write_devices(w, &track.common.devices)?;
@@ -467,7 +625,7 @@ fn write_midi_track(
 
     // ClipSlotList (session clips)
     w.start("ClipSlotList")?;
-    write_session_midi_clips(w, &track.session_clips)?;
+    write_session_midi_clips(w, &track.session_clips, num_scenes)?;
     w.end("ClipSlotList")?;
 
     w.value_int("MonitoringEnum", track.monitoring as i64)?;
@@ -499,6 +657,10 @@ fn write_midi_track(
     write_take_lanes(w, &track.take_lanes)?;
 
     w.end("DeviceChain")?;
+
+    // Per-track automation envelopes
+    write_track_automation(w, &track.common.automation_envelopes)?;
+
     w.end("MidiTrack")
 }
 
@@ -508,9 +670,13 @@ fn write_group_track(
 ) -> std::io::Result<()> {
     w.start_with_id("GroupTrack", track.common.id)?;
     write_track_common(w, &track.common)?;
-    write_device_chain_start(w, &track.common.mixer)?;
+    write_device_chain_start(w, &track.common.mixer, track.common.view_state.as_ref())?;
     write_devices(w, &track.common.devices)?;
     w.end("DeviceChain")?;
+
+    // Per-track automation envelopes
+    write_track_automation(w, &track.common.automation_envelopes)?;
+
     w.end("GroupTrack")
 }
 
@@ -520,9 +686,13 @@ fn write_return_track(
 ) -> std::io::Result<()> {
     w.start_with_id("ReturnTrack", track.common.id)?;
     write_track_common(w, &track.common)?;
-    write_device_chain_start(w, &track.common.mixer)?;
+    write_device_chain_start(w, &track.common.mixer, track.common.view_state.as_ref())?;
     write_devices(w, &track.common.devices)?;
     w.end("DeviceChain")?;
+
+    // Per-track automation envelopes
+    write_track_automation(w, &track.common.automation_envelopes)?;
+
     w.end("ReturnTrack")
 }
 
@@ -575,6 +745,9 @@ fn write_clip_common(
     w.value_float("FreezeStart", common.freeze_start)?;
     w.value_float("FreezeEnd", common.freeze_end)?;
     w.value_int("TakeId", common.take_id as i64)?;
+
+    // Clip automation envelopes
+    write_clip_envelopes(w, &common.envelopes)?;
 
     Ok(())
 }
@@ -774,10 +947,11 @@ fn write_sample_ref(w: &mut AbletonXmlWriter<&mut Vec<u8>>, sr: &SampleRef) -> s
 fn write_session_audio_clips(
     w: &mut AbletonXmlWriter<&mut Vec<u8>>,
     clips: &[SessionClip<AudioClip>],
+    num_scenes: usize,
 ) -> std::io::Result<()> {
-    // Determine how many slots we need
-    let max_slot = clips.iter().map(|c| c.slot_index).max().unwrap_or(0);
-    let num_slots = if clips.is_empty() { 0 } else { max_slot + 1 };
+    // Write one slot per scene (Ableton expects empty slots too)
+    let max_clip_slot = clips.iter().map(|c| c.slot_index + 1).max().unwrap_or(0);
+    let num_slots = max_clip_slot.max(num_scenes);
 
     for slot_idx in 0..num_slots {
         w.start_with_id("ClipSlot", slot_idx as i32)?;
@@ -801,9 +975,11 @@ fn write_session_audio_clips(
 fn write_session_midi_clips(
     w: &mut AbletonXmlWriter<&mut Vec<u8>>,
     clips: &[SessionClip<MidiClip>],
+    num_scenes: usize,
 ) -> std::io::Result<()> {
-    let max_slot = clips.iter().map(|c| c.slot_index).max().unwrap_or(0);
-    let num_slots = if clips.is_empty() { 0 } else { max_slot + 1 };
+    // Write one slot per scene (Ableton expects empty slots too)
+    let max_clip_slot = clips.iter().map(|c| c.slot_index + 1).max().unwrap_or(0);
+    let num_slots = max_clip_slot.max(num_scenes);
 
     for slot_idx in 0..num_slots {
         w.start_with_id("ClipSlot", slot_idx as i32)?;
@@ -842,7 +1018,7 @@ fn write_master_track(
 
     w.start("DeviceChain")?;
 
-    // Mixer with tempo
+    // Mixer with tempo (master track has no session track width)
     w.start("Mixer")?;
     w.value_int("LomId", 0)?;
 
@@ -1097,6 +1273,124 @@ fn write_tuning_system(
     // and we preserve it verbatim from parsing.
     w.write_raw(&tuning.raw_xml)?;
     w.end("TuningSystems")
+}
+
+// ─── Track & Clip Automation ──────────────────────────────────────────────
+
+fn write_track_automation(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    envelopes: &[AutomationEnvelope],
+) -> std::io::Result<()> {
+    if envelopes.is_empty() {
+        return Ok(());
+    }
+
+    w.start("AutomationEnvelopes")?;
+    w.start("Envelopes")?;
+    for (i, env) in envelopes.iter().enumerate() {
+        w.start_with_id("AutomationEnvelope", i as i32)?;
+        w.start("EnvelopeTarget")?;
+        w.value_int("PointeeId", env.pointee_id as i64)?;
+        w.end("EnvelopeTarget")?;
+        w.start("Automation")?;
+        w.start("Events")?;
+        for (j, event) in env.events.iter().enumerate() {
+            write_automation_event(w, j as i32, event)?;
+        }
+        w.end("Events")?;
+        w.end("Automation")?;
+        w.end("AutomationEnvelope")?;
+    }
+    w.end("Envelopes")?;
+    w.end("AutomationEnvelopes")
+}
+
+fn write_clip_envelopes(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    envelopes: &[ClipEnvelope],
+) -> std::io::Result<()> {
+    if envelopes.is_empty() {
+        return Ok(());
+    }
+
+    w.start("Envelopes")?;
+    w.start("Envelopes")?;
+    for (i, env) in envelopes.iter().enumerate() {
+        w.start_with_id("ClipEnvelope", i as i32)?;
+        w.start("EnvelopeTarget")?;
+        w.value_int("PointeeId", env.pointee_id as i64)?;
+        w.end("EnvelopeTarget")?;
+        w.start("Automation")?;
+        w.start("Events")?;
+        for (j, event) in env.events.iter().enumerate() {
+            write_automation_event(w, j as i32, event)?;
+        }
+        w.end("Events")?;
+        w.end("Automation")?;
+        w.end("ClipEnvelope")?;
+    }
+    w.end("Envelopes")?;
+    w.end("Envelopes")
+}
+
+fn write_automation_event(
+    w: &mut AbletonXmlWriter<&mut Vec<u8>>,
+    id: i32,
+    event: &AutomationEvent,
+) -> std::io::Result<()> {
+    match event {
+        AutomationEvent::Float {
+            time,
+            value,
+            curve_control_1,
+            curve_control_2,
+        } => {
+            let id_str = id.to_string();
+            let time_str = format_float(*time);
+            let value_str = format_float(*value);
+
+            let mut attrs: Vec<(&str, String)> =
+                vec![("Id", id_str), ("Time", time_str), ("Value", value_str)];
+
+            if let Some((x, y)) = curve_control_1 {
+                attrs.push(("CurveControl1X", format_float(*x)));
+                attrs.push(("CurveControl1Y", format_float(*y)));
+            }
+            if let Some((x, y)) = curve_control_2 {
+                attrs.push(("CurveControl2X", format_float(*x)));
+                attrs.push(("CurveControl2Y", format_float(*y)));
+            }
+
+            let attr_refs: Vec<(&str, &str)> =
+                attrs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+            w.empty_with_attrs("FloatEvent", &attr_refs)
+        }
+        AutomationEvent::Bool { time, value } => {
+            let id_str = id.to_string();
+            let time_str = format_float(*time);
+            w.empty_with_attrs(
+                "BoolEvent",
+                &[
+                    ("Id", id_str.as_str()),
+                    ("Time", time_str.as_str()),
+                    ("Value", if *value { "true" } else { "false" }),
+                ],
+            )
+        }
+        AutomationEvent::Enum { time, value } => {
+            let id_str = id.to_string();
+            let time_str = format_float(*time);
+            let value_str = value.to_string();
+            w.empty_with_attrs(
+                "EnumEvent",
+                &[
+                    ("Id", id_str.as_str()),
+                    ("Time", time_str.as_str()),
+                    ("Value", value_str.as_str()),
+                ],
+            )
+        }
+    }
 }
 
 // ─── Float Events with Bezier Handles ──────────────────────────────────────

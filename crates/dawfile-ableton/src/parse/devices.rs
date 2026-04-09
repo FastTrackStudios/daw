@@ -103,7 +103,13 @@ fn collect_devices_recursive(
 }
 
 /// Find all `<Devices>` element nodes reachable from this node.
-/// Checks both direct `Devices` child and `DeviceChain > Devices` paths.
+///
+/// Checks multiple paths because Ableton uses different chain element names:
+/// - `Devices` (direct child)
+/// - `DeviceChain > Devices`
+/// - `AudioToAudioDeviceChain > Devices` (inside rack branches)
+/// - `MidiToAudioDeviceChain > Devices` (inside instrument rack branches)
+/// - `MidiToMidiDeviceChain > Devices` (inside MIDI effect rack branches)
 fn find_device_lists<'a, 'input>(node: Node<'a, 'input>) -> Vec<Node<'a, 'input>> {
     let mut lists = Vec::new();
 
@@ -112,10 +118,18 @@ fn find_device_lists<'a, 'input>(node: Node<'a, 'input>) -> Vec<Node<'a, 'input>
         lists.push(d);
     }
 
-    // Nested: node > DeviceChain > Devices
-    if let Some(inner_chain) = child(node, "DeviceChain") {
-        if let Some(d) = child(inner_chain, "Devices") {
-            lists.push(d);
+    // Check all known chain element names
+    for chain_name in &[
+        "DeviceChain",
+        "AudioToAudioDeviceChain",
+        "MidiToAudioDeviceChain",
+        "MidiToMidiDeviceChain",
+        "AudioToMidiDeviceChain",
+    ] {
+        if let Some(inner_chain) = child(node, chain_name) {
+            if let Some(d) = child(inner_chain, "Devices") {
+                lists.push(d);
+            }
         }
     }
 
