@@ -1,0 +1,26 @@
+[package]
+name = "dawfile-ableton"
+version = "0.1.0"
+edition = "2024"
+description = "Ableton Live set file parser (.als, .adg) — pure Rust, cross-platform"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+thiserror = { workspace = true }
+
+# Domain types for conversion to daw-proto
+daw-proto = { path = "../daw-proto" }
+
+# Gzip decompression (Ableton files are gzipped XML)
+flate2 = "1"
+
+# Fast, zero-allocation XML DOM parser (read path)
+roxmltree = "0.20"
+
+# XML writer (write path)
+quick-xml = "0.37"
+
+[dev-dependencies]
+
+[lints]
+workspace = true
