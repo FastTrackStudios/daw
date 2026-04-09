@@ -87,6 +87,18 @@ pub trait RegionService {
     // Navigation Methods
     // =========================================================================
 
+    /// Configure the region render matrix — whether a specific track renders for this region.
+    ///
+    /// `track_index` is the 0-based REAPER track index. `enable` = true to include the
+    /// track in the render for this region, false to exclude it.
+    async fn set_region_render_matrix(
+        &self,
+        project: ProjectContext,
+        region_id: u32,
+        track_index: u32,
+        enable: bool,
+    );
+
     /// Navigate to the start of a region
     async fn goto_region_start(&self, project: ProjectContext, id: u32);
 

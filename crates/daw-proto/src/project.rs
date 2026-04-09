@@ -228,6 +228,22 @@ pub trait ProjectService {
     async fn save_all(&self);
 
     // =========================================================================
+    // Project Info (GetSetProjectInfo / GetSetProjectInfo_String)
+    // =========================================================================
+
+    /// Get a project info string value (e.g. `"RENDER_FILE"`, `"RENDER_PATTERN"`).
+    async fn get_project_info_string(&self, project: ProjectContext, key: String) -> String;
+
+    /// Set a project info string value (e.g. `"RENDER_FILE"`, `"RENDER_PATTERN"`).
+    async fn set_project_info_string(&self, project: ProjectContext, key: String, value: String);
+
+    /// Get a project info numeric value (e.g. `"RENDER_SETTINGS"`, `"PROJECT_SRATE"`).
+    async fn get_project_info(&self, project: ProjectContext, key: String) -> f64;
+
+    /// Set a project info numeric value.
+    async fn set_project_info(&self, project: ProjectContext, key: String, value: f64);
+
+    // =========================================================================
     // Ruler Lane Management (v7.62+)
     // =========================================================================
 

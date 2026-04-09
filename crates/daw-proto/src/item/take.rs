@@ -51,6 +51,8 @@ pub struct Take {
     // Source info
     /// Type of source (audio, MIDI, etc.)
     pub source_type: SourceType,
+    /// Absolute path to the source file on disk (None for MIDI or empty takes)
+    pub source_file_path: Option<String>,
     /// Length of the source media
     pub source_length: Option<Duration>,
     /// Sample rate of the source
@@ -112,6 +114,7 @@ impl Default for Take {
             preserve_pitch: true,
             start_offset: Duration::ZERO,
             source_type: SourceType::Empty,
+            source_file_path: None,
             source_length: None,
             source_sample_rate: None,
             source_channels: None,
