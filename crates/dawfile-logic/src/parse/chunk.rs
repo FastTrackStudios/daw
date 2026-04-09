@@ -11,8 +11,8 @@
 //! | Offset | Size | Field        | Description                                    |
 //! |--------|------|--------------|------------------------------------------------|
 //! | 0      | 4    | `tag`        | Chunk type — 4 ASCII bytes, little-endian order |
-//! | 4      | 28   | `meta`       | Flags / identifiers (partially understood)      |
-//! | 32     | 8    | `data_len`   | Payload byte count, u64 little-endian           |
+//! | 4      | 24   | `meta`       | Flags / identifiers (partially understood)      |
+//! | 28     | 8    | `data_len`   | Payload byte count, u64 little-endian           |
 //!
 //! The human-readable chunk type is the tag reversed, e.g. `gnoS` → `Song`.
 //!
@@ -77,8 +77,8 @@ pub fn parse_chunks(data: &[u8]) -> LogicResult<Vec<LogicChunk>> {
         let hdr = &data[offset..offset + CHUNK_HEADER_LEN];
 
         let tag: [u8; 4] = hdr[0..4].try_into().unwrap();
-        let mut header_meta = [0u8; 28];
-        header_meta.copy_from_slice(&hdr[4..32]);
+        let mut header_meta = [0u8; 24];
+        header_meta.copy_from_slice(&hdr[4..28]);
         let data_len = u64::from_le_bytes(hdr[28..36].try_into().unwrap());
 
         let payload_start = offset + CHUNK_HEADER_LEN;

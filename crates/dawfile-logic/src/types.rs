@@ -92,9 +92,33 @@ pub enum ClipKind {
         file_path: Option<String>,
     },
     /// A MIDI region (sequence of notes / CC events).
-    Midi,
+    Midi {
+        /// Notes extracted from the paired EvSq chunk.
+        notes: Vec<LogicMidiNote>,
+    },
     /// A clip type we don't yet model.
     Other,
+}
+
+/// A single MIDI note (or other positioned event) extracted from an EvSq chunk.
+///
+/// The [`position_ticks`] unit is the EvSq internal clock, which differs from
+/// the MSeq arrangement clock.  Full decoding is pending further
+/// reverse-engineering.
+#[derive(Debug, Clone)]
+pub struct LogicMidiNote {
+    /// Logic event type byte (e.g. `0x30` for type-A note events).
+    pub event_type: u8,
+    /// Position within the MIDI region in raw EvSq ticks.
+    pub position_ticks: i32,
+    /// Best-effort note pitch (MIDI note number 0–127).
+    pub pitch: u8,
+    /// Best-effort velocity (0–127).
+    pub velocity: u8,
+    /// MIDI channel (0-based; encoding not yet fully decoded).
+    pub channel: u8,
+    /// Raw bytes 8–15 of the EvSq event record (contains pitch/vel/duration).
+    pub raw_data: [u8; 8],
 }
 
 /// An arrangement marker.
@@ -141,8 +165,11 @@ pub struct LogicChunk {
     pub tag: [u8; 4],
     /// Human-readable form of the tag (reversed, e.g. `"Song"`).
     pub type_name: String,
-    /// 28 bytes of header metadata preceding the size field (indices 4–31).
-    pub header_meta: [u8; 28],
+    /// 24 bytes of header metadata (chunk header bytes 4–27, preceding the 8-byte data_len).
+    ///
+    /// `header_meta[4..8]` as i32 LE encodes the arrangement clock position for
+    /// MSeq, Trak, and EvSq chunks (65 536 ticks = 1 beat at the session BPM).
+    pub header_meta: [u8; 24],
     /// Length of the data payload in bytes.
     pub data_len: u64,
     /// The payload bytes.

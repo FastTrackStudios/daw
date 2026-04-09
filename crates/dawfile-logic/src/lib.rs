@@ -72,6 +72,6 @@ pub use convert::{feature_support, session_summary};
 pub use error::{LogicError, LogicResult};
 pub use io::read_session;
 pub use types::{
-    ClipKind, LogicChunk, LogicClip, LogicMarker, LogicSession, LogicSummingGroup, LogicTempoEvent,
-    LogicTrack, TrackKind,
+    ClipKind, LogicChunk, LogicClip, LogicMarker, LogicMidiNote, LogicSession, LogicSummingGroup,
+    LogicTempoEvent, LogicTrack, TrackKind,
 };

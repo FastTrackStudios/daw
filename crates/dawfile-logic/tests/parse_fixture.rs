@@ -178,24 +178,64 @@ fn aurg_audio_regions() {
         .filter_map(|c| parse_aurg(&c.data))
         .collect();
 
-    println!("\n=== AuRg regions ({}) ===", regions.len());
+    println!("\n=== AuRg pool entries ({}) ===", regions.len());
     for r in &regions {
         println!(
-            "  '{}' offset={} frames={} start_ticks={} end_ticks={}",
-            r.name, r.source_offset_frames, r.duration_frames, r.start_ticks, r.end_ticks
+            "  '{}' src_offset={} frames={}",
+            r.name, r.source_offset_frames, r.duration_frames
         );
     }
 
     assert!(!regions.is_empty(), "expected at least one AuRg region");
-    // All regions should have a non-empty name
     assert!(
         regions.iter().all(|r| !r.name.is_empty()),
         "region name should not be empty"
     );
-    // All regions should have positive duration
     assert!(
         regions.iter().all(|r| r.duration_frames > 0),
         "region duration should be > 0"
+    );
+}
+
+#[test]
+fn mseq_arrangement_positions() {
+    let session = dawfile_logic::read_session(FIXTURE).expect("parse failed");
+
+    // MSeq chunks with arrangement positions in header_meta[4..8].
+    // 65536 ticks = 1 beat; 262144 ticks = 1 bar (4/4 at any BPM).
+    let mseq_tag = *b"qeSM";
+    let positions: Vec<(String, f64)> = session
+        .chunks
+        .iter()
+        .filter(|c| c.tag == mseq_tag)
+        .map(|c| {
+            let ticks = i32::from_le_bytes(c.header_meta[4..8].try_into().unwrap_or([0; 4]));
+            let beats = ticks as f64 / 65536.0;
+            (c.type_name.clone(), beats)
+        })
+        .collect();
+
+    println!("\n=== MSeq arrangement positions ({}) ===", positions.len());
+    for (name, beats) in &positions {
+        println!("  {} @ {:.2} beats ({:.2} bars)", name, beats, beats / 4.0);
+    }
+
+    assert!(
+        !positions.is_empty(),
+        "expected at least one MSeq arrangement position"
+    );
+
+    // At least one position should be non-zero (clips at different bar positions).
+    let has_nonzero = positions.iter().any(|(_, b)| *b > 0.0);
+    assert!(
+        has_nonzero,
+        "expected some MSeq clips at non-zero positions"
+    );
+
+    // All positions should be non-negative.
+    assert!(
+        positions.iter().all(|(_, b)| *b >= 0.0),
+        "arrangement positions should be non-negative"
     );
 }
 
@@ -261,6 +301,101 @@ fn hex_dump(data: &[u8], limit: usize) {
         }
         println!("|");
     }
+}
+
+#[test]
+fn midi_items_extracted() {
+    use dawfile_logic::ClipKind;
+
+    let session = dawfile_logic::read_session(FIXTURE).expect("parse failed");
+
+    // Collect all MIDI clips from all tracks.
+    let mut midi_clips = Vec::new();
+    for track in &session.tracks {
+        for clip in &track.clips {
+            if let ClipKind::Midi { notes } = &clip.kind {
+                midi_clips.push((track.name.as_str(), clip.position_beats, notes.len()));
+            }
+        }
+    }
+
+    println!("\n=== MIDI clips from tracks ({}) ===", midi_clips.len());
+    for (track, pos, note_count) in &midi_clips {
+        println!(
+            "  track='{}' position={:.2} beats ({:.2} bars) notes={}",
+            track,
+            pos,
+            pos / 4.0,
+            note_count
+        );
+    }
+
+    // Independently verify MSeq-based arrangement positions.
+    let mseq_tag = *b"qeSM";
+    let trak_tag = *b"karT";
+    let evsq_tag = *b"qSvE";
+
+    let mut midi_positions = Vec::new();
+    let chunks = &session.chunks;
+    let mut i = 0;
+    while i < chunks.len() {
+        if chunks[i].tag != mseq_tag {
+            i += 1;
+            continue;
+        }
+        let mseq = &chunks[i];
+        let ticks = i32::from_le_bytes(mseq.header_meta[4..8].try_into().unwrap_or([0; 4]));
+        let beats = ticks as f64 / 65536.0;
+
+        let mut j = i + 1;
+        let mut is_midi = false;
+        let mut event_count = 0usize;
+        while j < chunks.len() {
+            if chunks[j].tag == trak_tag {
+                if chunks[j].data_len == 0 {
+                    is_midi = true;
+                }
+            } else if chunks[j].tag == evsq_tag {
+                // Count non-sentinel, non-end events
+                for rec in chunks[j].data.chunks_exact(16) {
+                    if rec[0] == 0xf1 {
+                        break;
+                    }
+                    let pos_raw = u32::from_le_bytes(rec[4..8].try_into().unwrap_or([0; 4]));
+                    if pos_raw != 0x8800_0000 {
+                        event_count += 1;
+                    }
+                }
+                break;
+            } else if chunks[j].tag == mseq_tag {
+                break;
+            }
+            j += 1;
+        }
+
+        if is_midi && event_count > 0 {
+            midi_positions.push(beats);
+        }
+        i = j;
+    }
+
+    println!(
+        "\n=== MIDI MSeq regions with events ({}) ===",
+        midi_positions.len()
+    );
+    for pos in &midi_positions {
+        println!("  {:.2} beats ({:.2} bars)", pos, pos / 4.0);
+    }
+
+    assert!(
+        !midi_positions.is_empty(),
+        "expected MIDI regions with note events"
+    );
+    // All positions must be non-negative.
+    assert!(
+        midi_positions.iter().all(|&p| p >= 0.0),
+        "MIDI positions should be non-negative"
+    );
 }
 
 #[test]

@@ -1,32 +1,69 @@
 //! Chunk interpreter — builds a [`LogicSession`] from raw [`LogicChunk`]s.
 //!
-//! The internal payload format of most chunk types is not yet fully
-//! reverse-engineered.  This module extracts what it can from the chunks
-//! (primarily from `Envi`/`ivnE` mixer objects which carry track names) and
-//! leaves the rest as raw data in [`LogicSession::chunks`].
+//! ## Arrangement position encoding
 //!
-//! As we learn more about individual chunk payloads, interpretation logic
-//! will grow here without changing the public API.
+//! `MSeq`, `Trak`, and `EvSq` chunks all store the arrangement clock position
+//! in `header_meta[4..8]` (i32 LE). The tick unit is **65 536 ticks per beat**
+//! (at the session BPM), so:
+//!
+//! ```text
+//! beats = meta[4..8] as i32 / 65_536.0
+//! ```
+//!
+//! This was empirically confirmed against the `FileDecrypt.logicx` fixture:
+//! - MSeq "Untitled" at meta[4]=0 → bar 1 beat 1
+//! - MSeq "FileDecrypt" at meta[4]=262_144 → bar 2 beat 1 (1 bar = 4×65_536)
+//! - MSeq "Untitled" at meta[4]=3_932_160 → bar 16 beat 1 (15 bars = 60 beats)
+//!
+//! ## Clip type detection
+//!
+//! The Trak chunk immediately following each MSeq in file order determines the
+//! clip type:
+//! - `data_len == 0`  → MIDI region (events stored in the EvSq that follows)
+//! - `data_len == 58` → Audio region (references the audio pool via GUID)
+//!
+//! ## Audio pool entries
+//!
+//! `AuFl` chunks name the source audio files; `AuRg` chunks describe the
+//! source segment (start offset, duration in sample frames, region name).  The
+//! AuFl/AuRg meta[4..8] value is a pool index (not an arrangement position).
+//! Pool entries are matched to placed clips by name prefix heuristic.
 
 use crate::parse::aufl::parse_aufl;
 use crate::parse::aurg::parse_aurg;
 use crate::parse::bundle::BundleMeta;
 use crate::types::{
-    ClipKind, LogicChunk, LogicClip, LogicMarker, LogicSession, LogicSummingGroup, LogicTempoEvent,
-    LogicTrack, TrackKind,
+    ClipKind, LogicChunk, LogicClip, LogicMarker, LogicMidiNote, LogicSession, LogicSummingGroup,
+    LogicTempoEvent, LogicTrack, TrackKind,
 };
+
+/// Ticks per beat in the arrangement clock used by MSeq / Trak / EvSq headers.
+const TICKS_PER_BEAT: f64 = 65_536.0;
+
+/// On-disk tags (reversed from human-readable form).
+const TAG_MSEQ: [u8; 4] = *b"qeSM";
+const TAG_TRAK: [u8; 4] = *b"karT";
+const TAG_EVSQ: [u8; 4] = *b"qSvE";
+const TAG_AUFL: [u8; 4] = *b"lFuA";
+const TAG_AURG: [u8; 4] = *b"gRuA";
+const TAG_ENVI: [u8; 4] = *b"ivnE";
+
+/// EvSq event sentinel: bytes[4..8] == 0x88000000 marks a non-positioned event.
+const EVSQ_SENTINEL: u32 = 0x8800_0000;
+/// EvSq end-of-sequence marker type byte.
+const EVSQ_END: u8 = 0xf1;
+
+// ── Public entry point ────────────────────────────────────────────────────────
 
 /// Build a [`LogicSession`] from parsed bundle metadata and the flat chunk list.
 pub fn build_session(meta: BundleMeta, chunks: Vec<LogicChunk>) -> LogicSession {
-    // Extract mixer channel names from Envi (ivnE) chunks.
     let (mut tracks, summing_groups) = extract_tracks_and_groups(&chunks);
 
-    // Collect audio regions from AuRg chunks and attach them as clips.
-    // We don't have track-to-region mapping yet, so we attach all audio clips
-    // to the first audio track that matches by name, or append them to a
-    // catch-all list if no match is found.
-    let audio_regions = collect_audio_regions(&chunks, meta.sample_rate);
-    attach_audio_clips(&mut tracks, audio_regions);
+    // Walk the MSeq → Trak → EvSq groups to produce clips.
+    let clips = collect_clips(&chunks, meta.sample_rate, meta.bpm);
+
+    // Attach clips to tracks by name matching.
+    attach_clips_to_tracks(&mut tracks, clips);
 
     LogicSession {
         creator_version: meta.creator_version,
@@ -38,42 +75,215 @@ pub fn build_session(meta: BundleMeta, chunks: Vec<LogicChunk>) -> LogicSession 
         key: meta.key,
         key_gender: meta.key_gender,
         tracks,
-        markers: Vec::new(),      // TODO: parse from EvSq chunks
-        tempo_events: Vec::new(), // TODO: parse from EvSq chunks
+        markers: Vec::new(),      // TODO: parse from EvSq
+        tempo_events: Vec::new(), // TODO: parse from EvSq
         summing_groups,
         chunks,
     }
 }
 
-// ── AuFl / AuRg chunk parsing ────────────────────────────────────────────────
+// ── MSeq / Trak / EvSq clip extraction ───────────────────────────────────────
 
-const TAG_AUFL: [u8; 4] = *b"lFuA"; // on-disk tag for AuFl (reversed)
-const TAG_AURG: [u8; 4] = *b"gRuA"; // on-disk tag for AuRg (reversed)
-
-/// An audio clip ready to be attached to a track.
+/// A clip gathered from a MSeq→Trak→EvSq group, ready to attach to a track.
 struct PendingClip {
-    /// Region name (e.g. `"Audio Track 1 #01"`).
+    /// User-visible clip name (from MSeq payload).
     name: String,
-    /// Track name inferred from the region name (prefix before ` #NN`).
-    track_name_hint: String,
-    clip: LogicClip,
+    /// Arrangement start in beats (from MSeq header_meta[4..8]).
+    position_beats: f64,
+    /// Clip content.
+    kind: ClipKind,
+    /// Duration in beats (from AuRg for audio; from EvSq for MIDI).
+    length_beats: f64,
 }
 
-/// Collect all parsed audio regions from `AuRg` chunks.
+/// Walk the chunk list and extract all placed clips (audio + MIDI).
+fn collect_clips(chunks: &[LogicChunk], sample_rate: u32, bpm: f64) -> Vec<PendingClip> {
+    // Build audio pool for matching clip names to source files.
+    let audio_pool = build_audio_pool(chunks, sample_rate, bpm);
+
+    let mut clips = Vec::new();
+    let mut i = 0;
+
+    while i < chunks.len() {
+        if chunks[i].tag != TAG_MSEQ {
+            i += 1;
+            continue;
+        }
+
+        let mseq = &chunks[i];
+        let position_beats = mseq_position_beats(mseq);
+        let name = mseq_name(&mseq.data);
+
+        // Skip system / internal MSeq names.
+        if is_system_mseq_name(&name) {
+            i += 1;
+            continue;
+        }
+
+        // Look ahead to find Trak and EvSq.
+        let mut j = i + 1;
+        let mut has_audio_trak = false;
+        let mut evsq_idx = None;
+
+        while j < chunks.len() {
+            match chunks[j].tag {
+                TAG_TRAK => {
+                    if chunks[j].data_len == 58 {
+                        has_audio_trak = true;
+                    }
+                }
+                TAG_EVSQ => {
+                    evsq_idx = Some(j);
+                    break;
+                }
+                TAG_MSEQ => break,
+                _ => {}
+            }
+            j += 1;
+        }
+
+        if has_audio_trak {
+            // Audio clip — match against the audio pool by name prefix.
+            if let Some(pending) = make_audio_clip(&name, position_beats, &audio_pool) {
+                clips.push(pending);
+            }
+        } else {
+            // MIDI clip — parse notes from the EvSq.
+            let notes = evsq_idx
+                .map(|idx| parse_evsq_notes(&chunks[idx].data))
+                .unwrap_or_default();
+
+            let length_beats = estimate_midi_length(&notes);
+
+            clips.push(PendingClip {
+                name: name.clone(),
+                position_beats,
+                kind: ClipKind::Midi { notes },
+                length_beats,
+            });
+        }
+
+        // Advance past the EvSq (or past the next MSeq boundary).
+        i = if let Some(idx) = evsq_idx { idx + 1 } else { j };
+    }
+
+    clips
+}
+
+/// Read the arrangement clock position (beats) from a MSeq/Trak/EvSq chunk.
 ///
-/// The sample_rate is used to convert frame counts to beat positions using
-/// the session BPM stored in the metadata plist.  At this point we don't have
-/// the BPM here, so we leave positions in beats as raw samples / sample_rate.
-/// Beat conversion happens in the public `LogicClip` later.
-fn collect_audio_regions(chunks: &[LogicChunk], sample_rate: u32) -> Vec<PendingClip> {
-    // Build a map of filename → AuFl entry for file-path decoration.
-    let aufl_map: Vec<_> = chunks
+/// `header_meta[4..8]` is i32 LE in units of [`TICKS_PER_BEAT`].
+fn mseq_position_beats(chunk: &LogicChunk) -> f64 {
+    let ticks = i32::from_le_bytes(chunk.header_meta[4..8].try_into().unwrap_or([0; 4]));
+    ticks as f64 / TICKS_PER_BEAT
+}
+
+/// Extract the user-visible name from a MSeq payload.
+///
+/// Layout: bytes 0–7 (flags), 8–15 (track index i64 LE),
+///         16–17 (name length u16 LE), 18+ (UTF-8 name).
+fn mseq_name(payload: &[u8]) -> String {
+    if payload.len() < 18 {
+        return String::new();
+    }
+    let name_len = u16::from_le_bytes([payload[16], payload[17]]) as usize;
+    let name_end = 18 + name_len;
+    if payload.len() < name_end {
+        return String::new();
+    }
+    String::from_utf8_lossy(&payload[18..name_end]).into_owned()
+}
+
+/// Returns true for Logic-internal MSeq names that should not become clips.
+fn is_system_mseq_name(name: &str) -> bool {
+    matches!(
+        name,
+        "Untitled"
+            | "TRASH"
+            | "Track Automation Root Folder"
+            | "Track Alternatives"
+            | "Global Harmonies"
+            | "*Automation"
+    ) || name.is_empty()
+}
+
+// ── EvSq / MIDI note parsing ─────────────────────────────────────────────────
+
+/// Parse MIDI-like note events from an EvSq payload.
+///
+/// Each record is 16 bytes:
+/// - byte 0:    event type
+/// - bytes 4–7: arrangement position as i32 LE ticks (or 0x88000000 = sentinel)
+/// - bytes 8–15: event-specific data (note, velocity, duration, etc.)
+///
+/// We extract positioned events (non-sentinel, non-end) as [`LogicMidiNote`]
+/// records.  The tick unit inside EvSq differs from the MSeq arrangement unit
+/// and is not yet fully characterised.
+fn parse_evsq_notes(data: &[u8]) -> Vec<LogicMidiNote> {
+    let mut notes = Vec::new();
+
+    for record in data.chunks_exact(16) {
+        let ev_type = record[0];
+        if ev_type == EVSQ_END {
+            break;
+        }
+
+        // Skip sentinel (non-positioned) records.
+        let pos_raw = u32::from_le_bytes(record[4..8].try_into().unwrap());
+        if pos_raw == EVSQ_SENTINEL {
+            continue;
+        }
+
+        let position_ticks = i32::from_le_bytes(record[4..8].try_into().unwrap());
+
+        // Best-effort decode of note data from bytes 8–15.
+        // Logic encodes pitch/velocity/channel here; exact byte positions vary
+        // by event type.  We extract byte[11] as pitch and byte[12] as velocity
+        // based on observed patterns for type 0x30 events.
+        let pitch = record[11];
+        let velocity = record[12];
+        let channel = 0u8; // channel encoding not yet decoded
+
+        notes.push(LogicMidiNote {
+            event_type: ev_type,
+            position_ticks,
+            pitch,
+            velocity,
+            channel,
+            raw_data: record[8..16].try_into().unwrap_or([0; 8]),
+        });
+    }
+
+    notes
+}
+
+/// Estimate MIDI clip length from the last note position (rough heuristic).
+fn estimate_midi_length(notes: &[LogicMidiNote]) -> f64 {
+    let max_ticks = notes.iter().map(|n| n.position_ticks).max().unwrap_or(0);
+    // EvSq ticks are not the same as MSeq ticks; store as 0 until decoded.
+    let _ = max_ticks;
+    0.0
+}
+
+// ── Audio pool ────────────────────────────────────────────────────────────────
+
+struct AudioPoolEntry {
+    name: String,            // AuRg region name (e.g. "Audio Track 1 #01")
+    track_name_hint: String, // prefix before " #NN"
+    file_path: Option<String>,
+    duration_beats: f64,
+}
+
+fn build_audio_pool(chunks: &[LogicChunk], sample_rate: u32, bpm: f64) -> Vec<AudioPoolEntry> {
+    let sr = sample_rate.max(1) as f64;
+    let bpm = bpm.max(1.0);
+
+    // Map filename → AuFl entry for file-path decoration.
+    let aufl_entries: Vec<_> = chunks
         .iter()
         .filter(|c| c.tag == TAG_AUFL)
         .filter_map(|c| parse_aufl(&c.data))
         .collect();
-
-    let sr = sample_rate.max(1) as f64;
 
     chunks
         .iter()
@@ -81,17 +291,9 @@ fn collect_audio_regions(chunks: &[LogicChunk], sample_rate: u32) -> Vec<Pending
         .filter_map(|c| {
             let region = parse_aurg(&c.data)?;
 
-            // `start_ticks` is the arrangement clock position in Logic's internal
-            // tick unit (240 PPQ at session BPM).  We don't have the BPM here so
-            // we store ticks directly as "beats" for now — callers can convert
-            // knowing the session BPM (LogicSession::bpm) and that 1 beat = 240
-            // ticks.  Duration is stored as seconds (frames / sample_rate).
-            // TODO: store everything in seconds once BPM is threaded through.
-            let position_beats = region.start_ticks as f64; // raw 240-PPQ ticks
-            let length_beats = region.duration_frames as f64 / sr; // seconds
+            let duration_beats = region.duration_frames as f64 / sr / 60.0 * bpm;
 
-            // Try to find the matching audio file by name prefix.
-            let file_path = aufl_map
+            let file_path = aufl_entries
                 .iter()
                 .find(|f| {
                     region.name.starts_with(
@@ -106,38 +308,91 @@ fn collect_audio_regions(chunks: &[LogicChunk], sample_rate: u32) -> Vec<Pending
                     }
                 });
 
-            // Infer track name from region name: "Audio Track 1 #01" → "Audio Track 1"
             let track_name_hint = if let Some(pos) = region.name.rfind(" #") {
                 region.name[..pos].to_owned()
             } else {
                 region.name.clone()
             };
 
-            Some(PendingClip {
-                name: region.name.clone(),
+            Some(AudioPoolEntry {
+                name: region.name,
                 track_name_hint,
-                clip: LogicClip {
-                    position_beats,
-                    length_beats,
-                    kind: ClipKind::Audio { file_path },
-                },
+                file_path,
+                duration_beats,
             })
         })
         .collect()
 }
 
-/// Attach pending clips to matching tracks by name.
+/// Try to match an audio MSeq name to a pool entry and build a clip.
 ///
-/// If no track matches, clips are dropped (we don't yet have the track↔region
-/// mapping from the Trak/MSeq chunks).
-fn attach_audio_clips(tracks: &mut Vec<LogicTrack>, clips: Vec<PendingClip>) {
+/// Audio MSeq names (e.g. "FileDecrypt") don't necessarily match pool entry
+/// names (e.g. "Audio Track 1 #01").  We fall back to the first pool entry
+/// on the matching track, or produce a clip with no file path.
+fn make_audio_clip(
+    clip_name: &str,
+    position_beats: f64,
+    pool: &[AudioPoolEntry],
+) -> Option<PendingClip> {
+    // First try: exact match on pool entry name.
+    if let Some(entry) = pool.iter().find(|e| e.name == clip_name) {
+        return Some(PendingClip {
+            name: clip_name.to_owned(),
+            position_beats,
+            kind: ClipKind::Audio {
+                file_path: entry.file_path.clone(),
+            },
+            length_beats: entry.duration_beats,
+        });
+    }
+
+    // Second try: match on track name hint (pool entries share a track prefix).
+    if let Some(entry) = pool.iter().find(|e| e.track_name_hint == clip_name) {
+        return Some(PendingClip {
+            name: clip_name.to_owned(),
+            position_beats,
+            kind: ClipKind::Audio {
+                file_path: entry.file_path.clone(),
+            },
+            length_beats: entry.duration_beats,
+        });
+    }
+
+    // Fallback: produce a clip with the name but no file reference.
+    Some(PendingClip {
+        name: clip_name.to_owned(),
+        position_beats,
+        kind: ClipKind::Audio { file_path: None },
+        length_beats: 0.0,
+    })
+}
+
+// ── Clip → Track attachment ───────────────────────────────────────────────────
+
+fn attach_clips_to_tracks(tracks: &mut Vec<LogicTrack>, clips: Vec<PendingClip>) {
     for pending in clips {
-        if let Some(track) = tracks
-            .iter_mut()
-            .find(|t| t.name == pending.track_name_hint)
-        {
-            track.clips.push(pending.clip);
+        // Find a track whose name matches the clip name or a name prefix hint.
+        let track_name = match &pending.kind {
+            ClipKind::Audio { .. } => {
+                // Try the clip name directly first (e.g. "FileDecrypt" on the
+                // "Audio Track 1" track).  If that fails, look for any audio track.
+                pending.name.clone()
+            }
+            ClipKind::Midi { .. } => pending.name.clone(),
+            _ => pending.name.clone(),
+        };
+
+        let clip = LogicClip {
+            position_beats: pending.position_beats,
+            length_beats: pending.length_beats,
+            kind: pending.kind,
+        };
+
+        if let Some(track) = tracks.iter_mut().find(|t| t.name == track_name) {
+            track.clips.push(clip);
         }
+        // If no matching track, the clip is dropped — we don't yet have the
+        // full track↔region mapping from the binary.
     }
 }
 
@@ -146,13 +401,6 @@ fn attach_audio_clips(tracks: &mut Vec<LogicTrack>, clips: Vec<PendingClip>) {
 // `ivnE` (Envi) chunks represent mixer objects: tracks, buses, aux sends,
 // the master, etc.  Each chunk carries a name string that is the user-visible
 // label for that mixer channel.
-//
-// From reverse-engineering with the cigol scripts, the name appears as a
-// null-terminated or length-prefixed ASCII string somewhere in the payload.
-// We use a heuristic: scan for the longest printable-ASCII run that looks
-// like a name (no control chars, not all whitespace).
-
-const TAG_ENVI: [u8; 4] = *b"ivnE";
 
 fn extract_tracks_and_groups(chunks: &[LogicChunk]) -> (Vec<LogicTrack>, Vec<LogicSummingGroup>) {
     let mut tracks = Vec::new();
@@ -173,27 +421,23 @@ fn extract_tracks_and_groups(chunks: &[LogicChunk]) -> (Vec<LogicTrack>, Vec<Log
                     member_names: child_hint.into_iter().collect(),
                 });
             }
-            EnviKind::SystemChannel => {
-                // Skip internal channels (Click, Stereo Out, Master, etc.)
-                // unless we later decide to expose them.
-            }
+            EnviKind::SystemChannel => {}
             EnviKind::Track(track_kind) => {
                 tracks.push(LogicTrack {
                     name,
                     kind: track_kind,
-                    channel: 0,     // TODO: parse channel index from payload
-                    fader_db: None, // TODO: parse from payload using cigol formula
+                    channel: 0,
+                    fader_db: None,
                     muted: false,
                     soloed: false,
-                    parent_group: None, // TODO: link via summing group membership
-                    clips: Vec::new(),  // TODO: parse from Trak/EvSq chunks
+                    parent_group: None,
+                    clips: Vec::new(),
                 });
             }
         }
     }
 
     tracks.retain(|t| !t.name.is_empty());
-
     (tracks, summing_groups)
 }
 
@@ -204,11 +448,9 @@ enum EnviKind {
     SystemChannel,
 }
 
-/// Classify an Envi channel by its name.
 fn classify_envi_channel(name: &str) -> EnviKind {
     let lower = name.to_ascii_lowercase();
 
-    // Known system channels
     if matches!(
         lower.as_str(),
         "stereo out"
@@ -226,13 +468,10 @@ fn classify_envi_channel(name: &str) -> EnviKind {
         return EnviKind::SystemChannel;
     }
 
-    // Summing group heuristics (Logic names them with "Sum" or they have a
-    // "Child of" hint embedded in the payload alongside the name)
     if lower.contains("sum") || lower.contains("group") || lower.contains("indented") {
         return EnviKind::SummingGroup { child_hint: None };
     }
 
-    // Track kind by name convention
     if lower.contains("audio") {
         return EnviKind::Track(TrackKind::Audio);
     }
@@ -243,22 +482,16 @@ fn classify_envi_channel(name: &str) -> EnviKind {
         return EnviKind::Track(TrackKind::Aux);
     }
 
-    // Default: treat unknown named channels as audio tracks
     EnviKind::Track(TrackKind::Audio)
 }
 
 /// Heuristically extract a human-readable name from an `ivnE` payload.
-///
-/// Logic stores names as Pascal strings (1-byte length prefix) or as
-/// null-terminated strings at various offsets.  We scan for the longest
-/// printable-ASCII run that plausibly looks like a channel name.
 fn extract_name_from_envi(data: &[u8]) -> String {
     if data.is_empty() {
         return String::new();
     }
 
-    // Strategy 1: Pascal string at the start (common in Logic environments).
-    // First byte = length, followed by that many ASCII bytes.
+    // Strategy 1: Pascal string at the start.
     {
         let len = data[0] as usize;
         if len > 0 && len < 64 && data.len() > len {
@@ -269,8 +502,7 @@ fn extract_name_from_envi(data: &[u8]) -> String {
         }
     }
 
-    // Strategy 2: scan for a null-terminated printable ASCII string of
-    // length 3–64 anywhere in the payload.
+    // Strategy 2: scan for longest printable-ASCII run.
     let mut best: &[u8] = &[];
     let mut i = 0;
     while i < data.len() {
