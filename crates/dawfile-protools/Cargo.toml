@@ -1,0 +1,17 @@
+[package]
+name = "dawfile-protools"
+version = "0.1.0"
+edition = "2024"
+description = "Pro Tools session file parser (.ptf, .ptx, .pts) — pure Rust, no C dependencies"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+thiserror = { workspace = true }
+
+# Domain types for conversion to daw-proto
+daw-proto = { path = "../daw-proto" }
+
+[dev-dependencies]
+
+[lints]
+workspace = true
