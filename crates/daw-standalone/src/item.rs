@@ -116,6 +116,7 @@ impl TakeState {
             preserve_pitch: self.preserve_pitch,
             start_offset: Duration::ZERO,
             source_type: daw_proto::item::SourceType::Empty,
+            source_file_path: None,
             source_length: None,
             source_sample_rate: None,
             source_channels: None,

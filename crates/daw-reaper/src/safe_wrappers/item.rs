@@ -266,3 +266,22 @@ pub fn get_take_source(
 ) -> Option<reaper_medium::PcmSource> {
     unsafe { medium.get_media_item_take_source(take) }
 }
+
+/// Get the source file path for a take (returns None for MIDI/empty takes).
+pub fn get_take_source_file_path(
+    medium: &reaper_medium::Reaper,
+    take: MediaItemTake,
+) -> Option<String> {
+    let source = unsafe { medium.get_media_item_take_source(take)? };
+    let low = medium.low();
+    let mut buf = vec![0u8; 4096];
+    unsafe {
+        low.GetMediaSourceFileName(
+            source.as_ptr(),
+            buf.as_mut_ptr() as *mut i8,
+            buf.len() as i32,
+        );
+    }
+    let path = super::buffer::string_from_buffer(&buf);
+    if path.is_empty() { None } else { Some(path) }
+}

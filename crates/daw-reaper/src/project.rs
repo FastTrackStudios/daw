@@ -593,6 +593,92 @@ impl ProjectService for ReaperProject {
     }
 
     // =========================================================================
+    // Project Info
+    // =========================================================================
+
+    async fn get_project_info_string(
+        &self,
+        project: daw_proto::ProjectContext,
+        key: String,
+    ) -> String {
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let low = reaper.medium_reaper().low();
+            let proj_ctx = match resolve_project(&project) {
+                Some(p) => ProjectContext::Proj(p.raw()),
+                None => ProjectContext::CurrentProject,
+            };
+            let key_cstr = std::ffi::CString::new(key).unwrap_or_default();
+            let mut buf = [0u8; 4096];
+            let buf_ptr = buf.as_mut_ptr() as *mut std::ffi::c_char;
+            unsafe {
+                low.GetSetProjectInfo_String(proj_ctx.to_raw(), key_cstr.as_ptr(), buf_ptr, false);
+                std::ffi::CStr::from_ptr(buf_ptr)
+                    .to_string_lossy()
+                    .to_string()
+            }
+        })
+        .await
+        .unwrap_or_default()
+    }
+
+    async fn set_project_info_string(
+        &self,
+        project: daw_proto::ProjectContext,
+        key: String,
+        value: String,
+    ) {
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let low = reaper.medium_reaper().low();
+            let proj_ctx = match resolve_project(&project) {
+                Some(p) => ProjectContext::Proj(p.raw()),
+                None => ProjectContext::CurrentProject,
+            };
+            let key_cstr = std::ffi::CString::new(key).unwrap_or_default();
+            let value_cstr = std::ffi::CString::new(value).unwrap_or_default();
+            unsafe {
+                low.GetSetProjectInfo_String(
+                    proj_ctx.to_raw(),
+                    key_cstr.as_ptr(),
+                    value_cstr.as_ptr() as *mut _,
+                    true,
+                );
+            }
+        });
+    }
+
+    async fn get_project_info(&self, project: daw_proto::ProjectContext, key: String) -> f64 {
+        main_thread::query(move || {
+            let reaper = Reaper::get();
+            let low = reaper.medium_reaper().low();
+            let proj_ptr = match resolve_project(&project) {
+                Some(p) => p.raw().as_ptr(),
+                None => reaper.current_project().raw().as_ptr(),
+            };
+            let key_cstr = std::ffi::CString::new(key).unwrap_or_default();
+            unsafe { low.GetSetProjectInfo(proj_ptr, key_cstr.as_ptr(), 0.0, false) }
+        })
+        .await
+        .unwrap_or(0.0)
+    }
+
+    async fn set_project_info(&self, project: daw_proto::ProjectContext, key: String, value: f64) {
+        main_thread::run(move || {
+            let reaper = Reaper::get();
+            let low = reaper.medium_reaper().low();
+            let proj_ptr = match resolve_project(&project) {
+                Some(p) => p.raw().as_ptr(),
+                None => reaper.current_project().raw().as_ptr(),
+            };
+            let key_cstr = std::ffi::CString::new(key).unwrap_or_default();
+            unsafe {
+                low.GetSetProjectInfo(proj_ptr, key_cstr.as_ptr(), value, true);
+            }
+        });
+    }
+
+    // =========================================================================
     // Ruler Lane Management (v7.62+)
     // =========================================================================
 

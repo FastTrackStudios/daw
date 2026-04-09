@@ -208,3 +208,40 @@ pub fn register_internal_timer(callback: fn()) {
 }
 
 static USER_TIMER_CALLBACKS: std::sync::Mutex<Vec<fn()>> = std::sync::Mutex::new(Vec::new());
+
+// ── Extension DAW initialization ─────────────────────────────────────────────
+
+/// Create an in-process `Daw` for a standalone REAPER extension.
+///
+/// Unlike [`create_plugin_daw`] (which bootstraps REAPER from a CLAP host
+/// pointer), this function assumes REAPER is already initialized — i.e. you
+/// are inside a `#[reaper_extension_plugin]` entry point and have already
+/// called:
+///
+/// ```rust,ignore
+/// HighReaper::load(context).setup()?;
+/// daw::reaper::set_task_support(&task_support);
+/// ```
+///
+/// It wires all REAPER service implementations into a [`LocalCaller`]
+/// (in-process vox memory channels) and returns the standard async [`Daw`]
+/// handle. No SHM, no sockets, no dependency on daw-bridge.
+///
+/// The `LocalCaller` server task is leaked so it lives for the process
+/// lifetime — call this once per extension.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // Inside plugin_main / extension entry:
+/// let daw = tokio_runtime.block_on(daw::reaper::build_extension_daw())?;
+/// ```
+pub async fn build_extension_daw() -> eyre::Result<Daw> {
+    let handler = crate::plugin_services::create_daw_handler();
+    let local = LocalCaller::new(handler).await?;
+    let caller = local.erased_caller();
+    // Leak LocalCaller to keep the server-side moire task alive for the
+    // process lifetime. The extension owns the process — this is intentional.
+    let _ = Box::leak(Box::new(local));
+    Ok(Daw::new(caller))
+}

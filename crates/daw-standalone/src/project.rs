@@ -235,6 +235,34 @@ impl ProjectService for StandaloneProject {
         0
     }
 
+    async fn get_project_info_string(
+        &self,
+        _project: daw_proto::ProjectContext,
+        _key: String,
+    ) -> String {
+        String::new()
+    }
+
+    async fn set_project_info_string(
+        &self,
+        _project: daw_proto::ProjectContext,
+        _key: String,
+        _value: String,
+    ) {
+    }
+
+    async fn get_project_info(&self, _project: daw_proto::ProjectContext, _key: String) -> f64 {
+        0.0
+    }
+
+    async fn set_project_info(
+        &self,
+        _project: daw_proto::ProjectContext,
+        _key: String,
+        _value: f64,
+    ) {
+    }
+
     async fn subscribe(&self, _tx: Tx<ProjectEvent>) {
         #[cfg(not(target_arch = "wasm32"))]
         {

@@ -63,6 +63,15 @@ pub(crate) fn registered_actions() -> &'static Mutex<HashMap<String, u32>> {
     REGISTERED_ACTIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Subscribe directly to action trigger broadcasts.
+///
+/// Returns a receiver that yields command names whenever an action is triggered.
+/// Useful for in-process extensions (LocalCaller) that want to avoid the vox
+/// streaming round-trip.
+pub fn subscribe_action_broadcasts() -> broadcast::Receiver<String> {
+    action_broadcaster().subscribe()
+}
+
 fn action_broadcaster() -> &'static broadcast::Sender<String> {
     ACTION_BROADCASTER.get_or_init(|| {
         let (tx, _rx) = broadcast::channel::<String>(64);

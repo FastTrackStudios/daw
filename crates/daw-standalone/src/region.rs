@@ -405,6 +405,16 @@ impl RegionService for StandaloneRegion {
             .collect()
     }
 
+    async fn set_region_render_matrix(
+        &self,
+        _project: ProjectContext,
+        _region_id: u32,
+        _track_index: u32,
+        _enable: bool,
+    ) {
+        // Standalone stub — no render matrix support
+    }
+
     async fn goto_region_start(&self, project: ProjectContext, id: u32) {
         let mut state = self.state.write().await;
         if let Some(proj_id) = project_id(&project)

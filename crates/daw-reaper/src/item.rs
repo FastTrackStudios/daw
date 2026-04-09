@@ -1200,7 +1200,7 @@ impl ReaperTake {
         let start_offset = item_sw::get_take_info_value(medium, take, TakeAttributeKey::StartOffs);
 
         // Get source info
-        // TODO: Implement proper source inspection using low-level API
+        let source_file_path = item_sw::get_take_source_file_path(medium, take);
         let source = item_sw::get_take_source(medium, take);
         let (source_type, source_length, source_sample_rate, source_channels, is_midi) =
             if source.is_some() {
@@ -1230,6 +1230,7 @@ impl ReaperTake {
             preserve_pitch,
             start_offset: Duration::from_seconds(start_offset),
             source_type,
+            source_file_path,
             source_length,
             source_sample_rate,
             source_channels,

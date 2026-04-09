@@ -68,7 +68,9 @@ pub mod transport;
 pub mod ui;
 
 // Re-export the main types
-pub use action_registry::{ReaperActionRegistry, register_extension_menu};
+pub use action_registry::{
+    ReaperActionRegistry, register_extension_menu, subscribe_action_broadcasts,
+};
 pub use audio_accessor::ReaperAudioAccessor;
 pub use audio_engine::ReaperAudioEngine;
 pub use automation::ReaperAutomation;
@@ -113,3 +115,6 @@ pub use routing::{init_routing_broadcaster, poll_and_broadcast_routing};
 
 // Re-export toolbar deferred ops processor
 pub use toolbar::process_deferred_ops as process_toolbar_ops;
+
+// Re-export extension bootstrap convenience
+pub use bootstrap::build_extension_daw;

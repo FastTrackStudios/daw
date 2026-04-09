@@ -316,6 +316,42 @@ impl RegionService for ReaperRegion {
             .collect()
     }
 
+    async fn set_region_render_matrix(
+        &self,
+        _project: ProjectContext,
+        region_id: u32,
+        track_index: u32,
+        enable: bool,
+    ) {
+        debug!(
+            "ReaperRegion: set_region_render_matrix region={} track_index={} enable={}",
+            region_id, track_index, enable
+        );
+        main_thread::run(move || {
+            let reaper = reaper_high::Reaper::get();
+            let medium = reaper.medium_reaper();
+            let low = medium.low();
+            let proj_ctx = ReaperProjectContext::CurrentProject;
+
+            let track = medium.get_track(proj_ctx, track_index);
+            let track_ptr = match track {
+                Some(t) => t.as_ptr(),
+                None => {
+                    debug!(
+                        "set_region_render_matrix: no track at index {}",
+                        track_index
+                    );
+                    return;
+                }
+            };
+
+            let flag = if enable { 1 } else { 0 };
+            unsafe {
+                low.SetRegionRenderMatrix(proj_ctx.to_raw(), region_id as i32, track_ptr, flag);
+            }
+        });
+    }
+
     async fn goto_region_start(&self, _project: ProjectContext, id: u32) {
         debug!("ReaperRegion: goto_region_start {}", id);
         main_thread::run(move || {
