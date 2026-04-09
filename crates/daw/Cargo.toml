@@ -18,6 +18,7 @@ daw-control-sync = { path = "../daw-control-sync", optional = true }
 daw-reaper = { path = "../daw-reaper", optional = true }
 daw-standalone = { path = "../daw-standalone", optional = true }
 dawfile-reaper = { path = "../dawfile-reaper", optional = true }
+dawfile-ableton = { path = "../dawfile-ableton", optional = true }
 
 [features]
 sync = ["dep:daw-control-sync"]
@@ -25,4 +26,4 @@ reaper = ["dep:daw-reaper"]
 standalone = ["dep:daw-standalone"]
 standalone-audio = ["standalone", "daw-standalone/audio"]
 standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
-file = ["dep:dawfile-reaper"]
+file = ["dep:dawfile-reaper", "dep:dawfile-ableton"]
