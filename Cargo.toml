@@ -8,6 +8,7 @@ members = [
     "crates/daw-proto",
     "crates/daw-reaper",
     "crates/daw-standalone",
+    "crates/daw-audio-graph",
     "crates/dawfile-reaper",
     "crates/dawfile-protools",
     "crates/dawfile-ableton",
