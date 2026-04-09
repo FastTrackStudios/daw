@@ -9,6 +9,9 @@ members = [
     "crates/daw-reaper",
     "crates/daw-standalone",
     "crates/dawfile-reaper",
+    "crates/dawfile-protools",
+    "crates/dawfile-ableton",
+    "crates/dawfile-dawproject",
     "crates/daw-ui",
     "crates/reaper-test",
     "crates/reaper-test-macro",
@@ -133,6 +136,24 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # dawfile-reaper = { path = "crates/dawfile-reaper" }
 
 # ── Vendored patches ──────────────────────────────────────────────────
+# Redirect bearcove/vox.git transitive deps to the FTS fork (fixes noisy eprintln! debug logs).
+[patch."https://github.com/bearcove/vox.git"]
+vox = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-types = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-postcard = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-stream = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-websocket = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-shm = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-schema = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-service-macros = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-macros-core = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-macros-parse = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-codegen = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+vox-inprocess = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+shm-primitives = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+facet-cbor = { git = "https://github.com/Codys-Wright/vox.git", rev = "2a2f793b" }
+
 # moire: FTS fork — tolerates broken frame-pointer chains on NixOS glibc.
 # All moire crates must point to the same fork rev to avoid duplicate
 # moire-runtime #[ctor] registrations that crash CLAP plugin scanning.
