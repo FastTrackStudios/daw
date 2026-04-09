@@ -44,6 +44,7 @@ fn parse_channel(node: Node<'_, '_>) -> Channel {
         .unwrap_or(ChannelRole::Regular);
     let audio_channels = attr_u32(node, "audioChannels", 2);
     let destination = attr(node, "destination").map(str::to_string);
+    let blend_mode = attr(node, "blendMode").map(str::to_string);
     let solo = attr_bool(node, "solo", false);
 
     let volume = child(node, "Volume")
@@ -66,6 +67,7 @@ fn parse_channel(node: Node<'_, '_>) -> Channel {
         role,
         audio_channels,
         destination,
+        blend_mode,
         volume,
         pan,
         muted,

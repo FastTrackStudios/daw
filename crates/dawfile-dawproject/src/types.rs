@@ -154,6 +154,8 @@ pub struct Channel {
     pub audio_channels: u32,
     /// IDREF to the destination channel (master/bus this feeds into).
     pub destination: Option<String>,
+    /// Blend mode for this channel (e.g. "normal", "multiply").
+    pub blend_mode: Option<String>,
     /// Volume (linear amplitude: 1.0 = 0 dB).
     pub volume: f64,
     /// Pan (-1.0 = full left, 0.0 = center, 1.0 = full right).
@@ -175,6 +177,7 @@ impl Default for Channel {
             role: ChannelRole::Regular,
             audio_channels: 2,
             destination: None,
+            blend_mode: None,
             volume: 1.0,
             pan: 0.0,
             muted: false,
@@ -245,6 +248,8 @@ pub struct Device {
     pub format: DeviceFormat,
     /// Functional role of this device in the signal chain.
     pub device_role: Option<DeviceRole>,
+    /// Format-specific plugin identifier (VST2 integer, VST3 GUID, CLAP domain-reverse ID).
+    pub plugin_id: Option<String>,
     /// Plugin file path (for external plugins).
     pub plugin_path: Option<PathBuf>,
     /// Whether the device is enabled (not bypassed).
@@ -264,7 +269,16 @@ pub enum DeviceFormat {
     Vst3,
     Clap,
     Au,
+    /// Generic built-in device (tag: `BuiltinDevice`).
     Builtin,
+    /// Built-in equalizer (tag: `Equalizer`).
+    Equalizer,
+    /// Built-in compressor (tag: `Compressor`).
+    Compressor,
+    /// Built-in limiter (tag: `Limiter`).
+    Limiter,
+    /// Built-in noise gate (tag: `NoiseGate`).
+    NoiseGate,
     Unknown,
 }
 
@@ -440,10 +454,10 @@ pub struct Clip {
     pub color: Option<String>,
     /// Annotation / comment text.
     pub comment: Option<String>,
-    /// Fade-in length.
-    pub fade_in: Option<f64>,
-    /// Fade-out length.
-    pub fade_out: Option<f64>,
+    /// Fade-in parameters.
+    pub fade_in: Option<Fade>,
+    /// Fade-out parameters.
+    pub fade_out: Option<Fade>,
     /// Whether this clip is active (false = muted/disabled).
     pub enabled: bool,
     /// Playback start offset inside the clip's content.
@@ -456,6 +470,51 @@ pub struct Clip {
     pub loop_settings: Option<LoopSettings>,
     /// Clip content.
     pub content: ClipContent,
+}
+
+/// Fade-in or fade-out envelope on a clip.
+#[derive(Debug, Clone, Copy)]
+pub struct Fade {
+    /// Fade duration (in the clip's time unit).
+    pub time: f64,
+    /// Shape of the fade curve.
+    pub curve: FadeCurve,
+}
+
+/// Curve shape for clip fades.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FadeCurve {
+    #[default]
+    Linear,
+    ScaledLinear,
+    InversedParabolic,
+    Parabolic,
+    Logarithmic,
+    LowPass,
+}
+
+impl FadeCurve {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "scaleLinear" => Self::ScaledLinear,
+            "inversedParabolic" => Self::InversedParabolic,
+            "parabolic" => Self::Parabolic,
+            "logarithmic" => Self::Logarithmic,
+            "lowPass" => Self::LowPass,
+            _ => Self::Linear,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Linear => "linear",
+            Self::ScaledLinear => "scaleLinear",
+            Self::InversedParabolic => "inversedParabolic",
+            Self::Parabolic => "parabolic",
+            Self::Logarithmic => "logarithmic",
+            Self::LowPass => "lowPass",
+        }
+    }
 }
 
 /// Loop settings for a clip.
@@ -671,12 +730,18 @@ pub struct AutomationPoint {
 pub enum Interpolation {
     Hold,
     Linear,
+    /// Smooth cubic spline interpolation.
+    Cubic,
+    /// Instant jump to the next value (step/staircase).
+    Jump,
 }
 
 impl Interpolation {
     pub fn from_str(s: &str) -> Self {
         match s {
             "linear" => Self::Linear,
+            "cubic" => Self::Cubic,
+            "jump" => Self::Jump,
             _ => Self::Hold,
         }
     }
@@ -685,6 +750,8 @@ impl Interpolation {
         match self {
             Self::Linear => "linear",
             Self::Hold => "hold",
+            Self::Cubic => "cubic",
+            Self::Jump => "jump",
         }
     }
 }
@@ -698,6 +765,8 @@ pub struct Scene {
     pub name: Option<String>,
     pub color: Option<String>,
     pub comment: Option<String>,
+    /// Optional tempo override for this scene (BPM).
+    pub tempo: Option<f64>,
     pub slots: Vec<ClipSlot>,
 }
 
@@ -706,6 +775,10 @@ pub struct Scene {
 pub struct ClipSlot {
     pub id: String,
     pub has_stop: bool,
+    /// Timeline position for sync-grid placement.
+    pub time: Option<f64>,
+    /// Duration for sync-grid placement.
+    pub duration: Option<f64>,
     pub clip: Option<Clip>,
 }
 

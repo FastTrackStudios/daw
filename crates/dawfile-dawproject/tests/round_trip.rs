@@ -2,9 +2,9 @@
 
 use dawfile_dawproject::{
     Application, Arrangement, AutomationPoint, AutomationPoints, AutomationTarget, Channel,
-    ChannelRole, Clip, ClipContent, ContentType, DawProject, ExpressionType, Interpolation, Lane,
-    LaneContent, Marker, Note, ProjectMetadata, Scene, Send, TempoPoint, TimeSignaturePoint,
-    TimeUnit, Track, Transport, feature_support,
+    ChannelRole, Clip, ClipContent, ContentType, DawProject, ExpressionType, Fade, FadeCurve,
+    Interpolation, Lane, LaneContent, Marker, Note, ProjectMetadata, Scene, Send, TempoPoint,
+    TimeSignaturePoint, TimeUnit, Track, Transport, feature_support,
 };
 
 fn minimal_project() -> DawProject {
@@ -37,6 +37,7 @@ fn minimal_project() -> DawProject {
                     role: ChannelRole::Regular,
                     audio_channels: 2,
                     destination: Some("ch-master".to_string()),
+                    blend_mode: None,
                     volume: 0.8,
                     pan: -0.25,
                     muted: false,
@@ -64,6 +65,7 @@ fn minimal_project() -> DawProject {
                     role: ChannelRole::Master,
                     audio_channels: 2,
                     destination: None,
+                    blend_mode: None,
                     volume: 1.0,
                     pan: 0.0,
                     muted: false,
@@ -95,8 +97,14 @@ fn minimal_project() -> DawProject {
                         play_start: Some(0.5),
                         play_stop: Some(3.5),
                         reference: None,
-                        fade_in: None,
-                        fade_out: None,
+                        fade_in: Some(Fade {
+                            time: 0.25,
+                            curve: FadeCurve::Logarithmic,
+                        }),
+                        fade_out: Some(Fade {
+                            time: 0.5,
+                            curve: FadeCurve::Linear,
+                        }),
                         loop_settings: None,
                         content: ClipContent::Notes(vec![
                             Note {
@@ -202,6 +210,7 @@ fn minimal_project() -> DawProject {
             name: Some("Verse".to_string()),
             color: None,
             comment: Some("first verse".to_string()),
+            tempo: Some(128.0),
             slots: vec![],
         }],
     }
@@ -259,6 +268,12 @@ fn round_trip_minimal() {
         assert!(clip.enabled);
         assert!((clip.play_start.unwrap() - 0.5).abs() < 0.001);
         assert!((clip.play_stop.unwrap() - 3.5).abs() < 0.001);
+        let fi = clip.fade_in.unwrap();
+        assert!((fi.time - 0.25).abs() < 0.001);
+        assert_eq!(fi.curve, FadeCurve::Logarithmic);
+        let fo = clip.fade_out.unwrap();
+        assert!((fo.time - 0.5).abs() < 0.001);
+        assert_eq!(fo.curve, FadeCurve::Linear);
         if let ClipContent::Notes(notes) = &clip.content {
             assert_eq!(notes.len(), 2);
             assert_eq!(notes[1].key, 43);
@@ -310,6 +325,7 @@ fn round_trip_minimal() {
     // Scenes
     assert_eq!(restored.scenes.len(), 1);
     assert_eq!(restored.scenes[0].comment.as_deref(), Some("first verse"));
+    assert!((restored.scenes[0].tempo.unwrap() - 128.0).abs() < 0.001);
 }
 
 #[test]

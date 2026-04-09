@@ -136,6 +136,11 @@ fn write_channel(w: &mut XmlWriter, ch: &Channel) {
         dest_s = d.clone();
         attrs.push(("destination", &dest_s));
     }
+    let blend_s;
+    if let Some(b) = &ch.blend_mode {
+        blend_s = b.clone();
+        attrs.push(("blendMode", &blend_s));
+    }
     if ch.solo {
         attrs.push(("solo", "true"));
     }
@@ -192,6 +197,10 @@ fn write_device(w: &mut XmlWriter, device: &Device) {
         DeviceFormat::Vst3 => "Vst3Plugin",
         DeviceFormat::Clap => "ClapPlugin",
         DeviceFormat::Au => "AuPlugin",
+        DeviceFormat::Equalizer => "Equalizer",
+        DeviceFormat::Compressor => "Compressor",
+        DeviceFormat::Limiter => "Limiter",
+        DeviceFormat::NoiseGate => "NoiseGate",
         DeviceFormat::Builtin | DeviceFormat::Unknown => "BuiltinDevice",
     };
 
@@ -201,6 +210,11 @@ fn write_device(w: &mut XmlWriter, device: &Device) {
     if let Some(role) = &device.device_role {
         role_s = role.as_str();
         attrs.push(("deviceRole", role_s));
+    }
+    let plugin_id_s;
+    if let Some(pid) = &device.plugin_id {
+        plugin_id_s = pid.clone();
+        attrs.push(("pluginId", &plugin_id_s));
     }
     let path_s;
     if let Some(path) = &device.plugin_path {
@@ -521,18 +535,16 @@ fn write_clip(w: &mut XmlWriter, clip: &Clip) {
         ref_s = r.clone();
         attrs.push(("reference", &ref_s));
     }
-    let fi_s;
-    if let Some(fi) = clip.fade_in {
-        fi_s = format!("{fi:.6}");
-        attrs.push(("fadeInTime", &fi_s));
-    }
-    let fo_s;
-    if let Some(fo) = clip.fade_out {
-        fo_s = format!("{fo:.6}");
-        attrs.push(("fadeOutTime", &fo_s));
-    }
-
     w.open("Clip", &attrs);
+
+    if let Some(fi) = clip.fade_in {
+        let t = format!("{:.6}", fi.time);
+        w.empty("FadeIn", &[("time", &t), ("curve", fi.curve.as_str())]);
+    }
+    if let Some(fo) = clip.fade_out {
+        let t = format!("{:.6}", fo.time);
+        w.empty("FadeOut", &[("time", &t), ("curve", fo.curve.as_str())]);
+    }
 
     if let Some(ls) = &clip.loop_settings {
         let ls_s = format!("{:.6}", ls.loop_start);
@@ -702,12 +714,29 @@ fn write_scene(w: &mut XmlWriter, scene: &Scene) {
         comment_s = c.clone();
         attrs.push(("comment", &comment_s));
     }
+    let tempo_s;
+    if let Some(t) = scene.tempo {
+        tempo_s = format!("{t:.6}");
+        attrs.push(("tempo", &tempo_s));
+    }
     w.open("Scene", &attrs);
     if !scene.slots.is_empty() {
         w.wrap("Slots", &[], |w| {
             for slot in &scene.slots {
                 let has_stop = if slot.has_stop { "true" } else { "false" };
-                w.open("ClipSlot", &[("id", &slot.id), ("hasStop", has_stop)]);
+                let mut slot_attrs: Vec<(&str, &str)> =
+                    vec![("id", &slot.id), ("hasStop", has_stop)];
+                let time_s;
+                if let Some(t) = slot.time {
+                    time_s = format!("{t:.6}");
+                    slot_attrs.push(("time", &time_s));
+                }
+                let dur_s;
+                if let Some(d) = slot.duration {
+                    dur_s = format!("{d:.6}");
+                    slot_attrs.push(("duration", &dur_s));
+                }
+                w.open("ClipSlot", &slot_attrs);
                 if let Some(clip) = &slot.clip {
                     write_clip(w, clip);
                 }

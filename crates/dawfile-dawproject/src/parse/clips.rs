@@ -2,8 +2,8 @@
 
 use super::xml_helpers::*;
 use crate::types::{
-    AudioContent, Clip, ClipContent, ClipSlot, LoopSettings, Marker, Note, Scene, TimeUnit,
-    VideoContent, Warp,
+    AudioContent, Clip, ClipContent, ClipSlot, Fade, FadeCurve, LoopSettings, Marker, Note, Scene,
+    TimeUnit, VideoContent, Warp,
 };
 use roxmltree::Node;
 
@@ -25,8 +25,8 @@ pub fn parse_clip(node: Node<'_, '_>) -> Clip {
     let play_start = attr(node, "playStart").and_then(|v| v.parse().ok());
     let play_stop = attr(node, "playStop").and_then(|v| v.parse().ok());
     let reference = attr(node, "reference").map(str::to_string);
-    let fade_in = attr(node, "fadeInTime").and_then(|v| v.parse().ok());
-    let fade_out = attr(node, "fadeOutTime").and_then(|v| v.parse().ok());
+    let fade_in = parse_fade(node, "FadeIn", "fadeInTime");
+    let fade_out = parse_fade(node, "FadeOut", "fadeOutTime");
     let loop_settings = parse_loop(node);
     let content = parse_clip_content(node);
 
@@ -48,6 +48,25 @@ pub fn parse_clip(node: Node<'_, '_>) -> Clip {
         loop_settings,
         content,
     }
+}
+
+/// Parse a `<FadeIn>` or `<FadeOut>` child element, falling back to a bare
+/// duration attribute (e.g. `fadeInTime`) for compatibility with older exports.
+fn parse_fade(node: Node<'_, '_>, child_tag: &str, fallback_attr: &str) -> Option<Fade> {
+    if let Some(child_node) = child(node, child_tag) {
+        let time = attr_f64(child_node, "time", 0.0);
+        let curve = attr(child_node, "curve")
+            .map(FadeCurve::from_str)
+            .unwrap_or_default();
+        return Some(Fade { time, curve });
+    }
+    // Legacy flat attribute form
+    attr(node, fallback_attr)
+        .and_then(|v| v.parse::<f64>().ok())
+        .map(|time| Fade {
+            time,
+            curve: FadeCurve::Linear,
+        })
 }
 
 fn parse_loop(node: Node<'_, '_>) -> Option<LoopSettings> {
@@ -147,6 +166,7 @@ fn parse_scene(node: Node<'_, '_>) -> Scene {
     let name = attr(node, "name").map(str::to_string);
     let color = attr(node, "color").map(str::to_string);
     let comment = attr(node, "comment").map(str::to_string);
+    let tempo = attr(node, "tempo").and_then(|v| v.parse().ok());
     let slots = child(node, "Slots")
         .map(|s| children(s, "ClipSlot").map(parse_clip_slot).collect())
         .unwrap_or_default();
@@ -155,6 +175,7 @@ fn parse_scene(node: Node<'_, '_>) -> Scene {
         name,
         color,
         comment,
+        tempo,
         slots,
     }
 }
@@ -162,8 +183,16 @@ fn parse_scene(node: Node<'_, '_>) -> Scene {
 fn parse_clip_slot(node: Node<'_, '_>) -> ClipSlot {
     let id = attr(node, "id").unwrap_or("").to_string();
     let has_stop = attr_bool(node, "hasStop", false);
+    let time = attr(node, "time").and_then(|v| v.parse().ok());
+    let duration = attr(node, "duration").and_then(|v| v.parse().ok());
     let clip = child(node, "Clip").map(parse_clip);
-    ClipSlot { id, has_stop, clip }
+    ClipSlot {
+        id,
+        has_stop,
+        time,
+        duration,
+        clip,
+    }
 }
 
 pub fn parse_marker(node: Node<'_, '_>) -> Marker {
