@@ -2,7 +2,7 @@
 
 A Rust workspace for parsing, modeling, and rendering musical charts. Keyflow provides a text-based chart format (`.kf`), a rich data model for chord progressions, lyrics, melodies, and time—and a GPU-accelerated engraving pipeline that outputs PDF, SVG, or interactive previews.
 
-Part of the [FastTrack Studio](https://github.com/nicholasgasior/fasttrack-studio) ecosystem.
+Part of the [FastTrackStudio](https://github.com/FastTrackStudios/FastTrackStudio) ecosystem.
 
 ## The `.kf` Format
 
@@ -134,4 +134,4 @@ The test suite covers parsing (basic structure, chords, keys, durations, melodie
 
 ## License
 
-See [LICENSE](LICENSE) for details.
+See [LICENSE.md](./LICENSE.md)
