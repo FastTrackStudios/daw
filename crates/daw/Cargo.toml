@@ -12,6 +12,7 @@ daw-control = { path = "../daw-control" }
 
 # Runtime (needed for block_on in plugin context)
 tokio.workspace = true
+tracing.workspace = true
 
 # Feature-gated internal crates
 daw-control-sync = { path = "../daw-control-sync", optional = true }
