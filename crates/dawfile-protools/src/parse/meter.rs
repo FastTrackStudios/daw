@@ -121,17 +121,93 @@ pub fn parse_meter_events(
 
 /// Parse user-defined markers from the `0x271a` (MarkerList) block.
 ///
-/// Pro Tools stores markers as "Memory Locations". None of the current
-/// fixture files contain user-defined memory locations, so this always
-/// returns an empty Vec until the format is confirmed against a fixture
-/// that has real markers.
+/// ## Block 0x2619 — MarkerEntry layout
+///
+/// ```text
+/// [0..1]         u16   content_type = 0x2619
+/// [2..5]         u32   name_len
+/// [6..6+N]       [u8]  name (N = name_len bytes)
+/// [6+N]          u8    marker_class:
+///                        0x00 = system / built-in (Tempo, Meter, Key Signature, Chord Symbols)
+///                        0x01 = user-defined memory location
+/// [6+N+1]        u8    (unknown, 0x00)
+/// [6+N+2]        u8    (unknown, 0x01)
+/// [6+N+3..6+N+6] [u8;4] zeros
+/// [6+N+7..6+N+10]  u32 = 42 (field-length constant)
+/// [6+N+11..6+N+18] [u8;8] unique record identifier (UID, not a position)
+/// [6+N+19..6+N+22] [u8;4] zeros
+/// [6+N+23..6+N+26] u32 = 42
+/// [6+N+27..6+N+34] [u8;8] same UID (duplicate cross-reference)
+/// [6+N+35..6+N+42] [u8;8] zeros
+/// [6+N+43..6+N+46] u32  sequential_number (1-based order in the session)
+/// ...                    child block (0x4301, all zeros — position encoding TBD)
+/// ```
+///
+/// The tick/sample position encoding in 0x2619 blocks has not been fully
+/// reverse-engineered; `sample_pos` and `tick_pos` are reported as 0.
 pub fn parse_markers(
-    _blocks: &[Block],
-    _cursor: &Cursor<'_>,
+    blocks: &[Block],
+    cursor: &Cursor<'_>,
     _tempo_map: &[TempoSegment],
     _target_sample_rate: u32,
 ) -> Vec<Marker> {
-    Vec::new()
+    let user_marker_container = match find_block_recursive(blocks, ContentType::UserMarkerContainer)
+    {
+        Some(b) => b,
+        None => return Vec::new(),
+    };
+
+    let data = cursor.data();
+    let mut markers = Vec::new();
+    let mut number: u32 = 0;
+
+    for child in &user_marker_container.children {
+        if child.content_type != Some(ContentType::MarkerEntry) {
+            continue;
+        }
+
+        let base = child.offset; // points at content_type field
+
+        // Need at least 6 bytes for content_type(2) + name_len(4)
+        if base + 6 > data.len() {
+            continue;
+        }
+
+        let name_len = u32::from_le_bytes(data[base + 2..base + 6].try_into().unwrap()) as usize;
+        if name_len == 0 || base + 6 + name_len > data.len() {
+            continue;
+        }
+
+        let name = String::from_utf8_lossy(&data[base + 6..base + 6 + name_len]).into_owned();
+
+        // Marker class byte: 0x00 = system/built-in, 0x01 = user-defined
+        let marker_class = data.get(base + 6 + name_len).copied().unwrap_or(0);
+        if marker_class != 0x01 {
+            // Skip system markers (Tempo, Meter, Key Signature, Chord Symbols)
+            continue;
+        }
+
+        number += 1;
+
+        // Try to read the sequential number from the fixed offset.
+        // Formula: offset = 6(ct) + name_len + 43(fixed fields before number)
+        let num_offset = base + 6 + name_len + 43;
+        let seq_number = if num_offset + 4 <= data.len() {
+            u32::from_le_bytes(data[num_offset..num_offset + 4].try_into().unwrap())
+        } else {
+            number
+        };
+
+        markers.push(Marker {
+            name,
+            number: if seq_number > 0 { seq_number } else { number },
+            // Position encoding in 0x2619 blocks is not yet decoded.
+            tick_pos: 0,
+            sample_pos: 0,
+        });
+    }
+
+    markers
 }
 
 fn find_block_recursive<'a>(blocks: &'a [Block], ct: ContentType) -> Option<&'a Block> {

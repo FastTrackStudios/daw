@@ -133,8 +133,10 @@ pub enum ContentType {
     AlternatePlaylistMapAlt = 0x2429,
 
     // ── Markers ─────────────────────────────────────────────────────────
-    /// Marker list
+    /// Marker list (system container: Tempo, Meter, Key Sig, Chord Symbols)
     MarkerList = 0x271a,
+    /// User-defined memory location container (user markers live here)
+    UserMarkerContainer = 0x263b,
 
     // ── Snaps ───────────────────────────────────────────────────────────
     /// Snaps block
@@ -214,6 +216,7 @@ impl ContentType {
             0x2429 => Some(Self::AlternatePlaylistMapAlt),
 
             0x271a => Some(Self::MarkerList),
+            0x263b => Some(Self::UserMarkerContainer),
             0x2511 => Some(Self::SnapsBlock),
 
             0x2028 => Some(Self::TempoBlock),
