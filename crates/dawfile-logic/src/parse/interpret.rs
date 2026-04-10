@@ -271,6 +271,7 @@ struct AudioPoolEntry {
     name: String,              // AuRg region name (e.g. "Audio Track 1 #01")
     track_name_hint: String,   // prefix before " #NN"
     take_number: u8,           // 0 = comp result, ≥1 = recorded take
+    take_number_on_lane: u8,   // 0-based UI lane index within take folder
     source_offset_frames: i32, // source file start in sample frames
     file_path: Option<String>,
     duration_beats: f64,
@@ -322,6 +323,7 @@ fn build_audio_pool(chunks: &[LogicChunk], sample_rate: u32, bpm: f64) -> Vec<Au
                 name: region.name,
                 track_name_hint,
                 take_number: region.take_number,
+                take_number_on_lane: region.take_number_on_lane,
                 source_offset_frames: region.source_offset_frames,
                 file_path,
                 duration_beats,
