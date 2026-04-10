@@ -128,7 +128,8 @@ fn collect_clips(chunks: &[LogicChunk], sample_rate: u32, bpm: f64) -> Vec<Pendi
         while j < chunks.len() {
             match chunks[j].tag {
                 TAG_TRAK => {
-                    if chunks[j].data_len == 58 {
+                    // 58 bytes = FileDecrypt/Logic ≤11.x; 57 bytes = Fire/Logic 12.x.
+                    if chunks[j].data_len >= 57 {
                         has_audio_trak = true;
                     }
                 }
@@ -277,6 +278,8 @@ struct AudioPoolEntry {
     duration_beats: f64,
     comp_start_ticks: i64, // non-zero only for take_number ≥ 1
     comp_end_ticks: i64,
+    uuid: Option<[u8; 16]>,           // RFC 4122 UUID for this region
+    offset_to_take_folder_start: i32, // -1 = not in a take folder
 }
 
 fn build_audio_pool(chunks: &[LogicChunk], sample_rate: u32, bpm: f64) -> Vec<AudioPoolEntry> {
@@ -329,6 +332,8 @@ fn build_audio_pool(chunks: &[LogicChunk], sample_rate: u32, bpm: f64) -> Vec<Au
                 duration_beats,
                 comp_start_ticks: region.start_ticks,
                 comp_end_ticks: region.end_ticks,
+                uuid: region.uuid,
+                offset_to_take_folder_start: region.offset_to_take_folder_start,
             })
         })
         .collect()

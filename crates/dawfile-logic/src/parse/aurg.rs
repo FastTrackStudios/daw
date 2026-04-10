@@ -108,6 +108,19 @@ pub struct AudioRegion {
     pub selected: bool,
     /// Whether this region is locked.
     pub locked: bool,
+    /// RFC 4122 UUID identifying this region (version 1 or 4).
+    ///
+    /// Located in the post-endClockComp section:
+    /// - `take_number == 0`: first valid UUID found at approximately post-name +87
+    /// - `take_number >= 1`: first valid UUID found at approximately post-name +86
+    ///
+    /// `None` if the payload is too short or no valid UUID is found.
+    pub uuid: Option<[u8; 16]>,
+    /// Offset to the related take folder start chunk, or -1 if none.
+    ///
+    /// Located at post-name +103 (post-endClockComp +36).
+    /// Value -1 = not part of a take folder (or no folder linkage in this version).
+    pub offset_to_take_folder_start: i32,
 }
 
 /// Parse an `AuRg` chunk payload into an [`AudioRegion`].
@@ -161,6 +174,20 @@ pub fn parse_aurg(data: &[u8]) -> Option<AudioRegion> {
         0
     };
 
+    // Post-endClockComp section begins at name_end + 67.
+    // UUID: first valid RFC 4122 v1 or v4 UUID in the range post-name[84..104].
+    //   take=0 → UUID at post-name +87 (confirmed), take≥1 → +86.
+    //   We scan for validity rather than hardcoding the offset.
+    let uuid = find_uuid_in_range(data, name_end + 84, name_end + 104);
+
+    // offsetToTakeFolderStart: i32 LE at post-name +103 (post-endClockComp +36).
+    // -1 = no take folder linkage.
+    let offset_to_take_folder_start = if data.len() >= name_end + 107 {
+        i32::from_le_bytes(data[name_end + 103..name_end + 107].try_into().ok()?)
+    } else {
+        -1
+    };
+
     Some(AudioRegion {
         name,
         take_number,
@@ -171,5 +198,24 @@ pub fn parse_aurg(data: &[u8]) -> Option<AudioRegion> {
         end_ticks,
         selected,
         locked,
+        uuid,
+        offset_to_take_folder_start,
     })
+}
+
+/// Scan `data[start..end]` for the first RFC 4122 UUID (version 1 or 4, variant 1).
+///
+/// Returns `Some([u8; 16])` at the first aligned window where:
+/// - byte 6 has version bits 0001xxxx or 0100xxxx (version 1 or 4)
+/// - byte 8 has variant bits 10xxxxxx (variant 1 / RFC 4122)
+fn find_uuid_in_range(data: &[u8], start: usize, end: usize) -> Option<[u8; 16]> {
+    let end = end.min(data.len().saturating_sub(15));
+    for i in start..end {
+        let ver = (data[i + 6] >> 4) & 0x0f;
+        let var = (data[i + 8] >> 6) & 0x03;
+        if matches!(ver, 1 | 4) && var == 0b10 {
+            return data[i..i + 16].try_into().ok();
+        }
+    }
+    None
 }

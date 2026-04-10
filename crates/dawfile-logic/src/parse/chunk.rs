@@ -39,6 +39,8 @@
 //! | `ediV`        | Vide       | Video reference                             |
 //! | `UCuA`        | AuCU       | Audio control utility                       |
 //! | `MneG`        | GenM       | General MIDI                                |
+//! | `vEuA`        | AuEv       | Audio event (playback region / AUv3 state)  |
+//! | `snrT`        | Trns       | Global transpose / pitch settings           |
 
 use crate::error::{LogicError, LogicResult};
 use crate::types::LogicChunk;
