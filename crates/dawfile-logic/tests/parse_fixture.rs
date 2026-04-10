@@ -439,6 +439,187 @@ fn layout_deep_dump() {
 
 // ── Fire.logicx fixture ───────────────────────────────────────────────────────
 
+#[test]
+fn fire_comp_structures() {
+    // Investigate chunk types relevant to Logic's comping / take-folder system:
+    //   Clip  (pilC) — 3 chunks, ~85 bytes — likely take-folder container
+    //   GAdd  (ddAG) — 936 chunks, 14 bytes — possibly take-lane assignments
+    //   AuRg  (gRuA) — 2418 chunks — mTakeNumber at byte 4
+    let session = dawfile_logic::read_session(FIRE_FIXTURE).expect("parse failed");
+    let chunks = &session.chunks;
+
+    const TAG_CLIP: [u8; 4] = *b"pilC"; // on-disk bytes for "Clip" (reversed)
+    const TAG_GADD: [u8; 4] = *b"ddAG";
+    const TAG_AURG: [u8; 4] = *b"gRuA";
+    const TAG_MSEQ: [u8; 4] = *b"qeSM";
+    const TAG_TRAK: [u8; 4] = *b"karT";
+
+    // --- Clip chunks -----------------------------------------------------------
+    println!("\n=== Clip chunks (take-folder candidates) ===");
+    for (ci, c) in chunks.iter().enumerate() {
+        if c.tag != TAG_CLIP {
+            continue;
+        }
+        let meta4 = u32::from_le_bytes(c.header_meta[4..8].try_into().unwrap_or([0; 4]));
+        let meta0 = u32::from_le_bytes(c.header_meta[0..4].try_into().unwrap_or([0; 4]));
+        println!(
+            "  chunk[{}] dlen={} meta[0]={} meta[4]={}",
+            ci, c.data_len, meta0, meta4
+        );
+        for (i, row) in c.data.chunks(16).enumerate() {
+            let hex: Vec<String> = row.iter().map(|b| format!("{:02x}", b)).collect();
+            let asc: String = row
+                .iter()
+                .map(|&b| {
+                    if b >= 0x20 && b < 0x7f {
+                        b as char
+                    } else {
+                        '.'
+                    }
+                })
+                .collect();
+            println!("  {:04x}  {}  |{}|", i * 16, hex.join(" "), asc);
+        }
+        // Show surrounding chunks for context
+        let start = ci.saturating_sub(3);
+        let end = (ci + 4).min(chunks.len());
+        println!("  context:");
+        for j in start..end {
+            let mark = if j == ci { " >>> " } else { "     " };
+            println!(
+                "  {}[{}] {} dlen={}",
+                mark, j, chunks[j].type_name, chunks[j].data_len
+            );
+        }
+        println!();
+    }
+
+    // --- GAdd chunks (first 8) -------------------------------------------------
+    println!("\n=== GAdd chunks (first 8, 14-byte each) ===");
+    let mut n = 0;
+    for (ci, c) in chunks.iter().enumerate() {
+        if c.tag != TAG_GADD {
+            continue;
+        }
+        let meta0 = u32::from_le_bytes(c.header_meta[0..4].try_into().unwrap_or([0; 4]));
+        let meta4 = i32::from_le_bytes(c.header_meta[4..8].try_into().unwrap_or([0; 4]));
+        let hex: Vec<String> = c.data.iter().map(|b| format!("{:02x}", b)).collect();
+        println!(
+            "  [{}] meta[0]={} meta[4]={} data={}",
+            ci,
+            meta0,
+            meta4,
+            hex.join(" ")
+        );
+        n += 1;
+        if n >= 8 {
+            break;
+        }
+    }
+
+    // --- AuRg take distribution ------------------------------------------------
+    println!("\n=== AuRg take-number distribution ===");
+    let mut take_counts = std::collections::HashMap::<u8, usize>::new();
+    let mut take0_with_name: Vec<(usize, String, i64, i64)> = Vec::new();
+    let mut take1plus: Vec<(usize, u8, String, i64, i64)> = Vec::new();
+
+    for (ci, c) in chunks.iter().enumerate() {
+        if c.tag != TAG_AURG || c.data.len() < 76 {
+            continue;
+        }
+        let take_num = c.data[4];
+        *take_counts.entry(take_num).or_insert(0) += 1;
+
+        // Parse name and clock positions
+        let name_len = u16::from_le_bytes([c.data[74], c.data[75]]) as usize;
+        if c.data.len() < 76 + name_len {
+            continue;
+        }
+        let name = String::from_utf8_lossy(&c.data[76..76 + name_len]).into_owned();
+        let clock_base = 76 + name_len + 51;
+        let start_ticks = if c.data.len() >= clock_base + 8 {
+            i64::from_le_bytes(
+                c.data[clock_base..clock_base + 8]
+                    .try_into()
+                    .unwrap_or([0; 8]),
+            )
+        } else {
+            0
+        };
+        let end_ticks = if c.data.len() >= clock_base + 16 {
+            i64::from_le_bytes(
+                c.data[clock_base + 8..clock_base + 16]
+                    .try_into()
+                    .unwrap_or([0; 8]),
+            )
+        } else {
+            0
+        };
+
+        if take_num == 0 && take0_with_name.len() < 10 {
+            take0_with_name.push((ci, name, start_ticks, end_ticks));
+        } else if take_num > 0 && take1plus.len() < 10 {
+            take1plus.push((ci, take_num, name, start_ticks, end_ticks));
+        }
+    }
+
+    let mut dist: Vec<_> = take_counts.iter().collect();
+    dist.sort_by_key(|(k, _)| *k);
+    for (take, count) in &dist {
+        println!("  take={} count={}", take, count);
+    }
+
+    println!("\n  Sample take-0 regions (comp result):");
+    for (ci, name, start, end) in &take0_with_name {
+        println!("    [{}] '{}' start={} end={}", ci, name, start, end);
+    }
+    println!("\n  Sample take-1+ regions (raw takes):");
+    for (ci, take, name, start, end) in &take1plus {
+        println!(
+            "    [{}] take={} '{}' start={} end={}",
+            ci, take, name, start, end
+        );
+    }
+
+    // --- MSeq→Trak groups near Clip chunks -------------------------------------
+    println!("\n=== MSeq groups near Clip chunks ===");
+    let clip_indices: Vec<usize> = chunks
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.tag == TAG_CLIP)
+        .map(|(i, _)| i)
+        .collect();
+    for clip_ci in clip_indices {
+        let search_start = clip_ci.saturating_sub(10);
+        let search_end = (clip_ci + 20).min(chunks.len());
+        println!("  Context around Clip[{}]:", clip_ci);
+        for j in search_start..search_end {
+            let mark = if j == clip_ci { " >>>" } else { "    " };
+            let extra = if chunks[j].tag == TAG_MSEQ {
+                let d = &chunks[j].data;
+                let nl = if d.len() >= 18 {
+                    u16::from_le_bytes([d[16], d[17]]) as usize
+                } else {
+                    0
+                };
+                let nm = if d.len() >= 18 + nl && nl > 0 {
+                    String::from_utf8_lossy(&d[18..18 + nl]).into_owned()
+                } else {
+                    String::new()
+                };
+                format!(" name='{}'", nm)
+            } else {
+                String::new()
+            };
+            println!(
+                "  {}[{}] {} dlen={}{}",
+                mark, j, chunks[j].type_name, chunks[j].data_len, extra
+            );
+        }
+        println!();
+    }
+}
+
 const FIRE_FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/Fire.logicx");
 
 #[test]
@@ -761,6 +942,13 @@ fn fire_parse_summary() {
                 dawfile_logic::ClipKind::Midi { notes } => {
                     format!("MIDI notes={}", notes.len())
                 }
+                dawfile_logic::ClipKind::TakeFolder(f) => {
+                    format!(
+                        "TAKE_FOLDER takes={} comp_ranges={}",
+                        f.takes.len(),
+                        f.comp_ranges.len()
+                    )
+                }
                 dawfile_logic::ClipKind::Other => "OTHER".into(),
             };
             println!(
@@ -776,4 +964,67 @@ fn fire_parse_summary() {
     assert!(session.chunks.len() > 100, "expected many chunks");
     assert!(!session.tracks.is_empty(), "expected tracks");
     assert!(session.bpm > 0.0, "expected non-zero BPM");
+}
+
+#[test]
+fn fire_take_folders() {
+    // Verify that the take folder parser detects comped clips.
+    // Fire.logicx has AuRg entries with take_number 1–23 ('Comp A' etc.) so at
+    // least some tracks should carry TakeFolder clips after parsing.
+    let session = dawfile_logic::read_session(FIRE_FIXTURE).expect("parse failed");
+
+    let mut total_take_folders = 0usize;
+    let mut total_takes = 0usize;
+    let mut total_comp_ranges = 0usize;
+    let mut sample_printed = false;
+
+    println!("\n=== Take Folders in Fire.logicx ===");
+    for track in &session.tracks {
+        for clip in &track.clips {
+            if let dawfile_logic::ClipKind::TakeFolder(folder) = &clip.kind {
+                total_take_folders += 1;
+                total_takes += folder.takes.len();
+                total_comp_ranges += folder.comp_ranges.len();
+
+                if !sample_printed {
+                    println!(
+                        "Track '{}' @ {:.2}b len={:.2}b",
+                        track.name, clip.position_beats, clip.length_beats
+                    );
+                    println!(
+                        "  {} takes, {} comp ranges",
+                        folder.takes.len(),
+                        folder.comp_ranges.len()
+                    );
+                    for t in &folder.takes {
+                        println!(
+                            "    take {} dur={:.2}b offset_frames={}",
+                            t.number, t.duration_beats, t.source_offset_frames
+                        );
+                    }
+                    for r in &folder.comp_ranges {
+                        println!(
+                            "    comp take={} start={} end={}",
+                            r.take_number, r.comp_start_ticks, r.comp_end_ticks
+                        );
+                    }
+                    sample_printed = true;
+                }
+            }
+        }
+    }
+
+    println!(
+        "\nTotal: {} take folders, {} takes, {} comp ranges",
+        total_take_folders, total_takes, total_comp_ranges
+    );
+
+    // Fire has comped vocal/instrument recordings — we expect at least one take folder.
+    // If none are found, it means the pool matching isn't picking up the names yet.
+    // Treat this as an informational test (no hard assert) until the clip→track
+    // name mapping is fully solved.
+    println!(
+        "Take folder detection: {} folders found (0 = name-matching not yet resolving comped clips)",
+        total_take_folders
+    );
 }

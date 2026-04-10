@@ -96,8 +96,47 @@ pub enum ClipKind {
         /// Notes extracted from the paired EvSq chunk.
         notes: Vec<LogicMidiNote>,
     },
+    /// A Logic Pro Take Folder — multiple recorded takes with a Quick Swipe Comp selection.
+    TakeFolder(LogicTakeFolder),
     /// A clip type we don't yet model.
     Other,
+}
+
+/// A Logic Pro Take Folder: one or more recorded takes with a Quick Swipe Comp
+/// selection that determines which portions of which takes are active.
+#[derive(Debug, Clone)]
+pub struct LogicTakeFolder {
+    /// The individual recorded takes (take_number ≥ 1).
+    pub takes: Vec<LogicTake>,
+    /// Comp ranges: the active selection within the folder.
+    ///
+    /// Each entry describes a contiguous span from a specific take that is
+    /// "comped in" to the output. Together they cover the full folder length.
+    pub comp_ranges: Vec<LogicCompRange>,
+}
+
+/// A single recorded take within a [`LogicTakeFolder`].
+#[derive(Debug, Clone)]
+pub struct LogicTake {
+    /// Take number (1-based, matching Logic Pro's UI).
+    pub number: u8,
+    /// Duration of this take's audio in beats.
+    pub duration_beats: f64,
+    /// Source file start offset in sample frames.
+    pub source_offset_frames: i32,
+    /// Resolved audio file path, if available.
+    pub file_path: Option<String>,
+}
+
+/// A comp selection range: a contiguous span from one take that is active in the comp.
+#[derive(Debug, Clone)]
+pub struct LogicCompRange {
+    /// Which take this range draws from (1-based).
+    pub take_number: u8,
+    /// Arrangement start of this comp range, in Logic internal ticks.
+    pub comp_start_ticks: i64,
+    /// Arrangement end of this comp range, in Logic internal ticks.
+    pub comp_end_ticks: i64,
 }
 
 /// A single MIDI note (or other positioned event) extracted from an EvSq chunk.

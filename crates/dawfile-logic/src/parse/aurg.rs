@@ -55,14 +55,21 @@ const POOLSEG_FIXED_BEFORE_CLOCK: usize = 51;
 pub struct AudioRegion {
     /// User-visible name of this region (e.g. `"Audio Track 1 #01"`).
     pub name: String,
+    /// Take number within a Take Folder.
+    ///
+    /// - `0` = comp result layer (the composite output; `start_ticks`/`end_ticks` are 0)
+    /// - `1..N` = individual recorded takes
+    pub take_number: u8,
     /// Source file start offset in sample frames.
     pub source_offset_frames: i32,
     /// Region duration in sample frames.
     pub duration_frames: i32,
     /// Arrangement start position in ticks (Logic clock, 240 PPQ).
     /// Zero = bar 1 beat 1. Convert to beats by dividing by 240.
+    /// For take regions (take_number ≥ 1): the start of the active comp range.
     pub start_ticks: i64,
     /// Arrangement end position in ticks (may be zero for non-comped regions).
+    /// For take regions (take_number ≥ 1): the end of the active comp range.
     pub end_ticks: i64,
     /// Whether this region is selected in the project.
     pub selected: bool,
@@ -79,6 +86,7 @@ pub fn parse_aurg(data: &[u8]) -> Option<AudioRegion> {
         return None;
     }
 
+    let take_number = data[4];
     let source_offset_frames = i32::from_le_bytes(data[6..10].try_into().ok()?);
     let duration_frames = i32::from_le_bytes(data[22..26].try_into().ok()?);
     let selected = data[38] != 0;
@@ -115,6 +123,7 @@ pub fn parse_aurg(data: &[u8]) -> Option<AudioRegion> {
 
     Some(AudioRegion {
         name,
+        take_number,
         source_offset_frames,
         duration_frames,
         start_ticks,

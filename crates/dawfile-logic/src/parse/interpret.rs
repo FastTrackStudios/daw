@@ -33,8 +33,8 @@ use crate::parse::aufl::parse_aufl;
 use crate::parse::aurg::parse_aurg;
 use crate::parse::bundle::BundleMeta;
 use crate::types::{
-    ClipKind, LogicChunk, LogicClip, LogicMarker, LogicMidiNote, LogicSession, LogicSummingGroup,
-    LogicTempoEvent, LogicTrack, TrackKind,
+    ClipKind, LogicChunk, LogicClip, LogicCompRange, LogicMarker, LogicMidiNote, LogicSession,
+    LogicSummingGroup, LogicTake, LogicTakeFolder, LogicTempoEvent, LogicTrack, TrackKind,
 };
 
 /// Ticks per beat in the arrangement clock used by MSeq / Trak / EvSq headers.
@@ -268,10 +268,14 @@ fn estimate_midi_length(notes: &[LogicMidiNote]) -> f64 {
 // ── Audio pool ────────────────────────────────────────────────────────────────
 
 struct AudioPoolEntry {
-    name: String,            // AuRg region name (e.g. "Audio Track 1 #01")
-    track_name_hint: String, // prefix before " #NN"
+    name: String,              // AuRg region name (e.g. "Audio Track 1 #01")
+    track_name_hint: String,   // prefix before " #NN"
+    take_number: u8,           // 0 = comp result, ≥1 = recorded take
+    source_offset_frames: i32, // source file start in sample frames
     file_path: Option<String>,
     duration_beats: f64,
+    comp_start_ticks: i64, // non-zero only for take_number ≥ 1
+    comp_end_ticks: i64,
 }
 
 fn build_audio_pool(chunks: &[LogicChunk], sample_rate: u32, bpm: f64) -> Vec<AudioPoolEntry> {
@@ -317,8 +321,12 @@ fn build_audio_pool(chunks: &[LogicChunk], sample_rate: u32, bpm: f64) -> Vec<Au
             Some(AudioPoolEntry {
                 name: region.name,
                 track_name_hint,
+                take_number: region.take_number,
+                source_offset_frames: region.source_offset_frames,
                 file_path,
                 duration_beats,
+                comp_start_ticks: region.start_ticks,
+                comp_end_ticks: region.end_ticks,
             })
         })
         .collect()
@@ -326,61 +334,101 @@ fn build_audio_pool(chunks: &[LogicChunk], sample_rate: u32, bpm: f64) -> Vec<Au
 
 /// Try to match an audio MSeq name to a pool entry and build a clip.
 ///
-/// Audio MSeq names (e.g. "FileDecrypt") don't necessarily match pool entry
-/// names (e.g. "Audio Track 1 #01").  We fall back to the first pool entry
-/// on the matching track, or produce a clip with no file path.
+/// If the pool contains any `take_number ≥ 1` entries whose name or
+/// `track_name_hint` matches `clip_name`, this clip is a **Take Folder** and
+/// the function returns `ClipKind::TakeFolder`.  Otherwise it returns a plain
+/// `ClipKind::Audio`.
 fn make_audio_clip(
     clip_name: &str,
     position_beats: f64,
     pool: &[AudioPoolEntry],
 ) -> Option<PendingClip> {
-    // First try: exact match on pool entry name.
-    if let Some(entry) = pool.iter().find(|e| e.name == clip_name) {
-        return Some(PendingClip {
-            name: clip_name.to_owned(),
-            position_beats,
-            kind: ClipKind::Audio {
-                file_path: entry.file_path.clone(),
-            },
-            length_beats: entry.duration_beats,
-        });
+    // Collect all pool entries that match this clip name (exact or hint).
+    let matching: Vec<&AudioPoolEntry> = pool
+        .iter()
+        .filter(|e| e.name == clip_name || e.track_name_hint == clip_name)
+        .collect();
+
+    // If any matching entries are recorded takes, build a Take Folder.
+    let has_takes = matching.iter().any(|e| e.take_number >= 1);
+
+    if has_takes {
+        return Some(make_take_folder_clip(clip_name, position_beats, &matching));
     }
 
-    // Second try: match on track name hint (pool entries share a track prefix).
-    if let Some(entry) = pool.iter().find(|e| e.track_name_hint == clip_name) {
-        return Some(PendingClip {
-            name: clip_name.to_owned(),
-            position_beats,
-            kind: ClipKind::Audio {
-                file_path: entry.file_path.clone(),
-            },
-            length_beats: entry.duration_beats,
-        });
-    }
+    // Single audio clip — prefer exact name match, fall back to hint match.
+    let entry = matching.into_iter().next();
 
-    // Fallback: produce a clip with the name but no file reference.
     Some(PendingClip {
         name: clip_name.to_owned(),
         position_beats,
-        kind: ClipKind::Audio { file_path: None },
-        length_beats: 0.0,
+        kind: ClipKind::Audio {
+            file_path: entry.and_then(|e| e.file_path.clone()),
+        },
+        length_beats: entry.map(|e| e.duration_beats).unwrap_or(0.0),
     })
+}
+
+/// Build a `PendingClip` with `ClipKind::TakeFolder` from a set of matching pool entries.
+fn make_take_folder_clip(
+    clip_name: &str,
+    position_beats: f64,
+    matching: &[&AudioPoolEntry],
+) -> PendingClip {
+    // Takes: all entries with take_number ≥ 1, deduplicated by take number.
+    let mut takes: Vec<LogicTake> = {
+        let mut seen = std::collections::HashSet::new();
+        matching
+            .iter()
+            .filter(|e| e.take_number >= 1)
+            .filter(|e| seen.insert(e.take_number))
+            .map(|e| LogicTake {
+                number: e.take_number,
+                duration_beats: e.duration_beats,
+                source_offset_frames: e.source_offset_frames,
+                file_path: e.file_path.clone(),
+            })
+            .collect()
+    };
+    takes.sort_by_key(|t| t.number);
+
+    // Comp ranges: take entries with non-zero clock spans define the active selection.
+    let mut comp_ranges: Vec<LogicCompRange> = matching
+        .iter()
+        .filter(|e| e.take_number >= 1 && (e.comp_start_ticks != 0 || e.comp_end_ticks != 0))
+        .map(|e| LogicCompRange {
+            take_number: e.take_number,
+            comp_start_ticks: e.comp_start_ticks,
+            comp_end_ticks: e.comp_end_ticks,
+        })
+        .collect();
+    comp_ranges.sort_by_key(|r| r.comp_start_ticks);
+
+    // Folder length: from the take_number=0 comp-result entry, or max of takes.
+    let length_beats = matching
+        .iter()
+        .find(|e| e.take_number == 0)
+        .map(|e| e.duration_beats)
+        .unwrap_or_else(|| {
+            matching
+                .iter()
+                .map(|e| e.duration_beats)
+                .fold(0.0_f64, f64::max)
+        });
+
+    PendingClip {
+        name: clip_name.to_owned(),
+        position_beats,
+        length_beats,
+        kind: ClipKind::TakeFolder(LogicTakeFolder { takes, comp_ranges }),
+    }
 }
 
 // ── Clip → Track attachment ───────────────────────────────────────────────────
 
 fn attach_clips_to_tracks(tracks: &mut Vec<LogicTrack>, clips: Vec<PendingClip>) {
     for pending in clips {
-        // Find a track whose name matches the clip name or a name prefix hint.
-        let track_name = match &pending.kind {
-            ClipKind::Audio { .. } => {
-                // Try the clip name directly first (e.g. "FileDecrypt" on the
-                // "Audio Track 1" track).  If that fails, look for any audio track.
-                pending.name.clone()
-            }
-            ClipKind::Midi { .. } => pending.name.clone(),
-            _ => pending.name.clone(),
-        };
+        let track_name = pending.name.clone();
 
         let clip = LogicClip {
             position_beats: pending.position_beats,
