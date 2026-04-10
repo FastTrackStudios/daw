@@ -16,17 +16,45 @@ pub fn feature_support() -> FeatureSupport {
         Capability::Items,
         Capability::Regions,
         Capability::Midi,
-        Capability::TempoMap, // TODO: not yet implemented, but the block type exists
+        Capability::TempoMap,
     ])
 }
 
 /// Summary of a parsed session, suitable for display.
 pub fn session_summary(session: &ProToolsSession) -> String {
+    let tempo_str = if session.tempo_events.len() == 1 {
+        format!("{:.1} BPM", session.bpm)
+    } else {
+        format!(
+            "{:.1} BPM ({} changes)",
+            session.bpm,
+            session.tempo_events.len() - 1
+        )
+    };
+
+    let meter_str = if session.meter_events.is_empty() {
+        String::new()
+    } else {
+        let first = &session.meter_events[0];
+        if session.meter_events.len() == 1 {
+            format!(", {}/{}", first.numerator, first.denominator)
+        } else {
+            format!(
+                ", {}/{} ({} meter changes)",
+                first.numerator,
+                first.denominator,
+                session.meter_events.len()
+            )
+        }
+    };
+
     format!(
-        "Pro Tools v{} session @ {}Hz: {} audio files, {} audio regions, \
+        "Pro Tools v{} @ {}Hz {}{}: {} audio files, {} audio regions, \
          {} audio tracks, {} MIDI regions, {} MIDI tracks",
         session.version,
         session.session_sample_rate,
+        tempo_str,
+        meter_str,
         session.audio_files.len(),
         session.audio_regions.len(),
         session.audio_tracks.len(),

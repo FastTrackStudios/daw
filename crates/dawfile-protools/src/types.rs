@@ -10,6 +10,19 @@ pub struct ProToolsSession {
     pub version: u16,
     /// Session sample rate as stored in the file.
     pub session_sample_rate: u32,
+    /// Initial (or only) BPM of the session.
+    pub bpm: f64,
+    /// All tempo change events, sorted by position.
+    ///
+    /// Contains at least one entry (the initial tempo). If the session has
+    /// no tempo changes this is a single-element Vec.
+    pub tempo_events: Vec<TempoEvent>,
+    /// Time-signature change events, sorted by position.
+    ///
+    /// Empty for sessions with no meter changes (4/4 implicit).
+    pub meter_events: Vec<MeterEvent>,
+    /// User-defined markers (Pro Tools Memory Locations).
+    pub markers: Vec<Marker>,
     /// Audio file references.
     pub audio_files: Vec<AudioFile>,
     /// Audio regions.
@@ -120,6 +133,47 @@ pub struct TrackRegion {
     pub region_index: u16,
     /// Start position override (if the track assignment overrides the region's start).
     pub start_pos: u64,
+}
+
+/// A single constant-tempo segment on the session timeline.
+#[derive(Debug, Clone)]
+pub struct TempoEvent {
+    /// Position in ticks (relative to the session start, ZERO_TICKS-based).
+    pub tick_start: u64,
+    /// Position in samples at the session's target sample rate.
+    pub sample_start: u64,
+    /// Beats per minute.
+    pub bpm: f64,
+    /// Ticks per beat (960,000 in all observed sessions).
+    pub ticks_per_beat: u64,
+}
+
+/// A time-signature change event.
+#[derive(Debug, Clone)]
+pub struct MeterEvent {
+    /// Position in ticks (relative to session start).
+    pub tick_start: u64,
+    /// Position in samples at the session's target sample rate.
+    pub sample_start: u64,
+    /// Bar number where this meter begins (1-based).
+    pub measure: u32,
+    /// Time signature numerator (e.g. 6 in 6/8).
+    pub numerator: u32,
+    /// Time signature denominator (e.g. 8 in 6/8).
+    pub denominator: u32,
+}
+
+/// A user-defined marker (Pro Tools Memory Location).
+#[derive(Debug, Clone)]
+pub struct Marker {
+    /// Marker name.
+    pub name: String,
+    /// 1-based memory location number.
+    pub number: u32,
+    /// Position in ticks (relative to session start).
+    pub tick_pos: u64,
+    /// Position in samples at the session's target sample rate.
+    pub sample_pos: u64,
 }
 
 /// The origin tick value for MIDI positions (10^12).

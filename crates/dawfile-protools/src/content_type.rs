@@ -143,6 +143,12 @@ pub enum ContentType {
     // ── Tempo / meter ────────────────────────────────────────────────────
     /// Tempo map block (contains "Tempo"/"Const"/"TMS" structure with f64 BPM)
     TempoBlock = 0x2028,
+    /// Meter map block (contains "Meter" + per-measure time signature changes)
+    MeterBlock = 0x2029,
+
+    // ── Markers ─────────────────────────────────────────────────────────
+    /// Individual entry block within the marker / track-list hierarchy
+    MarkerEntry = 0x2619,
 }
 
 impl ContentType {
@@ -211,6 +217,9 @@ impl ContentType {
             0x2511 => Some(Self::SnapsBlock),
 
             0x2028 => Some(Self::TempoBlock),
+            0x2029 => Some(Self::MeterBlock),
+
+            0x2619 => Some(Self::MarkerEntry),
 
             _ => None,
         }

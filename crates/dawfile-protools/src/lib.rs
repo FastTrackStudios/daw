@@ -56,7 +56,7 @@ pub mod types;
 pub mod write;
 
 // Re-export the primary public API
-pub use convert::feature_support;
+pub use convert::{feature_support, session_summary};
 pub use error::{PtError, PtResult};
 pub use io::read_session;
 pub use raw_block::{RawSession, parse_raw};

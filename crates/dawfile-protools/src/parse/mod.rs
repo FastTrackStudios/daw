@@ -5,11 +5,13 @@
 //! 2. Detect the Pro Tools version
 //! 3. Parse the block tree
 //! 4. Extract session metadata (sample rate)
-//! 5. Extract audio file references
-//! 6. Extract regions and region-to-track assignments
-//! 7. Extract MIDI data
+//! 5. Parse tempo and meter maps
+//! 6. Extract audio file references
+//! 7. Extract regions and region-to-track assignments
+//! 8. Extract MIDI data
 
 pub mod audio;
+pub mod meter;
 pub mod midi;
 pub mod regions;
 pub mod tempo;
@@ -21,7 +23,7 @@ use crate::content_type::ContentType;
 use crate::cursor::Cursor;
 use crate::decrypt;
 use crate::error::{PtError, PtResult};
-use crate::types::ProToolsSession;
+use crate::types::{ProToolsSession, TempoEvent};
 
 /// Parse a Pro Tools session from raw file bytes.
 ///
@@ -52,32 +54,53 @@ pub fn parse_session(data: &mut Vec<u8>, target_sample_rate: u32) -> PtResult<Pr
         1.0
     };
 
-    // Step 6: Parse audio files
+    // Step 6: Parse tempo map (needed for all tick→sample conversions below)
+    let tempo_segments = tempo::parse_tempo_map(&blocks, &cursor, target_sample_rate);
+
+    // Build the public TempoEvent list from the internal segments.
+    let bpm = tempo_segments.first().map(|s| s.bpm).unwrap_or(120.0);
+    let tempo_events: Vec<TempoEvent> = tempo_segments
+        .iter()
+        .map(|s| TempoEvent {
+            tick_start: s.tick_start,
+            sample_start: s.sample_start,
+            bpm: s.bpm,
+            ticks_per_beat: s.ticks_per_beat,
+        })
+        .collect();
+
+    // Step 7: Parse meter map and markers
+    let meter_events =
+        meter::parse_meter_events(&blocks, &cursor, &tempo_segments, target_sample_rate);
+    let markers = meter::parse_markers(&blocks, &cursor, &tempo_segments, target_sample_rate);
+
+    // Step 8: Parse audio files
     let audio_files = audio::parse_audio_files(&blocks, &cursor, version);
 
-    // Step 7: Parse regions
+    // Step 9: Parse regions
     let audio_regions = regions::parse_audio_regions(&blocks, &cursor, version, rate_factor);
 
-    // Step 8: Parse tempo map for tick→sample conversion
-    let tempo_map = tempo::parse_tempo_map(&blocks, &cursor, target_sample_rate);
-
-    // Step 9: Parse tracks and region-to-track assignments
+    // Step 10: Parse tracks and region-to-track assignments
     let audio_tracks = tracks::parse_audio_tracks(
         &blocks,
         &cursor,
         &audio_regions,
         version,
         rate_factor,
-        &tempo_map,
+        &tempo_segments,
         target_sample_rate,
     );
 
-    // Step 10: Parse MIDI
+    // Step 11: Parse MIDI
     let (midi_regions, midi_tracks) = midi::parse_midi(&blocks, &cursor, version, rate_factor);
 
     Ok(ProToolsSession {
         version,
         session_sample_rate,
+        bpm,
+        tempo_events,
+        meter_events,
+        markers,
         audio_files,
         audio_regions,
         audio_tracks,
