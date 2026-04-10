@@ -56,10 +56,12 @@ pub struct ActionDef {
     pub display_name: String,
     /// Handler called on the main thread when the action is triggered.
     pub handler: Arc<dyn Fn() + Send + Sync>,
+    /// If true, the action appears in the Extensions > FastTrackStudio menu.
+    pub show_in_menu: bool,
 }
 
 impl ActionDef {
-    /// Create a new action definition.
+    /// Create a new action definition (not shown in menu by default).
     pub fn new(
         command_id: impl Into<String>,
         display_name: impl Into<String>,
@@ -69,12 +71,24 @@ impl ActionDef {
             command_id: command_id.into(),
             display_name: display_name.into(),
             handler: Arc::new(handler),
+            show_in_menu: false,
         }
     }
 
+    /// Mark this action to appear in the Extensions > FastTrackStudio menu.
+    pub fn in_menu(mut self) -> Self {
+        self.show_in_menu = true;
+        self
+    }
+
     /// Convert to the tuple format used by extension action registration.
-    pub fn into_tuple(self) -> (String, String, Arc<dyn Fn() + Send + Sync>) {
-        (self.command_id, self.display_name, self.handler)
+    pub fn into_tuple(self) -> (String, String, Arc<dyn Fn() + Send + Sync>, bool) {
+        (
+            self.command_id,
+            self.display_name,
+            self.handler,
+            self.show_in_menu,
+        )
     }
 }
 
@@ -245,7 +259,7 @@ pub enum DockPosition {
 /// Collect all action tuples from a list of modules.
 pub fn collect_actions(
     modules: &[Box<dyn DawModule>],
-) -> Vec<(String, String, Arc<dyn Fn() + Send + Sync>)> {
+) -> Vec<(String, String, Arc<dyn Fn() + Send + Sync>, bool)> {
     let mut all = Vec::new();
     for m in modules {
         let actions = m.actions();
