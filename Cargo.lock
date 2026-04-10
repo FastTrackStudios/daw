@@ -1382,8 +1382,10 @@ dependencies = [
  "daw-proto 0.1.0",
  "daw-reaper",
  "daw-standalone",
+ "dawfile-ableton",
  "dawfile-reaper",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1620,6 +1622,7 @@ name = "dawfile-ableton"
 version = "0.1.0"
 dependencies = [
  "daw-proto 0.1.0",
+ "dawfile-reaper",
  "flate2",
  "quick-xml 0.37.5",
  "roxmltree 0.20.0",
@@ -4139,20 +4142,9 @@ name = "moire"
 version = "1.0.0"
 source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
 dependencies = [
- "moire-macros",
  "moire-macros-noop",
  "moire-tokio",
  "moire-wasm",
-]
-
-[[package]]
-name = "moire-macros"
-version = "1.0.0"
-source = "git+https://github.com/FastTrackStudios/moire.git?rev=6d856f2#6d856f2e3fd6624491775f84dedf32a384f77bb3"
-dependencies = [
- "proc-macro2",
- "quote",
- "unsynn",
 ]
 
 [[package]]

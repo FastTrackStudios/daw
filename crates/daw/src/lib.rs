@@ -158,3 +158,7 @@ pub mod standalone {
 pub mod file {
     pub use dawfile_reaper::*;
 }
+
+// ── Module system: standard interface for extension modules ─────────────────
+pub mod module;
+pub use module::{ActionDef, DawModule, ModuleContext};
