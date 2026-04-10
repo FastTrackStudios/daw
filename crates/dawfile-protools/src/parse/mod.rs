@@ -12,6 +12,7 @@
 pub mod audio;
 pub mod midi;
 pub mod regions;
+pub mod tempo;
 pub mod tracks;
 pub mod version;
 
@@ -57,11 +58,21 @@ pub fn parse_session(data: &mut Vec<u8>, target_sample_rate: u32) -> PtResult<Pr
     // Step 7: Parse regions
     let audio_regions = regions::parse_audio_regions(&blocks, &cursor, version, rate_factor);
 
-    // Step 8: Parse tracks and region-to-track assignments
-    let audio_tracks =
-        tracks::parse_audio_tracks(&blocks, &cursor, &audio_regions, version, rate_factor);
+    // Step 8: Parse tempo map for tick→sample conversion
+    let tempo_map = tempo::parse_tempo_map(&blocks, &cursor, target_sample_rate);
 
-    // Step 9: Parse MIDI
+    // Step 9: Parse tracks and region-to-track assignments
+    let audio_tracks = tracks::parse_audio_tracks(
+        &blocks,
+        &cursor,
+        &audio_regions,
+        version,
+        rate_factor,
+        &tempo_map,
+        target_sample_rate,
+    );
+
+    // Step 10: Parse MIDI
     let (midi_regions, midi_tracks) = midi::parse_midi(&blocks, &cursor, version, rate_factor);
 
     Ok(ProToolsSession {

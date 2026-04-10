@@ -139,6 +139,10 @@ pub enum ContentType {
     // ── Snaps ───────────────────────────────────────────────────────────
     /// Snaps block
     SnapsBlock = 0x2511,
+
+    // ── Tempo / meter ────────────────────────────────────────────────────
+    /// Tempo map block (contains "Tempo"/"Const"/"TMS" structure with f64 BPM)
+    TempoBlock = 0x2028,
 }
 
 impl ContentType {
@@ -205,6 +209,8 @@ impl ContentType {
 
             0x271a => Some(Self::MarkerList),
             0x2511 => Some(Self::SnapsBlock),
+
+            0x2028 => Some(Self::TempoBlock),
 
             _ => None,
         }

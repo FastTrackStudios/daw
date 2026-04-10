@@ -21,7 +21,8 @@
 use crate::block::Block;
 use crate::content_type::ContentType;
 use crate::cursor::Cursor;
-use crate::types::{AudioRegion, NO_REGION, Playlist, Track, TrackRegion};
+use crate::parse::tempo::{TempoSegment, tick_to_sample};
+use crate::types::{AudioRegion, NO_REGION, Playlist, Track, TrackRegion, ZERO_TICKS};
 
 /// Internal track entry that carries the channel position used for grouping.
 struct TrackEntry {
@@ -37,6 +38,8 @@ pub fn parse_audio_tracks(
     regions: &[AudioRegion],
     version: u16,
     rate_factor: f64,
+    tempo_map: &[TempoSegment],
+    target_sample_rate: u32,
 ) -> Vec<Track> {
     // Step 1: Parse track definitions from 0x1015
     let mut entries = parse_track_definitions(blocks, cursor);
@@ -53,7 +56,15 @@ pub fn parse_audio_tracks(
         return tracks;
     }
 
-    assign_regions_new(blocks, cursor, regions, &mut entries, rate_factor);
+    assign_regions_new(
+        blocks,
+        cursor,
+        regions,
+        &mut entries,
+        rate_factor,
+        tempo_map,
+        target_sample_rate,
+    );
 
     // Step 3: Remove entries with no active regions
     entries.retain(|e| !e.track.regions.is_empty());
@@ -182,6 +193,8 @@ fn assign_regions_new(
     regions: &[AudioRegion],
     entries: &mut [TrackEntry],
     rate_factor: f64,
+    tempo_map: &[TempoSegment],
+    target_sample_rate: u32,
 ) {
     let map_block = match find_top_level_block(blocks, ContentType::AudioRegionTrackMapNew) {
         Some(b) => b,
@@ -206,7 +219,14 @@ fn assign_regions_new(
             }
         };
 
-        let slot_regions = collect_slot_regions(map_entry, cursor, regions, rate_factor);
+        let slot_regions = collect_slot_regions(
+            map_entry,
+            cursor,
+            regions,
+            rate_factor,
+            tempo_map,
+            target_sample_rate,
+        );
         entries[idx].track.playlist_name = playlist_name;
         entries[idx].track.regions.extend(slot_regions);
     }
@@ -218,6 +238,8 @@ fn collect_slot_regions(
     cursor: &Cursor<'_>,
     regions: &[AudioRegion],
     rate_factor: f64,
+    tempo_map: &[TempoSegment],
+    target_sample_rate: u32,
 ) -> Vec<TrackRegion> {
     let data = cursor.data();
     let mut slot_regions = Vec::new();
@@ -248,7 +270,8 @@ fn collect_slot_regions(
             let start = if is_tick_based {
                 if start_offset + 5 <= data.len() {
                     let tick_pos = cursor.u40_le(start_offset);
-                    tick_pos.saturating_sub(crate::types::ZERO_TICKS)
+                    let relative_tick = tick_pos.saturating_sub(ZERO_TICKS);
+                    tick_to_sample(relative_tick, tempo_map, target_sample_rate)
                 } else {
                     0
                 }
