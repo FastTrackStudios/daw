@@ -111,8 +111,9 @@ impl ModuleContext {
 /// 1. Host creates all modules: `let modules = vec![foo::module(), bar::module()]`
 /// 2. Host calls `init_all(&modules, &ctx)` — each module initializes
 /// 3. Host calls `collect_actions(&modules)` — gathers all action defs for registration
-/// 4. Host registers actions with the DAW
-/// 5. When an action is triggered, host dispatches to the handler
+/// 4. Host calls `collect_panels(&modules)` — gathers all panel defs for registration
+/// 5. Host registers actions and panels with the DAW
+/// 6. When an action is triggered, host dispatches to the handler
 pub trait DawModule: Send + Sync {
     /// Unique module identifier (e.g. "session", "sync", "input").
     fn name(&self) -> &str;
@@ -124,6 +125,13 @@ pub trait DawModule: Send + Sync {
     /// Called once at startup.
     fn actions(&self) -> Vec<ActionDef>;
 
+    /// Return all UI panels this module provides.
+    /// Called once at startup. The host creates dock windows for each panel
+    /// using the DAW's native panel system (e.g. reaper-dioxus).
+    fn panels(&self) -> Vec<PanelDef> {
+        vec![]
+    }
+
     /// Initialize the module. Called once after DAW is available.
     /// Use for one-time setup: loading config, building caches, etc.
     fn init(&self, _ctx: &ModuleContext) {}
@@ -131,6 +139,107 @@ pub trait DawModule: Send + Sync {
     /// Subscribe to DAW events (track changes, transport, etc.)
     /// Called once after init. Use `ctx.spawn()` for async event listeners.
     fn subscribe(&self, _ctx: &ModuleContext) {}
+}
+
+// ── Panel Definitions ──────────────────────────────────────────────────────
+
+/// A UI panel that a module registers with the host.
+///
+/// The host creates a dockable window for each panel and renders the
+/// Dioxus component inside it. Panels are toggled via their associated
+/// action (the host auto-generates a toggle action if `toggle_action` is set).
+pub struct PanelDef {
+    /// Unique panel ID (e.g. "FTS_LAUNCHER", "FTS_INPUT_STATUS").
+    /// Used as the REAPER docker ID for state persistence.
+    pub id: &'static str,
+
+    /// Display title shown in the panel's title bar.
+    pub title: &'static str,
+
+    /// The Dioxus root component for this panel.
+    /// Must be a `fn() -> Element` — the component manages its own state
+    /// via signals, context, or module-level singletons.
+    pub component: PanelComponent,
+
+    /// Where the panel docks by default.
+    pub default_dock: DockPosition,
+
+    /// Default panel size (width, height) in logical pixels.
+    pub default_size: (f64, f64),
+
+    /// If set, the host auto-generates a toggle action with this command ID.
+    /// The action shows/hides the panel.
+    pub toggle_action: Option<&'static str>,
+}
+
+/// A panel's root component — opaque function pointer.
+///
+/// This is `fn() -> dioxus::prelude::Element` but we store it as a type-erased
+/// pointer since the `daw` crate doesn't depend on Dioxus. The host (which does
+/// depend on Dioxus) casts it back.
+///
+/// # Safety
+///
+/// The function pointer must be a valid Dioxus component: `fn() -> Element`.
+/// The host verifies this at registration time.
+#[derive(Clone, Copy)]
+pub struct PanelComponent {
+    /// Type-erased function pointer. The host casts this to `fn() -> Element`.
+    ptr: *const (),
+}
+
+unsafe impl Send for PanelComponent {}
+unsafe impl Sync for PanelComponent {}
+
+impl PanelComponent {
+    /// Create from a Dioxus component function.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// use dioxus::prelude::*;
+    /// fn my_panel() -> Element { rsx! { div { "Hello" } } }
+    /// PanelComponent::new(my_panel)
+    /// ```
+    pub fn new<F>(component: F) -> Self
+    where
+        F: Fn() + 'static,
+    {
+        Self {
+            ptr: &component as *const F as *const (),
+        }
+    }
+
+    /// Create from a raw function pointer.
+    /// Use this when you have a `fn() -> Element` directly.
+    pub fn from_fn_ptr(ptr: *const ()) -> Self {
+        Self { ptr }
+    }
+
+    /// Get the raw pointer (for the host to cast back).
+    pub fn as_ptr(&self) -> *const () {
+        self.ptr
+    }
+}
+
+impl std::fmt::Debug for PanelComponent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PanelComponent({:p})", self.ptr)
+    }
+}
+
+/// Where a panel docks by default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DockPosition {
+    /// Floating window (not docked).
+    Floating,
+    /// Docked at the bottom of the arrange view.
+    Bottom,
+    /// Docked on the left side.
+    Left,
+    /// Docked on the right side.
+    Right,
+    /// Docked at the top.
+    Top,
 }
 
 /// Collect all action tuples from a list of modules.
@@ -147,6 +256,24 @@ pub fn collect_actions(
             m.display_name()
         );
         all.extend(actions.into_iter().map(|a| a.into_tuple()));
+    }
+    all
+}
+
+/// Collect all panel definitions from a list of modules.
+pub fn collect_panels(modules: &[Box<dyn DawModule>]) -> Vec<PanelDef> {
+    let mut all = Vec::new();
+    for m in modules {
+        let panels = m.panels();
+        if !panels.is_empty() {
+            tracing::info!(
+                module = m.name(),
+                panels = panels.len(),
+                "Collected panels from {}",
+                m.display_name()
+            );
+        }
+        all.extend(panels);
     }
     all
 }
