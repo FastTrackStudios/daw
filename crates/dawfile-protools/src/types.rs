@@ -33,6 +33,14 @@ pub struct ProToolsSession {
     pub midi_regions: Vec<MidiRegion>,
     /// MIDI tracks with their region assignments.
     pub midi_tracks: Vec<Track>,
+    /// Session-wide registry of all plugin types used anywhere in the session.
+    ///
+    /// This is a global list — Pro Tools stores one list for the whole session,
+    /// not per-track. The same plugin may appear multiple times if used in
+    /// different configurations (e.g., mono vs. stereo instance).
+    pub plugins: Vec<PluginEntry>,
+    /// I/O channels configured in the session's Hardware Setup and I/O Setup.
+    pub io_channels: Vec<IoChannel>,
 }
 
 /// A reference to an audio file used in the session.
@@ -174,6 +182,56 @@ pub struct Marker {
     pub tick_pos: u64,
     /// Position in samples at the session's target sample rate.
     pub sample_pos: u64,
+}
+
+/// A plugin / insert registered in the session's global plugin list.
+///
+/// Pro Tools keeps a single session-wide list (block 0x1018) of all plugin
+/// types used anywhere in the session.
+#[derive(Debug, Clone)]
+pub struct PluginEntry {
+    /// Insert slot index within a track's insert chain (0-based).
+    ///
+    /// Note: the same slot index can appear on multiple tracks; this field
+    /// identifies the position within a single track's chain, not a unique
+    /// session-wide slot ID.
+    pub slot_index: u8,
+    /// Display name as shown in the Pro Tools insert selector.
+    pub name: String,
+    /// Manufacturer 4-character code (stored byte-reversed in the file).
+    /// E.g., "Digi" for Digidesign/Avid, "Srdx" for SoundRadix.
+    pub manufacturer_4cc: [u8; 4],
+    /// Plugin type 4CC (e.g., "Rvrb" for reverb).
+    pub type_4cc: [u8; 4],
+    /// Plugin subtype / variant 4CC.
+    pub subtype_4cc: [u8; 4],
+    /// Number of input channels (1 = mono, 2 = stereo).
+    pub input_channels: u8,
+    /// Number of output channels (1 = mono, 2 = stereo).
+    pub output_channels: u8,
+    /// AAX bundle identifier, e.g. `"com.avid.aax.dverb"`.
+    pub aax_bundle_id: String,
+}
+
+impl PluginEntry {
+    /// Returns the manufacturer code as a printable ASCII string.
+    pub fn manufacturer_name(&self) -> String {
+        self.manufacturer_4cc
+            .iter()
+            .map(|&b| if b.is_ascii_graphic() { b as char } else { '?' })
+            .collect()
+    }
+}
+
+/// A hardware or bus I/O channel configured in the session's I/O setup.
+#[derive(Debug, Clone)]
+pub struct IoChannel {
+    /// Channel display name (e.g., "Out 1-2", "MacBook Pro Speakers 1-2").
+    pub name: String,
+    /// I/O class: 0x01 = physical hardware interface, 0x02 = output bus.
+    pub io_class: u8,
+    /// Number of audio channels (1 = mono, 2 = stereo).
+    pub channel_count: u8,
 }
 
 /// The origin tick value for MIDI positions (10^12).

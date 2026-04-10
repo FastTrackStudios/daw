@@ -11,8 +11,10 @@
 //! 8. Extract MIDI data
 
 pub mod audio;
+pub mod io;
 pub mod meter;
 pub mod midi;
+pub mod plugins;
 pub mod regions;
 pub mod tempo;
 pub mod tracks;
@@ -94,6 +96,10 @@ pub fn parse_session(data: &mut Vec<u8>, target_sample_rate: u32) -> PtResult<Pr
     // Step 11: Parse MIDI
     let (midi_regions, midi_tracks) = midi::parse_midi(&blocks, &cursor, version, rate_factor);
 
+    // Step 12: Parse plugins and I/O channels
+    let plugins = plugins::parse_plugins(&blocks, &cursor);
+    let io_channels = io::parse_io_channels(&blocks, &cursor);
+
     Ok(ProToolsSession {
         version,
         session_sample_rate,
@@ -106,6 +112,8 @@ pub fn parse_session(data: &mut Vec<u8>, target_sample_rate: u32) -> PtResult<Pr
         audio_tracks,
         midi_regions,
         midi_tracks,
+        plugins,
+        io_channels,
     })
 }
 

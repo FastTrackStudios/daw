@@ -48,9 +48,21 @@ pub fn session_summary(session: &ProToolsSession) -> String {
         }
     };
 
+    let plugin_str = if session.plugins.is_empty() {
+        String::new()
+    } else {
+        format!(", {} plugins", session.plugins.len())
+    };
+
+    let io_str = if session.io_channels.is_empty() {
+        String::new()
+    } else {
+        format!(", {} I/O channels", session.io_channels.len())
+    };
+
     format!(
         "Pro Tools v{} @ {}Hz {}{}: {} audio files, {} audio regions, \
-         {} audio tracks, {} MIDI regions, {} MIDI tracks",
+         {} audio tracks, {} MIDI regions, {} MIDI tracks{}{}",
         session.version,
         session.session_sample_rate,
         tempo_str,
@@ -60,5 +72,7 @@ pub fn session_summary(session: &ProToolsSession) -> String {
         session.audio_tracks.len(),
         session.midi_regions.len(),
         session.midi_tracks.len(),
+        plugin_str,
+        io_str,
     )
 }
