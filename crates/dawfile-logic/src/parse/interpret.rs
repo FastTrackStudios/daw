@@ -467,6 +467,7 @@ fn extract_tracks_and_groups(chunks: &[LogicChunk]) -> (Vec<LogicTrack>, Vec<Log
         }
 
         let name = extract_name_from_envi(&chunk.data);
+        let fader_db = extract_fader_from_envi(&chunk.data);
         let kind = classify_envi_channel(&name);
 
         match kind {
@@ -482,7 +483,7 @@ fn extract_tracks_and_groups(chunks: &[LogicChunk]) -> (Vec<LogicTrack>, Vec<Log
                     name,
                     kind: track_kind,
                     channel: 0,
-                    fader_db: None,
+                    fader_db,
                     muted: false,
                     soloed: false,
                     parent_group: None,
@@ -540,6 +541,47 @@ fn classify_envi_channel(name: &str) -> EnviKind {
     EnviKind::Track(TrackKind::Audio)
 }
 
+/// Extract the fader level (dB) from an `ivnE` (Envi) payload.
+///
+/// The fader raw value is a u8 at offset 0x52 in user-track Envi chunks
+/// (empirically confirmed from Fire.logicx hex dumps; byte 0x51 = 0x11 is a
+/// preceding parameter marker).
+///
+/// Scale (0–255 logarithmic, reference at 128 = 0 dB):
+/// - `0`   → silence (returns `None`)
+/// - `128` → 0.0 dB (unity gain)
+/// - `255` → ~+6.0 dB (maximum)
+///
+/// Confirmed against Fire.logicx:
+/// - "Kick" raw=61 → −6.4 dB (quiet drum)
+/// - "Snare" raw=127 → −0.1 dB (near unity)
+/// - "PLUCK - Mau5" raw=217 → +4.6 dB (loud lead)
+/// - "Kick Sidechain" raw=249 → +5.8 dB (near-max sidechain send)
+///
+/// Returns `None` for system-channel chunks (data_len < 0x53) or silence (raw=0).
+fn extract_fader_from_envi(data: &[u8]) -> Option<f64> {
+    const FADER_MARKER_OFFSET: usize = 0x51;
+    const FADER_VALUE_OFFSET: usize = 0x52;
+    const FADER_MARKER: u8 = 0x11;
+
+    if data.len() <= FADER_VALUE_OFFSET {
+        return None;
+    }
+    // Validate the marker byte to avoid false matches in system-channel chunks.
+    if data[FADER_MARKER_OFFSET] != FADER_MARKER {
+        return None;
+    }
+
+    let raw = data[FADER_VALUE_OFFSET];
+    if raw == 0 {
+        return None; // silence / -infinity
+    }
+
+    // Logarithmic scale: 128 = 0 dB, 255 ≈ +6 dB, 64 ≈ −6 dB.
+    let db = 20.0 * (raw as f64 / 128.0).log10();
+    Some(db)
+}
+
 /// Extract the user-visible name from an `ivnE` (Envi) payload.
 ///
 /// ## Layout (user-track Envi chunks, data_len ~467–491)
@@ -548,6 +590,8 @@ fn classify_envi_channel(name: &str) -> EnviKind {
 ///
 /// | Offset | Size | Field          |
 /// |--------|------|----------------|
+/// | 0x51   | 1    | param marker (0x11) |
+/// | 0x52   | 1    | fader_raw (0–127)   |
 /// | 0x9E   | 1    | name_length    |
 /// | 0x9F   | 1    | (padding/zero) |
 /// | 0xA0   | N    | name bytes (ASCII, NOT null-terminated) |

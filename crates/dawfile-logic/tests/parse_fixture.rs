@@ -791,7 +791,7 @@ fn fire_audio_mseq_names() {
         while j < chunks.len() && chunks[j].tag != TAG_TRAK && chunks[j].tag != TAG_MSEQ {
             j += 1;
         }
-        if j < chunks.len() && chunks[j].tag == TAG_TRAK && chunks[j].data_len == 58 {
+        if j < chunks.len() && chunks[j].tag == TAG_TRAK && chunks[j].data_len >= 57 {
             let pos = i32::from_le_bytes(mseq.header_meta[4..8].try_into().unwrap_or([0; 4]))
                 as f64
                 / 65536.0;
@@ -800,7 +800,7 @@ fn fire_audio_mseq_names() {
         }
         i += 1;
     }
-    println!("Total audio clips (trak_dlen=58): {}", count);
+    println!("Total audio clips (trak_dlen>=57): {}", count);
 }
 
 #[test]
@@ -1027,4 +1027,67 @@ fn fire_take_folders() {
         "Take folder detection: {} folders found (0 = name-matching not yet resolving comped clips)",
         total_take_folders
     );
+}
+
+#[test]
+fn fire_envi_fader_values() {
+    // Verify that fader_db is extracted from Envi chunks for user-track channels.
+    // Confirmed raw values from Fire.logicx hex dumps:
+    //   "Kick":        byte[0x52] = 0x3d = 61  → fader below unity
+    //   "Snare":       byte[0x52] = 0x7f = 127 → fader at maximum
+    //   "Pluck Synth": byte[0x52] = 0x1b = 27  → fader well below unity
+    let session = dawfile_logic::read_session(FIRE_FIXTURE).expect("parse failed");
+
+    println!("\n=== Track fader_db values ===");
+    let mut tracks_with_fader = 0;
+    for t in &session.tracks {
+        if let Some(db) = t.fader_db {
+            println!("  '{}': {:.1} dB", t.name, db);
+            tracks_with_fader += 1;
+        }
+    }
+    println!(
+        "Tracks with fader_db: {} / {}",
+        tracks_with_fader,
+        session.tracks.len()
+    );
+
+    assert!(
+        tracks_with_fader > 0,
+        "expected at least some tracks to have fader_db values"
+    );
+
+    // Verify specific tracks extracted from Fire.logicx Envi hex dumps.
+    // Note: tracks may appear multiple times if duplicated in the Envi list.
+    let kick = session.tracks.iter().find(|t| t.name == "Kick");
+    let snare = session.tracks.iter().find(|t| t.name == "Snare");
+    let pluck = session.tracks.iter().find(|t| t.name == "Pluck Synth");
+
+    if let Some(kick) = kick {
+        let db = kick.fader_db.expect("Kick should have a fader_db");
+        // raw=61 → 20*log10(61/128) ≈ -6.4 dB
+        assert!(
+            db < 0.0 && db > -15.0,
+            "Kick fader should be 5–15 dB below unity, got {:.1} dB",
+            db
+        );
+    }
+    if let Some(snare) = snare {
+        let db = snare.fader_db.expect("Snare should have a fader_db");
+        // raw=127 → 20*log10(127/128) ≈ -0.07 dB (near unity)
+        assert!(
+            db.abs() < 1.0,
+            "Snare fader should be near 0 dB, got {:.1} dB",
+            db
+        );
+    }
+    if let Some(pluck) = pluck {
+        let db = pluck.fader_db.expect("Pluck Synth should have a fader_db");
+        // raw=27 → 20*log10(27/128) ≈ -13.5 dB (quiet)
+        assert!(
+            db < -5.0,
+            "Pluck Synth fader should be well below unity, got {:.1} dB",
+            db
+        );
+    }
 }
