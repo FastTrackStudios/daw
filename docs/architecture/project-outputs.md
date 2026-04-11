@@ -180,3 +180,39 @@ Samply is a hosted SaaS. Our system is:
 - **File-based** — everything is a `.md` file you own
 - **Open** — no vendor lock-in, works with any tool
 - **Integrated** — same system for tasks, projects, events, finances, and music production
+
+## Project Scaling: Song → Album → Video → Tour
+
+Projects nest naturally. A song becomes part of an album, the album spawns
+music videos, the videos feed into a tour. At each level:
+
+- The child project keeps its own `project.md`, `tasks/`, `outputs/`
+- The parent project links to children via `ProjectLink` references
+- Shared resources (setlist, stage plot) live in a `shared/` folder
+- Per-instance overrides (this venue's specific timing) live in `overrides/`
+
+### Inheritance Model
+
+```
+Tour (shared/)
+  └── setlist.md          ← default for all dates
+      ↓ inherits
+  Date (overrides/)
+      └── setlist.md      ← "swap song 3 for acoustic version"
+```
+
+A date without an override uses the shared version. A date with an override
+merges the changes on top.
+
+### Performance Layer
+
+At scale (30 tour dates × 10 songs × crew across cities), filesystem scanning
+is too slow for interactive queries. The performance layer:
+
+- **SQLite** indexes all frontmatter fields from `.md` files
+- **Redis** caches active project data for sub-millisecond reads
+- **File watcher** invalidates cache on `.md` file changes
+- **Full rebuild** from files at any time — the cache is disposable
+
+The markdown files remain the source of truth. Always portable, always readable
+by any tool, never locked into a database.
