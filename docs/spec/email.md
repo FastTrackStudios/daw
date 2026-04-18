@@ -136,6 +136,25 @@ NC Mail tag (auto-creating it on first call). See
 [`skills/email-triage.md`](../../skills/email-triage.md) for the full
 curator contract.
 
+Push (IMAP IDLE):
+```
+IMAP_PASSWORD=<bridge_password> task email watch \
+  --host 127.0.0.1 --port 1143 \
+  --user <address> --mailbox INBOX \
+  --ca-bundle /var/lib/nc-mail-trust/ca-bundle.crt
+```
+
+Long-running. Connects to Bridge via STARTTLS, LOGIN, SELECT, IDLE.
+Emits one JSON line per server-pushed update:
+
+```json
+{"ts":"2026-04-18T08:36:00Z","mailbox":"INBOX","exists":8,"raw":"* 8 EXISTS"}
+```
+
+The `exists` field is the new total mailbox count. Downstream
+consumers react by invoking the curator skill (typically via
+`task email sweep`) on each line.
+
 Linking:
 ```
 task email link --to task|project --reference <ref> \
