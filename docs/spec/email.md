@@ -124,6 +124,18 @@ task email tag unset '<imapLabel>' --email-id <id>
 task email tag delete --account <id> --tag <id>
 ```
 
+Triage loop (used by the curator skill):
+```
+task email sweep --account <id> [--mailbox <id>] [--limit N] [--filter …]
+task email mark-processed --email-id <id> [--note "<reason>"]
+```
+
+`sweep` returns messages that are neither linked to a task/project
+nor tagged `$processed`. `mark-processed` applies the `$processed`
+NC Mail tag (auto-creating it on first call). See
+[`skills/email-triage.md`](../../skills/email-triage.md) for the full
+curator contract.
+
 Linking:
 ```
 task email link --to task|project --reference <ref> \
