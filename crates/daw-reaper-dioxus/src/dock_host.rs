@@ -28,12 +28,17 @@ use crate::dock;
 const DOCK_EVENT_BUFFER: usize = 64;
 
 static DOCK_BROADCASTER: OnceLock<broadcast::Sender<DockEvent>> = OnceLock::new();
+static DOCK_STATE: OnceLock<Mutex<HostState>> = OnceLock::new();
 
 fn dock_broadcaster() -> &'static broadcast::Sender<DockEvent> {
     DOCK_BROADCASTER.get_or_init(|| {
         let (tx, _rx) = broadcast::channel::<DockEvent>(DOCK_EVENT_BUFFER);
         tx
     })
+}
+
+fn host_state() -> &'static Mutex<HostState> {
+    DOCK_STATE.get_or_init(|| Mutex::new(HostState::default()))
 }
 
 /// In-process subscriber for dock events. Useful for `LocalCaller` flows
@@ -44,14 +49,12 @@ pub fn subscribe_dock_broadcasts() -> broadcast::Receiver<DockEvent> {
 
 /// REAPER-backed [`DockHostService`] adapter.
 ///
-/// All operations dispatch synchronously to the existing `dock::*` module,
-/// which assumes it runs on REAPER's main thread. Subscribers receive
-/// [`DockEvent`]s via a tokio broadcast channel pumped to each vox
-/// `Tx<DockEvent>` by a per-subscriber background task.
-#[derive(Default)]
-pub struct ReaperDockHost {
-    state: Mutex<HostState>,
-}
+/// Stateless wrapper — all dock state lives in a process-wide
+/// `OnceLock<Mutex<HostState>>` (matches the static-state pattern used by
+/// `ReaperActionRegistry` and the rest of the daw-reaper crate). Cloning
+/// is cheap and preserves the shared state.
+#[derive(Default, Clone, Copy)]
+pub struct ReaperDockHost;
 
 #[derive(Default)]
 struct HostState {
@@ -70,7 +73,7 @@ impl ReaperDockHost {
 
     /// Resolve a handle back to the dock module's `&'static str` id.
     fn lookup(&self, handle: DockHandle) -> Option<&'static str> {
-        self.state.lock().unwrap().handles.get(&handle.0).copied()
+        host_state().lock().unwrap().handles.get(&handle.0).copied()
     }
 
     fn emit(event: DockEvent) {
@@ -80,7 +83,7 @@ impl ReaperDockHost {
 
 impl DockHostService for ReaperDockHost {
     async fn register_dock(&self, id: String, _title: String, _kind: DockKind) -> DockHandle {
-        let mut st = self.state.lock().unwrap();
+        let mut st = host_state().lock().unwrap();
         // Intern id as &'static str — the dock module requires it.
         let static_id: &'static str = Box::leak(id.into_boxed_str());
         if let Some(&existing) = st.by_id.get(static_id) {
@@ -94,7 +97,7 @@ impl DockHostService for ReaperDockHost {
     }
 
     async fn unregister_dock(&self, handle: DockHandle) -> bool {
-        let mut st = self.state.lock().unwrap();
+        let mut st = host_state().lock().unwrap();
         if let Some(id) = st.handles.remove(&handle.0) {
             st.by_id.remove(id);
             true

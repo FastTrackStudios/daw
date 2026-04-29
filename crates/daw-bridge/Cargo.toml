@@ -9,8 +9,11 @@ name = "reaper_daw_bridge"
 path = "src/lib.rs"
 
 [dependencies]
-# DAW facade (reaper impl)
-daw = { workspace = true, features = ["reaper"] }
+# DAW facade (reaper impl + UI host so DockHostServiceDispatcher is wired)
+daw = { workspace = true, features = ["reaper", "reaper-ui"] }
+# Direct dep so we can construct ReaperDockHost in plugin_main.
+daw-reaper-dioxus = { path = "../daw-reaper-dioxus" }
+daw-proto = { path = "../daw-proto" }
 
 # RT-aware allocator
 daw-allocator.workspace = true

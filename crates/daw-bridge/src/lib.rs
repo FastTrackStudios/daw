@@ -177,6 +177,7 @@ async fn register_daw_dispatcher() {
     let toolbar = daw::reaper::ReaperToolbar::new();
     let plugin_loader = daw::reaper::ReaperPluginLoader::new();
     let batch = daw::reaper::batch::BatchExecutor::new();
+    let dock_host = daw_reaper_dioxus::ReaperDockHost::new();
 
     // Import service descriptor functions for method_id routing
     use daw::service::{
@@ -278,6 +279,10 @@ async fn register_daw_dispatcher() {
         .with(
             batch_service_service_descriptor(),
             BatchServiceDispatcher::new(batch),
+        )
+        .with(
+            daw_proto::dock_host::dock_host_service_service_descriptor(),
+            daw_proto::dock_host::DockHostServiceDispatcher::new(dock_host),
         );
 
     // Build the connection acceptor from the routed handler
