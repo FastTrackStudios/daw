@@ -13,6 +13,12 @@ daw-reaper-embed = { path = "../daw-reaper-embed" }
 # pull in the daw facade, avoiding the daw <-> daw-reaper-dioxus cycle.
 daw-module = { path = "../daw-module" }
 
+# DockHostService trait + DockHandle/DockEvent types
+daw-proto = { path = "../daw-proto" }
+vox.workspace = true
+moire.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+
 # REAPER API access
 reaper-low.workspace = true
 reaper-medium.workspace = true
