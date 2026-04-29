@@ -434,13 +434,72 @@ async fn unregister_returns_true_for_known_action(ctx: &ReaperTestContext) -> ey
     Ok(())
 }
 
-// NOTE: we can't currently assert that unregister removes the action
-// from REAPER's action list / NamedCommandLookup. `register_action` in
-// daw-reaper Box::leak's the underlying reaper_high::RegisteredAction,
-// so neither the gaccel entry nor the cmd_id ever go away. Tracked as
-// a separate task — once the leak is replaced with a tracked
-// HashMap<String, RegisteredAction> + plugin_register_remove_gaccel,
-// add a passing `unregister_removes_from_action_list` here.
+#[reaper_test(isolated)]
+async fn unregister_removes_from_action_list(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    actions
+        .register_in_menu("FTS_TEST_UNREGISTER_ME", "FTS Test: Unregister Me")
+        .await?;
+    assert!(
+        actions.is_in_action_list("FTS_TEST_UNREGISTER_ME").await?,
+        "freshly registered action must be in the action list"
+    );
+
+    let removed = actions.unregister("FTS_TEST_UNREGISTER_ME").await?;
+    assert!(removed);
+
+    // The gaccel entry is gone — the action no longer appears in the
+    // Actions window / REAPER's main keyboard section action list.
+    assert!(
+        !actions.is_in_action_list("FTS_TEST_UNREGISTER_ME").await?,
+        "action must NOT be in REAPER's action list after unregister"
+    );
+
+    // NOTE: REAPER's named-command-id allocations are sticky for the
+    // lifetime of the process; once a command name has been registered
+    // its cmd_id stays in NamedCommandLookup even after the gaccel and
+    // the action's hook entry are dropped. This is REAPER behaviour,
+    // not a bug here. Our internal tracking IS gone, so re-registering
+    // takes the "register fresh" path inside register_action — see
+    // `reregister_after_unregister_keeps_cmd_id_but_re_adds_gaccel`.
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn reregister_after_unregister_keeps_cmd_id_but_re_adds_gaccel(
+    ctx: &ReaperTestContext,
+) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let id1 = actions
+        .register_in_menu("FTS_TEST_REREG_AFTER_UNREG", "FTS Test: Re-register")
+        .await?;
+    assert!(id1 > 0);
+    actions.unregister("FTS_TEST_REREG_AFTER_UNREG").await?;
+    assert!(
+        !actions
+            .is_in_action_list("FTS_TEST_REREG_AFTER_UNREG")
+            .await?,
+        "after unregister the action must NOT be in the action list"
+    );
+
+    let id2 = actions
+        .register_in_menu("FTS_TEST_REREG_AFTER_UNREG", "FTS Test: Re-register")
+        .await?;
+    assert_eq!(
+        id1, id2,
+        "REAPER hands the same sticky cmd_id back on re-register \
+         (named-command-id allocations don't recycle within a session)"
+    );
+    assert!(
+        actions
+            .is_in_action_list("FTS_TEST_REREG_AFTER_UNREG")
+            .await?,
+        "re-register must put the action back in the action list"
+    );
+    Ok(())
+}
 
 #[reaper_test(isolated)]
 async fn unregister_unknown_returns_false(ctx: &ReaperTestContext) -> eyre::Result<()> {

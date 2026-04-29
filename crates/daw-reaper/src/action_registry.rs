@@ -13,9 +13,10 @@
 
 use crate::main_thread;
 use daw_proto::{ActionEvent, ActionRegistryService};
-use reaper_high::Reaper;
+use reaper_high::{Reaper, RegisteredAction};
 use reaper_medium::{
-    CommandId, Hmenu, HookCustomMenu, MenuHookFlag, OwnedGaccelRegister, ProjectContext, ReaperStr,
+    CommandId, Handle, Hmenu, HookCustomMenu, MenuHookFlag, OwnedGaccelRegister, ProjectContext,
+    ReaperStr,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Mutex;
@@ -23,12 +24,42 @@ use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 use vox::Tx;
 
+/// Owned action keepalive — drops `RegisteredAction` and removes the
+/// manually-registered gaccel when unregistered. `Handle<gaccel_register_t>`
+/// wraps a NonNull<reaper_low::raw::gaccel_register_t> which is owned by
+/// REAPER itself (the medium session keeps the backing storage alive). The
+/// pointer is only deref'd on the REAPER main thread through
+/// `plugin_register_remove_gaccel`, so we can safely impl Send/Sync for
+/// the carrier type.
+struct OwnedAction {
+    action: RegisteredAction,
+    gaccel_handle: Handle<reaper_low::raw::gaccel_register_t>,
+}
+
+// SAFETY: `OwnedAction` is only mutated / dropped via main_thread::query,
+// which serialises on REAPER's main thread. The `Handle` and
+// `RegisteredAction` interior pointers are never deref'd from other
+// threads — we only need Send so the OnceLock<Mutex<..>> map can hold them.
+unsafe impl Send for OwnedAction {}
+
 /// Tracks actions registered through this service.
 ///
 /// Maps command_name → command_id for actions we've registered.
 /// Used for unregistration and to avoid double-registering.
 static REGISTERED_ACTIONS: std::sync::OnceLock<Mutex<HashMap<String, u32>>> =
     std::sync::OnceLock::new();
+
+/// Live `RegisteredAction` + manual gaccel handle keepalives. Dropping
+/// the action removes it from `reaper_high`'s internal command map (so
+/// REAPER's hook lookup won't dispatch through it any more), and the
+/// gaccel handle lets us call `plugin_register_remove_gaccel` to take
+/// the action OUT of REAPER's action list.
+static OWNED_ACTIONS: std::sync::OnceLock<Mutex<HashMap<String, OwnedAction>>> =
+    std::sync::OnceLock::new();
+
+fn owned_actions() -> &'static Mutex<HashMap<String, OwnedAction>> {
+    OWNED_ACTIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 /// Broadcast channel for action trigger events.
 ///
@@ -438,17 +469,22 @@ impl ActionRegistryService for ReaperActionRegistry {
             // gaccel (action list entry) when the session is already awake — that
             // only happens during wake_up(). Since daw-bridge calls wake_up() at
             // init time, any actions registered later by guests never appear in
-            // REAPER's action list. Fix: register the gaccel ourselves.
-            {
+            // REAPER's action list. Fix: register the gaccel ourselves and keep
+            // the returned handle so we can unregister later.
+            let gaccel_handle = {
                 let gaccel = OwnedGaccelRegister::without_key_binding(cmd_id, desc_static);
                 let mut session = reaper.medium_session();
-                if let Err(e) = session.plugin_register_add_gaccel(gaccel) {
-                    warn!(
-                        "Failed to register gaccel for '{}': {:?}",
-                        name_for_query, e
-                    );
+                match session.plugin_register_add_gaccel(gaccel) {
+                    Ok(h) => Some(h),
+                    Err(e) => {
+                        warn!(
+                            "Failed to register gaccel for '{}': {:?}",
+                            name_for_query, e
+                        );
+                        None
+                    }
                 }
-            }
+            };
 
             if toggleable {
                 // REAPER can be slow to surface newly registered toggle actions in the
@@ -467,9 +503,24 @@ impl ActionRegistryService for ReaperActionRegistry {
                 name_for_query, cmd_id_val, desc_for_query
             );
 
-            // Leak the RegisteredAction so it stays alive (action stays registered).
-            // We'll track the command_name → cmd_id mapping ourselves.
-            std::mem::forget(action);
+            // Park the RegisteredAction + gaccel handle in OWNED_ACTIONS
+            // keyed by command_name so unregister can drop them. Without
+            // a gaccel handle there's nothing to remove from REAPER's
+            // action list, but the RegisteredAction still gets tracked
+            // so its hook entry can be torn down.
+            if let Some(gaccel_handle) = gaccel_handle {
+                owned_actions().lock().unwrap().insert(
+                    name_for_query.clone(),
+                    OwnedAction {
+                        action,
+                        gaccel_handle,
+                    },
+                );
+            } else {
+                // No gaccel registered — keep the action alive but don't
+                // track it (it has nothing to tear down).
+                std::mem::forget(action);
+            }
 
             cmd_id_val
         })
@@ -510,6 +561,48 @@ impl ActionRegistryService for ReaperActionRegistry {
             .is_some();
 
         if removed {
+            // Tear down with REAPER on the main thread: drop the
+            // RegisteredAction (removes the hook entry) AND remove the
+            // gaccel handle (takes the entry out of the action list +
+            // NamedCommandLookup table).
+            let name_for_query = command_name.clone();
+            let _ = main_thread::query(move || {
+                let owned = owned_actions().lock().unwrap().remove(&name_for_query);
+                if let Some(owned) = owned {
+                    let reaper = Reaper::get();
+                    {
+                        let mut session = reaper.medium_session();
+                        session.plugin_register_remove_gaccel(owned.gaccel_handle);
+                    }
+                    // Explicit unregister of the action — drops the
+                    // command from reaper_high's command_by_id map.
+                    owned.action.unregister();
+
+                    // reaper_high adds the named-command via
+                    // `plugin_register("command_id", name)`. There is no
+                    // public wrapper for the corresponding remove yet
+                    // (reaper-medium has a TODO note). Drop the entry
+                    // ourselves via the raw low-level call: passing
+                    // `-command_id` removes the name → cmd_id mapping
+                    // so `NamedCommandLookup` returns None on a future
+                    // re-register and yields a fresh cmd_id.
+                    //
+                    // SAFETY: name_cstr lives for the duration of the
+                    // call; REAPER copies the string internally during
+                    // the unregister handshake.
+                    if let Ok(name_cstr) = std::ffi::CString::new(name_for_query.as_str()) {
+                        let low = reaper.medium_reaper().low();
+                        unsafe {
+                            low.plugin_register(
+                                c"-command_id".as_ptr(),
+                                name_cstr.as_ptr() as *mut std::os::raw::c_void,
+                            );
+                        }
+                    }
+                }
+            })
+            .await;
+
             // Also remove from menu metadata
             menu_actions()
                 .lock()
@@ -520,7 +613,7 @@ impl ActionRegistryService for ReaperActionRegistry {
             // re-register starts fresh (no stale on/off carrying over).
             toggle_states().lock().unwrap().remove(&command_name);
 
-            info!("Unregistered action '{}' (from tracking map)", command_name);
+            info!("Unregistered action '{}' (full teardown)", command_name);
         } else {
             debug!(
                 "Action '{}' not found in our registry (may not have been registered by us)",
