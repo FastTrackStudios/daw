@@ -734,15 +734,49 @@ impl ActionRegistryService for ReaperActionRegistry {
     }
 
     async fn set_toggle_state(&self, command_name: String, is_on: bool) {
-        let mut states = toggle_states().lock().unwrap();
-        if states.contains_key(&command_name) {
-            states.insert(command_name.clone(), is_on);
-            debug!("Toggle state for '{}' set to {}", command_name, is_on);
-        } else {
-            debug!(
-                "Ignoring set_toggle_state for '{}' — not registered as toggleable",
-                command_name
-            );
+        let was_known = {
+            let mut states = toggle_states().lock().unwrap();
+            if states.contains_key(&command_name) {
+                states.insert(command_name.clone(), is_on);
+                debug!("Toggle state for '{}' set to {}", command_name, is_on);
+                true
+            } else {
+                debug!(
+                    "Ignoring set_toggle_state for '{}' — not registered as toggleable",
+                    command_name
+                );
+                false
+            }
+        };
+
+        if !was_known {
+            return;
+        }
+
+        // Look up the cmd_id and tell REAPER to repaint any toolbar /
+        // menu cells showing this action's toggle indicator. REAPER
+        // queries the toggleaction hook lazily on repaint — without
+        // this nudge the indicator may keep showing the previous value
+        // until the user mouses over the action list. Mirrors SWS's
+        // RefreshToolbar2() / NSEEL_PROC_executeToolbarRefresh pattern.
+        let cmd_id = registered_actions()
+            .lock()
+            .unwrap()
+            .get(&command_name)
+            .copied();
+        if let Some(cmd_id) = cmd_id {
+            // Hop to the main thread; RefreshToolbar2 must be called
+            // there per the REAPER plugin SDK contract.
+            let _ = main_thread::query(move || {
+                let reaper = Reaper::get();
+                unsafe {
+                    reaper
+                        .medium_reaper()
+                        .low()
+                        .RefreshToolbar2(0, cmd_id as i32);
+                }
+            })
+            .await;
         }
     }
 
