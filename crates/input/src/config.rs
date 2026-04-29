@@ -220,6 +220,11 @@ pub fn parse_key_sequence(input: &str) -> Result<Vec<KeyChord>, ConfigError> {
 }
 
 pub fn parse_key_chord(input: &str) -> Result<KeyChord, ConfigError> {
+    // '+' is also used as a key character (Shift+=), but it's the chord separator,
+    // so handle it before splitting.
+    if input == "+" {
+        return Ok(KeyChord::new(KeyCode::Character("+".to_string()), Modifiers::NONE));
+    }
     let mut modifiers = Modifiers::NONE;
     let mut parts: Vec<&str> = input.split('+').collect();
     if parts.is_empty() {
@@ -250,6 +255,8 @@ fn parse_key_code(token: &str) -> Result<KeyCode, ConfigError> {
         "comma" => Ok(KeyCode::Character(",".to_string())),
         "period" | "dot" => Ok(KeyCode::Character(".".to_string())),
         "space" => Ok(KeyCode::Character(" ".to_string())),
+        "equals" | "equal" => Ok(KeyCode::Character("=".to_string())),
+        "minus" | "dash" => Ok(KeyCode::Character("-".to_string())),
         "enter" | "return" => Ok(KeyCode::Enter),
         "escape" | "esc" => Ok(KeyCode::Escape),
         "tab" => Ok(KeyCode::Tab),
@@ -259,6 +266,11 @@ fn parse_key_code(token: &str) -> Result<KeyCode, ConfigError> {
         "down" | "arrowdown" => Ok(KeyCode::ArrowDown),
         "left" | "arrowleft" => Ok(KeyCode::ArrowLeft),
         "right" | "arrowright" => Ok(KeyCode::ArrowRight),
+        // Numpad keys
+        "kp_enter" => Ok(KeyCode::Enter),
+        other if other.starts_with("kp_") => {
+            Ok(KeyCode::Character(other.to_string()))
+        }
         other if other.starts_with('f') => {
             let n = other[1..]
                 .parse::<u8>()
