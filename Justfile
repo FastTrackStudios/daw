@@ -1,18 +1,8 @@
 # Task workspace recipes
 # Run commands: just <recipe-name>
 
-# Default: serve the desktop app with hot-reload
-default: dx
-
-# ── Desktop App ──────────────────────────────────────────────────────────
-
-# Serve the desktop app with hot-reload (requires TASK_VAULT env var)
-dx *args:
-    cd apps/desktop && dx serve {{args}}
-
-# Build the desktop app for release
-dx-build:
-    cd apps/desktop && dx build --release --platform desktop
+# Default: check the core workspace
+default: check
 
 # ── CLI ──────────────────────────────────────────────────────────────────
 

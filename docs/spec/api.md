@@ -1,9 +1,9 @@
 # API Spec
 
-## VaultService
+## Vox Services
 
 ### t[api.service]
-`VaultService` is the primary Rust trait exposed by vault-core. It provides all task and project operations as async methods. The trait is exposed to callers over Vox RPC, allowing the desktop app, iOS app, and WASM plugin to share a single implementation without duplicating business logic.
+Task exposes split Rust service traits over Vox RPC: `TaskService`, `ProjectService`, `TimeService`, `CalendarService`, `ClientService`, `InvoiceService`, and `ActivityService`. `VaultServiceImpl` implements those traits, but callers should use the service-specific Vox entry points rather than a compatibility facade.
 
 ### t[api.service.list-tasks]
 `list_tasks() -> Vec<Task>` returns every task present in the current vault snapshot. The returned list is unfiltered and unsorted; callers should pass the result through the query engine (see `t[api.service.execute-query]`) to apply filters and ordering. The snapshot is the in-memory state from the most recent vault load or file-watch reload.
@@ -34,7 +34,7 @@
 ## Errors
 
 ### t[api.error]
-`VaultError` is the top-level error type returned by all `VaultService` methods. Variants:
+`VaultError` is the top-level error type returned by core service methods. Variants:
 
 - `NotFound(String)` — the requested task, project, or file does not exist in the vault snapshot.
 - `ParseError { path: PathBuf, message: String }` — a vault file could not be parsed as valid frontmatter or YAML.
@@ -47,4 +47,4 @@ All variants implement `std::error::Error` and `Display`. RPC transports seriali
 ## Vox RPC
 
 ### t[api.vox]
-vault-core uses Vox for inter-process and in-process communication. On desktop (macOS/Windows), the vault-core library is loaded in-process and Vox dispatches calls with zero serialization overhead via the `Dispatcher` (server) and `Client` (client) pair. In the Obsidian WASM plugin, the plugin runs in a sandboxed WASM context and communicates with the host vault-core process over Vox's WASM bridge. On iOS, the app communicates with the vault-core service over a local Vox WebSocket connection, allowing the app and the service to run in separate process contexts. All three transports share the same generated client and service trait, so no transport-specific code appears in business logic.
+task-core uses Vox for inter-process and in-process communication. The server accepts service connections on `/vox` and dispatches directly to the matching split service. Integrations and future clients should call those Vox services directly; domain REST compatibility endpoints are intentionally not maintained in pre-alpha.
