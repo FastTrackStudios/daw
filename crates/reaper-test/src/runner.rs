@@ -691,11 +691,17 @@ impl RunningReaper {
     pub fn stop(mut self, runner: &TestRunner) {
         if runner.keep_open {
             println!(
-                "REAPER left running (PID {}) — kill manually when done",
+                "REAPER left running (PID {}) — close it normally to exit",
                 self.pid
             );
-            // Leak the child so it isn't killed on drop
-            std::mem::forget(self);
+            // Block on REAPER until the user closes it. The bwrap sandbox
+            // we spawned through (fts-test) uses --die-with-parent, so
+            // letting the xtask process exit here would tear REAPER down
+            // immediately. Wait synchronously instead so the xtask
+            // (and its bwrap parent chain) stays alive for the whole
+            // inspection session.
+            let _ = self.child.wait();
+            let _ = std::fs::remove_file(&self.socket_path);
             return;
         }
         println!("Killing REAPER (PID {})…", self.pid);
