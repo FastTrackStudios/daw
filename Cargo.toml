@@ -25,7 +25,13 @@ members = [
     "crates/fts-audio-proto",
     "crates/fts-devtools",
     "crates/daw-extension-runtime",
+    "crates/daw-module",
     "crates/daw-reaper-embed",
+    # NOTE: daw-reaper-dioxus is intentionally NOT a workspace member yet.
+    # Its source has been vendored from reaper-lib at crates/daw-reaper-dioxus,
+    # but compiling it requires the blitz/anyrender/dioxus-native FTS forks to
+    # be aligned with the rest of the workspace. Tracked in daw-4a3.
+    # "crates/daw-reaper-dioxus",
     "apps/example-extension",
     "apps/example-plugin",
     "xtask",
@@ -115,6 +121,16 @@ wgpu = { version = "26", features = ["wgsl"] }
 vello = { version = "0.6", features = ["wgpu"] }
 skrifa = "0.37"
 pollster = "0.4"
+anyrender_vello = "0.6"
+
+# Dioxus native rendering (used by daw-reaper-dioxus)
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = [
+    "prelude", "svg", "system-fonts", "autofocus", "incremental",
+] }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
+dioxus-devtools = "0.7"
 
 # Platform UI bindings
 cocoa = "0.26"
