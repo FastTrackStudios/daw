@@ -137,6 +137,7 @@ pub(crate) use daw_proto::TakeServiceClient;
 pub(crate) use daw_proto::TempoMapServiceClient;
 pub(crate) use daw_proto::TrackServiceClient;
 pub(crate) use daw_proto::batch::BatchServiceClient;
+pub(crate) use daw_proto::dock_host::DockHostServiceClient;
 pub(crate) use daw_proto::plugin_loader::PluginLoaderServiceClient;
 pub(crate) use daw_proto::toolbar::ToolbarServiceClient;
 pub(crate) use daw_proto::transport::transport::TransportServiceClient;
@@ -149,6 +150,7 @@ mod action_registry;
 mod audio_engine;
 mod automation;
 pub mod batch;
+mod dock_host;
 mod ext_state;
 mod fx;
 mod input;
@@ -171,6 +173,7 @@ pub use self::automation::{EnvelopeHandle, Envelopes};
 pub use self::batch::{
     BatchBuilder, BatchExtractError, BatchResponseExt, FromStepOutput, StepHandle,
 };
+pub use self::dock_host::DockHost;
 pub use self::ext_state::ExtState;
 pub use self::fx::{FxChain, FxHandle, FxParamHandle};
 pub use self::input::Input;
@@ -191,6 +194,7 @@ pub use self::transport::Transport;
 #[derive(Clone)]
 pub struct DawClients {
     pub(crate) action_registry: ActionRegistryServiceClient,
+    pub(crate) dock_host: DockHostServiceClient,
     pub(crate) transport: TransportServiceClient,
     pub(crate) project: ProjectServiceClient,
     pub(crate) marker: MarkerServiceClient,
@@ -220,6 +224,7 @@ impl DawClients {
     pub fn new(handle: ErasedCaller) -> Self {
         Self {
             action_registry: ActionRegistryServiceClient::new(handle.clone()),
+            dock_host: DockHostServiceClient::new(handle.clone()),
             transport: TransportServiceClient::new(handle.clone()),
             project: ProjectServiceClient::new(handle.clone()),
             marker: MarkerServiceClient::new(handle.clone()),
@@ -524,6 +529,16 @@ impl Daw {
     /// Access the action registry for registering custom REAPER actions.
     pub fn action_registry(&self) -> ActionRegistry {
         ActionRegistry::new(self.clients.clone())
+    }
+
+    /// Access the dock host for registering and toggling UI panels.
+    ///
+    /// Backed by `DockHostService` — the platform-portable trait. The
+    /// REAPER+Dioxus implementation lives in `daw-reaper-dioxus`; tests
+    /// can swap in `MockDockHost` (under `daw-proto`'s `test-utils`
+    /// feature) without spinning up REAPER or a GPU.
+    pub fn dock_host(&self) -> DockHost {
+        DockHost::new(self.clients.clone())
     }
 
     /// Access the input interception service.

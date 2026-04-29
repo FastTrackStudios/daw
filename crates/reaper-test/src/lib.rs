@@ -704,6 +704,54 @@ impl ReaperTestContext {
         &self.project
     }
 
+    // ── UI assertion helpers ────────────────────────────────────────────
+    //
+    // Backed by `DockHostService`. Require the host extension running
+    // inside REAPER to have registered a `DockHostServiceDispatcher` —
+    // see `daw_reaper_dioxus::register_dock_host_service` (TODO: wire
+    // into create_daw_handler under daw-reaper feature).
+
+    /// Look up (or register) a dock by string id and return the handle.
+    /// Idempotent: repeat calls for the same id return the same handle.
+    pub async fn dock_handle(
+        &self,
+        id: &str,
+        title: &str,
+        kind: daw::service::dock_host::DockKind,
+    ) -> eyre::Result<daw::service::dock_host::DockHandle> {
+        Ok(self.daw.dock_host().register_dock(id, title, kind).await?)
+    }
+
+    /// Assert that the panel registered under `id` is currently visible.
+    /// Fails with a descriptive error if the dock isn't registered or is
+    /// hidden.
+    pub async fn assert_panel_visible(&self, id: &str) -> eyre::Result<()> {
+        let handle = self
+            .daw
+            .dock_host()
+            .register_dock(id, id, daw::service::dock_host::DockKind::Tabbed)
+            .await?;
+        let visible = self.daw.dock_host().is_visible(handle).await?;
+        if !visible {
+            eyre::bail!("expected dock '{id}' to be visible, but it was hidden");
+        }
+        Ok(())
+    }
+
+    /// Assert that the panel registered under `id` is currently hidden.
+    pub async fn assert_panel_hidden(&self, id: &str) -> eyre::Result<()> {
+        let handle = self
+            .daw
+            .dock_host()
+            .register_dock(id, id, daw::service::dock_host::DockKind::Tabbed)
+            .await?;
+        let visible = self.daw.dock_host().is_visible(handle).await?;
+        if visible {
+            eyre::bail!("expected dock '{id}' to be hidden, but it was visible");
+        }
+        Ok(())
+    }
+
     /// Get the full path to an asset file in the test assets directory.
     pub fn asset_path(&self, filename: &str) -> PathBuf {
         self.asset_dir.join(filename)
