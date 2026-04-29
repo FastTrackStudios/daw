@@ -30,6 +30,7 @@ pub mod hot_reload;
 pub mod macos_input;
 pub mod overlay;
 pub mod service;
+pub mod snapshot;
 
 pub use dock::{
     DockablePanelConfig, hide_panel, is_panel_visible, register_panel, restore_dock_state,

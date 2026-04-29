@@ -187,6 +187,16 @@ pub mod ui {
     /// Transparent floating overlay (HUDs, popups).
     pub use daw_reaper_dioxus::{DioxusOverlay, DioxusOverlayBuilder, OverlayConfig};
 
+    /// Pixel snapshot helpers — render a Dioxus root component to an
+    /// off-screen GPU surface and assert against a golden byte file.
+    /// Useful for component-level visual regression tests in
+    /// fts-extensions or any other consumer.
+    pub mod snapshot {
+        pub use daw_reaper_dioxus::snapshot::{
+            SnapshotError, compare_to_golden, render_panel_offscreen,
+        };
+    }
+
     /// Dioxus prelude — re-exported for component authors so they don't have
     /// to depend on `dioxus-native` directly.
     pub use daw_reaper_dioxus::prelude;
