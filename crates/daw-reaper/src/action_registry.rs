@@ -516,6 +516,10 @@ impl ActionRegistryService for ReaperActionRegistry {
                 .unwrap()
                 .retain(|a| a.command_name != command_name);
 
+            // Clear any toggle state recorded for this action so a later
+            // re-register starts fresh (no stale on/off carrying over).
+            toggle_states().lock().unwrap().remove(&command_name);
+
             info!("Unregistered action '{}' (from tracking map)", command_name);
         } else {
             debug!(

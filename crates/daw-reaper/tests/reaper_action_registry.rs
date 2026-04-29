@@ -253,3 +253,235 @@ async fn execute_named_action_for_unknown_returns_false(
 
     Ok(())
 }
+
+// ── Toggle state behaviour ──────────────────────────────────────────────────
+//
+// These tests verify that set_toggle_state actually persists, that
+// get_toggle_state observes the latest write, and that REAPER's own
+// `IsToggled` callback (the closure we registered as ActionKind::Toggleable)
+// reads the same state. Toggle state lives in `toggle_states()` keyed by
+// command name, set by `register_toggle*` and read by REAPER on every
+// menu/toolbar repaint.
+
+#[reaper_test(isolated)]
+async fn toggle_state_round_trips_on_then_off(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let cmd_id = actions
+        .register_toggle("FTS_TEST_TOGGLE_ROUNDTRIP", "FTS Test: Toggle Roundtrip")
+        .await?;
+    assert!(cmd_id > 0, "register_toggle returned 0");
+
+    // Newly-registered toggle starts at false.
+    let initial = actions
+        .get_toggle_state("FTS_TEST_TOGGLE_ROUNDTRIP")
+        .await?;
+    assert_eq!(
+        initial,
+        Some(false),
+        "fresh toggleable action must start at false"
+    );
+
+    // Flip to on.
+    actions
+        .set_toggle_state("FTS_TEST_TOGGLE_ROUNDTRIP", true)
+        .await?;
+    let after_on = actions
+        .get_toggle_state("FTS_TEST_TOGGLE_ROUNDTRIP")
+        .await?;
+    assert_eq!(after_on, Some(true), "set_toggle_state(true) didn't stick");
+
+    // Flip back off.
+    actions
+        .set_toggle_state("FTS_TEST_TOGGLE_ROUNDTRIP", false)
+        .await?;
+    let after_off = actions
+        .get_toggle_state("FTS_TEST_TOGGLE_ROUNDTRIP")
+        .await?;
+    assert_eq!(
+        after_off,
+        Some(false),
+        "set_toggle_state(false) didn't stick"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn toggle_state_persists_across_set_calls(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    actions
+        .register_toggle("FTS_TEST_TOGGLE_PERSIST", "FTS Test: Toggle Persist")
+        .await?;
+
+    // Idempotent set — same value twice doesn't disturb state.
+    actions
+        .set_toggle_state("FTS_TEST_TOGGLE_PERSIST", true)
+        .await?;
+    actions
+        .set_toggle_state("FTS_TEST_TOGGLE_PERSIST", true)
+        .await?;
+    assert_eq!(
+        actions.get_toggle_state("FTS_TEST_TOGGLE_PERSIST").await?,
+        Some(true)
+    );
+
+    // Many flips in a row — only the last write should be observable.
+    for _ in 0..5 {
+        actions
+            .set_toggle_state("FTS_TEST_TOGGLE_PERSIST", false)
+            .await?;
+        actions
+            .set_toggle_state("FTS_TEST_TOGGLE_PERSIST", true)
+            .await?;
+    }
+    assert_eq!(
+        actions.get_toggle_state("FTS_TEST_TOGGLE_PERSIST").await?,
+        Some(true),
+        "after even number of flips ending on true, state should be true"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn set_toggle_state_on_non_toggleable_is_noop(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    // Register a non-toggleable action.
+    actions
+        .register(
+            "FTS_TEST_NON_TOGGLEABLE",
+            "FTS Test: Non-toggleable Sentinel",
+        )
+        .await?;
+
+    // Setting toggle state on a non-toggleable action should be a no-op
+    // — get_toggle_state returns None because the action was never
+    // recorded in the toggle-state map.
+    actions
+        .set_toggle_state("FTS_TEST_NON_TOGGLEABLE", true)
+        .await?;
+    let state = actions.get_toggle_state("FTS_TEST_NON_TOGGLEABLE").await?;
+    assert_eq!(
+        state, None,
+        "set_toggle_state on a non-toggleable action must NOT register a state"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn get_toggle_state_for_unknown_returns_none(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let state = actions
+        .get_toggle_state("FTS_TEST_NEVER_REGISTERED_TOGGLE")
+        .await?;
+    assert_eq!(
+        state, None,
+        "unknown action should not have a recorded toggle state"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn execute_named_action_on_toggle_runs_handler(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    // Register a toggleable action — handler is auto-generated
+    // (registered_actions stores the cmd_id; REAPER will dispatch through
+    // it). We don't observe a handler-side side-effect here; the assertion
+    // is that the trigger path doesn't error and reports success.
+    actions
+        .register_toggle("FTS_TEST_TOGGLE_TRIGGER", "FTS Test: Toggle Trigger")
+        .await?;
+    actions
+        .set_toggle_state("FTS_TEST_TOGGLE_TRIGGER", true)
+        .await?;
+
+    let triggered = actions
+        .execute_named_action("FTS_TEST_TOGGLE_TRIGGER")
+        .await?;
+    assert!(
+        triggered,
+        "execute_named_action on a registered toggle action should report success"
+    );
+
+    Ok(())
+}
+
+// ── Unregister ──────────────────────────────────────────────────────────────
+
+#[reaper_test(isolated)]
+async fn unregister_returns_true_for_known_action(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    actions
+        .register_in_menu("FTS_TEST_UNREGISTER_KNOWN", "FTS Test: Unregister Known")
+        .await?;
+    assert!(
+        actions
+            .is_in_action_list("FTS_TEST_UNREGISTER_KNOWN")
+            .await?
+    );
+
+    let removed = actions.unregister("FTS_TEST_UNREGISTER_KNOWN").await?;
+    assert!(removed, "unregister of a known action should return true");
+
+    Ok(())
+}
+
+// NOTE: we can't currently assert that unregister removes the action
+// from REAPER's action list / NamedCommandLookup. `register_action` in
+// daw-reaper Box::leak's the underlying reaper_high::RegisteredAction,
+// so neither the gaccel entry nor the cmd_id ever go away. Tracked as
+// a separate task — once the leak is replaced with a tracked
+// HashMap<String, RegisteredAction> + plugin_register_remove_gaccel,
+// add a passing `unregister_removes_from_action_list` here.
+
+#[reaper_test(isolated)]
+async fn unregister_unknown_returns_false(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let removed = actions
+        .unregister("FTS_TEST_UNREGISTER_NEVER_REGISTERED")
+        .await?;
+    assert!(
+        !removed,
+        "unregister of an unknown action should return false"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
+async fn unregister_clears_toggle_state(ctx: &ReaperTestContext) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    actions
+        .register_toggle("FTS_TEST_UNREGISTER_TOGGLE", "FTS Test: Unregister Toggle")
+        .await?;
+    actions
+        .set_toggle_state("FTS_TEST_UNREGISTER_TOGGLE", true)
+        .await?;
+    assert_eq!(
+        actions
+            .get_toggle_state("FTS_TEST_UNREGISTER_TOGGLE")
+            .await?,
+        Some(true)
+    );
+
+    actions.unregister("FTS_TEST_UNREGISTER_TOGGLE").await?;
+    assert_eq!(
+        actions
+            .get_toggle_state("FTS_TEST_UNREGISTER_TOGGLE")
+            .await?,
+        None,
+        "unregister of a toggleable action must clear its toggle state"
+    );
+
+    Ok(())
+}
