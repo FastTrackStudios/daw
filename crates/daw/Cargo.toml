@@ -9,6 +9,7 @@ authors.workspace = true
 # Always included — these are WASM-compatible and form the core API
 daw-proto = { path = "../daw-proto" }
 daw-control = { path = "../daw-control" }
+daw-module = { path = "../daw-module" }
 
 # Runtime (needed for block_on in plugin context)
 tokio.workspace = true

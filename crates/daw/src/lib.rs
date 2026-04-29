@@ -160,5 +160,5 @@ pub mod file {
 }
 
 // ── Module system: standard interface for extension modules ─────────────────
-pub mod module;
-pub use module::{ActionDef, DawModule, DockPosition, ModuleContext, PanelComponent, PanelDef};
+pub use daw_module as module;
+pub use daw_module::{ActionDef, DawModule, DockPosition, ModuleContext, PanelComponent, PanelDef};
