@@ -10,17 +10,9 @@ default: dx
 dx *args:
     cd apps/desktop && dx serve {{args}}
 
-# Serve the web app with hot-reload
-web *args:
-    cd apps/web && dx serve {{args}}
-
 # Build the desktop app for release
 dx-build:
     cd apps/desktop && dx build --release --platform desktop
-
-# Build the web app for release
-web-build:
-    cd apps/web && dx build --release --platform web
 
 # ── CLI ──────────────────────────────────────────────────────────────────
 
