@@ -1091,3 +1091,72 @@ fn fire_envi_fader_values() {
         );
     }
 }
+
+// ── Tier-1 export coverage ───────────────────────────────────────────────────
+
+#[test]
+fn tier1_audio_file_pool_exposed() {
+    let session = dawfile_logic::read_session(FIXTURE).expect("parse failed");
+    assert!(
+        !session.audio_files.is_empty(),
+        "audio_files should be exposed on the session for export"
+    );
+    // Filenames must be non-empty and end in a recognisable audio extension.
+    for f in &session.audio_files {
+        assert!(!f.filename.is_empty(), "audio file with empty filename");
+        let lower = f.filename.to_ascii_lowercase();
+        assert!(
+            lower.ends_with(".wav")
+                || lower.ends_with(".aif")
+                || lower.ends_with(".aiff")
+                || lower.ends_with(".caf")
+                || lower.ends_with(".mp3"),
+            "unexpected extension in audio_files: {:?}",
+            f.filename
+        );
+    }
+}
+
+#[test]
+fn tier1_track_channels_contiguous() {
+    let session = dawfile_logic::read_session(FIXTURE).expect("parse failed");
+    for (i, t) in session.tracks.iter().enumerate() {
+        assert_eq!(
+            t.channel,
+            (i + 1) as u32,
+            "track[{i}] should have channel={} (1-based display order), got {}",
+            i + 1,
+            t.channel
+        );
+    }
+}
+
+#[test]
+fn tier1_clips_carry_names() {
+    let session = dawfile_logic::read_session(FIXTURE).expect("parse failed");
+    let mut total_clips = 0;
+    for t in &session.tracks {
+        for c in &t.clips {
+            assert!(
+                !c.name.is_empty(),
+                "clip on track {:?} has empty name",
+                t.name
+            );
+            total_clips += 1;
+        }
+    }
+    assert!(total_clips > 0, "expected at least one clip with a name");
+}
+
+#[test]
+fn tier1_folder_track_classified() {
+    let session = dawfile_logic::read_session(FIXTURE).expect("parse failed");
+    let has_folder = session
+        .tracks
+        .iter()
+        .any(|t| t.kind == dawfile_logic::TrackKind::Folder);
+    assert!(
+        has_folder,
+        "expected at least one Folder track in FileDecrypt fixture"
+    );
+}

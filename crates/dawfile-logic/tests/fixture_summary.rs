@@ -33,7 +33,7 @@ fn dump_all_logic_fixtures() {
 
         eprintln!(
             "── {name}\n   creator={} variant={:?} sr={} bpm={:.2} {}/{} key={}-{}\n   \
-             tracks={} clips={} markers={} tempo_events={} summing_groups={} chunks={}",
+             tracks={} clips={} audio_files={} markers={} tempo_events={} summing_groups={} chunks={}",
             s.creator_version,
             s.variant_name,
             s.sample_rate,
@@ -44,6 +44,7 @@ fn dump_all_logic_fixtures() {
             s.key_gender,
             s.tracks.len(),
             total_clips,
+            s.audio_files.len(),
             s.markers.len(),
             s.tempo_events.len(),
             s.summing_groups.len(),
@@ -52,13 +53,40 @@ fn dump_all_logic_fixtures() {
 
         for (i, t) in s.tracks.iter().enumerate().take(8) {
             eprintln!(
-                "   track[{i}]: {:?} ch={} db={:?} mute={} solo={} clips={}",
-                t.name,
+                "   track[{i}]: ch={} {:?} kind={:?} db={:?} mute={} solo={} clips={}",
                 t.channel,
+                t.name,
+                t.kind,
                 t.fader_db,
                 t.muted,
                 t.soloed,
                 t.clips.len()
+            );
+            for c in t.clips.iter().take(3) {
+                eprintln!(
+                    "      clip: {:?} @ beat {:.2} len={:.2} kind={}",
+                    c.name,
+                    c.position_beats,
+                    c.length_beats,
+                    match &c.kind {
+                        dawfile_logic::ClipKind::Audio { file_path } =>
+                            format!("Audio({:?})", file_path),
+                        dawfile_logic::ClipKind::Midi { notes } =>
+                            format!("Midi(notes={})", notes.len()),
+                        dawfile_logic::ClipKind::TakeFolder(tf) => format!(
+                            "TakeFolder(takes={}, comp_ranges={})",
+                            tf.takes.len(),
+                            tf.comp_ranges.len()
+                        ),
+                        dawfile_logic::ClipKind::Other => "Other".into(),
+                    }
+                );
+            }
+        }
+        for (i, f) in s.audio_files.iter().enumerate().take(8) {
+            eprintln!(
+                "   audio_file[{i}]: {:?} (vol={:?} usable={})",
+                f.filename, f.vol_name, f.usable
             );
         }
     }

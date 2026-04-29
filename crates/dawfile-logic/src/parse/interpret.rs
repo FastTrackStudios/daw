@@ -33,8 +33,9 @@ use crate::parse::aufl::parse_aufl;
 use crate::parse::aurg::parse_aurg;
 use crate::parse::bundle::BundleMeta;
 use crate::types::{
-    ClipKind, LogicChunk, LogicClip, LogicCompRange, LogicMarker, LogicMidiNote, LogicSession,
-    LogicSummingGroup, LogicTake, LogicTakeFolder, LogicTempoEvent, LogicTrack, TrackKind,
+    ClipKind, LogicAudioFile, LogicChunk, LogicClip, LogicCompRange, LogicMarker, LogicMidiNote,
+    LogicSession, LogicSummingGroup, LogicTake, LogicTakeFolder, LogicTempoEvent, LogicTrack,
+    TrackKind,
 };
 
 /// Ticks per beat in the arrangement clock used by MSeq / Trak / EvSq headers.
@@ -65,6 +66,18 @@ pub fn build_session(meta: BundleMeta, chunks: Vec<LogicChunk>) -> LogicSession 
     // Attach clips to tracks by name matching.
     attach_clips_to_tracks(&mut tracks, clips);
 
+    // Audio file pool (one LogicAudioFile per AuFl chunk).
+    let audio_files: Vec<LogicAudioFile> = chunks
+        .iter()
+        .filter(|c| c.tag == TAG_AUFL)
+        .filter_map(|c| parse_aufl(&c.data))
+        .map(|f| LogicAudioFile {
+            filename: f.filename,
+            vol_name: f.vol_name,
+            usable: f.usable,
+        })
+        .collect();
+
     LogicSession {
         creator_version: meta.creator_version,
         variant_name: meta.variant_name,
@@ -75,9 +88,10 @@ pub fn build_session(meta: BundleMeta, chunks: Vec<LogicChunk>) -> LogicSession 
         key: meta.key,
         key_gender: meta.key_gender,
         tracks,
-        markers: Vec::new(),      // TODO: parse from EvSq
-        tempo_events: Vec::new(), // TODO: parse from EvSq
+        markers: Vec::new(),      // TODO: parse from EvSq (RE pending)
+        tempo_events: Vec::new(), // TODO: parse from EvSq (RE pending)
         summing_groups,
+        audio_files,
         chunks,
     }
 }
@@ -438,6 +452,7 @@ fn attach_clips_to_tracks(tracks: &mut Vec<LogicTrack>, clips: Vec<PendingClip>)
         let track_name = pending.name.clone();
 
         let clip = LogicClip {
+            name: pending.name.clone(),
             position_beats: pending.position_beats,
             length_beats: pending.length_beats,
             kind: pending.kind,
@@ -494,6 +509,12 @@ fn extract_tracks_and_groups(chunks: &[LogicChunk]) -> (Vec<LogicTrack>, Vec<Log
     }
 
     tracks.retain(|t| !t.name.is_empty());
+
+    // Assign 1-based channel numbers in display order.
+    for (i, t) in tracks.iter_mut().enumerate() {
+        t.channel = (i + 1) as u32;
+    }
+
     (tracks, summing_groups)
 }
 
@@ -519,9 +540,14 @@ fn classify_envi_channel(name: &str) -> EnviKind {
             | "physical input"
             | "input view"
             | "input notes"
-            | "folder"
     ) {
         return EnviKind::SystemChannel;
+    }
+
+    // Logic exposes folder tracks via Envi entries named exactly "(Folder)" or
+    // "Folder". Surface them as Folder kind so consumers can build hierarchy.
+    if lower == "folder" || lower == "(folder)" {
+        return EnviKind::Track(TrackKind::Folder);
     }
 
     if lower.contains("sum") || lower.contains("group") || lower.contains("indented") {

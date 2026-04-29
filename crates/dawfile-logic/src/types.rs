@@ -30,8 +30,21 @@ pub struct LogicSession {
     pub tempo_events: Vec<LogicTempoEvent>,
     /// Summing groups (Logic "Summing Stacks").
     pub summing_groups: Vec<LogicSummingGroup>,
+    /// Audio file pool (one entry per source file referenced by the project).
+    pub audio_files: Vec<LogicAudioFile>,
     /// Raw chunk inventory from ProjectData — always populated, useful for debugging.
     pub chunks: Vec<LogicChunk>,
+}
+
+/// An entry in the audio file pool — one source file referenced by the project.
+#[derive(Debug, Clone)]
+pub struct LogicAudioFile {
+    /// Filename as stored in the bundle (e.g. `"Audio Track 1 #01.wav"`).
+    pub filename: String,
+    /// Audio folder relative path inside the bundle (e.g. `"Audio Files"`).
+    pub vol_name: String,
+    /// Whether the file is marked usable by Logic.
+    pub usable: bool,
 }
 
 /// A track in the Logic Pro mixer.
@@ -68,6 +81,8 @@ pub enum TrackKind {
     Aux,
     /// Master output.
     Master,
+    /// Folder track (groups other tracks visually in the arrangement).
+    Folder,
     /// Unknown / uncategorised track type.
     Other,
 }
@@ -75,6 +90,8 @@ pub enum TrackKind {
 /// A clip (audio region or MIDI region) placed on a track.
 #[derive(Debug, Clone)]
 pub struct LogicClip {
+    /// User-visible region/clip name (e.g. `"Audio Track 1 #01"`).
+    pub name: String,
     /// Start position in the project, in beats (quarter notes from bar 1 beat 1).
     pub position_beats: f64,
     /// Duration in beats.
