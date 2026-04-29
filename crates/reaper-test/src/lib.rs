@@ -955,11 +955,13 @@ pub fn run_reaper_test(
         // Run the test body
         let result = body(&ctx).await;
 
-        // Cleanup (skip when FTS_KEEP_OPEN=1 so users can inspect results)
-        let keep_open = std::env::var("FTS_KEEP_OPEN").map_or(false, |v| v == "1");
-        if keep_open {
-            println!("[{test_name}] Keeping project tab open for inspection");
-        } else if is_own_tab {
+        // Cleanup: always close per-test tabs. `FTS_KEEP_OPEN` only
+        // controls whether the REAPER process itself stays alive after
+        // the suite finishes (see runner.rs::RunningReaper::stop) —
+        // leaking N tabs for N tests pollutes the inspection state and
+        // wedges the active-tab logic. Inspection happens on a clean
+        // REAPER after all tests have run.
+        if is_own_tab {
             // Isolated: remove all tracks then close the tab
             let project_guid = project.guid().to_string();
             let _ = project.tracks().remove_all().await;
