@@ -361,6 +361,7 @@ impl ActionRegistryService for ReaperActionRegistry {
 
         let result = main_thread::query(move || {
             let reaper = Reaper::get();
+            let desc_static: &'static str = Box::leak(desc_for_query.clone().into_boxed_str());
 
             // First check if someone else already registered this command name
             let medium = reaper.medium_reaper();
@@ -370,13 +371,40 @@ impl ActionRegistryService for ReaperActionRegistry {
                     name_for_query,
                     existing.get()
                 );
+                let already_listed = {
+                    let section = reaper.main_section();
+                    section
+                        .with_raw(|s| {
+                            (0..s.action_list_cnt()).any(|i| {
+                                s.get_action_by_index(i)
+                                    .map(|a| a.cmd() == existing)
+                                    .unwrap_or(false)
+                            })
+                        })
+                        .unwrap_or(false)
+                };
+                if !already_listed {
+                    let gaccel = OwnedGaccelRegister::without_key_binding(existing, desc_static);
+                    let mut session = reaper.medium_session();
+                    if let Err(e) = session.plugin_register_add_gaccel(gaccel) {
+                        warn!(
+                            "Failed to repair gaccel for existing action '{}': {:?}",
+                            name_for_query, e
+                        );
+                    } else {
+                        debug!(
+                            "Repaired missing gaccel for existing action '{}' (cmd_id={})",
+                            name_for_query,
+                            existing.get()
+                        );
+                    }
+                }
                 return existing.get();
             }
 
             // register_action needs 'static string args — leak the strings
             // since actions live for the process lifetime anyway.
             let name_static: &'static str = Box::leak(name_for_query.clone().into_boxed_str());
-            let desc_static: &'static str = Box::leak(desc_for_query.clone().into_boxed_str());
 
             // Capture command_name for the trigger notification
             let trigger_name = name_for_query.clone();
@@ -419,6 +447,17 @@ impl ActionRegistryService for ReaperActionRegistry {
                         "Failed to register gaccel for '{}': {:?}",
                         name_for_query, e
                     );
+                }
+            }
+
+            if toggleable {
+                // REAPER can be slow to surface newly registered toggle actions in the
+                // action list unless their toolbar state is refreshed at least once.
+                unsafe {
+                    reaper
+                        .medium_reaper()
+                        .low()
+                        .RefreshToolbar2(0, cmd_id.get() as i32);
                 }
             }
 

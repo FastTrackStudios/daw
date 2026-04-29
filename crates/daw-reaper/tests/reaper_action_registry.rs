@@ -143,6 +143,39 @@ async fn register_in_menu_is_findable(ctx: &ReaperTestContext) -> eyre::Result<(
 }
 
 #[reaper_test(isolated)]
+async fn register_toggle_in_menu_is_findable_for_input_namespace(
+    ctx: &ReaperTestContext,
+) -> eyre::Result<()> {
+    let actions = ctx.daw.action_registry();
+
+    let cmd_id = actions
+        .register_toggle_in_menu(
+            "FTS_INPUT_TEST_TOGGLE_NAMESPACE",
+            "FTS Test: Input Namespace Toggle",
+        )
+        .await?;
+    assert!(
+        cmd_id > 0,
+        "register_toggle_in_menu should return a valid command ID"
+    );
+
+    let looked_up = actions
+        .lookup_command_id("FTS_INPUT_TEST_TOGGLE_NAMESPACE")
+        .await?;
+    assert_eq!(looked_up, Some(cmd_id));
+
+    let in_list = actions
+        .is_in_action_list("FTS_INPUT_TEST_TOGGLE_NAMESPACE")
+        .await?;
+    assert!(
+        in_list,
+        "FTS_INPUT_TEST_TOGGLE_NAMESPACE should appear in REAPER's action list"
+    );
+
+    Ok(())
+}
+
+#[reaper_test(isolated)]
 async fn register_and_register_in_menu_are_idempotent(ctx: &ReaperTestContext) -> eyre::Result<()> {
     let actions = ctx.daw.action_registry();
 
