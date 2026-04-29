@@ -1,0 +1,25 @@
+[package]
+name = "daw-reaper-dioxus-ext-test"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "REAPER extension cdylib that mounts a deterministic Dioxus panel for visual e2e tests."
+
+[lib]
+crate-type = ["cdylib"]
+name = "reaper_daw_dioxus_test_panel"
+path = "src/lib.rs"
+
+[dependencies]
+daw-reaper-dioxus = { path = "../daw-reaper-dioxus" }
+daw-module = { path = "../daw-module" }
+reaper-low.workspace = true
+reaper-medium.workspace = true
+reaper-high.workspace = true
+reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints.rust]
+unsafe_code = "allow"

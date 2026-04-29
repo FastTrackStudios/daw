@@ -2127,6 +2127,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "daw-reaper-dioxus-ext-test"
+version = "0.1.0"
+dependencies = [
+ "daw-module",
+ "daw-reaper-dioxus",
+ "reaper-high",
+ "reaper-low",
+ "reaper-macros",
+ "reaper-medium",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "daw-reaper-embed"
 version = "0.1.0"
 dependencies = [
@@ -11783,10 +11797,6 @@ dependencies = [
 ]
 
 [[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"
-
-[[patch.unused]]
 name = "vox-codegen"
 version = "0.2.2"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
@@ -11800,3 +11810,7 @@ source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b2
 name = "vox-websocket"
 version = "0.2.2"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
+
+[[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"
