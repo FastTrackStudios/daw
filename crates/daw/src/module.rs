@@ -58,6 +58,8 @@ pub struct ActionDef {
     pub handler: Arc<dyn Fn() + Send + Sync>,
     /// If true, the action appears in the Extensions > FastTrackStudio menu.
     pub show_in_menu: bool,
+    /// If true, the host should register the action as toggleable.
+    pub toggleable: bool,
 }
 
 impl ActionDef {
@@ -72,6 +74,7 @@ impl ActionDef {
             display_name: display_name.into(),
             handler: Arc::new(handler),
             show_in_menu: false,
+            toggleable: false,
         }
     }
 
@@ -81,13 +84,20 @@ impl ActionDef {
         self
     }
 
+    /// Mark this action as toggleable in REAPER.
+    pub fn toggleable(mut self) -> Self {
+        self.toggleable = true;
+        self
+    }
+
     /// Convert to the tuple format used by extension action registration.
-    pub fn into_tuple(self) -> (String, String, Arc<dyn Fn() + Send + Sync>, bool) {
+    pub fn into_tuple(self) -> (String, String, Arc<dyn Fn() + Send + Sync>, bool, bool) {
         (
             self.command_id,
             self.display_name,
             self.handler,
             self.show_in_menu,
+            self.toggleable,
         )
     }
 }
@@ -259,7 +269,7 @@ pub enum DockPosition {
 /// Collect all action tuples from a list of modules.
 pub fn collect_actions(
     modules: &[Box<dyn DawModule>],
-) -> Vec<(String, String, Arc<dyn Fn() + Send + Sync>, bool)> {
+) -> Vec<(String, String, Arc<dyn Fn() + Send + Sync>, bool, bool)> {
     let mut all = Vec::new();
     for m in modules {
         let actions = m.actions();
