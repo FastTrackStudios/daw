@@ -22,7 +22,7 @@ use crate::block::Block;
 use crate::content_type::ContentType;
 use crate::cursor::Cursor;
 use crate::parse::tempo::{TempoSegment, tick_to_sample};
-use crate::types::{AudioRegion, NO_REGION, Playlist, Track, TrackRegion, ZERO_TICKS};
+use crate::types::{AudioRegion, NO_REGION, Playlist, Track, TrackKind, TrackRegion, ZERO_TICKS};
 
 /// Internal track entry that carries the channel position used for grouping.
 struct TrackEntry {
@@ -123,6 +123,7 @@ fn parse_track_definitions(blocks: &[Block], cursor: &Cursor<'_>) -> Vec<TrackEn
             entries.push(TrackEntry {
                 track: Track {
                     name: name.clone(),
+                    kind: TrackKind::Audio,
                     index: track_index,
                     playlist_name: String::new(),
                     regions: Vec::new(),

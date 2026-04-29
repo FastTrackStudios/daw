@@ -114,11 +114,22 @@ pub struct Playlist {
     pub regions: Vec<TrackRegion>,
 }
 
+/// What kind of media a track carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrackKind {
+    /// Audio track — regions reference [`AudioRegion`] entries.
+    Audio,
+    /// MIDI track — regions reference [`MidiRegion`] entries.
+    Midi,
+}
+
 /// A track (audio or MIDI) with its region assignments.
 #[derive(Debug, Clone)]
 pub struct Track {
     /// Track name (from the track definition block).
     pub name: String,
+    /// Whether this track is audio or MIDI.
+    pub kind: TrackKind,
     /// Track channel index (ch_map value, used to match region assignments).
     pub index: u16,
     /// Name of the active playlist (from the region-to-track map block).
@@ -132,6 +143,18 @@ pub struct Track {
     ///
     /// Empty unless the session was saved with alternate playlists.
     pub alternate_playlists: Vec<Playlist>,
+}
+
+impl Track {
+    /// True if this track has any alternate (comp) playlists in addition to the active one.
+    pub fn has_alternate_playlists(&self) -> bool {
+        !self.alternate_playlists.is_empty()
+    }
+
+    /// Total playlist count (active + alternates).
+    pub fn playlist_count(&self) -> usize {
+        1 + self.alternate_playlists.len()
+    }
 }
 
 /// A region placed on a track.
@@ -232,6 +255,60 @@ pub struct IoChannel {
     pub io_class: u8,
     /// Number of audio channels (1 = mono, 2 = stereo).
     pub channel_count: u8,
+}
+
+/// Strongly-typed view of [`IoChannel::io_class`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IoClass {
+    /// Physical hardware interface (`io_class == 0x01`).
+    HardwareInterface,
+    /// Output bus (`io_class == 0x02`).
+    OutputBus,
+    /// Any other / unknown I/O class.
+    Other(u8),
+}
+
+impl IoChannel {
+    /// Returns a strongly-typed view of [`Self::io_class`].
+    pub fn class(&self) -> IoClass {
+        match self.io_class {
+            0x01 => IoClass::HardwareInterface,
+            0x02 => IoClass::OutputBus,
+            other => IoClass::Other(other),
+        }
+    }
+}
+
+impl ProToolsSession {
+    /// Iterate over every track in the session, audio first then MIDI.
+    pub fn all_tracks(&self) -> impl Iterator<Item = &Track> {
+        self.audio_tracks.iter().chain(self.midi_tracks.iter())
+    }
+
+    /// Total active region placements across every audio + MIDI track.
+    pub fn total_active_region_placements(&self) -> usize {
+        self.all_tracks().map(|t| t.regions.len()).sum()
+    }
+
+    /// Total alternate-playlist count across every track.
+    pub fn total_alternate_playlists(&self) -> usize {
+        self.all_tracks().map(|t| t.alternate_playlists.len()).sum()
+    }
+
+    /// Look up an audio file by region.
+    pub fn audio_file_for(&self, region: &AudioRegion) -> Option<&AudioFile> {
+        self.audio_files
+            .iter()
+            .find(|f| f.index == region.audio_file_index)
+    }
+
+    /// Convert a sample position (at the session sample rate) to seconds.
+    pub fn samples_to_seconds(&self, samples: u64) -> f64 {
+        if self.session_sample_rate == 0 {
+            return 0.0;
+        }
+        samples as f64 / self.session_sample_rate as f64
+    }
 }
 
 /// The origin tick value for MIDI positions (10^12).

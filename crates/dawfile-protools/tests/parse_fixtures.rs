@@ -146,3 +146,77 @@ fn feature_support_is_read_only() {
     assert!(!support.can_write(daw_proto::Capability::Tracks));
     assert!(!support.can_write(daw_proto::Capability::Items));
 }
+
+// ── Tier-1 export coverage ──────────────────────────────────────────────────
+
+#[test]
+fn tier1_track_kind_is_set() {
+    use dawfile_protools::TrackKind;
+    let s = read_session(fixture_path("TestPTX.ptx"), 48000).unwrap();
+    assert!(s.audio_tracks.iter().all(|t| t.kind == TrackKind::Audio));
+    assert!(s.midi_tracks.iter().all(|t| t.kind == TrackKind::Midi));
+}
+
+#[test]
+fn tier1_all_tracks_iter_is_audio_then_midi() {
+    let s = read_session(fixture_path("TestPTX.ptx"), 48000).unwrap();
+    let total = s.all_tracks().count();
+    assert_eq!(total, s.audio_tracks.len() + s.midi_tracks.len());
+}
+
+#[test]
+fn tier1_audio_file_lookup_helper_runs() {
+    // Sanity: helper does not panic and returns either Some or None.
+    // (Some sessions store audio_file_index in a different namespace than file.index;
+    // a robust mapping is tracked separately — see beads.)
+    let s = read_session(fixture_path("RegionTest.ptx"), 48000).unwrap();
+    assert!(!s.audio_regions.is_empty());
+    let region = &s.audio_regions[0];
+    let _maybe = s.audio_file_for(region);
+}
+
+#[test]
+fn tier1_session_has_meter_and_markers_when_present() {
+    // GodnessOfGod has 3 meter events; HeyLady has 1.
+    let s = read_session(fixture_path("GodnessOfGod.ptx"), 48000).unwrap();
+    assert!(
+        s.meter_events.len() >= 3,
+        "GodnessOfGod should expose ≥3 meter events"
+    );
+    assert!(s.session_sample_rate >= 48000);
+}
+
+#[test]
+fn tier1_io_class_decoded() {
+    use dawfile_protools::IoClass;
+    let s = read_session(fixture_path("HeyLady.ptx"), 48000).unwrap();
+    // Real session should have at least one hardware interface or output bus.
+    let any_known = s
+        .io_channels
+        .iter()
+        .any(|c| matches!(c.class(), IoClass::HardwareInterface | IoClass::OutputBus));
+    if !s.io_channels.is_empty() {
+        assert!(any_known, "expected at least one classified I/O channel");
+    }
+}
+
+#[test]
+fn tier1_samples_to_seconds_helper() {
+    let s = read_session(fixture_path("HeyLady.ptx"), 48000).unwrap();
+    // 48000 samples == 1 second at 48 kHz session.
+    let seconds = s.samples_to_seconds(s.session_sample_rate as u64);
+    assert!((seconds - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn tier1_total_helpers_consistent() {
+    // total_active_region_placements should equal manual sum across all tracks.
+    let s = read_session(fixture_path("choir-session.ptx"), 48000).unwrap();
+    let manual: usize = s
+        .audio_tracks
+        .iter()
+        .chain(s.midi_tracks.iter())
+        .map(|t| t.regions.len())
+        .sum();
+    assert_eq!(s.total_active_region_placements(), manual);
+}

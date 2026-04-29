@@ -6,7 +6,7 @@
 use crate::block::Block;
 use crate::content_type::ContentType;
 use crate::cursor::{self, Cursor};
-use crate::types::{MidiEvent, MidiRegion, NO_REGION, Track, TrackRegion, ZERO_TICKS};
+use crate::types::{MidiEvent, MidiRegion, NO_REGION, Track, TrackKind, TrackRegion, ZERO_TICKS};
 
 /// Magic marker that precedes MIDI event data within a 0x2000 block.
 const MIDI_MAGIC: &[u8] = b"MdNLB";
@@ -216,6 +216,7 @@ fn parse_midi_tracks(
 
         tracks.push(Track {
             name,
+            kind: TrackKind::Midi,
             index: tracks.len() as u16,
             playlist_name: String::new(),
             regions: Vec::new(),
