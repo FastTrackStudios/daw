@@ -526,6 +526,20 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
     }
     runner::end_section(ci);
 
+    // ── Step 1c: Visual tests — build the test panel cdylib ──────────────
+    let visual_tests = std::env::var("FTS_VISUAL_TESTS").is_ok_and(|v| !v.is_empty() && v != "0");
+    if visual_tests {
+        runner::section(ci, "reaper-test: build daw-reaper-dioxus-ext-test (visual)");
+        println!("Building daw-reaper-dioxus-ext-test (FTS_VISUAL_TESTS=1)...");
+        let status = Command::new("cargo")
+            .args(["build", "-p", "daw-reaper-dioxus-ext-test"])
+            .status()?;
+        if !status.success() {
+            return Err("Failed to build daw-reaper-dioxus-ext-test".into());
+        }
+        runner::end_section(ci);
+    }
+
     // ── Step 2: Build test binaries (no-run) ──────────────────────────────
     runner::section(ci, "reaper-test: build test binaries");
     println!("Building test binaries...");
@@ -570,6 +584,33 @@ fn reaper_test(filter: Option<String>, keep_open: bool) -> Result<(), Box<dyn st
         runner::install_plugin(&so_path, so_dst_name, &user_plugins_dir)?;
     }
     runner::end_section(ci);
+
+    // ── Step 3a: Visual tests — install the test panel cdylib ─────────────
+    if visual_tests {
+        runner::section(
+            ci,
+            "reaper-test: install daw-reaper-dioxus-ext-test (visual)",
+        );
+        let test_so_src = workspace_root.join("target/debug/libreaper_daw_dioxus_test_panel.so");
+        if test_so_src.exists() {
+            runner::install_plugin(
+                &test_so_src,
+                "reaper_daw_dioxus_test_panel.so",
+                &user_plugins_dir,
+            )?;
+            println!(
+                "  Installed reaper_daw_dioxus_test_panel.so -> {}",
+                user_plugins_dir.display()
+            );
+        } else {
+            return Err(format!(
+                "Test panel cdylib not found at {}; FTS_VISUAL_TESTS expects it built.",
+                test_so_src.display()
+            )
+            .into());
+        }
+        runner::end_section(ci);
+    }
 
     // ── Step 3b: Install daw-guest into fts-extensions/ ──────────────────
     runner::section(ci, "reaper-test: install guest extensions");
