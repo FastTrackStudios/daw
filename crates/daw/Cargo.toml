@@ -11,6 +11,10 @@ daw-proto = { path = "../daw-proto" }
 daw-control = { path = "../daw-control" }
 daw-module = { path = "../daw-module" }
 
+# UI host adapter (REAPER + Dioxus). Pulled in only when the `reaper-ui`
+# feature is enabled — keeps audio-graph / WASM / embedded targets clean.
+daw-reaper-dioxus = { path = "../daw-reaper-dioxus", optional = true }
+
 # Runtime (needed for block_on in plugin context)
 tokio.workspace = true
 tracing.workspace = true
@@ -29,3 +33,4 @@ standalone = ["dep:daw-standalone"]
 standalone-audio = ["standalone", "daw-standalone/audio"]
 standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
 file = ["dep:dawfile-reaper", "dep:dawfile-ableton"]
+reaper-ui = ["dep:daw-reaper-dioxus"]

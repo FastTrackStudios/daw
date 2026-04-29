@@ -1887,6 +1887,7 @@ dependencies = [
  "daw-module",
  "daw-proto 0.1.0",
  "daw-reaper",
+ "daw-reaper-dioxus",
  "daw-standalone",
  "dawfile-ableton",
  "dawfile-reaper",
@@ -2102,6 +2103,19 @@ dependencies = [
  "vello 0.8.0",
  "wgpu 28.0.0",
  "x11-dl",
+]
+
+[[package]]
+name = "daw-reaper-dioxus-ext"
+version = "0.1.0"
+dependencies = [
+ "daw-reaper-dioxus",
+ "reaper-high",
+ "reaper-low",
+ "reaper-macros",
+ "reaper-medium",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

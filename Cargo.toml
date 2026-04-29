@@ -28,6 +28,7 @@ members = [
     "crates/daw-module",
     "crates/daw-reaper-embed",
     "crates/daw-reaper-dioxus",
+    "crates/daw-reaper-dioxus-ext",
     "apps/example-extension",
     "apps/example-plugin",
     "xtask",
