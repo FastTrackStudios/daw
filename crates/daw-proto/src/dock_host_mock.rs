@@ -8,7 +8,7 @@
 //! Pulled in via `cargo features = ["test-utils"]` so production builds
 //! never link this code.
 
-use crate::dock_host::{DockEvent, DockHandle, DockHostService, DockKind};
+use crate::dock_host::{DockEvent, DockHandle, DockHostService, DockKind, PanelPixels};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use vox::Tx;
@@ -64,6 +64,8 @@ struct MockState {
     /// Not a faithful round-trip — just a stable shape so tests can assert
     /// "the blob the host gave back is the one we set."
     layout_blob: Vec<u8>,
+    /// Stub pixel buffers per handle, set via [`MockDockHost::set_pixels`].
+    pixels: HashMap<DockHandle, PanelPixels>,
 }
 
 impl MockDockHost {
@@ -91,6 +93,13 @@ impl MockDockHost {
     /// `register_dock`). Returns the assigned handle.
     pub fn handle_for(&self, id: &str) -> Option<DockHandle> {
         self.inner.lock().unwrap().by_id.get(id).copied()
+    }
+
+    /// Pre-load a stub pixel buffer the next call to
+    /// [`capture_panel_pixels`](DockHostService::capture_panel_pixels)
+    /// will return for `handle`.
+    pub fn set_pixels(&self, handle: DockHandle, pixels: PanelPixels) {
+        self.inner.lock().unwrap().pixels.insert(handle, pixels);
     }
 
     /// Number of currently-visible docks.
@@ -231,6 +240,10 @@ impl DockHostService for MockDockHost {
         let mut st = self.inner.lock().unwrap();
         Self::record(&mut st, DockOp::Subscribe);
         st.subscribers.push(tx);
+    }
+
+    async fn capture_panel_pixels(&self, handle: DockHandle) -> Option<PanelPixels> {
+        self.inner.lock().unwrap().pixels.get(&handle).cloned()
     }
 }
 

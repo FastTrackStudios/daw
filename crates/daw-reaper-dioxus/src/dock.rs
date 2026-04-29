@@ -648,6 +648,23 @@ pub fn is_panel_visible(id: PanelId) -> bool {
     PANELS.with(|panels| panels.borrow().get(id).map_or(false, |p| p.visible))
 }
 
+/// Capture the current rendered pixels of a panel by id.
+///
+/// Returns `(width, height, bgra)` if the panel is registered AND has
+/// completed at least one offscreen render tick (its readback buffer is
+/// non-empty). Used by the visual e2e test path through
+/// `DockHostService::capture_panel_pixels`.
+pub fn capture_panel_pixels(id: PanelId) -> Option<(u32, u32, Vec<u8>)> {
+    PANELS.with(|panels| {
+        let panels = panels.borrow();
+        let panel = panels.get(id)?;
+        let view = panel.view.as_ref()?;
+        let bgra = view.bgra_pixels()?.to_vec();
+        let (w, h) = view.size();
+        Some((w, h, bgra))
+    })
+}
+
 thread_local! {
     /// Reentrancy guard — set while `update_panels` is running so that a
     /// Dioxus event handler calling back into REAPER APIs that re-post into

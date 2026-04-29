@@ -31,6 +31,18 @@ pub enum DockEvent {
     LayoutChanged,
 }
 
+/// Pixel buffer captured from a live dock panel.
+///
+/// Returned by [`DockHostService::capture_panel_pixels`] for visual
+/// regression and interaction tests. `bgra` is BGRA8, length must equal
+/// `width * height * 4`.
+#[derive(Debug, Clone, Facet)]
+pub struct PanelPixels {
+    pub width: u32,
+    pub height: u32,
+    pub bgra: Vec<u8>,
+}
+
 /// Hint about the kind of host window the dock should produce.
 ///
 /// Adapters may ignore hints they cannot honor (e.g. a browser adapter
@@ -85,4 +97,13 @@ pub trait DockHostService {
 
     /// Subscribe to dock lifecycle events. Multiple subscribers supported.
     async fn subscribe_dock_events(&self, tx: Tx<DockEvent>);
+
+    /// Capture the current rendered pixels of a dock panel for visual
+    /// regression / interaction tests.
+    ///
+    /// Returns `None` if the handle has no live panel mounted, or the
+    /// panel hasn't completed its first render yet (no readback bytes
+    /// available). Tests should poll with a short timeout if they need
+    /// to wait for the initial render to settle.
+    async fn capture_panel_pixels(&self, handle: DockHandle) -> Option<PanelPixels>;
 }

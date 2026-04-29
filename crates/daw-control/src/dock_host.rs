@@ -5,7 +5,7 @@
 //! transport they already use for ActionRegistry / Track / etc.
 
 use crate::DawClients;
-use daw_proto::dock_host::{DockEvent, DockHandle, DockKind};
+use daw_proto::dock_host::{DockEvent, DockHandle, DockKind, PanelPixels};
 use std::sync::Arc;
 use vox::Tx;
 
@@ -76,5 +76,13 @@ impl DockHost {
     pub async fn subscribe_events(&self, tx: Tx<DockEvent>) -> crate::Result<()> {
         self.clients.dock_host.subscribe_dock_events(tx).await?;
         Ok(())
+    }
+
+    /// Capture the current rendered pixels of a panel.
+    ///
+    /// Returns `None` if no panel is mounted for `handle` or if it has
+    /// not completed its first render tick yet (no readback bytes).
+    pub async fn capture_pixels(&self, handle: DockHandle) -> crate::Result<Option<PanelPixels>> {
+        Ok(self.clients.dock_host.capture_panel_pixels(handle).await?)
     }
 }

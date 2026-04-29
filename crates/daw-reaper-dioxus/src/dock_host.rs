@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use daw_proto::dock_host::{DockEvent, DockHandle, DockHostService, DockKind};
+use daw_proto::dock_host::{DockEvent, DockHandle, DockHostService, DockKind, PanelPixels};
 use tokio::sync::broadcast;
 use tracing::{debug, info};
 use vox::Tx;
@@ -151,6 +151,16 @@ impl DockHostService for ReaperDockHost {
         dock::restore_dock_state();
         Self::emit(DockEvent::LayoutChanged);
         true
+    }
+
+    async fn capture_panel_pixels(&self, handle: DockHandle) -> Option<PanelPixels> {
+        let id = self.lookup(handle)?;
+        let (width, height, bgra) = dock::capture_panel_pixels(id)?;
+        Some(PanelPixels {
+            width,
+            height,
+            bgra,
+        })
     }
 
     async fn subscribe_dock_events(&self, tx: Tx<DockEvent>) {
