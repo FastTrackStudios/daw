@@ -475,10 +475,19 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     match HighReaper::load(context).setup() {
         Ok(_) => {
             info!("REAPER high-level API initialized");
-            // Register hookcommand callback so custom action closures fire
-            // when actions are triggered via Main_OnCommandEx / KBD_OnMainActionEx.
-            if let Err(e) = HighReaper::get().wake_up() {
-                debug!("REAPER high-level API wake_up failed: {e}");
+            // wake_up() registers the global hookcommand AND toggleaction
+            // hooks (HighLevelHookCommand / HighLevelToggleAction). Without
+            // it our ActionKind::Toggleable closure is never queried, so
+            // toggle indicators in REAPER's action list / toolbars stay
+            // frozen at the initial value.
+            match HighReaper::get().wake_up() {
+                Ok(()) => info!("REAPER high-level API woke up (toggleaction hook registered)"),
+                Err(e) => {
+                    tracing::error!(
+                        "REAPER high-level API wake_up FAILED: {e} — toggle action \
+                         indicators will not update"
+                    );
+                }
             }
         }
         Err(_) => debug!("REAPER high-level API already initialized"),

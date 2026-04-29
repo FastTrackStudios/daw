@@ -121,12 +121,18 @@ pub(crate) fn toggle_states() -> &'static Mutex<HashMap<String, bool>> {
 /// Read toggle state for a command. Called from REAPER's main thread
 /// via the `ActionKind::Toggleable` closure.
 fn read_toggle_state(command_name: &str) -> bool {
-    toggle_states()
+    let state = toggle_states()
         .lock()
         .unwrap()
         .get(command_name)
         .copied()
-        .unwrap_or(false)
+        .unwrap_or(false);
+    // Trace every REAPER toggleaction hook query so we can confirm
+    // REAPER is actually consulting our state when repainting the
+    // action list / toolbars. If this trace never fires, REAPER never
+    // queries our hook and the indicator can never update.
+    tracing::trace!(target: "toggle_hook", "{} -> {}", command_name, state);
+    state
 }
 
 /// Derive a menu group name from a REAPER command name.
