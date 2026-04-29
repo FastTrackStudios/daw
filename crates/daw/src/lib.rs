@@ -162,3 +162,32 @@ pub mod file {
 // ── Module system: standard interface for extension modules ─────────────────
 pub use daw_module as module;
 pub use daw_module::{ActionDef, DawModule, DockPosition, ModuleContext, PanelComponent, PanelDef};
+
+// ── UI host (REAPER + Dioxus) ──────────────────────────────────────────────
+//
+// Enabled via `features = ["reaper-ui"]`. Re-exports the curated public
+// surface of `daw-reaper-dioxus` so apps depend only on the daw facade.
+// Audio-graph / WASM / embedded targets get nothing pulled in — the GPU
+// / blitz / dioxus-native stack only enters the dependency graph when the
+// feature is on.
+#[cfg(feature = "reaper-ui")]
+pub mod ui {
+    /// Dock host implementation backed by REAPER's docker + Dioxus.
+    pub mod dock {
+        pub use daw_reaper_dioxus::dock::{
+            DockablePanelConfig, hide_panel, init as init_dock, is_panel_visible, register_panel,
+            register_panel_from_service, restore_dock_state, save_dock_state, show_panel,
+            toggle_panel, unregister_all_panels, update_panels,
+        };
+        pub use daw_reaper_dioxus::service::{init as init_service, register_panel_from_def};
+    }
+
+    /// Embedded Dioxus view inside an existing REAPER HWND.
+    pub use daw_reaper_dioxus::EmbeddedView;
+    /// Transparent floating overlay (HUDs, popups).
+    pub use daw_reaper_dioxus::{DioxusOverlay, DioxusOverlayBuilder, OverlayConfig};
+
+    /// Dioxus prelude — re-exported for component authors so they don't have
+    /// to depend on `dioxus-native` directly.
+    pub use daw_reaper_dioxus::prelude;
+}
