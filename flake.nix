@@ -19,7 +19,40 @@
         pkgs = import nixpkgs { inherit system; };
         ftsReaperConfig = "$HOME/.config/FastTrackStudio/Reaper";
         ftsDev = fts-flake.lib.mkFtsPackages { inherit pkgs; cfg = fts-flake.presets.dev // { reaper.configDir = ftsReaperConfig; }; };
+        cargoLock = {
+          lockFile = ./Cargo.lock;
+          outputHashes = {
+            "lucide-dioxus-2.26.0" = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+          };
+        };
+
+        commonRustArgs = {
+          version = "0.1.0";
+          src = ./.;
+          inherit cargoLock;
+          nativeBuildInputs = with pkgs; [ pkg-config ];
+          buildInputs = with pkgs; [ openssl ];
+        };
       in {
+        packages = {
+          fts-ui = pkgs.rustPlatform.buildRustPackage (commonRustArgs // {
+            pname = "fts-ui";
+            cargoBuildFlags = [ "--package" "fts-ui" ];
+            cargoTestFlags = [ "--package" "fts-ui" ];
+          });
+
+          default = pkgs.rustPlatform.buildRustPackage (commonRustArgs // {
+            pname = "fts-ui-showcase";
+            cargoBuildFlags = [ "--package" "fts-ui-showcase" ];
+            cargoTestFlags = [ "--package" "fts-ui-showcase" ];
+          });
+        };
+
+        checks = {
+          fts-ui = self.packages.${system}.fts-ui;
+          default = self.packages.${system}.default;
+        };
+
         devShells.default = devenv.lib.mkShell {
           inherit inputs pkgs;
           modules = [({ pkgs, config, ... }: {
