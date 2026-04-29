@@ -141,6 +141,7 @@ impl GpuState {
                 required_limits: limits,
                 memory_hints: MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
+                experimental_features: wgpu::ExperimentalFeatures::default(),
             }))?;
 
         let surface_caps = surface.get_capabilities(&adapter);
@@ -246,6 +247,7 @@ impl GpuState {
                 required_limits: limits,
                 memory_hints: MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
+                experimental_features: wgpu::ExperimentalFeatures::default(),
             }))?;
 
         let present_format = TextureFormat::Bgra8Unorm;
@@ -450,7 +452,12 @@ impl GpuState {
         slice.map_async(wgpu::MapMode::Read, move |res| {
             let _ = tx.send(res);
         });
-        self.device.poll(wgpu::PollType::Wait).ok();
+        self.device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .ok();
         rx.recv().ok().and_then(|r| r.ok());
 
         let tight_stride = (width * 4) as usize;
@@ -572,7 +579,7 @@ impl TextureBlitter {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Blit Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -600,7 +607,7 @@ impl TextureBlitter {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -659,6 +666,7 @@ impl TextureBlitter {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             render_pass.set_pipeline(&self.pipeline);

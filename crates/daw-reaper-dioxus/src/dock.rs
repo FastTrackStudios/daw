@@ -26,6 +26,33 @@ use std::ptr;
 
 use crate::embedded::EmbeddedView;
 
+/// Build a `BlitzPointerEvent` for a mouse pointer at window-local (x, y).
+/// All coord fields are filled with the same value because we don't track
+/// page/screen offsets inside REAPER's docker windows.
+fn mouse_pointer_event(
+    x: f32,
+    y: f32,
+    button: blitz_traits::events::MouseEventButton,
+    buttons: blitz_traits::events::MouseEventButtons,
+) -> blitz_traits::events::BlitzPointerEvent {
+    blitz_traits::events::BlitzPointerEvent {
+        id: blitz_traits::events::BlitzPointerId::Mouse,
+        is_primary: true,
+        coords: blitz_traits::events::PointerCoords {
+            page_x: x,
+            page_y: y,
+            screen_x: x,
+            screen_y: y,
+            client_x: x,
+            client_y: y,
+        },
+        button,
+        buttons,
+        mods: keyboard_types::Modifiers::empty(),
+        details: blitz_traits::events::PointerDetails::default(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -128,7 +155,10 @@ pub fn init(reaper: &'static Reaper, swell: &'static Swell) {
 struct DockPanelAccelHandler;
 
 impl reaper_medium::TranslateAccel for DockPanelAccelHandler {
-    fn call(&mut self, args: reaper_medium::TranslateAccelArgs) -> reaper_medium::TranslateAccelResult {
+    fn call(
+        &mut self,
+        args: reaper_medium::TranslateAccelArgs,
+    ) -> reaper_medium::TranslateAccelResult {
         let msg_hwnd = args.msg.raw().hwnd;
 
         // Check if the message target is one of our panel HWNDs
@@ -172,9 +202,7 @@ unsafe extern "C" fn screenset_callback(
         SCREENSET_ACTION_GETHWND => hwnd as isize,
         SCREENSET_ACTION_IS_DOCKED => {
             let mut is_floating = false;
-            let dock_id = unsafe {
-                reaper().DockIsChildOfDock(hwnd, &mut is_floating)
-            };
+            let dock_id = unsafe { reaper().DockIsChildOfDock(hwnd, &mut is_floating) };
             if dock_id >= 0 && !is_floating { 1 } else { 0 }
         }
         _ => 0,
@@ -202,13 +230,19 @@ impl reaper_medium::HwndInfo for DockPanelHwndInfo {
             let mut current = hwnd_raw;
             let mut found = std::ptr::null_mut();
             for _ in 0..16 {
-                if current.is_null() { break; }
-                let is_ours = PANELS.with(|panels| {
-                    panels.borrow().values().any(|p| p.hwnd == current)
-                });
-                if is_ours { found = current; break; }
+                if current.is_null() {
+                    break;
+                }
+                let is_ours =
+                    PANELS.with(|panels| panels.borrow().values().any(|p| p.hwnd == current));
+                if is_ours {
+                    found = current;
+                    break;
+                }
                 let parent = unsafe { swell.GetParent(current) };
-                if parent.is_null() || parent == current { break; }
+                if parent.is_null() || parent == current {
+                    break;
+                }
                 current = parent;
             }
             found
@@ -220,7 +254,9 @@ impl reaper_medium::HwndInfo for DockPanelHwndInfo {
         match info_type {
             reaper_medium::HwndInfoType::IsTextField => {
                 let is_text = PANELS.with(|panels| {
-                    panels.borrow().values()
+                    panels
+                        .borrow()
+                        .values()
                         .find(|p| p.hwnd == panel_hwnd)
                         .and_then(|p| p.view.as_ref())
                         .map(|v| v.focused_is_text_input())
@@ -304,9 +340,7 @@ impl HasDisplayHandle for RenderSurface {
         {
             use raw_window_handle::WindowsDisplayHandle;
             Ok(unsafe {
-                DisplayHandle::borrow_raw(RawDisplayHandle::Windows(
-                    WindowsDisplayHandle::new(),
-                ))
+                DisplayHandle::borrow_raw(RawDisplayHandle::Windows(WindowsDisplayHandle::new()))
             })
         }
     }
@@ -341,15 +375,26 @@ fn show_dock_context_menu(hwnd: raw::HWND, screen_x: i32, screen_y: i32) {
     }
 
     unsafe {
-        let toggle_label = if is_docked { "Undock" } else { "Dock in REAPER" };
+        let toggle_label = if is_docked {
+            "Undock"
+        } else {
+            "Dock in REAPER"
+        };
         insert_menu_item(menu, CMD_TOGGLE_DOCK, toggle_label);
         insert_menu_item(menu, CMD_CLOSE, "Close");
     }
 
     // VK_APPS key produces (-1, -1); fall back to window centre.
     let (px, py) = if screen_x == -1 && screen_y == -1 {
-        let mut rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-        unsafe { swell.GetWindowRect(hwnd, &mut rect); }
+        let mut rect = raw::RECT {
+            left: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+        };
+        unsafe {
+            swell.GetWindowRect(hwnd, &mut rect);
+        }
         ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2)
     } else {
         (screen_x, screen_y)
@@ -359,10 +404,16 @@ fn show_dock_context_menu(hwnd: raw::HWND, screen_x: i32, screen_y: i32) {
         swell.TrackPopupMenu(
             menu,
             TPM_RETURNCMD | TPM_NONOTIFY,
-            px, py, 0, hwnd, std::ptr::null(),
+            px,
+            py,
+            0,
+            hwnd,
+            std::ptr::null(),
         )
     };
-    unsafe { swell.DestroyMenu(menu); }
+    unsafe {
+        swell.DestroyMenu(menu);
+    }
 
     match cmd as u32 {
         CMD_CLOSE => {
@@ -403,7 +454,9 @@ unsafe fn insert_menu_item(menu: raw::HMENU, id: u32, label: &str) {
         dwTypeData: label_buf.as_mut_ptr() as *mut _,
         ..std::mem::zeroed()
     };
-    unsafe { swell.InsertMenuItem(menu, -1, 1, &mut mi); }
+    unsafe {
+        swell.InsertMenuItem(menu, -1, 1, &mut mi);
+    }
 }
 
 // Linux X11 reparenting machinery removed — we now render offscreen via
@@ -453,7 +506,10 @@ pub fn register_panel(
         let section = CString::new(config.id).unwrap();
         let key = CString::new("registered").unwrap();
         let prior = unsafe { reaper.GetExtState(section.as_ptr(), key.as_ptr()) };
-        prior.is_null() || unsafe { std::ffi::CStr::from_ptr(prior) }.to_bytes().is_empty()
+        prior.is_null()
+            || unsafe { std::ffi::CStr::from_ptr(prior) }
+                .to_bytes()
+                .is_empty()
     };
     if first_launch && config.default_dock_position >= 0 {
         unsafe { reaper.Dock_UpdateDockID(ident.as_ptr(), config.default_dock_position) };
@@ -462,21 +518,26 @@ pub fn register_panel(
         let section = CString::new(config.id).unwrap();
         let key = CString::new("registered").unwrap();
         let val = CString::new("1").unwrap();
-        unsafe { reaper.SetExtState(section.as_ptr(), key.as_ptr(), val.as_ptr(), true); }
+        unsafe {
+            reaper.SetExtState(section.as_ptr(), key.as_ptr(), val.as_ptr(), true);
+        }
     }
 
     let title_c = CString::new(config.title).unwrap();
     unsafe {
-        reaper.DockWindowAddEx(hwnd, title_c.as_ptr(), ident.as_ptr(), config.show_on_first_launch);
+        reaper.DockWindowAddEx(
+            hwnd,
+            title_c.as_ptr(),
+            ident.as_ptr(),
+            config.show_on_first_launch,
+        );
     }
 
     // Register a screenset callback so REAPER can restore dock tab focus
     // after project load / screenset switch. Matches reaimgui window.cpp:71-73.
     // The id string must remain valid for the lifetime of the registration —
     // we leak it (process-lifetime panel IDs).
-    let screenset_id: &'static str = Box::leak(
-        format!("FTSDioxus_{}", config.id).into_boxed_str()
-    );
+    let screenset_id: &'static str = Box::leak(format!("FTSDioxus_{}", config.id).into_boxed_str());
     let screenset_id_c = CString::new(screenset_id).unwrap().into_raw();
     unsafe {
         reaper.screenset_registerNew(
@@ -502,7 +563,9 @@ pub fn register_panel(
         wants_text_input: false,
     };
 
-    PANELS.with(|panels| { panels.borrow_mut().insert(id, panel); });
+    PANELS.with(|panels| {
+        panels.borrow_mut().insert(id, panel);
+    });
     tracing::debug!(id, first_launch, default_dock, "Registered dockable panel");
 }
 
@@ -546,7 +609,11 @@ pub fn toggle_panel(id: PanelId) {
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
         if let Some(panel) = panels.get_mut(id) {
-            if panel.visible { hide_panel_inner(panel); } else { show_panel_inner(panel); }
+            if panel.visible {
+                hide_panel_inner(panel);
+            } else {
+                show_panel_inner(panel);
+            }
         }
     });
 }
@@ -557,7 +624,9 @@ pub fn show_panel(id: PanelId) {
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
         if let Some(panel) = panels.get_mut(id) {
-            if !panel.visible { show_panel_inner(panel); }
+            if !panel.visible {
+                show_panel_inner(panel);
+            }
         }
     });
 }
@@ -568,7 +637,9 @@ pub fn hide_panel(id: PanelId) {
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
         if let Some(panel) = panels.get_mut(id) {
-            if panel.visible { hide_panel_inner(panel); }
+            if panel.visible {
+                hide_panel_inner(panel);
+            }
         }
     });
 }
@@ -624,9 +695,7 @@ pub fn update_panels() {
             // On change: invalidate render surface (Linux X11 child, macOS
             // layout cache, etc.) and force a redraw.
             let mut is_floating = false;
-            let current_dock_id = unsafe {
-                reaper.DockIsChildOfDock(panel.hwnd, &mut is_floating)
-            };
+            let current_dock_id = unsafe { reaper.DockIsChildOfDock(panel.hwnd, &mut is_floating) };
             if current_dock_id != panel.last_dock_id {
                 tracing::info!(
                     panel = panel.config.id,
@@ -671,8 +740,15 @@ pub fn update_panels() {
             }
 
             if let Some(view) = &mut panel.view {
-                let mut rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-                unsafe { swell.GetClientRect(panel.hwnd, &mut rect); }
+                let mut rect = raw::RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
+                unsafe {
+                    swell.GetClientRect(panel.hwnd, &mut rect);
+                }
                 let w = (rect.right - rect.left).unsigned_abs();
                 let h = (rect.bottom - rect.top).unsigned_abs();
 
@@ -694,18 +770,18 @@ pub fn update_panels() {
                     let wants = view.focused_is_text_input();
                     if wants != panel.wants_text_input {
                         panel.wants_text_input = wants;
-                        let class = if wants { TEXT_INPUT_CLASS } else { DEFAULT_CLASS };
+                        let class = if wants {
+                            TEXT_INPUT_CLASS
+                        } else {
+                            DEFAULT_CLASS
+                        };
                         unsafe {
                             swell.SWELL_SetClassName(
                                 panel.hwnd,
                                 class.as_ptr() as *const std::os::raw::c_char,
                             );
                         }
-                        tracing::trace!(
-                            panel = panel.config.id,
-                            wants,
-                            "SWELL class swap"
-                        );
+                        tracing::trace!(panel = panel.config.id, wants, "SWELL class swap");
                     }
 
                     view.update();
@@ -713,7 +789,9 @@ pub fn update_panels() {
                     // In offscreen mode, a completed frame means new pixels
                     // are ready; tell SWELL to post WM_PAINT so we can blit.
                     if view.take_needs_blit() {
-                        unsafe { swell.InvalidateRect(panel.hwnd, std::ptr::null(), 0); }
+                        unsafe {
+                            swell.InvalidateRect(panel.hwnd, std::ptr::null(), 0);
+                        }
                     }
                 }
             }
@@ -752,7 +830,9 @@ fn save_panel_state(panel: &LivePanel) {
     let section = CString::new(id).unwrap();
     let vis_key = CString::new("visible").unwrap();
     let vis_val = CString::new(if panel.visible { "1" } else { "0" }).unwrap();
-    unsafe { reaper.SetExtState(section.as_ptr(), vis_key.as_ptr(), vis_val.as_ptr(), true); }
+    unsafe {
+        reaper.SetExtState(section.as_ptr(), vis_key.as_ptr(), vis_val.as_ptr(), true);
+    }
 
     // Persist dock position via REAPER's authoritative API.
     let mut is_floating = false;
@@ -853,10 +933,21 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
     );
 
     let swell = swell();
-    let mut rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-    unsafe { swell.GetClientRect(panel.hwnd, &mut rect); }
-    let w = (rect.right - rect.left).unsigned_abs().max(panel.config.default_width);
-    let h = (rect.bottom - rect.top).unsigned_abs().max(panel.config.default_height);
+    let mut rect = raw::RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    unsafe {
+        swell.GetClientRect(panel.hwnd, &mut rect);
+    }
+    let w = (rect.right - rect.left)
+        .unsigned_abs()
+        .max(panel.config.default_width);
+    let h = (rect.bottom - rect.top)
+        .unsigned_abs()
+        .max(panel.config.default_height);
     tracing::info!(w, h, "Panel '{}' client rect", panel.config.id);
 
     let contexts = std::mem::take(&mut panel.contexts);
@@ -878,7 +969,8 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
             if panel.init_attempts >= 30 {
                 tracing::error!(
                     "Failed to create render surface for '{}' after {} attempts",
-                    panel.config.id, panel.init_attempts
+                    panel.config.id,
+                    panel.init_attempts
                 );
             }
             return;
@@ -908,16 +1000,27 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
             let section = CString::new(panel.config.id).unwrap();
             let key = CString::new("embedded_view").unwrap();
             let val = CString::new("1").unwrap();
-            unsafe { reaper.SetExtState(section.as_ptr(), key.as_ptr(), val.as_ptr(), true); }
+            unsafe {
+                reaper.SetExtState(section.as_ptr(), key.as_ptr(), val.as_ptr(), true);
+            }
         }
         Err(e) => {
-            tracing::warn!("EmbeddedView creation failed for '{}': {}", panel.config.id, e);
+            tracing::warn!(
+                "EmbeddedView creation failed for '{}': {}",
+                panel.config.id,
+                e
+            );
         }
     }
 }
 
 #[cfg(not(target_os = "linux"))]
-fn create_render_surface(panel: &mut LivePanel, _swell: &Swell, _w: u32, _h: u32) -> Option<RenderSurface> {
+fn create_render_surface(
+    panel: &mut LivePanel,
+    _swell: &Swell,
+    _w: u32,
+    _h: u32,
+) -> Option<RenderSurface> {
     Some(RenderSurface { hwnd: panel.hwnd })
 }
 
@@ -939,14 +1042,29 @@ fn forward_mouse_event(hwnd: raw::HWND, event: blitz_traits::events::UiEvent) {
         let mut panels = panels.borrow_mut();
         if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
             match &event {
-                blitz_traits::events::UiEvent::MouseMove(e) => {
-                    tracing::trace!(x = e.x, y = e.y, "MouseMove on '{}'", panel.config.id);
+                blitz_traits::events::UiEvent::PointerMove(e) => {
+                    tracing::trace!(
+                        x = e.coords.client_x,
+                        y = e.coords.client_y,
+                        "MouseMove on '{}'",
+                        panel.config.id
+                    );
                 }
-                blitz_traits::events::UiEvent::MouseDown(e) => {
-                    tracing::info!(x = e.x, y = e.y, "MouseDown on '{}'", panel.config.id);
+                blitz_traits::events::UiEvent::PointerDown(e) => {
+                    tracing::info!(
+                        x = e.coords.client_x,
+                        y = e.coords.client_y,
+                        "MouseDown on '{}'",
+                        panel.config.id
+                    );
                 }
-                blitz_traits::events::UiEvent::MouseUp(e) => {
-                    tracing::info!(x = e.x, y = e.y, "MouseUp on '{}'", panel.config.id);
+                blitz_traits::events::UiEvent::PointerUp(e) => {
+                    tracing::info!(
+                        x = e.coords.client_x,
+                        y = e.coords.client_y,
+                        "MouseUp on '{}'",
+                        panel.config.id
+                    );
                 }
                 blitz_traits::events::UiEvent::KeyDown(e) => {
                     tracing::info!(key = ?e.key, "KeyDown on '{}'", panel.config.id);
@@ -1037,8 +1155,12 @@ fn create_panel_window(config: &DockablePanelConfig, swell: &Swell) -> raw::HWND
         if !hwnd.is_null() {
             swell.SetWindowText(hwnd, title_c.as_ptr());
             swell.SetWindowPos(
-                hwnd, ptr::null_mut(), 0, 0,
-                config.default_width as c_int, config.default_height as c_int,
+                hwnd,
+                ptr::null_mut(),
+                0,
+                0,
+                config.default_width as c_int,
+                config.default_height as c_int,
                 0x0006, // SWP_NOZORDER | SWP_NOMOVE
             );
         }
@@ -1113,8 +1235,15 @@ fn panel_wndproc_inner(
             });
 
             if let Some((ptr, w, h)) = blit_info {
-                let mut rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-                unsafe { swell.GetClientRect(hwnd, &mut rect); }
+                let mut rect = raw::RECT {
+                    left: 0,
+                    top: 0,
+                    right: 0,
+                    bottom: 0,
+                };
+                unsafe {
+                    swell.GetClientRect(hwnd, &mut rect);
+                }
                 let cw = rect.right - rect.left;
                 let ch = rect.bottom - rect.top;
                 // `srcspan` is pixels-per-row (LICE_WrapperBitmap m_span, not bytes).
@@ -1122,28 +1251,37 @@ fn panel_wndproc_inner(
                 // inside memmove. Our readback is tightly packed, so span == w.
                 unsafe {
                     swell.StretchBltFromMem(
-                        hdc, 0, 0, cw, ch,
+                        hdc,
+                        0,
+                        0,
+                        cw,
+                        ch,
                         ptr as *const std::ffi::c_void,
-                        w, h, w,
+                        w,
+                        h,
+                        w,
                     );
                 }
             }
 
-            unsafe { swell.EndPaint(hwnd, &mut ps); }
+            unsafe {
+                swell.EndPaint(hwnd, &mut ps);
+            }
             0
         }
         // ── Mouse events ────────────────────────────────────────────
         WM_MOUSEMOVE => {
             let x = (lparam & 0xFFFF) as i16 as f32;
             let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
-            forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseMove(
-                blitz_traits::events::BlitzMouseButtonEvent {
-                    x, y,
-                    button: blitz_traits::events::MouseEventButton::Main,
-                    buttons: blitz_traits::events::MouseEventButtons::empty(),
-                    mods: keyboard_types::Modifiers::empty(),
-                },
-            ));
+            forward_mouse_event(
+                hwnd,
+                blitz_traits::events::UiEvent::PointerMove(mouse_pointer_event(
+                    x,
+                    y,
+                    blitz_traits::events::MouseEventButton::Main,
+                    blitz_traits::events::MouseEventButtons::empty(),
+                )),
+            );
             0
         }
         WM_LBUTTONDOWN | WM_MBUTTONDOWN => {
@@ -1159,13 +1297,15 @@ fn panel_wndproc_inner(
                 swell().SetCapture(hwnd);
                 swell().SetFocus(hwnd);
             }
-            forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseDown(
-                blitz_traits::events::BlitzMouseButtonEvent {
-                    x, y, button,
-                    buttons: blitz_traits::events::MouseEventButtons::Primary,
-                    mods: keyboard_types::Modifiers::empty(),
-                },
-            ));
+            forward_mouse_event(
+                hwnd,
+                blitz_traits::events::UiEvent::PointerDown(mouse_pointer_event(
+                    x,
+                    y,
+                    button,
+                    blitz_traits::events::MouseEventButtons::Primary,
+                )),
+            );
             0
         }
         // Right-click: forward to Blitz AND fall through to DefWindowProc so
@@ -1174,14 +1314,15 @@ fn panel_wndproc_inner(
         WM_RBUTTONDOWN => {
             let x = (lparam & 0xFFFF) as i16 as f32;
             let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
-            forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseDown(
-                blitz_traits::events::BlitzMouseButtonEvent {
-                    x, y,
-                    button: blitz_traits::events::MouseEventButton::Secondary,
-                    buttons: blitz_traits::events::MouseEventButtons::Secondary,
-                    mods: keyboard_types::Modifiers::empty(),
-                },
-            ));
+            forward_mouse_event(
+                hwnd,
+                blitz_traits::events::UiEvent::PointerDown(mouse_pointer_event(
+                    x,
+                    y,
+                    blitz_traits::events::MouseEventButton::Secondary,
+                    blitz_traits::events::MouseEventButtons::Secondary,
+                )),
+            );
             let swell = swell();
             unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
         }
@@ -1193,26 +1334,29 @@ fn panel_wndproc_inner(
                 WM_MBUTTONUP => blitz_traits::events::MouseEventButton::Auxiliary,
                 _ => blitz_traits::events::MouseEventButton::Main,
             };
-            forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseUp(
-                blitz_traits::events::BlitzMouseButtonEvent {
-                    x, y, button,
-                    buttons: blitz_traits::events::MouseEventButtons::empty(),
-                    mods: keyboard_types::Modifiers::empty(),
-                },
-            ));
+            forward_mouse_event(
+                hwnd,
+                blitz_traits::events::UiEvent::PointerUp(mouse_pointer_event(
+                    x,
+                    y,
+                    button,
+                    blitz_traits::events::MouseEventButtons::empty(),
+                )),
+            );
             0
         }
         WM_RBUTTONUP => {
             let x = (lparam & 0xFFFF) as i16 as f32;
             let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
-            forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseUp(
-                blitz_traits::events::BlitzMouseButtonEvent {
-                    x, y,
-                    button: blitz_traits::events::MouseEventButton::Secondary,
-                    buttons: blitz_traits::events::MouseEventButtons::empty(),
-                    mods: keyboard_types::Modifiers::empty(),
-                },
-            ));
+            forward_mouse_event(
+                hwnd,
+                blitz_traits::events::UiEvent::PointerUp(mouse_pointer_event(
+                    x,
+                    y,
+                    blitz_traits::events::MouseEventButton::Secondary,
+                    blitz_traits::events::MouseEventButtons::empty(),
+                )),
+            );
             let swell = swell();
             unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
         }
@@ -1220,15 +1364,22 @@ fn panel_wndproc_inner(
             let delta = ((wparam >> 16) & 0xFFFF) as i16 as f64 / 120.0;
             let x = (lparam & 0xFFFF) as i16 as f32;
             let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
-            forward_mouse_event(hwnd, blitz_traits::events::UiEvent::Wheel(
-                blitz_traits::events::BlitzWheelEvent {
+            forward_mouse_event(
+                hwnd,
+                blitz_traits::events::UiEvent::Wheel(blitz_traits::events::BlitzWheelEvent {
                     delta: blitz_traits::events::BlitzWheelDelta::Lines(0.0, delta),
-                    x, y,
-                    button: blitz_traits::events::MouseEventButton::Main,
+                    coords: blitz_traits::events::PointerCoords {
+                        page_x: x,
+                        page_y: y,
+                        screen_x: x,
+                        screen_y: y,
+                        client_x: x,
+                        client_y: y,
+                    },
                     buttons: blitz_traits::events::MouseEventButtons::empty(),
                     mods: keyboard_types::Modifiers::empty(),
-                },
-            ));
+                }),
+            );
             0
         }
         // ── Keyboard events ─────────────────────────────────────────
@@ -1261,9 +1412,12 @@ fn panel_wndproc_inner(
             // Text input — send as IME commit
             if let Some(ch) = char::from_u32(wparam as u32) {
                 if !ch.is_control() {
-                    forward_mouse_event(hwnd, blitz_traits::events::UiEvent::Ime(
-                        blitz_traits::events::BlitzImeEvent::Commit(ch.to_string()),
-                    ));
+                    forward_mouse_event(
+                        hwnd,
+                        blitz_traits::events::UiEvent::Ime(
+                            blitz_traits::events::BlitzImeEvent::Commit(ch.to_string()),
+                        ),
+                    );
                 }
             }
             0
@@ -1302,12 +1456,22 @@ fn panel_wndproc_inner(
             let sy = ((lparam >> 16) & 0xFFFF) as i16 as i32;
             let swell = swell();
             let mut pt = raw::POINT { x: sx, y: sy };
-            unsafe { swell.ScreenToClient(hwnd, &mut pt); }
-            let mut client = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-            unsafe { swell.GetClientRect(hwnd, &mut client); }
-            let in_client =
-                pt.x >= client.left && pt.x < client.right
-                && pt.y >= client.top && pt.y < client.bottom;
+            unsafe {
+                swell.ScreenToClient(hwnd, &mut pt);
+            }
+            let mut client = raw::RECT {
+                left: 0,
+                top: 0,
+                right: 0,
+                bottom: 0,
+            };
+            unsafe {
+                swell.GetClientRect(hwnd, &mut client);
+            }
+            let in_client = pt.x >= client.left
+                && pt.x < client.right
+                && pt.y >= client.top
+                && pt.y < client.bottom;
             if in_client {
                 // Content right-click — let Blitz/SWELL handle it normally.
                 let swell = swell;
@@ -1349,7 +1513,8 @@ fn panel_wndproc_inner(
             //   3. DockWindowRemove
             let taken = PANELS.with(|panels| {
                 let mut panels = panels.borrow_mut();
-                let id = panels.iter()
+                let id = panels
+                    .iter()
                     .find(|(_, p)| p.hwnd == hwnd)
                     .map(|(id, _)| *id);
                 id.and_then(|id| panels.remove(id).map(|p| (id, p)))
@@ -1360,8 +1525,12 @@ fn panel_wndproc_inner(
                 // Unregister screenset callback before destroying the HWND —
                 // otherwise REAPER may call us back with a dead param.
                 // Matches reaimgui (window.cpp:111).
-                unsafe { reaper.screenset_unregisterByParam(hwnd as *mut std::os::raw::c_void); }
-                unsafe { reaper.DockWindowRemove(hwnd); }
+                unsafe {
+                    reaper.screenset_unregisterByParam(hwnd as *mut std::os::raw::c_void);
+                }
+                unsafe {
+                    reaper.DockWindowRemove(hwnd);
+                }
                 // LivePanel::Drop handles X11 child cleanup (Linux).
                 drop(panel);
             }
@@ -1381,9 +1550,15 @@ fn panel_wndproc_inner(
                 && msg != 0x0085 /*WM_NCPAINT*/
                 && msg != 0x0046 /*WM_WINDOWPOSCHANGING*/
                 && msg != 0x0047 /*WM_WINDOWPOSCHANGED*/
-                && msg != 0x0215 /*WM_CAPTURECHANGED*/
+                && msg != 0x0215
+            /*WM_CAPTURECHANGED*/
             {
-                tracing::info!(msg = format!("0x{msg:04X}"), wparam, lparam, "unhandled wnd msg");
+                tracing::info!(
+                    msg = format!("0x{msg:04X}"),
+                    wparam,
+                    lparam,
+                    "unhandled wnd msg"
+                );
             }
             let swell = swell();
             unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
@@ -1421,9 +1596,13 @@ pub fn would_create_circular_parent(child: raw::HWND, parent: raw::HWND) -> bool
     let swell = swell();
     let mut current = parent;
     for _ in 0..64 {
-        if current == child { return true; }
+        if current == child {
+            return true;
+        }
         let next = unsafe { swell.GetParent(current) };
-        if next.is_null() || next == current { break; }
+        if next.is_null() || next == current {
+            break;
+        }
         current = next;
     }
     false

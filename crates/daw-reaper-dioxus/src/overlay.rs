@@ -9,13 +9,13 @@ use blitz_dom::Document as _;
 use blitz_paint::paint_scene;
 use blitz_traits::shell::{ColorScheme, Viewport};
 use crossbeam::channel::{Receiver, Sender, unbounded};
+use daw_reaper_embed::TransparentWindow;
 use dioxus_native::prelude::*;
 use dioxus_native::{DioxusDocument, DocumentConfig};
 use futures_util::task::ArcWake;
-use daw_reaper_embed::TransparentWindow;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use vello::Scene;
 
@@ -31,7 +31,6 @@ pub(crate) enum DocumentMessage {
         contents: Option<String>,
     },
 }
-
 
 /// Proxy that implements `dioxus::document::Document` and forwards head element
 /// creation requests through a channel. This enables `document::Style { }` in RSX.
@@ -350,6 +349,8 @@ impl DioxusOverlay {
             self.scale_factor as f64,
             self.width,
             self.height,
+            0,
+            0,
         );
 
         // Render the scene to the window's GPU surface
