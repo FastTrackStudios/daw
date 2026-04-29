@@ -9,3 +9,9 @@ facet = { workspace = true }
 thiserror = { workspace = true }
 actions-proto = { workspace = true }
 # Note: No tokio - this crate is WASM-compatible for use in web apps
+
+[features]
+# Pulls in the MockDockHost in-memory adapter for unit tests that don't
+# need REAPER / GPU. Enable from a consumer's dev-dependencies:
+#   daw-proto = { path = "...", features = ["test-utils"] }
+test-utils = []

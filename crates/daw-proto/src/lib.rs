@@ -12,6 +12,8 @@ pub mod automation;
 pub mod batch;
 pub mod capability;
 pub mod dock_host;
+#[cfg(feature = "test-utils")]
+pub mod dock_host_mock;
 pub mod error;
 pub mod ext_state;
 pub mod fx;
