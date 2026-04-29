@@ -85,6 +85,24 @@ in
       '';
     };
 
+    databasePath = mkOption {
+      type = types.path;
+      default = "/var/lib/task-server/task.sqlite";
+      description = "SQLite database path for auth, organizations, activity, and other authoritative service data.";
+    };
+
+    publicBaseUrl = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      description = "Public base URL used by auth callbacks. Defaults to the bind address.";
+    };
+
+    seedDemo = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Seed demo users, organizations, projects, and tasks on startup. Disable for production instances.";
+    };
+
     # ── Nextcloud integration ─────────────────────────────────────────
 
     nextcloud = {
@@ -212,11 +230,16 @@ in
       wantedBy = [ "multi-user.target" ];
 
       environment = {
+        TASK_VAULT = toString cfg.vaultRoot;
         VAULT_ROOT = toString cfg.vaultRoot;
+        TASK_DB_PATH = toString cfg.databasePath;
+        TASK_SEED_DEMO = if cfg.seedDemo then "1" else "0";
         SERVER_NAME = cfg.serverName;
         SERVER_ID = cfg.serverId;
         BIND_ADDR = "${cfg.bindAddress}:${toString cfg.port}";
         RUST_LOG = "task_server=${cfg.logLevel}";
+      } // lib.optionalAttrs (cfg.publicBaseUrl != null) {
+        PUBLIC_BASE_URL = cfg.publicBaseUrl;
       } // lib.optionalAttrs cfg.nextcloud.enable {
         NEXTCLOUD_URL = cfg.nextcloud.url;
         NEXTCLOUD_USERNAME = cfg.nextcloud.username;
@@ -246,6 +269,7 @@ in
         ReadWritePaths = [
           (toString cfg.vaultRoot)
           "/var/lib/task-server"
+          (toString (dirOf cfg.databasePath))
         ] ++ lib.optionals cfg.caldav.enable [
           cfg.caldav.cacheDir
         ];
@@ -269,7 +293,9 @@ in
     };
 
     # Create cache directory
-    systemd.tmpfiles.rules = lib.optionals cfg.caldav.enable [
+    systemd.tmpfiles.rules = [
+      "d ${dirOf cfg.databasePath} 0750 ${cfg.user} ${cfg.group} -"
+    ] ++ lib.optionals cfg.caldav.enable [
       "d ${cfg.caldav.cacheDir} 0750 ${cfg.user} ${cfg.group} -"
     ];
   };
