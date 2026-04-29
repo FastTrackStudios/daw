@@ -5,7 +5,7 @@
 //! transport they already use for ActionRegistry / Track / etc.
 
 use crate::DawClients;
-use daw_proto::dock_host::{DockEvent, DockHandle, DockKind, PanelPixels};
+use daw_proto::dock_host::{DockEvent, DockHandle, DockKind, PanelPixels, UiEventDto};
 use std::sync::Arc;
 use vox::Tx;
 
@@ -84,5 +84,15 @@ impl DockHost {
     /// not completed its first render tick yet (no readback bytes).
     pub async fn capture_pixels(&self, handle: DockHandle) -> crate::Result<Option<PanelPixels>> {
         Ok(self.clients.dock_host.capture_panel_pixels(handle).await?)
+    }
+
+    /// Inject a synthetic UI event into a panel for interaction tests.
+    /// Returns `false` if the handle has no live panel mounted.
+    pub async fn inject_event(&self, handle: DockHandle, event: UiEventDto) -> crate::Result<bool> {
+        Ok(self
+            .clients
+            .dock_host
+            .inject_ui_event(handle, event)
+            .await?)
     }
 }

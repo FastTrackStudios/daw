@@ -1914,6 +1914,8 @@ dependencies = [
  "crossbeam-channel",
  "daw",
  "daw-allocator",
+ "daw-proto 0.1.0",
+ "daw-reaper-dioxus",
  "dawfile-aaf",
  "dawfile-ableton",
  "dawfile-dawproject",
@@ -2101,6 +2103,8 @@ dependencies = [
  "reaper-high",
  "reaper-low",
  "reaper-medium",
+ "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "vello 0.8.0",
@@ -11779,6 +11783,10 @@ dependencies = [
 ]
 
 [[patch.unused]]
+name = "blitz"
+version = "0.3.0-alpha.2"
+
+[[patch.unused]]
 name = "vox-codegen"
 version = "0.2.2"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
@@ -11792,7 +11800,3 @@ source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b2
 name = "vox-websocket"
 version = "0.2.2"
 source = "git+https://github.com/Codys-Wright/vox.git?rev=2a2f793b#2a2f793b868b22d82ae4be6e1abc581ca330f940"
-
-[[patch.unused]]
-name = "blitz"
-version = "0.3.0-alpha.2"

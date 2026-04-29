@@ -8,7 +8,7 @@
 //! Pulled in via `cargo features = ["test-utils"]` so production builds
 //! never link this code.
 
-use crate::dock_host::{DockEvent, DockHandle, DockHostService, DockKind, PanelPixels};
+use crate::dock_host::{DockEvent, DockHandle, DockHostService, DockKind, PanelPixels, UiEventDto};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use vox::Tx;
@@ -16,7 +16,7 @@ use vox::Tx;
 /// Record of a single operation invoked against [`MockDockHost`].
 ///
 /// Tests inspect the recorded sequence with [`MockDockHost::ops`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DockOp {
     Register {
         handle: DockHandle,
@@ -31,6 +31,10 @@ pub enum DockOp {
     SaveLayout,
     RestoreLayout,
     Subscribe,
+    InjectUiEvent {
+        handle: DockHandle,
+        event: UiEventDto,
+    },
 }
 
 /// Snapshot of one mock dock's state.
@@ -244,6 +248,13 @@ impl DockHostService for MockDockHost {
 
     async fn capture_panel_pixels(&self, handle: DockHandle) -> Option<PanelPixels> {
         self.inner.lock().unwrap().pixels.get(&handle).cloned()
+    }
+
+    async fn inject_ui_event(&self, handle: DockHandle, event: UiEventDto) -> bool {
+        let mut st = self.inner.lock().unwrap();
+        let known = st.docks.contains_key(&handle);
+        Self::record(&mut st, DockOp::InjectUiEvent { handle, event });
+        known
     }
 }
 

@@ -648,6 +648,25 @@ pub fn is_panel_visible(id: PanelId) -> bool {
     PANELS.with(|panels| panels.borrow().get(id).map_or(false, |p| p.visible))
 }
 
+/// Dispatch a synthetic UI event to a panel's EmbeddedView.
+/// Used by `DockHostService::inject_ui_event` to drive interaction
+/// tests without a real window-system event.
+///
+/// Returns `true` if the panel was found and the event was queued.
+pub fn dispatch_event_to_panel(id: PanelId, event: blitz_traits::events::UiEvent) -> bool {
+    PANELS.with(|panels| {
+        let mut panels = panels.borrow_mut();
+        let Some(panel) = panels.get_mut(id) else {
+            return false;
+        };
+        let Some(view) = panel.view.as_mut() else {
+            return false;
+        };
+        view.handle_event(event);
+        true
+    })
+}
+
 /// Capture the current rendered pixels of a panel by id.
 ///
 /// Returns `(width, height, bgra)` if the panel is registered AND has

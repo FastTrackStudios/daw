@@ -16,7 +16,9 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use daw_proto::dock_host::{DockEvent, DockHandle, DockHostService, DockKind, PanelPixels};
+use daw_proto::dock_host::{
+    DockEvent, DockHandle, DockHostService, DockKind, PanelPixels, UiEventDto,
+};
 use tokio::sync::broadcast;
 use tracing::{debug, info};
 use vox::Tx;
@@ -45,6 +47,90 @@ fn host_state() -> &'static Mutex<HostState> {
 /// that want to bypass the vox streaming round-trip.
 pub fn subscribe_dock_broadcasts() -> broadcast::Receiver<DockEvent> {
     dock_broadcaster().subscribe()
+}
+
+/// Build a panel-local pointer event at `(x, y)` from the wire DTO.
+fn pointer_event_at(x: f32, y: f32, button: u8) -> blitz_traits::events::BlitzPointerEvent {
+    let blitz_button = match button {
+        1 => blitz_traits::events::MouseEventButton::Auxiliary,
+        2 => blitz_traits::events::MouseEventButton::Secondary,
+        _ => blitz_traits::events::MouseEventButton::Main,
+    };
+    let buttons = match blitz_button {
+        blitz_traits::events::MouseEventButton::Main => {
+            blitz_traits::events::MouseEventButtons::Primary
+        }
+        blitz_traits::events::MouseEventButton::Secondary => {
+            blitz_traits::events::MouseEventButtons::Secondary
+        }
+        _ => blitz_traits::events::MouseEventButtons::empty(),
+    };
+    blitz_traits::events::BlitzPointerEvent {
+        id: blitz_traits::events::BlitzPointerId::Mouse,
+        is_primary: true,
+        coords: blitz_traits::events::PointerCoords {
+            page_x: x,
+            page_y: y,
+            screen_x: x,
+            screen_y: y,
+            client_x: x,
+            client_y: y,
+        },
+        button: blitz_button,
+        buttons,
+        mods: keyboard_types::Modifiers::empty(),
+        details: blitz_traits::events::PointerDetails::default(),
+    }
+}
+
+fn build_key_event(key: String) -> blitz_traits::events::BlitzKeyEvent {
+    let parsed = key
+        .parse::<keyboard_types::Key>()
+        .ok()
+        .unwrap_or(keyboard_types::Key::Unidentified);
+    blitz_traits::events::BlitzKeyEvent {
+        key: parsed,
+        code: keyboard_types::Code::Unidentified,
+        modifiers: keyboard_types::Modifiers::empty(),
+        location: keyboard_types::Location::Standard,
+        is_composing: false,
+        state: blitz_traits::events::KeyState::Pressed,
+        is_auto_repeating: false,
+        text: None,
+    }
+}
+
+fn dto_to_blitz_event(dto: UiEventDto) -> Option<blitz_traits::events::UiEvent> {
+    use blitz_traits::events::{BlitzWheelDelta, BlitzWheelEvent, UiEvent};
+    Some(match dto {
+        UiEventDto::PointerMove { x, y } => UiEvent::PointerMove(pointer_event_at(x, y, 0)),
+        UiEventDto::PointerDown { x, y, button } => {
+            UiEvent::PointerDown(pointer_event_at(x, y, button))
+        }
+        UiEventDto::PointerUp { x, y, button } => {
+            UiEvent::PointerUp(pointer_event_at(x, y, button))
+        }
+        UiEventDto::Wheel {
+            x,
+            y,
+            delta_x,
+            delta_y,
+        } => UiEvent::Wheel(BlitzWheelEvent {
+            delta: BlitzWheelDelta::Pixels(delta_x, delta_y),
+            coords: blitz_traits::events::PointerCoords {
+                page_x: x,
+                page_y: y,
+                screen_x: x,
+                screen_y: y,
+                client_x: x,
+                client_y: y,
+            },
+            buttons: blitz_traits::events::MouseEventButtons::empty(),
+            mods: keyboard_types::Modifiers::empty(),
+        }),
+        UiEventDto::KeyDown { key } => UiEvent::KeyDown(build_key_event(key)),
+        UiEventDto::KeyUp { key } => UiEvent::KeyUp(build_key_event(key)),
+    })
 }
 
 /// REAPER-backed [`DockHostService`] adapter.
@@ -161,6 +247,16 @@ impl DockHostService for ReaperDockHost {
             height,
             bgra,
         })
+    }
+
+    async fn inject_ui_event(&self, handle: DockHandle, event: UiEventDto) -> bool {
+        let Some(id) = self.lookup(handle) else {
+            return false;
+        };
+        let Some(blitz_event) = dto_to_blitz_event(event) else {
+            return false;
+        };
+        dock::dispatch_event_to_panel(id, blitz_event)
     }
 
     async fn subscribe_dock_events(&self, tx: Tx<DockEvent>) {

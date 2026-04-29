@@ -31,6 +31,46 @@ pub enum DockEvent {
     LayoutChanged,
 }
 
+/// Synthetic UI event injected into a panel for interaction tests.
+///
+/// Mirrors the subset of `blitz_traits::events::UiEvent` that tests
+/// commonly need to drive: pointer move/down/up, wheel, key down/up.
+/// Coordinates are panel-local pixels (origin at the top-left of the
+/// dock window's client area).
+#[repr(u8)]
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub enum UiEventDto {
+    PointerMove {
+        x: f32,
+        y: f32,
+    },
+    PointerDown {
+        x: f32,
+        y: f32,
+        /// 0 = main (left), 1 = aux (middle), 2 = secondary (right).
+        button: u8,
+    },
+    PointerUp {
+        x: f32,
+        y: f32,
+        button: u8,
+    },
+    Wheel {
+        x: f32,
+        y: f32,
+        delta_x: f64,
+        delta_y: f64,
+    },
+    KeyDown {
+        /// `keyboard_types::Key` rendered as a string (e.g. "Enter",
+        /// "ArrowDown", "a", "A").
+        key: String,
+    },
+    KeyUp {
+        key: String,
+    },
+}
+
 /// Pixel buffer captured from a live dock panel.
 ///
 /// Returned by [`DockHostService::capture_panel_pixels`] for visual
@@ -106,4 +146,9 @@ pub trait DockHostService {
     /// available). Tests should poll with a short timeout if they need
     /// to wait for the initial render to settle.
     async fn capture_panel_pixels(&self, handle: DockHandle) -> Option<PanelPixels>;
+
+    /// Inject a synthetic UI event into a panel. Used by interaction
+    /// tests to drive clicks / keys / scroll without a real window
+    /// system. Returns `false` if the handle has no live panel mounted.
+    async fn inject_ui_event(&self, handle: DockHandle, event: UiEventDto) -> bool;
 }
