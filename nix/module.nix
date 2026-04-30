@@ -142,6 +142,12 @@ in
         description = "CalDAV calendar name for task sync.";
       };
 
+      eventCalendar = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Optional CalDAV calendar name for non-task events.";
+      };
+
       deckEnabled = mkOption {
         type = types.bool;
         default = false;
@@ -246,6 +252,8 @@ in
         NEXTCLOUD_PROJECTS_PATH = cfg.nextcloud.projectsPath;
         NEXTCLOUD_CALENDAR = cfg.nextcloud.calendar;
         NEXTCLOUD_DECK_ENABLED = if cfg.nextcloud.deckEnabled then "1" else "0";
+      } // lib.optionalAttrs (cfg.nextcloud.enable && cfg.nextcloud.eventCalendar != null) {
+        NEXTCLOUD_EVENT_CALENDAR = cfg.nextcloud.eventCalendar;
       } // lib.optionalAttrs cfg.caldav.enable {
         CALDAV_URL = cfg.caldav.serverUrl;
         CALDAV_USERNAME = cfg.caldav.username;

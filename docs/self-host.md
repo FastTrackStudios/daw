@@ -1,0 +1,98 @@
+# Self-Hosting Task
+
+Task can run as a normal Rust service with a markdown vault, SQLite database,
+and optional Nextcloud provider integrations. The core server exposes Vox RPC on
+`/vox`; clients and agents should use those native services.
+
+## Build
+
+```bash
+nix build .#task-server
+nix build .#task-cli
+```
+
+For development or manual administration:
+
+```bash
+nix develop
+cargo check -p task-server
+cargo test -p task-core
+```
+
+## Runtime Files
+
+Recommended layout:
+
+```text
+/srv/task/vault/                 # markdown task/project vault
+/var/lib/task-server/task.sqlite # auth/org/activity SQLite database
+/etc/task/nextcloud.toml         # provider config, secret file references only
+```
+
+Set:
+
+```bash
+TASK_VAULT=/srv/task/vault
+TASK_DB_PATH=/var/lib/task-server/task.sqlite
+TASK_NEXTCLOUD_CONFIG=/etc/task/nextcloud.toml
+```
+
+`TASK_NEXTCLOUD_CONFIG` should point at a file like
+`docs/templates/nextcloud.toml.example`. Prefer `password_file` over putting app
+passwords directly in environment variables.
+
+## Smoke Tests
+
+Before enabling unattended sync:
+
+```bash
+task doctor --deep
+task sync --plan
+task sync --state
+task people list
+task project list
+task invoice report
+```
+
+Remote client setup:
+
+```bash
+task server add home --url https://task.example.com --session-token "$TOKEN" --use-now
+task --server home doctor --deep
+task --server home sync --plan
+```
+
+## NixOS
+
+This flake exports a NixOS module:
+
+```nix
+{
+  imports = [ inputs.task.nixosModules.task-server ];
+
+  services.task-server = {
+    enable = true;
+    package = inputs.task.packages.${pkgs.system}.task-server;
+    vaultRoot = "/srv/task/vault";
+    databasePath = "/var/lib/task-server/task.sqlite";
+    port = 3456;
+    seedDemo = true;
+
+    nextcloud = {
+      enable = true;
+      url = "https://cloud.example.com";
+      username = "agent";
+      passwordFile = config.sops.secrets."task/nextcloud-password".path;
+      projectsPath = "Projects/";
+      calendar = "tasks";
+      eventCalendar = "events";
+      deckEnabled = true;
+    };
+  };
+}
+```
+
+## Generic systemd
+
+Use `docs/systemd/task-server.service` as a starting point on non-NixOS hosts.
+Keep secrets in files readable only by the service user.
