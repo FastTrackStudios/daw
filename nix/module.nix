@@ -155,6 +155,36 @@ in
       };
     };
 
+    nextcloudVaultAcl = {
+      enable = mkEnableOption ''
+        POSIX ACL management for a Nextcloud-owned vault tree.
+
+        Enable this when vaultRoot points at live Nextcloud storage such as
+        /var/lib/nextcloud/data/<user>/files/Projects and task-server needs
+        write access without changing Nextcloud ownership.
+      '';
+
+      path = mkOption {
+        type = types.path;
+        default = cfg.vaultRoot;
+        defaultText = lib.literalExpression "config.services.task-server.vaultRoot";
+        description = ''
+          Directory that should receive ACLs for the task-server user.
+          Defaults to vaultRoot.
+        '';
+      };
+
+      recursive = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Apply the access ACL to existing files/directories under path and
+          apply default ACLs to existing directories so new files inherit
+          task-server write access.
+        '';
+      };
+    };
+
     # ── CalDAV sync ───────────────────────────────────────────────────
 
     caldav = {
@@ -224,6 +254,30 @@ in
     };
 
     users.groups.${cfg.group} = {};
+
+    system.activationScripts.task-server-nextcloud-vault-acl = mkIf cfg.nextcloudVaultAcl.enable {
+      deps = [ "users" "groups" ];
+      text =
+        let
+          aclRoot = toString cfg.nextcloudVaultAcl.path;
+          setfacl = "${pkgs.acl}/bin/setfacl";
+          find = "${pkgs.findutils}/bin/find";
+        in
+        ''
+          if [ -d ${lib.escapeShellArg aclRoot} ]; then
+            ${if cfg.nextcloudVaultAcl.recursive then ''
+              ${setfacl} -R -m ${lib.escapeShellArg "u:${cfg.user}:rwX"} ${lib.escapeShellArg aclRoot}
+              ${find} ${lib.escapeShellArg aclRoot} -type d -exec \
+                ${setfacl} -m ${lib.escapeShellArg "d:u:${cfg.user}:rwX"} {} +
+            '' else ''
+              ${setfacl} -m ${lib.escapeShellArg "u:${cfg.user}:rwX"} ${lib.escapeShellArg aclRoot}
+              ${setfacl} -m ${lib.escapeShellArg "d:u:${cfg.user}:rwX"} ${lib.escapeShellArg aclRoot}
+            ''}
+          else
+            echo "task-server: nextcloudVaultAcl path does not exist, skipping ACL setup: ${aclRoot}" >&2
+          fi
+        '';
+    };
 
     # Firewall
     networking.firewall.allowedTCPPorts = mkIf cfg.openFirewall [ cfg.port ];

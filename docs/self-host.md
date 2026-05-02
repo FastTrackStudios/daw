@@ -88,9 +88,38 @@ This flake exports a NixOS module:
       eventCalendar = "events";
       deckEnabled = true;
     };
+
+    # Optional: when vaultRoot points at live Nextcloud server storage
+    # owned by nextcloud:nextcloud, grant task-server write access without
+    # changing ownership.
+    nextcloudVaultAcl.enable = true;
   };
 }
 ```
+
+### Nextcloud vault ACLs
+
+If `vaultRoot` points at a live Nextcloud data tree, for example
+`/var/lib/nextcloud/data/codywright/files/Projects`, keep ownership with
+Nextcloud and grant the service user access with POSIX ACLs:
+
+```nix
+services.task-server = {
+  vaultRoot = "/var/lib/nextcloud/data/codywright/files/Projects";
+
+  nextcloudVaultAcl = {
+    enable = true;
+    # path defaults to vaultRoot
+    recursive = true;
+  };
+};
+```
+
+When enabled, activation applies `u:<task-server-user>:rwX` to the configured
+path and default ACLs to directories so new files inherit service write access.
+This preserves Nextcloud-compatible ownership while allowing Task to create and
+update project/task files. Keep the ACL root as narrow as practical, normally the
+Projects vault root rather than the whole Nextcloud data directory.
 
 ## Generic systemd
 
