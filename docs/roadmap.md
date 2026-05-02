@@ -5,17 +5,17 @@ Phased plan from scaffold (today) to production-grade VRT + fuzzing.
 ## Phase 0 — scaffold (DONE)
 
 - Workspace skeleton with six crates (`core`, `macros`, `runtime`, `shell`, `snapshots`, `fuzz`).
-- `fts-vt-core` defines `Story`, `KnobSpec`, `KnobValue`, `KnobKind`,
+- `fts-story-core` defines `Story`, `KnobSpec`, `KnobValue`, `KnobKind`,
   `Interaction`, `Selector`, `WaitCondition`, `InteractionScript`, and
   the `STORIES` / `INTERACTION_SCRIPTS` `linkme` slices.
-- `fts-vt-runtime` defines `RenderFn`, `KnobSource`, `render_fn` cast.
-- `fts-vt-snapshots` enforces release builds via `compile_error!`.
+- `fts-story-runtime` defines `RenderFn`, `KnobSource`, `render_fn` cast.
+- `fts-story-snapshots` enforces release builds via `compile_error!`.
 - Stubs everywhere else.
 
 ## Phase 1 — hand-rolled stories prove the registry (1 day)
 
 - Hand-write 1-2 `Story` values for an `fts-ui` component (no macro yet).
-- Wire `fts-vt-shell::Lookbook` to read from `STORIES`, render the
+- Wire `fts-story-shell::Lookbook` to read from `STORIES`, render the
   selected story by casting `render` back to `RenderFn`.
 - Implement `KnobSource` against a `Signal<HashMap<&'static str, KnobValue>>`.
 - Render shell in fts-ui's existing native app (replaces the showcase grid
@@ -34,7 +34,7 @@ Phased plan from scaffold (today) to production-grade VRT + fuzzing.
 - Manual `#[states(...)]` attribute for explicit matrices on enums and
   String-valued cases.
 
-## Phase 3 — `fts-vt-snapshots` MVP (3 days)
+## Phase 3 — `fts-story-snapshots` MVP (3 days)
 
 Decision: **license-resolve `blitz-vrt`** (file an issue, ask Tony for
 MIT/Apache-2.0 dual) **and vendor** the parts we need, with attribution
@@ -85,11 +85,11 @@ Pieces:
 
 ## Phase 6 — cross-renderer parity (later)
 
-- `fts-vt-snapshots` already covers Blitz.
-- Add `fts-vt-snapshots-wry` (uses `webview.screenshot()`).
-- Add `fts-vt-snapshots-web` (Playwright shell that loads the Dioxus web
+- `fts-story-snapshots` already covers Blitz.
+- Add `fts-story-snapshots-wry` (uses `webview.screenshot()`).
+- Add `fts-story-snapshots-web` (Playwright shell that loads the Dioxus web
   build and screenshots).
-- Add `fts-vt-snapshots-mobile` (xcrun simctl io / adb screencap).
+- Add `fts-story-snapshots-mobile` (xcrun simctl io / adb screencap).
 - All four write into the same `snapshots/` layout. Each renderer can
   pin its own baseline (`snapshots/<story>__<state>__<renderer>.png`)
   and a meta-test asserts cross-renderer DSSIM is below a generous
@@ -103,7 +103,7 @@ just `fts-ui`. Concretely:
 - `fts-ui` (dioxus 0.7.6) — primary driver, will host the first stories.
 - `frame-ui` (dioxus 0.7.2) — secondary consumer; once `frame-ui` adds
   meaningful components the same `#[story]` attribute applies. Pin both
-  to the same `fts-visual-testing` git rev.
+  to the same `fts-story` git rev.
 - Future UI crates — same pattern.
 
 To make sure new features don't accidentally lock to `fts-ui`:

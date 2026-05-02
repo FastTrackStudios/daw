@@ -1,4 +1,4 @@
-# fts-visual-testing
+# fts-story
 
 Component browser **and** automated visual regression testing for Dioxus
 0.7+ UI libraries.
@@ -20,15 +20,15 @@ Pre-MVP. Scaffold only — see `docs/roadmap.md`.
 
 | Crate                 | Purpose                                                                 | Heavy deps          |
 |-----------------------|-------------------------------------------------------------------------|---------------------|
-| `fts-vt-core`        | `Story`, `Knob`, `Interaction` types + linkme registry                  | linkme              |
-| `fts-vt-macros`      | `#[story]`, `#[story_test]`, `#[states]` proc-macros                    | syn, quote          |
-| `fts-vt-runtime`     | Dioxus-aware glue: render thunks, `KnobSource`, interaction executor    | dioxus              |
-| `fts-vt-shell`       | Interactive sidebar + preview Dioxus component                          | dioxus              |
-| `fts-vt-snapshots`         | Headless Blitz renderer, settling loop, DSSIM diff, baseline harness    | dioxus-native, dssim |
-| `fts-vt-fuzz`        | Interaction fuzzing via proptest                                        | proptest             |
+| `fts-story-core`        | `Story`, `Knob`, `Interaction` types + linkme registry                  | linkme              |
+| `fts-story-macros`      | `#[story]`, `#[story_test]`, `#[states]` proc-macros                    | syn, quote          |
+| `fts-story-runtime`     | Dioxus-aware glue: render thunks, `KnobSource`, interaction executor    | dioxus              |
+| `fts-story-shell`       | Interactive sidebar + preview Dioxus component                          | dioxus              |
+| `fts-story-snapshots`         | Headless Blitz renderer, settling loop, DSSIM diff, baseline harness    | dioxus-native, dssim |
+| `fts-story-fuzz`        | Interaction fuzzing via proptest                                        | proptest             |
 
-Consumers normally depend on **only** `fts-vt-runtime` (story declarations)
-+ `fts-vt-shell` (interactive browser) + `fts-vt-snapshots` (snapshot harness).
+Consumers normally depend on **only** `fts-story-runtime` (story declarations)
++ `fts-story-shell` (interactive browser) + `fts-story-snapshots` (snapshot harness).
 
 ## Why not lookbook?
 
@@ -74,9 +74,9 @@ In your workspace `Cargo.toml`:
 
 ```toml
 [workspace.dependencies]
-fts-vt-runtime   = { git = "ssh://git@github.com/FastTrackStudios/fts-visual-testing", rev = "<sha>" }
-fts-vt-shell     = { git = "ssh://git@github.com/FastTrackStudios/fts-visual-testing", rev = "<sha>" }
-fts-vt-snapshots = { git = "ssh://git@github.com/FastTrackStudios/fts-visual-testing", rev = "<sha>" }
+fts-story-runtime   = { git = "ssh://git@github.com/FastTrackStudios/fts-story", rev = "<sha>" }
+fts-story-shell     = { git = "ssh://git@github.com/FastTrackStudios/fts-story", rev = "<sha>" }
+fts-story-snapshots = { git = "ssh://git@github.com/FastTrackStudios/fts-story", rev = "<sha>" }
 ```
 
 In a UI crate that declares stories — keep it light, only the runtime:
@@ -84,10 +84,10 @@ In a UI crate that declares stories — keep it light, only the runtime:
 ```toml
 # crates/fts-ui/Cargo.toml  (or  crates/frame-ui/Cargo.toml)
 [dependencies]
-fts-vt-runtime = { workspace = true, optional = true }
+fts-story-runtime = { workspace = true, optional = true }
 
 [features]
-stories = ["dep:fts-vt-runtime"]
+stories = ["dep:fts-story-runtime"]
 ```
 
 In the **app** that hosts the interactive Lookbook:
@@ -95,7 +95,7 @@ In the **app** that hosts the interactive Lookbook:
 ```toml
 # apps/showcase/Cargo.toml
 [dependencies]
-fts-vt-shell = { workspace = true }
+fts-story-shell = { workspace = true }
 fts-ui       = { workspace = true, features = ["stories"] }   # or frame-ui
 ```
 
@@ -103,12 +103,12 @@ In a **`tests/` crate** that runs snapshot regressions:
 
 ```toml
 [dev-dependencies]
-fts-vt-snapshots = { workspace = true }
+fts-story-snapshots = { workspace = true }
 fts-ui           = { workspace = true, features = ["stories"] }
 ```
 
-Why split it this way: `fts-vt-runtime` is small (depends only on
-`dioxus`, `linkme`, `fts-vt-core`); a UI library can opt into story
+Why split it this way: `fts-story-runtime` is small (depends only on
+`dioxus`, `linkme`, `fts-story-core`); a UI library can opt into story
 declarations via a feature flag without forcing every downstream
 consumer to compile Blitz, dssim, or proptest. Apps that actually run
 the shell or snapshot tests pay for the heavier deps separately.
@@ -135,7 +135,7 @@ cargo check --workspace
 Snapshot tests only:
 
 ```sh
-cargo test --release -p fts-vt-snapshots
+cargo test --release -p fts-story-snapshots
 ```
 
 (release build is enforced — `compile_error!` triggers under
