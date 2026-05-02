@@ -1,0 +1,7 @@
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# VRT artefacts
+/diff_output/
+/fuzz-failures/
