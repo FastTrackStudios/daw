@@ -188,10 +188,27 @@ headless capture path, set this first.
 
 `dioxus-primitives::dropdown_menu`, `select`, `popover`, etc. all
 close themselves by watching `focus.any_focused()` flipping false
-— there is **no** "click outside" handler. If Blitz's
-`dioxus-native-dom` doesn't fire blur on the trigger when an
-unfocusable element is clicked, none of those primitives close.
-Reproduce with `Diagnostics / dropdown-close`.
+— there is **no** "click outside" handler. The trigger needs a
+real blur event (which Blitz emits via `generate_focus_events`
+when a click hits an unfocusable sibling), AND the
+`mounted.set_focus(true).await` the trigger calls in its `onclick`
+must not panic. The latter was the actual bug behind "dropdowns
+aren't closing on native": Dioxus polls the spawned focus future
+synchronously inside the same call stack as Blitz's event-dispatch
+`borrow_mut`, so any in-future `doc.borrow_mut()` panics with
+`RefCell already borrowed`. Symptom looked like "doesn't close"
+because the renderer was dead after the first click. Fix:
+`NodeHandle::set_focus` queues into
+`Rc<RefCell<Vec<(NodeId, bool)>>>` that `DioxusDocument` drains
+after every UI event and after every `poll`, so the focus
+mutation lands on a clean borrow. See
+`fix/dom-handle-focus-defer-queue` and the
+`Diagnostics / dropdown-close` story.
+
+When you encounter a `RefCell already borrowed` panic in any
+`NodeHandle::*` future, the same queue-defer pattern almost
+certainly applies — never call `self.doc_mut()` synchronously
+from a future returned from a `RenderedElementBacking` method.
 
 ## 7. Tracing what Blitz is actually doing
 
