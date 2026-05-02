@@ -34,27 +34,45 @@ Phased plan from scaffold (today) to production-grade VRT + fuzzing.
 - Manual `#[states(...)]` attribute for explicit matrices on enums and
   String-valued cases.
 
-## Phase 3 — `fts-story-snapshots` MVP (3 days)
+## Phase 3 — `fts-story-snapshots` MVP (DONE)
 
-Decision: **license-resolve `blitz-vrt`** (file an issue, ask Tony for
-MIT/Apache-2.0 dual) **and vendor** the parts we need, with attribution
-in `NOTICE`. If unresolved within a week, write our own.
+Implemented from scratch (not vendored from blitz-vrt — the design is
+similar but the code is ours, so no LICENSE issue to resolve).
 
-Pieces:
+Shipped:
 
-- `render::render_story(story, &dyn KnobSource, viewport) -> Vec<u8>`
-  - build `DioxusDocument` (via patched `FastTrackStudios/blitz`)
-  - settling loop: resolve → drain net queue → resolve, capped at 100 iters
-  - paint via `anyrender_vello_cpu`
-  - PNG-encode
-- `diff::compare(baseline, candidate, threshold)` with DSSIM
-- `harness::generate_tests!()` macro that emits one `#[test]` per
-  story × auto-state combo
-- `Dockerfile` based on ubuntu:24.04 + pinned fontconfig/freetype so font
-  rendering is byte-stable across CI machines
-- GitHub Actions workflow that builds the Docker image, runs `cargo test
-  --release`, uploads `vrt-diffs/` as an artifact on failure, and
-  refreshes `vrt-baselines/` via `workflow_dispatch` input
+- `render::render_story(story, knobs, &RenderConfig) -> Vec<u8>` —
+  builds a `DioxusDocument` via the patched `FastTrackStudios/blitz`
+  fork, runs a settling loop (`poll → resolve`, capped at
+  `RenderConfig::max_settle_iters`, default 64), paints through
+  `anyrender_vello_cpu::VelloCpuImageRenderer`, encodes the RGBA buffer
+  via the `png` crate.
+- Thread-local snapshot dispatch lets us hand a zero-arg `Component` to
+  `VirtualDom` while still recovering the per-call render thunk +
+  knob-value map.
+- Runtime debug-build guard: panics with a useful message if invoked
+  under `debug_assertions` (Stylo/Parley produce *incorrect* renders
+  in debug, not just slow ones). Replaces the earlier
+  `compile_error!` that blocked even `cargo check` on the dev profile.
+- `diff::compare(baseline, candidate, threshold)` — DSSIM perceptual
+  diff via `dssim-core`. PNG decode normalises to RGBA8. Default
+  threshold `0.001` per the blitz-vrt tuning.
+- `harness::assert_snapshot(story, &SnapshotConfig)` — used inside
+  `#[test]` fns. Auto-creates baselines on first run; writes candidate
+  PNGs to `diff_output/` on mismatch and panics with both paths.
+  `FTS_STORY_UPDATE_SNAPSHOTS=1` forces a refresh.
+- `docker/Dockerfile` (ubuntu:24.04 + pinned Liberation/Noto fonts +
+  Rust toolchain) for byte-stable cross-machine rendering.
+- `.github/workflows/snapshots.yml` builds the image, runs the workspace
+  tests, uploads diffs/baselines as artefacts on failure or refresh.
+
+Smoke test: `crates/fts-ui/tests/snapshots.rs` in the consuming
+`fts-ui` repo asserts 4 stories. Run with `cargo test --release -p
+fts-ui --features stories`. First invocation populates
+`crates/fts-ui/snapshots/`.
+
+Out of scope here (lands in Phase 4): post-interaction snapshots
+(open the dropdown, then snapshot). Initial-render only for now.
 
 ## Phase 4 — interaction scripts (2 days)
 
