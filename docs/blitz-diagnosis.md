@@ -184,6 +184,34 @@ disagrees by ~1 px per row and the dssim score never falls below
 ~0.08. `fts-story-parity` pins it; if you ever set up a new
 headless capture path, set this first.
 
+### Tailwind v4 hover variants and Stylo's media features
+
+Stylo's Servo backend (`stylo/style/servo/media_features.rs`) only
+registered six media features upstream: `width`, `scan`,
+`resolution`, `device-pixel-ratio`, `-moz-device-pixel-ratio`,
+`prefers-color-scheme`. Tailwind v4 wraps every `hover:*` utility in
+`@media (hover: hover) { &:hover { … } }` to suppress hover styles
+on touch devices — but with no `hover` feature registered, the
+matcher treated the query as unsupported and silently dropped the
+contained rule. Symptom on the native renderer: every Tailwind
+`hover:bg-X` was invisible (buttons, dropdown items, links never
+highlighted), even though plain `:hover` worked fine on hand-rolled
+CSS.
+
+Fork: [`FastTrackStudios/stylo`](https://github.com/FastTrackStudios/stylo),
+branch `fts/integration` adds `hover` / `any-hover` / `pointer` /
+`any-pointer` to the Servo `MEDIA_FEATURES` array (and registers the
+four atom names in `stylo_atoms/static_atoms.txt` so `atom!()` can
+resolve them at compile time). Hard-codes "fine pointer that can
+hover" because no Servo embedder targets touch yet.
+
+When extending: keep `[patch.crates-io]` entries for `stylo`,
+`stylo_traits`, `stylo_atoms`, `stylo_static_prefs`, `stylo_dom`,
+`selectors`, `servo_arc`, `to_shmem` — they all live in the same
+workspace and a partial patch produces "multiple versions of crate
+X in dependency graph" errors that show up as 75+ trait-bound
+failures in `blitz-dom`.
+
 ### Focus-driven UI primitives need real blur events
 
 `dioxus-primitives::dropdown_menu`, `select`, `popover`, etc. all
