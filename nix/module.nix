@@ -103,6 +103,68 @@ in
       description = "Seed demo users, organizations, projects, and tasks on startup. Disable for production instances.";
     };
 
+    bootstrapAuth = {
+      enable = mkEnableOption "bootstrap a production auth user, organization, membership, and session token";
+
+      sessionTokenFile = mkOption {
+        type = types.nullOr types.path;
+        default = null;
+        description = ''
+          Path to a file containing the production Task session token.
+          Use a secret manager such as sops-nix; the token is inserted into
+          auth_sessions at service startup and is never placed in the Nix store.
+        '';
+      };
+
+      userId = mkOption {
+        type = types.str;
+        default = "user_cody";
+        description = "Stable auth user id to create for the bootstrap session.";
+      };
+
+      email = mkOption {
+        type = types.str;
+        default = "cody@fasttrackstudio.com";
+        description = "Bootstrap user email.";
+      };
+
+      name = mkOption {
+        type = types.str;
+        default = "Cody Wright";
+        description = "Bootstrap user display name.";
+      };
+
+      username = mkOption {
+        type = types.str;
+        default = "cody";
+        description = "Bootstrap username.";
+      };
+
+      organizationId = mkOption {
+        type = types.str;
+        default = "org_fts";
+        description = "Stable auth organization id to create.";
+      };
+
+      organizationName = mkOption {
+        type = types.str;
+        default = "Fast Track Studio";
+        description = "Bootstrap organization name.";
+      };
+
+      organizationSlug = mkOption {
+        type = types.str;
+        default = "fast-track-studio";
+        description = "Bootstrap organization slug.";
+      };
+
+      sessionId = mkOption {
+        type = types.str;
+        default = "session_cody_bootstrap";
+        description = "Stable auth session id for the bootstrap token.";
+      };
+    };
+
     # ── Nextcloud integration ─────────────────────────────────────────
 
     nextcloud = {
@@ -315,9 +377,47 @@ in
         CALDAV_CACHE_DIR = cfg.caldav.cacheDir;
       };
 
+      script = let
+        ncPw = lib.optionalString (cfg.nextcloud.enable && cfg.nextcloud.passwordFile != null) ''
+          if [ -r "$CREDENTIALS_DIRECTORY/nextcloud-password" ]; then
+            export NEXTCLOUD_PASSWORD="$(< "$CREDENTIALS_DIRECTORY/nextcloud-password")"
+          fi
+        '';
+        cdPw = lib.optionalString (cfg.caldav.enable && cfg.caldav.passwordFile != null) ''
+          if [ -r "$CREDENTIALS_DIRECTORY/caldav-password" ]; then
+            export CALDAV_PASSWORD="$(< "$CREDENTIALS_DIRECTORY/caldav-password")"
+          fi
+        '';
+        authBootstrap = lib.optionalString cfg.bootstrapAuth.enable ''
+          if [ -r "$CREDENTIALS_DIRECTORY/session-token" ] && [ -e "$TASK_DB_PATH" ]; then
+            token="$(< "$CREDENTIALS_DIRECTORY/session-token")"
+            now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            expires="$(date -u -d '+365 days' +%Y-%m-%dT%H:%M:%SZ)"
+            ${pkgs.sqlite}/bin/sqlite3 "$TASK_DB_PATH" <<SQL
+INSERT INTO auth_users (id, email, name, email_verified, created_at, updated_at, metadata, username, display_username, two_factor_enabled, banned)
+VALUES ('${cfg.bootstrapAuth.userId}', '${cfg.bootstrapAuth.email}', '${cfg.bootstrapAuth.name}', 1, '$now', '$now', '{}', '${cfg.bootstrapAuth.username}', '${cfg.bootstrapAuth.username}', 0, 0)
+ON CONFLICT(id) DO UPDATE SET email=excluded.email, name=excluded.name, updated_at=excluded.updated_at, username=excluded.username, display_username=excluded.display_username;
+INSERT INTO auth_organizations (id, name, slug, metadata, created_at, updated_at)
+VALUES ('${cfg.bootstrapAuth.organizationId}', '${cfg.bootstrapAuth.organizationName}', '${cfg.bootstrapAuth.organizationSlug}', '{}', '$now', '$now')
+ON CONFLICT(id) DO UPDATE SET name=excluded.name, slug=excluded.slug, updated_at=excluded.updated_at;
+INSERT INTO auth_members (id, organization_id, user_id, role, created_at)
+VALUES ('member_${cfg.bootstrapAuth.userId}_${cfg.bootstrapAuth.organizationId}', '${cfg.bootstrapAuth.organizationId}', '${cfg.bootstrapAuth.userId}', 'owner', '$now')
+ON CONFLICT(id) DO UPDATE SET role=excluded.role;
+INSERT INTO auth_sessions (id, expires_at, token, created_at, updated_at, user_id, active_organization_id, active)
+VALUES ('${cfg.bootstrapAuth.sessionId}', '$expires', '$token', '$now', '$now', '${cfg.bootstrapAuth.userId}', '${cfg.bootstrapAuth.organizationId}', 1)
+ON CONFLICT(id) DO UPDATE SET expires_at=excluded.expires_at, token=excluded.token, updated_at=excluded.updated_at, user_id=excluded.user_id, active_organization_id=excluded.active_organization_id, active=1;
+SQL
+          fi
+        '';
+      in ''
+        ${ncPw}
+        ${cdPw}
+        ${authBootstrap}
+        exec ${cfg.package}/bin/task-server
+      '';
+
       serviceConfig = {
         Type = "simple";
-        ExecStart = "${cfg.package}/bin/task-server";
         User = cfg.user;
         Group = cfg.group;
         Restart = "on-failure";
@@ -340,18 +440,10 @@ in
         LoadCredential = lib.optional (cfg.nextcloud.enable && cfg.nextcloud.passwordFile != null)
           "nextcloud-password:${cfg.nextcloud.passwordFile}"
         ++ lib.optional (cfg.caldav.enable && cfg.caldav.passwordFile != null)
-          "caldav-password:${cfg.caldav.passwordFile}";
+          "caldav-password:${cfg.caldav.passwordFile}"
+        ++ lib.optional (cfg.bootstrapAuth.enable && cfg.bootstrapAuth.sessionTokenFile != null)
+          "session-token:${cfg.bootstrapAuth.sessionTokenFile}";
       };
-
-      # Read password from credential files into env vars
-      preStart = let
-        ncPw = lib.optionalString (cfg.nextcloud.enable && cfg.nextcloud.passwordFile != null) ''
-          export NEXTCLOUD_PASSWORD="$(cat $CREDENTIALS_DIRECTORY/nextcloud-password)"
-        '';
-        cdPw = lib.optionalString (cfg.caldav.enable && cfg.caldav.passwordFile != null) ''
-          export CALDAV_PASSWORD="$(cat $CREDENTIALS_DIRECTORY/caldav-password)"
-        '';
-      in ncPw + cdPw;
     };
 
     # Create cache directory
