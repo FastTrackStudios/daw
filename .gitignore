@@ -13,3 +13,6 @@
 .vscode/
 tests/output/
 .cache
+examples/datasets/data/
+docs/node_modules/
+docs/output/
