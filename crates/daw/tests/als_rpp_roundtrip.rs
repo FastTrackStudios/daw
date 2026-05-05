@@ -57,10 +57,10 @@ fn ableton_to_rpp(set: &AbletonLiveSet) -> dawfile_reaper::types::ReaperProject 
 
                 t = t.item(position, length, |item: ItemBuilder| {
                     let mut item = item.name(&clip.common.name);
-                    if let Some(ref sr) = clip.sample_ref {
-                        if let Some(ref path) = sr.path {
-                            item = item.source_wave(path.to_string_lossy().to_string());
-                        }
+                    if let Some(ref sr) = clip.sample_ref
+                        && let Some(ref path) = sr.path
+                    {
+                        item = item.source_wave(path.to_string_lossy().to_string());
                     }
                     if clip.pitch_coarse != 0.0 {
                         item = item.pitch(clip.pitch_coarse);

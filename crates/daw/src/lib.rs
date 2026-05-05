@@ -49,20 +49,20 @@ pub fn init(raw_host_context: Option<*const std::ffi::c_void>) -> bool {
     }
 
     #[cfg(feature = "reaper")]
-    if let Some(host_ptr) = raw_host_context {
-        if let Some((daw, runtime)) = reaper::bootstrap::create_plugin_daw(host_ptr) {
-            // Register internal timer that fires user callbacks
-            reaper::bootstrap::register_internal_timer(|| {
-                _fire_timer_callbacks();
-            });
+    if let Some(host_ptr) = raw_host_context
+        && let Some((daw, runtime)) = reaper::bootstrap::create_plugin_daw(host_ptr)
+    {
+        // Register internal timer that fires user callbacks
+        reaper::bootstrap::register_internal_timer(|| {
+            _fire_timer_callbacks();
+        });
 
-            let _ = DAW_INSTANCE.set(DawInstance {
-                daw,
-                runtime,
-                _timer_callbacks: std::sync::Mutex::new(Vec::new()),
-            });
-            return true;
-        }
+        let _ = DAW_INSTANCE.set(DawInstance {
+            daw,
+            runtime,
+            _timer_callbacks: std::sync::Mutex::new(Vec::new()),
+        });
+        return true;
     }
 
     let _ = raw_host_context;
@@ -87,21 +87,21 @@ pub fn block_on<F: std::future::Future>(f: F) -> Option<F::Output> {
 
 /// Register a callback that fires at ~30Hz on the DAW's main thread.
 pub fn register_timer(callback: fn()) {
-    if let Some(instance) = DAW_INSTANCE.get() {
-        if let Ok(mut cbs) = instance._timer_callbacks.lock() {
-            cbs.push(callback);
-        }
+    if let Some(instance) = DAW_INSTANCE.get()
+        && let Ok(mut cbs) = instance._timer_callbacks.lock()
+    {
+        cbs.push(callback);
     }
 }
 
 /// Called internally by the timer system to fire user callbacks.
 #[doc(hidden)]
 pub fn _fire_timer_callbacks() {
-    if let Some(instance) = DAW_INSTANCE.get() {
-        if let Ok(cbs) = instance._timer_callbacks.lock() {
-            for cb in cbs.iter() {
-                cb();
-            }
+    if let Some(instance) = DAW_INSTANCE.get()
+        && let Ok(cbs) = instance._timer_callbacks.lock()
+    {
+        for cb in cbs.iter() {
+            cb();
         }
     }
 }
