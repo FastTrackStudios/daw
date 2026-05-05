@@ -4,6 +4,8 @@
 //! then converts the RPP back to an Ableton Live set and verifies that
 //! the key properties are equivalent.
 
+#![cfg(feature = "file")]
+
 use dawfile_ableton::*;
 use dawfile_reaper::RppSerialize;
 use dawfile_reaper::builder::*;
