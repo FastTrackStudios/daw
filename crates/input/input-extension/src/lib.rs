@@ -1,53 +1,90 @@
-//! Input extension — SHM guest for keyboard interception and keybinding dispatch.
+//! Input integrated REAPER extension.
 //!
-//! Connects to the DAW host via daw-bridge SHM, subscribes to input events,
+//! Loaded directly by REAPER from `UserPlugins/`. Subscribes to input events
 //! and processes them through the `input` crate's trie-based key dispatch.
 //! Resolved actions are executed back on the host via `execute_action`.
-//!
-//! This extension is DAW-agnostic — all platform-specific key conversion
-//! happens in the host (daw-bridge). The wire format uses `KeyCode`.
-//!
-//! Placed in `UserPlugins/fts-extensions/` and hot-reloaded by daw-bridge.
 
-use daw_extension_runtime::GuestOptions;
+use std::cell::OnceCell;
+use std::error::Error;
+
+use daw::Daw;
+use daw_extension_runtime::ExtensionRuntime;
 use eyre::Result;
+use fragile::Fragile;
 use input::{ActionContext, InputCommand, InputProcessor, KeymapConfig};
+use reaper_low::PluginContext;
+use reaper_macros::reaper_extension_plugin;
 use tracing::{debug, info, warn};
 
-fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
-        )
-        .init();
-
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-
-    rt.block_on(run())
+thread_local! {
+    static APP: OnceCell<Fragile<InputExtension>> = const { OnceCell::new() };
 }
 
-async fn run() -> Result<()> {
+struct InputExtension {
+    runtime: ExtensionRuntime,
+}
+
+impl InputExtension {
+    fn new(context: PluginContext) -> Result<Self> {
+        let runtime = ExtensionRuntime::new(context)?;
+        let daw = runtime.build_daw()?;
+
+        runtime.spawn(async move {
+            if let Err(e) = run(daw).await {
+                warn!("[input] event loop ended: {e}");
+            }
+        });
+
+        Ok(Self { runtime })
+    }
+
+    fn timer(&self) {
+        self.runtime.process_tasks();
+    }
+}
+
+extern "C" fn timer_callback() {
+    APP.with(|cell| {
+        if let Some(app) = cell.get() {
+            app.get().timer();
+        }
+    });
+}
+
+#[reaper_extension_plugin]
+fn plugin_main(context: PluginContext) -> std::result::Result<(), Box<dyn Error>> {
+    init_tracing();
+    info!("input-extension starting");
+
+    let app = InputExtension::new(context).map_err(|e| -> Box<dyn Error> { e.into() })?;
+    app.runtime.add_timer(timer_callback).map_err(|e| -> Box<dyn Error> { e.into() })?;
+
+    let stored = APP.with(|cell| cell.set(Fragile::new(app)).is_ok());
+    if !stored {
+        return Err("input-extension already initialized".into());
+    }
+
+    info!("input-extension loaded");
+    Ok(())
+}
+
+fn init_tracing() {
+    let Ok(log_file) = std::fs::File::create("/tmp/input-extension.log") else {
+        return;
+    };
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(std::sync::Mutex::new(log_file))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::INFO.into()),
+        )
+        .finish();
+    let _ = tracing::subscriber::set_global_default(subscriber);
+}
+
+async fn run(daw: Daw) -> Result<()> {
     let pid = std::process::id();
-    info!("[input:{pid}] Input extension starting");
-
-    let daw = daw_extension_runtime::connect(GuestOptions {
-        role: "input",
-        ..Default::default()
-    })
-    .await?;
-
-    info!("[input:{pid}] Connected to DAW host via SHM");
-
-    // Health beacon — tests and the host can verify the extension is alive
-    daw.ext_state()
-        .set("FTS_INPUT_EXT", "status", "ready", false)
-        .await?;
-    daw.ext_state()
-        .set("FTS_INPUT_EXT", "pid", &pid.to_string(), false)
-        .await?;
-    info!("[input:{pid}] Health beacon written");
+    info!("[input:{pid}] runtime started");
 
     // Load keybinding config
     let processor = load_processor();
@@ -75,7 +112,7 @@ async fn run() -> Result<()> {
     let ctx = ActionContext::new();
 
     while let Ok(Some(event)) = rx.recv().await {
-        match &*event {
+        match event.get() {
             daw::service::InputEvent::Key(key_event) => {
                 // Only process KeyDown events (skip KeyUp, Char, etc.)
                 if !matches!(
@@ -87,7 +124,7 @@ async fn run() -> Result<()> {
 
                 // Convert daw_proto::KeyEvent → input::KeyEvent
                 // Both use the same agnostic key representation, so this is trivial.
-                let input_key_event = to_input_key_event(key_event);
+                let input_key_event = to_input_key_event(&key_event);
 
                 let commands = processor.process(input::InputEvent::Key(input_key_event), &ctx);
 

@@ -2,17 +2,20 @@
 name = "input-extension"
 version.workspace = true
 edition.workspace = true
-description = "Input domain SHM extension — connects to REAPER via daw-bridge for keyboard interception"
+description = "Input integrated REAPER extension — keyboard interception and keybinding dispatch"
 
-[[bin]]
-name = "input"
-path = "src/main.rs"
+[lib]
+crate-type = ["cdylib"]
+name = "fts_input_extension"
+path = "src/lib.rs"
 
 [dependencies]
 daw.workspace = true
 daw-extension-runtime.workspace = true
 input.workspace = true
-tokio = { workspace = true, features = ["time", "net", "rt"] }
 eyre.workspace = true
+fragile.workspace = true
+reaper-low.workspace = true
+reaper-macros.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
