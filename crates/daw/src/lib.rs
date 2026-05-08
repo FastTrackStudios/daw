@@ -159,6 +159,26 @@ pub mod file {
     pub use dawfile_reaper::*;
 }
 
+// ── Extension runtime: in-process REAPER extension hosting ──────────────────
+//
+// Enabled via `features = ["extension-runtime"]`. Replaces the old
+// `daw-extension-runtime` sibling crate — extensions should depend only on
+// `daw[features = ["extension-runtime"]]` going forward.
+#[cfg(feature = "extension-runtime")]
+/// In-process REAPER extension runtime helpers.
+///
+/// `ExtensionRuntime::new(plugin_context)` builds a tokio runtime, registers
+/// the main-thread task middleware, and lets the extension construct a
+/// `Daw` handle without going through `daw-bridge`, sockets, or shared
+/// memory. See `apps/example-extension` for a complete reference.
+pub mod extension_runtime {
+    pub use daw_extension_runtime::*;
+}
+
+// ── Streaming ergonomics ────────────────────────────────────────────────────
+pub use stream::RxExt;
+mod stream;
+
 // ── Module system: standard interface for extension modules ─────────────────
 pub use daw_module as module;
 pub use daw_module::{

@@ -19,12 +19,17 @@ daw-reaper-dioxus = { path = "../daw-reaper-dioxus", optional = true }
 tokio.workspace = true
 tracing.workspace = true
 
+# Streaming primitives — Rx<T> ergonomic wrapper lives at daw::RxExt
+vox.workspace = true
+facet.workspace = true
+
 # Feature-gated internal crates
 daw-control-sync = { path = "../daw-control-sync", optional = true }
 daw-reaper = { path = "../daw-reaper", optional = true }
 daw-standalone = { path = "../daw-standalone", optional = true }
 dawfile-reaper = { path = "../dawfile-reaper", optional = true }
 dawfile-ableton = { path = "../dawfile-ableton", optional = true }
+daw-extension-runtime = { path = "../daw-extension-runtime", optional = true }
 
 [features]
 sync = ["dep:daw-control-sync"]
@@ -34,3 +39,7 @@ standalone-audio = ["standalone", "daw-standalone/audio"]
 standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
 file = ["dep:dawfile-reaper", "dep:dawfile-ableton"]
 reaper-ui = ["dep:daw-reaper-dioxus"]
+# In-process REAPER extension runtime helpers (`ExtensionRuntime`,
+# `register_actions`). Pulls in `reaper-low/medium/high` so it's only
+# meaningful on platforms where REAPER runs.
+extension-runtime = ["dep:daw-extension-runtime", "reaper", "sync"]
