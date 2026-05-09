@@ -69,6 +69,24 @@ pub fn init(raw_host_context: Option<*const std::ffi::c_void>) -> bool {
     false
 }
 
+/// Initialize the facade from an already constructed DAW handle.
+///
+/// Extension hosts that build a custom in-process DAW service graph can use this
+/// to make `daw::get()` and `daw::block_on()` available to reusable modules.
+pub fn init_from_parts(daw: Daw, runtime: std::sync::Arc<tokio::runtime::Runtime>) -> bool {
+    if DAW_INSTANCE.get().is_some() {
+        return true;
+    }
+
+    DAW_INSTANCE
+        .set(DawInstance {
+            daw,
+            runtime,
+            _timer_callbacks: std::sync::Mutex::new(Vec::new()),
+        })
+        .is_ok()
+}
+
 /// Get the global `Daw` handle.
 ///
 /// Returns `None` if [`init`] hasn't been called or failed.
