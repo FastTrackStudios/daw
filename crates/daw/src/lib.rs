@@ -3,21 +3,35 @@
 //! This is the single public API surface for the `daw` domain. External consumers
 //! should depend only on this crate — never on internal crates directly.
 //!
-//! # Core (always available, WASM-compatible)
+//! # Namespaces
 //!
-//! - **Root**: High-level control API — `Daw`, `Project`, `Track`, `FxChain`,
-//!   `Transport`, etc.
-//! - **`service`**: Raw protocol types and service clients.
+//! - **`rpc`** → `daw::rpc` — Async Vox control API (`Daw`, `Project`, `Transport`, `TrackHandle`,
+//!   `FxChain`, `BatchBuilder`, etc.). Use from UI, remote clients, background tasks.
+//! - **`service`** → `daw::service` — Raw protocol types and service clients.
+//!
+//! Native sync handles (zero-overhead, REAPER main-thread only) live under
+//! `daw::reaper::sync` (via `ReaperMainThread`); the trait definitions are in
+//! `daw_proto::sync`. See `DAW_API_ARCHITECTURE.md`.
 //!
 //! # Feature-gated modules
 //!
-//! - **`sync`** → `daw::sync` — Blocking wrapper for audio plugins (`DawSync`, `LocalCaller`).
 //! - **`reaper`** → `daw::reaper` — REAPER-specific implementations.
 //! - **`standalone`** → `daw::standalone` — Reference implementation for testing.
 //! - **`file`** → `daw::file` — RPP file format parser.
 
-// ── Core: high-level control API (WASM-compatible) ──────────────────────────
-pub use daw_control::*;
+// ── RPC: async Vox control API ──────────────────────────────────────────────
+//
+// All async client types (`Daw`, `Project`, `Transport`, `TrackHandle`, etc.)
+// live under `daw::rpc`. Use from UI, remote clients, background tasks, tests.
+//
+// In-process REAPER extension code that runs on the main thread should prefer
+// the native sync handles in `daw::reaper::sync` for hot paths.
+pub mod rpc {
+    pub use daw_control::*;
+}
+
+// Internal alias for the bootstrap singleton.
+use rpc::Daw;
 
 // ── Plugin API: DAW-agnostic initialization ─────────────────────────────────
 
@@ -73,7 +87,7 @@ pub fn init(raw_host_context: Option<*const std::ffi::c_void>) -> bool {
 ///
 /// Extension hosts that build a custom in-process DAW service graph can use this
 /// to make `daw::get()` and `daw::block_on()` available to reusable modules.
-pub fn init_from_parts(daw: Daw, runtime: std::sync::Arc<tokio::runtime::Runtime>) -> bool {
+pub fn init_from_parts(daw: rpc::Daw, runtime: std::sync::Arc<tokio::runtime::Runtime>) -> bool {
     if DAW_INSTANCE.get().is_some() {
         return true;
     }
@@ -91,7 +105,7 @@ pub fn init_from_parts(daw: Daw, runtime: std::sync::Arc<tokio::runtime::Runtime
 ///
 /// Returns `None` if [`init`] hasn't been called or failed.
 /// Works the same whether in a CLAP plugin, extension, or standalone.
-pub fn get() -> Option<&'static Daw> {
+pub fn get() -> Option<&'static rpc::Daw> {
     DAW_INSTANCE.get().map(|i| &i.daw)
 }
 
@@ -147,13 +161,6 @@ pub fn main_thread_daw() -> Option<reaper::DawMainThread> {
 /// Raw protocol types and service clients.
 pub mod service {
     pub use daw_proto::*;
-}
-
-// ── Sync: blocking wrapper for audio plugins ────────────────────────────────
-#[cfg(feature = "sync")]
-/// Synchronous (blocking) DAW control API for real-time audio contexts.
-pub mod sync {
-    pub use daw_control_sync::*;
 }
 
 // ── Reaper: REAPER-specific implementations ─────────────────────────────────

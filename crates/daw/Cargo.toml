@@ -24,7 +24,6 @@ vox.workspace = true
 facet.workspace = true
 
 # Feature-gated internal crates
-daw-control-sync = { path = "../daw-control-sync", optional = true }
 daw-reaper = { path = "../daw-reaper", optional = true }
 daw-standalone = { path = "../daw-standalone", optional = true }
 dawfile-reaper = { path = "../dawfile-reaper", optional = true }
@@ -44,7 +43,6 @@ dawfile-ableton = { path = "../dawfile-ableton", optional = true }
 # "apps depend only on `daw`" rule.
 
 [features]
-sync = ["dep:daw-control-sync"]
 reaper = ["dep:daw-reaper"]
 standalone = ["dep:daw-standalone"]
 standalone-audio = ["standalone", "daw-standalone/audio"]
