@@ -2,25 +2,27 @@
 
 > **For Hermes:** Use `subagent-driven-development` to implement this plan task-by-task.
 
-**Goal:** Add a self-contained integration layer that lets the task system delegate work to [Hermes Agent](https://github.com/NousResearch/hermes-agent) profiles via Hermes's multi-agent Kanban (introduced in v0.12.0, hardened in v0.13.0). A user can mark a task as agent-eligible, the integration mirrors it to `~/.hermes/kanban.db` as a Kanban card, a Hermes profile claims it and works in an isolated worktree, and the integration syncs status + comments back into the task system.
+**Goal:** Add a self-contained integration layer that lets the task system delegate selected Task-owned work items to [Hermes Agent](https://github.com/NousResearch/hermes-agent) profiles via Hermes's multi-agent Kanban. A user can choose which Task tasks are agent-delegated; Task mirrors those tasks into Hermes Kanban boards as execution cards; Hermes profiles work them; Task continuously reconciles Hermes execution signals back into Task-owned task state, history, comments, and run records.
 
 **Architecture:**
-Side-car module behind `feature = "hermes"`. The core `Task` entity is unchanged — delegation metadata lives in the existing polymorphic `properties: JsonObject` column under a `hermes` key. The integration owns its own service trait, its own SQLite adapter for `kanban.db`, its own background sync worker, and its own CLI subcommand group. Source of truth stays in the task system for *what to do* (title, description, deps); Hermes is authoritative for *progress* (status transitions, comments, time).
+Task is the system of record. It owns projects, tasks, dependencies, statuses, notes, execution history, and all canonical IDs in its own store. Hermes Kanban is **not** Task's backend; it is an integration surface / execution mirror. The Hermes integration is a side-car module behind `feature = "hermes"` with its own service trait, sync adapter, background worker, and CLI subcommand group. Delegation metadata lives in `task.properties.hermes` as foreign-system linkage (`board_slug`, `kanban_task_id`, sync cursors, profile, last observed run IDs). Hermes events are imported as external execution observations; Task applies them according to Task's own reconciliation policy.
 
 **Tech Stack:**
-Rust, Facet, Vox, SeaORM (separate connection to Hermes's `kanban.db`), `notify` for inotify-based WAL watching, `task-cli` / `task-server`. No Python — we read/write `kanban.db` directly rather than calling a Hermes HTTP API.
+Rust, Facet, Vox, SeaORM/SQLite for Task's own store, and a Hermes adapter that can start with Hermes CLI/WebUI-compatible API calls or a narrow schema-pinned SQLite reader/writer where necessary. Prefer public/stable Hermes surfaces (`hermes kanban ...`, WebUI API, or a future Hermes library API) over treating `kanban.db` as a permanent backend contract. `task-cli` / `task-server` expose the Task-side control plane.
 
 ---
 
 ## Design Rules
 
-1. **Side-car, not core.** Hermes integration lives in its own crate (`crates/task-hermes/`) gated by a feature flag. Core compiles and runs without Hermes installed.
-2. **Properties, not columns.** Delegation state goes into `task.properties.hermes = {profile, kanban_id, last_synced_at, ...}`. No schema migration on the Task entity.
-3. **Schema-pinned to a Hermes version.** The adapter knows which Hermes Kanban schema version it understands. On startup the sync worker probes and refuses to run against an unknown version (logged warning, skipped — not crashed).
-4. **Two columns of truth.** Task→Kanban: title, description, dependencies, priority. Kanban→Task: status, comments, time entries, final output. Conflicts on either column are decided by their owning side.
-5. **Idempotent delegation.** Card IDs derive deterministically from `task.id` — re-running delegate on the same task is a no-op upsert, not a duplicate card.
-6. **Polling first, watching later.** v1 polls `kanban.db` every N seconds. v2 can swap in inotify on the WAL file when motivated.
-7. **No Hermes runtime dependency.** Task system never spawns Hermes processes. The user runs Hermes themselves; we just read/write its DB.
+1. **Task owns everything.** Task's own store is canonical for projects, tasks, dependencies, statuses, notes, execution attempts, and long-term history. Hermes data is external integration state.
+2. **Explicit delegation.** Only tasks the user marks for agent work are mirrored to Hermes Kanban. Ordinary Task tasks never silently appear in Hermes.
+3. **Side-car, not core.** Hermes integration lives in its own crate (`crates/task-hermes/`) gated by a feature flag. Core compiles and runs without Hermes installed.
+4. **Foreign IDs, not primary IDs.** Delegation state goes into `task.properties.hermes = {connection_id, board_slug, kanban_task_id, profile, last_synced_at, cursors, ...}`. Task IDs remain canonical; Hermes IDs are foreign references.
+5. **Task reconciliation policy wins.** Task→Kanban publishes delegated task briefs, dependencies, priority, assignee/profile hints, and desired state. Kanban→Task imports observations: worker status, comments, run summaries, metadata, logs, and failure/block reasons. Task decides how imported observations affect canonical Task status.
+6. **Idempotent delegation.** Re-running delegate on the same Task task updates the existing mirrored Hermes card rather than creating duplicates. Store an explicit mapping and, where Hermes supports it, an idempotency key derived from `task.id`.
+7. **Public API first; schema pinning only as fallback.** Prefer Hermes CLI/WebUI/API-compatible operations. If v1 reads/writes `kanban.db` directly, keep the adapter narrow, probe schema/version, and treat it as a replaceable transport detail.
+8. **Polling first, watching later.** v1 polls at a configurable interval. v2 can add event/WAL watching or WebUI/gateway event streams when motivated.
+9. **No hidden Hermes runtime dependency.** Task should not require Hermes to be running for normal project/task management. Hermes is only needed for delegation sync/agent execution.
 
 ---
 
@@ -34,17 +36,17 @@ Rust, Facet, Vox, SeaORM (separate connection to Hermes's `kanban.db`), `notify`
 - `task task show <ref>` displays the linked Kanban card status inline when the integration is active
 
 ### Sync semantics
-- newly-delegated task → upserted Kanban card with deterministic ID `task-system:<task.id>`
-- task title/description/deps changes → propagated to the Kanban card on next sync tick
-- Kanban card status transitions (`ready → claimed → in_progress → blocked → done`) → mirrored to `task.properties.hermes.kanban_status` and surfaced in `task task show`
-- Kanban card comments → appended as threaded comments on the task (using the existing comment system from the threaded-conversations plan)
-- Kanban card final output → appended as a "result" comment with provenance metadata
-- card archived in Kanban → task closed with a closure reason indicating Hermes provenance
+- newly delegated Task task → mirrored Kanban card with stored foreign mapping and idempotency key derived from `task.id`
+- Task title/description/deps changes → propagated to the Kanban card on next sync tick if the task remains delegated
+- Kanban card status transitions (`ready → running → blocked → done`) → imported into `task.properties.hermes.last_observed_status` and optionally mapped to Task status by explicit reconciliation rules
+- Kanban card comments → imported as Hermes-attributed Task comments or execution observations, with source IDs/cursors so sync is idempotent
+- Kanban card run summaries/metadata/log pointers → imported into Task-owned execution history
+- card archived/deleted in Kanban → recorded as an external event; Task does **not** automatically delete or close canonical tasks unless the configured policy says so
 
 ### Profile + connection management
-- `task hermes register --kanban-db <path>` configures a `HermesConnection` row
-- `task hermes profiles list` reads available profiles from `~/.hermes/profiles/` (or wherever Hermes stores them — schema probe at register time)
-- per-`project_type` default profile mapping (e.g. `cooking` → `recipe-research`, `audio-production` → `mix-review`) so common delegations don't need an explicit `--profile`
+- `task hermes register --kanban-db <path>` or `task hermes register --api <url>` configures a `HermesConnection` row
+- `task hermes profiles list` reads available profiles from Hermes through the selected transport when possible
+- `task hermes boards list` discovers Hermes boards, and `task hermes board link <task-project> <board-slug>` records which Hermes board mirrors delegated work for a Task project
 - multi-tenant: `--tenant <namespace>` for the optional Hermes tenant namespace field
 
 ### Observability
@@ -56,11 +58,37 @@ Rust, Facet, Vox, SeaORM (separate connection to Hermes's `kanban.db`), `notify`
 
 ## Out of Scope (v1)
 
-- Bidirectional comment sync (comment on a task → appear as Kanban comment). v1 only flows kanban→task. v2 adds the reverse.
-- Dependency-graph mirroring (task `blocked_by` → kanban `link`). v1 is one-way for delegation only; v2 mirrors the dep DAG so Hermes can plan around blocking work.
+- Bidirectional comment sync (comment on a task → appear as Kanban comment). v1 can import Hermes observations first; v2 adds Task→Hermes human comments once conflict/attribution rules are clear.
+- Full dependency-graph mirroring. v1 can mirror only direct dependencies for delegated tasks; v2 mirrors enough of the Task DAG for Hermes to respect larger project blocking constraints.
+- Making Hermes the canonical project/task database. Task must remain usable and complete without Hermes.
 - Project-context exposure (Hermes profiles read recipes/routines/glossary as working memory). Compelling but requires a stable "context bundle" format.
 - Multi-Hermes-instance fanout. v1 supports one `HermesConnection` row at a time; multi-host comes later.
 - Real-time WAL watching. v1 is poll-driven (every 5 s by default, configurable).
+
+---
+
+## Hermes WebUI Reference Notes
+
+Hermes's Kanban WebUI/API treats boards as the user-facing integration boundary: board list, active board, columns, cards, assignees, config, events, task logs, task patching, comments, bulk operations, and dispatch nudging are exposed as board-scoped operations in current Hermes docs/skills. Task should mirror that shape rather than treating Hermes as a hidden database:
+
+- Task project/workstream links to a Hermes board slug.
+- Task delegated item links to a Hermes card/task ID plus sync cursors.
+- Task UI can show Hermes-like execution columns as an integration view, but the cards remain Task tasks.
+- Dispatch controls are explicit: selecting “delegate to agent” publishes/updates the Hermes mirror; it does not move all Task work into Hermes.
+- Imported Hermes runs/events/logs become Task execution evidence.
+
+Starcommand inspection note from 2026-05-10: the relevant Hermes install for Task-server integration is the Starcommand `agent` WebUI service, not THEBATTLESHIP's local Hermes dashboard. On Starcommand, `hermes-webui` listens on `127.0.0.1:12490` and exposes live Kanban JSON endpoints with no dashboard token required on loopback:
+
+```text
+GET /api/kanban/boards
+GET /api/kanban/board
+GET /api/kanban/stats
+GET /api/kanban/config
+GET /api/kanban/assignees
+GET /api/kanban/events
+```
+
+Observed board response shape includes `boards[].{slug,name,description,icon,color,db_path,is_current,counts,total}`, with the default board backed by `/home/agent/.hermes/kanban.db`. `GET /api/kanban/board` returns `columns[]` where each column has `name` and `tasks[]`; task objects include `id`, `title`, `body`, `assignee`, `status`, `priority`, `created_by`, timestamps, `workspace_kind`, `workspace_path`, `tenant`, `result`, `idempotency_key`, failure fields, `current_run_id`, `skills`, `link_counts`, and `comment_count`. This API is the best near-term integration reference for Task's Hermes adapter.
 
 ---
 
