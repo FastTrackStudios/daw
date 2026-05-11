@@ -19,6 +19,12 @@ cargo check -p task-server
 cargo test -p task-core
 ```
 
+## Starcommand stable/preview runbook
+
+For the Starcommand deployment architecture and operator runbook covering
+`task.starcommand.live` and `task-preview.starcommand.live`, see
+[`docs/starcommand-webapp-runbook.md`](starcommand-webapp-runbook.md).
+
 ## Runtime Files
 
 Recommended layout:
