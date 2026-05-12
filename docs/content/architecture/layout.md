@@ -56,6 +56,34 @@ tells you (a) this is the `timeline` feature and (b) the package is
 named `timeline-reaper` without opening the file. The slight redundancy
 pays back in PR diffs, `cargo tree` output, and crate-graph thinking.
 
+## Scaffolding a new feature
+
+The mechanical churn of dropping in a new feature is automated:
+
+```sh
+just scaffold-feature mixing
+# or directly:
+cargo run -p architect-cli -- feature new mixing
+```
+
+That command writes the canonical layout into `features/mixing/`:
+
+```
+features/mixing/
+  mixing-proto/        Cargo.toml + src/lib.rs with a placeholder Mixing entity
+  mixing-memory/       in-tree HashMap impl
+  mixing/              facade (vox + server-* + backend-memory features)
+  spec/mixing.md       tracey rule stub
+  tests/native/        sample round-trip test
+```
+
+It also updates the workspace `Cargo.toml` (members, default-members,
+workspace.dependencies) and appends a spec block to
+`.config/tracey/config.styx`. Rename the placeholder `Mixing` entity
+to the real one for that feature, flesh out the memory backend, and
+you're ready to consume it from an app via
+`features = ["full"]` on the facade.
+
 ## Adding a second app
 
 Same shape, different prefix:

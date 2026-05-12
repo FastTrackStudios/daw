@@ -20,4 +20,43 @@ specs (
             }
         )
     }
+
+
+    {
+        name foo
+        include (features/foo/spec/**/*.md)
+        impls (
+            {
+                name rust
+                include (
+                    features/foo/**/*.rs
+                )
+                exclude (
+                    features/foo/**/target/**
+                )
+                test_include (
+                    features/foo/tests/**/*.rs
+                )
+            }
+        )
+    }
+
+    {
+        name bar
+        include (features/bar/spec/**/*.md)
+        impls (
+            {
+                name rust
+                include (
+                    features/bar/**/*.rs
+                )
+                exclude (
+                    features/bar/**/target/**
+                )
+                test_include (
+                    features/bar/tests/**/*.rs
+                )
+            }
+        )
+    }
 )
