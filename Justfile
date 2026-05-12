@@ -9,7 +9,7 @@ default: check
 # Type-check workspace (server, db, proto) + the UI crates.
 check:
     cargo check --workspace
-    cd crates/example-ui && cargo check
+    cd apps/ui && cargo check
     cd apps/web && cargo check --target wasm32-unknown-unknown
     cd apps/desktop && cargo check
 
@@ -59,6 +59,6 @@ desktop:
 # Format all Rust files in the workspace + UI crates.
 fmt:
     cargo fmt --all
-    cd crates/example-ui && cargo fmt
+    cd apps/ui && cargo fmt
     cd apps/web && cargo fmt
     cd apps/desktop && cargo fmt
