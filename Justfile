@@ -1,4 +1,4 @@
-# Architecture-Reference dev recipes
+# architect dev recipes
 #
 # Run from the repo root inside the Dioxus dev shell:
 #   nix develop -c just <recipe>
