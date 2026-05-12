@@ -21,6 +21,33 @@ migrate:
 server:
     cargo run -p example-app-server
 
+# Run the wasm browser integration tests against a server.
+# Start `just server` in another terminal first.
+test-wasm:
+    cd features/example/example-test-wasm && cargo test --target wasm32-unknown-unknown --release
+
+# Run server + wasm tests together with the default (db) backend.
+test-e2e: (_e2e "")
+
+# Same e2e against the in-memory backend. Proves the contract is
+# truly backend-agnostic — the wasm tests don't change.
+test-e2e-memory: (_e2e "--no-default-features --features backend-memory")
+
+# Internal: build + run server with given cargo features, drive wasm tests.
+_e2e features:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build -p example-app-server {{features}}
+    rm -f example.db
+    ./target/debug/example-server &
+    server_pid=$!
+    trap "kill $server_pid 2>/dev/null || true; rm -f example.db" EXIT
+    for i in {1..30}; do
+        if curl -fsS http://127.0.0.1:4040/api/health >/dev/null 2>&1; then break; fi
+        sleep 0.2
+    done
+    cd features/example/example-test-wasm && cargo test --target wasm32-unknown-unknown --release
+
 # `dx serve` the web app — connects to the server on 4040 by default.
 web:
     cd apps/web && dx serve --web --addr 0.0.0.0 --port 8765
