@@ -201,11 +201,34 @@ Concrete consequences:
 
 | Feature | Pulls | What you get |
 |---------|-------|--------------|
+| `vox`           | `vox` (+ moire + facet-cbor + …) | Makes the architect-emitted `<T>Repo` trait a `#[vox::service]` — generates dispatcher + client. Without this, the trait is plain Rust 2024 async-in-trait, RPC types don't exist. |
 | `server-seaorm` | `sea-orm` + `async-trait` | The SeaORM bridge → `<T>RepoStorage<C>` impl. Only enable if you want the architect-emitted SeaORM repo. |
 | `server-axum`   | `axum` + `tokio` + `futures` + `tracing` + `vox-core` + `vox-types` | The `architect::axum_ws` adapter for mounting any dispatcher on an axum WS route. |
+| `full`          | all of the above | tokio-style convenience: turns everything on. |
 
-They're independent. A custom server that brings its own repo enables
-only `server-axum` and never compiles `sea-orm`.
+They're all independent. Three useful combinations:
+
+```toml
+# In-process trait use only — drives the repo from Rust, no RPC, no
+# storage opinion. Pulls only `architect` + `facet`.
+architect = { ..., default-features = false }
+
+# Client crate for a vox-served binary — wasm app, native CLI, etc.
+# No storage bridge, no axum.
+architect = { ..., features = ["vox"] }
+
+# Custom server (your own repo impl) — picks transport but skips the
+# SeaORM emission. No `sea-orm` in the dep tree.
+architect = { ..., features = ["vox", "server-axum"] }
+
+# Everything. Single-binary first-party app, dev experimentation.
+architect = { ..., features = ["full"] }
+```
+
+Feature crates (e.g. `example-proto`, `example`) carry their own
+`full` features that bundle whatever subset is meaningful for that
+layer. `example-proto/full` = `vox + server`. `example/full` =
+`backend-db + backend-memory + example-proto/full`.
 
 ## The working examples
 
