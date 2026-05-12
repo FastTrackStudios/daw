@@ -13,18 +13,18 @@ A `create` call MUST generate a new UUID for the row's primary key and
 return the materialized record with `created_at` and `updated_at`
 populated from the server clock.
 
-r[repo.get.not_found]
+r[repo.get.missing]
 A `get` call against an unknown UUID MUST return `RepoError::NotFound`.
 
-r[repo.delete.not_found]
+r[repo.delete.missing]
 A `delete` call against an unknown UUID MUST return `RepoError::NotFound`.
 
-r[repo.list.sort.name_ascending]
+r[repo.list.sort.name]
 A `list` call with `Sort { field: "name", order: SortOrder::Asc }` MUST
 return rows ordered by `name` ascending. The same call against any
 backend MUST produce the same row order.
 
-r[repo.list.sort.unknown_field]
+r[repo.list.sort.unknown]
 A `list` call with a `Sort { field: <unknown> }` MUST return
 `RepoError::InvalidInput`. This is the architect derive's contract for
 fields not annotated `#[architect(sortable)]`.
