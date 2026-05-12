@@ -1,16 +1,26 @@
 {% extends "base.html" %}
+
+{% block title %}{{ section.title }} — {{ config.title }}{% endblock %}
+
 {% block content %}
 <section class="section">
     <h1>{{ section.title }}</h1>
-    {% if section.description %}<p class="lead">{{ section.description }}</p>{% endif %}
     {{ section.content | safe }}
+
     {% if section.pages %}
+    <h2>Pages</h2>
     <ul class="page-list">
         {% for p in section.pages %}
-        <li>
-            <a href="{{ p.permalink }}">{{ p.title }}</a>
-            {% if p.description %}<span class="desc">— {{ p.description }}</span>{% endif %}
-        </li>
+        <li><a href="{{ p.permalink }}">{{ p.title }}</a></li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    {% if section.subsections %}
+    <h2>Sections</h2>
+    <ul class="page-list">
+        {% for sub in section.subsections %}
+        <li><a href="{{ sub.permalink }}">{{ sub.title }}</a></li>
         {% endfor %}
     </ul>
     {% endif %}
