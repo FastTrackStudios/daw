@@ -2,24 +2,20 @@
 
 specs (
     {
-        name architect
+        name example
         source_url https://git.starcommand.live/codywright/architect
-        include (docs/content/spec/**/*.md)
+        include (features/example/spec/**/*.md)
         impls (
             {
                 name rust
                 include (
-                    apps/**/*.rs
-                    features/**/*.rs
-                    macros/**/*.rs
-                    xtask/**/*.rs
+                    features/example/**/*.rs
                 )
                 exclude (
-                    target/**
+                    features/example/**/target/**
                 )
                 test_include (
-                    features/**/tests/**/*.rs
-                    apps/**/tests/**/*.rs
+                    features/example/tests/**/*.rs
                 )
             }
         )

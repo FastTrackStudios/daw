@@ -29,6 +29,7 @@ features/
     <feature>-proto/           wire contract.
     <feature>-<backend>/       one impl per backend (db, memory, ...).
     <feature>-ui/              feature-scoped Dioxus components.
+    spec/                      tracey-tracked rules for this feature.
     tests/
       native/                  cargo test against in-memory backend.
       web/                     wasm-bindgen browser tests against a server.

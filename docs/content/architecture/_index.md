@@ -19,3 +19,5 @@ distinction visible at a glance.
 - [Monorepo layout](@/architecture/layout.md) — `apps/<app>/<role>` +
   `features/<feature>/<role>` and why the prefixes are duplicated in
   both the directory and the package name.
+- [Spec coverage](@/architecture/specs.md) — per-feature
+  `features/<feature>/spec/*.md` tracked by tracey.
