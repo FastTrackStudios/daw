@@ -9,17 +9,17 @@ default: check
 # Type-check workspace (server, db, proto) + the UI crates.
 check:
     cargo check --workspace
-    cd apps/example/ui && cargo check
-    cd apps/example/web && cargo check --target wasm32-unknown-unknown
-    cd apps/example/desktop && cargo check
+    cd apps/app/ui && cargo check
+    cd apps/app/web && cargo check --target wasm32-unknown-unknown
+    cd apps/app/desktop && cargo check
 
 # Build + run the migration binary.
 migrate:
-    cargo run -p example-app-db -- up
+    cargo run -p app-db -- up
 
 # Run the axum + vox server. Migrations auto-apply on boot.
 server:
-    cargo run -p example-app-server
+    cargo run -p app-server
 
 # Run the wasm browser integration tests against a server.
 # Start `just server` in another terminal first.
@@ -37,9 +37,9 @@ test-e2e-memory: (_e2e "--no-default-features --features backend-memory")
 _e2e features:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo build -p example-app-server {{features}}
+    cargo build -p app-server {{features}}
     rm -f example.db
-    ./target/debug/example-server &
+    ./target/debug/app-server &
     server_pid=$!
     trap "kill $server_pid 2>/dev/null || true; rm -f example.db" EXIT
     for i in {1..30}; do
@@ -50,15 +50,15 @@ _e2e features:
 
 # `dx serve` the web app — connects to the server on 4040 by default.
 web:
-    cd apps/example/web && dx serve --web --addr 0.0.0.0 --port 8765
+    cd apps/app/web && dx serve --web --addr 0.0.0.0 --port 8765
 
 # `dx serve` the desktop app.
 desktop:
-    cd apps/example/desktop && dx serve --desktop
+    cd apps/app/desktop && dx serve --desktop
 
 # Format all Rust files in the workspace + UI crates.
 fmt:
     cargo fmt --all
-    cd apps/example/ui && cargo fmt
-    cd apps/example/web && cargo fmt
-    cd apps/example/desktop && cargo fmt
+    cd apps/app/ui && cargo fmt
+    cd apps/app/web && cargo fmt
+    cd apps/app/desktop && cargo fmt
