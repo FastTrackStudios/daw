@@ -158,10 +158,67 @@ depend only on `<feature>-proto`. The example app's facade is fine
 for first-party builds; consumers who pull in external impls just
 won't use it.
 
-## The working example
+## Dependency injection: repo *and* service
 
-`examples/external-stub/` in this repo is a runnable demonstration
-of the third-party shape:
+Both halves of the architect surface are traits. They swap
+independently:
+
+```text
+┌──────────────────────────────────────────────────────────────────────┐
+│  <feature>-proto declares two traits + the wire types               │
+│                                                                      │
+│    pub trait <T>Repo     { async fn get/list/create/update/delete } │
+│    pub trait <T>Service  { async fn search/duplicate/...           }│
+└──────────────────────────────────────────────────────────────────────┘
+                              │
+        ┌─────────────────────┼─────────────────────┐
+        ▼                     ▼                     ▼
+   pick a repo:          pick a service:        binary assembles:
+   - SeaORM (architect    - architect doesn't    let repo  = ...;
+     emits this when        emit one — write     let svc   = MyService::new(repo.clone());
+     `server-seaorm`)       it by hand           mount(<T>RepoDispatcher::new(repo));
+   - in-memory                                   mount(<T>ServiceDispatcher::new(svc));
+   - sqlx/postgres
+   - HTTP proxy
+   - mock for tests
+```
+
+Concrete consequences:
+
+- **A third party can replace the architect-emitted SeaORM repo.**
+  Disable `architect/server-seaorm` on the proto crate and the
+  derive never compiles in the SeaORM bridge. Write your own struct
+  implementing `<T>Repo` against sqlx/postgres/redis/whatever.
+- **A third party can replace the service.** `<T>Service` is a
+  hand-written `#[vox::service]` trait — anyone can write a
+  different impl with different business rules, mount it on the
+  same dispatcher.
+- **A binary picks one of each.** No fixed coupling between
+  "architect-generated repo" and "architect-generated service"
+  because the second doesn't exist — services are always yours.
+
+`architect`'s feature flags reflect the split:
+
+| Feature | Pulls | What you get |
+|---------|-------|--------------|
+| `server-seaorm` | `sea-orm` + `async-trait` | The SeaORM bridge → `<T>RepoStorage<C>` impl. Only enable if you want the architect-emitted SeaORM repo. |
+| `server-axum`   | `axum` + `tokio` + `futures` + `tracing` + `vox-core` + `vox-types` | The `architect::axum_ws` adapter for mounting any dispatcher on an axum WS route. |
+
+They're independent. A custom server that brings its own repo enables
+only `server-axum` and never compiles `sea-orm`.
+
+## The working examples
+
+Two demonstrators live in `examples/`:
+
+### `examples/external-stub/` — third-party repo shape
+
+```text
+examples/external-stub/
+  Cargo.toml      depends only on example-proto + architect
+                  (no server-seaorm, no in-tree backend)
+  src/lib.rs      pub struct StubBackend impls ExampleRepo
+```
 
 ```text
 examples/
@@ -175,8 +232,40 @@ this isn't a first-party impl. Its `Cargo.toml` would look identical
 if it lived in a separate repository and pulled its deps from
 crates.io; only the path-vs-version of two dep lines changes.
 
-`features/example/tests/native/` exercises both backends through the
-same trait surface:
+### `examples/custom-server/` — binary assembled by hand
+
+```text
+examples/custom-server/
+  Cargo.toml      depends on example-proto + example-stub-backend +
+                  architect[server-axum]
+                  NOTHING from sea-orm, the `example` facade, or
+                  any in-tree backend.
+  src/main.rs     - pick repo (StubBackend::with_seed_data)
+                  - write a service impl (CustomExampleService<R>,
+                    generic over any ExampleRepo)
+                  - mount both dispatchers on /vox via architect::axum_ws
+```
+
+Smoke test that confirms the wiring is genuinely backend-agnostic:
+
+```sh
+$ cargo run -p example-custom-server &
+$ cargo run -q -p app-cli -- list --url ws://127.0.0.1:4041/vox
+3 examples
+  385ae81f-...  stub.alpha
+  062e7e27-...  stub.bravo
+  ed8bc20b-...  stub.charlie
+```
+
+`app-cli` was built against the first-party (SeaORM-aware) workspace,
+but the server it's talking to has *zero* SeaORM in its dependency
+graph. The contract is what holds it together.
+
+### Contract test
+
+`features/example/tests/native/` exercises both `ExampleRepoMemory`
+and `StubBackend` through the same trait surface — and the test
+bodies don't reference the concrete backend type:
 
 ```rust
 async fn external_backend_round_trip() {
