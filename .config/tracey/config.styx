@@ -1,0 +1,39 @@
+@schema {id crate:tracey-config@1, cli tracey}
+
+# Tracey traceability config — links the architect specification (in
+# docs/content/spec/*.md) to the implementing code and tests.
+#
+# Add an `r[name]` block to a markdown rule, then reference it from
+# source as `// r[impl name]` (implementation) or `// r[verify name]`
+# (test). `tracey query validate` enforces that every rule is covered
+# by at least one impl + verify, and that no source reference points
+# at a stale spec ID.
+
+specs (
+    {
+        name architect
+        source_url https://git.starcommand.live/codywright/architect
+        include (
+            docs/content/spec/**/*.md
+        )
+        impls (
+            {
+                name rust
+                include (
+                    apps/**/*.rs
+                    features/**/*.rs
+                    macros/**/*.rs
+                    xtask/**/*.rs
+                )
+                exclude (
+                    target/**
+                    **/Cargo.lock
+                )
+                test_include (
+                    features/**/tests/**/*.rs
+                    apps/**/tests/**/*.rs
+                )
+            }
+        )
+    }
+)
