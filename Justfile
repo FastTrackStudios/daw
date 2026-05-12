@@ -9,9 +9,9 @@ default: check
 # Type-check workspace (server, db, proto) + the UI crates.
 check:
     cargo check --workspace
-    cd apps/ui && cargo check
-    cd apps/web && cargo check --target wasm32-unknown-unknown
-    cd apps/desktop && cargo check
+    cd apps/example/ui && cargo check
+    cd apps/example/web && cargo check --target wasm32-unknown-unknown
+    cd apps/example/desktop && cargo check
 
 # Build + run the migration binary.
 migrate:
@@ -24,7 +24,7 @@ server:
 # Run the wasm browser integration tests against a server.
 # Start `just server` in another terminal first.
 test-wasm:
-    cd features/example/example-test-wasm && cargo test --target wasm32-unknown-unknown --release
+    cd features/example/tests/web && cargo test --target wasm32-unknown-unknown --release
 
 # Run server + wasm tests together with the default (db) backend.
 test-e2e: (_e2e "")
@@ -46,19 +46,19 @@ _e2e features:
         if curl -fsS http://127.0.0.1:4040/api/health >/dev/null 2>&1; then break; fi
         sleep 0.2
     done
-    cd features/example/example-test-wasm && cargo test --target wasm32-unknown-unknown --release
+    cd features/example/tests/web && cargo test --target wasm32-unknown-unknown --release
 
 # `dx serve` the web app — connects to the server on 4040 by default.
 web:
-    cd apps/web && dx serve --web --addr 0.0.0.0 --port 8765
+    cd apps/example/web && dx serve --web --addr 0.0.0.0 --port 8765
 
 # `dx serve` the desktop app.
 desktop:
-    cd apps/desktop && dx serve --desktop
+    cd apps/example/desktop && dx serve --desktop
 
 # Format all Rust files in the workspace + UI crates.
 fmt:
     cargo fmt --all
-    cd apps/ui && cargo fmt
-    cd apps/web && cargo fmt
-    cd apps/desktop && cargo fmt
+    cd apps/example/ui && cargo fmt
+    cd apps/example/web && cargo fmt
+    cd apps/example/desktop && cargo fmt
