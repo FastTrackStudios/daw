@@ -49,6 +49,16 @@ pub mod backend_memory {
 }
 ```
 
+## In-tree vs external implementations
+
+Everything on this page describes the **in-tree** pattern: backends
+live inside the project's `features/<feature>/` tree alongside the
+contract. Third parties can implement the same trait surface from
+their own crates without forking the monorepo — see
+[Extensibility](@/architecture/extensibility.md) for that path. The
+contract (`<feature>-proto`) is what makes both paths interchangeable
+from the running app's perspective.
+
 ## Pattern for the DAW analogue
 
 Each DAW backend (Reaper, Ableton, Pro Tools) lives as a sibling

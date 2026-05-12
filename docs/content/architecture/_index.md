@@ -14,6 +14,9 @@ distinction visible at a glance.
   `#[derive(architect::Entity)]` emits and how to write an entity.
 - [Multi-backend features](@/architecture/backends.md) — one contract,
   multiple implementations behind one facade.
+- [Extensibility](@/architecture/extensibility.md) — in-tree vs
+  third-party implementations; how the contract crate makes both
+  paths interchangeable.
 - [Testing strata](@/architecture/testing.md) — native unit, native
   integration, browser e2e: which lives where.
 - [Monorepo layout](@/architecture/layout.md) — `apps/<app>/<role>` +
