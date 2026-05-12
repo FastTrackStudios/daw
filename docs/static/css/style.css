@@ -1,0 +1,92 @@
+:root {
+    --bg: #0f1115;
+    --fg: #e6e6e6;
+    --muted: #8a8f99;
+    --accent: #f2a93b;
+    --code-bg: #1a1d24;
+    --border: #262a33;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Public Sans", "Helvetica Neue", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+    font-size: 16px;
+}
+
+.site-header {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--border);
+}
+.site-title {
+    font-weight: 600;
+    text-decoration: none;
+    color: var(--fg);
+    font-size: 1.15rem;
+}
+.site-header nav {
+    display: flex;
+    gap: 1.25rem;
+}
+.site-header a {
+    color: var(--muted);
+    text-decoration: none;
+}
+.site-header a:hover { color: var(--accent); }
+
+.content {
+    max-width: 780px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem 4rem;
+}
+
+h1, h2, h3 { margin-top: 2.5rem; line-height: 1.25; }
+h1:first-child { margin-top: 0; }
+.lead { color: var(--muted); font-size: 1.1rem; margin-top: 0.25rem; }
+
+code {
+    background: var(--code-bg);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+pre {
+    background: var(--code-bg);
+    padding: 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+}
+pre code { background: transparent; padding: 0; }
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1.5rem 0;
+}
+th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+}
+th { color: var(--muted); font-weight: 500; }
+
+a { color: var(--accent); }
+
+.site-footer {
+    border-top: 1px solid var(--border);
+    padding: 1.5rem 2rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+.site-footer a { color: var(--muted); text-decoration: underline; }
+
+.page-list { padding-left: 0; list-style: none; }
+.page-list li { padding: 0.4rem 0; }
+.page-list .desc { color: var(--muted); }

@@ -56,6 +56,26 @@ web:
 desktop:
     cd apps/app/desktop && dx serve --desktop
 
+# ── Docs ──────────────────────────────────────────────────────────────
+
+# Serve the dodeca docs site locally with live reload.
+# Requires `ddc` on PATH — install with:
+#   curl --proto '=https' --tlsv1.2 -LsSf \
+#     https://github.com/bearcove/dodeca/releases/latest/download/dodeca-installer.sh | sh
+docs:
+    cd docs && ddc serve
+
+# Build the dodeca docs site for production.
+docs-build:
+    cd docs && ddc build
+
+# Sync docs/content/ → the Forgejo wiki repo. Dry-run first to preview.
+sync-wiki:
+    ./scripts/sync-wiki.sh
+
+sync-wiki-dry-run:
+    ./scripts/sync-wiki.sh --dry-run
+
 # Format all Rust files in the workspace + UI crates.
 fmt:
     cargo fmt --all
