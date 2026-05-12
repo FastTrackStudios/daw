@@ -1,0 +1,29 @@
+@schema {id crate:capn-config@1, cli capn}
+
+// All defaults are `true` except `doc-tests`. Enable `doc-tests` so
+// markdown ``` fences in /// comments are enforced; everything else
+// runs as bearcove's standard pre-commit / pre-push pipeline.
+//
+// Capn handles: rustfmt staged files, Cargo.lock staging, arborium
+// rustdoc setup, edition-2024 enforcement, external-path-deps lint,
+// clippy -D warnings, nextest (affected only), cargo-doc, cargo-shear.
+//
+// architect-specific additions (tracey query validate) ride on top in
+// hooks/pre-commit and hooks/pre-push.
+
+pre-commit {
+  rustfmt true
+  cargo-lock true
+  arborium true
+  edition-2024 true
+  external-path-deps true
+  internal-dev-deps-release-plz true
+}
+
+pre-push {
+  clippy true
+  nextest true
+  doc-tests true
+  docs true
+  cargo-shear true
+}
