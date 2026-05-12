@@ -158,6 +158,39 @@ depend only on `<feature>-proto`. The example app's facade is fine
 for first-party builds; consumers who pull in external impls just
 won't use it.
 
+## The working example
+
+`examples/external-stub/` in this repo is a runnable demonstration
+of the third-party shape:
+
+```text
+examples/
+  external-stub/
+    Cargo.toml      depends only on example-proto + architect
+    src/lib.rs      pub struct StubBackend impls ExampleRepo
+```
+
+It sits **outside** `features/` on purpose — that's the visual cue
+this isn't a first-party impl. Its `Cargo.toml` would look identical
+if it lived in a separate repository and pulled its deps from
+crates.io; only the path-vs-version of two dep lines changes.
+
+`features/example/tests/native/` exercises both backends through the
+same trait surface:
+
+```rust
+async fn external_backend_round_trip() {
+    let r = example_stub_backend::StubBackend::new();
+    let created = r.create(ExampleCreate { /* ... */ }).await.unwrap();
+    let got = r.get(created.id).await.unwrap();
+    assert_eq!(got.id, created.id);
+}
+```
+
+The test body never references which concrete backend it's running
+against — proof that the contract is the only thing that matters
+at the consumer's call site.
+
 ## When you want both at once
 
 A real DAW build will mix paths. The same binary might use
