@@ -19,10 +19,10 @@ auth lives in its own `features/auth/` feature.
 nix develop
 
 # In one terminal: the Loro sync relay
-just sync-demo-server         # listens on :9090, sqlite-backed
+just server                   # listens on :9090, pre-seeded
 
 # In another terminal: the Dioxus dev server
-just task-web-dev             # listens on :8765, hot-reload
+just web                      # listens on :8765, hot-reload
 
 # Open two browsers at http://localhost:8765/timer (or /assets,
 # /projects-live, /invoice, …) and watch edits propagate.
