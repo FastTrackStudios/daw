@@ -7,9 +7,10 @@ specs (
         include (features/example/spec/**/*.md)
         impls (
             {
-                name rust
+                name live
                 include (
-                    features/example/**/*.rs
+                    features/example/example-db/**/*.rs
+                    features/example/example-memory/**/*.rs
                 )
                 exclude (
                     features/example/**/target/**
@@ -18,18 +19,29 @@ specs (
                     features/example/tests/**/*.rs
                 )
             }
+            {
+                name mock
+                include (
+                    examples/external-stub/**/*.rs
+                )
+                exclude (
+                    examples/external-stub/**/target/**
+                )
+                test_include (
+                    features/example/tests/**/*.rs
+                )
+            }
         )
     }
-
 
     {
         name foo
         include (features/foo/spec/**/*.md)
         impls (
             {
-                name rust
+                name live
                 include (
-                    features/foo/**/*.rs
+                    features/foo/foo-memory/**/*.rs
                 )
                 exclude (
                     features/foo/**/target/**
@@ -46,9 +58,9 @@ specs (
         include (features/bar/spec/**/*.md)
         impls (
             {
-                name rust
+                name live
                 include (
-                    features/bar/**/*.rs
+                    features/bar/bar-memory/**/*.rs
                 )
                 exclude (
                     features/bar/**/target/**
