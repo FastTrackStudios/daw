@@ -133,6 +133,12 @@ impl CrdtDoc {
     /// Open a doc against the given persistence: load any stored
     /// snapshot, replay any updates, wire the subscription that
     /// forwards future commits back to storage.
+    ///
+    /// Server-side only. Spawns a background task (`tokio::spawn`)
+    /// for fire-and-forget update persistence, so it requires a
+    /// tokio runtime. Wasm clients use [`CrdtDoc::ephemeral`] +
+    /// transport-level sync instead.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn open<P: Persistence>(doc_id: Uuid, persistence: P) -> Result<Self, PersistError> {
         let persistence: Arc<dyn Persistence> = Arc::new(persistence);
         let doc = LoroDoc::new();
