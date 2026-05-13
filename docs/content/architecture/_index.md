@@ -17,6 +17,9 @@ distinction visible at a glance.
 - [Extensibility](@/architecture/extensibility.md) — in-tree vs
   third-party implementations; how the contract crate makes both
   paths interchangeable.
+- [Async diagnostics](@/architecture/diagnostics.md) — opt-in moiré
+  instrumentation for the axum_ws adapter; see what every task is
+  waiting on via the live dashboard.
 - [Testing strata](@/architecture/testing.md) — native unit, native
   integration, browser e2e: which lives where.
 - [Monorepo layout](@/architecture/layout.md) — `apps/<app>/<role>` +
