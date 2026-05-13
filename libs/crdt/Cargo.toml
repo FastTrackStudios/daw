@@ -1,0 +1,37 @@
+[package]
+name = "crdt"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+# Local-first source-of-truth layer. Wraps a LoroDoc with a typed
+# per-entity view (`LoroRepo<E>`) and a pluggable `Persistence` trait.
+#
+# - One `CrdtDoc` per collaboration boundary (a project, a workspace).
+#   It owns the LoroDoc + persistence handle, and exposes typed sub-
+#   repos for each entity type living in the doc.
+# - `LoroRepo<E>` implements the architect-style get/list/create/
+#   update/delete surface; the per-entity glue (what root map, how to
+#   encode the wire struct as a LoroMap, etc.) is supplied by the
+#   `EntityCrdt` trait the feature crate implements.
+# - `Persistence` is object-safe (async-trait) so a CrdtDoc can be
+#   constructed against any backend at runtime — SeaORM, IndexedDB,
+#   the bundled in-memory store, anything.
+#
+# Wasm-clean by construction. No DB deps, no transport deps.
+
+[dependencies]
+architect.workspace = true
+loro.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tokio = { workspace = true, features = ["sync", "rt"] }
+thiserror.workspace = true
+tracing.workspace = true
