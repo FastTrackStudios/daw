@@ -355,6 +355,28 @@ impl<E: EntityCrdt> LoroRepo<E> {
     pub fn doc(&self) -> &LoroDoc {
         &self.inner.doc
     }
+
+    /// Apply text ops against a `LoroText` child container on the
+    /// entity's sub-map. The fast path for editor keystrokes — bypasses
+    /// the full-entity `apply_update` round trip and so doesn't bump
+    /// `updated_at`. Callers wanting bookkeeping should follow with
+    /// `update`.
+    pub async fn apply_text_ops(
+        &self,
+        id: Uuid,
+        key: &str,
+        ops: &[crate::codec::TextOp],
+    ) -> Result<(), RepoError> {
+        let _g = self.inner.write_lock.lock().await;
+        let root = self.inner.doc.get_map(E::ROOT);
+        let sub = root
+            .get(&id.to_string())
+            .and_then(only_map)
+            .ok_or(RepoError::NotFound)?;
+        crate::codec::apply_text_ops(&sub, key, ops)?;
+        self.inner.doc.commit();
+        Ok(())
+    }
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────

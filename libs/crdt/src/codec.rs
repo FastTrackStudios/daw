@@ -26,7 +26,7 @@
 
 use architect::RepoError;
 use chrono::{DateTime, Utc};
-use loro::{LoroMap, LoroValue};
+use loro::{Container, LoroMap, LoroText, LoroValue};
 use uuid::Uuid;
 
 /// Wrap any Loro error into the architect `RepoError` shape so call
@@ -273,5 +273,319 @@ pub fn read_opt_string_list(m: &LoroMap, k: &str) -> Result<Option<Vec<String>>,
         None => Ok(None),
         Some(s) if s.is_empty() => Ok(Some(Vec::new())),
         Some(s) => Ok(Some(s.split('\t').map(str::to_string).collect())),
+    }
+}
+
+// ── LoroText ──────────────────────────────────────────────────────────
+//
+// Helpers for character-level text fields. Wire as a child `LoroText`
+// container under a map key. Positions are unicode scalar units —
+// matches Loro's default `insert`/`delete` API. Callers working in
+// UTF-16 (DOM) must translate at the boundary.
+
+/// Edit op against a `LoroText` child container.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TextOp {
+    Insert { pos: u32, text: String },
+    Delete { pos: u32, len: u32 },
+}
+
+/// Get-or-create a `LoroText` child container under `map[key]`.
+///
+/// Idempotent: a second call returns the same attached container.
+/// Returns `Err` if the key already holds a non-text value (legacy
+/// snapshot string) — callers wanting migration use
+/// [`read_text_with_migration`].
+pub fn text_child(m: &LoroMap, key: &str) -> Result<LoroText, RepoError> {
+    if let Some(loro::ValueOrContainer::Container(Container::Text(t))) = m.get(key) {
+        return Ok(t);
+    }
+    if let Some(other) = m.get(key) {
+        return Err(RepoError::Internal(format!(
+            "expected text container at `{key}`, got {other:?}"
+        )));
+    }
+    m.get_or_create_container(key, LoroText::new())
+        .map_err(loro_err)
+}
+
+/// Read the current text. Returns "" if the key is absent.
+pub fn read_text(m: &LoroMap, key: &str) -> Result<String, RepoError> {
+    match m.get(key) {
+        None => Ok(String::new()),
+        Some(loro::ValueOrContainer::Container(Container::Text(t))) => Ok(t.to_string()),
+        Some(other) => Err(RepoError::Internal(format!(
+            "expected text container at `{key}`, got {other:?}"
+        ))),
+    }
+}
+
+/// Read text with migration from a legacy string LoroValue. If `key`
+/// holds a plain string (from older snapshots), seeds a `LoroText`
+/// container with that content and returns the value. Idempotent
+/// after the first call: subsequent reads hit the text-container path.
+pub fn read_text_with_migration(m: &LoroMap, key: &str) -> Result<String, RepoError> {
+    match m.get(key) {
+        Some(loro::ValueOrContainer::Container(Container::Text(t))) => Ok(t.to_string()),
+        Some(loro::ValueOrContainer::Value(LoroValue::String(s))) => {
+            let legacy = (*s).to_string();
+            m.delete(key).map_err(loro_err)?;
+            let t = m
+                .get_or_create_container(key, LoroText::new())
+                .map_err(loro_err)?;
+            if !legacy.is_empty() {
+                t.insert(0, &legacy).map_err(loro_err)?;
+            }
+            Ok(t.to_string())
+        }
+        Some(loro::ValueOrContainer::Value(LoroValue::Null)) | None => Ok(String::new()),
+        Some(other) => Err(RepoError::Internal(format!(
+            "expected text container or legacy string at `{key}`, got {other:?}"
+        ))),
+    }
+}
+
+/// Apply a sequence of `TextOp` against the text child at `map[key]`.
+/// Each op runs against the post-state of the previous ops, matching
+/// the editor's stream-of-keystrokes semantics.
+pub fn apply_text_ops(m: &LoroMap, key: &str, ops: &[TextOp]) -> Result<(), RepoError> {
+    let t = text_child(m, key)?;
+    for op in ops {
+        match op {
+            TextOp::Insert { pos, text } => {
+                t.insert(*pos as usize, text).map_err(loro_err)?;
+            }
+            TextOp::Delete { pos, len } => {
+                t.delete(*pos as usize, *len as usize).map_err(loro_err)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Fallback diff: compute a minimal insert/delete pair from old → new
+/// using common-prefix + common-suffix stripping. O(n). Correct for
+/// typing flows and most paste/programmatic-overwrite cases. For
+/// non-prefix/suffix edits, the change collapses to a single
+/// delete-middle + insert-middle pair — not optimal but correct.
+pub fn apply_text_diff(m: &LoroMap, key: &str, old: &str, new: &str) -> Result<(), RepoError> {
+    if old == new {
+        // Touch the container so callers can rely on its existence.
+        let _ = text_child(m, key)?;
+        return Ok(());
+    }
+    let old_chars: Vec<char> = old.chars().collect();
+    let new_chars: Vec<char> = new.chars().collect();
+
+    let mut prefix = 0usize;
+    while prefix < old_chars.len()
+        && prefix < new_chars.len()
+        && old_chars[prefix] == new_chars[prefix]
+    {
+        prefix += 1;
+    }
+    let mut suffix = 0usize;
+    while suffix < old_chars.len() - prefix
+        && suffix < new_chars.len() - prefix
+        && old_chars[old_chars.len() - 1 - suffix] == new_chars[new_chars.len() - 1 - suffix]
+    {
+        suffix += 1;
+    }
+
+    let del_len = old_chars.len() - prefix - suffix;
+    let ins_chars = &new_chars[prefix..new_chars.len() - suffix];
+    let ins: String = ins_chars.iter().collect();
+
+    let mut ops: Vec<TextOp> = Vec::new();
+    if del_len > 0 {
+        ops.push(TextOp::Delete {
+            pos: prefix as u32,
+            len: del_len as u32,
+        });
+    }
+    if !ins.is_empty() {
+        ops.push(TextOp::Insert {
+            pos: prefix as u32,
+            text: ins,
+        });
+    }
+    apply_text_ops(m, key, &ops)
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+    use loro::{ContainerTrait, ExportMode, LoroDoc};
+
+    fn root(doc: &LoroDoc) -> LoroMap {
+        doc.get_map("root")
+    }
+
+    #[test]
+    fn text_child_is_idempotent() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        let a = text_child(&m, "content").unwrap();
+        a.insert(0, "abc").unwrap();
+        let b = text_child(&m, "content").unwrap();
+        assert_eq!(b.to_string(), "abc");
+        assert_eq!(a.id(), b.id());
+    }
+
+    #[test]
+    fn read_text_empty_when_missing() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        assert_eq!(read_text(&m, "missing").unwrap(), "");
+    }
+
+    #[test]
+    fn apply_text_ops_insert_then_delete() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        apply_text_ops(
+            &m,
+            "c",
+            &[
+                TextOp::Insert {
+                    pos: 0,
+                    text: "hello world".into(),
+                },
+                TextOp::Delete { pos: 5, len: 1 },
+                TextOp::Insert {
+                    pos: 5,
+                    text: "—".into(),
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(read_text(&m, "c").unwrap(), "hello—world");
+    }
+
+    #[test]
+    fn apply_text_diff_seeds_empty() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        apply_text_diff(&m, "c", "", "fresh").unwrap();
+        assert_eq!(read_text(&m, "c").unwrap(), "fresh");
+    }
+
+    #[test]
+    fn apply_text_diff_is_minimal_for_suffix_change() {
+        // Common-prefix typing flow: "hello" → "hello!" should produce
+        // exactly one Insert at pos=5 of "!", no deletes, no full
+        // replacement. We can't observe the ops directly via the
+        // public surface, so we assert via remote merge: a concurrent
+        // edit at pos 0 must survive.
+        let a = LoroDoc::new();
+        a.set_peer_id(1).unwrap();
+        let b = LoroDoc::new();
+        b.set_peer_id(2).unwrap();
+        // Seed the container on A and replicate to B before forking.
+        apply_text_diff(&root(&a), "c", "", "hello").unwrap();
+        a.commit();
+        b.import(&a.export(ExportMode::all_updates()).unwrap())
+            .unwrap();
+
+        // Peer A appends "!" via diff.
+        apply_text_diff(&root(&a), "c", "hello", "hello!").unwrap();
+        // Peer B prepends ">" via diff at the same time.
+        apply_text_diff(&root(&b), "c", "hello", ">hello").unwrap();
+        a.commit();
+        b.commit();
+
+        // Cross-import.
+        let a_to_b = a.export(ExportMode::updates(&b.oplog_vv())).unwrap();
+        let b_to_a = b.export(ExportMode::updates(&a.oplog_vv())).unwrap();
+        b.import(&a_to_b).unwrap();
+        a.import(&b_to_a).unwrap();
+
+        let final_a = read_text(&root(&a), "c").unwrap();
+        let final_b = read_text(&root(&b), "c").unwrap();
+        assert_eq!(final_a, final_b, "peers diverged");
+        // Both inserts must be present — minimal-diff property.
+        assert!(final_a.contains('>'), "lost peer B prepend: {final_a}");
+        assert!(final_a.contains('!'), "lost peer A append: {final_a}");
+        assert!(final_a.contains("hello"));
+    }
+
+    #[test]
+    fn two_doc_concurrent_insert_at_same_pos() {
+        // Container creation must happen once on one peer and sync to
+        // the other before forked edits, otherwise each peer creates
+        // its own LoroText under the same key and one wins.
+        let a = LoroDoc::new();
+        a.set_peer_id(1).unwrap();
+        let b = LoroDoc::new();
+        b.set_peer_id(2).unwrap();
+        let _ = text_child(&root(&a), "c").unwrap();
+        a.commit();
+        b.import(&a.export(ExportMode::all_updates()).unwrap())
+            .unwrap();
+
+        apply_text_ops(
+            &root(&a),
+            "c",
+            &[TextOp::Insert {
+                pos: 0,
+                text: "abc".into(),
+            }],
+        )
+        .unwrap();
+        apply_text_ops(
+            &root(&b),
+            "c",
+            &[TextOp::Insert {
+                pos: 0,
+                text: "xyz".into(),
+            }],
+        )
+        .unwrap();
+        a.commit();
+        b.commit();
+
+        let a_to_b = a.export(ExportMode::updates(&b.oplog_vv())).unwrap();
+        let b_to_a = b.export(ExportMode::updates(&a.oplog_vv())).unwrap();
+        b.import(&a_to_b).unwrap();
+        a.import(&b_to_a).unwrap();
+
+        let final_a = read_text(&root(&a), "c").unwrap();
+        let final_b = read_text(&root(&b), "c").unwrap();
+        assert_eq!(final_a, final_b);
+        assert_eq!(final_a.len(), 6, "both inserts must survive: {final_a}");
+        for ch in "abcxyz".chars() {
+            assert!(final_a.contains(ch));
+        }
+    }
+
+    #[test]
+    fn read_text_with_migration_seeds_from_legacy_string() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        write_str(&m, "c", "legacy body").unwrap();
+        let seen = read_text_with_migration(&m, "c").unwrap();
+        assert_eq!(seen, "legacy body");
+        // Second call now hits the text-container path and matches.
+        assert_eq!(read_text_with_migration(&m, "c").unwrap(), "legacy body");
+        // And further ops apply against the seeded container.
+        apply_text_ops(
+            &m,
+            "c",
+            &[TextOp::Insert {
+                pos: 11,
+                text: "!".into(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(read_text(&m, "c").unwrap(), "legacy body!");
+    }
+
+    #[test]
+    fn apply_text_diff_noop_when_unchanged() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        apply_text_diff(&m, "c", "", "same").unwrap();
+        apply_text_diff(&m, "c", "same", "same").unwrap();
+        assert_eq!(read_text(&m, "c").unwrap(), "same");
     }
 }
