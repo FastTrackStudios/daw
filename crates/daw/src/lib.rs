@@ -30,8 +30,8 @@ pub mod rpc {
     pub use daw_control::*;
 }
 
-// Back-compat root exports for crates that depend on the facade API.
-pub use rpc::*;
+// Internal alias for the bootstrap singleton.
+use rpc::Daw;
 
 // ── Plugin API: DAW-agnostic initialization ─────────────────────────────────
 
