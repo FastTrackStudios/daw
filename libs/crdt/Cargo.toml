@@ -34,6 +34,7 @@ chrono.workspace = true
 uuid.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+crdt-derive = { path = "../../macros/crdt-derive", version = "*" }
 
 # Declare tokio independently of the workspace dep so wasm32 builds
 # (which can't pull mio / rt-multi-thread) stay clean. On native we
