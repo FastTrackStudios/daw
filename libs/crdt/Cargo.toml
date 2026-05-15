@@ -29,6 +29,9 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 [dependencies]
 architect.workspace = true
 loro.workspace = true
+# Pin to the same minor as `loro` — type identities in
+# `EphemeralStore` ride the loro-internal crate version.
+loro-internal = { version = "1.12", default-features = false }
 async-trait.workspace = true
 chrono.workspace = true
 uuid.workspace = true

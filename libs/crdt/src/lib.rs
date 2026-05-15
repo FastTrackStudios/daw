@@ -29,6 +29,15 @@ pub use architect;
 pub use crdt_derive::entity_crdt;
 pub use loro;
 
+/// Re-exports for awareness / cursor-sync work. `EphemeralStore`
+/// is the Loro primitive for ephemeral state (remote cursors,
+/// presence) — timestamp-LWW, partial-update encoding, stale-
+/// peer timeouts. Lives in `loro_internal` because the public
+/// `loro` crate doesn't expose it.
+pub mod awareness {
+    pub use loro_internal::awareness::{EphemeralStore, EphemeralStoreEvent};
+}
+
 use architect::{Filter, Page, RepoError, Sort, SortOrder};
 use loro::{Container, LoroDoc, LoroMap, ValueOrContainer};
 use tokio::sync::Mutex as AsyncMutex;
