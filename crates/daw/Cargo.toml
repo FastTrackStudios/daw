@@ -23,6 +23,10 @@ tracing.workspace = true
 vox.workspace = true
 facet.workspace = true
 
+# Re-exported through the facade so apps depending only on `daw` can
+# reach `daw::{Services, Layer, layers!}` for service composition.
+architect.workspace = true
+
 # Feature-gated internal crates
 daw-reaper = { path = "../daw-reaper", optional = true }
 daw-standalone = { path = "../daw-standalone", optional = true }
