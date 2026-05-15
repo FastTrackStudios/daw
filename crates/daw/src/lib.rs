@@ -36,8 +36,8 @@ pub mod rpc {
 // dep. `Reaper.into_router()` and `Reaper::layers().merge(...)` rely
 // on the `Services` trait being in scope.
 pub use architect::{
-    Descriptors, Layer, LayerRouter, Mounted, RequirementGap, Requires, RequiresAll, Services,
-    layers,
+    Descriptors, Layer, LayerRouter, Mounted, Needs, RequirementGap, Requires, RequiresAll,
+    Services, WithRequires, layers,
 };
 
 // Internal alias for the bootstrap singleton.
