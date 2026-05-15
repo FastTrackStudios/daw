@@ -35,7 +35,10 @@ pub mod rpc {
 // `Layer::merge`, and the `layers!` macro without a direct architect
 // dep. `Reaper.into_router()` and `Reaper::layers().merge(...)` rely
 // on the `Services` trait being in scope.
-pub use architect::{Descriptors, Layer, LayerRouter, Mounted, Services, layers};
+pub use architect::{
+    Descriptors, Layer, LayerRouter, Mounted, RequirementGap, Requires, RequiresAll, Services,
+    layers,
+};
 
 // Internal alias for the bootstrap singleton.
 use rpc::Daw;
