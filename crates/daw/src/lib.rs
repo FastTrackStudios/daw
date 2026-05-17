@@ -199,6 +199,29 @@ pub mod file {
 // (daw-reaper uses keyflow for chord detection; keyflow uses daw::module).
 // Extension authors depend on `daw` + `daw-extension-runtime` together.
 
+// ── Sync stack: engine + network + Link ─────────────────────────────────────
+//
+// `daw-synchronization`, `daw-network`, and `daw-link` are also public
+// sibling crates, not folded under the `daw` facade. Each depends on
+// `daw` itself (synchronization on the streaming surface, network on
+// `SyncEvent` from synchronization, link is standalone), so a facade
+// re-export would cycle. Consumers (other domain crates that want to
+// reuse the peer-mesh transport for non-sync use cases, integration
+// tests, the daw CLI's `sync` subcommand) depend on these directly.
+//
+// - `daw-synchronization` — backend-agnostic sync engine + drift corrector
+//   + heartbeat. Wraps the streaming surface from `daw::service` and
+//   `daw::reaper::event_hub` in `SyncEvent` envelopes.
+// - `daw-network`       — TCP peer mesh + handshake + clock calibration.
+//   Concrete on `SyncEvent` today; library-shaped so other domains can
+//   reuse the transport.
+// - `daw-link`          — Ableton Link adapter (host-agnostic via the
+//   `LinkCallbacks` trait).
+//
+// `daw-bridge` wires all three together inside its `sync` cargo feature
+// (default-on), gated at runtime by `FTS_SYNC_ENABLED=1`. See
+// `daw-bridge/src/sync_runtime.rs` and `docs/sync-stack-consolidation.md`.
+
 // ── Streaming ergonomics ────────────────────────────────────────────────────
 pub use stream::RxExt;
 mod stream;
