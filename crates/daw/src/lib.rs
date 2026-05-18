@@ -9,13 +9,8 @@
 //!   `FxChain`, `BatchBuilder`, etc.). Use from UI, remote clients, background tasks.
 //! - **`service`** → `daw::service` — Raw protocol types and service clients.
 //!
-//! Native sync handles (zero-overhead, REAPER main-thread only) live under
-//! `daw::reaper::sync` (via `ReaperMainThread`); the trait definitions are in
-//! `daw_proto::sync`. See `DAW_API_ARCHITECTURE.md`.
-//!
 //! # Feature-gated modules
 //!
-//! - **`reaper`** → `daw::reaper` — REAPER-specific implementations.
 //! - **`standalone`** → `daw::standalone` — Reference implementation for testing.
 //! - **`file`** → `daw::file` — RPP file format parser.
 
@@ -24,8 +19,8 @@
 // All async client types (`Daw`, `Project`, `Transport`, `TrackHandle`, etc.)
 // live under `daw::rpc`. Use from UI, remote clients, background tasks, tests.
 //
-// In-process REAPER extension code that runs on the main thread should prefer
-// the native sync handles in `daw::reaper::sync` for hot paths.
+// In-process extension code that needs native sync access should use the
+// service traits from `daw::service` and receive a backend from its host.
 pub mod rpc {
     pub use daw_control::*;
 }
@@ -33,8 +28,7 @@ pub mod rpc {
 // Service composition primitives — re-exported from architect so apps
 // depending only on `daw` can compose service bundles via `Services`,
 // `Layer::merge`, and the `layers!` macro without a direct architect
-// dep. `Reaper.into_router()` and `Reaper::layers().merge(...)` rely
-// on the `Services` trait being in scope.
+// dep. Backend crates use these traits/macros to expose their service bundles.
 pub use architect::{Descriptors, Layer, LayerRouter, Mounted, Services, layers};
 
 // Internal alias for the bootstrap singleton.
@@ -71,10 +65,10 @@ pub fn init(raw_host_context: Option<*const std::ffi::c_void>) -> bool {
 
     #[cfg(feature = "reaper")]
     if let Some(host_ptr) = raw_host_context
-        && let Some((daw, runtime)) = reaper::bootstrap::create_plugin_daw(host_ptr)
+        && let Some((daw, runtime)) = daw_reaper::bootstrap::create_plugin_daw(host_ptr)
     {
         // Register internal timer that fires user callbacks
-        reaper::bootstrap::register_internal_timer(|| {
+        daw_reaper::bootstrap::register_internal_timer(|| {
             _fire_timer_callbacks();
         });
 
@@ -160,8 +154,8 @@ pub fn _fire_timer_callbacks() {
 /// }
 /// ```
 #[cfg(feature = "reaper")]
-pub fn main_thread_daw() -> Option<reaper::DawMainThread> {
-    reaper::DawMainThread::try_new()
+pub fn main_thread_daw() -> Option<daw_reaper::DawMainThread> {
+    daw_reaper::DawMainThread::try_new()
 }
 
 // ── Service: raw protocol types & service clients ───────────────────────────
@@ -170,18 +164,21 @@ pub mod service {
     pub use daw_proto::*;
 }
 
-// ── Reaper: REAPER-specific implementations ─────────────────────────────────
-#[cfg(feature = "reaper")]
-/// REAPER DAW implementation — in-process service dispatchers.
-pub mod reaper {
-    pub use daw_reaper::*;
-}
-
 // ── Standalone: reference/mock implementation ───────────────────────────────
 #[cfg(feature = "standalone")]
 /// Standalone reference implementation for testing (mock data included).
 pub mod standalone {
     pub use daw_standalone::*;
+}
+
+// ── REAPER backend re-export ────────────────────────────────────────────────
+// `daw-bridge`, `daw-perf-test`, and the in-process sync engine reach
+// through the facade to REAPER-side helpers (event_hub, safe_wrappers,
+// register_*) without taking direct `daw-reaper` deps everywhere. No
+// cycle: `daw-reaper` is a feature-gated dependency of this facade.
+#[cfg(feature = "reaper")]
+pub mod reaper {
+    pub use daw_reaper::*;
 }
 
 // ── File: RPP file format parser ────────────────────────────────────────────
@@ -210,8 +207,8 @@ pub mod file {
 // tests, the daw CLI's `sync` subcommand) depend on these directly.
 //
 // - `daw-synchronization` — backend-agnostic sync engine + drift corrector
-//   + heartbeat. Wraps the streaming surface from `daw::service` and
-//   `daw::reaper::event_hub` in `SyncEvent` envelopes.
+//   + heartbeat. Wraps the streaming surface from `daw::service` in
+//   `SyncEvent` envelopes.
 // - `daw-network`       — TCP peer mesh + handshake + clock calibration.
 //   Concrete on `SyncEvent` today; library-shaped so other domains can
 //   reuse the transport.
