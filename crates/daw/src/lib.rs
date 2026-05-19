@@ -3,21 +3,36 @@
 //! This is the single public API surface for the `daw` domain. External consumers
 //! should depend only on this crate — never on internal crates directly.
 //!
-//! # Core (always available, WASM-compatible)
+//! # Namespaces
 //!
-//! - **Root**: High-level control API — `Daw`, `Project`, `Track`, `FxChain`,
-//!   `Transport`, etc.
-//! - **`service`**: Raw protocol types and service clients.
+//! - **`rpc`** → `daw::rpc` — Async Vox control API (`Daw`, `Project`, `Transport`, `TrackHandle`,
+//!   `FxChain`, `BatchBuilder`, etc.). Use from UI, remote clients, background tasks.
+//! - **`service`** → `daw::service` — Raw protocol types and service clients.
 //!
 //! # Feature-gated modules
 //!
-//! - **`sync`** → `daw::sync` — Blocking wrapper for audio plugins (`DawSync`, `LocalCaller`).
-//! - **`reaper`** → `daw::reaper` — REAPER-specific implementations.
 //! - **`standalone`** → `daw::standalone` — Reference implementation for testing.
 //! - **`file`** → `daw::file` — RPP file format parser.
 
-// ── Core: high-level control API (WASM-compatible) ──────────────────────────
-pub use daw_control::*;
+// ── RPC: async Vox control API ──────────────────────────────────────────────
+//
+// All async client types (`Daw`, `Project`, `Transport`, `TrackHandle`, etc.)
+// live under `daw::rpc`. Use from UI, remote clients, background tasks, tests.
+//
+// In-process extension code that needs native sync access should use the
+// service traits from `daw::service` and receive a backend from its host.
+pub mod rpc {
+    pub use daw_control::*;
+}
+
+// Service composition primitives — re-exported from architect so apps
+// depending only on `daw` can compose service bundles via `Services`,
+// `Layer::merge`, and the `layers!` macro without a direct architect
+// dep. Backend crates use these traits/macros to expose their service bundles.
+pub use architect::{Descriptors, Layer, LayerRouter, Mounted, Services, layers};
+
+// Internal alias for the bootstrap singleton.
+use rpc::Daw;
 
 // ── Plugin API: DAW-agnostic initialization ─────────────────────────────────
 
@@ -50,10 +65,10 @@ pub fn init(raw_host_context: Option<*const std::ffi::c_void>) -> bool {
 
     #[cfg(feature = "reaper")]
     if let Some(host_ptr) = raw_host_context
-        && let Some((daw, runtime)) = reaper::bootstrap::create_plugin_daw(host_ptr)
+        && let Some((daw, runtime)) = daw_reaper::bootstrap::create_plugin_daw(host_ptr)
     {
         // Register internal timer that fires user callbacks
-        reaper::bootstrap::register_internal_timer(|| {
+        daw_reaper::bootstrap::register_internal_timer(|| {
             _fire_timer_callbacks();
         });
 
@@ -69,11 +84,29 @@ pub fn init(raw_host_context: Option<*const std::ffi::c_void>) -> bool {
     false
 }
 
+/// Initialize the facade from an already constructed DAW handle.
+///
+/// Extension hosts that build a custom in-process DAW service graph can use this
+/// to make `daw::get()` and `daw::block_on()` available to reusable modules.
+pub fn init_from_parts(daw: rpc::Daw, runtime: std::sync::Arc<tokio::runtime::Runtime>) -> bool {
+    if DAW_INSTANCE.get().is_some() {
+        return true;
+    }
+
+    DAW_INSTANCE
+        .set(DawInstance {
+            daw,
+            runtime,
+            _timer_callbacks: std::sync::Mutex::new(Vec::new()),
+        })
+        .is_ok()
+}
+
 /// Get the global `Daw` handle.
 ///
 /// Returns `None` if [`init`] hasn't been called or failed.
 /// Works the same whether in a CLAP plugin, extension, or standalone.
-pub fn get() -> Option<&'static Daw> {
+pub fn get() -> Option<&'static rpc::Daw> {
     DAW_INSTANCE.get().map(|i| &i.daw)
 }
 
@@ -121,8 +154,8 @@ pub fn _fire_timer_callbacks() {
 /// }
 /// ```
 #[cfg(feature = "reaper")]
-pub fn main_thread_daw() -> Option<reaper::DawMainThread> {
-    reaper::DawMainThread::try_new()
+pub fn main_thread_daw() -> Option<daw_reaper::DawMainThread> {
+    daw_reaper::DawMainThread::try_new()
 }
 
 // ── Service: raw protocol types & service clients ───────────────────────────
@@ -131,25 +164,21 @@ pub mod service {
     pub use daw_proto::*;
 }
 
-// ── Sync: blocking wrapper for audio plugins ────────────────────────────────
-#[cfg(feature = "sync")]
-/// Synchronous (blocking) DAW control API for real-time audio contexts.
-pub mod sync {
-    pub use daw_control_sync::*;
-}
-
-// ── Reaper: REAPER-specific implementations ─────────────────────────────────
-#[cfg(feature = "reaper")]
-/// REAPER DAW implementation — in-process service dispatchers.
-pub mod reaper {
-    pub use daw_reaper::*;
-}
-
 // ── Standalone: reference/mock implementation ───────────────────────────────
 #[cfg(feature = "standalone")]
 /// Standalone reference implementation for testing (mock data included).
 pub mod standalone {
     pub use daw_standalone::*;
+}
+
+// ── REAPER backend re-export ────────────────────────────────────────────────
+// `daw-bridge`, `daw-perf-test`, and the in-process sync engine reach
+// through the facade to REAPER-side helpers (event_hub, safe_wrappers,
+// register_*) without taking direct `daw-reaper` deps everywhere. No
+// cycle: `daw-reaper` is a feature-gated dependency of this facade.
+#[cfg(feature = "reaper")]
+pub mod reaper {
+    pub use daw_reaper::*;
 }
 
 // ── File: RPP file format parser ────────────────────────────────────────────
@@ -166,6 +195,29 @@ pub mod file {
 //   daw → daw-extension-runtime → daw-reaper → keyflow → daw
 // (daw-reaper uses keyflow for chord detection; keyflow uses daw::module).
 // Extension authors depend on `daw` + `daw-extension-runtime` together.
+
+// ── Sync stack: engine + network + Link ─────────────────────────────────────
+//
+// `daw-synchronization`, `daw-network`, and `daw-link` are also public
+// sibling crates, not folded under the `daw` facade. Each depends on
+// `daw` itself (synchronization on the streaming surface, network on
+// `SyncEvent` from synchronization, link is standalone), so a facade
+// re-export would cycle. Consumers (other domain crates that want to
+// reuse the peer-mesh transport for non-sync use cases, integration
+// tests, the daw CLI's `sync` subcommand) depend on these directly.
+//
+// - `daw-synchronization` — backend-agnostic sync engine + drift corrector
+//   + heartbeat. Wraps the streaming surface from `daw::service` in
+//   `SyncEvent` envelopes.
+// - `daw-network`       — TCP peer mesh + handshake + clock calibration.
+//   Concrete on `SyncEvent` today; library-shaped so other domains can
+//   reuse the transport.
+// - `daw-link`          — Ableton Link adapter (host-agnostic via the
+//   `LinkCallbacks` trait).
+//
+// `daw-bridge` wires all three together inside its `sync` cargo feature
+// (default-on), gated at runtime by `FTS_SYNC_ENABLED=1`. See
+// `daw-bridge/src/sync_runtime.rs` and `docs/sync-stack-consolidation.md`.
 
 // ── Streaming ergonomics ────────────────────────────────────────────────────
 pub use stream::RxExt;
@@ -189,9 +241,9 @@ pub mod ui {
     /// Dock host implementation backed by REAPER's docker + Dioxus.
     pub mod dock {
         pub use daw_reaper_dioxus::dock::{
-            DockablePanelConfig, hide_panel, init as init_dock, is_panel_visible, register_panel,
-            register_panel_from_service, restore_dock_state, save_dock_state, show_panel,
-            toggle_panel, unregister_all_panels, update_panels,
+            DockablePanelConfig, hide_panel, init as init_dock, is_panel_visible, prewarm_panel,
+            register_panel, register_panel_from_service, restore_dock_state, save_dock_state,
+            show_panel, toggle_panel, unregister_all_panels, update_panels,
         };
         pub use daw_reaper_dioxus::service::{init as init_service, register_panel_from_def};
     }
