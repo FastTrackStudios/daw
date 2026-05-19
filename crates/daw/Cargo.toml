@@ -53,3 +53,6 @@ standalone-audio = ["standalone", "daw-standalone/audio"]
 standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
 file = ["dep:dawfile-reaper", "dep:dawfile-ableton"]
 reaper-ui = ["dep:daw-reaper-dioxus"]
+
+[lints]
+workspace = true
