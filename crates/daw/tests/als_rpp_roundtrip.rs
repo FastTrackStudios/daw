@@ -431,23 +431,19 @@ fn extract_midi_notes(item: &dawfile_reaper::types::Item) -> Vec<KeyTrack> {
         };
 
         match event.event_type() {
-            MidiEventType::NoteOn => {
-                if event.bytes.len() >= 3 {
-                    let note_num = event.bytes[1];
-                    let vel = event.bytes[2];
-                    if vel > 0 {
-                        pending_notes.push((abs_pos, note_num, vel));
-                    } else {
-                        // velocity 0 = note-off
-                        complete_note(&mut pending_notes, &mut key_map, abs_pos, note_num, tpqn);
-                    }
-                }
-            }
-            MidiEventType::NoteOff => {
-                if event.bytes.len() >= 2 {
-                    let note_num = event.bytes[1];
+            MidiEventType::NoteOn if event.bytes.len() >= 3 => {
+                let note_num = event.bytes[1];
+                let vel = event.bytes[2];
+                if vel > 0 {
+                    pending_notes.push((abs_pos, note_num, vel));
+                } else {
+                    // velocity 0 = note-off
                     complete_note(&mut pending_notes, &mut key_map, abs_pos, note_num, tpqn);
                 }
+            }
+            MidiEventType::NoteOff if event.bytes.len() >= 2 => {
+                let note_num = event.bytes[1];
+                complete_note(&mut pending_notes, &mut key_map, abs_pos, note_num, tpqn);
             }
             _ => {}
         }
