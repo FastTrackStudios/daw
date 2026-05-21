@@ -89,6 +89,81 @@ keeping notes on people you care about.
 Contacts link bidirectionally with Projects (collaborators) and
 Inbox (mentions, reflections about people).
 
+### 📨 Comms — *"what's in flight, and where does it belong?"*
+
+The communications surface: email, chat, project threads, DMs.
+Same triage shape as Inbox — incoming messages get processed and
+either linked to a project, archived, snoozed, or deleted — but
+the data lives differently from the other pillars because
+communications are inherently **multi-party**.
+
+**Why this surface looks different from the others:**
+
+- **Not markdown files.** Messages carry too much structure
+  (sender, recipient, thread parent, timestamps, read state,
+  delivery state, attachments, encryption envelopes), too much
+  volume (100k+ message archives), and too many simultaneous
+  participants for plain files to handle. Storage is structured
+  tables on the server (SeaORM / postgres in prod), with vox
+  streaming to clients and a local read-through cache for offline
+  access.
+- **Server-authoritative.** Email comes from external systems
+  (IMAP/SMTP). Chat needs real-time push with multi-party
+  participation. Audit logs need legal-grade immutability. These
+  break the local-first model — and that's correct, because the
+  data belongs partly to the *other* people in the conversation.
+- **Federated, not platformed.** The reconciliation with the
+  guiding constraint: the server is *infrastructure*. You can
+  self-host it. Data is exportable in open formats (mbox for
+  email, Matrix/MLS for chat). The client always has a local
+  replica of your view. No vendor lock-in — same model as running
+  your own SMTP server.
+
+**Capabilities:**
+
+- **Email client** — IMAP/SMTP per-org accounts, unified inbox
+  across accounts, project-link rules (auto-tag incoming mail by
+  sender / subject / project membership), compose / reply /
+  forward. Attachments route through the existing attachments
+  feature.
+- **Chat / threads** — every project gets a `#general` thread by
+  default; add more as the project grows. Cross-project DMs for
+  collaborator conversations that don't fit one project. Real-time
+  via the existing vox WebSocket relay. Threading, reactions, read
+  receipts, presence.
+- **External bridges** — adapters for Matrix (federated), and
+  optionally Slack / Discord / Teams (work accounts) so messages
+  in those systems can be triaged into the same surface.
+- **Search at scale** — full-text + recency-weighted ranking
+  (tantivy in v1, embeddings for semantic search later).
+
+**Triage flow** — the same temporal contract as Inbox, applied to
+in-flight communications:
+
+1. Incoming mail / chat lands in Comms with no project assignment.
+2. The triage view surfaces overdue items honestly (no badges, no
+   shame — just "these need a decision").
+3. Triage actions: link to existing project, create new project,
+   archive, delete, snooze.
+4. Once linked, the message appears in that project's
+   conversation panel — alongside its tasks, notes, and time
+   entries. The full conversation history is one query.
+
+**Permissions + audit:**
+
+- Per-project ACL: who can read this project's conversation log.
+- Per-thread ACL: implicit from the original to/cc + explicit
+  grants.
+- Every access is recorded in an append-only audit log. "Who read
+  what, when" survives any future dispute.
+- Linking a message to a project is itself a logged metadata
+  event — visible to anyone with project access.
+
+Comms threads through every other pillar: Contacts (the people in
+the conversation), Projects (where the conversation belongs),
+Inbox (capture of insights mid-conversation), Wiki (citations to
+canonical references), Goals (which goal does this thread serve?).
+
 ### 🎯 Goals — *"am I building the life I said I wanted?"*
 
 Goals aren't a separate pillar — they're **Projects with horizon
@@ -254,14 +329,19 @@ Every design decision passes through this filter. Concretely:
   iCalendar, vCard. You can stop using Task at any time and your
   data continues to work in every other tool that reads those
   formats.
-- **Local-first is an ethic.** No telemetry, no cloud dependency,
-  no subscription lock-in. The server is a sync relay you can
-  self-host or skip entirely.
+- **Local-first is an ethic, with one honest exception.** No
+  telemetry, no cloud dependency, no subscription lock-in. The
+  sync relay you self-host or skip entirely. The exception is
+  Comms: emails and chats involve other people's data, so the
+  server is system-of-record rather than relay — but it's still
+  *your* server (self-hostable), in open formats (mbox, Matrix),
+  with a full local replica. Federated infrastructure, not
+  platform lock-in.
 
 The scope is *entire life management* — projects, knowledge,
-relationships, time, money, things, places. The constraint is
-that all of it has to serve the life it's managing, not become
-it.
+relationships, communications, time, money, things, places. The
+constraint is that all of it has to serve the life it's managing,
+not become it.
 
 ## What the words mean here
 
