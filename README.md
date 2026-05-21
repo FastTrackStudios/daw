@@ -174,8 +174,9 @@ the spine that connects today's work to your future self.
 
 Each goal-project carries:
 
-- **Horizon** — `today / week / month / quarter / year / 5-year /
-  10-year / life`. A project can sit at any level; long-horizon
+- **Horizon** — `today / week / cycle / quarter / year / 5-year /
+  10-year / life`. (Cycle is a 28-day / 4-week block; see *Time
+  architecture* below.) A project can sit at any level; long-horizon
   goals contain shorter-horizon sub-projects.
 - **Charter** — one of the project's notes captures *why* this
   matters, what success looks like, the cost (financial / time /
@@ -295,6 +296,171 @@ capture lives in your inbox. The wiki only grows by intentional
 promotion. The system is designed around the natural maturation
 of ideas (capture → personal note → consolidated fact) rather
 than around storage convenience.
+
+### Time architecture — cyclic planning
+
+Task plans time in **cycles** rather than calendar months. The
+default time model:
+
+```
+Year
+├── Q1  (13 weeks)
+│   ├── Cycle 1   (4 weeks = 28 days)
+│   ├── Cycle 2   (4 weeks)
+│   ├── Cycle 3   (4 weeks)
+│   └── Reset Week  ← end of quarter
+├── Q2  (same shape)
+├── Q3  (same shape)
+└── Q4  (same shape)
+```
+
+Year totals: `4 × 13 × 7 = 364 days`. The 1–2 leftover days
+accumulate over ~5 years until they cross a 7-day threshold,
+giving that year a **Week Zero** at the boundary (a prep week
+before Cycle 1 of the next year).
+
+**Why cycles instead of months:**
+
+Calendar months are awful for routines. They're different lengths
+(28/29/30/31), they start on different days of the week, and the
+number of each weekday per month drifts. Plan a "first Sunday of
+the month" routine and the first Sunday floats anywhere from day
+1 to day 7. Plan "midpoint reflection" on the 15th and it lands
+on a different weekday every month.
+
+Cycles fix this. Every cycle:
+- Has exactly **28 days = 4 weeks**.
+- Starts on the **same weekday** (user-configurable; default Monday).
+- Has **4 of each weekday** — 4 Mondays, 4 Sundays, etc.
+- Has weeks worth exactly **25% of the cycle** — planning math is
+  trivial ("I want to be halfway by end of week 2").
+
+This makes habits, training programs, meal-prep rotations,
+journaling rhythms, and weekly reviews land predictably. The
+midpoint of every cycle is always the same weekend. The end of
+every cycle is always the same weekend. Routines build naturally.
+
+**Reset weeks are structurally separate from cycles.** A reset
+week is not "the fifth week of a cycle." It sits at the end of
+each quarter as a deliberate gap — refresh spaces, review goals,
+consider what worked, prep the next quarter. The quarterly review
+*cadence* is built into the calendar itself; the system doesn't
+need to remind you because the week IS the reminder.
+
+**Anchor rules:**
+
+- **Year start** — Week 1 of Cycle 1 of Q1 is the first 7-day
+  week containing **≥ 4 days** of the new year (ISO-week-style).
+  Monday-start, 2026: starts 2025-12-29.
+- **Cycle epoch** — configurable per-user (Monday-start default;
+  Sunday-start common for some traditions).
+- **Bonus / Week Zero years** — for Monday-start: 2026, 2032,
+  2037. For Sunday-start: 2025, 2031, 2036. The bonus week is
+  treated as Week Zero of the *following* year — a prep / soft-
+  start week before Cycle 1 begins.
+
+**Two coordinate systems, one source of truth:**
+
+Every datetime in Task has two representations, computed from one
+`DateTime<Utc>`:
+
+```
+Gregorian:   2026-03-15
+Cyclic:      2026-Q1-C3-W2-D5     ("year, quarter, cycle, week, day")
+```
+
+External interop speaks Gregorian — CalDAV, IMAP timestamps,
+invoices, tax periods, anything the world's running on. **In-app
+primary display is cyclic.** The Calendar lens dual-renders both;
+goal horizons (cycle / quarter / year) reference the cyclic
+coordinate; reviews fire on cyclic boundaries.
+
+**Where this shows up:**
+
+- **Goals** — horizons are cycle-aware (today / week / cycle /
+  quarter / year / 5y / 10y / life).
+- **Habits lens** — heatmap defaults to 28-day grid (4 weeks × 7
+  days). Cadence templates speak in cycles ("once per cycle",
+  "week 1 of each cycle", "twice weekly").
+- **Training lens** — a training block is naturally a cycle
+  (3 build weeks + 1 deload — the original mesocycle).
+- **Reviews** — automatic ritual prompts on cycle/quarter
+  boundaries. End-of-cycle weekend, end-of-quarter reset week,
+  year-end Week Zero.
+- **Inbox temporal contract** — review SLAs measured in cycle-
+  weeks rather than calendar weeks (consistent meaning regardless
+  of which month a note landed in).
+
+Credit: this 4-quarter / 3-cycle-plus-reset-week structure
+follows the cyclic-planning system documented at
+[youtube.com/watch?v=BiY2yUwTgQc](https://www.youtube.com/watch?v=BiY2yUwTgQc).
+A user who prefers traditional Gregorian planning can flip the
+default; the cyclic layer becomes a parallel coordinate system
+they can ignore.
+
+### Information policy — data classification + LLM scoping
+
+Every note carries a **sensitivity class** that governs which (if
+any) LLM can see it. Without this, putting personal data into a
+life-management system that touches LLMs is irresponsible — your
+passport, therapy notes, financial account numbers, and medical
+record don't belong in any cloud LLM's context window, ever.
+
+**Classes** (default per pillar, overridable per-note):
+
+| Class | Examples | LLM access |
+|---|---|---|
+| `public` | Wiki entries, shareable docs, public project notes | Any registered LLM, including cloud (Claude, GPT) |
+| `project` | Project-internal notes, meeting logs | LLMs explicitly granted that project's scope |
+| `personal` | Inbox, journals, atomic notes, personal Wiki | **Local LLM only** (Ollama, llama.cpp) — never cloud |
+| `records` | Passport, IDs, medical history, financial accounts, legal docs | **Never sent to any LLM.** Display only. |
+| `legacy` | Legacy-contact-only material | Locked entirely until access-trigger |
+
+Defaults: Wiki = `public`. Project notes = `project`. Inbox =
+`personal`. Records section = `records`. Override is a single
+frontmatter field: `sensitivity: records`.
+
+**LLM endpoint registry** — each configured LLM declares which
+classes it's allowed to see:
+
+```yaml
+endpoints:
+  local-ollama:
+    classes: [public, project, personal]
+  claude-cloud:
+    classes: [public, project]      # explicitly NOT personal
+  hermes-internal:
+    classes: [public, project, personal]
+```
+
+**Pre-flight redaction** — every context-building pipeline (chat
+agent, summarization, semantic search) filters by the target
+LLM's allowed classes *before* the prompt is built:
+
+- Notes outside the LLM's classes don't enter context at all.
+- Citations to disallowed notes get redacted at the link
+  (`[redacted: passport.md (records-class)]`) so the LLM knows
+  *something exists* but not what.
+- Records-class notes are never included by any pipeline — no
+  override, no escape hatch.
+
+**Audit log** — every prompt to every LLM endpoint records
+which notes were in context, their classes, and the endpoint
+that received them. Append-only. "What does Claude know about my
+Personal org?" is a query.
+
+**Records UI** — the Records view is a lens over notes-tagged-
+`records`. They live in their natural pillars (Records section of
+Wiki for medical reference docs, Operations for tax filings,
+Projects for client contracts) but the Records lens aggregates
+them with the LLM-scope visualization built in. You can see at a
+glance: "this passport scan is class `records`, no LLM has ever
+been allowed to see it."
+
+This is what makes "LLM-assisted life management" responsible
+rather than reckless. The default isn't "send everything to the
+smartest model"; the default is "the smallest model that respects
+the data's class."
 
 ### The guiding constraint
 
