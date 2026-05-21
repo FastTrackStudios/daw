@@ -8,6 +8,261 @@ domain — projects, time tracking, invoicing, inventory, recipes,
 agent chat, calendar — is a self-contained feature you can use
 together or strip out, all written in Rust + Dioxus.
 
+## The product
+
+Task is organized around four top-level surfaces plus a per-org
+operations panel. Each surface answers a distinct question.
+
+### 📥 Inbox — *"what's on my mind right now, and have I processed it?"*
+
+The capture-and-review surface. Two jobs:
+
+1. **Capture** — fleeting notes, half-formed thoughts, links saved
+   for later, daily reflections, dreams, prompts. Personal,
+   private, messy by design.
+2. **The temporal contract** — Inbox enforces the discipline that
+   captured notes get *processed* on a schedule. Every fleeting
+   note has a review SLA: a card you've ignored for too long
+   surfaces as overdue. Processing means either promoting it
+   (fleeting → atomic → maybe Wiki), linking it into a Project,
+   archiving it, or deleting it. The Inbox is where you uphold the
+   contract that says "anything I capture, I will return to."
+
+Notes mature outward: fleeting → atomic note → consolidated Wiki
+entry. Inbox notes link **out** to anything — Projects, Contacts,
+Wiki entries. They're the source of the personal graph.
+
+### 📚 Wiki — *"what is known?"*
+
+A consolidated, depersonalized knowledge base. Facts, references,
+explanations, definitions, how-tos. Built as an
+[LLM-Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) —
+LLM reads source documents and incrementally maintains an
+interconnected encyclopedia. Same shape Obsidian uses (Markdown +
+YAML frontmatter + `[[wikilinks]]`), so the wiki dir works as an
+Obsidian vault if you ever want to leave.
+
+**The Wiki is a graph sink.** Other surfaces can link to it; it
+cannot link out. The wiki can link within itself. This isolation
+is deliberate — it keeps the encyclopedia clean enough to publish
+(see Quartz integration) and prevents personal context from
+leaking into shared knowledge. Promotion to the Wiki is a
+conscious step, not an accidental tangle.
+
+Wiki pages do **show** incoming links — a "referenced by" panel
+lists tasks, project docs, inbox notes, and contacts that cite
+this entry. Backlinks are queries against the rest of the graph,
+not edges authored *by* the wiki page, so the wiki's source files
+stay publishable in isolation.
+
+### 📁 Projects — *"what am I building / doing?"*
+
+Where Task shines. One pillar holds every project — personal,
+work, side, archived — filterable by the organization switcher
+("Personal", "FastTrackStudio", "Client X", …). Each project owns:
+
+- Its own task list (with kanban, gantt, agent dispatch)
+- Its own notes / spec docs / meeting logs
+- Its own attachments
+- Its own time + invoice records
+- Its own subset of contacts (collaborators, clients, vendors)
+- Its own **custom workflows** — status sets, kanban columns,
+  automation, agent dispatch rules — defined per-project (or
+  inherited from the org template).
+
+**Crucially, a project's data lives where its actual artifacts
+live** — alongside the code repo, the design files, the
+spreadsheets. Task isn't a centralized knowledge silo you sync
+into; it's the *editing surface for the data that's already where
+your work lives*. Move a project, it's a folder move. Archive it,
+it's a folder archive. Share it, push the folder to a collaborator.
+
+### 👥 Contacts — *"who matters?"*
+
+A CalDAV-synced relationship manager. Standard address-book fields
+plus the interaction graph: which projects this person touched,
+which meetings you've had, what they said, what you owe them,
+upcoming gift / compliment / check-in reminders. Designed to help
+you be *intentionally* attentive — the application equivalent of
+keeping notes on people you care about.
+
+Contacts link bidirectionally with Projects (collaborators) and
+Inbox (mentions, reflections about people).
+
+### 🎯 Goals — *"am I building the life I said I wanted?"*
+
+Goals aren't a separate pillar — they're **Projects with horizon
+metadata and a charter**. The goal-as-project pattern means
+everything you've already built (tasks, notes, financial tracking,
+contacts, attachments) composes for free; the goal layer just adds
+the spine that connects today's work to your future self.
+
+Each goal-project carries:
+
+- **Horizon** — `today / week / month / quarter / year / 5-year /
+  10-year / life`. A project can sit at any level; long-horizon
+  goals contain shorter-horizon sub-projects.
+- **Charter** — one of the project's notes captures *why* this
+  matters, what success looks like, the cost (financial / time /
+  opportunity), and the contingency ("if not by date X, then Y").
+  The charter is what makes the goal survive setbacks.
+- **Financial target** — optional `target_amount` + `target_date`
+  pulled from Operations.Finance. The system computes the monthly
+  rate needed and shows progress against it.
+- **Sub-projects** — a 5-year goal decomposes into a tree of
+  shorter projects. "Buy a house" branches into "build credit,"
+  "save down payment," "research neighborhoods," each with their
+  own milestones.
+- **Supporting habits** — habits linked to a goal answer the
+  question they're for. Skipping a habit prompts an honest review:
+  *is this still serving Goal X?* — making the trade-off explicit
+  rather than letting it drift.
+
+Examples:
+
+> **Buy a car** *(1-year, $30k target)*
+> Charter: why this car, why now, what it replaces.
+> Sub-projects: research models, save monthly, sell current vehicle.
+> Tasks: visit dealerships, get preapproval, test drive list.
+
+> **Buy a house** *(5-year, $100k down payment)*
+> Charter: target neighborhood, family timeline, mortgage tolerance.
+> Sub-projects: build credit (1yr), save down payment (5yr),
+> research neighborhoods (2yr), search → offer → close (year 5).
+> Habits: monthly savings rate, weekly listings review.
+> Contacts: spouse, realtor, loan officer.
+
+### ⚙️ Operations — *per-organization business utilities*
+
+Separate from the main nav because the concerns are different.
+Where the 4 surfaces are about *thinking and doing*, Operations is
+about *running the business*:
+
+- **Time** — tracking, weekly/monthly/yearly reports, billable vs.
+  non-billable, per-project rollups.
+- **Invoicing** — generate invoices from time entries + line items,
+  email PDFs, track paid/outstanding.
+- **Finance** — income/expense ledger, category breakdowns,
+  per-project P&L, tax-year snapshots.
+- **Inventory** — locations + physical things they hold. Studios,
+  warehouses, home offices, storage units; the gear, instruments,
+  furniture, supplies inside each; restock triggers; assignment to
+  active projects ("this mic is in Studio B for the next session").
+
+These live in an Operations panel reachable from the org switcher,
+not from the main nav — they're tools, not surfaces.
+
+### 🔍 Lenses — *cross-cutting views over the pillars*
+
+Lenses are **perspectives, not silos**. Each lens aggregates data
+that already lives in the pillars and presents it through a domain-
+specific UI. You can add new lenses without adding pillars or
+duplicating data.
+
+**Built-in lenses:**
+
+- **📅 Calendar** — time-axis view of anything dated: task
+  due/scheduled, project milestones, time entries, contact
+  birthdays + follow-ups, wiki entries with `date:` frontmatter.
+  CalDAV bidirectional sync interoperates with your existing
+  calendar app.
+- **🗺 Map** — location-axis view: inventory locations (studios,
+  warehouses), project venues, contact addresses, meeting points.
+- **🕸 Graph** — link-axis view: the wiki internal graph, the
+  cross-pillar reference graph, backlinks panels per entity.
+- **🔁 Habits** — recurrence-pattern view: which behaviors you
+  committed to, what the last 30/90/365 days looked like, what
+  goals they serve. **No streaks, no gamification** — see the
+  guiding constraint below. The view surfaces honest information
+  (12 of 30 days, last gap 4 days), and skipped habits route to
+  Inbox for review.
+- **💪 Training** — workout aggregation: PR graphs, volume per
+  muscle group, program adherence, deload signals. Built from
+  tasks tagged with `workout:` structured data.
+- **🍳 Meals** — meal-planning view: week grid, prep-day visibility,
+  shopping-list generator (`project meal plan` minus
+  `pantry inventory` = grocery list), pantry-aware recipe
+  suggestions, expiry prompts.
+- **🎯 Goals** — horizon pyramid (life → 10yr → 5yr → year →
+  quarter → month → week → today). Up-link from any task ("what
+  goal does this serve?") and down-link from any goal ("what am I
+  doing this week toward this?"). Drift detection surfaces stale
+  goals to Inbox for re-charter or drop.
+- **💰 Finance dashboard** — category trends, per-project P&L,
+  goal-savings progress, cash-flow projection.
+
+**Custom lenses:** any user can define a new lens as a *query +
+layout*. "Reading log," "Journaling streaks," "Gardening,"
+"Apartment hunt" — none of these need new code or new pillars.
+A lens is a saved cross-pillar query rendered through a chosen
+visualization (list, grid, calendar, map, graph, kanban, gantt).
+
+This is what makes the architecture scale: **new life domains
+compose** the existing pillars through new lenses. They don't
+demand new silos.
+
+### Why this shape
+
+Most knowledge tools either *centralize everything* (Obsidian =
+one vault, Notion = one workspace) or *scatter into silos* (loose
+folders, separate apps for tasks vs. notes vs. contacts). Both
+modes have failure cases:
+
+- **Centralized**: every piece of knowledge tangles with every
+  other. The encyclopedia becomes unsharable because your fleeting
+  notes leaked into it. Migration is a database operation.
+- **Siloed**: context-switching between "where I work" and "where
+  I write about my work." Forgetting where you put something.
+
+Task's bet is *project-colocated data with a one-way wiki promotion
+path*. Your project notes live with the project. Your personal
+capture lives in your inbox. The wiki only grows by intentional
+promotion. The system is designed around the natural maturation
+of ideas (capture → personal note → consolidated fact) rather
+than around storage convenience.
+
+### The guiding constraint
+
+**Software meant to improve / augment your life, not consume your
+life.**
+
+Every design decision passes through this filter. Concretely:
+
+- **Output beats input.** Features must produce visible life
+  improvement (less forgotten work, better relationships, time
+  reclaimed). Capture time that doesn't return value is dead
+  weight. If a feature mostly grows the app's content without
+  changing how the user lives, it's a smell.
+- **In-and-out, not all-day.** Get information in fast, get
+  answers out fast. Long sessions inside the app are a failure
+  mode. Workflows route you back to the world.
+- **Push to the world, not pull into the app.** Calendar entries
+  sync out via CalDAV. Notes live as files on disk you can edit
+  in any editor. Contacts federate. Task is a lens over your
+  existing life-data, not a destination that owns it.
+- **No engagement loops.** No streaks, no gamification, no
+  daily-active-user hooks. The temporal contract is a real
+  obligation surfaced honestly — "you've ignored these 12 notes
+  for 3 weeks, here they are" — not a habit-trap dressed up as
+  productivity.
+- **Quiet by default.** Notifications only when they carry signal
+  the user would want acted on (a contact's birthday tomorrow,
+  a deadline approaching, a payment overdue). Never for
+  attention-fishing.
+- **Owns nothing, federates everything.** Your data is plain
+  files in standard formats. Markdown, YAML frontmatter,
+  iCalendar, vCard. You can stop using Task at any time and your
+  data continues to work in every other tool that reads those
+  formats.
+- **Local-first is an ethic.** No telemetry, no cloud dependency,
+  no subscription lock-in. The server is a sync relay you can
+  self-host or skip entirely.
+
+The scope is *entire life management* — projects, knowledge,
+relationships, time, money, things, places. The constraint is
+that all of it has to serve the life it's managing, not become
+it.
+
 ## What the words mean here
 
 - **Local-first.** The user's data lives on the user's device. Every
