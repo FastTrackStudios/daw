@@ -10,50 +10,187 @@ together or strip out, all written in Rust + Dioxus.
 
 ## The product
 
-Task is organized around four top-level surfaces plus a per-org
-operations panel. Each surface answers a distinct question.
+Task is organized around a **sub-vault taxonomy** — eight
+specialized memory layers, each answering a different question
+about your work and life. Sub-vaults are linkable but governed
+by **directional reference policies** (Knowledge cannot reach
+back into Journal; Records is graph-isolated by design). The
+same five-part core (Knowledge / Wisdom / Journal / Inbox /
+Records) applies recursively — to a person, a team, a project,
+or an LLM agent.
 
-### 📥 Inbox — *"what's on my mind right now, and have I processed it?"*
+### The sub-vault taxonomy
 
-The capture-and-review surface. Two jobs:
+| Sub-vault | Question it answers | Author | Tag |
+|---|---|---|---|
+| 📥 **Inbox** | What's unprocessed? | Capturer (human / bridge) | `fleeting` |
+| 📓 **Journal** | What happened? | Humans + LLM teams | `journal` |
+| 🧠 **Wisdom** | What do I understand? | Humans (LLMs draft-assist) | `atomic` |
+| 📚 **Knowledge** | What is true? | LLMs (humans review) | `knowledge` |
+| 🔒 **Records** | What must stay private? | Humans only | `records` |
+| 📁 **Projects** | What am I building? | Humans + project LLMs | `project` |
+| 👥 **Contacts** | Who matters? | Humans + LLM assist | `contact` |
+| 📨 **Comms** | What's in flight? | Multi-party | `message` |
 
-1. **Capture** — fleeting notes, half-formed thoughts, links saved
-   for later, daily reflections, dreams, prompts. Personal,
-   private, messy by design.
-2. **The temporal contract** — Inbox enforces the discipline that
-   captured notes get *processed* on a schedule. Every fleeting
-   note has a review SLA: a card you've ignored for too long
-   surfaces as overdue. Processing means either promoting it
-   (fleeting → atomic → maybe Wiki), linking it into a Project,
-   archiving it, or deleting it. The Inbox is where you uphold the
-   contract that says "anything I capture, I will return to."
+The first five are the **memory core** — the recursive pattern
+that scales from individual to org to project to agent. The last
+three (Projects, Contacts, Comms) are the *life-and-work* layer
+that the core memory composes around.
 
-Notes mature outward: fleeting → atomic note → consolidated Wiki
-entry. Inbox notes link **out** to anything — Projects, Contacts,
-Wiki entries. They're the source of the personal graph.
+### 📥 Inbox — *"what's unprocessed?"*
 
-### 📚 Wiki — *"what is known?"*
+The triage station. Notes here are **ephemeral by design** —
+they get processed *out* into Journal, Wisdom, Projects, or
+trash. The Inbox should approach zero on a regular cadence.
 
-A consolidated, depersonalized knowledge base. Facts, references,
-explanations, definitions, how-tos. Built as an
-[LLM-Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) —
-LLM reads source documents and incrementally maintains an
-interconnected encyclopedia. Same shape Obsidian uses (Markdown +
-YAML frontmatter + `[[wikilinks]]`), so the wiki dir works as an
-Obsidian vault if you ever want to leave.
+**Inbox is a per-sub-vault pattern, not a single global surface.**
+Each accumulating sub-vault has its own Inbox:
 
-**The Wiki is a graph sink.** Other surfaces can link to it; it
-cannot link out. The wiki can link within itself. This isolation
-is deliberate — it keeps the encyclopedia clean enough to publish
-(see Quartz integration) and prevents personal context from
-leaking into shared knowledge. Promotion to the Wiki is a
-conscious step, not an accidental tangle.
+- **Personal Inbox** — your own fleeting captures (this section).
+- **Knowledge Inbox** — LLM-curated drafts pending human review
+  before promotion to canonical Knowledge.
+- **Project Inbox** — incoming items routed to a project (from
+  Comms triage, external integrations, agent dispatch).
+- **Comms Inbox** — the email/chat triage queue.
 
-Wiki pages do **show** incoming links — a "referenced by" panel
-lists tasks, project docs, inbox notes, and contacts that cite
-this entry. Backlinks are queries against the rest of the graph,
-not edges authored *by* the wiki page, so the wiki's source files
-stay publishable in isolation.
+Each follows the same shape (queue + review SLA + triage actions
++ zero-inbox goal) but with sub-vault-specific actions. What
+follows describes the Personal Inbox; other Inboxes are mentioned
+in their respective sub-vault sections.
+
+**The temporal contract** — between you and yesterday-you / future-you.
+You must store every fleeting capture in a single trusted system,
+and every day you must *read* yesterday's captures. Not necessarily
+do them — just face them. (Borrowed from Tris's [FLAP system](https://www.youtube.com/@NoBoilerplate)
+which borrowed from David Allen's GTD and Bob Doto's *A System for
+Writing*.)
+
+**Daily review is the system's entry point.** Opening Task lands
+you in Inbox. Each fleeting note gets one of five triage actions:
+
+1. **Do now** — task that takes <2 minutes. Do it, delete the note.
+2. **Atomic-ize** — promote to Wisdom: rewrite in your own words,
+   keep the original capture as a footnote (paper trail).
+3. **Journal** — observation worth keeping but not synthesized.
+   Drop into today's Journal entry with timestamp.
+4. **File to Project** — belongs to ongoing work. Cut/paste into
+   the project's notes.
+5. **Snooze** — can't process today. Use spaced-repetition-style
+   backlog management ("later / soon / now") so the note resurfaces
+   at the right time without piling up.
+
+Snooze is the key to scale: a backlog of thousands becomes a
+processable stream of ~10/day. Spaced-repetition for fleeting
+notes (re-purposed from study tools) is what makes the temporal
+contract actually upholdable.
+
+**Capture bridges** — Inbox accepts captures from anywhere:
+in-app, mobile, Readwise (book/article highlights), Telegram /
+SMS / email-to-inbox, REST API for scripts and external tools.
+The home of capture is wherever you happen to be.
+
+### 📓 Journal — *"what happened?"*
+
+Stream-of-observation. Daily notes, meeting logs, agent run
+transcripts, dream journals, decision logs, weekly retrospectives.
+Time-ordered, append-style, kept indefinitely.
+
+**Both humans and LLM teams keep journals.** Your daily reflection
+sits next to the Ops agent's standup summary sits next to the
+Knowledge-curator agent's "what I added today" log. The journal is
+where the *operating log* of the org lives — what happened, who
+did what, what got decided.
+
+Journal entries can reference **Knowledge** (cite the facts
+mentioned), **Wisdom** (cite the principles applied), **Projects**
+(what work was advanced), and **Contacts** (who you talked to).
+Journal cannot be referenced by Knowledge — that's the
+directionality rule. Your raw observations stay personal even when
+they cite published facts.
+
+### 🧠 Wisdom — *"what do I understand?"*
+
+Your atomic notes. Your synthesis. Things written *in your own
+words* after you've digested them — the actual learning, not the
+raw material.
+
+This is the Zettelkasten layer, modeled directly after Bob Doto's
+*A System for Writing*. Each atomic note is:
+
+- **Loosely coupled** — readable on its own without chasing 12 links
+- **Highly cohesive** — focused on one idea
+- **Owned by you** — your phrasing, your understanding, not a copy-paste
+- **Cross-linked** — see-also references to related atomic notes
+- **Tree-positioned** — one `up:` frontmatter property gives it a
+  single canonical parent, building a navigable tree
+
+The tree-view (one parent per note) solves the "graph view
+doesn't scale past 30 nodes" problem. By cycle 3 you have
+hundreds of atomic notes; the up-link tree keeps them browsable
+like a card-box.
+
+**Wisdom can cite Knowledge** (your understanding rests on
+facts), and **Wisdom can cite Wisdom** (ideas connect). Wisdom
+cannot be cited by Knowledge — the encyclopedia stays
+depersonalized.
+
+File names are *identity*, not IDs — human-readable summaries
+that jog your memory without opening the file. `Writers block is
+caused by reader block.md` beats `2026-03-15-1342.md`.
+
+### 📚 Knowledge — *"what is true?"*
+
+**LLM-curated external knowledge.** Facts, references, definitions,
+how-tos — the encyclopedia. Built as an
+[LLM-Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f):
+LLM agents read source documents (papers, books, web content,
+internal docs) and incrementally maintain an interconnected
+encyclopedia with citations and provenance. Same on-disk shape
+Obsidian uses (Markdown + YAML frontmatter + `[[wikilinks]]`), so
+the Knowledge vault works as a standalone Obsidian vault — full
+[obsidian-compat](crates/obsidian-compat/) layer (parser, Bases
+evaluator, CLI parity).
+
+**Knowledge is a graph sink.** It can only link to other
+Knowledge — no outbound links to Wisdom, Journal, or anything
+personal. This isolation is what makes Knowledge **publishable in
+isolation** (push to Quartz, share with collaborators, hand to a
+new team member) without leaking personal context. Backlinks
+panels still show incoming references from elsewhere — those are
+queries, not authored edges.
+
+Humans review LLM-curated entries before they're marked stable.
+LLM-authored content carries provenance: `author: <llm-id>`,
+`reviewed_by: <user>`, `prompt_hash: <…>`. You can always trace a
+Knowledge entry back to the source documents and the agent that
+synthesized it.
+
+**Knowledge Inbox** — LLM ingestion agents drop drafts into the
+Knowledge sub-vault's own Inbox (`knowledge/_inbox/`) tagged
+`pending_review`. A human reviewer triages: promote to canonical
+Knowledge (move out of `_inbox/`, drop the tag), request revision
+(comment + bounce back to the agent), or reject (delete). This
+mirrors the personal-Inbox temporal contract but at the
+sub-vault level — same discipline of "anything captured will be
+returned to."
+
+### 🔒 Records — *"what must stay private?"*
+
+The locked private vault. Passports, IDs, driver's licenses,
+medical history, insurance, financial account numbers, legal
+documents (wills, contracts, leases), tax returns, vaccination
+certs, warranties.
+
+**Records is graph-isolated by design.** It has no outbound
+references and is referenced by nothing. **No LLM can ever read
+it.** No exception, no override, no escape hatch — the
+information-policy layer hard-blocks it.
+
+Records carry **expiry metadata** — passport renewal date, license
+renewal, warranty end. The Calendar lens surfaces upcoming
+expirations as natural reminders. Stored with strong encryption
+at rest; on-disk format is plain markdown so you can decrypt and
+read with any tool if Task ever disappears.
 
 ### 📁 Projects — *"what am I building / doing?"*
 
@@ -159,10 +296,138 @@ in-flight communications:
 - Linking a message to a project is itself a logged metadata
   event — visible to anyone with project access.
 
-Comms threads through every other pillar: Contacts (the people in
-the conversation), Projects (where the conversation belongs),
-Inbox (capture of insights mid-conversation), Wiki (citations to
-canonical references), Goals (which goal does this thread serve?).
+Comms threads through every other sub-vault: Contacts (the people
+in the conversation), Projects (where the conversation belongs),
+Journal (insights captured mid-conversation), Knowledge (citations
+to canonical references), Goals (which goal does this thread
+serve?).
+
+### Reference policy — directional rules between sub-vaults
+
+Sub-vaults are linkable but governed by **type-directional rules**
+enforced at link-write time, at LLM-context-build time, and at
+publication time. The rule:
+
+```
+Knowledge  →  Knowledge only
+              (publishable in isolation; no outbound to personal)
+
+Wisdom     →  Knowledge ✓   Wisdom ✓   Journal ✗   Records ✗
+              (synthesis cites facts; not raw observations or secrets)
+
+Journal    →  Knowledge ✓   Wisdom ✓   Journal ✓   Projects ✓   Contacts ✓
+              (observations reference everything except Records)
+
+Inbox      →  Anywhere — ephemeral; will be processed out anyway
+
+Records    →  Nothing.  Nothing references it.
+              (graph-isolated by design)
+
+Projects   →  Anywhere except Records (unless explicitly granted)
+
+Contacts   →  Knowledge ✓   Projects ✓   Comms ✓   (people anchors)
+
+Comms      →  References anything by ID;
+              inbound references to Comms governed by participant ACLs.
+```
+
+**Backlinks are queries, not authored edges.** A Knowledge entry
+can show "referenced by 3 Journal entries, 2 Wisdom notes, 1
+Project doc" without violating the rule — the entry itself
+authored no outbound links. The reference-policy applies to
+*links written into the source*, not to *queries computed at view
+time*.
+
+This is what keeps the Knowledge sub-vault **publishable**:
+push it to Quartz, share with a new team, hand to a contractor
+— the source files have no edges pointing at your personal
+context. Only inbound queries, computed by whoever's viewing.
+
+### Org-scale — sub-vault × owner
+
+Each sub-vault is owned by either an **org** or a **person**.
+Switching orgs (`Personal` / `FastTrackStudio` / `Client X`)
+changes which sub-vaults are visible. Personal sub-vaults remain
+visible across all orgs — they're yours.
+
+```
+                Personal         Org: FastTrackStudio    Org: Client X
+Knowledge       rare             ✓ shared world-facts    ✓ industry refs
+Wisdom          ✓ atomic notes   ✓ team synthesis        ✓ deliverables
+Journal         ✓ daily notes    ✓ standups + agent log  ✓ meeting logs
+Inbox           ✓ always         —                       —
+                                 (Inbox is per-person)
+Records         ✓ passports      ✓ legal docs            ✓ signed contracts
+Projects        ✓ side work      ✓ org work              ✓ client work
+Contacts        ✓ personal       ✓ team + vendors        ✓ client roster
+Comms           ✓ personal mail  ✓ org email + chat      ✓ client thread
+```
+
+The same five-part memory core (Knowledge / Wisdom / Journal /
+Inbox / Records) is **fractal** — it applies recursively:
+
+- **One person** has personal Knowledge / Wisdom / Journal /
+  Inbox / Records.
+- **One team / org** has shared org-scoped versions.
+- **One project** can have project-scoped Knowledge / Wisdom /
+  Journal (decisions, learnings, operating log specific to it).
+- **One LLM agent** has its own Journal (its activity log) and
+  scoped read/write access into specific sub-vaults.
+
+Anywhere a coherent memory needs to exist, the same five-part
+structure applies. The reference-policy rules stay consistent at
+every scale.
+
+### LLM teams as first-class members
+
+LLMs aren't tools that read your notes — they're **members of
+orgs** with identities, scope, and authorship. They show up in
+the org's members list. They keep journals. They author content
+with provenance.
+
+```yaml
+endpoints:
+  knowledge-curator-claude:
+    role: "Maintains the Knowledge sub-vault"
+    write_access:  [knowledge_inbox]
+    read_access:   [knowledge, journal_org_public, comms_org_public]
+    cannot_read:   [wisdom_personal, records, journal_personal,
+                    inbox_personal]
+
+  ops-journal-agent:
+    role: "Standup summarization + agent run logs"
+    write_access:  [journal_org]
+    read_access:   [journal_org, projects, comms_org]
+
+  personal-assistant-local-ollama:
+    role: "Personal help — local model only"
+    write_access:  [inbox_personal, journal_personal]
+    read_access:   [knowledge, wisdom_personal, journal_personal,
+                    inbox_personal]
+    runs_locally:  true
+    never_reaches: [records, comms]
+```
+
+**LLM-authored content carries provenance** — every note an LLM
+writes records `author: <llm-id>`, `prompt_hash: <…>`, `model:
+<name>`, `at: <timestamp>`. Human-reviewed entries also carry
+`reviewed_by: <user>` + `reviewed_at: <…>`.
+
+**LLMs have their own Inbox-and-temporal-contract too.** The
+Knowledge-curator agent's drafts land in the Knowledge Inbox
+awaiting human review. The Ops-Journal agent's daily summary
+must be written by a SLA — if it skips three days, the
+operator notices.
+
+**Default deny + explicit grant.** A new LLM endpoint added to
+the org sees nothing until classes are explicitly added. There's
+no "give it everything" preset. Records is **hardcoded
+unreachable** — no override flag exists.
+
+This is what makes "LLM-assisted life management" responsible
+rather than reckless. The architecture *names* LLMs as actors
+that need scope, audit, and review — not invisible context
+consumers.
 
 ### 🎯 Goals — *"am I building the life I said I wanted?"*
 
@@ -290,12 +555,21 @@ modes have failure cases:
 - **Siloed**: context-switching between "where I work" and "where
   I write about my work." Forgetting where you put something.
 
-Task's bet is *project-colocated data with a one-way wiki promotion
-path*. Your project notes live with the project. Your personal
-capture lives in your inbox. The wiki only grows by intentional
-promotion. The system is designed around the natural maturation
-of ideas (capture → personal note → consolidated fact) rather
-than around storage convenience.
+Task's bet is **typed sub-vaults with directional reference
+policies and project-colocated data**. Knowledge curated by LLMs,
+Wisdom synthesized by humans, Journal capturing what happened,
+Inbox triaging what's unprocessed, Records guarding what must
+stay private. Linking is governed: Knowledge can't reach into
+your personal stream, Records can't be touched by any LLM. The
+maturation pipeline (Inbox → Journal/Wisdom → Knowledge) becomes
+the natural shape of how information ripens.
+
+The result: an encyclopedia you can publish, a personal
+synthesis layer that stays yours, an operating log shared with
+your team and your agents, and a private vault for the things
+that need to stay private. Same five-part memory core for one
+person, one team, one project, or one agent — fractal at every
+scale.
 
 ### Time architecture — cyclic planning
 
@@ -398,69 +672,60 @@ A user who prefers traditional Gregorian planning can flip the
 default; the cyclic layer becomes a parallel coordinate system
 they can ignore.
 
-### Information policy — data classification + LLM scoping
+### Information policy — classification, redaction, audit
 
-Every note carries a **sensitivity class** that governs which (if
-any) LLM can see it. Without this, putting personal data into a
-life-management system that touches LLMs is irresponsible — your
-passport, therapy notes, financial account numbers, and medical
-record don't belong in any cloud LLM's context window, ever.
+Sub-vault membership is the **primary classifier**. A note's
+sub-vault implies its default sensitivity class:
 
-**Classes** (default per pillar, overridable per-note):
-
-| Class | Examples | LLM access |
+| Sub-vault | Default class | LLM access shape |
 |---|---|---|
-| `public` | Wiki entries, shareable docs, public project notes | Any registered LLM, including cloud (Claude, GPT) |
-| `project` | Project-internal notes, meeting logs | LLMs explicitly granted that project's scope |
-| `personal` | Inbox, journals, atomic notes, personal Wiki | **Local LLM only** (Ollama, llama.cpp) — never cloud |
-| `records` | Passport, IDs, medical history, financial accounts, legal docs | **Never sent to any LLM.** Display only. |
-| `legacy` | Legacy-contact-only material | Locked entirely until access-trigger |
+| Knowledge | `public` | Any registered LLM, including cloud |
+| Wisdom | `personal` | Local LLM only (or org-scoped LLMs with explicit grant) |
+| Journal | `personal` (`org-shared` if org-scoped) | Org-scoped LLMs; cloud requires opt-in |
+| Inbox | `personal` | Local LLM only — your raw stream |
+| Records | `records` | **Never sent to any LLM.** Display only. |
+| Projects | `project` | LLMs scoped to that project |
+| Contacts | `personal` / `org-shared` | Org-scoped LLMs |
+| Comms | governed by participant ACLs | Conversation-scoped LLMs only |
 
-Defaults: Wiki = `public`. Project notes = `project`. Inbox =
-`personal`. Records section = `records`. Override is a single
-frontmatter field: `sensitivity: records`.
+**Per-note overrides** for edge cases — when a Wisdom note
+happens to contain sensitive data (a research note about your
+therapy progress, say), the `sensitivity:` frontmatter field
+upgrades it: `sensitivity: records`. Downgrade is similarly
+explicit. Override never **expands** access beyond what the
+sub-vault allows; it can only restrict further.
 
-**LLM endpoint registry** — each configured LLM declares which
-classes it's allowed to see:
-
-```yaml
-endpoints:
-  local-ollama:
-    classes: [public, project, personal]
-  claude-cloud:
-    classes: [public, project]      # explicitly NOT personal
-  hermes-internal:
-    classes: [public, project, personal]
-```
+**LLM endpoint registry** — each LLM in the org declares which
+sub-vaults / classes it's allowed to see (full example in the
+LLM Teams section above). Endpoints with no explicit grant see
+nothing. Records is hardcoded unreachable for every endpoint.
 
 **Pre-flight redaction** — every context-building pipeline (chat
-agent, summarization, semantic search) filters by the target
-LLM's allowed classes *before* the prompt is built:
+agent, summarization, semantic search, knowledge-curation
+ingest) filters by the target LLM's allowed scope *before* the
+prompt is built:
 
-- Notes outside the LLM's classes don't enter context at all.
+- Disallowed notes don't enter context at all.
 - Citations to disallowed notes get redacted at the link
   (`[redacted: passport.md (records-class)]`) so the LLM knows
   *something exists* but not what.
 - Records-class notes are never included by any pipeline — no
-  override, no escape hatch.
+  override, no escape hatch, no exception.
 
 **Audit log** — every prompt to every LLM endpoint records
-which notes were in context, their classes, and the endpoint
-that received them. Append-only. "What does Claude know about my
-Personal org?" is a query.
+which notes were in context, their classes, and the receiving
+endpoint. Append-only. "What does Claude know about my Personal
+org?" is a single query against the audit log.
 
-**Records UI** — the Records view is a lens over notes-tagged-
-`records`. They live in their natural pillars (Records section of
-Wiki for medical reference docs, Operations for tax filings,
-Projects for client contracts) but the Records lens aggregates
-them with the LLM-scope visualization built in. You can see at a
-glance: "this passport scan is class `records`, no LLM has ever
-been allowed to see it."
+**Records lens** — surfaces every records-class note across the
+vault with the audit context visible: "passport.md (Records,
+expires 2029-04, no LLM has ever seen it)." Per-record expiry
+metadata routes to the Calendar lens as renewal reminders.
 
 This is what makes "LLM-assisted life management" responsible
 rather than reckless. The default isn't "send everything to the
 smartest model"; the default is "the smallest model that respects
-the data's class."
+the data's class — and **never** Records."
 
 ### The guiding constraint
 
@@ -653,6 +918,39 @@ matches yours and adapt.
 Active development. Demo data is seeded server-side on every boot;
 nothing here is persisted across cold starts unless
 `SYNC_DEMO_DATABASE_URL=sqlite://./data.db?mode=rwc` is set.
+
+## Credits
+
+The product architecture builds on ideas from several sources
+worth following directly:
+
+- **Andrej Karpathy** — [LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f).
+  The pattern of LLM-curated, incrementally-maintained knowledge
+  bases. Task's Knowledge sub-vault is a direct implementation.
+- **Tris (No Boilerplate)** — [the FLAP system](https://www.youtube.com/@NoBoilerplate)
+  + [namarie.com](https://namarie.com). Five years of refined
+  Zettelkasten-meets-GTD practice in Obsidian. Inbox triage,
+  the temporal contract, spaced-repetition backlog management,
+  the up-link tree structure, file-names-as-identity — all
+  borrowed and extended.
+- **Bob Doto** — *A System for Writing*. Definitive book on
+  modern Zettelkasten / atomic notes. Task's Wisdom sub-vault is
+  the Zettelkasten layer.
+- **David Allen** — *Getting Things Done* (2001). The
+  single-trusted-system principle, the 2-minute task rule, the
+  capture/process/organize/review/engage workflow shape.
+- **[Cyclic planning system](https://www.youtube.com/watch?v=BiY2yUwTgQc)**
+  — the 4-quarter × (3-cycle + reset-week) time architecture.
+- **[nashsu/llm_wiki](https://github.com/nashsu/llm_wiki)** —
+  Tauri+React implementation of Karpathy's LLM-wiki pattern.
+  Reference for the LLM-curation pipeline we want to build for
+  the Knowledge sub-vault.
+- **[Obsidian](https://obsidian.md)** — Markdown + YAML
+  frontmatter + `[[wikilinks]]` as the on-disk format Task adopts
+  for everything text-shaped. The
+  [obsidian-compat](crates/obsidian-compat/) layer keeps Task's
+  knowledge vaults openable in Obsidian if you ever want to
+  leave.
 
 ## License
 
