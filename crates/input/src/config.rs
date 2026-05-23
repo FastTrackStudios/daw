@@ -97,6 +97,14 @@ impl KeymapConfig {
     /// - User mode definitions override base per mode.
     /// - User keybindings override per key sequence.
     /// - `unbind` removes a key from the merged map.
+    /// - Inserting a user binding at sequence `K` also removes every base
+    ///   binding whose sequence starts with `K ` (i.e. anything *below*
+    ///   `K` in the prefix tree). This keeps user leaves from being
+    ///   shadowed by leftover base subtrees: e.g. if the base has `f f`,
+    ///   `f e r`, …, and the user binds `f → action`, the user's `f`
+    ///   resolves as a clean leaf instead of staying pending while the
+    ///   trie waits for `f` to disambiguate. Siblings (`g …`, etc.) are
+    ///   untouched.
     pub fn merge(base: Self, user: Self) -> Self {
         let mut merged = base;
 
@@ -105,12 +113,33 @@ impl KeymapConfig {
         }
 
         for (mode, user_bindings) in user.keymap {
-            let mode_map = merged.keymap.entry(mode).or_default();
+            let mode_map = merged.keymap.entry(mode.clone()).or_default();
             for (key_seq, value) in user_bindings {
+                // Wipe any base bindings below `key_seq` so the user's
+                // leaf/prefix isn't shadowed by orphaned subtrees.
+                let below = format!("{key_seq} ");
+                let before = mode_map.len();
+                mode_map.retain(|k, _| !k.starts_with(&below));
+                let wiped = before - mode_map.len();
+
                 if value.trim().eq_ignore_ascii_case("unbind") {
                     mode_map.remove(&key_seq);
+                    tracing::debug!(
+                        mode = %mode,
+                        key_seq = %key_seq,
+                        wiped_below = wiped,
+                        "[keymap-merge] Unbind"
+                    );
                 } else {
-                    mode_map.insert(key_seq, value);
+                    let replaced = mode_map.insert(key_seq.clone(), value.clone()).is_some();
+                    tracing::debug!(
+                        mode = %mode,
+                        key_seq = %key_seq,
+                        action = %value,
+                        replaced,
+                        wiped_below = wiped,
+                        "[keymap-merge] Insert"
+                    );
                 }
             }
         }
@@ -223,7 +252,10 @@ pub fn parse_key_chord(input: &str) -> Result<KeyChord, ConfigError> {
     // '+' is also used as a key character (Shift+=), but it's the chord separator,
     // so handle it before splitting.
     if input == "+" {
-        return Ok(KeyChord::new(KeyCode::Character("+".to_string()), Modifiers::NONE));
+        return Ok(KeyChord::new(
+            KeyCode::Character("+".to_string()),
+            Modifiers::NONE,
+        ));
     }
     let mut modifiers = Modifiers::NONE;
     let mut parts: Vec<&str> = input.split('+').collect();
@@ -268,9 +300,7 @@ fn parse_key_code(token: &str) -> Result<KeyCode, ConfigError> {
         "right" | "arrowright" => Ok(KeyCode::ArrowRight),
         // Numpad keys
         "kp_enter" => Ok(KeyCode::Enter),
-        other if other.starts_with("kp_") => {
-            Ok(KeyCode::Character(other.to_string()))
-        }
+        other if other.starts_with("kp_") => Ok(KeyCode::Character(other.to_string())),
         other if other.starts_with('f') => {
             let n = other[1..]
                 .parse::<u8>()

@@ -1,6 +1,6 @@
 //! Core input processing state machine.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use crate::command::{ActionId, InputArgs, InputCommand};
@@ -32,6 +32,23 @@ pub struct InputProcessor {
     pending_macro_record_register: bool,
     pending_macro_play_register: bool,
     is_playing_back_macro: bool,
+    /// Chords currently held down (between keydown and keyup).
+    held_keys: HashSet<KeyChord>,
+    /// `true` if the anchor (first chord of `sequence`) has had a matching
+    /// keyup observed since the sequence began. Used to distinguish a held
+    /// prefix (e.g. holding `g` while tapping `q`/`w`/`e`) from a vim-style
+    /// double-tap (e.g. `gg`), which look identical by chord-content alone.
+    anchor_released_during_sequence: bool,
+    /// If set, sticky-prefix mode is active: after each successful match,
+    /// the sequence is rewound to this anchor instead of cleared. Cleared
+    /// on keyup of the anchor.
+    sticky_anchor: Option<KeyChord>,
+    /// Number of leaf actions that have fired during the current sticky
+    /// sequence. Used so the host can hide a lingering which-key overlay
+    /// when the anchor is released after one or more actions have run
+    /// (the user is done) while keeping it open on a bare hold+release
+    /// (the user is still exploring).
+    sticky_actions_fired: u32,
 }
 
 impl InputProcessor {
@@ -51,7 +68,44 @@ impl InputProcessor {
             pending_macro_record_register: false,
             pending_macro_play_register: false,
             is_playing_back_macro: false,
+            held_keys: HashSet::new(),
+            anchor_released_during_sequence: false,
+            sticky_anchor: None,
+            sticky_actions_fired: 0,
         }
+    }
+
+    /// Notify the processor that a key has been physically released.
+    ///
+    /// Called by hosts that can observe keyup events (e.g. the REAPER
+    /// TranslateAccel handler). Used to power "hold-prefix-active"
+    /// behaviour: as long as the anchor key of a which-key prefix is held,
+    /// successful matches preserve the prefix so subsequent leaf keys keep
+    /// firing without re-pressing it.
+    ///
+    /// Returns `true` when the host should hide a lingering which-key
+    /// overlay because a sticky-prefix sequence that fired at least one
+    /// action just ended. Bare hold-and-release with no action fired
+    /// returns `false` so the overlay can keep guiding the user.
+    pub fn notify_key_release(&mut self, chord: KeyChord) -> bool {
+        self.held_keys.remove(&chord);
+        if let Some(anchor) = self.sequence.first()
+            && anchor == &chord
+        {
+            self.anchor_released_during_sequence = true;
+        }
+        let should_hide_overlay =
+            self.sticky_anchor.as_ref() == Some(&chord) && self.sticky_actions_fired > 0;
+        if self.sticky_anchor.as_ref() == Some(&chord) {
+            self.sticky_anchor = None;
+            self.sticky_actions_fired = 0;
+            self.sequence.clear();
+            self.count_prefix = None;
+            self.pending_operator = None;
+            self.pending_macro_record_register = false;
+            self.pending_macro_play_register = false;
+        }
+        should_hide_overlay
     }
 
     /// Build an input processor from config.
@@ -153,6 +207,19 @@ impl InputProcessor {
 
     pub fn needs_timeout(&self) -> bool {
         !self.sequence.is_empty()
+    }
+
+    /// Returns `true` if the anchor (first chord) of the pending sequence
+    /// is still physically held down by the user. Hosts that drive timeout
+    /// checks from a periodic tick should use this to avoid expiring a
+    /// which-key prefix while the user is still actively holding it —
+    /// otherwise a held prefix flickers on every tick as the sequence is
+    /// cleared and immediately re-entered by OS auto-repeat.
+    pub fn is_anchor_held(&self) -> bool {
+        match self.sequence.first() {
+            Some(anchor) => self.held_keys.contains(anchor),
+            None => false,
+        }
     }
 
     pub fn timeout_duration(&self) -> Duration {
@@ -264,6 +331,14 @@ impl InputProcessor {
         from_playback: bool,
     ) -> Vec<InputCommand> {
         if chord.key == KeyCode::Escape && chord.modifiers == Modifiers::NONE {
+            if self.sequence.is_empty() {
+                let current_mode = self.modes.current().clone();
+                if let TrieLookup::Match(action) =
+                    self.lookup_in_mode(&current_mode, ctx, std::slice::from_ref(&chord))
+                {
+                    return self.execute_leaf_action(action);
+                }
+            }
             return self.handle_escape();
         }
 
@@ -271,13 +346,42 @@ impl InputProcessor {
             if let Some(commands) = self.handle_macro_controls(&chord, ctx) {
                 return commands;
             }
-            if self.handle_count_prefix(&chord) {
+            if self.handle_count_prefix(&chord, ctx) {
                 return Vec::new();
             }
         }
 
         if self.macro_recorder.is_recording() && !from_playback && !self.is_playing_back_macro {
             self.macro_recorder.record(chord.clone());
+        }
+
+        // Track held chords so that prefix anchors can be detected as still
+        // physically pressed at the moment a leaf binding fires. Macro-playback
+        // synthesises chords without real keydown/keyup pairs, so it is excluded.
+        //
+        // OS keyboard auto-repeat (a keydown for a chord already in
+        // `held_keys`) needs to be suppressed inside a which-key sequence so
+        // that:
+        //   • holding the anchor (e.g. `z`) does not re-enter the prefix
+        //     and re-flash the overlay on every repeat, and does not
+        //     accidentally match a `z z` leaf;
+        //   • holding a leaf under a sticky prefix (e.g. holding `h` after
+        //     `z` → `_SWS_TOGZOOMHORIZ`) does not toggle 30×/sec.
+        // Outside any active sequence, auto-repeat passes through so
+        // continuous actions like cursor movement keep working.
+        if !from_playback {
+            let is_auto_repeat = self.held_keys.contains(&chord);
+            let in_sequence = !self.sequence.is_empty() || self.sticky_anchor.is_some();
+            if is_auto_repeat && in_sequence {
+                return Vec::new();
+            }
+            self.held_keys.insert(chord.clone());
+        }
+
+        // Starting a fresh sequence: reset the release-tracking flag so a
+        // subsequent match can tell whether the anchor stayed held.
+        if self.sequence.is_empty() {
+            self.anchor_released_during_sequence = false;
         }
 
         self.sequence.push(chord);
@@ -287,7 +391,25 @@ impl InputProcessor {
 
         match lookup {
             TrieLookup::Match(action) => {
-                self.sequence.clear();
+                // Hold-to-keep-prefix: if the anchor (first chord) of a
+                // multi-chord match is still physically held, rewind the
+                // sequence to that anchor so the next keypress resolves as a
+                // sibling of the just-fired leaf.
+                let anchor = self.sequence.first().cloned();
+                let multi_chord = self.sequence.len() > 1;
+                let anchor_held = anchor
+                    .as_ref()
+                    .is_some_and(|c| !from_playback && self.held_keys.contains(c));
+                let anchor_uninterrupted = !self.anchor_released_during_sequence;
+                if multi_chord && anchor_held && anchor_uninterrupted {
+                    let anchor = anchor.expect("checked above");
+                    self.sequence.clear();
+                    self.sequence.push(anchor.clone());
+                    self.sticky_anchor = Some(anchor);
+                    self.sticky_actions_fired = self.sticky_actions_fired.saturating_add(1);
+                } else {
+                    self.sequence.clear();
+                }
                 self.execute_leaf_action(action)
             }
             TrieLookup::Prefix => {
@@ -301,6 +423,9 @@ impl InputProcessor {
             }
             TrieLookup::Miss => {
                 self.sequence.clear();
+                self.sticky_anchor = None;
+                self.sticky_actions_fired = 0;
+                self.anchor_released_during_sequence = false;
                 self.count_prefix = None;
                 self.pending_operator = None;
                 self.handle_unmatched(original_event, &current_mode)
@@ -339,7 +464,7 @@ impl InputProcessor {
         }
     }
 
-    fn handle_count_prefix(&mut self, chord: &KeyChord) -> bool {
+    fn handle_count_prefix(&mut self, chord: &KeyChord, ctx: &ActionContext) -> bool {
         if !self.sequence.is_empty() {
             return false;
         }
@@ -357,6 +482,19 @@ impl InputProcessor {
             return false;
         }
         if c == '0' && self.count_prefix.is_none() {
+            return false;
+        }
+
+        // If the user has explicitly bound this digit (as a leaf or a
+        // prefix to deeper bindings) in the current mode, defer to the
+        // normal trie lookup so that user binding wins over the
+        // vim-style count parser. Without this an overlay that binds
+        // "1"/"2"/… to actions would never fire — the digit would be
+        // silently accumulated as a count for the next non-digit key.
+        let current_mode = self.modes.current().clone();
+        let probe = [chord.clone()];
+        let probe_lookup = self.lookup_in_mode(&current_mode, ctx, &probe);
+        if !matches!(probe_lookup, TrieLookup::Miss) {
             return false;
         }
 
@@ -407,7 +545,13 @@ impl InputProcessor {
             });
         }
 
-        if ch == 'q' {
+        // Macro triggers only fire as standalone keys. If a multi-key sequence
+        // is already in progress, fall through so the trie can resolve it
+        // (e.g. `g q` in a which-key prefix must reach the leaf binding,
+        // not be eaten as `q`-record-macro).
+        let in_sequence = !self.sequence.is_empty();
+
+        if ch == 'q' && !in_sequence {
             if self.macro_recorder.is_recording() {
                 self.macro_recorder.stop_recording();
             } else {
@@ -417,7 +561,7 @@ impl InputProcessor {
             return Some(Vec::new());
         }
 
-        if ch == '@' {
+        if ch == '@' && !in_sequence {
             self.pending_macro_play_register = true;
             self.sequence.clear();
             return Some(Vec::new());
@@ -722,6 +866,107 @@ mod tests {
     }
 
     #[test]
+    fn test_sticky_prefix_rewinds_to_anchor_while_held() -> Result<()> {
+        // Holding the prefix anchor (`g`) and tapping leaf keys should keep
+        // the sequence rewound to the anchor so subsequent taps resolve as
+        // siblings of the matched leaf.
+        let mut proc = make_processor();
+        let ctx = ActionContext::new();
+
+        // Hold `g` down (no release).
+        let commands = proc.process(char_event('g'), &ctx);
+        assert!(matches!(&commands[0], InputCommand::Pending { display } if display == "g"));
+
+        // First tap of `e` matches `g e` while `g` is still held.
+        let commands = proc.process(char_event('e'), &ctx);
+        assert!(!proc.notify_key_release(chord('e')));
+        assert_eq!(extract_action_ids(&commands), vec!["cursor.end"]);
+
+        // Sequence should be rewound to `[g]`, not cleared.
+        assert!(proc.needs_timeout());
+        assert_eq!(proc.pending_display(), Some("g".to_string()));
+
+        // Second tap of `e` resolves as `g e` again without re-pressing `g`.
+        let commands = proc.process(char_event('e'), &ctx);
+        assert!(!proc.notify_key_release(chord('e')));
+        assert_eq!(extract_action_ids(&commands), vec!["cursor.end"]);
+        assert!(proc.needs_timeout());
+
+        // Releasing the anchor clears the sticky state and signals the host
+        // to hide the overlay (one or more actions fired during the sequence).
+        assert!(proc.notify_key_release(chord('g')));
+        assert!(!proc.needs_timeout());
+        assert_eq!(proc.pending_display(), None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_held_anchor_auto_repeat_is_suppressed() -> Result<()> {
+        // Holding the prefix anchor itself should not re-enter the prefix
+        // on every OS auto-repeat keydown (which would re-flash the
+        // overlay) nor accidentally match a same-key two-chord binding
+        // such as `gg`.
+        let mut proc = make_processor();
+        let ctx = ActionContext::new();
+
+        let commands = proc.process(char_event('g'), &ctx);
+        assert!(matches!(&commands[0], InputCommand::Pending { display } if display == "g"));
+
+        // OS auto-repeat: keydown of `g` again with no prior keyup.
+        let commands = proc.process(char_event('g'), &ctx);
+        assert!(
+            extract_action_ids(&commands).is_empty(),
+            "anchor auto-repeat should not fire `g g`",
+        );
+        assert_eq!(
+            proc.pending_display(),
+            Some("g".to_string()),
+            "sequence should remain at the anchor",
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sticky_prefix_suppresses_auto_repeat() -> Result<()> {
+        // Holding the prefix anchor and holding a leaf key should fire the
+        // bound action exactly once; OS keyboard auto-repeat (a second
+        // keydown without an intervening keyup) must be suppressed so toggle
+        // actions don't flip on/off rapidly.
+        let mut proc = make_processor();
+        let ctx = ActionContext::new();
+
+        proc.process(char_event('g'), &ctx);
+
+        let commands = proc.process(char_event('e'), &ctx);
+        assert_eq!(extract_action_ids(&commands), vec!["cursor.end"]);
+
+        // OS auto-repeat: keydown of `e` again with no prior keyup.
+        let commands = proc.process(char_event('e'), &ctx);
+        assert!(
+            extract_action_ids(&commands).is_empty(),
+            "auto-repeat keydown should be swallowed while sticky prefix is active",
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_bare_hold_release_keeps_overlay_visible() -> Result<()> {
+        // Holding the prefix anchor and releasing it without firing any
+        // child action should NOT signal the host to hide the overlay; the
+        // user is still exploring.
+        let mut proc = make_processor();
+        let ctx = ActionContext::new();
+
+        proc.process(char_event('g'), &ctx);
+        assert!(!proc.notify_key_release(chord('g')));
+
+        Ok(())
+    }
+
+    #[test]
     fn test_two_key_sequence_with_pending() -> Result<()> {
         let mut proc = make_processor();
         let ctx = ActionContext::new();
@@ -732,6 +977,11 @@ mod tests {
         assert!(matches!(&commands[0], InputCommand::Pending { display } if display == "g"));
         assert!(proc.needs_timeout());
         assert_eq!(proc.pending_display(), Some("g".to_string()));
+
+        // Release the first `g` before the second press so the processor
+        // treats this as a vim-style `gg` double-tap rather than a held
+        // prefix (in which case sticky-prefix mode would activate).
+        proc.notify_key_release(chord('g'));
 
         let commands = proc.process(char_event('g'), &ctx);
 
@@ -792,6 +1042,28 @@ mod tests {
         assert!(commands.is_empty());
         assert!(!proc.needs_timeout());
         assert_eq!(proc.current_mode(), &ModeId::normal());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_escape_binding_runs_when_idle() -> Result<()> {
+        let mut proc = make_processor();
+        let ctx = ActionContext::new();
+
+        let mut normal_trie = KeyTrie::new();
+        normal_trie.bind(
+            KeyChord::plain(KeyCode::Escape),
+            ActionId::new("selection.clear"),
+        );
+        proc.set_keymap(ModeId::normal(), normal_trie);
+
+        let commands = proc.process(key_event(KeyCode::Escape), &ctx);
+
+        let ids = extract_action_ids(&commands);
+        assert_eq!(ids, vec!["selection.clear"]);
+        assert_eq!(proc.current_mode(), &ModeId::normal());
+        assert!(!proc.needs_timeout());
 
         Ok(())
     }
