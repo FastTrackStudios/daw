@@ -12,8 +12,10 @@
 //! ```
 //!
 //! Per-entity glue lives behind the [`EntityCrdt`] trait, which the
-//! feature crate implements for its wire struct. Eventually the
-//! `architect::Entity` derive will emit this; today it is hand-written.
+//! feature crate implements for its wire struct. The
+//! [`entity_crdt!`] macro emits the entire impl + the `*RepoLoro`
+//! newtype + the forward `*Repo` impl from a one-block declaration
+//! — see its docstring.
 //!
 //! The `LoroRepo<E>` type is generic. The `<Name>Repo` trait that
 //! architect emits is per-entity. Bridging the two is a one-line
@@ -24,7 +26,17 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 pub use architect;
+pub use crdt_derive::entity_crdt;
 pub use loro;
+
+/// Re-exports for awareness / cursor-sync work. `EphemeralStore`
+/// is the Loro primitive for ephemeral state (remote cursors,
+/// presence) — timestamp-LWW, partial-update encoding, stale-
+/// peer timeouts. Lives in `loro_internal` because the public
+/// `loro` crate doesn't expose it.
+pub mod awareness {
+    pub use loro_internal::awareness::{EphemeralStore, EphemeralStoreEvent};
+}
 
 use architect::{Filter, Page, RepoError, Sort, SortOrder};
 use loro::{Container, LoroDoc, LoroMap, ValueOrContainer};
