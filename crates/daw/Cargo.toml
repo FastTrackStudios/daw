@@ -52,6 +52,9 @@ standalone = ["dep:daw-standalone"]
 standalone-audio = ["standalone", "daw-standalone/audio"]
 standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
 file = ["dep:dawfile-reaper", "dep:dawfile-ableton"]
+# Cross-format project conversion (`daw::file::convert`). Pulls the importers
+# (which produce RPP) from `daw-reaper`.
+convert = ["file", "reaper"]
 reaper-ui = ["dep:daw-reaper-dioxus"]
 
 [lints]
