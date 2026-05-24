@@ -183,9 +183,77 @@ pub mod reaper {
 
 // ── File: RPP file format parser ────────────────────────────────────────────
 #[cfg(feature = "file")]
-/// High-performance RPP (REAPER Project) file format parser.
+/// High-performance RPP (REAPER Project) file format parser, plus
+/// cross-format project conversion ([`file::convert`], with the `convert`
+/// feature).
 pub mod file {
     pub use dawfile_reaper::*;
+
+    /// Error from [`convert`].
+    #[cfg(feature = "reaper")]
+    #[derive(Debug)]
+    pub enum ConvertError {
+        /// The output extension isn't a supported conversion target.
+        UnsupportedOutput(String),
+        /// The conversion itself failed (unsupported input, parse/build error).
+        Convert(String),
+        /// Reading the input or writing the output failed.
+        Io(std::io::Error),
+    }
+
+    #[cfg(feature = "reaper")]
+    impl std::fmt::Display for ConvertError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                ConvertError::UnsupportedOutput(ext) => {
+                    write!(
+                        f,
+                        "unsupported output format '.{ext}' (supported target: .rpp)"
+                    )
+                }
+                ConvertError::Convert(e) => write!(f, "conversion failed: {e}"),
+                ConvertError::Io(e) => write!(f, "io error: {e}"),
+            }
+        }
+    }
+
+    #[cfg(feature = "reaper")]
+    impl std::error::Error for ConvertError {}
+
+    /// Convert a supported project file to another supported format, dispatching
+    /// on file extensions.
+    ///
+    /// Supported today: any of `.ptx` / `.ptf` / `.pts` (Pro Tools), `.als`
+    /// (Ableton), `.aaf`, `.dawproject` **→ `.rpp` (REAPER)**. Other output
+    /// formats return [`ConvertError::UnsupportedOutput`]; unsupported inputs
+    /// surface as [`ConvertError::Convert`]. Requires the `reaper` feature
+    /// (enable both via the `convert` feature).
+    ///
+    /// ```no_run
+    /// daw::file::convert("session.ptx", "session.rpp").unwrap();
+    /// ```
+    #[cfg(feature = "reaper")]
+    pub fn convert(
+        input: impl AsRef<std::path::Path>,
+        output: impl AsRef<std::path::Path>,
+    ) -> Result<(), ConvertError> {
+        let input = input.as_ref();
+        let output = output.as_ref();
+        let out_ext = output
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        match out_ext.as_str() {
+            "rpp" => {
+                let rpp = daw_reaper::project_import::convert_to_rpp(&input.to_string_lossy())
+                    .map_err(|e| ConvertError::Convert(e.to_string()))?;
+                std::fs::write(output, rpp).map_err(ConvertError::Io)
+            }
+            other => Err(ConvertError::UnsupportedOutput(other.to_string())),
+        }
+    }
 }
 
 // ── Extension runtime: in-process REAPER extension hosting ──────────────────
