@@ -5,13 +5,17 @@ This document describes the internal architecture of the Keyflow workspace — h
 ## Crate Dependency Graph
 
 ```
-keyflow-proto  (core data model, no I/O)
+keyflow-syntax (spans, lexer, syntax AST, highlighting)
+    ↓
+keyflow-proto  (domain model + RPC contracts)
     ↑
 keyflow-text   (parser: .kf text → Chart)
+keyflow-midi   (MIDI import: bytes → Chart / chart text)
+keyflow-live   (in-process implementation of keyflow-proto traits)
     ↑
 engraver-proto (layout engine + rendering: Chart → PDF/SVG/Vello)
     ↑
-keyflow        (facade crate: re-exports all, IntoChart trait)
+keyflow        (facade crate: re-exports proto/text/engraver; optional live)
     ↑
 keyflow-cli    (CLI binary: kf parse, kf pdf, kf svg)
 keyflow-ui     (Dioxus UI: WGPU preview, editing)
@@ -24,9 +28,19 @@ External dependencies not in workspace:
 
 ## Crate Responsibilities
 
+### keyflow-syntax
+
+The **concrete syntax** crate. Defines source-oriented types used by parsers,
+editor tooling, and proto contracts:
+
+- **`TextSpan`** — byte-span references into source text.
+- **`Lexer` / `Token` / `TokenType`** — tokenization for `.kf` syntax and chord parsing.
+- **Syntax AST** — source-preserving chord and rhythm AST nodes.
+- **Highlighting** — optional editor highlight spans and renderers behind the `highlighting` feature.
+
 ### keyflow-proto
 
-The **data model** crate. Zero I/O, zero rendering. Defines:
+The **domain model and RPC contract** crate. Zero I/O, zero rendering. Defines:
 
 - **`Chart`** — the root type. Contains sections, metadata (title, artist, tempo, time signature, key).
 - **`Section`** — a musical section (Verse, Chorus, Bridge, Intro, Outro, Instrumental, Solo, etc.).
@@ -40,9 +54,19 @@ The **data model** crate. Zero I/O, zero rendering. Defines:
 
 Uses [Facet](https://github.com/bearcove/facet) for reflection-based serialization (RPC-ready).
 
+Service traits follow the singular-struct/plural-trait convention used by
+`architect::rpc`: `Charts`, `ChartParsers`, `Guides`, and `Parsers`.
+
 ### keyflow-text
 
 The **parser** crate. Converts `.kf` text format → `Chart` structs.
+
+### keyflow-live
+
+The **live implementation** crate. Implements the `keyflow-proto` service traits
+in-process using `keyflow-text`, `keyflow-midi`, and the guide generation
+algorithms. It is the place for app/runtime behavior; `keyflow-proto` remains
+only the shared model and contract surface.
 
 Key modules:
 - `chart::parser::ChartParser` — main entry point. Processes lines, identifies sections, delegates to sub-parsers.
@@ -109,12 +133,12 @@ The `tlayout` module contains MuseScore-ported layout functions:
 
 #### Import
 
-- **`import::midi_import.rs`** — `MidiFile` from raw MIDI bytes.
-- **`import::midi_chart_builder.rs`** — `MidiFile` → chart text. Chord detection, push/pull analysis, rhythm formatting, melody extraction from LINES track.
+- **`import::keyflow_import.rs`** — optional bridge from `keyflow_proto::Chart` into the lower-level engraver `Score` model.
+- MIDI import lives in `keyflow-midi`; `engraver::import` re-exports those APIs under the `midi-import` feature for compatibility only.
 
 ### keyflow
 
-The **facade crate**. Re-exports all other crates under a unified namespace. Provides `IntoChart` trait for generic parsing (text or MIDI bytes). Contains integration tests.
+The **facade crate**. Re-exports the core data model plus feature-gated subsystems under a unified namespace. The engraving engine is exposed as `keyflow::engraver` through the default `engraver` feature; consumers that only need domain/text parsing can opt out with `default-features = false`. Provides `IntoChart` trait for generic parsing (text or MIDI bytes). Contains integration tests.
 
 ### keyflow-cli
 
@@ -158,7 +182,7 @@ The `keyflow` crate re-exports everything:
 pub use keyflow_proto::*;          // all chart/chord/key types at top level
 pub use keyflow_text as text;      // feature "text"
 pub use keyflow_midi as midi;      // feature "midi"
-pub use engraver_proto as engraver; // via engraver facade
+pub use engraver;                  // default feature "engraver"
 ```
 Consumers depend on `keyflow` only, getting a clean namespace.
 

@@ -8,6 +8,9 @@ This document tracks known limitations, planned features, and technical debt acr
 
 ### High Priority
 
+**Beam grouping mode is only partially wired** — `ChartLayoutConfig.beam_grouping` exposes `Standard`, `JazzHalfBar`, and `FullBar`, and the responsive/iReal-style preset selects `JazzHalfBar`. The rhythm/beam-building pass still uses standard grouping behavior, so non-standard modes are API intent rather than rendered behavior.
+*File: `engraver-proto/layout/chart/mod.rs`*
+
 ~~**Multi-note chord accidental column stacking**~~ — Fixed. `NoteParams` gained `accidental_column_width`; in chord layout each note uses the chord's max accidental width as a shared column, with each note's accidental right-aligned inside it so all noteheads land at a common X. Single-note layout unchanged.
 
 ~~**Slash notehead beam Y anchor mismatch**~~ — Fixed. Introduced `stem_anchor_y(note, stem_dir, spatium)` and use it in `calculate_beam_position` + the collision-avoidance loop, so beams account for non-standard notehead anchor offsets (slash, X) instead of measuring stem length from the notehead center.
@@ -18,11 +21,18 @@ This document tracks known limitations, planned features, and technical debt acr
 
 ### Medium Priority
 
+**Programmatic UI chart layouts can reuse stale cache entries** — `ChartRenderer::layout_chart_with_preview_mode` invalidates layout from the source string and preview settings, not the provided `Chart` value. Parse-from-source flows are fine, but programmatic chart edits or DAW-generated charts can be skipped if the caller reuses the same source string.
+*File: `keyflow-ui/src/chart_renderer.rs`*
+
+**Low-level harmony layout panics when font metrics are absent** — The main chart engine supplies metrics, but direct callers of `layout_harmony` can still hit an `expect` if they construct `HarmonyStyle` without text font metrics. This should become a typed error or a safe fallback.
+*File: `engraver-proto/layout/tlayout/harmony.rs`*
+
 ~~**Page backgrounds missing in paginated adapter**~~ — Fixed. `PaginatedAdapter::add_background` paints the first page; `handle_boundary` paints each new page on break. Both delegate to `page_rendering::add_page_background`.
 
 ~~**Percussion noteheads use normal noteheads**~~ — Fixed. `NotationMode::Percussion` now returns `NoteHeadType::X`.
 
-~~**Slash notehead style not configurable**~~ — Fixed at the glyph level. Added `SlashLongStyle { Diamond, WhiteSlash }` and `NoteHeadType::glyph_with_slash_style(duration, style)`; default `glyph()` keeps the legacy diamond. Threading the style through chord/note params at call sites is a follow-up.
+**Slash notehead style not chart-configurable** — Fixed at the glyph helper level. Added `SlashLongStyle { Diamond, WhiteSlash }` and `NoteHeadType::glyph_with_slash_style(duration, style)`; default `glyph()` keeps the legacy diamond. Threading the style through chord/note params and chart config remains.
+*File: `engraver-proto/layout/tlayout/note.rs`*
 
 ~~**Hit testing not implemented**~~ — Implemented `SceneNode::hit_test(point)` that walks the scene tree depth-first and returns the deepest visible node whose world-space bounds contain the point (skipping invisible subtrees and zero-area nodes). The legacy `SceneGraph::hit_test` stub on the deprecated `SceneGraph` was removed.
 
@@ -105,7 +115,7 @@ lines so accidental regressions are obvious in PR output.
 
 ~~**Tie rendering at barline crossings**~~ — Now configurable via `ChartLayoutConfig.draw_melody_barline_ties` (default `true`, matching prior behavior). Set to `false` for lead-sheet styles where the second piece renders as a fresh attack.
 
-~~**Beam groups limited to within-beat**~~ — Config knob exposed as `ChartLayoutConfig.beam_grouping: BeamGroupingMode { Standard, JazzHalfBar, FullBar }`. Default `Standard` preserves existing behavior. Threading `JazzHalfBar` / `FullBar` through the actual beam-building pass (`build_rhythm` / beam group detector) is a follow-up — the API now lets callers express intent.
+**Beam groups limited to within-beat** — Config knob exposed as `ChartLayoutConfig.beam_grouping: BeamGroupingMode { Standard, JazzHalfBar, FullBar }`. Default `Standard` preserves existing behavior. Threading `JazzHalfBar` / `FullBar` through the actual beam-building pass (`build_rhythm` / beam group detector) is still a follow-up — the API now lets callers express intent.
 
 ---
 

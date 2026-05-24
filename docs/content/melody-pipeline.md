@@ -108,8 +108,6 @@ For RPP files with a LINES track:
 
 ## Known Limitations
 
-- Octave centering may be too aggressive for wide-range melodies
-- Beaming limited to within-beat groups (no cross-beat beaming)
-- IOI durations occasionally produce dotted values for mostly-eighth-note lines
-- Ties at barline crossings are correct but may look unexpected
-- Chord symbol Y is per-system, not per-measure (high notes in one measure push all chords up)
+- `ChartLayoutConfig.beam_grouping` exposes jazz/full-bar intent, but non-standard modes still need to be threaded into the rhythm/beam-building pass.
+- MIDI IOI duration detection can still produce odd values on uneven real-world performances; use `MelodyGrid` to constrain quantization when needed.
+- Ties at barline crossings are correct and now configurable via `ChartLayoutConfig.draw_melody_barline_ties`.

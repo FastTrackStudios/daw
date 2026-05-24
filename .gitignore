@@ -16,3 +16,6 @@ tests/output/
 examples/datasets/data/
 docs/node_modules/
 docs/output/
+
+# Local reference corpora for analysis/import experiments.
+/reference-data/
