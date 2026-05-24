@@ -114,20 +114,47 @@ impl KeymapConfig {
 
         for (mode, user_bindings) in user.keymap {
             let mode_map = merged.keymap.entry(mode.clone()).or_default();
-            for (key_seq, value) in user_bindings {
-                // Wipe any base bindings below `key_seq` so the user's
-                // leaf/prefix isn't shadowed by orphaned subtrees.
-                let below = format!("{key_seq} ");
-                let before = mode_map.len();
-                mode_map.retain(|k, _| !k.starts_with(&below));
-                let wiped = before - mode_map.len();
 
+            // First pass: collect every distinct first-chord the user
+            // touches in this mode. Anything starting with one of these
+            // chords in the base is wiped before we insert — the user's
+            // overlay fully owns each prefix namespace they bind into.
+            //
+            // Without this, an overlay that binds `o s` and `o a`
+            // would still inherit every other `o *` entry from the
+            // base (e.g. an Options which-key tree), which leaks into
+            // the which-key overlay display and the trie's pending
+            // continuations. With it, pressing `o` in the overlay
+            // shows only `s` and `a`.
+            let mut user_roots: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for key_seq in user_bindings.keys() {
+                let first = key_seq.split(' ').next().unwrap_or("");
+                if !first.is_empty() {
+                    user_roots.insert(first.to_string());
+                }
+            }
+            let before = mode_map.len();
+            mode_map.retain(|k, _| {
+                let first = k.split(' ').next().unwrap_or("");
+                !user_roots.contains(first)
+            });
+            let wiped = before - mode_map.len();
+            if wiped > 0 {
+                tracing::debug!(
+                    mode = %mode,
+                    roots = ?user_roots,
+                    wiped,
+                    "[keymap-merge] Wiped base entries under user-owned prefix roots"
+                );
+            }
+
+            for (key_seq, value) in user_bindings {
                 if value.trim().eq_ignore_ascii_case("unbind") {
                     mode_map.remove(&key_seq);
                     tracing::debug!(
                         mode = %mode,
                         key_seq = %key_seq,
-                        wiped_below = wiped,
                         "[keymap-merge] Unbind"
                     );
                 } else {
@@ -137,7 +164,6 @@ impl KeymapConfig {
                         key_seq = %key_seq,
                         action = %value,
                         replaced,
-                        wiped_below = wiped,
                         "[keymap-merge] Insert"
                     );
                 }
