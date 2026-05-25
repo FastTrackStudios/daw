@@ -430,14 +430,13 @@ impl TestRunner {
         }
 
         // Dump ini for diagnostics in CI
-        if self.ci {
-            if let Ok(content) = std::fs::read_to_string(&reaper_ini) {
+        if self.ci
+            && let Ok(content) = std::fs::read_to_string(&reaper_ini) {
                 println!("  reaper.ini contents:");
                 for line in content.lines() {
                     println!("    {line}");
                 }
             }
-        }
     }
 
     /// Spawn REAPER with FHS wrapper support and return a [`RunningReaper`].
@@ -741,15 +740,14 @@ impl RunningReaper {
                 if std::time::Instant::now() > deadline {
                     break;
                 }
-                if let Ok(mut f) = std::fs::File::open(&ext_log_clone) {
-                    if f.seek(SeekFrom::Start(pos)).is_ok() {
+                if let Ok(mut f) = std::fs::File::open(&ext_log_clone)
+                    && f.seek(SeekFrom::Start(pos)).is_ok() {
                         let reader = BufReader::new(&f);
                         for line in reader.lines().map_while(|l| l.ok()) {
                             println!("  [ext] {line}");
                             pos += line.len() as u64 + 1;
                         }
                     }
-                }
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
         });
@@ -848,14 +846,13 @@ pub fn find_fts_daw_socket() -> Option<String> {
     let entries = std::fs::read_dir("/tmp").ok()?;
     for entry in entries.flatten() {
         let path = entry.path();
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with("fts-daw-")
+        if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && name.starts_with("fts-daw-")
                 && name.ends_with(".sock")
                 && !name.contains(".bootstrap.")
             {
                 return Some(path.to_string_lossy().into_owned());
             }
-        }
     }
     None
 }
@@ -1022,11 +1019,10 @@ pub fn list_tmp_sockets() {
     println!("  fts-daw-*.sock files in /tmp:");
     if let Ok(entries) = std::fs::read_dir("/tmp") {
         for entry in entries.flatten() {
-            if let Some(name) = entry.file_name().to_str().map(|s| s.to_string()) {
-                if name.starts_with("fts-daw-") && name.ends_with(".sock") {
+            if let Some(name) = entry.file_name().to_str().map(|s| s.to_string())
+                && name.starts_with("fts-daw-") && name.ends_with(".sock") {
                     println!("    {name}");
                 }
-            }
         }
     }
 }
