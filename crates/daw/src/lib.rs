@@ -287,6 +287,15 @@ pub mod file {
 // (default-on), gated at runtime by `FTS_SYNC_ENABLED=1`. See
 // `daw-bridge/src/sync_runtime.rs` and `docs/sync-stack-consolidation.md`.
 
+// ── Integration-test harness ────────────────────────────────────────────────
+//
+// Enabled via `features = ["test-harness"]`. Folds the former `reaper-test`
+// crate in as a feature-gated module that drives `daw-reaper` over the daw
+// RPC surface. Generalized over the `DawBackend` trait (single concrete impl:
+// `ReaperBackend`). Re-exports the `#[daw_test]` / `#[reaper_test]` macros.
+#[cfg(feature = "test-harness")]
+pub mod test;
+
 // ── Streaming ergonomics ────────────────────────────────────────────────────
 pub use stream::RxExt;
 mod stream;

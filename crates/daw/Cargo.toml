@@ -33,6 +33,15 @@ daw-standalone = { path = "../daw-standalone", optional = true }
 dawfile-reaper = { path = "../dawfile-reaper", optional = true }
 dawfile-ableton = { path = "../dawfile-ableton", optional = true }
 
+# Integration-test harness deps — only pulled in by the `test-harness`
+# feature (folded-in former `reaper-test` crate). None of these dep on
+# `daw`, so there is no cycle.
+vox-stream = { workspace = true, optional = true }
+moire = { workspace = true, optional = true }
+eyre = { workspace = true, optional = true }
+daw-test-macro = { path = "../daw-test-macro", optional = true }
+reaper-launcher = { workspace = true, optional = true }
+
 # NOTE: `daw-extension-runtime` is intentionally NOT folded under a
 # `daw[extension-runtime]` feature. It can't be — `daw-reaper` depends
 # on `keyflow` (for chord detection in MIDI items), and `keyflow`
@@ -56,6 +65,16 @@ file = ["dep:dawfile-reaper", "dep:dawfile-ableton"]
 # (which produce RPP) from `daw-reaper`.
 convert = ["file", "reaper"]
 reaper-ui = ["dep:daw-reaper-dioxus"]
+# Integration-test harness (former `reaper-test` crate). Drives daw-reaper
+# over the daw RPC surface; generalized over `DawBackend` (impl `ReaperBackend`).
+test-harness = [
+    "reaper",
+    "dep:reaper-launcher",
+    "dep:vox-stream",
+    "dep:moire",
+    "dep:eyre",
+    "dep:daw-test-macro",
+]
 
 [lints]
 workspace = true
