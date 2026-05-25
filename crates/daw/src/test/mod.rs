@@ -76,10 +76,10 @@ pub fn reaper_executable() -> String {
     }
 
     // On Linux, prefer `reaper` on PATH (provided by nix/devenv)
-    if cfg!(target_os = "linux") {
-        if let Some(exe) = which_command("reaper") {
-            return exe;
-        }
+    if cfg!(target_os = "linux")
+        && let Some(exe) = which_command("reaper")
+    {
+        return exe;
     }
 
     // macOS .app bundle fallback
@@ -766,18 +766,17 @@ async fn discover_socket() -> Result<PathBuf> {
         if let Ok(entries) = std::fs::read_dir("/tmp") {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.starts_with("fts-daw-")
-                        && name.ends_with(".sock")
-                        && !name.contains(".bootstrap.")
-                    {
-                        // Verify the socket is connectable (not stale)
-                        if tokio::net::UnixStream::connect(&path).await.is_ok() {
-                            return Ok(path);
-                        } else {
-                            // Stale socket — clean it up
-                            let _ = std::fs::remove_file(&path);
-                        }
+                if let Some(name) = path.file_name().and_then(|n| n.to_str())
+                    && name.starts_with("fts-daw-")
+                    && name.ends_with(".sock")
+                    && !name.contains(".bootstrap.")
+                {
+                    // Verify the socket is connectable (not stale)
+                    if tokio::net::UnixStream::connect(&path).await.is_ok() {
+                        return Ok(path);
+                    } else {
+                        // Stale socket — clean it up
+                        let _ = std::fs::remove_file(&path);
                     }
                 }
             }
@@ -1325,10 +1324,10 @@ impl DawInstance {
     ) -> Result<String> {
         let ext = self.daw.ext_state();
         for i in 0..retries {
-            if let Ok(Some(val)) = ext.get(section, key).await {
-                if !val.is_empty() {
-                    return Ok(val);
-                }
+            if let Ok(Some(val)) = ext.get(section, key).await
+                && !val.is_empty()
+            {
+                return Ok(val);
             }
             if i < retries - 1 {
                 tokio::time::sleep(Duration::from_millis(interval_ms)).await;
