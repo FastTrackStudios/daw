@@ -31,6 +31,12 @@ pub mod rpc {
 // dep. Backend crates use these traits/macros to expose their service bundles.
 pub use architect::{Descriptors, Layer, LayerRouter, Mounted, Services, layers};
 
+/// Backend-agnostic main-thread affinity. Service code calls
+/// `daw::main_thread::query` / `run`; REAPER installs a `TaskSupport`-backed
+/// executor, standalone installs none (the work runs inline). See
+/// [`daw_proto::main_thread`].
+pub use daw_proto::main_thread;
+
 // Internal alias for the bootstrap singleton.
 use rpc::Daw;
 
