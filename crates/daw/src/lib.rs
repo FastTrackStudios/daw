@@ -46,8 +46,11 @@ use std::sync::OnceLock;
 
 static DAW_INSTANCE: OnceLock<DawInstance> = OnceLock::new();
 
+/// Facade-only runtime state. The `Daw` itself is NOT stored here — there is a
+/// single global `Daw`, owned by `daw-control` (`rpc::Daw::get()`), which
+/// `daw::get()` delegates to. This holds only the things the facade adds on top:
+/// the runtime for `block_on` and the timer-callback list.
 struct DawInstance {
-    daw: Daw,
     runtime: std::sync::Arc<tokio::runtime::Runtime>,
     _timer_callbacks: std::sync::Mutex<Vec<fn()>>,
 }
@@ -78,8 +81,10 @@ pub fn init(raw_host_context: Option<*const std::ffi::c_void>) -> bool {
             _fire_timer_callbacks();
         });
 
+        // Install the single global Daw (owned by daw-control) + the facade's
+        // runtime/timers.
+        let _ = rpc::Daw::init(daw.caller().clone());
         let _ = DAW_INSTANCE.set(DawInstance {
-            daw,
             runtime,
             _timer_callbacks: std::sync::Mutex::new(Vec::new()),
         });
@@ -95,13 +100,14 @@ pub fn init(raw_host_context: Option<*const std::ffi::c_void>) -> bool {
 /// Extension hosts that build a custom in-process DAW service graph can use this
 /// to make `daw::get()` and `daw::block_on()` available to reusable modules.
 pub fn init_from_parts(daw: rpc::Daw, runtime: std::sync::Arc<tokio::runtime::Runtime>) -> bool {
+    // Install the single global Daw (owned by daw-control) so both
+    // `daw::get()` and `rpc::Daw::get()` resolve to the same instance.
+    let _ = rpc::Daw::init(daw.caller().clone());
     if DAW_INSTANCE.get().is_some() {
         return true;
     }
-
     DAW_INSTANCE
         .set(DawInstance {
-            daw,
             runtime,
             _timer_callbacks: std::sync::Mutex::new(Vec::new()),
         })
@@ -110,10 +116,11 @@ pub fn init_from_parts(daw: rpc::Daw, runtime: std::sync::Arc<tokio::runtime::Ru
 
 /// Get the global `Daw` handle.
 ///
-/// Returns `None` if [`init`] hasn't been called or failed.
-/// Works the same whether in a CLAP plugin, extension, or standalone.
+/// Delegates to the single global owned by `daw-control` (`rpc::Daw::get()`),
+/// so the facade and lower-level code always see the same instance. Returns
+/// `None` if no DAW has been initialized.
 pub fn get() -> Option<&'static rpc::Daw> {
-    DAW_INSTANCE.get().map(|i| &i.daw)
+    rpc::Daw::try_get()
 }
 
 /// Run an async operation on the DAW runtime.
