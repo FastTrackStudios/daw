@@ -55,6 +55,23 @@ I  ii  iii  IV  V  vi  vii      →  I, iim, iiim, IV, V, vim, viim
 
 You can still add explicit descriptors on top: `Imaj7`, `V7`, `iim7`.
 
+## Readability: the `:` separator
+
+When a number or numeral is followed by a quality that *starts with a digit*,
+the two runs of digits can be hard to read — is `17` "degree 1, seventh" or the
+number seventeen? Optionally put a colon between the root and the quality:
+
+```
+1:7      4:maj9      2:m7      5:9
+```
+
+It's purely for readability and carries no meaning — `1:7` and `17` parse
+identically, as do `4:maj9` and `4maj9`. The colon works on any root (`C:7` =
+`C7`), though it matters most for numbers.
+
+**Good practice: write the `:`.** `1:7` reads cleanly; `17` is correct but
+easy to misread. (A future editor will insert the `:` for you automatically.)
+
 ## Relative to the key
 
 Both number-based systems resolve against the key set in the
