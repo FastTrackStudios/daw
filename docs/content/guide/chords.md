@@ -144,5 +144,6 @@ Bbmaj7/D    Bb + major 7th, over D
 
 ## What's next
 
-- **Rhythm** — how long each chord lasts, why a bare chord fills a whole bar,
-  and why you rarely need bar lines.
+- **Notation Systems** — the three interchangeable ways to write the root
+  (letter names, Nashville numbers, Roman numerals), how they relate to the
+  key, and how flats and the ambiguous `b7` are resolved.
