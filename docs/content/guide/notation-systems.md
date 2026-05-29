@@ -66,8 +66,9 @@ number seventeen? Optionally put a colon between the root and the quality:
 ```
 
 It's purely for readability and carries no meaning — `1:7` and `17` parse
-identically, as do `4:maj9` and `4maj9`. The colon works on any root (`C:7` =
-`C7`), though it matters most for numbers.
+identically, as do `4:maj9` and `4maj9`. The colon works on **all three
+systems** — numbers (`4:maj9`), Roman numerals (`V:7`, `i:m7`), and letter
+names (`C:7`) — though it matters most for numbers.
 
 **Good practice: write the `:`.** `1:7` reads cleanly; `17` is correct but
 easy to misread. (A future editor will insert the `:` for you automatically.)
