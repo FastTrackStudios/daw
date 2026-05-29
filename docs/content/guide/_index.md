@@ -34,9 +34,10 @@ chord just fills its bar.
 ## The guide
 
 1. [Structure](/guide/structure/) — the document: title, artist, time signature, tempo, key.
+2. [Chords](/guide/chords/) — writing a single chord: root, quality, seventh family, extensions, alterations, slash bass.
 
-*(More pages land here as the guide grows: Sections, Chords, Rhythm, Numbers &
-Numerals, Lyrics, and Melody.)*
+*(More pages land here as the guide grows: Rhythm, Sections, Lyrics, and
+Melody.)*
 
 ## Two things to know up front
 
