@@ -17,7 +17,6 @@ daw-reaper-dioxus = { path = "../daw-reaper-dioxus", optional = true }
 
 # Runtime (needed for block_on in plugin context)
 tokio.workspace = true
-tracing.workspace = true
 
 # Streaming primitives — Rx<T> ergonomic wrapper lives at daw::RxExt
 vox.workspace = true
@@ -31,7 +30,6 @@ architect.workspace = true
 daw-reaper = { path = "../daw-reaper", optional = true }
 daw-standalone = { path = "../daw-standalone", optional = true }
 dawfile-reaper = { path = "../dawfile-reaper", optional = true }
-dawfile-ableton = { path = "../dawfile-ableton", optional = true }
 
 # Integration-test harness deps — only pulled in by the `test-harness`
 # feature (folded-in former `reaper-test` crate). None of these dep on
@@ -60,7 +58,7 @@ reaper = ["dep:daw-reaper"]
 standalone = ["dep:daw-standalone"]
 standalone-audio = ["standalone", "daw-standalone/audio"]
 standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
-file = ["dep:dawfile-reaper", "dep:dawfile-ableton"]
+file = ["dep:dawfile-reaper"]
 # Cross-format project conversion (`daw::file::convert`). Pulls the importers
 # (which produce RPP) from `daw-reaper`.
 convert = ["file", "reaper"]
@@ -78,3 +76,6 @@ test-harness = [
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+dawfile-ableton = { path = "../dawfile-ableton" }
