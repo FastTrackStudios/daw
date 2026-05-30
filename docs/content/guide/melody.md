@@ -152,9 +152,7 @@ let melody = {
 Inside a `melody` lane the notes are written bare — no `m{ }` wrapper — because
 the whole lane is already melody.
 
-## That's the tour
+## What's next
 
-You can now read and write a complete Keyflow chart: a [header](/guide/structure/),
-[chords](/guide/chords/) in any of the [three systems](/guide/notation-systems/),
-their [rhythm](/guide/rhythm/), and a melody on top. From here, the best next
-step is to open a real chart and start changing things.
+- **Lyrics** — the last layer: words under the chords, with the chord changes
+  marked on the syllables they fall on.

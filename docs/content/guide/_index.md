@@ -39,8 +39,7 @@ chord just fills its bar.
 4. [Notation Systems](/guide/notation-systems/) — the three interchangeable ways to name roots: letter names, Nashville numbers, Roman numerals.
 5. [Rhythm](/guide/rhythm/) — how long each chord lasts: the one-chord-per-bar default, slashes, `()` groups, and note-value durations.
 6. [Melody](/guide/melody/) — writing the tune line: notes as letters or numbers, octaves, durations, stacked notes, and pairing it with the chords.
-
-*(Lyrics lands here as the guide grows.)*
+7. [Lyrics](/guide/lyrics/) — words under the chords: a `[lyrics]` line, `{Chord}` markers on syllables, and hyphen splits for melisma.
 
 ## Two things to know up front
 
