@@ -148,6 +148,29 @@ This only applies to **Roman `/` Roman**. A Roman numeral over a note or a
 number — `I/3`, `V/B` — is still an ordinary slash bass, as are all letter-name
 (`C/E`) and number (`1/3`) slashes.
 
+## Figured bass and inversions
+
+A `^` after a chord attaches a **figured-bass figure** — the small stacked
+numbers used to mark inversions and suspensions. Most useful on Roman numerals:
+
+```
+V^6    V^64    V^65    V^43    V^42    V^4-3
+```
+
+| Figure | Means |
+| ------ | ----- |
+| `^6` | first-inversion triad (3rd in the bass) |
+| `^64` | second-inversion triad (5th in the bass) |
+| `^65` | first-inversion seventh chord |
+| `^43` | second-inversion seventh chord |
+| `^42` | third-inversion seventh chord |
+| `^4-3` | a 4–3 suspension |
+
+Because the figure lives behind the `^`, the chord symbol itself stays clean:
+`V^6` is the V chord with a first-inversion figure, while a plain `V6` (no `^`)
+is still an ordinary sixth chord. A duration goes after the figure as usual
+(`V^65_4`).
+
 ## Putting it together
 
 The pieces stack in order — root, quality, family, extensions, alterations,
