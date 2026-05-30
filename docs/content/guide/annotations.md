@@ -76,11 +76,7 @@ hairpin > 2..4        decrescendo from beat 2 to 4
 
 Like dynamics, hairpins default below the staff; add `above` to move them up.
 
-## That's the language
+## What's next
 
-With the [header](/guide/structure/), [sections](/guide/sections/),
-[chords](/guide/chords/) and the [three ways](/guide/notation-systems/) to name
-them, [rhythm](/guide/rhythm/), [melody](/guide/melody/), [lyrics](/guide/lyrics/),
-[key and meter changes](/guide/key-meter-changes/), and these markings, you've
-seen the whole format. The rest is practice — open a real `.kf` chart and make it
-yours.
+- **Repeats & Endings** — the last piece: saying a part once and looping it,
+  with first and second endings.

@@ -42,6 +42,7 @@ chord just fills its bar.
 7. [Lyrics](/guide/lyrics/) — words under the chords: a `[lyrics]` line, `{Chord}` markers on syllables, and hyphen splits for melisma.
 8. [Key & Meter Changes](/guide/key-meter-changes/) — moving to a new key or time signature mid-song, and the `!T` one-bar meter change.
 9. [Annotations & Expression](/guide/annotations/) — staff text, instrument cues, dynamics, and crescendo/decrescendo hairpins.
+10. [Repeats & Endings](/guide/repeats/) — repeat a bar, a line, or a span, and write first/second endings.
 
 ## Two things to know up front
 
