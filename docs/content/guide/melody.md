@@ -9,27 +9,31 @@ of them. It uses the same note names you already know and the same durations as
 [Rhythm](/guide/rhythm/) — so once you can write a chord chart, a melody is a
 short step away.
 
-Notes live in a melody block, `m{ … }`:
+Notes live in a melody block, `m{ … }`. Each note is a **pitch** and a
+**duration** — the same note values as [Rhythm](/guide/rhythm/):
 
 ```
-m{ C D E F }
+m{ C8 D8 E8 F8 }
 ```
 
-That's four notes — C, D, E, F.
+Four eighth notes — C, D, E, F. As with chords, the duration **inherits**, so you
+mark it once: `m{ C8 D E F }` is the same four eighths. (Durations get their own
+section below; for now, the `8` just means "eighth note.")
 
 ## Writing notes
 
-A note is a **pitch** and, optionally, a duration. The pitch is written one of
-two ways, exactly like a chord root:
+The pitch is written one of two ways, exactly like a chord root:
 
 - **Letter names** — `C D E F G A B`, with `#` sharp, `b` flat, `n` natural:
   ```
-  m{ C F# Bb Dn }
+  m{ C8 F# Bb Dn }
   ```
 - **Scale numbers** — `1`–`7`, relative to the key, with the same accidentals:
   ```
-  m{ 1 2 3 4 5 }        in C: C D E F G
+  m{ 1_8 2 3 4 5 }      in C: C D E F G
   ```
+  (A number needs the `_` before its duration — `1_8`, not `18` — since both are
+  digits.)
 
 Pick whichever suits the chart — letters for a fixed key, numbers for a
 transposable one. (Roman numerals name *chords* but not melody notes.)
@@ -44,17 +48,19 @@ When you need to steer the octave, three tools, lightest first:
 
 - **Nudge** with `'` (up) and `,` (down) — push one note into the next octave:
   ```
-  m{ C C, C C, }        the 2nd and 4th C drop an octave
-  m{ G A B C'' }        C'' jumps two octaves up
+  m{ C8 C, C C, }       the 2nd and 4th C drop an octave
+  m{ G8 A B C'' }       C'' jumps two octaves up
   ```
-- **Pin** an absolute octave with `(N)`:
+- **Pin** an absolute octave with `:N` — the same `:` divider that separates a
+  chord's root from its quality, here separating a note from its octave. It sits
+  before the duration, so `C:48` is "C, octave 4, eighth note":
   ```
-  m{ C(4) D E F }       start on C4; the rest follow relatively
+  m{ C:48 D E F }       start on C4; the rest follow relatively
   ```
 - **Set a starting octave** for a whole block or section with `/octave`:
   ```
   /octave 4
-  m{ C D E F }
+  m{ C8 D E F }
   ```
 
 ## Durations
@@ -70,8 +76,8 @@ m{ C8t D8t E8t }        an eighth-note triplet
 ```
 
 A bare number is the **duration**, so `C4` is a quarter-note C (an octave is
-`C(4)`). You can also write the value after an underscore — `C_8` is the same as
-`C8` — which reads more clearly when a pitch already carries an octave.
+`C:4`, and the two combine as `C:48` — octave 4, eighth note). You can also write
+a duration after an underscore — `C_8` is the same as `C8`.
 
 Like chords, a duration **sticks** until you change it, so a run of equal notes
 needs it only once:
@@ -94,8 +100,8 @@ Wrap notes in `< … >` to sound them **together**, read low to high — a melod
 note with harmony notes stacked above it:
 
 ```
-m{ <C E G> }            a C-major shape on one stem
-m{ <F# 'C#> <G# 'D#> }   two stacked pairs
+m{ <C E G>4 }           a C-major shape on one stem
+m{ <F# 'C#>8 <G# 'D#> }  two stacked pairs
 ```
 
 Inside a group, `'` and `,` adjust an individual note's octave, so `<F# 'C#>`
