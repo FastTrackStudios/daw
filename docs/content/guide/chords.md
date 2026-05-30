@@ -150,26 +150,44 @@ number — `I/3`, `V/B` — is still an ordinary slash bass, as are all letter-n
 
 ## Figured bass and inversions
 
-A `^` after a chord attaches a **figured-bass figure** — the small stacked
-numbers used to mark inversions and suspensions. Most useful on Roman numerals:
+A `^` after a chord adds a **figured-bass figure** — the stacked numbers analysts
+use for inversions. On a Roman numeral these are **real inversions**: the chord
+actually gets the right bass note, so it resolves and transposes correctly, while
+the chart still shows the figure.
 
 ```
-V^6    V^64    V^65    V^43    V^42    V^4-3
+V^6    V^64    V^65    V^43    V^42
 ```
 
-| Figure | Means |
-| ------ | ----- |
-| `^6` | first-inversion triad (3rd in the bass) |
-| `^64` | second-inversion triad (5th in the bass) |
+| Figure | Resolves to |
+| ------ | ----------- |
+| `^6` | first-inversion triad — the 3rd in the bass |
+| `^64` | second-inversion triad — the 5th in the bass |
 | `^65` | first-inversion seventh chord |
 | `^43` | second-inversion seventh chord |
 | `^42` | third-inversion seventh chord |
-| `^4-3` | a 4–3 suspension |
 
-Because the figure lives behind the `^`, the chord symbol itself stays clean:
-`V^6` is the V chord with a first-inversion figure, while a plain `V6` (no `^`)
-is still an ordinary sixth chord. A duration goes after the figure as usual
+So in C, `V^65` is shown as `V^65` but is really a G7 with B in the bass. Because
+the figure sits behind the `^`, the chord symbol stays clean — a plain `V6` (no
+`^`) is still an ordinary sixth chord. A duration goes after the figure as usual
 (`V^65_4`).
+
+A figure with a dash is a **suspension** rather than an inversion — `V^4-3` marks
+a 4–3 suspension.
+
+### Text annotations use quotes
+
+The `^` figures are *structural* (they change the chord). For a plain text
+**annotation** — a cue, a reminder — use **quotes**:
+
+```
+G^"watch the push"     text above the chord
+G_"quietly"            text below (subscript)
+Cmaj7"as written"      text attached to the chord
+```
+
+So `^65` is an inversion, but `^"65"` (quoted) would just be the text "65"
+floating above.
 
 ## Putting it together
 
