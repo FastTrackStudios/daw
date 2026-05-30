@@ -1,7 +1,7 @@
 +++
 title = "Notation Systems"
 description = "Keyflow's three interchangeable ways to name chords and melody: letter names, Nashville numbers, and Roman numerals — including how flats and the ambiguous b7 are resolved."
-weight = 3
+weight = 4
 +++
 
 A core idea in Keyflow: the same music can be written three ways, and they're

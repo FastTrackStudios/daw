@@ -1,7 +1,7 @@
 +++
 title = "Chords"
 description = "How to write a single chord in Keyflow: the root (letter, number, or numeral), then quality, seventh family, extensions, alterations, and slash bass."
-weight = 2
+weight = 3
 +++
 
 A chord is a **root** followed by an optional **descriptor** that says what's

@@ -1,7 +1,7 @@
 +++
 title = "Melody"
 description = "Writing a melody line in Keyflow: notes as letters or scale numbers, relative octaves with nudges and pins, the same durations as chords, stacked notes, and pairing a tune with the chords above it."
-weight = 5
+weight = 6
 +++
 
 A melody is the tune line, written **alongside** the chords rather than instead

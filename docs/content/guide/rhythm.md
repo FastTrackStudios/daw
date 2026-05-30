@@ -1,7 +1,7 @@
 +++
 title = "Rhythm"
 description = "How long each chord lasts in Keyflow: the one-chord-per-bar default, slashes for beats, () groups for even splits and triplets, exact note-value durations, and repeating a bar."
-weight = 4
+weight = 5
 +++
 
 Most lead sheets change chords no more than once or twice a bar, so Keyflow
