@@ -126,8 +126,27 @@ Dm7/G      Dm7 over G
 F/A        F over A
 ```
 
-The bass takes the same three systems as the root, so `1/3` (Nashville) and
-`I/3` work too.
+The bass takes the same systems as the root, so `1/3` (Nashville, the 1 chord
+over the 3rd degree) means the same thing as `C/E` in C.
+
+### One exception: `V/V` in Roman numerals
+
+There's a single twist. Between two **Roman numerals**, `/` doesn't mean slash
+bass — it's a **secondary (applied) chord**, the way analysts write them:
+
+```
+V/V        "five of five" — the dominant of the dominant
+V/vi       the dominant of the vi chord
+V7/V       …with a seventh
+```
+
+`V/V` reads as "the V chord *in the key of* V." In C, the second `V` is G, so
+`V/V` is the dominant of G — a **D** chord (`V7/V` is D7). It's a chromatic chord
+that pulls toward the V, not a G over a G bass.
+
+This only applies to **Roman `/` Roman**. A Roman numeral over a note or a
+number — `I/3`, `V/B` — is still an ordinary slash bass, as are all letter-name
+(`C/E`) and number (`1/3`) slashes.
 
 ## Putting it together
 
