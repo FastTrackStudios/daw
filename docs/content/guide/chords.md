@@ -167,10 +167,12 @@ V^6    V^64    V^65    V^43    V^42
 | `^43` | second-inversion seventh chord |
 | `^42` | third-inversion seventh chord |
 
-So in C, `V^65` is shown as `V^65` but is really a G7 with B in the bass. Because
-the figure sits behind the `^`, the chord symbol stays clean — a plain `V6` (no
-`^`) is still an ordinary sixth chord. A duration goes after the figure as usual
-(`V^65_4`).
+So in C, `V^65` is shown as `V^65` but is really a G7 with B in the bass — and it
+follows the chord's actual notes, so `III^65` (a chromatic chord) puts the right
+G♯ in the bass, not a plain G. Any numeral takes a figure — `ii^65`, `IV^64`,
+`vii°^6`. Because the figure sits behind the `^`, the chord symbol stays clean — a
+plain `V6` (no `^`) is still an ordinary sixth chord. A duration goes after the
+figure as usual (`V^65_4`).
 
 A figure with a dash is a **suspension** rather than an inversion — `V^4-3` marks
 a 4–3 suspension.

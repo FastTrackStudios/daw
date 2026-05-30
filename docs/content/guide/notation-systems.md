@@ -70,6 +70,10 @@ I  ii  iii  IV  V  vi  vii      →  I, iim, iiim, IV, V, vim, viim
 
 You can still add explicit descriptors on top: `Imaj7`, `V7`, `iim7`.
 
+Roman numerals also unlock two analyst's tools, both covered on the
+[Chords](/guide/chords/) page: **secondary chords** with `/` (`V/V` is "five of
+five"), and **inversions** with `^` (`V^65` is a first-inversion dominant 7th).
+
 ## Readability: the `:` separator
 
 When a number or numeral is followed by a quality that *starts with a digit*,
