@@ -28,10 +28,19 @@ Use the common short name or spell it out — case doesn't matter:
 | Intro | `IN` | | Instrumental | `INST` |
 | Verse | `VS` | | Interlude | `INT` |
 | Chorus | `CH` | | Solo | `SOLO` |
-| Bridge | `BR` | | Outro | `OUT` |
+| Pre-Chorus | `PRE-CH` | | Outro | `OUT` |
+| Bridge | `BR` | | | |
 
 So `VS`, `Verse`, and `verse` are the same section. (Names are two or more
-letters — a lone `C` is the chord C, not a chorus.)
+letters — a lone `C` is the chord C, not a chorus.) `PRE-` and `POST-` go in
+front of any name — `Pre-Chorus`, `Post-Verse`.
+
+To tell apart two of the same part — a first and second chorus that differ — drop
+a short label between the name and its length:
+
+```
+CH 3A 4       chorus variant 3A, four bars
+```
 
 ## Length in bars
 
