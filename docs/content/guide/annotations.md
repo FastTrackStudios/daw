@@ -1,0 +1,86 @@
++++
+title = "Annotations & Expression"
+description = "Markings that sit on a Keyflow chart alongside the music: free staff text above or below the staff, instrument cues, classical dynamics, and crescendo/decrescendo hairpins."
+weight = 9
++++
+
+Beyond the notes themselves, a chart carries **markings** — a word of direction,
+a dynamic, a swell. In Keyflow these go on their own lines inside a section,
+mixed in with the chord and melody lines.
+
+## Staff text
+
+A quoted string is **free text** placed on the staff. By default it sits below;
+`^` puts it above, `_` keeps it below:
+
+```
+"straight feel"        below the staff (the default)
+^"BIG"                 above the staff
+_"rit. ...."           below the staff
+```
+
+Put the line wherever the text belongs in the music — before the bar it
+describes, between two chord lines, and so on. (To pin text to a *single chord*
+instead of a whole spot, attach it to the chord: `Cmaj7"as written"` — see
+[Chords](/guide/chords/).)
+
+## Instrument cues
+
+A cue aimed at one player starts with `@` and the instrument name, then the
+text:
+
+```
+@Drums "full groove now"
+@Bass "walk it down"
+@Keys "pad only"
+```
+
+It reads like staff text but is tagged for that instrument, so a part can show
+just its own cues.
+
+## Dynamics
+
+Classical dynamics use the `dyn` keyword, so a lone `f` or `p` is never mistaken
+for a chord:
+
+```
+dyn mp
+dyn ff
+dyn fp
+```
+
+The levels run `ppp pp p mp mf f ff fff`, plus the accents `sf`, `sfz`, and `fp`.
+
+A dynamic sits **below** the staff by default; add `above` to lift it:
+
+```
+dyn mf above
+```
+
+To place it on a particular beat of the bar rather than the downbeat, add `@`
+and the beat number:
+
+```
+dyn fff@4        forte-fortissimo on beat 4
+```
+
+## Hairpins
+
+A hairpin is a crescendo or decrescendo wedge, written with `hairpin` and a
+direction — `<` to swell, `>` to fade — over a **beat range** `start..end`:
+
+```
+hairpin < 1..4        crescendo across the bar
+hairpin > 2..4        decrescendo from beat 2 to 4
+```
+
+Like dynamics, hairpins default below the staff; add `above` to move them up.
+
+## That's the language
+
+With the [header](/guide/structure/), [sections](/guide/sections/),
+[chords](/guide/chords/) and the [three ways](/guide/notation-systems/) to name
+them, [rhythm](/guide/rhythm/), [melody](/guide/melody/), [lyrics](/guide/lyrics/),
+[key and meter changes](/guide/key-meter-changes/), and these markings, you've
+seen the whole format. The rest is practice — open a real `.kf` chart and make it
+yours.

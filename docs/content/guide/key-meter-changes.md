@@ -61,10 +61,7 @@ is the same "just this once" mark you can put on a
 [chord duration](/guide/rhythm/) — here it scopes the meter change to a single
 measure instead of letting it stick.
 
-## That's the format
+## What's next
 
-Between the [header](/guide/structure/), [sections](/guide/sections/),
-[chords](/guide/chords/) and the [three ways](/guide/notation-systems/) to name
-them, [rhythm](/guide/rhythm/), [melody](/guide/melody/), [lyrics](/guide/lyrics/),
-and these mid-song changes, you've seen the whole language. The best way on from
-here is a real `.kf` file — open one and start changing things.
+- **Annotations & Expression** — the markings that sit on top of the notes:
+  staff text, instrument cues, dynamics, and hairpins.

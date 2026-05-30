@@ -41,6 +41,7 @@ chord just fills its bar.
 6. [Melody](/guide/melody/) — writing the tune line: notes as letters or numbers, octaves, durations, stacked notes, and pairing it with the chords.
 7. [Lyrics](/guide/lyrics/) — words under the chords: a `[lyrics]` line, `{Chord}` markers on syllables, and hyphen splits for melisma.
 8. [Key & Meter Changes](/guide/key-meter-changes/) — moving to a new key or time signature mid-song, and the `!T` one-bar meter change.
+9. [Annotations & Expression](/guide/annotations/) — staff text, instrument cues, dynamics, and crescendo/decrescendo hairpins.
 
 ## Two things to know up front
 
