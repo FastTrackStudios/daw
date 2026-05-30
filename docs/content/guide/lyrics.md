@@ -63,11 +63,12 @@ F  C  G  Am
 [lyrics] second time the words are new
 ```
 
-## That's the whole format
-
 You now have every layer of a Keyflow chart: the [header](/guide/structure/), the
 [sections](/guide/sections/) that organize the song, [chords](/guide/chords/) in
 any of the [three systems](/guide/notation-systems/), their
 [rhythm](/guide/rhythm/), a [melody](/guide/melody/), and the lyrics underneath.
-Open a real `.kf` file and start changing things — it renders the same lead sheet
-either way.
+
+## What's next
+
+- **Key & Meter Changes** — the one thing left: moving to a new key or time
+  signature partway through a song.

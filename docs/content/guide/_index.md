@@ -40,6 +40,7 @@ chord just fills its bar.
 5. [Rhythm](/guide/rhythm/) — how long each chord lasts: the one-chord-per-bar default, slashes, `()` groups, and note-value durations.
 6. [Melody](/guide/melody/) — writing the tune line: notes as letters or numbers, octaves, durations, stacked notes, and pairing it with the chords.
 7. [Lyrics](/guide/lyrics/) — words under the chords: a `[lyrics]` line, `{Chord}` markers on syllables, and hyphen splits for melisma.
+8. [Key & Meter Changes](/guide/key-meter-changes/) — moving to a new key or time signature mid-song, and the `!T` one-bar meter change.
 
 ## Two things to know up front
 
