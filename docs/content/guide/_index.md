@@ -36,9 +36,9 @@ chord just fills its bar.
 1. [Structure](/guide/structure/) — the document: title, artist, time signature, tempo, key.
 2. [Chords](/guide/chords/) — writing a single chord: root, quality, seventh family, extensions, alterations, slash bass.
 3. [Notation Systems](/guide/notation-systems/) — the three interchangeable ways to name roots: letter names, Nashville numbers, Roman numerals.
+4. [Rhythm](/guide/rhythm/) — how long each chord lasts: the one-chord-per-bar default, slashes, `()` groups, and note-value durations.
 
-*(More pages land here as the guide grows: Rhythm, Sections, Lyrics, and
-Melody.)*
+*(More pages land here as the guide grows: Sections, Lyrics, and Melody.)*
 
 ## Two things to know up front
 

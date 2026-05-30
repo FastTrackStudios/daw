@@ -33,16 +33,31 @@ Letter names don't depend on the key — `C` is always C.
 ## Nashville numbers
 
 The root is a **scale degree** `1`–`7`, relative to the song's key. A bare
-number is major; add `m` for minor:
+number automatically takes the key's **diatonic quality** — you don't write the
+`m`. In a major key `1 2 3 4 5 6 7` gives:
 
-```
-1   2   4   5      major
-1m  2m  6m         minor
-```
+| Degree | `1` | `2` | `3` | `4` | `5` | `6` | `7` |
+| ------ | --- | --- | --- | --- | --- | --- | --- |
+| Quality | major | minor | minor | major | major | minor | dim |
+| In C | C | Dm | Em | F | G | Am | B° |
 
-So in the key of C, `1 4 5` is C–F–G; in the key of G, the *same* `1 4 5` is
-G–C–D. That's the point of the number system — the chart is the progression,
-independent of key.
+So `2` *is* the ii chord (minor) — no need to write `2m`. Minor keys get their
+own diatonic qualities (in A minor, `1` is Am, `2` is B°). Sevenths and
+extensions stack on the implied triad: `2:7` is ii m7 (Dm7), `5:7` is V7 (G7).
+
+And because the chart stores degrees, the same `1 4 5` is C–F–G in C and G–C–D
+in G — that's the point of the number system: the progression, independent of
+key.
+
+### Overriding the quality
+
+- **`!`** before a number is *literal* — it drops the key association, so a
+  bare `!2` is a plain major triad (D in C).
+- An **explicit quality** overrides the diatonic one: `2M` / `2Major` /
+  `2:maj` for major, `2m` for minor, plus `2dim`, `2aug`, `2sus4`, …
+
+So `2` = Dm (diatonic), `2M` = D (forced major), `!2` = D (literal), `2m` = Dm
+(explicit).
 
 ## Roman numerals
 
