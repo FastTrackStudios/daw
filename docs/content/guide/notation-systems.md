@@ -137,8 +137,10 @@ the rest stay letter names.
 
 ## The same for melody
 
-These three systems aren't just for chords — melody notes use the same letter /
-number / numeral choice, covered in the Melody page.
+The naming carries over to melody too — melody notes are written as **letter
+names or scale-degree numbers**, the same choice you make for a chord root.
+(Roman numerals name chords, not single notes.) See the
+[Melody](/guide/melody/) page.
 
 ## What's next
 

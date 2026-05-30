@@ -177,5 +177,5 @@ Each fenced bar divides on its own, so you can mix densities freely down a line.
 
 ## What's next
 
-- **Melody** — notes use the same letter / number / numeral choice as chords,
-  plus these same durations.
+- **Melody** — notes use the same letter-or-number naming as chords, plus these
+  same durations.
