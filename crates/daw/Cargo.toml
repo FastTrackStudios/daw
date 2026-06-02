@@ -13,7 +13,7 @@ daw-module = { path = "../daw-module" }
 
 # UI host adapter (REAPER + Dioxus). Pulled in only when the `reaper-ui`
 # feature is enabled — keeps audio-graph / WASM / embedded targets clean.
-daw-reaper-dioxus = { path = "../daw-reaper-dioxus", optional = true }
+daw-reaper-dioxus = { path = "../../features/backends/reaper/daw-reaper-dioxus", optional = true }
 
 # Runtime (needed for block_on in plugin context)
 tokio.workspace = true
@@ -27,9 +27,9 @@ facet.workspace = true
 architect.workspace = true
 
 # Feature-gated internal crates
-daw-reaper = { path = "../daw-reaper", optional = true }
-daw-standalone = { path = "../daw-standalone", optional = true }
-dawfile-reaper = { path = "../dawfile-reaper", optional = true }
+daw-reaper = { path = "../../features/backends/reaper/daw-reaper", optional = true }
+daw-standalone = { path = "../../features/standalone/daw-standalone", optional = true }
+dawfile-reaper = { path = "../../features/backends/reaper/dawfile-reaper", optional = true }
 
 # Integration-test harness deps — only pulled in by the `test-harness`
 # feature (folded-in former `reaper-test` crate). None of these dep on
@@ -78,4 +78,4 @@ test-harness = [
 workspace = true
 
 [dev-dependencies]
-dawfile-ableton = { path = "../dawfile-ableton" }
+dawfile-ableton = { path = "../../features/backends/ableton/dawfile-ableton" }
