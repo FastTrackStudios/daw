@@ -269,6 +269,45 @@ pub mod file {
     }
 }
 
+// ── Source-format parsers ───────────────────────────────────────────────────
+//
+// Each module exposes one DAW's file-format parser (format → daw-proto
+// types) and is gated by a per-format feature, so a consumer depends only
+// on the formats it actually reads. None of these pull in REAPER; the
+// reaper-based file→RPP conversion lives in [`file::convert`] instead.
+// Every parser declares a `capability::FeatureSupport` describing which
+// daw-proto domains it can read/write for that format.
+
+/// Pro Tools session parser (`.ptx` / `.ptf` / `.pts`).
+#[cfg(feature = "protools")]
+pub mod protools {
+    pub use dawfile_protools::*;
+}
+
+/// Ableton Live Set parser (`.als`).
+#[cfg(feature = "ableton")]
+pub mod ableton {
+    pub use dawfile_ableton::*;
+}
+
+/// Logic Pro session parser (`.logicx`).
+#[cfg(feature = "logic")]
+pub mod logic {
+    pub use dawfile_logic::*;
+}
+
+/// Advanced Authoring Format parser (`.aaf`).
+#[cfg(feature = "aaf")]
+pub mod aaf {
+    pub use dawfile_aaf::*;
+}
+
+/// DAWproject parser (`.dawproject`).
+#[cfg(feature = "dawproject")]
+pub mod dawproject {
+    pub use dawfile_dawproject::*;
+}
+
 // ── Extension runtime: in-process REAPER extension hosting ──────────────────
 //
 // `daw-extension-runtime` lives as a public sibling crate, not under the

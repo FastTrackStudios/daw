@@ -13,7 +13,7 @@ daw-module = { path = "../daw-module" }
 
 # UI host adapter (REAPER + Dioxus). Pulled in only when the `reaper-ui`
 # feature is enabled — keeps audio-graph / WASM / embedded targets clean.
-daw-reaper-dioxus = { path = "../daw-reaper-dioxus", optional = true }
+daw-reaper-dioxus = { path = "../../features/backends/reaper/daw-reaper-dioxus", optional = true }
 
 # Runtime (needed for block_on in plugin context)
 tokio.workspace = true
@@ -26,10 +26,23 @@ facet.workspace = true
 # reach `daw::{Services, Layer, layers!}` for service composition.
 architect.workspace = true
 
-# Feature-gated internal crates
-daw-reaper = { path = "../daw-reaper", optional = true }
-daw-standalone = { path = "../daw-standalone", optional = true }
-dawfile-reaper = { path = "../dawfile-reaper", optional = true }
+# Feature-gated internal crates. daw-reaper carries per-format importer
+# features (default = all-formats); we take it with default-features = false
+# so the facade can opt into formats individually (see convert-<format>).
+daw-reaper = { path = "../../features/backends/reaper/daw-reaper", optional = true, default-features = false }
+daw-standalone = { path = "../../features/standalone/daw-standalone", optional = true }
+dawfile-reaper = { path = "../../features/backends/reaper/dawfile-reaper", optional = true }
+
+# Source-format parsers — each exposes one DAW's file format (format →
+# daw-proto types) under `daw::<format>`, gated by a per-format feature.
+# Opt into only the formats you need; none of these pull in REAPER. The
+# reaper-based file→RPP `convert()` path lives under the `convert` feature.
+# Each depends only on `daw-proto`, so there is no facade cycle.
+dawfile-protools = { path = "../../features/backends/protools/dawfile-protools", optional = true }
+dawfile-ableton = { path = "../../features/backends/ableton/dawfile-ableton", optional = true }
+dawfile-logic = { path = "../../features/backends/logic/dawfile-logic", optional = true }
+dawfile-aaf = { path = "../../features/backends/aaf/dawfile-aaf", optional = true }
+dawfile-dawproject = { path = "../../features/backends/dawproject/dawfile-dawproject", optional = true }
 
 # Integration-test harness deps — only pulled in by the `test-harness`
 # feature (folded-in former `reaper-test` crate). None of these dep on
@@ -59,10 +72,26 @@ standalone = ["dep:daw-standalone"]
 standalone-audio = ["standalone", "daw-standalone/audio"]
 standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
 file = ["dep:dawfile-reaper"]
-# Cross-format project conversion (`daw::file::convert`). Pulls the importers
-# (which produce RPP) from `daw-reaper`.
-convert = ["file", "reaper"]
+# Cross-format project conversion (`daw::file::convert`, format → RPP). Pulls
+# the importers from `daw-reaper`. `convert` enables every importer; the
+# `convert-<format>` variants compile in only one source format, so a
+# specialized build (e.g. a Pro-Tools-only converter) avoids the other parsers.
+convert = ["file", "reaper", "daw-reaper/all-formats"]
+convert-protools = ["file", "reaper", "daw-reaper/protools"]
+convert-ableton = ["file", "reaper", "daw-reaper/ableton"]
+convert-aaf = ["file", "reaper", "daw-reaper/aaf"]
+convert-dawproject = ["file", "reaper", "daw-reaper/dawproject"]
 reaper-ui = ["dep:daw-reaper-dioxus"]
+
+# Source-format parsers, exposed under daw::<format>. Each is independent
+# of REAPER and of each other — opt into only what you read.
+protools = ["dep:dawfile-protools"]
+ableton = ["dep:dawfile-ableton"]
+logic = ["dep:dawfile-logic"]
+aaf = ["dep:dawfile-aaf"]
+dawproject = ["dep:dawfile-dawproject"]
+# All source-format parsers at once.
+formats = ["protools", "ableton", "logic", "aaf", "dawproject"]
 # Integration-test harness (former `reaper-test` crate). Drives daw-reaper
 # over the daw RPC surface; generalized over `DawBackend` (impl `ReaperBackend`).
 test-harness = [
@@ -78,4 +107,4 @@ test-harness = [
 workspace = true
 
 [dev-dependencies]
-dawfile-ableton = { path = "../dawfile-ableton" }
+dawfile-ableton = { path = "../../features/backends/ableton/dawfile-ableton" }
