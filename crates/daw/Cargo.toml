@@ -26,8 +26,10 @@ facet.workspace = true
 # reach `daw::{Services, Layer, layers!}` for service composition.
 architect.workspace = true
 
-# Feature-gated internal crates
-daw-reaper = { path = "../../features/backends/reaper/daw-reaper", optional = true }
+# Feature-gated internal crates. daw-reaper carries per-format importer
+# features (default = all-formats); we take it with default-features = false
+# so the facade can opt into formats individually (see convert-<format>).
+daw-reaper = { path = "../../features/backends/reaper/daw-reaper", optional = true, default-features = false }
 daw-standalone = { path = "../../features/standalone/daw-standalone", optional = true }
 dawfile-reaper = { path = "../../features/backends/reaper/dawfile-reaper", optional = true }
 
@@ -70,9 +72,15 @@ standalone = ["dep:daw-standalone"]
 standalone-audio = ["standalone", "daw-standalone/audio"]
 standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
 file = ["dep:dawfile-reaper"]
-# Cross-format project conversion (`daw::file::convert`). Pulls the importers
-# (which produce RPP) from `daw-reaper`.
-convert = ["file", "reaper"]
+# Cross-format project conversion (`daw::file::convert`, format → RPP). Pulls
+# the importers from `daw-reaper`. `convert` enables every importer; the
+# `convert-<format>` variants compile in only one source format, so a
+# specialized build (e.g. a Pro-Tools-only converter) avoids the other parsers.
+convert = ["file", "reaper", "daw-reaper/all-formats"]
+convert-protools = ["file", "reaper", "daw-reaper/protools"]
+convert-ableton = ["file", "reaper", "daw-reaper/ableton"]
+convert-aaf = ["file", "reaper", "daw-reaper/aaf"]
+convert-dawproject = ["file", "reaper", "daw-reaper/dawproject"]
 reaper-ui = ["dep:daw-reaper-dioxus"]
 
 # Source-format parsers, exposed under daw::<format>. Each is independent
