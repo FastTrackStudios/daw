@@ -31,6 +31,17 @@ daw-reaper = { path = "../../features/backends/reaper/daw-reaper", optional = tr
 daw-standalone = { path = "../../features/standalone/daw-standalone", optional = true }
 dawfile-reaper = { path = "../../features/backends/reaper/dawfile-reaper", optional = true }
 
+# Source-format parsers — each exposes one DAW's file format (format →
+# daw-proto types) under `daw::<format>`, gated by a per-format feature.
+# Opt into only the formats you need; none of these pull in REAPER. The
+# reaper-based file→RPP `convert()` path lives under the `convert` feature.
+# Each depends only on `daw-proto`, so there is no facade cycle.
+dawfile-protools = { path = "../../features/backends/protools/dawfile-protools", optional = true }
+dawfile-ableton = { path = "../../features/backends/ableton/dawfile-ableton", optional = true }
+dawfile-logic = { path = "../../features/backends/logic/dawfile-logic", optional = true }
+dawfile-aaf = { path = "../../features/backends/aaf/dawfile-aaf", optional = true }
+dawfile-dawproject = { path = "../../features/backends/dawproject/dawfile-dawproject", optional = true }
+
 # Integration-test harness deps — only pulled in by the `test-harness`
 # feature (folded-in former `reaper-test` crate). None of these dep on
 # `daw`, so there is no cycle.
@@ -63,6 +74,16 @@ file = ["dep:dawfile-reaper"]
 # (which produce RPP) from `daw-reaper`.
 convert = ["file", "reaper"]
 reaper-ui = ["dep:daw-reaper-dioxus"]
+
+# Source-format parsers, exposed under daw::<format>. Each is independent
+# of REAPER and of each other — opt into only what you read.
+protools = ["dep:dawfile-protools"]
+ableton = ["dep:dawfile-ableton"]
+logic = ["dep:dawfile-logic"]
+aaf = ["dep:dawfile-aaf"]
+dawproject = ["dep:dawfile-dawproject"]
+# All source-format parsers at once.
+formats = ["protools", "ableton", "logic", "aaf", "dawproject"]
 # Integration-test harness (former `reaper-test` crate). Drives daw-reaper
 # over the daw RPC surface; generalized over `DawBackend` (impl `ReaperBackend`).
 test-harness = [
