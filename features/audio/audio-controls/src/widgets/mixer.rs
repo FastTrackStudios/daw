@@ -12,6 +12,7 @@
 
 use crate::core::sensitivity::{DragSensitivity, ModifierKeys};
 use crate::prelude::*;
+use crate::theming::{Color, ThemeState, use_theme};
 use crate::widgets::knob::{Knob, KnobVariant};
 
 // ── Palette ──────────────────────────────────────────────────────────────────
@@ -344,10 +345,15 @@ pub fn ChannelStrip(
     #[props(default = 180)] fader_height: u32,
     #[props(default)] disabled: bool,
 ) -> Element {
-    let track = track_hex(&color);
-    let footer_fg = readable_on(&track);
-    let body_tint = with_alpha(&track, "14");
-    let border_col = with_alpha(&track, "66");
+    let theme = use_theme().theme;
+    let st = ThemeState::new().track(color.as_deref().and_then(Color::hex));
+    let s = theme.strip(&st);
+    let surface = theme.tokens.surface.css();
+    let track = s.accent.css();
+    let footer_fg = s.footer_text.css();
+    let body_tint = s.body.css();
+    let border_col = s.border.css();
+    let value_fg = s.value_text.css();
     let opacity = if disabled { "0.5" } else { "1.0" };
     let title = name.clone().unwrap_or_default();
     let display = format!("{:.0}%", fader().clamp(0.0, 1.0) * 100.0);
@@ -357,7 +363,7 @@ pub fn ChannelStrip(
             style: format!(
                 "display:inline-flex; flex-direction:column; align-items:stretch; \
                  width:{width}px; overflow:hidden; margin-right:-1px; opacity:{opacity}; \
-                 border:1px solid {border_col}; background:#09090b; user-select:none;"
+                 border:1px solid {border_col}; background:{surface}; user-select:none;"
             ),
 
             // Body.
@@ -393,7 +399,9 @@ pub fn ChannelStrip(
                 }
 
                 span {
-                    style: "font-size:10px; color:#d4d4d8; text-align:center; font-variant-numeric:tabular-nums;",
+                    style: format!(
+                        "font-size:10px; color:{value_fg}; text-align:center; font-variant-numeric:tabular-nums;"
+                    ),
                     "{display}"
                 }
 

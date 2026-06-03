@@ -5,12 +5,15 @@
 use crate::prelude::*;
 
 use super::style::{DefaultStyleSheet, KnobStyle, SliderStyle, StyleSheet, XYPadStyle};
+use super::theme::Theme;
 
 /// Theme context data.
 #[derive(Clone)]
 pub struct ThemeContext {
     /// The active style sheet.
     sheet: StyleSheetWrapper,
+    /// The active token-based theme (panels/new components read this).
+    pub theme: Theme,
     /// Whether animations are enabled.
     pub animations_enabled: bool,
     /// Whether haptic feedback is enabled (for touch devices).
@@ -40,6 +43,7 @@ impl PartialEq for StyleSheetWrapper {
 impl PartialEq for ThemeContext {
     fn eq(&self, other: &Self) -> bool {
         self.sheet == other.sheet
+            && self.theme == other.theme
             && self.animations_enabled == other.animations_enabled
             && self.haptics_enabled == other.haptics_enabled
             && (self.scale_factor - other.scale_factor).abs() < f32::EPSILON
@@ -53,6 +57,7 @@ impl ThemeContext {
         static DEFAULT: DefaultStyleSheet = DefaultStyleSheet;
         Self {
             sheet: StyleSheetWrapper { inner: &DEFAULT },
+            theme: Theme::dark(),
             animations_enabled: true,
             haptics_enabled: true,
             scale_factor: 1.0,
@@ -67,6 +72,7 @@ impl ThemeContext {
     pub fn with_stylesheet(sheet: &'static dyn StyleSheet) -> Self {
         Self {
             sheet: StyleSheetWrapper { inner: sheet },
+            theme: Theme::dark(),
             animations_enabled: true,
             haptics_enabled: true,
             scale_factor: 1.0,
@@ -91,6 +97,13 @@ impl ThemeContext {
     #[must_use]
     pub fn with_scale(mut self, scale: f32) -> Self {
         self.scale_factor = scale.max(0.1);
+        self
+    }
+
+    /// Set the active token-based [`Theme`].
+    #[must_use]
+    pub fn with_theme(mut self, theme: Theme) -> Self {
+        self.theme = theme;
         self
     }
 
