@@ -1,9 +1,41 @@
 {% extends "base.html" %}
 
 {% block title %}Keyflow — plain-text chart notation{% endblock title %}
+{% block body_class %}home{% endblock body_class %}
 
-{% block content %}
-<article>
-    {{ section.content | safe }}
-</article>
-{% endblock content %}
+{% block body %}
+<div class="hero">
+    <div class="hero-content">
+        <h1 class="hero-title">Keyflow</h1>
+        <p class="hero-tagline">Plain-text chord charts that engrave themselves.</p>
+        <p class="hero-sub">A diffable source format for lead sheets, rhythm charts, and melodies — rendered to publication-quality SVG and PDF.</p>
+        <div class="hero-actions">
+            <a href="/guide/" class="btn btn-primary">Read the guide</a>
+            <a href="/architecture/" class="btn btn-secondary">Architecture</a>
+        </div>
+    </div>
+</div>
+
+<div class="layout">
+    <aside class="sidebar">
+        <nav class="sidebar-nav">
+            {% for sub in root.subsections %}
+            <div class="sidebar-section">
+                <h3><a href="{{ sub.permalink }}">{{ sub.title }}</a></h3>
+                <ul>
+                    {% for page in sub.pages %}
+                    <li><a href="{{ page.permalink }}">{{ page.title }}</a></li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endfor %}
+
+        </nav>
+    </aside>
+    <main class="content">
+        <article>
+            {{ section.content | safe }}
+        </article>
+    </main>
+</div>
+{% endblock body %}
