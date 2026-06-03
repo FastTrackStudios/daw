@@ -17,6 +17,7 @@ pub mod compressor_graph;
 pub mod gate_graph;
 pub mod hslider;
 pub mod knob;
+pub mod mixer;
 pub mod vslider;
 pub mod xy_pad;
 
@@ -28,5 +29,8 @@ pub use compressor_graph::{
 pub use gate_graph::{GateDbRange, GateGraph, GateMetering, GateMode, GateParams};
 pub use hslider::{HSlider, SliderVariant};
 pub use knob::{Knob, KnobVariant};
+pub use mixer::{ChannelFader, ChannelStrip, MixerFolder, MuteButton, RoutingButton, SoloButton};
+#[cfg(feature = "hierarchy")]
+pub use mixer::{Mixer, MixerStrip};
 pub use vslider::VSlider;
 pub use xy_pad::XYPad;
