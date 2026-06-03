@@ -13,5 +13,10 @@ pub mod core;
 pub mod theming;
 pub mod widgets;
 
+/// Top-level, reusable DAW panels (TrackControlPanel / MixerControlPanel /
+/// ArrangeView) and their `DawWorkspace` composition.
+#[cfg(feature = "web")]
+pub mod panels;
+
 // Internal prelude for conditional dioxus import
 pub(crate) mod prelude;
