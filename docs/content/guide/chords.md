@@ -14,6 +14,12 @@ C        F#m7       Bbmaj9       G7b9       Dm7b5/F
          └quality   └root        └family
 ```
 
+A bar of varied chord qualities, engraved:
+
+```kf
+Cmaj7 | F#m7b5 | Bbmaj9 | G7b9
+```
+
 This page is about writing **one chord, on its own**. (How chords carry their
 quality forward from bar to bar — "chord memory" — comes later.) Everything
 after the root reads left to right: quality → seventh family → extensions →

@@ -19,6 +19,14 @@ A quoted string is **free text** placed on the staff. By default it sits below;
 _"rit. ...."           below the staff
 ```
 
+Staff text and a dynamic alongside the chords, engraved:
+
+```kf
+^"Swell"
+dyn mf
+1 | 4 | 5 | 1
+```
+
 Put the line wherever the text belongs in the music — before the bar it
 describes, between two chord lines, and so on. (To pin text to a *single chord*
 instead of a whole spot, attach it to the chord: `Cmaj7"as written"` — see

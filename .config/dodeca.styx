@@ -1,2 +1,11 @@
-content docs/content
+// `content` points at the GENERATED tree, not the authored one. Authors edit
+// docs/content; `kf docs` renders its kf blocks to inline SVG into
+// docs/.rendered, which stock dodeca then builds. Run docs/build.sh (one shot)
+// or docs/serve.sh (watch + serve) — never `ddc` directly on raw source.
+content docs/.rendered
 output docs/output
+
+// The shared engraving-font stylesheet (`kf docs` writes it; chart pages
+// <link> it). Served verbatim at /kf-fonts.css — no cache-busting — so the
+// stable <link href> resolves. It's CSS, so the font subsetter leaves it alone.
+stable_assets ( kf-fonts.css )

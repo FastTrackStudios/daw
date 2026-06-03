@@ -15,6 +15,16 @@ Notes live in a melody block, `m{ … }`:
 m{ C D E F }
 ```
 
+A melody paired with its chords, engraved:
+
+```kf
+VS
+<<
+C | F | G | C ;
+m { C(4) D E F | E F G A | G A B 'C | 'C B A G }
+>>
+```
+
 Four notes — C, D, E, F. With no duration written, each is a **quarter note**, so
 that line is one 4/4 bar. You add a duration only when you want something else
 (below).

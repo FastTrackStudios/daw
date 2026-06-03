@@ -13,6 +13,12 @@ than one chord. That's why you almost never type a bar line.
 C  F  G  Am
 ```
 
+Slashes mark the beats — engraved, a mix of held and strummed bars:
+
+```kf
+C //// | F //// | G / / / | C
+```
+
 Four chords, four bars — one chord each. No `|`, no durations.
 
 ## One chord, one bar

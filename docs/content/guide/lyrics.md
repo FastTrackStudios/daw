@@ -13,6 +13,14 @@ C  C  F  C
 [lyrics] Twinkle twinkle little star
 ```
 
+Words under the chords, engraved:
+
+```kf
+VS 4
+C | C | F | C
+[lyrics] Twinkle twinkle little star
+```
+
 `[lyrics]` is a reserved marker (the words for the section above it), not a
 section of its own — unlike the custom `[Name]` headers from
 [Sections](/guide/sections/).

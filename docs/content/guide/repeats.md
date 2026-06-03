@@ -15,6 +15,12 @@ Songs loop. Rather than write the same bars again, Keyflow has a few ways to say
 1  4  %  5        bar 3 repeats bar 2 (the 4)
 ```
 
+`%` replays the previous bar — engraved, bar 3 repeats the 4:
+
+```kf
+1 | 4 | % | 5
+```
+
 ## Repeat a line — `xN`
 
 Put `x` and a number at the end of a line to play the whole line that many times:

@@ -21,6 +21,13 @@ VS 8
 1  4  5  1   #G   1  4  5  1
 ```
 
+A key change mid-chart (to G at bar 3), engraved:
+
+```kf
+4/4 #C
+1 | 5 | #G 1 | 5
+```
+
 From `#G` onward the chart is in G, so the `1 4 5` after it are G–C–D, not
 C–F–G. The token isn't a chord; it just moves the key — and the key signature —
 from that spot on. It works in a letter-name chart too: the change still updates

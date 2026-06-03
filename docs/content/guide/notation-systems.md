@@ -19,6 +19,19 @@ Use whichever fits the chart — letter names for a fixed-key lead sheet, number
 for a transposable worship/Nashville chart, Roman numerals for analysis or
 classical feel.
 
+Those same four bars, engraved straight from a ` ```kf ` block:
+
+```kf
+C | F | Am | G
+```
+
+Write it in numbers instead and it's the same music as scale degrees:
+
+```kf
+4/4 #C
+1 | 4 | 6m | 5
+```
+
 ## Letter names
 
 Absolute pitch. The root is a note `A`–`G` with an optional accidental, and the

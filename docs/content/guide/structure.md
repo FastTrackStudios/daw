@@ -14,6 +14,16 @@ VS                            ← sections: the music
 Gm Bb F Ab
 ```
 
+Engraved, a small chart with a header and one section looks like this:
+
+```kf
+Vienna - Billy Joel
+4/4 140bpm #Gm
+
+VS
+Gm | Bb | F | Ab
+```
+
 1. A **header** at the top describing the song — its title, who wrote it, and
    the musical defaults (time signature, tempo, key).
 2. One or more **sections** of music below it.
