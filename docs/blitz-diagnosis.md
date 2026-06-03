@@ -6,7 +6,7 @@ behaves wrong on `--platform native` (Blitz). It's distilled from
 the SVG `currentColor` bug, the CSS-keyframe rotation bug, and the
 Xvfb-DPI parity drift — see [`docs/blitz-fork-workflow.md`](./blitz-fork-workflow.md)
 for how the fork is laid out, and the [`Diagnostics/*`
-stories](../crates/fts-ui/src/stories.rs) for live reproductions of
+stories](../features/core/src/stories.rs) for live reproductions of
 each.
 
 ## 1. Reproduce in a story before doing anything else
@@ -55,14 +55,14 @@ need it in the matrix.
 
 ## 3. Run the parity harness
 
-`cargo test --release -p fts-ui --features stories --test parity`
+`cargo test --release -p fts-ui-core --test parity`
 gives you a deterministic side-by-side composite of Blitz and wry.
 Use it for any visual question. When in doubt, `nix-shell -p
 xorg.xorgserver imagemagick --run "<cmd>"` — the harness needs Xvfb,
 xdotool, and ImageMagick on `$PATH`.
 
 The composite lives at
-`crates/fts-ui/parity_output/<Category>__<name>.composite.png`
+`features/core/parity_output/<Category>__<name>.composite.png`
 (Blitz on the left, wry on the right). Check the per-side images
 too — sometimes Blitz crashes silently and "looks identical" only
 because both sides are blank.
@@ -244,7 +244,7 @@ When the visual output isn't enough:
 
 ```sh
 RUST_LOG=blitz_dom=debug,blitz_paint=debug,anyrender_vello_cpu=debug \
-  cargo test --release -p fts-ui --features stories \
+  cargo test --release -p fts-ui-core \
   --test parity <story>_parity -- --ignored --nocapture
 ```
 

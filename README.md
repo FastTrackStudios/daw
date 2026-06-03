@@ -45,7 +45,10 @@ and platform-specific rendering differences.
 
 ## Component Library
 
-The reusable library is in `crates/fts-ui`.
+`crates/fts-ui` is a thin facade that re-exports the feature crates under
+`features/` behind Cargo features: `features/core` (`fts-ui-core`, the standard
+component set, on by default) and `features/audio` (`fts-ui-audio`, the audio
+widget kit, behind `features = ["audio"]` and exposed as `fts_ui::audio`).
 
 Typical app usage:
 
