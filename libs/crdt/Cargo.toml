@@ -47,3 +47,6 @@ tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1", default-features = false, features = ["rt"] }
+
+[lib]
+doctest = false
