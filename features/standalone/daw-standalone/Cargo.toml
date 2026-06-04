@@ -69,6 +69,9 @@ audio = ["decode", "dep:cpal"]
 # `rpp-project` without default features:
 #   default-features = false, features = ["rpp-project-wasm"]
 rpp-project = ["dep:dawfile-reaper", "dawfile-reaper/parallel"]
+# REAPER .reapeaks peak-cache reading (waveform drawing) — much lighter
+# than rpp-project (no parallel parser).
+reapeaks = ["dep:dawfile-reaper"]
 rpp-project-wasm = ["dep:dawfile-reaper"]
 # Adds audio decoding on top of rpp-project — for the in-process
 # mixer example that streams the resolved item audio. Native-only.

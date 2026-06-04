@@ -89,3 +89,8 @@ mod window_manager;
 pub use project::project_guids;
 pub use shared_state::SharedProjectState;
 pub use sync::Standalone;
+
+/// REAPER `.reapeaks` peak-cache reading (the `reapeaks` feature) — draw
+/// waveforms from REAPER's own peak mipmaps.
+#[cfg(feature = "reapeaks")]
+pub use dawfile_reaper::reapeaks;
