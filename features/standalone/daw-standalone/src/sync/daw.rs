@@ -320,6 +320,10 @@ pub struct ProjectState {
     pub next_fx_counter: u64,
     /// Counter for synthesizing take GUIDs.
     pub next_take_counter: u64,
+    /// Mutation generation — bumped by every `with_project_mut` /
+    /// `write_project` pass. Readers (the audio renderer's snapshot
+    /// cache) compare revisions instead of re-walking the state.
+    pub revision: u64,
 }
 
 impl ProjectState {
@@ -361,6 +365,7 @@ impl ProjectState {
             next_item_counter: 0,
             next_fx_counter: 0,
             next_take_counter: 0,
+            revision: 0,
         }
     }
 }
@@ -536,7 +541,11 @@ impl Standalone {
             .projects
             .get_mut(guid)
             .ok_or_else(|| DawError::not_found("Project", guid))?;
-        Ok(f(project))
+        let r = f(project);
+        // Every mutable pass counts as a mutation — false positives
+        // just refresh a cache, staleness would corrupt playback.
+        project.revision = project.revision.wrapping_add(1);
+        Ok(r)
     }
 
     /// Run a closure with shared access to a project's state.
@@ -673,7 +682,10 @@ impl Standalone {
         f: impl FnOnce(&mut ProjectState) -> R,
     ) -> Option<R> {
         let mut s = self.state.lock().ok()?;
-        s.projects.get_mut(guid).map(f)
+        let project = s.projects.get_mut(guid)?;
+        let r = f(project);
+        project.revision = project.revision.wrapping_add(1);
+        Some(r)
     }
 
     /// Captured console messages, useful in tests.

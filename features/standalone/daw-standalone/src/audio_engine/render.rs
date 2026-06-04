@@ -202,18 +202,27 @@ struct MidiOtherSnapshot {
 }
 
 /// Render a stereo master block.
-pub struct ProjectRenderer<'a> {
-    daw: &'a Standalone,
-    project_guid: &'a str,
+///
+/// Keep one renderer alive across blocks: the track snapshot is cached
+/// against the project's mutation revision, so steady-state playback
+/// (no edits) re-walks nothing — REAPER's "graph is cheap, only
+/// rebuild on change" model. A throwaway renderer still works, it just
+/// re-snapshots every call.
+pub struct ProjectRenderer {
+    daw: Standalone,
+    project_guid: String,
     sample_rate: u32,
+    /// `(project revision, snapshot)` — refreshed when the revision moves.
+    cache: std::sync::Mutex<Option<(u64, Arc<Vec<TrackSnapshot>>)>>,
 }
 
-impl<'a> ProjectRenderer<'a> {
-    pub fn new(daw: &'a Standalone, project_guid: &'a str, sample_rate: u32) -> Self {
+impl ProjectRenderer {
+    pub fn new(daw: &Standalone, project_guid: &str, sample_rate: u32) -> Self {
         Self {
-            daw,
-            project_guid,
+            daw: daw.clone(),
+            project_guid: project_guid.to_string(),
             sample_rate,
+            cache: std::sync::Mutex::new(None),
         }
     }
 
@@ -236,17 +245,26 @@ impl<'a> ProjectRenderer<'a> {
         // Allocate per-track stereo buses keyed by guid.
         let mut buses: std::collections::HashMap<String, StereoBuffer> =
             std::collections::HashMap::with_capacity(snapshot.len());
-        for t in &snapshot {
+        for t in snapshot.iter() {
             buses.insert(
                 t.guid.clone(),
                 StereoBuffer::zeroed(frames, self.sample_rate),
             );
         }
 
+        // Dirty flags: a bus that never receives signal (no items in
+        // the window, no sends, no children, no synth FX) is all
+        // zeros — every later stage can skip it outright. With a big
+        // session only a fraction of tracks are audible in any block,
+        // so this is the difference between O(active) and O(all)
+        // per-frame work.
+        let n = snapshot.len();
+        let mut dirty = vec![false; n];
+
         // 1) Item playback into per-track buses. Item-level envelopes
         // (take volume / pan / mute / pitch) are evaluated per-frame
         // inside mix_item_into_bus via cursors.
-        for t in snapshot.iter() {
+        for (ti, t) in snapshot.iter().enumerate() {
             if any_soloed && !t.soloed {
                 continue;
             }
@@ -256,7 +274,7 @@ impl<'a> ProjectRenderer<'a> {
                     continue;
                 }
                 let Some(audio) = &item.audio else { continue };
-                mix_item_into_bus(
+                dirty[ti] |= mix_item_into_bus(
                     bus,
                     audio,
                     item,
@@ -312,7 +330,7 @@ impl<'a> ProjectRenderer<'a> {
             let mut in_r = vec![0.0f32; frames];
             let mut out_l = vec![0.0f32; frames];
             let mut out_r = vec![0.0f32; frames];
-            for t in snapshot.iter() {
+            for (ti, t) in snapshot.iter().enumerate() {
                 if any_soloed && !t.soloed {
                     continue;
                 }
@@ -381,6 +399,9 @@ impl<'a> ProjectRenderer<'a> {
                         bus.samples[f * 2] = out_l[f];
                         bus.samples[f * 2 + 1] = out_r[f];
                     }
+                    // A plugin ran — it may synthesize (MIDI → audio),
+                    // so the bus can carry signal even with no items.
+                    dirty[ti] = true;
                 }
             }
         }
@@ -404,7 +425,6 @@ impl<'a> ProjectRenderer<'a> {
         // (the session's whole drum mix flows Drums → DRUM BUS → MIX BUS).
         // Kahn's algorithm; any cycle remainder (feedback loops) appends in
         // index order.
-        let n = snapshot.len();
         let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
         let mut indeg = vec![0usize; n];
         let mut edge = |a: usize, b: usize| {
@@ -509,6 +529,15 @@ impl<'a> ProjectRenderer<'a> {
                 }
                 continue;
             }
+            // Clean bus = all zeros: gain scales nothing, sends add
+            // nothing, parent sums add nothing. Skip the per-frame
+            // work entirely; only active tracks cost CPU.
+            if !dirty[ti] {
+                if let Some(cell) = meters.cell(ti) {
+                    cell.write(0.0, 0.0, crate::metering::HOLD_DECAY);
+                }
+                continue;
+            }
 
             // Gain + pan + polarity, per-frame envelopes.
             if let Some(bus) = buses.get_mut(&t.guid) {
@@ -599,6 +628,9 @@ impl<'a> ProjectRenderer<'a> {
                     Some(b) => b,
                     None => continue,
                 };
+                if let Some(&di) = idx_by_guid.get(snd.dest_guid.as_str()) {
+                    dirty[di] = true;
+                }
                 let mut c_vol = snd.volume_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 let mut c_pan = snd.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 let mut c_mute = snd.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
@@ -640,6 +672,7 @@ impl<'a> ProjectRenderer<'a> {
                             for (m, smp) in parent_bus.samples.iter_mut().zip(src.iter()) {
                                 *m += *smp;
                             }
+                            dirty[pi] = true;
                         }
                     }
                     None => {
@@ -676,15 +709,28 @@ impl<'a> ProjectRenderer<'a> {
         master
     }
 
-    fn snapshot_tracks(&self) -> Option<Vec<TrackSnapshot>> {
-        self.daw.read_project(self.project_guid, |p| {
+    fn snapshot_tracks(&self) -> Option<Arc<Vec<TrackSnapshot>>> {
+        let revision = self.daw.read_project(&self.project_guid, |p| p.revision)?;
+        if let Ok(cache) = self.cache.lock()
+            && let Some((cached_rev, snap)) = cache.as_ref()
+            && *cached_rev == revision
+        {
+            return Some(snap.clone());
+        }
+        // Build + revision in ONE lock pass so the cached pair is
+        // always internally consistent.
+        let (revision, snap) = self.daw.read_project(&self.project_guid, |p| {
             let tempo_map = TempoMap::from_state(p);
             let mut tracks = Vec::with_capacity(p.tracks.len());
             for t in &p.tracks {
                 tracks.push(snapshot_track(p, t, &tempo_map));
             }
-            tracks
-        })
+            (p.revision, Arc::new(tracks))
+        })?;
+        if let Ok(mut cache) = self.cache.lock() {
+            *cache = Some((revision, snap.clone()));
+        }
+        Some(snap)
     }
 }
 
@@ -1320,6 +1366,8 @@ fn eval_envelope(points: &[EnvelopePoint], time_seconds: f64) -> Option<f64> {
     None
 }
 
+/// Returns `true` if any sample was mixed into the bus (drives the
+/// caller's dirty-bus tracking).
 fn mix_item_into_bus(
     bus: &mut StereoBuffer,
     audio: &AudioSource,
@@ -1327,18 +1375,18 @@ fn mix_item_into_bus(
     block_start_seconds: f64,
     block_end_seconds: f64,
     output_rate: u32,
-) {
+) -> bool {
     let item_start = item.position_seconds;
     let item_end = item_start + item.length_seconds;
 
     // Quick out: item doesn't overlap this block.
     if item_end <= block_start_seconds || item_start >= block_end_seconds {
-        return;
+        return false;
     }
 
     let base_gain = (item.item_volume * item.take_volume) as f32;
     if base_gain == 0.0 {
-        return;
+        return false;
     }
 
     // Per-frame envelope cursors. All in item-relative time, which
@@ -1358,6 +1406,18 @@ fn mix_item_into_bus(
     let audio_rate = audio.sample_rate().max(1) as f64;
     let output_rate_f = output_rate as f64;
 
+    // Pitch → rate multiplier. `powf` costs ~an entire frame's mixing
+    // work, so fold the static case out of the loop; per-frame powf
+    // only happens while a pitch envelope is actually present.
+    let static_pitch_mult = if item.take_pitch_semitones == 0.0 {
+        1.0
+    } else {
+        2f64.powf(item.take_pitch_semitones / 12.0)
+    };
+    let source_len = audio.frame_count() as f64;
+    let last_frame = audio.frame_count().saturating_sub(1);
+
+    let mut wrote = false;
     for frame in 0..bus.frames {
         let block_time = block_start_seconds + (frame as f64 / output_rate_f);
         if block_time < item_start || block_time >= item_end {
@@ -1376,26 +1436,29 @@ fn mix_item_into_bus(
         }
 
         // Pitch: static + envelope semitones → rate multiplier.
-        let env_pitch_st = c_pitch
-            .as_mut()
-            .and_then(|c| c.eval_at(item_time))
-            .unwrap_or(0.0);
-        let pitch_mult = 2f64.powf((item.take_pitch_semitones + env_pitch_st) / 12.0);
+        let pitch_mult = match c_pitch.as_mut() {
+            Some(c) => {
+                let st = c.eval_at(item_time).unwrap_or(0.0);
+                2f64.powf((item.take_pitch_semitones + st) / 12.0)
+            }
+            None => static_pitch_mult,
+        };
 
         let source_time = item.start_offset_seconds + item_time * item.play_rate * pitch_mult;
         if source_time < 0.0 {
             continue;
         }
         let source_frame_f = source_time * audio_rate;
-        let source_len = audio.frame_count() as f64;
         if source_frame_f >= source_len {
             continue;
         }
 
         // Linear interpolation between two source frames.
-        let i0 = source_frame_f.floor() as usize;
+        // (`as usize` truncates toward zero == floor for the
+        // non-negative values guaranteed above.)
+        let i0 = source_frame_f as usize;
         let frac = (source_frame_f - i0 as f64) as f32;
-        let i1 = (i0 + 1).min(audio.frame_count().saturating_sub(1));
+        let i1 = (i0 + 1).min(last_frame);
         let (l, r) = audio.stereo_interp(i0, i1, frac);
 
         // Volume envelope per-frame.
@@ -1429,7 +1492,9 @@ fn mix_item_into_bus(
 
         bus.samples[frame * 2] += l * g * pan_lg;
         bus.samples[frame * 2 + 1] += r * g * pan_rg;
+        wrote = true;
     }
+    wrote
 }
 
 fn sample_stereo_interp(

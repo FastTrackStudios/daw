@@ -393,6 +393,10 @@ impl AudioEngine {
     ) -> Result<Stream, String> {
         let channels = config.channels as usize;
         let sample_rate = config.sample_rate;
+        // One renderer for the stream's lifetime — its snapshot cache
+        // only rebuilds when the project revision moves, so steady
+        // playback re-walks nothing.
+        let renderer = ProjectRenderer::new(&daw, &project_guid, sample_rate);
         let stream = device
             .build_output_stream(
                 config,
@@ -419,12 +423,11 @@ impl AudioEngine {
                     }
                     let start = shared.playhead_samples().0.max(0) as u64;
 
-                    // Snapshot + render. ProjectRenderer briefly
-                    // acquires the project Mutex (Vec snapshot only,
-                    // not the render itself). Future work: lock-free
-                    // RCU snapshot so the callback never blocks.
-                    let block = ProjectRenderer::new(&daw, &project_guid, sample_rate)
-                        .render_block(start, num_frames);
+                    // Render. The renderer briefly acquires the project
+                    // Mutex (revision check; full re-walk only after an
+                    // edit). Future work: lock-free RCU snapshot so the
+                    // callback never blocks.
+                    let block = renderer.render_block(start, num_frames);
 
                     // Interleave the stereo block into the cpal
                     // buffer (handle channel-count mismatch by

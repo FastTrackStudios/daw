@@ -249,9 +249,15 @@ impl AudioSource {
             AudioSource::PcmFile(p) => {
                 let l0 = p.sample(i0, 0);
                 let l1 = p.sample(i1, 0);
+                let l = l0 + (l1 - l0) * frac;
+                // Mono (most stems): both channels read the same data —
+                // skip the second decode entirely.
+                if p.channels <= 1 {
+                    return (l, l);
+                }
                 let r0 = p.sample(i0, 1);
                 let r1 = p.sample(i1, 1);
-                (l0 + (l1 - l0) * frac, r0 + (r1 - r0) * frac)
+                (l, r0 + (r1 - r0) * frac)
             }
         }
     }
