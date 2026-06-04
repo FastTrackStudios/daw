@@ -429,6 +429,11 @@ pub struct Standalone {
         Arc<tokio::sync::broadcast::Sender<daw_proto::region::RegionStreamEvent>>,
     pub(crate) tempo_map_events:
         Arc<tokio::sync::broadcast::Sender<daw_proto::tempo_map::TempoMapStreamEvent>>,
+    /// Per-track peak-meter bank, written by the audio engine and read by the
+    /// `Peaks` service. Replaceable (the track count is fixed per bank) so an
+    /// audio engine can install a freshly-sized bank when it attaches; empty
+    /// until then, so `track_peak` reports silence.
+    pub(crate) meters: Arc<Mutex<Arc<crate::metering::Meters>>>,
 }
 
 impl Default for Standalone {
@@ -453,7 +458,21 @@ impl Standalone {
             marker_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
             region_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
             tempo_map_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
+            meters: Arc::new(Mutex::new(crate::metering::Meters::empty())),
         }
+    }
+
+    /// The current per-track peak-meter bank (written by the audio engine,
+    /// read by the `Peaks` service).
+    pub fn meters(&self) -> Arc<crate::metering::Meters> {
+        self.meters.lock().expect("meters poisoned").clone()
+    }
+
+    /// Install a peak-meter bank, replacing any previous one. An audio engine
+    /// calls this when it attaches so its realtime callback and the `Peaks`
+    /// service share the same cells.
+    pub fn set_meters(&self, meters: Arc<crate::metering::Meters>) {
+        *self.meters.lock().expect("meters poisoned") = meters;
     }
 
     /// Get or lazily-create the transport engine bundle for `guid`.

@@ -53,6 +53,35 @@ pub fn sine_wave_stereo(
     }
 }
 
+/// Generate a rhythmic, metering-friendly tone: a sine carrier shaped by a
+/// repeating half-sine amplitude pulse at `pulse_hz`. Unlike a flat sine (whose
+/// meter would sit at a constant level), the bouncing envelope makes per-track
+/// meters visibly move, and distinct `pulse_hz` per track gives a polyrhythmic
+/// demo. `gain` is the peak linear amplitude (≤ ~0.5 to leave mixing headroom).
+pub fn pulse_tone(
+    frequency: f32,
+    pulse_hz: f32,
+    gain: f32,
+    duration_seconds: f32,
+    sample_rate: u32,
+) -> DecodedAudio {
+    let num_samples = (duration_seconds * sample_rate as f32) as usize;
+    let mut samples = Vec::with_capacity(num_samples);
+    for i in 0..num_samples {
+        let t = i as f32 / sample_rate as f32;
+        let carrier = (2.0 * std::f32::consts::PI * frequency * t).sin();
+        // Half-sine hump each pulse period: rises and falls smoothly 0→1→0.
+        let phase = (t * pulse_hz).fract();
+        let env = (std::f32::consts::PI * phase).sin().max(0.0);
+        samples.push(carrier * env * gain);
+    }
+    DecodedAudio {
+        samples,
+        channels: 1,
+        sample_rate,
+    }
+}
+
 /// Generate a chord (multiple frequencies mixed together).
 pub fn chord(frequencies: &[f32], duration_seconds: f32, sample_rate: u32) -> DecodedAudio {
     let num_samples = (duration_seconds * sample_rate as f32) as usize;

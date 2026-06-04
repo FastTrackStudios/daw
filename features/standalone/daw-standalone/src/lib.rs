@@ -55,6 +55,7 @@ mod item;
 mod live_midi;
 mod marker;
 pub mod media_bay;
+pub mod metering;
 mod midi;
 mod peak;
 pub(crate) mod platform;

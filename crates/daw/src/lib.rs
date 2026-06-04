@@ -365,8 +365,12 @@ pub use daw_module::{
 // Audio-graph / WASM / embedded targets get nothing pulled in — the GPU
 // / blitz / dioxus-native stack only enters the dependency graph when the
 // feature is on.
+//
+// This is REAPER-specific UI plumbing (dock host, HWND-embedded views,
+// overlays). The portable, vector-themeable component library lives under
+// `daw::ui` (the `ui` feature) instead.
 #[cfg(feature = "reaper-ui")]
-pub mod ui {
+pub mod reaper_ui {
     /// Dock host implementation backed by REAPER's docker + Dioxus.
     pub mod dock {
         pub use daw_reaper_dioxus::dock::{
@@ -395,4 +399,18 @@ pub mod ui {
     /// Dioxus prelude — re-exported for component authors so they don't have
     /// to depend on `dioxus-native` directly.
     pub use daw_reaper_dioxus::prelude;
+}
+
+// ── UI components (portable, vector-themeable) ─────────────────────────────
+//
+// Enabled via `features = ["ui"]`. Re-exports the `daw-ui` component library —
+// theming tokens, widgets, and the Reaper-style panels (`DawWorkspace`,
+// `TrackControlPanel`, `MixerControlPanel`, `ArrangeView`) plus the `TrackView`
+// view-model the panels bind to. Renderer-agnostic: drives equally under
+// `dioxus-native` (Blitz/GPU) on desktop and dioxus-web in the browser. Apps
+// consume the panels through `daw::ui::panels` rather than depending on
+// `daw-ui` directly.
+#[cfg(feature = "ui")]
+pub mod ui {
+    pub use daw_ui::*;
 }

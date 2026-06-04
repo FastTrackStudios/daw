@@ -18,6 +18,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
 use tracing::{error, info};
 
+use crate::metering::{HOLD_DECAY, Meters};
 use crate::sync::Standalone;
 use crate::transport_engine::{PlayStateRepr, TransportShared};
 
@@ -40,6 +41,10 @@ struct TrackAudio {
     muted: bool,
     /// Whether this track is soloed
     soloed: bool,
+    /// Index of this track's cell in the [`Meters`] bank — i.e. the *project*
+    /// track index this audio is metering, which need not equal the mixer's own
+    /// track ordering.
+    meter_index: usize,
 }
 
 /// Mixer-private state. Playhead + play state are *not* here — they
@@ -54,6 +59,8 @@ struct MixerState {
     tracks: Vec<TrackAudio>,
     /// Master gain.
     master_gain: f32,
+    /// Per-track peak-meter bank, written once per block from `fill_buffer`.
+    meters: Arc<Meters>,
 }
 
 impl MixerState {
@@ -65,10 +72,20 @@ impl MixerState {
     /// Mix all tracks into the output buffer starting at `position`
     /// (in output-rate sample frames). Does not advance the engine —
     /// the caller (audio callback) does that.
+    ///
+    /// As a side effect, each contributing track's L/R block peak is written
+    /// into the [`Meters`] bank (after master gain) so the UI can show real
+    /// per-track levels. When stopped (or silent) every cell is written `0`, so
+    /// the meters decay to silence rather than freezing.
     fn fill_buffer(&self, output: &mut [f32], position: i64, playing: bool) {
         let channels = self.channels as usize;
+
+        // Per-track block peak accumulators (L, R), indexed by meter cell.
+        let mut peaks = vec![(0.0f32, 0.0f32); self.meters.len()];
+
         if channels == 0 || !playing {
             output.fill(0.0);
+            self.flush_meters(&peaks);
             return;
         }
 
@@ -78,19 +95,14 @@ impl MixerState {
         output.fill(0.0);
 
         for track in &self.tracks {
-            if track.muted {
-                continue;
-            }
-            if any_soloed && !track.soloed {
-                continue;
-            }
-            if track.gain == 0.0 {
+            if track.muted || (any_soloed && !track.soloed) || track.gain == 0.0 {
                 continue;
             }
 
             let buf = &track.buffer;
             let track_channels = buf.channels as usize;
             let track_rate = buf.sample_rate;
+            let (mut peak_l, mut peak_r) = (0.0f32, 0.0f32);
 
             for frame in 0..num_frames {
                 let out_frame = position + frame as i64;
@@ -114,14 +126,34 @@ impl MixerState {
                 for ch in 0..channels {
                     let src_ch = if ch < track_channels { ch } else { 0 };
                     let sample = buf.samples.get(src_offset + src_ch).copied().unwrap_or(0.0);
-                    output[dst_offset + ch] += sample * track.gain;
+                    let contribution = sample * track.gain * self.master_gain;
+                    output[dst_offset + ch] += contribution;
+                    match ch {
+                        0 => peak_l = peak_l.max(contribution.abs()),
+                        1 => peak_r = peak_r.max(contribution.abs()),
+                        _ => {}
+                    }
                 }
+            }
+
+            // Mono sources meter as dual-mono so the strip's two columns match.
+            if track_channels < 2 {
+                peak_r = peak_l;
+            }
+            if let Some(slot) = peaks.get_mut(track.meter_index) {
+                slot.0 = slot.0.max(peak_l);
+                slot.1 = slot.1.max(peak_r);
             }
         }
 
-        if self.master_gain != 1.0 {
-            for sample in output.iter_mut() {
-                *sample *= self.master_gain;
+        self.flush_meters(&peaks);
+    }
+
+    /// Push the per-track block peaks into the shared [`Meters`] bank.
+    fn flush_meters(&self, peaks: &[(f32, f32)]) {
+        for (i, &(l, r)) in peaks.iter().enumerate() {
+            if let Some(cell) = self.meters.cell(i) {
+                cell.write(l, r, HOLD_DECAY);
             }
         }
     }
@@ -146,6 +178,23 @@ impl AudioEngine {
         Self::with_shared(Arc::new(TransportShared::new(48_000, 120.0)))
     }
 
+    /// Attach a private-mixer engine to a project's transport clock *and*
+    /// peak-meter bank: shares `daw`'s playhead (disabling the soft clock so the
+    /// audio callback drives `advance`), and installs a freshly-sized
+    /// [`Meters`] bank on `daw` so per-track levels reach the `Peaks` service.
+    /// Load one track per project track with [`add_track_metered`](Self::add_track_metered).
+    pub fn metered_for(
+        daw: &Standalone,
+        project_guid: &str,
+        track_count: usize,
+    ) -> Result<Self, String> {
+        let bundle = daw.transport_engine_for(project_guid);
+        bundle.disable_soft_clock();
+        let meters = Meters::new(track_count);
+        daw.set_meters(meters.clone());
+        Self::with_shared_metered(bundle.shared.clone(), meters)
+    }
+
     /// Create an engine wired to a specific project on `daw`. The
     /// callback renders via [`ProjectRenderer`] every block, so the
     /// project's tracks / items / routing / audio sources are heard
@@ -162,8 +211,17 @@ impl AudioEngine {
 
     /// Create an engine that shares its sample clock with the given
     /// `TransportShared`. The shared sample-rate is rewritten to the
-    /// device's actual rate at startup.
+    /// device's actual rate at startup. Metering is disabled (empty bank).
     pub fn with_shared(shared: Arc<TransportShared>) -> Result<Self, String> {
+        Self::with_shared_metered(shared, Meters::empty())
+    }
+
+    /// As [`with_shared`](Self::with_shared), but the mixer writes per-track
+    /// block peaks into `meters` (one cell per project track index).
+    pub fn with_shared_metered(
+        shared: Arc<TransportShared>,
+        meters: Arc<Meters>,
+    ) -> Result<Self, String> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -177,10 +235,11 @@ impl AudioEngine {
         let channels = supported_config.channels();
 
         info!(
-            "Audio engine: {} channels, {} Hz, format {:?}",
+            "Audio engine: {} channels, {} Hz, format {:?}, {} meter cells",
             channels,
             sample_rate,
-            supported_config.sample_format()
+            supported_config.sample_format(),
+            meters.len(),
         );
 
         shared.set_sample_rate(sample_rate);
@@ -190,6 +249,7 @@ impl AudioEngine {
             channels,
             tracks: Vec::new(),
             master_gain: 1.0,
+            meters,
         }));
 
         let config = StreamConfig {
@@ -252,11 +312,14 @@ impl AudioEngine {
         );
         shared.set_sample_rate(sample_rate);
 
+        // The project-render path meters via `ProjectRenderer`, not the private
+        // track list, so the mixer's own bank stays empty here.
         let state = Arc::new(Mutex::new(MixerState {
             sample_rate,
             channels,
             tracks: Vec::new(),
             master_gain: 1.0,
+            meters: Meters::empty(),
         }));
 
         let config = StreamConfig {
@@ -419,7 +482,17 @@ impl AudioEngine {
     // ─── Track Management ────────────────────────────────────────────────
 
     /// Load a decoded audio buffer as a new track. Returns a handle for control.
+    /// The track meters into the cell matching its own load order; use
+    /// [`add_track_metered`](Self::add_track_metered) to meter into a specific
+    /// project track index instead.
     pub fn add_track(&self, audio: DecodedAudio) -> TrackHandle {
+        let index = self.state.lock().unwrap().tracks.len();
+        self.add_track_metered(audio, index)
+    }
+
+    /// Load a decoded buffer as a new track that meters into `meter_index` (the
+    /// project track index this audio represents). Returns a handle for control.
+    pub fn add_track_metered(&self, audio: DecodedAudio, meter_index: usize) -> TrackHandle {
         let mut state = self.state.lock().unwrap();
         let index = state.tracks.len();
         state.tracks.push(TrackAudio {
@@ -427,8 +500,9 @@ impl AudioEngine {
             gain: 1.0,
             muted: false,
             soloed: false,
+            meter_index,
         });
-        info!("Added track {index}");
+        info!("Added track {index} (meter cell {meter_index})");
         TrackHandle(index)
     }
 
