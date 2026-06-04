@@ -100,3 +100,7 @@ required-features = ["rpp-loader"]
 
 [lints]
 workspace = true
+
+[[example]]
+name = "dump_rpp_items"
+required-features = ["rpp-project"]
