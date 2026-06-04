@@ -1,0 +1,3 @@
+# Only the built site goes into the image.
+*
+!output
