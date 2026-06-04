@@ -102,6 +102,16 @@ where
     Ok((proj, audio))
 }
 
+/// REAPER native colour (Windows `COLORREF`, `0x..BBGGRR` + the
+/// `0x1000000` custom flag) → the canonical `0xRRGGBB` the daw-proto
+/// types carry.
+fn native_color_to_rgb(c: u32) -> u32 {
+    let r = c & 0xff;
+    let g = (c >> 8) & 0xff;
+    let b = (c >> 16) & 0xff;
+    (r << 16) | (g << 8) | b
+}
+
 /// Summary of what was loaded.
 #[derive(Debug, Default)]
 pub struct LoadedProject {
@@ -209,7 +219,7 @@ fn populate_tracks(
                 guid: guid.clone(),
                 index: idx as u32,
                 name: rt.name.clone(),
-                color: rt.peak_color.map(|c| c as u32),
+                color: rt.peak_color.map(|c| native_color_to_rgb(c as u32)),
                 muted,
                 soloed,
                 armed: rt.record.as_ref().map(|r| r.armed).unwrap_or(false),
@@ -273,7 +283,7 @@ fn populate_tracks(
                     item.fade_out_length = Duration::from_seconds(fo.time);
                     item.fade_out_shape = fade_curve_to_shape(fo.curve_type);
                 }
-                item.color = ri.color.map(|c| c as u32);
+                item.color = ri.color.map(|c| native_color_to_rgb(c as u32));
                 item.loop_source = ri.loop_source;
                 item.take_count = ri.takes.len().max(1) as u32;
                 // proto `Item` doesn't carry `channel_mode` yet — drop.
@@ -634,7 +644,7 @@ fn populate_markers_regions(
                 color: if mr.color == 0 {
                     None
                 } else {
-                    Some(mr.color as u32)
+                    Some(native_color_to_rgb(mr.color as u32))
                 },
                 guid: if mr.guid.is_empty() {
                     None
@@ -656,7 +666,7 @@ fn populate_markers_regions(
                 color: if mr.color == 0 {
                     None
                 } else {
-                    Some(mr.color as u32)
+                    Some(native_color_to_rgb(mr.color as u32))
                 },
                 guid: if mr.guid.is_empty() {
                     None
