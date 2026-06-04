@@ -145,6 +145,21 @@ impl Tracks for Standalone {
         })
     }
 
+    fn set_phase_inverted(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        inverted: bool,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].phase_inverted = inverted;
+            Ok::<_, DawError>(())
+        })??;
+        Ok(())
+    }
+
     fn set_muted(&self, project: ProjectContext, track: TrackRef, muted: bool) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
         let event = self.with_project_mut(&guid, |p| {

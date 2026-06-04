@@ -80,9 +80,13 @@ struct TrackSnapshot {
     name: String,
     volume: f64,
     pan: f64,
+    /// Polarity invert: flip the signal's sign at the gain stage.
+    phase_inverted: bool,
     muted: bool,
     soloed: bool,
     parent_send: bool,
+    /// Folder parent (resolved guid) — children sum into the parent's bus.
+    parent_guid: Option<String>,
     sends: Vec<SendSnapshot>,
     items: Vec<ItemSnapshot>,
     /// FX chain — list of `fx_guid`s in chain order. The renderer
@@ -349,78 +353,150 @@ impl<'a> ProjectRenderer<'a> {
             }
         }
 
-        // 2) Apply track gain + pan in place (pre-send, post-fader).
-        // Per-frame: walk envelopes via cursors so a ramp resolves at
-        // sample resolution rather than block-midpoint.
-        let inv_rate = 1.0 / self.sample_rate as f64;
-        for t in snapshot.iter() {
-            if any_soloed && !t.soloed {
-                continue;
+        // 2–4) Per-track processing in CHILDREN-FIRST order: a track's bus
+        // is gained/panned, its sends dispatched, and the result summed into
+        // its folder parent's bus *before* the parent's own gain applies —
+        // REAPER's folder routing (the parent fader/FX scale the children's
+        // sum plus the parent's own items). Top-level parent-send tracks sum
+        // to master.
+        let idx_by_guid: std::collections::HashMap<&str, usize> = snapshot
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t.guid.as_str(), i))
+            .collect();
+        let depth_of = |mut i: usize| -> usize {
+            let mut d = 0;
+            while let Some(pg) = snapshot[i].parent_guid.as_deref() {
+                match idx_by_guid.get(pg) {
+                    Some(&pi) if d < 64 => {
+                        d += 1;
+                        i = pi;
+                    }
+                    _ => break,
+                }
             }
-            let Some(bus) = buses.get_mut(&t.guid) else {
-                continue;
-            };
-            let mut c_vol = t.volume_env.as_ref().map(|p| EnvelopeCursor::new(p));
-            let mut c_pvol = t.volume_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
-            let mut c_pan = t.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
-            let mut c_ppan = t.pan_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
-            let mut c_mute = t.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
-            for frame in 0..bus.frames {
-                let time = start_seconds + frame as f64 * inv_rate;
-                let v_main = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
-                let v_prefx = c_pvol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
-                let vol = t.volume * v_main * v_prefx;
-                let p_main = c_pan
-                    .as_mut()
-                    .and_then(|c| c.eval_at(time))
-                    .map(|v| (v - 0.5) * 2.0)
-                    .unwrap_or(0.0);
-                let p_prefx = c_ppan
-                    .as_mut()
-                    .and_then(|c| c.eval_at(time))
-                    .map(|v| (v - 0.5) * 2.0)
-                    .unwrap_or(0.0);
-                let pan = (t.pan + p_main + p_prefx).clamp(-1.0, 1.0);
-                let env_muted = c_mute
-                    .as_mut()
-                    .and_then(|c| c.eval_at(time))
-                    .map(|v| v > 0.5)
-                    .unwrap_or(false);
-                let muted = t.muted || env_muted;
-                if muted {
-                    bus.samples[frame * 2] = 0.0;
-                    bus.samples[frame * 2 + 1] = 0.0;
+            d
+        };
+        let mut order: Vec<usize> = (0..snapshot.len()).collect();
+        order.sort_by_key(|&i| std::cmp::Reverse(depth_of(i)));
+
+        // Solo routing: with folder summing, a soloed track's signal flows
+        // THROUGH its ancestors — they (and its descendants) must keep
+        // passing audio even though they aren't soloed themselves.
+        let solo_pass: Option<Vec<bool>> = any_soloed.then(|| {
+            let mut pass = vec![false; snapshot.len()];
+            for (i, t) in snapshot.iter().enumerate() {
+                if !t.soloed {
                     continue;
                 }
-                let lg = ((1.0 - pan) * 0.5).sqrt() * vol;
-                let rg = ((1.0 + pan) * 0.5).sqrt() * vol;
-                bus.samples[frame * 2] *= lg as f32;
-                bus.samples[frame * 2 + 1] *= rg as f32;
+                // The soloed track + ancestors.
+                pass[i] = true;
+                let mut cur = i;
+                while let Some(pg) = snapshot[cur].parent_guid.as_deref() {
+                    match idx_by_guid.get(pg) {
+                        Some(&pi) if !pass[pi] => {
+                            pass[pi] = true;
+                            cur = pi;
+                        }
+                        _ => break,
+                    }
+                }
+                // Descendants (soloing a folder solos its children).
+                for (j, c) in snapshot.iter().enumerate() {
+                    let mut cur = j;
+                    let mut hops = 0;
+                    while let Some(pg) = snapshot[cur].parent_guid.as_deref() {
+                        match idx_by_guid.get(pg) {
+                            Some(&pi) if hops < 64 => {
+                                if pi == i {
+                                    pass[j] = true;
+                                    break;
+                                }
+                                hops += 1;
+                                cur = pi;
+                            }
+                            _ => break,
+                        }
+                    }
+                    let _ = c;
+                }
             }
-        }
+            pass
+        });
+        let passes = |i: usize| -> bool {
+            match &solo_pass {
+                Some(p) => p[i],
+                None => true,
+            }
+        };
 
-        // 3) Sends — additive into destination buses, per-frame.
-        for t in snapshot.iter() {
-            if any_soloed && !t.soloed {
+        let inv_rate = 1.0 / self.sample_rate as f64;
+        for &ti in &order {
+            let t = &snapshot[ti];
+            if !passes(ti) {
                 continue;
             }
-            // Read source bus once (clone) so we can mutably borrow
-            // dest buses below.
+
+            // Gain + pan + polarity, per-frame envelopes.
+            if let Some(bus) = buses.get_mut(&t.guid) {
+                let mut c_vol = t.volume_env.as_ref().map(|p| EnvelopeCursor::new(p));
+                let mut c_pvol = t.volume_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
+                let mut c_pan = t.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
+                let mut c_ppan = t.pan_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
+                let mut c_mute = t.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
+                for frame in 0..bus.frames {
+                    let time = start_seconds + frame as f64 * inv_rate;
+                    let v_main = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
+                    let v_prefx = c_pvol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
+                    let vol = t.volume * v_main * v_prefx;
+                    let p_main = c_pan
+                        .as_mut()
+                        .and_then(|c| c.eval_at(time))
+                        .map(|v| (v - 0.5) * 2.0)
+                        .unwrap_or(0.0);
+                    let p_prefx = c_ppan
+                        .as_mut()
+                        .and_then(|c| c.eval_at(time))
+                        .map(|v| (v - 0.5) * 2.0)
+                        .unwrap_or(0.0);
+                    let pan = (t.pan + p_main + p_prefx).clamp(-1.0, 1.0);
+                    let env_muted = c_mute
+                        .as_mut()
+                        .and_then(|c| c.eval_at(time))
+                        .map(|v| v > 0.5)
+                        .unwrap_or(false);
+                    let muted = t.muted || env_muted;
+                    if muted {
+                        bus.samples[frame * 2] = 0.0;
+                        bus.samples[frame * 2 + 1] = 0.0;
+                        continue;
+                    }
+                    // Polarity invert folds into the gain sign.
+                    let sign = if t.phase_inverted { -1.0 } else { 1.0 };
+                    let lg = ((1.0 - pan) * 0.5).sqrt() * vol * sign;
+                    let rg = ((1.0 + pan) * 0.5).sqrt() * vol * sign;
+                    bus.samples[frame * 2] *= lg as f32;
+                    bus.samples[frame * 2 + 1] *= rg as f32;
+                }
+            }
+
+            // Sends — additive into destination buses, per-frame. (Read the
+            // source once so we can mutably borrow dest buses.)
             let src = match buses.get(&t.guid) {
                 Some(b) => b.samples.clone(),
                 None => continue,
             };
-            for s in &t.sends {
-                if s.muted {
+            for snd in &t.sends {
+                if snd.muted {
                     continue;
                 }
-                let dest_bus = match buses.get_mut(&s.dest_guid) {
+                let dest_bus = match buses.get_mut(&snd.dest_guid) {
                     Some(b) => b,
                     None => continue,
                 };
-                let mut c_vol = s.volume_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                let mut c_pan = s.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
-                let mut c_mute = s.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
+                let mut c_vol = snd.volume_env.as_ref().map(|p| EnvelopeCursor::new(p));
+                let mut c_pan = snd.pan_env.as_ref().map(|p| EnvelopeCursor::new(p));
+                let mut c_mute = snd.mute_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 for frame in 0..dest_bus.frames {
                     let time = start_seconds + frame as f64 * inv_rate;
                     let env_muted = c_mute
@@ -432,35 +508,41 @@ impl<'a> ProjectRenderer<'a> {
                         continue;
                     }
                     let v_env = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
-                    let vol = s.volume * v_env;
+                    let vol = snd.volume * v_env;
                     let p_off = c_pan
                         .as_mut()
                         .and_then(|c| c.eval_at(time))
                         .map(|v| (v - 0.5) * 2.0)
                         .unwrap_or(0.0);
-                    let pan = (s.pan + p_off).clamp(-1.0, 1.0);
+                    let pan = (snd.pan + p_off).clamp(-1.0, 1.0);
                     let lg = (((1.0 - pan) * 0.5).sqrt() * vol) as f32;
                     let rg = (((1.0 + pan) * 0.5).sqrt() * vol) as f32;
                     dest_bus.samples[frame * 2] += src[frame * 2] * lg;
                     dest_bus.samples[frame * 2 + 1] += src[frame * 2 + 1] * rg;
                 }
             }
-        }
 
-        // 4) Sum to master: tracks with parent_send_enabled go through.
-        for t in snapshot.iter() {
-            if any_soloed && !t.soloed {
-                continue;
-            }
-            if !t.parent_send {
-                continue;
-            }
-            let bus = match buses.get(&t.guid) {
-                Some(b) => b,
-                None => continue,
-            };
-            for (m, s) in master.samples.iter_mut().zip(bus.samples.iter()) {
-                *m += *s;
+            // Parent / master sum.
+            if t.parent_send {
+                let parent_idx = t
+                    .parent_guid
+                    .as_deref()
+                    .and_then(|g| idx_by_guid.get(g).copied());
+                match parent_idx {
+                    Some(pi) => {
+                        let pg = snapshot[pi].guid.clone();
+                        if let Some(parent_bus) = buses.get_mut(&pg) {
+                            for (m, smp) in parent_bus.samples.iter_mut().zip(src.iter()) {
+                                *m += *smp;
+                            }
+                        }
+                    }
+                    None => {
+                        for (m, smp) in master.samples.iter_mut().zip(src.iter()) {
+                            *m += *smp;
+                        }
+                    }
+                }
             }
         }
 
@@ -874,9 +956,11 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) 
         name: t.name.clone(),
         volume: t.volume,
         pan: t.pan,
+        phase_inverted: t.phase_inverted,
         muted: t.muted,
         soloed: t.soloed,
         parent_send,
+        parent_guid: t.parent_guid.clone(),
         sends,
         items,
         fx_chain: fx.chain,

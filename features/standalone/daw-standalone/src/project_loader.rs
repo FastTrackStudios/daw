@@ -223,6 +223,7 @@ fn populate_tracks(
                 muted,
                 soloed,
                 armed: rt.record.as_ref().map(|r| r.armed).unwrap_or(false),
+                phase_inverted: rt.invert_phase,
                 selected: rt.selected,
                 volume,
                 pan,
