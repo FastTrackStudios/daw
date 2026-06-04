@@ -85,6 +85,9 @@ struct TrackSnapshot {
     muted: bool,
     soloed: bool,
     parent_send: bool,
+    /// Fixed-lane play mask (bit n = lane n audible). `0` when the
+    /// track has no fixed lanes — every item plays.
+    lane_play_mask: u64,
     /// Track has hardware-output routes. v0 monitoring model: hw outs
     /// sum to master like a parent send (we only render one stereo
     /// device), so a `MAINSEND 0` track feeding the interface
@@ -144,6 +147,8 @@ struct SendSnapshot {
 struct ItemSnapshot {
     take_guid: Option<String>,
     audio: Option<Arc<AudioSource>>,
+    /// Fixed lane this item sits on (lane-enabled tracks only).
+    fixed_lane: Option<u32>,
     position_seconds: f64,
     length_seconds: f64,
     fade_in_seconds: f64,
@@ -271,6 +276,14 @@ impl ProjectRenderer {
             let bus = buses.get_mut(&t.guid).expect("bus pre-allocated");
             for item in &t.items {
                 if item.muted {
+                    continue;
+                }
+                // Fixed lanes: only items on PLAYING lanes sound —
+                // the rest are alternate takes (REAPER 7 comping).
+                if t.lane_play_mask != 0
+                    && let Some(lane) = item.fixed_lane
+                    && (lane >= 64 || t.lane_play_mask & (1u64 << lane) == 0)
+                {
                     continue;
                 }
                 let Some(audio) = &item.audio else { continue };
@@ -1074,6 +1087,7 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) 
             items.push(ItemSnapshot {
                 take_guid: take_guid_opt,
                 audio,
+                fixed_lane: item.fixed_lane,
                 position_seconds: item.position.as_seconds(),
                 length_seconds: item.length.as_seconds(),
                 fade_in_seconds: item.fade_in_length.as_seconds(),
@@ -1133,6 +1147,11 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) 
         muted: t.muted,
         soloed: t.soloed,
         parent_send,
+        lane_play_mask: if t.lane_count > 0 {
+            t.lane_play_mask
+        } else {
+            0
+        },
         hw_out: p
             .hw_outputs
             .get(&t.guid)

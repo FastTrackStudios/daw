@@ -218,6 +218,46 @@ fn populate_tracks(
                 })
                 .unwrap_or((0, false));
 
+            // Fixed item lanes (REAPER 7 comping). Lane count comes
+            // from LANENAME (one token per lane); fall back to the
+            // largest item lane index + 1 when names are absent. The
+            // play mask comes from LANESOLO's first 64 bits; a track
+            // with lanes but no LANESOLO plays lane 0.
+            let lane_count: u32 = rt
+                .lane_names
+                .as_ref()
+                .map(|ln| ln.lane_count.max(0) as u32)
+                .filter(|&c| c > 0)
+                .unwrap_or_else(|| {
+                    if rt.fixed_lanes.is_some() {
+                        rt.items
+                            .iter()
+                            .filter_map(|i| i.lane)
+                            .max()
+                            .map(|l| (l.max(0) as u32) + 1)
+                            .unwrap_or(0)
+                    } else {
+                        0
+                    }
+                });
+            let lane_play_mask: u64 = if lane_count == 0 {
+                0
+            } else {
+                rt.lane_solo
+                    .as_ref()
+                    .map(|ls| {
+                        (ls.playing_lanes as u32 as u64)
+                            | ((ls.unknown_field_2 as u32 as u64) << 32)
+                    })
+                    .filter(|&m| m != 0)
+                    .unwrap_or(1) // lanes on, no LANESOLO → lane 0 plays
+            };
+            let lane_names: Vec<String> = rt
+                .lane_names
+                .as_ref()
+                .map(|ln| ln.lane_names.clone())
+                .unwrap_or_default();
+
             let track = Track {
                 guid: guid.clone(),
                 index: idx as u32,
@@ -235,6 +275,9 @@ fn populate_tracks(
                 // tracked only via folder_depth
                 folder_depth,
                 is_folder,
+                lane_count,
+                lane_play_mask,
+                lane_names,
                 visible_in_tcp: rt
                     .show_in_mixer
                     .as_ref()
@@ -289,6 +332,13 @@ fn populate_tracks(
                 }
                 item.color = ri.color.map(|c| native_color_to_rgb(c as u32));
                 item.loop_source = ri.loop_source;
+                // Fixed-lane membership only matters on lane-enabled
+                // tracks (YPOS also appears for free item positioning).
+                item.fixed_lane = if lane_count > 0 {
+                    ri.lane.map(|l| l.max(0) as u32)
+                } else {
+                    None
+                };
                 item.take_count = ri.takes.len().max(1) as u32;
                 // proto `Item` doesn't carry `channel_mode` yet — drop.
 

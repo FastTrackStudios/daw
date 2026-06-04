@@ -40,8 +40,16 @@ fn main() {
                         .unwrap_or_else(|| format!("MISSING({pg})"))
                 })
                 .unwrap_or_else(|| "-".into());
+            let lanes = if t.lane_count > 0 {
+                format!(
+                    " lanes={} play={:#x} names={:?}",
+                    t.lane_count, t.lane_play_mask, t.lane_names
+                )
+            } else {
+                String::new()
+            };
             println!(
-                "{i:3} {:28} parent={parent_name:<20} parent_send={ps} hw={hw} sends={sends} folder={} muted={} vol={:.3}",
+                "{i:3} {:28} parent={parent_name:<20} parent_send={ps} hw={hw} sends={sends} folder={} muted={} vol={:.3}{lanes}",
                 t.name, t.is_folder, t.muted, t.volume,
             );
         }
