@@ -1,40 +1,111 @@
-/* Fonts - using Google Fonts Recursive (variable font) */
+/* ════════════════════════════════════════════════════════════════════
+   KEYFLOW — "Session View"
+   A studio-console dark theme. The docs read like a session in a DAW:
+   near-black desk surface, hardware-silkscreen labels, an amber VU
+   accent, and engraved charts sitting on warm paper cards like printed
+   lead sheets on the console.
 
+   Type:  Bricolage Grotesque (display) · Public Sans (body) · Iosevka (mono)
+   All fonts self-hosted from /fonts — no third-party requests.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Fonts ─────────────────────────────────────────────────────────── */
+@font-face {
+    font-family: "Bricolage Grotesque";
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url("/fonts/bricolage-grotesque-v9-latin-600.woff2") format("woff2");
+}
+@font-face {
+    font-family: "Bricolage Grotesque";
+    font-style: normal;
+    font-weight: 800;
+    font-display: swap;
+    src: url("/fonts/bricolage-grotesque-v9-latin-800.woff2") format("woff2");
+}
+@font-face {
+    font-family: "Public Sans";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/fonts/PublicSans-Regular.woff2") format("woff2");
+}
+@font-face {
+    font-family: "Public Sans";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("/fonts/PublicSans-Bold.woff2") format("woff2");
+}
+@font-face {
+    font-family: "Iosevka";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/fonts/Iosevka-Regular.woff2") format("woff2");
+}
+@font-face {
+    font-family: "Iosevka";
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url("/fonts/Iosevka-Bold.woff2") format("woff2");
+}
+
+/* ── Tokens ────────────────────────────────────────────────────────── */
 :root {
-    color-scheme: light dark;
+    color-scheme: dark;
 
-    /* Base colors */
-    --bg: light-dark(#ffffff, #0a0a0a);
-    --bg-raised: light-dark(#f5f5f5, #111);
-    --fg: light-dark(#1a1a1a, #d4d4d4);
-    --fg-muted: light-dark(#737373, #737373);
-    --accent: light-dark(#FFAA5F, #FFAA5F);
-    --accent-dim: light-dark(#E6944D, #E6944D);
-    --code-bg: light-dark(#f5f5f5, #161616);
-    --border: light-dark(#e5e5e5, #262626);
+    /* Desk surfaces — neutral, slightly cool, like anodized hardware */
+    --bg: #0b0c0f;
+    --bg-raised: #121419;
+    --bg-overlay: #181b21;
+    --code-bg: #0e1014;
+    --border: #23262e;
+    --border-strong: #2f333d;
 
-    /* Semantic colors */
-    --btn-text: light-dark(#000, #000);
-    --active-bg: light-dark(rgba(184, 134, 11, 0.15), rgba(218, 165, 32, 0.15));
-    --table-hover-bg: light-dark(rgba(0, 0, 0, 0.02), rgba(255, 255, 255, 0.02));
-    --shadow-default: light-dark(rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.5));
-    --shadow-accent: light-dark(rgba(255, 107, 53, 0.2), rgba(255, 107, 53, 0.3));
+    /* Ink */
+    --fg: #e7e9ee;
+    --fg-muted: #8b919e;
+    --fg-faint: #5c6270;
 
-    /* Copy button colors */
-    --copy-btn-bg: light-dark(rgba(255, 255, 255, 0.9), rgba(60, 60, 70, 0.9));
-    --copy-btn-border: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.3));
-    --copy-btn-text: light-dark(#1a1a1a, #c0caf5);
-    --copy-btn-hover-bg: light-dark(rgba(240, 240, 240, 0.95), rgba(80, 80, 95, 0.95));
-    --copy-btn-copied-bg: light-dark(rgba(50, 200, 50, 0.9), rgba(50, 160, 50, 0.9));
+    /* Signal path — VU amber, with a green "signal present" LED */
+    --accent: #ffb454;
+    --accent-dim: #d9923a;
+    --accent-deep: #8a5a1d;
+    --accent-glow: rgba(255, 180, 84, 0.16);
+    --signal: #5ed49e;
 
-    /* Fonts */
-    --font-sans: "Recursive", system-ui, -apple-system, sans-serif;
-    --font-mono: "Recursive", monospace;
+    /* Paper — printed lead sheets on the desk */
+    --paper: #f7f3ea;
+    --paper-shade: #efe9da;
+    --paper-ink: #1b1812;
+
+    /* Semantic */
+    --btn-text: #15110a;
+    --active-bg: rgba(255, 180, 84, 0.1);
+    --table-hover-bg: rgba(255, 255, 255, 0.025);
+    --shadow-default: rgba(0, 0, 0, 0.55);
+    --shadow-accent: rgba(255, 180, 84, 0.25);
+
+    /* Copy button */
+    --copy-btn-bg: rgba(24, 27, 33, 0.92);
+    --copy-btn-border: var(--border-strong);
+    --copy-btn-text: var(--fg-muted);
+    --copy-btn-hover-bg: rgba(36, 40, 48, 0.95);
+    --copy-btn-copied-bg: rgba(46, 125, 90, 0.9);
+
+    /* Type */
+    --font-display: "Bricolage Grotesque", "Public Sans", sans-serif;
+    --font-sans: "Public Sans", system-ui, sans-serif;
+    --font-mono: "Iosevka", ui-monospace, monospace;
 
     /* Layout */
-    --sidebar-width: 240px;
+    --sidebar-width: 250px;
     --content-max: 1200px;
-    --toc-width: 240px;
+    --toc-width: 230px;
+    --nav-height: 56px;
 }
 
 * {
@@ -47,55 +118,143 @@ html {
     font-size: 16px;
 }
 
-/* Monospace text using Recursive's MONO axis */
-code,
-pre {
-    font-family: var(--font-mono);
-    font-variation-settings:
-        "MONO" 1,
-        "CASL" 0;
-}
-
 body {
     font-family: var(--font-sans);
     background: var(--bg);
     color: var(--fg);
-    line-height: 1.6;
+    line-height: 1.65;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
 }
 
-/* ============================================
-   Navigation
-   ============================================ */
+/* Atmosphere: a faint warm glow bleeding down from the console's meter
+   bridge, plus a film-grain pass so flat panels don't read as voids. */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+        radial-gradient(1100px 420px at 50% -180px, rgba(255, 180, 84, 0.07), transparent 70%),
+        radial-gradient(800px 500px at 85% -220px, rgba(94, 212, 158, 0.04), transparent 70%);
+}
+body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.035;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+body > * {
+    position: relative;
+    z-index: 1;
+}
+
+::selection {
+    background: var(--accent);
+    color: var(--btn-text);
+}
+
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+/* Thin hardware scrollbars */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+}
+
+code,
+pre,
+kbd {
+    font-family: var(--font-mono);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Top navigation — the meter bridge
+   ════════════════════════════════════════════════════════════════════ */
 .site-nav {
     display: flex;
     align-items: center;
-    gap: 1.5rem;
-    padding: 0.75rem 1.5rem;
+    gap: 1.25rem;
+    height: var(--nav-height);
+    padding: 0 1.5rem;
     border-bottom: 1px solid var(--border);
-    background: var(--bg);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    backdrop-filter: blur(10px);
     position: sticky;
     top: 0;
     z-index: 100;
-    max-width: 1600px;
-    margin: 0 auto;
     width: 100%;
+}
+/* amber hairline across the very top, like a powered-on edge LED */
+.site-nav::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg,
+        transparent 0%,
+        var(--accent-deep) 18%,
+        var(--accent) 50%,
+        var(--accent-deep) 82%,
+        transparent 100%);
+    opacity: 0.85;
 }
 
 .site-nav-brand {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    font-size: 1.25rem;
-    font-weight: 700;
+    gap: 0.6rem;
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
     color: var(--fg);
     text-decoration: none;
 }
 
 .site-nav-logo {
     flex-shrink: 0;
+    color: var(--accent);
+    filter: drop-shadow(0 0 6px var(--accent-glow));
+}
+
+/* Mini VU meter — five bars idling next to the brand */
+.site-nav-vu {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 16px;
+    margin-left: 0.25rem;
+}
+.site-nav-vu i {
+    width: 3px;
+    border-radius: 1px;
+    background: linear-gradient(180deg, var(--accent) 0%, var(--accent-deep) 100%);
+    animation: vu-idle 1.1s ease-in-out infinite alternate;
+    transform-origin: bottom;
+}
+.site-nav-vu i:nth-child(1) { height: 7px;  animation-duration: 0.9s;  }
+.site-nav-vu i:nth-child(2) { height: 13px; animation-duration: 1.25s; animation-delay: -0.4s; }
+.site-nav-vu i:nth-child(3) { height: 16px; animation-duration: 0.8s;  animation-delay: -0.15s; }
+.site-nav-vu i:nth-child(4) { height: 11px; animation-duration: 1.05s; animation-delay: -0.7s; }
+.site-nav-vu i:nth-child(5) { height: 6px;  animation-duration: 1.35s; animation-delay: -0.25s; }
+@keyframes vu-idle {
+    from { transform: scaleY(0.35); opacity: 0.55; }
+    to   { transform: scaleY(1);    opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .site-nav-vu i { animation: none; }
 }
 
 .site-nav-spacer {
@@ -110,53 +269,86 @@ body {
 
 .site-nav-github {
     color: var(--fg-muted);
-    transition: color 0.2s;
+    transition: color 0.2s, filter 0.2s;
 }
-
 .site-nav-github:hover {
-    color: var(--fg);
+    color: var(--accent);
+    filter: drop-shadow(0 0 8px var(--accent-glow));
 }
 
-/* ============================================
-   Hero Section (homepage only)
-   ============================================ */
+/* ════════════════════════════════════════════════════════════════════
+   Hero (homepage)
+   ════════════════════════════════════════════════════════════════════ */
 .hero {
-    padding: 4rem 2rem;
+    padding: 5.5rem 2rem 4.5rem;
     text-align: center;
     border-bottom: 1px solid var(--border);
-    background: linear-gradient(180deg, var(--bg) 0%, var(--bg-raised) 100%);
+    position: relative;
+    overflow: hidden;
+}
+/* faint timeline ruler running behind the hero */
+.hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(90deg,
+        var(--border) 0 1px,
+        transparent 1px 96px);
+    mask-image: linear-gradient(180deg, transparent 0%, #000 45%, transparent 100%);
+    opacity: 0.5;
 }
 
 .hero-content {
-    max-width: 600px;
+    position: relative;
+    max-width: 640px;
     margin: 0 auto;
 }
 
 .hero-logo {
     display: block;
     margin: 0 auto 1.5rem;
-    filter: drop-shadow(0 0 20px var(--shadow-accent));
+    color: var(--accent);
+    filter: drop-shadow(0 0 24px var(--shadow-accent));
+    animation: rise 0.6s ease-out both;
+}
+
+.hero-kicker {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 1rem;
+    animation: rise 0.6s ease-out 0.05s both;
 }
 
 .hero-title {
-    font-size: 3.5rem;
-    font-weight: 700;
+    font-family: var(--font-display);
+    font-size: 4.25rem;
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -0.025em;
     color: var(--fg);
-    margin-bottom: 0.5rem;
-    letter-spacing: -0.02em;
+    margin-bottom: 0.75rem;
+    animation: rise 0.6s ease-out 0.1s both;
 }
 
 .hero-tagline {
+    font-family: var(--font-display);
     font-size: 1.5rem;
+    font-weight: 600;
     color: var(--accent);
-    margin-bottom: 0.5rem;
-    font-weight: 500;
+    margin-bottom: 0.75rem;
+    animation: rise 0.6s ease-out 0.18s both;
 }
 
 .hero-sub {
-    font-size: 1rem;
+    font-size: 1.02rem;
     color: var(--fg-muted);
-    margin-bottom: 2rem;
+    margin-bottom: 2.25rem;
+    animation: rise 0.6s ease-out 0.26s both;
 }
 
 .hero-actions {
@@ -164,43 +356,63 @@ body {
     gap: 1rem;
     justify-content: center;
     flex-wrap: wrap;
+    animation: rise 0.6s ease-out 0.34s both;
 }
 
+@keyframes rise {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .hero-logo, .hero-kicker, .hero-title, .hero-tagline, .hero-sub, .hero-actions {
+        animation: none;
+    }
+}
+
+/* Transport-style buttons */
 .btn {
     display: inline-block;
-    padding: 0.75rem 1.5rem;
-    border-radius: 6px;
+    padding: 0.7rem 1.6rem;
+    border-radius: 8px;
+    font-family: var(--font-display);
     font-weight: 600;
+    font-size: 0.95rem;
     text-decoration: none;
-    transition: all 0.2s;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 }
 
 .btn-primary {
-    background: var(--accent);
+    background: linear-gradient(180deg, var(--accent) 0%, var(--accent-dim) 100%);
     color: var(--btn-text);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.35),
+        0 4px 16px var(--shadow-accent);
 }
-
 .btn-primary:visited {
     color: var(--btn-text);
 }
-
 .btn-primary:hover {
-    background: var(--accent-dim);
+    transform: translateY(-1px);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.35),
+        0 8px 24px var(--shadow-accent);
 }
 
 .btn-secondary {
-    background: transparent;
+    background: var(--bg-raised);
     color: var(--fg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
-
 .btn-secondary:hover {
-    border-color: var(--fg-muted);
+    border-color: var(--accent-dim);
+    color: var(--accent);
+    transform: translateY(-1px);
 }
 
-/* ============================================
+/* ════════════════════════════════════════════════════════════════════
    Layout (sidebar + content)
-   ============================================ */
+   ════════════════════════════════════════════════════════════════════ */
 .layout {
     display: flex;
     flex: 1;
@@ -209,81 +421,109 @@ body {
     width: 100%;
 }
 
-/* ============================================
-   Sidebar
-   ============================================ */
+/* ════════════════════════════════════════════════════════════════════
+   Sidebar — the tracklist
+   ════════════════════════════════════════════════════════════════════ */
 .sidebar {
     width: var(--sidebar-width);
     flex-shrink: 0;
-    padding: 2rem 1.5rem;
+    padding: 1.75rem 1rem 2rem 1.25rem;
     border-right: 1px solid var(--border);
     position: sticky;
-    top: 53px; /* nav height */
-    height: calc(100vh - 53px);
+    top: var(--nav-height);
+    height: calc(100vh - var(--nav-height));
     overflow-y: auto;
 }
 
 .sidebar-nav {
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    gap: 1.5rem;
 }
 
+/* Group label, silkscreened like a console section heading */
 .sidebar-section h3 {
-    font-size: 0.875rem;
-    font-weight: 600;
-    margin-bottom: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    margin-bottom: 0.6rem;
+    padding-left: 0.6rem;
 }
-
 .sidebar-section h3 a {
     color: var(--fg-muted);
     text-decoration: none;
     transition: color 0.15s;
 }
-
 .sidebar-section h3 a:hover {
     color: var(--fg);
+}
+.sidebar-section h3 a.active {
+    color: var(--accent);
 }
 
 .sidebar-section ul {
     list-style: none;
+    counter-reset: track;
 }
 
 .sidebar-section li {
-    margin-bottom: 0.25rem;
+    counter-increment: track;
+    margin-bottom: 1px;
 }
 
-.sidebar-section a {
-    display: block;
-    padding: 0.25rem 0.5rem;
+/* Each page is a numbered track */
+.sidebar-section li a {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.32rem 0.6rem;
     color: var(--fg);
     text-decoration: none;
     font-size: 0.85rem;
-    border-radius: 4px;
-    transition: all 0.15s;
+    border-radius: 6px;
+    border-left: 2px solid transparent;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.sidebar-section li a::before {
+    content: counter(track, decimal-leading-zero);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--fg-muted);
+    opacity: 0.65;
+    transition: color 0.15s, opacity 0.15s;
 }
 
-.sidebar-section a:hover {
-    color: var(--fg);
+.sidebar-section li a:hover {
     background: var(--bg-raised);
 }
-
-.sidebar-section a.active {
-    color: var(--accent);
-    background: var(--active-bg);
+.sidebar-section li a:hover::before {
+    opacity: 1;
 }
 
-/* ============================================
-   Main Content
-   ============================================ */
+/* Active track: armed. Amber number, LED edge, soft glow. */
+.sidebar-section li a.active {
+    color: var(--accent);
+    background: var(--active-bg);
+    border-left-color: var(--accent);
+}
+.sidebar-section li a.active::before {
+    color: var(--accent);
+    opacity: 1;
+    text-shadow: 0 0 8px var(--accent-glow);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   Main content
+   ════════════════════════════════════════════════════════════════════ */
 .content {
     flex: 1;
     min-width: 0;
-    padding: 2rem 3rem;
+    padding: 2.5rem 3rem;
     max-width: var(--content-max);
 }
 
-/* Page layout: main content + right-hand TOC */
 .page-layout {
     display: flex;
     gap: 2.5rem;
@@ -294,24 +534,28 @@ body {
     min-width: 0;
 }
 
+/* Right-hand TOC — the cue list */
 .page-toc {
     flex: 0 0 var(--toc-width);
-    max-height: calc(100vh - 80px);
+    max-height: calc(100vh - 90px);
     position: sticky;
-    top: 68px; /* nav + a bit of padding */
+    top: calc(var(--nav-height) + 16px);
     align-self: flex-start;
     padding-top: 0.25rem;
     padding-left: 1.5rem;
     border-left: 1px solid var(--border);
     font-size: 0.8rem;
     color: var(--fg-muted);
+    overflow-y: auto;
 }
 
 .page-toc h2 {
-    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    margin-bottom: 0.75rem;
+    letter-spacing: 0.22em;
+    margin-bottom: 0.85rem;
     color: var(--fg-muted);
 }
 
@@ -327,26 +571,30 @@ body {
 .page-toc a {
     color: var(--fg-muted);
     text-decoration: none;
+    transition: color 0.15s;
 }
-
 .page-toc a:hover {
-    color: var(--fg);
-    text-decoration: underline;
+    color: var(--accent);
+    text-decoration: none;
 }
 
 .page-toc ul ul {
     margin-top: 0.25rem;
     padding-left: 0.75rem;
+    border-left: 1px solid var(--border);
 }
 
+/* ── Article typography ────────────────────────────────────────────── */
 article h1 {
-    font-size: 2rem;
+    font-family: var(--font-display);
+    font-size: 2.3rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
     margin-bottom: 1.5rem;
-    font-weight: 700;
     color: var(--fg);
 }
 
-/* Ensure anchored headings scroll below the sticky nav/TOC */
 article h1[id],
 article h2[id],
 article h3[id],
@@ -355,20 +603,34 @@ article h4[id] {
 }
 
 article h2 {
-    font-size: 1.35rem;
-    margin-top: 2.5rem;
-    margin-bottom: 1rem;
+    font-family: var(--font-display);
+    font-size: 1.4rem;
     font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-top: 2.75rem;
+    margin-bottom: 1rem;
     color: var(--fg);
     padding-bottom: 0.5rem;
     border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+/* amber channel tick ahead of every h2 */
+article h2::before {
+    content: "";
+    flex: 0 0 4px;
+    height: 1em;
+    border-radius: 2px;
+    background: linear-gradient(180deg, var(--accent) 0%, var(--accent-deep) 100%);
 }
 
 article h3 {
-    font-size: 1.1rem;
+    font-family: var(--font-display);
+    font-size: 1.12rem;
+    font-weight: 600;
     margin-top: 2rem;
     margin-bottom: 0.75rem;
-    font-weight: 600;
 }
 
 article p {
@@ -384,14 +646,34 @@ article ol {
 article li {
     margin-bottom: 0.5rem;
 }
+article li::marker {
+    color: var(--accent-dim);
+}
 
 article a {
     color: var(--accent);
     text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s;
+}
+article a:hover {
+    border-bottom-color: var(--accent);
+    text-decoration: none;
 }
 
-article a:hover {
-    text-decoration: underline;
+article blockquote {
+    margin: 1.25rem 0;
+    padding: 0.6rem 1.25rem;
+    border-left: 3px solid var(--accent-deep);
+    background: var(--bg-raised);
+    border-radius: 0 8px 8px 0;
+    color: var(--fg-muted);
+}
+
+article hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2.5rem 0;
 }
 
 /* Rule identifier links (spec references like r[frame.structure]) */
@@ -407,10 +689,15 @@ a.rule-link:active {
     font-size: 0.75em;
     color: var(--fg-muted);
     background: var(--code-bg);
+    border: 1px solid var(--border);
     padding: 0.15em 0.4em;
-    border-radius: 3px;
+    border-radius: 4px;
     text-decoration: none;
     white-space: nowrap;
+}
+a.rule-link:hover {
+    color: var(--accent);
+    border-color: var(--accent-deep);
 }
 
 article img {
@@ -421,99 +708,204 @@ article img {
 }
 
 article code {
-    font-family: var(--font-mono);
     font-size: 0.875em;
     background: var(--code-bg);
-    padding: 0.2em 0.4em;
+    border: 1px solid var(--border);
+    padding: 0.15em 0.4em;
     border-radius: 4px;
 }
 
 article pre {
     background: var(--code-bg);
-    padding: 0.75rem 1rem;
-    border-radius: 6px;
+    padding: 0.85rem 1.1rem;
+    border-radius: 8px;
     overflow-x: auto;
     margin-bottom: 1rem;
     border: 1px solid var(--border);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 /* When pre is inside a .code-block wrapper, the wrapper owns the chrome */
 .code-block pre {
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     margin-bottom: 0;
+    box-shadow: none;
 }
 
 /* When there's a header, only round the bottom corners */
 .code-header + pre {
-    border-radius: 0 0 6px 6px;
+    border-radius: 0 0 8px 8px;
 }
 
 article pre code {
     background: none;
+    border: none;
     padding: 0;
     font-size: 0.85rem;
-    line-height: 1.5;
+    line-height: 1.55;
 }
 
-/* ============================================
-   Code Block (wrapper with language header)
-   ============================================ */
+/* ════════════════════════════════════════════════════════════════════
+   Code blocks — channel-strip panels
+   ════════════════════════════════════════════════════════════════════ */
 .code-block {
     position: relative;
     margin-bottom: 1rem;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     background: var(--code-bg);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
+/* Language tag reads like a silkscreened channel label */
 .code-header {
     display: flex;
     align-items: center;
-    padding: 0.35rem 1rem;
+    gap: 0.5rem;
+    padding: 0.4rem 1rem;
     font-family: var(--font-mono);
-    font-variation-settings: "MONO" 1, "CASL" 0;
-    font-size: 0.7rem;
-    font-weight: 500;
+    font-size: 0.65rem;
+    font-weight: 700;
     color: var(--fg-muted);
     border-bottom: 1px solid var(--border);
+    background: var(--bg-raised);
+    border-radius: 8px 8px 0 0;
     user-select: none;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.18em;
     text-transform: uppercase;
 }
+/* tiny signal LED next to the language tag */
+.code-header::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent-glow);
+}
 
-.code-block .copy-btn {
+.code-block .copy-btn,
+pre > .copy-btn {
     position: absolute;
-    top: 0.3rem;
+    top: 0.35rem;
     right: 0.5rem;
-    padding: 0.2rem 0.5rem;
+    padding: 0.22rem 0.55rem;
     font-family: var(--font-mono);
-    font-variation-settings: "MONO" 1, "CASL" 0;
     font-size: 0.7rem;
     background: var(--copy-btn-bg);
     border: 1px solid var(--copy-btn-border);
-    border-radius: 4px;
+    border-radius: 5px;
     color: var(--copy-btn-text);
     cursor: pointer;
     opacity: 0;
-    transition: opacity 0.15s;
+    transition: opacity 0.15s, color 0.15s, border-color 0.15s;
 }
-
-.code-block:hover .copy-btn {
+pre {
+    position: relative;
+}
+pre > .copy-btn {
+    top: 0.5rem;
+}
+.code-block:hover .copy-btn,
+pre:hover > .copy-btn {
     opacity: 1;
 }
-
-.code-block .copy-btn:hover {
+.code-block .copy-btn:hover,
+pre > .copy-btn:hover {
     background: var(--copy-btn-hover-bg);
+    color: var(--fg);
+    border-color: var(--accent-deep);
+}
+.code-block .copy-btn.copied,
+pre > .copy-btn.copied {
+    background: var(--copy-btn-copied-bg);
+    border-color: transparent;
+    color: #eafff3;
 }
 
-.code-block .copy-btn.copied {
-    background: var(--copy-btn-copied-bg);
-    color: #fff;
+/* ── Syntax highlighting — studio palette ──────────────────────────────
+   Arborium injects GitHub-light / Tokyo-Night-dark palettes behind OS
+   media queries; the site is dark-only, so these unconditional overrides
+   (loaded after the inline block) pin one warm palette for everyone. */
+pre {
+    background: var(--code-bg);
+    --bg: var(--code-bg);
+    --surface: var(--bg-overlay);
+    color: #c9cdd6;
+    --fg: #c9cdd6;
+    --muted: var(--fg-faint);
 }
+/* keywords & operators — console amber */
+a-k, a-kc, a-ko, a-kd, a-ke, a-kf, a-ki, a-kp, a-kr, a-kt, a-ky,
+a-in, a-sc, a-rp, a-cn, a-ex, a-pp { color: var(--accent); }
+a-o, a-ss { color: var(--accent-dim); }
+/* strings & escapes — signal green */
+a-s, a-ch, a-cs { color: var(--signal); }
+a-se, a-ps { color: #9be3c3; }
+/* numbers, constants, literals — warm cream */
+a-n, a-co, a-cb, a-l, a-vp { color: #ffd9a0; }
+/* functions — pale gold */
+a-f, a-fb, a-fm, a-fd, a-fc, a-tt { color: #f0c987; }
+/* types & tags — desaturated teal, the one cool voice in the rack */
+a-t, a-tb, a-tq, a-tf, a-tg, a-td, a-te { color: #8fd0c0; }
+/* variables, punctuation, misc */
+a-v, a-vm, a-sp, a-tl, a-p, a-pb, a-pd { color: #c9cdd6; }
+a-at, a-pr, a-m { color: #d4a8e8; }
+/* comments — silkscreen grey */
+a-c, a-cd { color: var(--fg-faint); font-style: italic; }
+a-em { font-style: italic; }
+a-st { font-weight: bold; }
+a-tu { color: var(--accent); text-decoration: underline; }
+a-tr { color: #8fd0c0; }
+a-tx { text-decoration: line-through; }
+
+/* ── Keyflow source highlighting (```kf-src) ───────────────────────────
+   Spans emitted by `kf docs` via the editor's own highlighter
+   (keyflow-syntax). Same hues as the editor's "Keyflow Dark" theme. */
+.kf-src .kf-root,
+.kf-src .kf-degree,
+.kf-src .kf-roman { color: #f0b464; font-weight: 700; }
+.kf-src .kf-accidental { color: #dc8c5f; }
+.kf-src .kf-quality { color: #82be8c; }
+.kf-src .kf-extension,
+.kf-src .kf-melody-block { color: #8cb4dc; }
+.kf-src .kf-modifier { color: #b48cc8; }
+.kf-src .kf-bass,
+.kf-src .kf-bass-slash { color: #c89678; }
+.kf-src .kf-duration,
+.kf-src .kf-dot,
+.kf-src .kf-triplet { color: #78b4be; }
+.kf-src .kf-slash-rhythm { color: #78787d; }
+.kf-src .kf-rest,
+.kf-src .kf-space { color: #6e6e73; font-style: italic; }
+.kf-src .kf-push,
+.kf-src .kf-pull { color: #b4966e; }
+.kf-src .kf-section,
+.kf-src .kf-repeat { color: #82c8aa; font-weight: 700; }
+.kf-src .kf-measure-count { color: #aaa08c; }
+.kf-src .kf-section-comment { color: #8ca082; font-style: italic; }
+.kf-src .kf-section-bracket,
+.kf-src .kf-measure-sep { color: #50555a; }
+.kf-src .kf-title { color: #dcc8a0; font-weight: 700; }
+.kf-src .kf-artist { color: #dcc8a0; }
+.kf-src .kf-tempo,
+.kf-src .kf-time-sig,
+.kf-src .kf-tempo-arrow { color: #96b4c8; }
+.kf-src .kf-key { color: #a0be96; }
+.kf-src .kf-command,
+.kf-src .kf-track-marker { color: #aa8cbe; }
+.kf-src .kf-dynamic { color: #c88278; font-weight: 700; }
+.kf-src .kf-text-cue { color: #dcc8a0; font-style: italic; }
+.kf-src .kf-comment,
+.kf-src .kf-comment-marker { color: #648264; font-style: italic; }
+.kf-src .kf-memory-recall { color: #8cb4b4; }
+/* annotation arrows and other un-lexed text in samples stay plain —
+   no error color in docs */
+.kf-src .kf-unknown { color: inherit; }
 
 article strong {
-    font-weight: 600;
+    font-weight: 700;
     color: var(--fg);
 }
 
@@ -521,39 +913,84 @@ article em {
     color: var(--fg-muted);
 }
 
+/* ── Tables ────────────────────────────────────────────────────────── */
 article table {
     width: 100%;
     border-collapse: collapse;
     margin: 1.5rem 0;
     font-size: 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
 }
 
 article th,
 article td {
-    padding: 0.75rem 1rem;
+    padding: 0.65rem 1rem;
     text-align: left;
     border-bottom: 1px solid var(--border);
 }
 
 article th {
-    font-weight: 600;
-    color: var(--fg);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
     background: var(--bg-raised);
+}
+
+article tr:last-child td {
+    border-bottom: none;
 }
 
 article tr:hover td {
     background: var(--table-hover-bg);
 }
 
-/* ============================================
+/* ════════════════════════════════════════════════════════════════════
+   Engraved kf charts — printed lead sheets on the desk.
+   Emitted by `kf docs` as <figure class="kf-chart"> with inline SVG;
+   the engraving ink is plain black, so it sits on warm paper exactly
+   as it would in print. No filters, no inversion — real ink, real paper.
+   ════════════════════════════════════════════════════════════════════ */
+figure.kf-chart {
+    /* shrink-wrap the paper to the engraved chart — no excess margins;
+       wide charts cap at the column and scroll */
+    width: fit-content;
+    max-width: 100%;
+    margin: 1.75rem 0;
+    padding: 0.9rem 1.1rem;
+    background:
+        linear-gradient(180deg, var(--paper) 0%, var(--paper-shade) 100%);
+    border-radius: 6px;
+    overflow-x: auto;
+    box-shadow:
+        0 1px 2px rgba(0, 0, 0, 0.4),
+        0 12px 32px var(--shadow-default),
+        inset 0 1px 0 rgba(255, 255, 255, 0.75);
+    color: var(--paper-ink);
+}
+
+figure.kf-chart svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+}
+
+/* ════════════════════════════════════════════════════════════════════
    Footer
-   ============================================ */
+   ════════════════════════════════════════════════════════════════════ */
 footer {
     border-top: 1px solid var(--border);
     padding: 1.5rem;
     text-align: center;
     color: var(--fg-muted);
-    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
 }
 
 footer a {
@@ -561,14 +998,13 @@ footer a {
     text-decoration: none;
     transition: color 0.15s;
 }
-
 footer a:hover {
     color: var(--accent);
 }
 
-/* ============================================
-   Pagefind Search
-   ============================================ */
+/* ════════════════════════════════════════════════════════════════════
+   Pagefind search
+   ════════════════════════════════════════════════════════════════════ */
 .pagefind-ui {
     --pagefind-ui-scale: 0.75;
     --pagefind-ui-primary: var(--accent);
@@ -663,9 +1099,9 @@ footer a:hover {
     border-radius: 2px !important;
 }
 
-/* ============================================
+/* ════════════════════════════════════════════════════════════════════
    Responsive
-   ============================================ */
+   ════════════════════════════════════════════════════════════════════ */
 @media (max-width: 768px) {
     .sidebar {
         display: none;
@@ -689,19 +1125,24 @@ footer a:hover {
     }
 
     .hero {
-        padding: 3rem 1.5rem;
+        padding: 3.5rem 1.5rem 3rem;
     }
 
     .hero-title {
-        font-size: 2.5rem;
+        font-size: 2.75rem;
     }
 
     .hero-tagline {
-        font-size: 1.25rem;
+        font-size: 1.2rem;
     }
 
     .site-nav {
-        padding: 0.75rem 1rem;
+        padding: 0 1rem;
+        gap: 0.85rem;
+    }
+
+    .site-nav-vu {
+        display: none;
     }
 
     .site-nav-search {
@@ -709,13 +1150,17 @@ footer a:hover {
     }
 
     article h1 {
-        font-size: 1.75rem;
+        font-size: 1.85rem;
+    }
+
+    figure.kf-chart {
+        padding: 1rem;
     }
 }
 
-/* ============================================
-   Page Transitions
-   ============================================ */
+/* ════════════════════════════════════════════════════════════════════
+   Page transitions
+   ════════════════════════════════════════════════════════════════════ */
 /* stylelint-disable-next-line at-rule-no-unknown */
 @view-transition {
     navigation: auto;
@@ -727,51 +1172,41 @@ footer a:hover {
     animation: fade-in 0.15s ease-in;
 }
 @keyframes fade-out {
-    from {
-        opacity: 1;
-    }
-    to {
-        opacity: 0;
-    }
+    from { opacity: 1; }
+    to   { opacity: 0; }
 }
 @keyframes fade-in {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
+    from { opacity: 0; }
+    to   { opacity: 1; }
 }
 
-/* Override visited link colors - no distinction from unvisited */
+/* Visited links match unvisited — no purple drift */
 .sidebar a:visited,
 .sidebar-nav a:visited,
 .sidebar-section a:visited {
     color: var(--fg);
 }
-
 .sidebar-section a.active:visited {
     color: var(--accent);
 }
-
 article a:visited {
     color: var(--accent);
 }
-
 footer a:visited {
     color: var(--accent-dim);
 }
 
-/* ============================================
-   Requirement Blocks (.req)
-   ============================================ */
+/* ════════════════════════════════════════════════════════════════════
+   Requirement blocks (.req) — spec callouts as patched-in modules
+   ════════════════════════════════════════════════════════════════════ */
 .req {
     position: relative;
     margin: 2rem 0 1.5rem 0;
     padding: 1.25rem 1.25rem 1rem 1.25rem;
-    background: light-dark(#f8f8f8, #111);
-    border: 1px solid light-dark(#e0e0e0, #252525);
-    border-radius: 6px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 .req[id] {
@@ -784,21 +1219,19 @@ footer a:visited {
     left: 1rem;
     display: inline-block;
     font-family: var(--font-mono);
-    font-variation-settings:
-        "MONO" 1,
-        "CASL" 0;
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: light-dark(#fff, #000);
-    background: var(--accent);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--btn-text);
+    background: linear-gradient(180deg, var(--accent) 0%, var(--accent-dim) 100%);
     padding: 0.2rem 0.6rem;
     border-radius: 4px;
     text-decoration: none;
-    box-shadow: 0 2px 4px light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.3));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
 .req .req-link:hover {
-    background: var(--accent-dim);
+    filter: brightness(1.08);
     text-decoration: none;
 }
 
@@ -806,89 +1239,25 @@ footer a:visited {
     word-break: break-word;
 }
 
-/* Remove extra margin from first paragraph after the link */
 .req > p:first-of-type {
     margin-top: 0;
 }
 
-/* Tighten spacing for empty paragraphs that sometimes appear */
 .req > p:empty {
     display: none;
 }
 
-/* Code blocks inside requirements */
 .req pre {
     margin-top: 0.75rem;
     margin-bottom: 0.75rem;
 }
 
-/* Last element in req shouldn't have bottom margin */
 .req > *:last-child {
     margin-bottom: 0;
 }
 
-/* Lists inside requirements */
 .req ul,
 .req ol {
     margin-top: 0.5rem;
     margin-bottom: 0.75rem;
-}
-
-/* Copy button for bare pre elements (without .code-block wrapper) */
-pre {
-    position: relative;
-}
-pre > .copy-btn {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
-    padding: 0.2rem 0.5rem;
-    font-family: var(--font-mono);
-    font-variation-settings: "MONO" 1, "CASL" 0;
-    font-size: 0.7rem;
-    background: var(--copy-btn-bg);
-    border: 1px solid var(--copy-btn-border);
-    border-radius: 4px;
-    color: var(--copy-btn-text);
-    cursor: pointer;
-    opacity: 0;
-    transition: opacity 0.15s;
-}
-pre:hover > .copy-btn {
-    opacity: 1;
-}
-pre > .copy-btn:hover {
-    background: var(--copy-btn-hover-bg);
-}
-pre > .copy-btn.copied {
-    background: var(--copy-btn-copied-bg);
-    color: #fff;
-}
-
-/* ────────────────────────────────────────────────────────────────────
- * Engraved kf chart figures, emitted by `kf docs` from ```kf``` blocks.
- * The SVG is content-cropped and font-less; fonts come from kf-fonts.css.
- * ──────────────────────────────────────────────────────────────────── */
-figure.kf-chart {
-    margin: 1.5rem 0;
-    padding: 1rem 1.25rem;
-    background: var(--surface-1, #fafafa);
-    border: 1px solid var(--border, #e6e6ea);
-    border-radius: 10px;
-    overflow-x: auto;
-}
-figure.kf-chart svg {
-    max-width: 100%;
-    height: auto;
-    display: block;
-    margin: 0 auto;
-}
-@media (prefers-color-scheme: dark) {
-    figure.kf-chart {
-        background: rgba(255, 255, 255, 0.04);
-        border-color: rgba(255, 255, 255, 0.08);
-    }
-    /* Keep the engraved chart readable on dark surfaces — the SMuFL
-       glyphs are plain black; invert lightness without flipping hues. */
-    figure.kf-chart svg { filter: invert(1) hue-rotate(180deg); }
 }
