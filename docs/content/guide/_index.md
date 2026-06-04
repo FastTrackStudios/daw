@@ -15,7 +15,7 @@ tooling.
 
 A taste of what a finished chart looks like:
 
-```
+```kf-src
 Vienna (Live) - Billy Joel
 4/4 140bpm #Gm
 

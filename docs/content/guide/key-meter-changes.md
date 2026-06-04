@@ -14,7 +14,7 @@ dropped inline.
 Put a key token — the same `#Key` from the header — on the chord line at the
 point the key changes:
 
-```
+```kf-src
 4/4 #C
 
 VS 8
@@ -40,7 +40,7 @@ A whole section can also *start* in a new key by putting the token on its header
 
 A meter change is written with a **`T`** in front of the new signature:
 
-```
+```kf-src
 VS
 G  D/F#  Em  C   T6/8 Am   T4/4   G  D
 ```
@@ -58,7 +58,7 @@ Often a meter only wobbles for a single bar — one bar of 2/4 in a stream of 4/
 Prefix the change with `!` and it lasts exactly **one measure**, then snaps back
 to the prevailing meter on its own, with no closing `T` needed:
 
-```
+```kf-src
 VS
 G  D/F#  Em  G   !T2/4 Am   G  D
 ```
