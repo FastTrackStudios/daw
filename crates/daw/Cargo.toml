@@ -78,6 +78,9 @@ standalone-audio = ["standalone", "daw-standalone/audio"]
 # Reusable UI components (`daw::ui` — widgets / theming / panels). `web` brings
 # in dioxus (the components render under any dioxus renderer, incl. native Blitz).
 ui = ["dep:daw-ui", "daw-ui/web"]
+# REAPER theme import: `daw::ui::theming::theme_from_reaper` (+ the
+# daw-theme-reaper parser via daw-ui).
+ui-reaper-theme = ["ui", "daw-ui/reaper-theme"]
 standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
 file = ["dep:dawfile-reaper"]
 # Cross-format project conversion (`daw::file::convert`, format → RPP). Pulls
