@@ -493,10 +493,20 @@ impl<'a> ProjectRenderer<'a> {
             }
         };
 
+        // Per-track meter bank: post-fader block peaks, written once
+        // per track per block (lock-free atomics — safe from the audio
+        // callback). Cell index == project track index == snapshot
+        // index, matching `TrackRef::Index` on the Peaks service.
+        let meters = self.daw.meters();
+
         let inv_rate = 1.0 / self.sample_rate as f64;
         for &ti in &order {
             let t = &snapshot[ti];
             if !passes(ti) {
+                // Solo-skipped tracks meter as silence.
+                if let Some(cell) = meters.cell(ti) {
+                    cell.write(0.0, 0.0, crate::metering::HOLD_DECAY);
+                }
                 continue;
             }
 
@@ -549,6 +559,18 @@ impl<'a> ProjectRenderer<'a> {
                 Some(b) => b.samples.clone(),
                 None => continue,
             };
+
+            // Meter the post-fader signal (folder children already
+            // summed in — topo order guarantees the bus is complete).
+            if let Some(cell) = meters.cell(ti) {
+                let (mut pl, mut pr) = (0.0f32, 0.0f32);
+                for fr in src.chunks_exact(2) {
+                    pl = pl.max(fr[0].abs());
+                    pr = pr.max(fr[1].abs());
+                }
+                cell.write(pl, pr, crate::metering::HOLD_DECAY);
+            }
+
             if debug {
                 let v = (src.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>()
                     / src.len().max(1) as f64)

@@ -206,6 +206,12 @@ impl AudioEngine {
     pub fn attached_to(daw: &Standalone, project_guid: &str) -> Result<Self, String> {
         let bundle = daw.transport_engine_for(project_guid);
         bundle.disable_soft_clock();
+        // One meter cell per project track — `ProjectRenderer` writes
+        // post-fader block peaks during playback.
+        let track_count = daw
+            .read_project(project_guid, |p| p.tracks.len())
+            .unwrap_or(0);
+        daw.set_meters(crate::metering::Meters::new(track_count));
         Self::with_project(daw.clone(), project_guid.to_string(), bundle.shared.clone())
     }
 
@@ -384,6 +390,14 @@ impl AudioEngine {
                     if !playing {
                         for s in data.iter_mut() {
                             *s = T::from_sample(0.0);
+                        }
+                        // Meters fall to silence instead of freezing
+                        // at the last rendered block's peaks.
+                        let meters = daw.meters();
+                        for i in 0..meters.len() {
+                            if let Some(cell) = meters.cell(i) {
+                                cell.write(0.0, 0.0, crate::metering::HOLD_DECAY);
+                            }
                         }
                         return;
                     }

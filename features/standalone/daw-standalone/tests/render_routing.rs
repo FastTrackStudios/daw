@@ -834,3 +834,36 @@ fn item_position_shifts_into_block() {
         rms_l(&mid)
     );
 }
+
+#[test]
+fn render_writes_post_fader_track_meters() {
+    let (daw, guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let t = Tracks::add(&daw, ctx.clone(), "T", None).unwrap();
+    create_item_with_audio(&daw, &guid, &t, 0.0, 1.0, const_audio(0.5));
+
+    // Install a meter bank like AudioEngine::attached_to does.
+    daw.set_meters(daw_standalone::metering::Meters::new(1));
+
+    let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
+    let _ = r.render_block(0, 512);
+    let meters = daw.meters();
+    let cell = meters.cell(0).expect("cell 0");
+    // Constant 0.5, center pan, unity volume → ~0.354 per side.
+    let target = 0.5 * (0.5_f32).sqrt();
+    assert!(
+        (cell.peak(0) - target).abs() < 0.05,
+        "L peak={}, target={target}",
+        cell.peak(0)
+    );
+    assert!((cell.peak(1) - target).abs() < 0.05);
+
+    // Halve the fader: meter is post-fader, peak follows.
+    Tracks::set_volume(&daw, ctx, TrackRef::Guid(t.clone()), 0.5).unwrap();
+    let _ = r.render_block(0, 512);
+    assert!(
+        (meters.cell(0).unwrap().peak(0) - target * 0.5).abs() < 0.05,
+        "post-fader peak={}",
+        meters.cell(0).unwrap().peak(0)
+    );
+}
