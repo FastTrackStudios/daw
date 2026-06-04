@@ -9,6 +9,7 @@ It parses human-readable chart syntax into a structured document model, then lay
 
 ## Getting Started
 
+- [Guide](/guide/) — Learn the `.kf` format one concept at a time
 - [Architecture](/architecture/) — How Keyflow is structured internally
 - [Melody Pipeline](/melody-pipeline/) — The melody notation and rendering pipeline
 
