@@ -168,6 +168,9 @@ pub struct AudioEngine {
     shared: Arc<TransportShared>,
     // cpal stream is kept alive; dropping it stops audio output
     _stream: Stream,
+    /// Media read-ahead worker (project mode only) — stops with the engine.
+    #[cfg(not(target_arch = "wasm32"))]
+    _prefetch: Option<super::prefetch::PrefetchWorker>,
 }
 
 impl AudioEngine {
@@ -285,6 +288,9 @@ impl AudioEngine {
             state,
             shared,
             _stream: stream,
+            // Private-track-list mode mixes from memory — no mmap to warm.
+            #[cfg(not(target_arch = "wasm32"))]
+            _prefetch: None,
         })
     }
 
@@ -361,10 +367,20 @@ impl AudioEngine {
         stream
             .play()
             .map_err(|e| format!("Failed to start audio stream: {e}"))?;
+        // Media read-ahead: warm mmap pages ahead of the playhead so
+        // the callback never page-faults on cold USB/network media.
+        #[cfg(not(target_arch = "wasm32"))]
+        let prefetch = Some(super::prefetch::PrefetchWorker::spawn(
+            daw,
+            project_guid,
+            shared.clone(),
+        ));
         Ok(Self {
             state,
             shared,
             _stream: stream,
+            #[cfg(not(target_arch = "wasm32"))]
+            _prefetch: prefetch,
         })
     }
 

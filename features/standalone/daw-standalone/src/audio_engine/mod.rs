@@ -34,6 +34,8 @@ pub mod materialize;
 mod mixer;
 #[cfg(feature = "clap-host")]
 pub mod plugin_host;
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+pub mod prefetch;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub mod render;
 /// Streaming audio sources (mmap PCM + decoded memory) — REAPER's model.
