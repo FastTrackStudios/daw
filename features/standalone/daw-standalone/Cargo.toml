@@ -106,3 +106,11 @@ workspace = true
 [[example]]
 name = "dump_rpp_items"
 required-features = ["rpp-project"]
+
+[[example]]
+name = "render_probe"
+required-features = ["rpp-loader"]
+
+[[example]]
+name = "route_probe"
+required-features = ["rpp-project"]

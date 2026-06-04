@@ -208,7 +208,10 @@ fn populate_tracks(
                     let depth = match f.folder_state {
                         FS::Regular => 0,
                         FS::FolderParent => 1,
-                        FS::LastInFolder => -1,
+                        // ISBUS's second field is the depth DELTA: a
+                        // last-in-folder track can close several
+                        // nested folders at once (`ISBUS 2 -3`).
+                        FS::LastInFolder => f.indentation.min(-1),
                         FS::Unknown(_) => 0,
                     };
                     (depth, depth > 0)
@@ -720,14 +723,43 @@ fn populate_routing(
     project: &ReaperProject,
     summary: &mut LoadedProject,
 ) {
-    // Hardware outputs only — track→track sends in RPP are stored on
-    // the source track as `AUXSEND idx ...` records keyed by
-    // destination *track index*. dawfile-reaper exposes those as
-    // `track.aux_sends` (a Vec); if your build of dawfile-reaper
-    // doesn't include that field this branch becomes a no-op.
+    // Track→track sends are stored in RPP on the DESTINATION track as
+    // `AUXRECV <source idx> <mode> <vol> <pan> …` — walk every track's
+    // receives and register the send on the source. This is the session's
+    // actual mix path (e.g. a folder with MAINSEND 0 sending into its bus:
+    // Drums → DRUM BUS → MIX BUS → master); dropping them silences any
+    // project mixed through busses.
     let _ = daw.with_project_mut(project_guid, |p| {
-        // Snapshot track GUIDs by index for AUXSEND resolution.
+        // Snapshot track GUIDs by index for AUXRECV resolution.
         let track_guids: Vec<String> = p.tracks.iter().map(|t| t.guid.clone()).collect();
+        let track_names: Vec<String> = p.tracks.iter().map(|t| t.name.clone()).collect();
+        for (dest_idx, rt) in project.tracks.iter().enumerate() {
+            let Some(dest_guid) = track_guids.get(dest_idx).cloned() else {
+                continue;
+            };
+            for recv in &rt.receives {
+                let src_idx = recv.source_track_index;
+                if src_idx < 0 {
+                    continue;
+                }
+                let Some(src_guid) = track_guids.get(src_idx as usize).cloned() else {
+                    continue;
+                };
+                let mut route = daw_proto::TrackRoute::default();
+                route.route_type = daw_proto::RouteType::Send;
+                route.source_track_guid = src_guid.clone();
+                route.dest_track_guid = Some(dest_guid.clone());
+                route.dest_track_name = track_names.get(dest_idx).cloned();
+                route.volume = recv.volume;
+                route.pan = recv.pan;
+                route.muted = recv.mute;
+                route.phase_inverted = recv.invert_polarity;
+                let sends = p.sends.entry(src_guid).or_default();
+                route.index = sends.len() as u32;
+                sends.push(route);
+            }
+        }
+
         for (src_idx, rt) in project.tracks.iter().enumerate() {
             let Some(src_guid) = track_guids.get(src_idx).cloned() else {
                 continue;

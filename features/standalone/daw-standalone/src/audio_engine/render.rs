@@ -85,6 +85,11 @@ struct TrackSnapshot {
     muted: bool,
     soloed: bool,
     parent_send: bool,
+    /// Track has hardware-output routes. v0 monitoring model: hw outs
+    /// sum to master like a parent send (we only render one stereo
+    /// device), so a `MAINSEND 0` track feeding the interface
+    /// directly is still audible.
+    hw_out: bool,
     /// Folder parent (resolved guid) — children sum into the parent's bus.
     parent_guid: Option<String>,
     sends: Vec<SendSnapshot>,
@@ -262,6 +267,33 @@ impl<'a> ProjectRenderer<'a> {
             }
         }
 
+        // Debug tracing: FTS_RENDER_DEBUG=1 dumps per-track bus RMS at
+        // each stage so silent-master bugs can be localized headlessly.
+        // Cached — render_block runs on the audio thread.
+        static DEBUG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let debug = *DEBUG.get_or_init(|| std::env::var("FTS_RENDER_DEBUG").is_ok());
+        if debug {
+            let rms = |b: &StereoBuffer| {
+                (b.samples
+                    .iter()
+                    .map(|s| (*s as f64) * (*s as f64))
+                    .sum::<f64>()
+                    / b.samples.len().max(1) as f64)
+                    .sqrt()
+            };
+            for t in snapshot.iter() {
+                if t.items.is_empty() {
+                    continue;
+                }
+                if let Some(b) = buses.get(&t.guid) {
+                    let v = rms(b);
+                    if v > 1e-9 {
+                        eprintln!("[stage1] {:<24} items={} rms={v:.6}", t.name, t.items.len());
+                    }
+                }
+            }
+        }
+
         // 1.5) FX chain: pipe each track's bus through every loaded
         // plugin in order. The plugin instance map lives separately
         // from ProjectState so the audio thread doesn't block project
@@ -364,21 +396,52 @@ impl<'a> ProjectRenderer<'a> {
             .enumerate()
             .map(|(i, t)| (t.guid.as_str(), i))
             .collect();
-        let depth_of = |mut i: usize| -> usize {
-            let mut d = 0;
-            while let Some(pg) = snapshot[i].parent_guid.as_deref() {
-                match idx_by_guid.get(pg) {
-                    Some(&pi) if d < 64 => {
-                        d += 1;
-                        i = pi;
-                    }
-                    _ => break,
+        // Topological processing order over the ROUTING GRAPH: a track must
+        // be fully processed before anything it feeds — its folder parent
+        // (children sum upward) and every send destination (busses receive
+        // post-fader signal). Depth ordering alone breaks bus mixes: a send
+        // landing on an already-processed bus would never be forwarded
+        // (the session's whole drum mix flows Drums → DRUM BUS → MIX BUS).
+        // Kahn's algorithm; any cycle remainder (feedback loops) appends in
+        // index order.
+        let n = snapshot.len();
+        let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut indeg = vec![0usize; n];
+        let mut edge = |a: usize, b: usize| {
+            if a != b {
+                adj[a].push(b);
+                indeg[b] += 1;
+            }
+        };
+        for (i, t) in snapshot.iter().enumerate() {
+            if let Some(&pi) = t.parent_guid.as_deref().and_then(|g| idx_by_guid.get(g)) {
+                edge(i, pi);
+            }
+            for snd in &t.sends {
+                if let Some(&di) = idx_by_guid.get(snd.dest_guid.as_str()) {
+                    edge(i, di);
                 }
             }
-            d
-        };
-        let mut order: Vec<usize> = (0..snapshot.len()).collect();
-        order.sort_by_key(|&i| std::cmp::Reverse(depth_of(i)));
+        }
+        let mut order: Vec<usize> = Vec::with_capacity(n);
+        let mut queue: std::collections::VecDeque<usize> =
+            (0..n).filter(|&i| indeg[i] == 0).collect();
+        while let Some(i) = queue.pop_front() {
+            order.push(i);
+            for &j in &adj[i] {
+                indeg[j] -= 1;
+                if indeg[j] == 0 {
+                    queue.push_back(j);
+                }
+            }
+        }
+        if order.len() < n {
+            for i in 0..n {
+                if indeg[i] > 0 {
+                    order.push(i);
+                }
+            }
+        }
 
         // Solo routing: with folder summing, a soloed track's signal flows
         // THROUGH its ancestors — they (and its descendants) must keep
@@ -486,6 +549,26 @@ impl<'a> ProjectRenderer<'a> {
                 Some(b) => b.samples.clone(),
                 None => continue,
             };
+            if debug {
+                let v = (src.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>()
+                    / src.len().max(1) as f64)
+                    .sqrt();
+                if v > 1e-9 {
+                    eprintln!(
+                        "[stage2] {:<24} rms={v:.6} vol={:.3} ps={} pg={} hw={} sends={}",
+                        t.name,
+                        t.volume,
+                        t.parent_send,
+                        t.parent_guid
+                            .as_deref()
+                            .map(|g| idx_by_guid.contains_key(g))
+                            .map(|b| if b { "ok" } else { "MISS" })
+                            .unwrap_or("none"),
+                        t.hw_out,
+                        t.sends.len()
+                    );
+                }
+            }
             for snd in &t.sends {
                 if snd.muted {
                     continue;
@@ -541,6 +624,28 @@ impl<'a> ProjectRenderer<'a> {
                         for (m, smp) in master.samples.iter_mut().zip(src.iter()) {
                             *m += *smp;
                         }
+                        if debug {
+                            let v = (src.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>()
+                                / src.len().max(1) as f64)
+                                .sqrt();
+                            if v > 1e-9 {
+                                eprintln!("[->master] {:<24} rms={v:.6}", t.name);
+                            }
+                        }
+                    }
+                }
+            } else if t.hw_out {
+                // No parent send but routed to hardware — v0 sums hw
+                // outs straight to the master device buffer.
+                for (m, smp) in master.samples.iter_mut().zip(src.iter()) {
+                    *m += *smp;
+                }
+                if debug {
+                    let v = (src.iter().map(|s| (*s as f64) * (*s as f64)).sum::<f64>()
+                        / src.len().max(1) as f64)
+                        .sqrt();
+                    if v > 1e-9 {
+                        eprintln!("[hw->master] {:<24} rms={v:.6}", t.name);
                     }
                 }
             }
@@ -960,6 +1065,11 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) 
         muted: t.muted,
         soloed: t.soloed,
         parent_send,
+        hw_out: p
+            .hw_outputs
+            .get(&t.guid)
+            .map(|v| !v.is_empty())
+            .unwrap_or(false),
         parent_guid: t.parent_guid.clone(),
         sends,
         items,

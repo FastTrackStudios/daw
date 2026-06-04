@@ -84,3 +84,36 @@ fn loads_tracks_items_markers_tempo_routing() {
     let active = Takes::get_active_take(&daw, ctx, ItemRef::Guid(it.guid.clone())).unwrap();
     assert_eq!(active.source_file_path.as_deref(), Some("drums.wav"));
 }
+
+/// `ISBUS 2 -N` closes N nested folders at once. A loader that pops
+/// only one level corrupts every parent assignment after the first
+/// multi-pop (real sessions: tracks land under unrelated folders and
+/// the master sum path silently dead-ends).
+#[test]
+fn multi_level_folder_pop_resolves_parents() {
+    // A (folder) > B (folder) > Leaf [folder_end(2)], then Top.
+    let rpp = ReaperProjectBuilder::new()
+        .track("A", |t| t.folder_start())
+        .track("B", |t| t.folder_start())
+        .track("Leaf", |t| t.folder_end(2))
+        .track("Top", |t| t)
+        .build()
+        .to_rpp_string();
+
+    let daw = Standalone::new();
+    let summary = load_rpp_text(&daw, "Test", "/tmp/test.rpp", &rpp).unwrap();
+    let ctx = ProjectContext::Project(summary.project_guid.clone());
+    let tracks = Tracks::all(&daw, ctx);
+    assert_eq!(tracks.len(), 4);
+
+    let a = &tracks[0];
+    let b = &tracks[1];
+    assert_eq!(tracks[1].parent_guid.as_ref(), Some(&a.guid), "B under A");
+    assert_eq!(
+        tracks[2].parent_guid.as_ref(),
+        Some(&b.guid),
+        "Leaf under B"
+    );
+    // The -2 closes BOTH folders: Top is back at the root.
+    assert_eq!(tracks[3].parent_guid, None, "Top must be top-level");
+}
