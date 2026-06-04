@@ -40,6 +40,8 @@ libloading = { workspace = true, optional = true }
 base64 = "0.22"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# mmap-backed PCM streaming (native only; WASM falls back to decode).
+memmap2 = { workspace = true }
 tokio = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

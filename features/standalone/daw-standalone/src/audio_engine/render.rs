@@ -34,7 +34,7 @@ use daw_proto::primitives::AutomationMode;
 
 use crate::sync::EnvelopeData;
 
-use super::decoder::DecodedAudio;
+use super::source::AudioSource;
 use crate::sync::{EnvelopeKey, ProjectState, Standalone};
 
 /// Honor `EnvelopeData.automation_mode` at snapshot time: return the
@@ -138,7 +138,7 @@ struct SendSnapshot {
 
 struct ItemSnapshot {
     take_guid: Option<String>,
-    audio: Option<Arc<DecodedAudio>>,
+    audio: Option<Arc<AudioSource>>,
     position_seconds: f64,
     length_seconds: f64,
     fade_in_seconds: f64,
@@ -1190,7 +1190,7 @@ fn eval_envelope(points: &[EnvelopePoint], time_seconds: f64) -> Option<f64> {
 
 fn mix_item_into_bus(
     bus: &mut StereoBuffer,
-    audio: &DecodedAudio,
+    audio: &AudioSource,
     item: &ItemSnapshot,
     block_start_seconds: f64,
     block_end_seconds: f64,
@@ -1223,8 +1223,7 @@ fn mix_item_into_bus(
     let fade_in = item.fade_in_seconds.max(0.0);
     let fade_out = item.fade_out_seconds.max(0.0);
 
-    let audio_channels = audio.channels.max(1) as usize;
-    let audio_rate = audio.sample_rate.max(1) as f64;
+    let audio_rate = audio.sample_rate().max(1) as f64;
     let output_rate_f = output_rate as f64;
 
     for frame in 0..bus.frames {
@@ -1265,7 +1264,7 @@ fn mix_item_into_bus(
         let i0 = source_frame_f.floor() as usize;
         let frac = (source_frame_f - i0 as f64) as f32;
         let i1 = (i0 + 1).min(audio.frame_count().saturating_sub(1));
-        let (l, r) = sample_stereo_interp(&audio.samples, audio_channels, i0, i1, frac);
+        let (l, r) = audio.stereo_interp(i0, i1, frac);
 
         // Volume envelope per-frame.
         let env_vol = c_vol

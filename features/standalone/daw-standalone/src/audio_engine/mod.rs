@@ -36,6 +36,8 @@ mod mixer;
 pub mod plugin_host;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub mod render;
+/// Streaming audio sources (mmap PCM + decoded memory) — REAPER's model.
+pub mod source;
 #[cfg(feature = "vst3-host")]
 pub mod vst3_host;
 #[cfg(all(target_arch = "wasm32", feature = "web"))]
@@ -51,3 +53,6 @@ pub mod test_tone;
 pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
 #[cfg(feature = "audio")]
 pub use mixer::{AudioEngine, TrackHandle};
+pub use source::AudioSource;
+#[cfg(not(target_arch = "wasm32"))]
+pub use source::PcmFile;

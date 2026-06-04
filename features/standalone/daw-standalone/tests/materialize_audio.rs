@@ -62,9 +62,9 @@ fn attach_audio_source_directly_round_trips() {
     attach_audio_source(&daw, &guid, take_guid, decoded);
 
     let got = daw.audio_source(&guid, take_guid).expect("attached");
-    assert_eq!(got.samples.len(), 4);
-    assert_eq!(got.channels, 1);
-    assert_eq!(got.sample_rate, 48_000);
+    assert_eq!(got.frame_count(), 4);
+    assert_eq!(got.channels(), 1);
+    assert_eq!(got.sample_rate(), 48_000);
     assert_eq!(daw.audio_source_count(&guid), 1);
 }
 
@@ -107,7 +107,7 @@ fn materialize_resolves_and_decodes_take_sources() {
     assert!(report.failed.is_empty(), "failed: {:?}", report.failed);
 
     let decoded = daw.audio_source(&guid, &active.guid).expect("attached");
-    assert_eq!(decoded.sample_rate, 44_100);
+    assert_eq!(decoded.sample_rate(), 44_100);
     assert!(decoded.frame_count() >= 44_000);
 }
 

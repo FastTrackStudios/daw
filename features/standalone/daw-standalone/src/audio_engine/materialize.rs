@@ -20,6 +20,7 @@
 use std::sync::Arc;
 
 use super::decoder::{DecodedAudio, decode_audio_with_extension};
+use super::source::AudioSource;
 use crate::sync::Standalone;
 
 /// Per-take materialization outcome.
@@ -38,14 +39,31 @@ pub struct MaterializeReport {
 /// Walk every take in `project_guid` and call `resolve(path)` for
 /// each one whose source has a file path. Successful decodes land in
 /// `ProjectState.audio_sources[take_guid]`.
-pub fn materialize_audio<F>(
-    daw: &Standalone,
-    project_guid: &str,
-    mut resolve: F,
-) -> MaterializeReport
+pub fn materialize_audio<F>(daw: &Standalone, project_guid: &str, resolve: F) -> MaterializeReport
 where
     F: FnMut(&str) -> Result<Vec<u8>, String>,
 {
+    materialize_audio_streaming(daw, project_guid, resolve, |_| None)
+}
+
+/// [`materialize_audio`] with a streaming fast path: when `resolve_path`
+/// returns an on-disk file, uncompressed PCM is **memory-mapped instead of
+/// decoded** — REAPER's model. Opening parses the header only, so a
+/// multi-gigabyte session "materializes" in milliseconds with flat RAM;
+/// the OS page cache streams samples during playback. Compressed formats
+/// (and non-file sources) fall back to the byte resolver + full decode.
+pub fn materialize_audio_streaming<F, P>(
+    daw: &Standalone,
+    project_guid: &str,
+    mut resolve: F,
+    mut resolve_path: P,
+) -> MaterializeReport
+where
+    F: FnMut(&str) -> Result<Vec<u8>, String>,
+    P: FnMut(&str) -> Option<std::path::PathBuf>,
+{
+    #[cfg(target_arch = "wasm32")]
+    let _ = &mut resolve_path;
     let mut report = MaterializeReport::default();
 
     // Snapshot the list of (take_guid, source_path) outside the
@@ -68,6 +86,22 @@ where
         .unwrap_or_default();
 
     for (take_guid, path) in pending {
+        // Streaming fast path: mmap uncompressed PCM straight from disk.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(disk_path) = resolve_path(&path) {
+            match super::source::PcmFile::open(&disk_path) {
+                Ok(pcm) => {
+                    let _ = daw.with_project_mut(project_guid, |p| {
+                        p.audio_sources
+                            .insert(take_guid.clone(), Arc::new(AudioSource::PcmFile(pcm)));
+                    });
+                    report.loaded += 1;
+                    continue;
+                }
+                // Not a plain RIFF/PCM file — fall through to decode.
+                Err(_) => {}
+            }
+        }
         let bytes = match resolve(&path) {
             Ok(b) => b,
             Err(e) => {
@@ -117,8 +151,10 @@ pub fn attach_audio_source(
     decoded: DecodedAudio,
 ) {
     let _ = daw.with_project_mut(project_guid, |p| {
-        p.audio_sources
-            .insert(take_guid.to_string(), Arc::new(decoded));
+        p.audio_sources.insert(
+            take_guid.to_string(),
+            Arc::new(AudioSource::Memory(decoded)),
+        );
     });
 }
 
@@ -141,7 +177,10 @@ pub fn materialize_via_bay(
     project_guid: &str,
 ) -> Result<MaterializeReport, String> {
     let bay = daw.media_bay();
-    Ok(materialize_audio(daw, project_guid, |path| {
-        bay.resolve_file(path)
-    }))
+    Ok(materialize_audio_streaming(
+        daw,
+        project_guid,
+        |path| bay.resolve_file(path),
+        |path| bay.resolve_file_path(path),
+    ))
 }

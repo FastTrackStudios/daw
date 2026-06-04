@@ -281,7 +281,7 @@ pub struct ProjectState {
     /// directly via `attach_audio_source`). Read by the mixer during
     /// playback. Wrapped in `Arc` so the mixer can hold cheap refs.
     #[cfg(any(feature = "audio", feature = "decode"))]
-    pub audio_sources: HashMap<String, std::sync::Arc<crate::audio_engine::DecodedAudio>>,
+    pub audio_sources: HashMap<String, std::sync::Arc<crate::audio_engine::AudioSource>>,
     pub next_region_id: u32,
     pub next_marker_id: u32,
     /// Per-track ext state keyed by `(track_guid, section, key)`.
@@ -644,7 +644,7 @@ impl Standalone {
         &self,
         project_guid: &str,
         take_guid: &str,
-    ) -> Option<std::sync::Arc<crate::audio_engine::DecodedAudio>> {
+    ) -> Option<std::sync::Arc<crate::audio_engine::AudioSource>> {
         self.with_project(project_guid, |p| p.audio_sources.get(take_guid).cloned())
             .ok()
             .flatten()

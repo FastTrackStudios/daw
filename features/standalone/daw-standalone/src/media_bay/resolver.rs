@@ -21,6 +21,14 @@ pub trait BayFileResolver: Send + Sync {
     /// can assume the path is whatever was stored on
     /// `Take.source_file_path`.
     fn resolve(&self, path: &str) -> Result<Vec<u8>, String>;
+
+    /// Resolve to an on-disk path when the source is a local file —
+    /// lets the engine stream PCM straight from disk (mmap) instead of
+    /// loading bytes. `None` (the default, and on WASM) falls back to
+    /// the byte path + full decode.
+    fn resolve_path(&self, _path: &str) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 /// Native filesystem resolver — reads from disk. Pulls in
@@ -31,6 +39,11 @@ pub struct FsFileResolver;
 impl BayFileResolver for FsFileResolver {
     fn resolve(&self, path: &str) -> Result<Vec<u8>, String> {
         std::fs::read(path).map_err(|e| format!("read {path}: {e}"))
+    }
+
+    fn resolve_path(&self, path: &str) -> Option<std::path::PathBuf> {
+        let pb = std::path::PathBuf::from(path);
+        pb.exists().then_some(pb)
     }
 }
 
@@ -59,6 +72,16 @@ impl BayFileResolver for ProjectRelativeResolver {
             self.project_dir.join(pb)
         };
         std::fs::read(&abs).map_err(|e| format!("read {}: {e}", abs.display()))
+    }
+
+    fn resolve_path(&self, path: &str) -> Option<std::path::PathBuf> {
+        let pb = std::path::PathBuf::from(path);
+        let abs = if pb.is_absolute() {
+            pb
+        } else {
+            self.project_dir.join(pb)
+        };
+        abs.exists().then_some(abs)
     }
 }
 

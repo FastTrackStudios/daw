@@ -104,6 +104,13 @@ impl MediaBay {
         r.resolve(path)
     }
 
+    /// Resolve a source path to an on-disk file when the installed
+    /// resolver can (native filesystems) — the streaming-PCM fast path.
+    pub fn resolve_file_path(&self, path: &str) -> Option<std::path::PathBuf> {
+        let guard = self.daw.bay_resolver.lock().expect("resolver poisoned");
+        guard.as_ref().and_then(|r| r.resolve_path(path))
+    }
+
     // ── Listing ─────────────────────────────────────────────────
 
     /// List entries for a view. `filter` is a case-insensitive
