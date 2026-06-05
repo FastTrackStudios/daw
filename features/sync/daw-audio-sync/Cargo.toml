@@ -6,6 +6,11 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 # Companion to `daw-synchronization`. That crate handles state sync (mixer,
 # tracks, markers, …) at main-thread cadence via TCP mesh + suppression. This
 # crate handles the sample-accurate transport layer: audio-callback hook,

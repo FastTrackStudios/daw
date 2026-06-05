@@ -6,6 +6,11 @@ license.workspace = true
 authors.workspace = true
 description = "Core audio processing DAG engine — AudioNode trait, BufferPool, and graph compiler."
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [lib]
 path = "src/node.rs"
 

@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 description = "RT-safe instruction set for fts-audio VST plugin — flat fixed-size rule tables"
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [dependencies]
 
 [lints]

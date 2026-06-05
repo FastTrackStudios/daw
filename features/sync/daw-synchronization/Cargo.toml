@@ -6,6 +6,11 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 # Synchronizes DAW state between peers. Subscribes to the streaming
 # service traits in daw-proto (TransportStream, MarkersStream, …),
 # wraps events in SyncEvent envelopes with origin peer + sequence
@@ -36,7 +41,7 @@ tracing.workspace = true
 [dev-dependencies]
 # Integration-test harness via the daw facade's `test-harness` feature
 # (replaces the former `reaper-test` crate).
-daw = { workspace = true, features = ["reaper", "test-harness"] }
+daw = { path = "../../../crates/daw", features = ["reaper", "test-harness"] }
 eyre.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "sync"] }
 

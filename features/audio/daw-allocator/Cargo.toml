@@ -6,6 +6,11 @@ license.workspace = true
 authors.workspace = true
 description = "Real-time-aware allocator and main-thread task dispatch for DAW extensions. Inspired by Helgobox (https://github.com/helgoboss/helgobox)."
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [dependencies]
 
 [lints]
