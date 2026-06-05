@@ -1039,10 +1039,15 @@ fn send_modes_tap_pre_or_post_fader() {
     );
 }
 
-/// VCA grouping at playback: a follower's gain is multiplied by every
-/// shared-group lead's fader; muting the lead silences the follower.
+/// VCA grouping at playback (user guide §5.16): the lead's fader
+/// dB-adds (linear-multiplies) onto followers, the lead's pan offsets
+/// follower pan, the lead's MUTE BUTTON does NOT affect followers, and
+/// a mute ENVELOPE on the lead gates them.
 #[test]
 fn vca_lead_scales_and_mutes_followers() {
+    use daw_proto::automation::{EnvelopePoint, EnvelopeShape, EnvelopeType};
+    use daw_standalone::sync::{EnvelopeData, EnvelopeKey};
+
     let (daw, guid) = seeded();
     let ctx = ProjectContext::Current;
     let lead = Tracks::add(&daw, ctx.clone(), "VCA", None).unwrap();
@@ -1052,14 +1057,14 @@ fn vca_lead_scales_and_mutes_followers() {
         p.tracks[0].grouping.vca_lead = 1;
         p.tracks[1].grouping.vca_follow = 1;
     });
-    let _ = lead;
 
     let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
     let unity = 0.5 * (0.5_f32).sqrt();
     let base = rms_l(&r.render_block(0, 512));
     assert!((base - unity).abs() < 0.02, "lead at unity: {base}");
 
-    // Lead fader at half → follower output halves.
+    // Lead fader at half → follower output halves (faders don't move:
+    // the follower's stored volume stays 1.0).
     Tracks::set_volume(&daw, ctx.clone(), TrackRef::Guid(lead.clone()), 0.5).unwrap();
     let halved = rms_l(&r.render_block(0, 512));
     assert!(
@@ -1067,11 +1072,60 @@ fn vca_lead_scales_and_mutes_followers() {
         "VCA lead scales follower: {halved} vs {}",
         unity * 0.5
     );
+    let follower_vol = daw.read_project(&guid, |p| p.tracks[1].volume).unwrap();
+    assert!((follower_vol - 1.0).abs() < 1e-9, "follower fader unmoved");
 
-    // Muting the lead silences the follower.
-    Tracks::set_muted(&daw, ctx, TrackRef::Guid(lead), true).unwrap();
-    let muted = rms_l(&r.render_block(0, 512));
-    assert!(muted < 1e-6, "VCA lead mute mutes follower: {muted}");
+    // The lead's mute BUTTON does not gate followers (mute is not a
+    // VCA parameter — only a mute envelope on the lead is).
+    Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(lead.clone()), true).unwrap();
+    let still = rms_l(&r.render_block(0, 512));
+    assert!(
+        (still - unity * 0.5).abs() < 0.02,
+        "lead mute button must NOT mute follower: {still}"
+    );
+    Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(lead.clone()), false).unwrap();
+
+    // A mute ENVELOPE on the lead gates the follower.
+    daw.write_project(&guid, |p| {
+        let mut data = EnvelopeData::new();
+        data.points = vec![EnvelopePoint {
+            index: 0,
+            time: daw_proto::PositionInSeconds::from_seconds(0.0),
+            value: 1.0, // ours: >0.5 = muted
+            shape: EnvelopeShape::Square,
+            tension: 0.0,
+            selected: false,
+        }];
+        p.envelopes
+            .insert((lead.clone(), EnvelopeKey::Track(EnvelopeType::Mute)), data);
+    });
+    let gated = rms_l(&r.render_block(0, 512));
+    assert!(gated < 1e-6, "lead mute envelope gates follower: {gated}");
+}
+
+/// VCA pan: the lead's pan offsets follower pan at playback.
+#[test]
+fn vca_lead_pan_offsets_follower() {
+    let (daw, guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let lead = Tracks::add(&daw, ctx.clone(), "VCA", None).unwrap();
+    let follower = Tracks::add(&daw, ctx.clone(), "F", None).unwrap();
+    create_item_with_audio(&daw, &guid, &follower, 0.0, 1.0, const_audio(0.5));
+    daw.write_project(&guid, |p| {
+        p.tracks[0].grouping.vca_lead = 1;
+        p.tracks[1].grouping.vca_follow = 1;
+    });
+
+    // Pan the LEAD hard left → the follower's signal goes left.
+    Tracks::set_pan(&daw, ctx, TrackRef::Guid(lead), -1.0).unwrap();
+    let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
+    let block = r.render_block(0, 512);
+    assert!(
+        rms_l(&block) > 0.3,
+        "left carries signal: {}",
+        rms_l(&block)
+    );
+    assert!(rms_r(&block) < 1e-6, "right silent: {}", rms_r(&block));
 }
 
 /// Record-arm grouping gangs the gesture: arming the lead arms every

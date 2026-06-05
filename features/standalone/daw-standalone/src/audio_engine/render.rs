@@ -464,39 +464,6 @@ impl ProjectRenderer {
         // index, matching `TrackRef::Index` on the Peaks service.
         let meters = self.daw.meters();
 
-        // VCA grouping: a follower's effective gain is its fader ×
-        // every shared-group lead's fader, and a muted lead mutes its
-        // followers (console VCA semantics — the lead's own audio
-        // path is unaffected unless it also carries signal). Static
-        // faders only for v0: lead volume ENVELOPES don't ride
-        // followers yet.
-        let any_vca = snapshot.iter().any(|t| t.vca_follow != 0);
-        let (vca_gain, vca_muted): (Vec<f64>, Vec<bool>) = if any_vca {
-            let leads: Vec<(u64, f64, bool)> = snapshot
-                .iter()
-                .filter(|t| t.vca_lead != 0)
-                .map(|t| (t.vca_lead, t.volume, t.muted))
-                .collect();
-            snapshot
-                .iter()
-                .map(|t| {
-                    let mut gain = 1.0;
-                    let mut muted = false;
-                    if t.vca_follow != 0 {
-                        for (mask, vol, lead_muted) in &leads {
-                            if mask & t.vca_follow != 0 {
-                                gain *= vol;
-                                muted |= lead_muted;
-                            }
-                        }
-                    }
-                    (gain, muted)
-                })
-                .unzip()
-        } else {
-            (Vec::new(), Vec::new())
-        };
-
         // Plugin instances + de-interleave scratch for the per-track
         // FX stage inside the loop. The map lives separately from
         // ProjectState so the audio thread doesn't block project
@@ -623,13 +590,35 @@ impl ProjectRenderer {
                 .flatten();
 
             // Gain + pan + polarity, per-frame envelopes.
-            // VCA: shared-group leads scale this track's gain and can
-            // mute it outright.
-            let (track_vca_gain, track_vca_muted) = if any_vca {
-                (vca_gain[ti], vca_muted[ti])
+            // VCA grouping (user guide §5.16): a follower's volume is
+            // dB-added (= linear-multiplied) with every shared-group
+            // lead's fader + volume envelope; the lead's pan (+ pan
+            // envelope) offsets the follower's pan; a MUTE ENVELOPE on
+            // the lead mutes followers (the lead's mute button does
+            // NOT — mute isn't a VCA parameter). Follower faders never
+            // move; this is playback-only.
+            let vca_leads: Vec<&TrackSnapshot> = if t.vca_follow != 0 {
+                snapshot
+                    .iter()
+                    .filter(|l| l.vca_lead & t.vca_follow != 0)
+                    .collect()
             } else {
-                (1.0, false)
+                Vec::new()
             };
+            let mut vca_cursors: Vec<(
+                Option<EnvelopeCursor>,
+                Option<EnvelopeCursor>,
+                Option<EnvelopeCursor>,
+            )> = vca_leads
+                .iter()
+                .map(|l| {
+                    (
+                        l.volume_env.as_ref().map(|p| EnvelopeCursor::new(p)),
+                        l.pan_env.as_ref().map(|p| EnvelopeCursor::new(p)),
+                        l.mute_env.as_ref().map(|p| EnvelopeCursor::new(p)),
+                    )
+                })
+                .collect();
             if let Some(bus) = buses.get_mut(&t.guid) {
                 let mut c_vol = t.volume_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 let mut c_pvol = t.volume_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
@@ -640,7 +629,7 @@ impl ProjectRenderer {
                     let time = start_seconds + frame as f64 * inv_rate;
                     let v_main = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
                     let v_prefx = c_pvol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
-                    let vol = t.volume * v_main * v_prefx * track_vca_gain;
+                    let mut vol = t.volume * v_main * v_prefx;
                     let p_main = c_pan
                         .as_mut()
                         .and_then(|c| c.eval_at(time))
@@ -651,13 +640,36 @@ impl ProjectRenderer {
                         .and_then(|c| c.eval_at(time))
                         .map(|v| (v - 0.5) * 2.0)
                         .unwrap_or(0.0);
-                    let pan = (t.pan + p_main + p_prefx).clamp(-1.0, 1.0);
+                    let mut pan = t.pan + p_main + p_prefx;
+                    // VCA leads ride this follower: gain multiplies,
+                    // pan offsets, lead mute envelopes gate.
+                    let mut vca_env_muted = false;
+                    for (li, lead) in vca_leads.iter().enumerate() {
+                        let (c_lv, c_lp, c_lm) = &mut vca_cursors[li];
+                        let lv = c_lv.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
+                        vol *= lead.volume * lv;
+                        let lp = c_lp
+                            .as_mut()
+                            .and_then(|c| c.eval_at(time))
+                            .map(|v| (v - 0.5) * 2.0)
+                            .unwrap_or(0.0);
+                        pan += lead.pan + lp;
+                        if c_lm
+                            .as_mut()
+                            .and_then(|c| c.eval_at(time))
+                            .map(|v| v > 0.5)
+                            .unwrap_or(false)
+                        {
+                            vca_env_muted = true;
+                        }
+                    }
+                    let pan = pan.clamp(-1.0, 1.0);
                     let env_muted = c_mute
                         .as_mut()
                         .and_then(|c| c.eval_at(time))
                         .map(|v| v > 0.5)
                         .unwrap_or(false);
-                    let muted = t.muted || env_muted || track_vca_muted;
+                    let muted = t.muted || env_muted || vca_env_muted;
                     if muted {
                         bus.samples[frame * 2] = 0.0;
                         bus.samples[frame * 2 + 1] = 0.0;
