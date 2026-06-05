@@ -162,6 +162,8 @@ struct ItemSnapshot {
     take_volume: f64,
     play_rate: f64,
     start_offset_seconds: f64,
+    /// REAPER `CHANMODE` on the active take (0 = normal stereo).
+    channel_mode: u32,
     /// Take pitch in semitones (added to envelope-driven pitch).
     take_pitch_semitones: f64,
     /// Per-take envelopes. All in item-relative time (0 at item
@@ -945,7 +947,7 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) 
             let audio = take_guid_opt
                 .as_ref()
                 .and_then(|tg| p.audio_sources.get(tg).cloned());
-            let (take_volume, play_rate, start_offset, take_pitch) = p
+            let (take_volume, play_rate, start_offset, take_pitch, channel_mode) = p
                 .takes
                 .get(ig)
                 .and_then(|tl| tl.takes.get(tl.active_idx as usize))
@@ -955,9 +957,10 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) 
                         tk.play_rate,
                         tk.start_offset.as_seconds(),
                         tk.pitch,
+                        tk.channel_mode,
                     )
                 })
-                .unwrap_or((1.0, 1.0, 0.0, 0.0));
+                .unwrap_or((1.0, 1.0, 0.0, 0.0, 0));
             // Look up each take envelope by `(owner="", EnvelopeKey::Take{..})`
             // — matches the storage convention in automation.rs.
             // Capture take_guid first so the closure can reuse it
@@ -1145,6 +1148,7 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) 
                     play_rate
                 },
                 start_offset_seconds: start_offset,
+                channel_mode,
                 take_pitch_semitones: take_pitch,
                 take_volume_env,
                 take_pan_env,
@@ -1527,7 +1531,36 @@ fn mix_item_into_bus(
         let i0 = source_frame_f as usize;
         let frac = (source_frame_f - i0 as f64) as f32;
         let i1 = (i0 + 1).min(last_frame);
-        let (l, r) = audio.stereo_interp(i0, i1, frac);
+        // REAPER channel mode: how the source's channels map onto the
+        // stereo item signal.
+        let (l, r) = match item.channel_mode {
+            0 => audio.stereo_interp(i0, i1, frac),
+            1 => {
+                // Reverse stereo.
+                let (l, r) = audio.stereo_interp(i0, i1, frac);
+                (r, l)
+            }
+            2 => {
+                // Mono downmix.
+                let (l, r) = audio.stereo_interp(i0, i1, frac);
+                let m = (l + r) * 0.5;
+                (m, m)
+            }
+            m @ 3..=66 => {
+                // Mono of source channel (3 = left/ch1, 4 = right/ch2,
+                // 5+ = channel m−2, all 1-based).
+                let v = audio.channel_interp(i0, i1, frac, (m - 3) as usize);
+                (v, v)
+            }
+            m => {
+                // Stereo pair starting at channel m−67 (0-based).
+                let c = (m - 67) as usize;
+                (
+                    audio.channel_interp(i0, i1, frac, c),
+                    audio.channel_interp(i0, i1, frac, c + 1),
+                )
+            }
+        };
 
         // Volume envelope per-frame.
         let env_vol = c_vol

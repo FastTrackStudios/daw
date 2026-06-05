@@ -137,7 +137,7 @@ impl PcmFile {
     /// One sample (frame, channel) as f32. Bounds-checked; out of range
     /// reads 0.
     #[inline]
-    fn sample(&self, frame: usize, channel: usize) -> f32 {
+    pub(crate) fn sample(&self, frame: usize, channel: usize) -> f32 {
         if frame >= self.frames {
             return 0.0;
         }
@@ -258,6 +258,28 @@ impl AudioSource {
                 let r0 = p.sample(i0, 1);
                 let r1 = p.sample(i1, 1);
                 (l, r0 + (r1 - r0) * frac)
+            }
+        }
+    }
+
+    /// Linearly interpolated read of one source channel (clamped to
+    /// the last channel) — backs REAPER channel modes (mono-of-N,
+    /// stereo pair N).
+    #[inline]
+    pub fn channel_interp(&self, i0: usize, i1: usize, frac: f32, ch: usize) -> f32 {
+        match self {
+            AudioSource::Memory(d) => {
+                let nch = d.channels.max(1) as usize;
+                let c = ch.min(nch - 1);
+                let s0 = d.samples.get(i0 * nch + c).copied().unwrap_or(0.0);
+                let s1 = d.samples.get(i1 * nch + c).copied().unwrap_or(0.0);
+                s0 + (s1 - s0) * frac
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            AudioSource::PcmFile(p) => {
+                let s0 = p.sample(i0, ch);
+                let s1 = p.sample(i1, ch);
+                s0 + (s1 - s0) * frac
             }
         }
     }

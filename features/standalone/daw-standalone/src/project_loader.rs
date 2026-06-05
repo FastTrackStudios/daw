@@ -673,6 +673,21 @@ fn build_take(item_guid: &str, index: u32, rt: &RppTake, _summary: &mut LoadedPr
         play_rate: rt.playrate.as_ref().map(|pr| pr.rate).unwrap_or(1.0),
         pitch: 0.0,
         preserve_pitch: true,
+        channel_mode: {
+            use dawfile_reaper::types::item::ChannelMode as CM;
+            match rt.channel_mode {
+                CM::Normal => 0,
+                CM::ReverseStereo => 1,
+                CM::MonoDownmix => 2,
+                CM::MonoLeft => 3,
+                CM::MonoRight => 4,
+                // dawfile stores the decoded channel; re-encode to
+                // REAPER's raw CHANMODE value space.
+                CM::MonoChannel(ch) => ch as u32 + 2,
+                CM::StereChannel(ch) => ch as u32 + 66,
+                CM::Unknown(v) => v.max(0) as u32,
+            }
+        },
         start_offset: Duration::from_seconds(rt.slip_offset.max(0.0)),
         source_type,
         source_file_path,

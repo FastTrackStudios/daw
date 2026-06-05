@@ -925,3 +925,64 @@ fn master_volume_pan_mute_apply() {
     let block = r.render_block(0, 512);
     assert!(rms_l(&block) < 1e-6, "master mute silences output");
 }
+
+/// CHANMODE maps source channels onto the item's stereo signal:
+/// reverse stereo swaps, mono-left/right pick a channel.
+#[test]
+fn channel_modes_remap_source_channels() {
+    let stereo = |l: f32, r: f32| -> DecodedAudio {
+        let frames = SAMPLE_RATE as usize;
+        let mut samples = Vec::with_capacity(frames * 2);
+        for _ in 0..frames {
+            samples.push(l);
+            samples.push(r);
+        }
+        DecodedAudio {
+            samples,
+            channels: 2,
+            sample_rate: SAMPLE_RATE,
+        }
+    };
+    // L = 0.8, R = 0.2.
+    let run = |mode: u32| -> (f32, f32) {
+        let (daw, guid) = seeded();
+        let ctx = ProjectContext::Current;
+        let t = Tracks::add(&daw, ctx, "T", None).unwrap();
+        let (item_guid, _) = create_item_with_audio(&daw, &guid, &t, 0.0, 1.0, stereo(0.8, 0.2));
+        daw.write_project(&guid, |p| {
+            let tl = p.takes.get_mut(&item_guid).unwrap();
+            let idx = tl.active_idx as usize;
+            tl.takes[idx].channel_mode = mode;
+        });
+        let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
+        let block = r.render_block(0, 512);
+        (rms_l(&block), rms_r(&block))
+    };
+    let g = (0.5_f32).sqrt(); // centre-pan constant-power gain
+
+    let (l, r) = run(0); // normal
+    assert!(
+        (l - 0.8 * g).abs() < 0.02 && (r - 0.2 * g).abs() < 0.02,
+        "normal {l} {r}"
+    );
+    let (l, r) = run(1); // reverse stereo
+    assert!(
+        (l - 0.2 * g).abs() < 0.02 && (r - 0.8 * g).abs() < 0.02,
+        "reversed {l} {r}"
+    );
+    let (l, r) = run(2); // mono downmix
+    assert!(
+        (l - 0.5 * g).abs() < 0.02 && (r - 0.5 * g).abs() < 0.02,
+        "downmix {l} {r}"
+    );
+    let (l, r) = run(3); // mono left
+    assert!(
+        (l - 0.8 * g).abs() < 0.02 && (r - 0.8 * g).abs() < 0.02,
+        "mono-L {l} {r}"
+    );
+    let (l, r) = run(4); // mono right
+    assert!(
+        (l - 0.2 * g).abs() < 0.02 && (r - 0.2 * g).abs() < 0.02,
+        "mono-R {l} {r}"
+    );
+}
