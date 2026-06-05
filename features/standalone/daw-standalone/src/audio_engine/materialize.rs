@@ -89,17 +89,15 @@ where
         // Streaming fast path: mmap uncompressed PCM straight from disk.
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(disk_path) = resolve_path(&path) {
-            match super::source::PcmFile::open(&disk_path) {
-                Ok(pcm) => {
-                    let _ = daw.with_project_mut(project_guid, |p| {
-                        p.audio_sources
-                            .insert(take_guid.clone(), Arc::new(AudioSource::PcmFile(pcm)));
-                    });
-                    report.loaded += 1;
-                    continue;
-                }
-                // Not a plain RIFF/PCM file — fall through to decode.
-                Err(_) => {}
+            // Open errors mean "not a plain RIFF/PCM file" — fall through
+            // to decode.
+            if let Ok(pcm) = super::source::PcmFile::open(&disk_path) {
+                let _ = daw.with_project_mut(project_guid, |p| {
+                    p.audio_sources
+                        .insert(take_guid.clone(), Arc::new(AudioSource::PcmFile(pcm)));
+                });
+                report.loaded += 1;
+                continue;
             }
         }
         let bytes = match resolve(&path) {
