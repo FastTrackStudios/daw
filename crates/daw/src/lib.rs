@@ -184,6 +184,15 @@ pub mod standalone {
     pub use daw_standalone::*;
 }
 
+// ── CSI: hardware control surfaces ──────────────────────────────────────────
+#[cfg(feature = "csi")]
+/// Control Surface Integration — Mackie Control / Behringer X-Touch
+/// driver fed by the event bus. `daw::csi::run(daw, config)` connects
+/// a surface to any backend reachable through `daw_control::Daw`.
+pub mod csi {
+    pub use daw_csi::*;
+}
+
 // ── REAPER backend re-export ────────────────────────────────────────────────
 // `daw-bridge`, `daw-perf-test`, and the in-process sync engine reach
 // through the facade to REAPER-side helpers (event_hub, safe_wrappers,

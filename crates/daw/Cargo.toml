@@ -43,6 +43,10 @@ dawfile-reaper = { path = "../../features/backends/reaper/dawfile-reaper", optio
 # `ui` feature so apps consume the components through the facade.
 daw-ui = { workspace = true, optional = true }
 
+# Control Surface Integration (Mackie Control / X-Touch). Depends only on
+# daw-proto + daw-control, so it folds into the facade — no cycle.
+daw-csi = { path = "../../features/surfaces/daw-csi", optional = true }
+
 # Source-format parsers — each exposes one DAW's file format (format →
 # daw-proto types) under `daw::<format>`, gated by a per-format feature.
 # Opt into only the formats you need; none of these pull in REAPER. The
@@ -98,6 +102,9 @@ convert-ableton = ["file", "reaper", "daw-reaper/ableton"]
 convert-aaf = ["file", "reaper", "daw-reaper/aaf"]
 convert-dawproject = ["file", "reaper", "daw-reaper/dawproject"]
 reaper-ui = ["dep:daw-reaper-dioxus"]
+# Control surfaces (`daw::csi`) — Mackie Control / Behringer X-Touch driver
+# fed by the event bus. Hardware MIDI via midir (ALSA/CoreMIDI/WinMM).
+csi = ["dep:daw-csi"]
 
 # Source-format parsers, exposed under daw::<format>. Each is independent
 # of REAPER and of each other — opt into only what you read.
