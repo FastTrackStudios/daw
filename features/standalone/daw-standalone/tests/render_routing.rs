@@ -867,3 +867,61 @@ fn render_writes_post_fader_track_meters() {
         meters.cell(0).unwrap().peak(0)
     );
 }
+
+#[test]
+fn loop_source_tiles_past_source_end() {
+    let (daw, guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let t = Tracks::add(&daw, ctx, "T", None).unwrap();
+    // 2s item over a 1s source (const_audio is 1s) — the second half
+    // only sounds when LOOP is honored.
+    let (item_guid, _take) = create_item_with_audio(&daw, &guid, &t, 0.0, 2.0, const_audio(0.5));
+    daw.write_project(&guid, |p| {
+        p.items.get_mut(&item_guid).unwrap().item.loop_source = true;
+    });
+
+    let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
+    // Render half a second starting at 1.5s — past the source length.
+    let block = r.render_block(
+        (SAMPLE_RATE + SAMPLE_RATE / 2) as u64,
+        (SAMPLE_RATE / 4) as usize,
+    );
+    let target = 0.5 * (0.5_f32).sqrt();
+    assert!(
+        (rms_l(&block) - target).abs() < 0.05,
+        "looped tail should sound: rms={}",
+        rms_l(&block)
+    );
+
+    // Sanity: with loop off the same window is silent.
+    daw.write_project(&guid, |p| {
+        p.items.get_mut(&item_guid).unwrap().item.loop_source = false;
+    });
+    let block = r.render_block(
+        (SAMPLE_RATE + SAMPLE_RATE / 2) as u64,
+        (SAMPLE_RATE / 4) as usize,
+    );
+    assert!(rms_l(&block) < 1e-6, "unlooped tail must be silent");
+}
+
+#[test]
+fn master_volume_pan_mute_apply() {
+    let (daw, guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let t = Tracks::add(&daw, ctx, "T", None).unwrap();
+    create_item_with_audio(&daw, &guid, &t, 0.0, 1.0, const_audio(0.5));
+    let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
+    let unity = 0.5 * (0.5_f32).sqrt();
+
+    daw.write_project(&guid, |p| p.master_volume = 0.5);
+    let block = r.render_block(0, 512);
+    assert!(
+        (rms_l(&block) - unity * 0.5).abs() < 0.05,
+        "master gain halves output: rms={}",
+        rms_l(&block)
+    );
+
+    daw.write_project(&guid, |p| p.master_muted = true);
+    let block = r.render_block(0, 512);
+    assert!(rms_l(&block) < 1e-6, "master mute silences output");
+}

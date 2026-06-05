@@ -153,6 +153,10 @@ struct ItemSnapshot {
     length_seconds: f64,
     fade_in_seconds: f64,
     fade_out_seconds: f64,
+    fade_in_shape: daw_proto::item::FadeShape,
+    fade_out_shape: daw_proto::item::FadeShape,
+    /// Loop the source when the item outlasts it (RPP `LOOP 1`).
+    loop_source: bool,
     muted: bool,
     item_volume: f64,
     take_volume: f64,
@@ -218,7 +222,18 @@ pub struct ProjectRenderer {
     project_guid: String,
     sample_rate: u32,
     /// `(project revision, snapshot)` — refreshed when the revision moves.
-    cache: std::sync::Mutex<Option<(u64, Arc<Vec<TrackSnapshot>>)>>,
+    cache: std::sync::Mutex<Option<(u64, Arc<RenderSnapshot>)>>,
+}
+
+/// Everything `render_block` reads, snapshotted once per project
+/// revision: the per-track graph plus the master section.
+struct RenderSnapshot {
+    tracks: Vec<TrackSnapshot>,
+    /// Master fader gain (linear).
+    master_volume: f64,
+    /// Master pan (−1…1).
+    master_pan: f64,
+    master_muted: bool,
 }
 
 impl ProjectRenderer {
@@ -239,10 +254,11 @@ impl ProjectRenderer {
             return master;
         }
 
-        let snapshot = match self.snapshot_tracks() {
+        let snap = match self.snapshot_tracks() {
             Some(s) => s,
             None => return master,
         };
+        let snapshot = &snap.tracks;
         let start_seconds = start_frame as f64 / self.sample_rate as f64;
         let end_seconds = start_seconds + (frames as f64 / self.sample_rate as f64);
         let any_soloed = snapshot.iter().any(|t| t.soloed);
@@ -719,10 +735,27 @@ impl ProjectRenderer {
             }
         }
 
+        // Master fader (RPP `MASTER_VOLUME` / `MASTERMUTESOLO`).
+        // Balance pan law: centre = unity (no constant-power dip on
+        // an already-mixed stereo bus), panning attenuates the
+        // opposite channel.
+        if snap.master_muted {
+            master.fill(0.0);
+        } else if snap.master_volume != 1.0 || snap.master_pan != 0.0 {
+            let vol = snap.master_volume as f32;
+            let pan = (snap.master_pan as f32).clamp(-1.0, 1.0);
+            let lg = vol * (1.0 - pan.max(0.0));
+            let rg = vol * (1.0 + pan.min(0.0));
+            for f in 0..master.frames {
+                master.samples[f * 2] *= lg;
+                master.samples[f * 2 + 1] *= rg;
+            }
+        }
+
         master
     }
 
-    fn snapshot_tracks(&self) -> Option<Arc<Vec<TrackSnapshot>>> {
+    fn snapshot_tracks(&self) -> Option<Arc<RenderSnapshot>> {
         let revision = self.daw.read_project(&self.project_guid, |p| p.revision)?;
         if let Ok(cache) = self.cache.lock()
             && let Some((cached_rev, snap)) = cache.as_ref()
@@ -738,7 +771,15 @@ impl ProjectRenderer {
             for t in &p.tracks {
                 tracks.push(snapshot_track(p, t, &tempo_map));
             }
-            (p.revision, Arc::new(tracks))
+            (
+                p.revision,
+                Arc::new(RenderSnapshot {
+                    tracks,
+                    master_volume: p.master_volume,
+                    master_pan: p.master_pan,
+                    master_muted: p.master_muted,
+                }),
+            )
         })?;
         if let Ok(mut cache) = self.cache.lock() {
             *cache = Some((revision, snap.clone()));
@@ -1092,6 +1133,9 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) 
                 length_seconds: item.length.as_seconds(),
                 fade_in_seconds: item.fade_in_length.as_seconds(),
                 fade_out_seconds: item.fade_out_length.as_seconds(),
+                fade_in_shape: item.fade_in_shape,
+                fade_out_shape: item.fade_out_shape,
+                loop_source: item.loop_source,
                 muted: item.muted,
                 item_volume: item.volume,
                 take_volume,
@@ -1467,9 +1511,14 @@ fn mix_item_into_bus(
         if source_time < 0.0 {
             continue;
         }
-        let source_frame_f = source_time * audio_rate;
+        let mut source_frame_f = source_time * audio_rate;
         if source_frame_f >= source_len {
-            continue;
+            if item.loop_source && source_len > 0.0 {
+                // `LOOP 1`: the source tiles across the item.
+                source_frame_f %= source_len;
+            } else {
+                continue;
+            }
         }
 
         // Linear interpolation between two source frames.
@@ -1498,14 +1547,14 @@ fn mix_item_into_bus(
             (1.0, 1.0)
         };
 
-        // Fade in / out (linear).
+        // Fade in / out, shaped per the item's REAPER curve type.
         let mut fade = 1.0f32;
         if fade_in > 0.0 && item_time < fade_in {
-            fade *= (item_time / fade_in) as f32;
+            fade *= fade_curve(item.fade_in_shape, item_time / fade_in) as f32;
         }
         let time_until_end = item_end - block_time;
         if fade_out > 0.0 && time_until_end < fade_out {
-            fade *= (time_until_end / fade_out).max(0.0) as f32;
+            fade *= fade_curve(item.fade_out_shape, (time_until_end / fade_out).max(0.0)) as f32;
         }
         let g = base_gain * env_vol * fade;
 
@@ -1514,6 +1563,27 @@ fn mix_item_into_bus(
         wrote = true;
     }
     wrote
+}
+
+/// Fade gain at normalized position `t` (0 = silent end, 1 = full)
+/// for a REAPER fade curve type. Polynomial approximations of
+/// REAPER's curve family: fast-* are quadratic/quartic, slow-*
+/// are smoothstep/smootherstep S-curves.
+fn fade_curve(shape: daw_proto::item::FadeShape, t: f64) -> f64 {
+    use daw_proto::item::FadeShape as FS;
+    let t = t.clamp(0.0, 1.0);
+    match shape {
+        FS::Linear => t,
+        FS::FastStart => 1.0 - (1.0 - t) * (1.0 - t),
+        FS::FastEnd => t * t,
+        FS::FastStartSteep => {
+            let u = 1.0 - t;
+            1.0 - u * u * u * u
+        }
+        FS::FastEndSteep => t * t * t * t,
+        FS::SlowStartEnd => t * t * (3.0 - 2.0 * t),
+        FS::SlowStartEndSteep => t * t * t * (t * (t * 6.0 - 15.0) + 10.0),
+    }
 }
 
 fn sample_stereo_interp(

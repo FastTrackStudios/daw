@@ -117,3 +117,86 @@ fn multi_level_folder_pop_resolves_parents() {
     // The -2 closes BOTH folders: Top is back at the root.
     assert_eq!(tracks[3].parent_guid, None, "Top must be top-level");
 }
+
+/// Track envelopes (VOLENV2/PANENV2/MUTEENV2) land in the runtime
+/// envelope map with renderer-convention values: pan −1…1 → 0…1,
+/// mute inverted (RPP >0.5 = play, ours >0.5 = muted).
+#[test]
+fn loads_track_envelopes_with_value_conversion() {
+    let rpp = r#"<REAPER_PROJECT 0.1 "7.22/linux-x86_64" 1700000000
+  MASTER_VOLUME 0.5 -0.25 -1 -1 1
+  MASTERMUTESOLO 1
+  <TRACK {11111111-2222-3333-4444-555555555555}
+    NAME "Env"
+    TRACKID {11111111-2222-3333-4444-555555555555}
+    <VOLENV2
+      ACT 1 -1
+      VIS 1 1 1
+      LANEHEIGHT 0 0
+      ARM 0
+      DEFSHAPE 0 -1 -1
+      PT 0 1 0
+      PT 2 0.5 0
+    >
+    <PANENV2
+      ACT 1 -1
+      VIS 1 1 1
+      LANEHEIGHT 0 0
+      ARM 0
+      DEFSHAPE 0 -1 -1
+      PT 0 -1 0
+      PT 1 1 0
+    >
+    <MUTEENV2
+      ACT 0 -1
+      VIS 1 1 1
+      LANEHEIGHT 0 0
+      ARM 0
+      DEFSHAPE 1 -1 -1
+      PT 0 0 1
+    >
+  >
+>"#;
+    use daw_proto::automation::EnvelopeType;
+    use daw_standalone::sync::EnvelopeKey;
+
+    let daw = Standalone::new();
+    let summary = load_rpp_text(&daw, "Test", "/tmp/env.rpp", rpp).unwrap();
+    let guid = summary.project_guid.clone();
+    let track_guid = "{11111111-2222-3333-4444-555555555555}".to_string();
+
+    daw.read_project(&guid, |p| {
+        // Master section.
+        assert!((p.master_volume - 0.5).abs() < 1e-9);
+        assert!((p.master_pan - (-0.25)).abs() < 1e-9);
+        assert!(p.master_muted);
+
+        let vol = p
+            .envelopes
+            .get(&(track_guid.clone(), EnvelopeKey::Track(EnvelopeType::Volume)))
+            .expect("volume envelope loaded");
+        assert_eq!(vol.points.len(), 2);
+        assert!((vol.points[1].value - 0.5).abs() < 1e-9);
+        assert!((vol.points[1].time.as_seconds() - 2.0).abs() < 1e-9);
+
+        let pan = p
+            .envelopes
+            .get(&(track_guid.clone(), EnvelopeKey::Track(EnvelopeType::Pan)))
+            .expect("pan envelope loaded");
+        // RPP −1 (left) → 0.0; +1 (right) → 1.0.
+        assert!((pan.points[0].value - 0.0).abs() < 1e-9);
+        assert!((pan.points[1].value - 1.0).abs() < 1e-9);
+
+        let mute = p
+            .envelopes
+            .get(&(track_guid.clone(), EnvelopeKey::Track(EnvelopeType::Mute)))
+            .expect("mute envelope loaded");
+        // RPP 0 = muted → ours 1.0 (>0.5 mutes); ACT 0 → mode Off.
+        assert!((mute.points[0].value - 1.0).abs() < 1e-9);
+        assert_eq!(
+            mute.automation_mode,
+            daw_proto::primitives::AutomationMode::Off
+        );
+    })
+    .unwrap();
+}

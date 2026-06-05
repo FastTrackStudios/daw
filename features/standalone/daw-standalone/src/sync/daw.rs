@@ -324,6 +324,12 @@ pub struct ProjectState {
     /// `write_project` pass. Readers (the audio renderer's snapshot
     /// cache) compare revisions instead of re-walking the state.
     pub revision: u64,
+    /// Master output gain (linear, 1.0 = unity) — RPP `MASTER_VOLUME`.
+    pub master_volume: f64,
+    /// Master pan (−1…1).
+    pub master_pan: f64,
+    /// Master mute — RPP `MASTERMUTESOLO` bit 0.
+    pub master_muted: bool,
 }
 
 impl ProjectState {
@@ -366,6 +372,9 @@ impl ProjectState {
             next_fx_counter: 0,
             next_take_counter: 0,
             revision: 0,
+            master_volume: 1.0,
+            master_pan: 0.0,
+            master_muted: false,
         }
     }
 }

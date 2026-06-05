@@ -178,6 +178,15 @@ fn populate_tracks(
             p.transport.time_signature = TimeSignature::new(num.max(1) as u32, denom.max(1) as u32);
         }
 
+        // Master section: `MASTER_VOLUME vol pan …` + `MASTERMUTESOLO`.
+        if let Some((vol, pan, ..)) = project.properties.master_volume {
+            p.master_volume = vol.max(0.0);
+            p.master_pan = pan.clamp(-1.0, 1.0);
+        }
+        if let Some(ms) = project.properties.master_mute_solo {
+            p.master_muted = ms & 1 != 0;
+        }
+
         for (idx, rt) in project.tracks.iter().enumerate() {
             // Synthesize a GUID — REAPER's track GUIDs aren't always
             // exposed by dawfile-reaper. Use track_id when available.
@@ -313,6 +322,13 @@ fn populate_tracks(
                     tcp_height_pixels: 0,
                 },
             );
+
+            // Track automation envelopes (VOLENV2 / PANENV2 / …).
+            for env in &rt.envelopes {
+                if let Some((key, data)) = convert_track_envelope(env) {
+                    p.envelopes.insert((guid.clone(), key), data);
+                }
+            }
 
             // Items on this track.
             let track_items = p.items_by_track.entry(guid.clone()).or_default();
@@ -774,6 +790,73 @@ fn populate_tempo(
             summary.tempo_point_count += 1;
         }
     });
+}
+
+/// Convert an RPP track envelope block into the runtime envelope map
+/// entry. Returns `None` for envelope types the renderer doesn't
+/// evaluate yet (width, tempo, FX-param blocks live elsewhere).
+///
+/// Value conventions translated to the renderer's:
+/// - volume: linear gain, used as-is
+/// - pan: RPP −1…1 (negative = left) → 0…1 (0.5 = centre)
+/// - mute: RPP >0.5 = PLAY → ours >0.5 = MUTED (inverted)
+fn convert_track_envelope(
+    env: &dawfile_reaper::types::envelope::Envelope,
+) -> Option<(crate::sync::EnvelopeKey, crate::sync::EnvelopeData)> {
+    use daw_proto::automation::{EnvelopeShape, EnvelopeType};
+    use daw_proto::primitives::AutomationMode;
+    use dawfile_reaper::types::envelope::EnvelopePointShape as PS;
+
+    enum ValueMap {
+        Direct,
+        Pan,
+        Mute,
+    }
+    let (ty, map) = match env.envelope_type.as_str() {
+        "VOLENV2" => (EnvelopeType::Volume, ValueMap::Direct),
+        "VOLENV" => (EnvelopeType::VolumePrefx, ValueMap::Direct),
+        "PANENV2" => (EnvelopeType::Pan, ValueMap::Pan),
+        "PANENV" => (EnvelopeType::PanPrefx, ValueMap::Pan),
+        "MUTEENV" | "MUTEENV2" => (EnvelopeType::Mute, ValueMap::Mute),
+        _ => return None,
+    };
+    let points: Vec<daw_proto::automation::EnvelopePoint> = env
+        .points
+        .iter()
+        .enumerate()
+        .map(|(i, pt)| daw_proto::automation::EnvelopePoint {
+            index: i as u32,
+            time: PositionInSeconds::from_seconds(pt.position),
+            value: match map {
+                ValueMap::Direct => pt.value,
+                ValueMap::Pan => (pt.value.clamp(-1.0, 1.0) + 1.0) / 2.0,
+                ValueMap::Mute => 1.0 - pt.value.clamp(0.0, 1.0),
+            },
+            shape: match pt.shape {
+                PS::Square => EnvelopeShape::Square,
+                PS::SlowStartEnd => EnvelopeShape::SlowStartEnd,
+                PS::FastStart => EnvelopeShape::FastStart,
+                PS::FastEnd => EnvelopeShape::FastEnd,
+                PS::Bezier => EnvelopeShape::Bezier,
+                PS::Linear | PS::Default => EnvelopeShape::Linear,
+            },
+            tension: pt.bezier_tension.unwrap_or(0.0),
+            selected: pt.selected.unwrap_or(false),
+        })
+        .collect();
+    if points.is_empty() {
+        return None;
+    }
+    let mut data = crate::sync::EnvelopeData::new();
+    data.visible = env.visible;
+    data.armed = env.armed;
+    data.automation_mode = if env.active {
+        AutomationMode::Read
+    } else {
+        AutomationMode::Off
+    };
+    data.points = points;
+    Some((crate::sync::EnvelopeKey::Track(ty), data))
 }
 
 fn populate_routing(
