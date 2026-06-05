@@ -15,7 +15,6 @@ daw-control = { path = "../../../crates/daw-control" }
 midir = { workspace = true, optional = true }
 
 tokio.workspace = true
-moire.workspace = true
 tracing.workspace = true
 eyre.workspace = true
 vox.workspace = true
