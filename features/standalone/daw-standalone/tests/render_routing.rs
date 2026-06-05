@@ -1038,3 +1038,64 @@ fn send_modes_tap_pre_or_post_fader() {
         "pre-FX send ignores fader: {prefx} vs {pre_expect}"
     );
 }
+
+/// VCA grouping at playback: a follower's gain is multiplied by every
+/// shared-group lead's fader; muting the lead silences the follower.
+#[test]
+fn vca_lead_scales_and_mutes_followers() {
+    let (daw, guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let lead = Tracks::add(&daw, ctx.clone(), "VCA", None).unwrap();
+    let follower = Tracks::add(&daw, ctx.clone(), "F", None).unwrap();
+    create_item_with_audio(&daw, &guid, &follower, 0.0, 1.0, const_audio(0.5));
+    daw.write_project(&guid, |p| {
+        p.tracks[0].grouping.vca_lead = 1;
+        p.tracks[1].grouping.vca_follow = 1;
+    });
+    let _ = lead;
+
+    let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
+    let unity = 0.5 * (0.5_f32).sqrt();
+    let base = rms_l(&r.render_block(0, 512));
+    assert!((base - unity).abs() < 0.02, "lead at unity: {base}");
+
+    // Lead fader at half → follower output halves.
+    Tracks::set_volume(&daw, ctx.clone(), TrackRef::Guid(lead.clone()), 0.5).unwrap();
+    let halved = rms_l(&r.render_block(0, 512));
+    assert!(
+        (halved - unity * 0.5).abs() < 0.02,
+        "VCA lead scales follower: {halved} vs {}",
+        unity * 0.5
+    );
+
+    // Muting the lead silences the follower.
+    Tracks::set_muted(&daw, ctx, TrackRef::Guid(lead), true).unwrap();
+    let muted = rms_l(&r.render_block(0, 512));
+    assert!(muted < 1e-6, "VCA lead mute mutes follower: {muted}");
+}
+
+/// Record-arm grouping gangs the gesture: arming the lead arms every
+/// follower (the session's "BAND RECORD VCA" workflow).
+#[test]
+fn recarm_group_arms_followers() {
+    let (daw, guid) = seeded();
+    let ctx = ProjectContext::Current;
+    let lead = Tracks::add(&daw, ctx.clone(), "BAND VCA", None).unwrap();
+    let a = Tracks::add(&daw, ctx.clone(), "In", None).unwrap();
+    let b = Tracks::add(&daw, ctx.clone(), "Out", None).unwrap();
+    let c = Tracks::add(&daw, ctx.clone(), "Unrelated", None).unwrap();
+    daw.write_project(&guid, |p| {
+        p.tracks[0].grouping.recarm_lead = 0b110; // leads groups 2+3
+        p.tracks[1].grouping.recarm_follow = 0b010; // group 2
+        p.tracks[2].grouping.recarm_follow = 0b100; // group 3
+        p.tracks[3].grouping.recarm_follow = 0b1000; // group 4 — untouched
+    });
+
+    Tracks::set_armed(&daw, ctx.clone(), TrackRef::Guid(lead), true).unwrap();
+    let tracks = Tracks::all(&daw, ctx);
+    assert!(tracks[0].armed);
+    assert!(tracks[1].armed, "group-2 follower armed");
+    assert!(tracks[2].armed, "group-3 follower armed");
+    assert!(!tracks[3].armed, "non-member untouched");
+    let _ = (a, b, c);
+}

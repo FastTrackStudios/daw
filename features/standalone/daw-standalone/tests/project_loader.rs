@@ -200,3 +200,38 @@ fn loads_track_envelopes_with_value_conversion() {
     })
     .unwrap();
 }
+
+/// GROUP_FLAGS decodes by REAPER's documented field order: 9/10 are
+/// record-arm lead/follow, 21/22 VCA lead/follow, 24/25 media-edit.
+#[test]
+fn group_flags_decode_field_positions() {
+    let rpp = r#"<REAPER_PROJECT 0.1 "7.22/linux-x86_64" 1700000000
+  <TRACK {AAAAAAAA-0000-0000-0000-000000000001}
+    NAME "VcaLead"
+    TRACKID {AAAAAAAA-0000-0000-0000-000000000001}
+    GROUP_FLAGS 0 0 0 0 0 0 0 0 6 0 0 0 0 0 0 0 0 0 0 0 1 0 0 6
+  >
+  <TRACK {AAAAAAAA-0000-0000-0000-000000000002}
+    NAME "Follower"
+    TRACKID {AAAAAAAA-0000-0000-0000-000000000002}
+    GROUP_FLAGS 0 0 0 0 0 0 0 0 1 7 0 0 0 0 0 0 0 0 0 0 0 1 0 1 5
+  >
+>"#;
+    let daw = Standalone::new();
+    let summary = load_rpp_text(&daw, "Test", "/tmp/groups.rpp", rpp).unwrap();
+    let ctx = ProjectContext::Project(summary.project_guid.clone());
+    let tracks = Tracks::all(&daw, ctx);
+
+    let lead = &tracks[0].grouping;
+    assert_eq!(lead.recarm_lead, 6, "field 9");
+    assert_eq!(lead.recarm_follow, 0, "field 10");
+    assert_eq!(lead.vca_lead, 1, "field 21");
+    assert_eq!(lead.media_edit_lead, 6, "field 24");
+
+    let f = &tracks[1].grouping;
+    assert_eq!(f.recarm_lead, 1);
+    assert_eq!(f.recarm_follow, 7);
+    assert_eq!(f.vca_follow, 1, "field 22");
+    assert_eq!(f.media_edit_lead, 1);
+    assert_eq!(f.media_edit_follow, 5, "field 25");
+}

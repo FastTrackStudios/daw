@@ -88,6 +88,11 @@ struct TrackSnapshot {
     /// Fixed-lane play mask (bit n = lane n audible). `0` when the
     /// track has no fixed lanes — every item plays.
     lane_play_mask: u64,
+    /// VCA groups this track LEADS (its fader/mute scale followers).
+    vca_lead: u64,
+    /// VCA groups this track FOLLOWS: effective gain = own fader ×
+    /// every shared-group lead's fader; a muted lead mutes it.
+    vca_follow: u64,
     /// Track has hardware-output routes. v0 monitoring model: hw outs
     /// sum to master like a parent send (we only render one stereo
     /// device), so a `MAINSEND 0` track feeding the interface
@@ -459,6 +464,39 @@ impl ProjectRenderer {
         // index, matching `TrackRef::Index` on the Peaks service.
         let meters = self.daw.meters();
 
+        // VCA grouping: a follower's effective gain is its fader ×
+        // every shared-group lead's fader, and a muted lead mutes its
+        // followers (console VCA semantics — the lead's own audio
+        // path is unaffected unless it also carries signal). Static
+        // faders only for v0: lead volume ENVELOPES don't ride
+        // followers yet.
+        let any_vca = snapshot.iter().any(|t| t.vca_follow != 0);
+        let (vca_gain, vca_muted): (Vec<f64>, Vec<bool>) = if any_vca {
+            let leads: Vec<(u64, f64, bool)> = snapshot
+                .iter()
+                .filter(|t| t.vca_lead != 0)
+                .map(|t| (t.vca_lead, t.volume, t.muted))
+                .collect();
+            snapshot
+                .iter()
+                .map(|t| {
+                    let mut gain = 1.0;
+                    let mut muted = false;
+                    if t.vca_follow != 0 {
+                        for (mask, vol, lead_muted) in &leads {
+                            if mask & t.vca_follow != 0 {
+                                gain *= vol;
+                                muted |= lead_muted;
+                            }
+                        }
+                    }
+                    (gain, muted)
+                })
+                .unzip()
+        } else {
+            (Vec::new(), Vec::new())
+        };
+
         // Plugin instances + de-interleave scratch for the per-track
         // FX stage inside the loop. The map lives separately from
         // ProjectState so the audio thread doesn't block project
@@ -585,6 +623,13 @@ impl ProjectRenderer {
                 .flatten();
 
             // Gain + pan + polarity, per-frame envelopes.
+            // VCA: shared-group leads scale this track's gain and can
+            // mute it outright.
+            let (track_vca_gain, track_vca_muted) = if any_vca {
+                (vca_gain[ti], vca_muted[ti])
+            } else {
+                (1.0, false)
+            };
             if let Some(bus) = buses.get_mut(&t.guid) {
                 let mut c_vol = t.volume_env.as_ref().map(|p| EnvelopeCursor::new(p));
                 let mut c_pvol = t.volume_prefx_env.as_ref().map(|p| EnvelopeCursor::new(p));
@@ -595,7 +640,7 @@ impl ProjectRenderer {
                     let time = start_seconds + frame as f64 * inv_rate;
                     let v_main = c_vol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
                     let v_prefx = c_pvol.as_mut().and_then(|c| c.eval_at(time)).unwrap_or(1.0);
-                    let vol = t.volume * v_main * v_prefx;
+                    let vol = t.volume * v_main * v_prefx * track_vca_gain;
                     let p_main = c_pan
                         .as_mut()
                         .and_then(|c| c.eval_at(time))
@@ -612,7 +657,7 @@ impl ProjectRenderer {
                         .and_then(|c| c.eval_at(time))
                         .map(|v| v > 0.5)
                         .unwrap_or(false);
-                    let muted = t.muted || env_muted;
+                    let muted = t.muted || env_muted || track_vca_muted;
                     if muted {
                         bus.samples[frame * 2] = 0.0;
                         bus.samples[frame * 2 + 1] = 0.0;
@@ -1223,6 +1268,9 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) 
         } else {
             0
         },
+        vca_lead: t.grouping.vca_lead,
+        // Pre-FX VCA follow approximated at the fader for v0.
+        vca_follow: t.grouping.vca_follow | t.grouping.vca_prefx_follow,
         hw_out: p
             .hw_outputs
             .get(&t.guid)

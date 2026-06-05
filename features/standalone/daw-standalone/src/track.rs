@@ -34,6 +34,28 @@ fn find_track_index(tracks: &[Track], r: &TrackRef) -> Option<usize> {
     }
 }
 
+/// Tracks ganged to a control gesture on `origin`: every other track
+/// whose FOLLOW mask for the parameter intersects the origin's LEAD
+/// mask (REAPER's grouping matrix — touching a lead's control moves
+/// the followers' controls).
+fn group_followers(
+    tracks: &[Track],
+    origin: usize,
+    lead_of: impl Fn(&daw_proto::track::TrackGrouping) -> u64,
+    follow_of: impl Fn(&daw_proto::track::TrackGrouping) -> u64,
+) -> Vec<usize> {
+    let lead_mask = lead_of(&tracks[origin].grouping);
+    if lead_mask == 0 {
+        return Vec::new();
+    }
+    tracks
+        .iter()
+        .enumerate()
+        .filter(|(j, t)| *j != origin && follow_of(&t.grouping) & lead_mask != 0)
+        .map(|(j, _)| j)
+        .collect()
+}
+
 fn not_found_proj() -> DawError {
     DawError::not_found("Project", "context")
 }
@@ -154,6 +176,10 @@ impl Tracks for Standalone {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
         self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            // Polarity group: gang the flip.
+            for j in group_followers(&p.tracks, i, |g| g.polarity_lead, |g| g.polarity_follow) {
+                p.tracks[j].phase_inverted = inverted;
+            }
             p.tracks[i].phase_inverted = inverted;
             Ok::<_, DawError>(())
         })??;
@@ -162,31 +188,48 @@ impl Tracks for Standalone {
 
     fn set_muted(&self, project: ProjectContext, track: TrackRef, muted: bool) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        let event = self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
-            let track_guid = p.tracks[i].guid.clone();
+            let mut events = Vec::new();
+            // Mute group: the gesture gangs to followers.
+            for j in group_followers(&p.tracks, i, |g| g.mute_lead, |g| g.mute_follow) {
+                p.tracks[j].muted = muted;
+                events.push(TrackEvent::MuteChanged {
+                    guid: p.tracks[j].guid.clone(),
+                    muted,
+                });
+            }
             p.tracks[i].muted = muted;
-            Ok::<_, DawError>(TrackEvent::MuteChanged {
-                guid: track_guid,
+            events.push(TrackEvent::MuteChanged {
+                guid: p.tracks[i].guid.clone(),
                 muted,
-            })
+            });
+            Ok::<_, DawError>(events)
         })??;
-        publish_track_events(self, &guid, vec![event]);
+        publish_track_events(self, &guid, events);
         Ok(())
     }
 
     fn set_soloed(&self, project: ProjectContext, track: TrackRef, soloed: bool) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        let event = self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
-            let track_guid = p.tracks[i].guid.clone();
+            let mut events = Vec::new();
+            for j in group_followers(&p.tracks, i, |g| g.solo_lead, |g| g.solo_follow) {
+                p.tracks[j].soloed = soloed;
+                events.push(TrackEvent::SoloChanged {
+                    guid: p.tracks[j].guid.clone(),
+                    soloed,
+                });
+            }
             p.tracks[i].soloed = soloed;
-            Ok::<_, DawError>(TrackEvent::SoloChanged {
-                guid: track_guid,
+            events.push(TrackEvent::SoloChanged {
+                guid: p.tracks[i].guid.clone(),
                 soloed,
-            })
+            });
+            Ok::<_, DawError>(events)
         })??;
-        publish_track_events(self, &guid, vec![event]);
+        publish_track_events(self, &guid, events);
         Ok(())
     }
 
@@ -233,47 +276,85 @@ impl Tracks for Standalone {
 
     fn set_armed(&self, project: ProjectContext, track: TrackRef, armed: bool) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        let event = self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
-            let track_guid = p.tracks[i].guid.clone();
+            let mut events = Vec::new();
+            // Record-arm group: arming the lead arms every follower
+            // (the showcase session's "BAND RECORD VCA" arms the band).
+            for j in group_followers(&p.tracks, i, |g| g.recarm_lead, |g| g.recarm_follow) {
+                p.tracks[j].armed = armed;
+                events.push(TrackEvent::ArmChanged {
+                    guid: p.tracks[j].guid.clone(),
+                    armed,
+                });
+            }
             p.tracks[i].armed = armed;
-            Ok::<_, DawError>(TrackEvent::ArmChanged {
-                guid: track_guid,
+            events.push(TrackEvent::ArmChanged {
+                guid: p.tracks[i].guid.clone(),
                 armed,
-            })
+            });
+            Ok::<_, DawError>(events)
         })??;
-        publish_track_events(self, &guid, vec![event]);
+        publish_track_events(self, &guid, events);
         Ok(())
     }
 
     fn set_volume(&self, project: ProjectContext, track: TrackRef, volume: f64) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        let event = self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
-            let track_guid = p.tracks[i].guid.clone();
+            let mut events = Vec::new();
+            // Volume group: gestures gang RELATIVELY (a dB offset =
+            // a linear ratio), matching REAPER's fader linking.
+            let old = p.tracks[i].volume;
+            let ratio = if old.abs() > 1e-12 { volume / old } else { 0.0 };
+            for j in group_followers(&p.tracks, i, |g| g.volume_lead, |g| g.volume_follow) {
+                let next = if ratio > 0.0 {
+                    p.tracks[j].volume * ratio
+                } else {
+                    volume
+                };
+                p.tracks[j].volume = next;
+                events.push(TrackEvent::VolumeChanged {
+                    guid: p.tracks[j].guid.clone(),
+                    volume: next,
+                });
+            }
             p.tracks[i].volume = volume;
-            Ok::<_, DawError>(TrackEvent::VolumeChanged {
-                guid: track_guid,
+            events.push(TrackEvent::VolumeChanged {
+                guid: p.tracks[i].guid.clone(),
                 volume,
-            })
+            });
+            Ok::<_, DawError>(events)
         })??;
-        publish_track_events(self, &guid, vec![event]);
+        publish_track_events(self, &guid, events);
         Ok(())
     }
 
     fn set_pan(&self, project: ProjectContext, track: TrackRef, pan: f64) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        let event = self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
-            let track_guid = p.tracks[i].guid.clone();
             let pan = pan.clamp(-1.0, 1.0);
+            let mut events = Vec::new();
+            // Pan group: gang the gesture as an additive offset.
+            let delta = pan - p.tracks[i].pan;
+            for j in group_followers(&p.tracks, i, |g| g.pan_lead, |g| g.pan_follow) {
+                let next = (p.tracks[j].pan + delta).clamp(-1.0, 1.0);
+                p.tracks[j].pan = next;
+                events.push(TrackEvent::PanChanged {
+                    guid: p.tracks[j].guid.clone(),
+                    pan: next,
+                });
+            }
             p.tracks[i].pan = pan;
-            Ok::<_, DawError>(TrackEvent::PanChanged {
-                guid: track_guid,
+            events.push(TrackEvent::PanChanged {
+                guid: p.tracks[i].guid.clone(),
                 pan,
-            })
+            });
+            Ok::<_, DawError>(events)
         })??;
-        publish_track_events(self, &guid, vec![event]);
+        publish_track_events(self, &guid, events);
         Ok(())
     }
 
