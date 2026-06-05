@@ -98,7 +98,56 @@
     }
     table.lines td.num { text-align: right; font-variant-numeric: tabular-nums; }
     table.lines th.num { text-align: right; }
-    table.lines td.desc { width: 50%; }
+    table.lines td.desc { width: 44%; }
+    table.lines td.who { color: #444; font-size: 9pt; white-space: nowrap; }
+
+    .breakdown {
+      display: flex;
+      gap: 18pt;
+      margin: 18pt 0 6pt 0;
+      page-break-inside: avoid;
+    }
+    .breakdown .charts {
+      display: flex;
+      gap: 12pt;
+      align-items: center;
+    }
+    .breakdown h3 {
+      font-size: 8pt;
+      text-transform: uppercase;
+      letter-spacing: 1pt;
+      color: #999;
+      margin: 0 0 6pt 0;
+    }
+    table.assignees {
+      flex: 1;
+      border-collapse: collapse;
+      font-size: 9pt;
+    }
+    table.assignees th {
+      text-align: left;
+      font-size: 8pt;
+      text-transform: uppercase;
+      letter-spacing: 0.5pt;
+      color: #777;
+      border-bottom: 1px solid #ccc;
+      padding: 4pt 6pt;
+    }
+    table.assignees td {
+      padding: 4pt 6pt;
+      border-bottom: 1px solid #eee;
+      vertical-align: middle;
+    }
+    table.assignees .swatch {
+      display: inline-block;
+      width: 9pt;
+      height: 9pt;
+      border-radius: 2pt;
+      margin-right: 5pt;
+      vertical-align: -1pt;
+    }
+    table.assignees td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    table.assignees th.num { text-align: right; }
 
     .totals {
       margin-left: auto;
@@ -158,7 +207,7 @@
     <div class="num">{{ number }}</div>
     <div><span class="status {{ status }}">{{ status }}</span></div>
     <div>Issued: <strong>{{ issue_date }}</strong></div>
-    <div>Due: <strong>{{ due_date }}</strong></div>
+    {% if due_date %}<div>Due: <strong>{{ due_date }}</strong></div>{% endif %}
     <div>Currency: {{ currency }}</div>
   </div>
 </div>
@@ -186,6 +235,7 @@
   <thead>
     <tr>
       <th class="desc">Description</th>
+      <th>Assignee</th>
       <th class="num">Qty</th>
       <th class="num">Unit price</th>
       <th class="num">Amount</th>
@@ -195,6 +245,7 @@
     {% for line in lines %}
     <tr>
       <td class="desc">{{ line.description }}</td>
+      <td class="who">{{ line.assignee }}</td>
       <td class="num">{{ line.quantity }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
       <td class="num">{{ line.unit_price }}</td>
       <td class="num">{{ line.amount }}</td>
@@ -202,6 +253,38 @@
     {% endfor %}
   </tbody>
 </table>
+
+{% if assignees %}
+<div class="breakdown">
+  <div style="flex:1;">
+    <h3>Time by assignee</h3>
+    <table class="assignees">
+      <thead>
+        <tr>
+          <th>Member</th>
+          <th class="num">Hours</th>
+          <th class="num">Share</th>
+          <th class="num">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in assignees %}
+        <tr>
+          <td><span class="swatch" style="background:{{ a.color }}"></span>{{ a.name }}</td>
+          <td class="num">{{ a.hours }}</td>
+          <td class="num">{{ a.pct }}%</td>
+          <td class="num">{{ currency_symbol }}{{ a.amount }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="charts">
+    {% if donut_svg %}<div>{{ donut_svg | safe }}</div>{% endif %}
+    {% if bars_svg %}<div>{{ bars_svg | safe }}</div>{% endif %}
+  </div>
+</div>
+{% endif %}
 
 <div class="totals">
   <div class="row sub">
