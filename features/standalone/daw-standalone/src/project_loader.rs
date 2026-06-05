@@ -257,6 +257,14 @@ fn populate_tracks(
                 .as_ref()
                 .map(|ln| ln.lane_names.clone())
                 .unwrap_or_default();
+            // Display mode from FIXEDLANES (empirical, verified across
+            // the session corpus): field 3 = "show only the playing
+            // lane"; bitfield &8 = big lanes (vs small).
+            let lane_display = match rt.fixed_lanes.as_ref() {
+                Some(fl) if fl.show_play_only_lane => daw_proto::track::LaneDisplay::One,
+                Some(fl) if fl.bitfield & 8 != 0 => daw_proto::track::LaneDisplay::Big,
+                _ => daw_proto::track::LaneDisplay::Small,
+            };
 
             let track = Track {
                 guid: guid.clone(),
@@ -278,6 +286,7 @@ fn populate_tracks(
                 lane_count,
                 lane_play_mask,
                 lane_names,
+                lane_display,
                 visible_in_tcp: rt
                     .show_in_mixer
                     .as_ref()
