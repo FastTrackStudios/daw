@@ -911,6 +911,11 @@ fn populate_routing(
                 route.pan = recv.pan;
                 route.muted = recv.mute;
                 route.phase_inverted = recv.invert_polarity;
+                route.send_mode = match recv.mode {
+                    1 => daw_proto::routing::SendMode::PreFx,
+                    3 => daw_proto::routing::SendMode::PostFx, // pre-fader
+                    _ => daw_proto::routing::SendMode::PostFader,
+                };
                 let sends = p.sends.entry(src_guid).or_default();
                 route.index = sends.len() as u32;
                 sends.push(route);

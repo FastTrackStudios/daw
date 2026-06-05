@@ -137,6 +137,9 @@ struct SendSnapshot {
     volume: f64,
     pan: f64,
     muted: bool,
+    /// Where the send taps the chain: post-fader (default), pre-FX,
+    /// or post-FX/pre-fader.
+    mode: daw_proto::routing::SendMode,
     /// Optional per-send envelopes. Block-evaluated alongside track
     /// envelopes; see `effective_send_*` helpers.
     volume_env: Option<Vec<EnvelopePoint>>,
@@ -343,100 +346,6 @@ impl ProjectRenderer {
             }
         }
 
-        // 1.5) FX chain: pipe each track's bus through every loaded
-        // plugin in order. The plugin instance map lives separately
-        // from ProjectState so the audio thread doesn't block project
-        // mutations on the proto side. Synthetic / unloaded FX are
-        // skipped — no DSP, no work.
-        {
-            let mut plugins = self
-                .daw
-                .plugin_instances
-                .lock()
-                .expect("plugin_instances poisoned");
-            // Per-block scratch — same shape as the bus's interleaved
-            // f32 stereo. Allocated once per render call, reused per
-            // plugin within a track.
-            let mut in_l = vec![0.0f32; frames];
-            let mut in_r = vec![0.0f32; frames];
-            let mut out_l = vec![0.0f32; frames];
-            let mut out_r = vec![0.0f32; frames];
-            for (ti, t) in snapshot.iter().enumerate() {
-                if any_soloed && !t.soloed {
-                    continue;
-                }
-                if t.fx_chain.is_empty() {
-                    continue;
-                }
-                let Some(bus) = buses.get_mut(&t.guid) else {
-                    continue;
-                };
-                // Collect MIDI + note-expression events for this
-                // block. Both lists are delivered to every plugin in
-                // the chain (REAPER's default) — plugins that don't
-                // consume MIDI just ignore them. Limiting MIDI to
-                // plugin[0] is a different mode the user can switch
-                // to via a future per-track flag.
-                let midi_events =
-                    collect_midi_events(t, start_seconds, end_seconds, self.sample_rate, frames);
-                let note_expr_events = collect_note_expressions(
-                    t,
-                    start_seconds,
-                    end_seconds,
-                    self.sample_rate,
-                    frames,
-                );
-                for (i, fx_guid) in t.fx_chain.iter().enumerate() {
-                    if !t.fx_enabled.get(i).copied().unwrap_or(true) {
-                        continue;
-                    }
-                    let Some(plugin) = plugins.get_mut(fx_guid) else {
-                        continue; // synthetic / not loaded
-                    };
-                    if !plugin.is_prepared() {
-                        // Lazy prepare on first use. If activation
-                        // fails just bypass this plugin for now.
-                        if plugin
-                            .prepare(self.sample_rate as f64, frames as u32)
-                            .is_err()
-                        {
-                            continue;
-                        }
-                    }
-                    // De-interleave → process → re-interleave.
-                    for f in 0..frames {
-                        in_l[f] = bus.samples[f * 2];
-                        in_r[f] = bus.samples[f * 2 + 1];
-                    }
-                    for v in out_l.iter_mut().chain(out_r.iter_mut()) {
-                        *v = 0.0;
-                    }
-                    let param_events = t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]);
-                    let events = crate::plugin::PluginEvents {
-                        params: param_events,
-                        midi: &midi_events,
-                        note_expressions: &note_expr_events,
-                    };
-                    let _ = i; // index is preserved for future
-                    // "first-FX-only" mode toggle; currently every
-                    // FX in the chain sees the same MIDI stream.
-                    if plugin
-                        .process_block(&in_l, &in_r, &mut out_l, &mut out_r, &events)
-                        .is_err()
-                    {
-                        continue;
-                    }
-                    for f in 0..frames {
-                        bus.samples[f * 2] = out_l[f];
-                        bus.samples[f * 2 + 1] = out_r[f];
-                    }
-                    // A plugin ran — it may synthesize (MIDI → audio),
-                    // so the bus can carry signal even with no items.
-                    dirty[ti] = true;
-                }
-            }
-        }
-
         // 2–4) Per-track processing in CHILDREN-FIRST order: a track's bus
         // is gained/panned, its sends dispatched, and the result summed into
         // its folder parent's bus *before* the parent's own gain applies —
@@ -550,6 +459,20 @@ impl ProjectRenderer {
         // index, matching `TrackRef::Index` on the Peaks service.
         let meters = self.daw.meters();
 
+        // Plugin instances + de-interleave scratch for the per-track
+        // FX stage inside the loop. The map lives separately from
+        // ProjectState so the audio thread doesn't block project
+        // mutations on the proto side.
+        let mut plugins = self
+            .daw
+            .plugin_instances
+            .lock()
+            .expect("plugin_instances poisoned");
+        let mut in_l = vec![0.0f32; frames];
+        let mut in_r = vec![0.0f32; frames];
+        let mut out_l = vec![0.0f32; frames];
+        let mut out_r = vec![0.0f32; frames];
+
         let inv_rate = 1.0 / self.sample_rate as f64;
         for &ti in &order {
             let t = &snapshot[ti];
@@ -562,13 +485,104 @@ impl ProjectRenderer {
             }
             // Clean bus = all zeros: gain scales nothing, sends add
             // nothing, parent sums add nothing. Skip the per-frame
-            // work entirely; only active tracks cost CPU.
+            // work entirely; only active tracks cost CPU. (A track
+            // with FX must still run — synths generate from MIDI.)
+            if !dirty[ti] && t.fx_chain.is_empty() {
+                if let Some(cell) = meters.cell(ti) {
+                    cell.write(0.0, 0.0, crate::metering::HOLD_DECAY);
+                }
+                continue;
+            }
+
+            // Pre-FX send tap: the bus BEFORE the FX chain runs. At
+            // this point in topo order the bus already holds items +
+            // children sums + received sends — the track's input.
+            let pre_fx_tap: Option<Vec<f32>> = t
+                .sends
+                .iter()
+                .any(|s| s.mode == daw_proto::routing::SendMode::PreFx)
+                .then(|| buses.get(&t.guid).map(|b| b.samples.clone()))
+                .flatten();
+
+            // FX chain: pipe the bus through every loaded plugin in
+            // order. Running INSIDE the topo loop means a folder's FX
+            // process the children's mix, and bus FX process their
+            // received sends — REAPER's signal flow. Synthetic /
+            // unloaded FX are skipped — no DSP, no work.
+            if !t.fx_chain.is_empty()
+                && let Some(bus) = buses.get_mut(&t.guid)
+            {
+                // MIDI + note-expression events for this block. Both
+                // lists go to every plugin in the chain (REAPER's
+                // default) — non-MIDI plugins ignore them.
+                let midi_events =
+                    collect_midi_events(t, start_seconds, end_seconds, self.sample_rate, frames);
+                let note_expr_events = collect_note_expressions(
+                    t,
+                    start_seconds,
+                    end_seconds,
+                    self.sample_rate,
+                    frames,
+                );
+                for (i, fx_guid) in t.fx_chain.iter().enumerate() {
+                    if !t.fx_enabled.get(i).copied().unwrap_or(true) {
+                        continue;
+                    }
+                    let Some(plugin) = plugins.get_mut(fx_guid) else {
+                        continue; // synthetic / not loaded
+                    };
+                    if !plugin.is_prepared() {
+                        // Lazy prepare on first use; bypass on failure.
+                        if plugin
+                            .prepare(self.sample_rate as f64, frames as u32)
+                            .is_err()
+                        {
+                            continue;
+                        }
+                    }
+                    // De-interleave → process → re-interleave.
+                    for f in 0..frames {
+                        in_l[f] = bus.samples[f * 2];
+                        in_r[f] = bus.samples[f * 2 + 1];
+                    }
+                    for v in out_l.iter_mut().chain(out_r.iter_mut()) {
+                        *v = 0.0;
+                    }
+                    let param_events = t.fx_params.get(i).map(Vec::as_slice).unwrap_or(&[]);
+                    let events = crate::plugin::PluginEvents {
+                        params: param_events,
+                        midi: &midi_events,
+                        note_expressions: &note_expr_events,
+                    };
+                    if plugin
+                        .process_block(&in_l, &in_r, &mut out_l, &mut out_r, &events)
+                        .is_err()
+                    {
+                        continue;
+                    }
+                    for f in 0..frames {
+                        bus.samples[f * 2] = out_l[f];
+                        bus.samples[f * 2 + 1] = out_r[f];
+                    }
+                    // A plugin ran — it may synthesize (MIDI → audio),
+                    // so the bus can carry signal even with no items.
+                    dirty[ti] = true;
+                }
+            }
             if !dirty[ti] {
                 if let Some(cell) = meters.cell(ti) {
                     cell.write(0.0, 0.0, crate::metering::HOLD_DECAY);
                 }
                 continue;
             }
+
+            // Pre-fader send tap: post-FX, before the gain stage.
+            let pre_fader_tap: Option<Vec<f32>> = t
+                .sends
+                .iter()
+                .any(|s| s.mode == daw_proto::routing::SendMode::PostFx)
+                .then(|| buses.get(&t.guid).map(|b| b.samples.clone()))
+                .flatten();
 
             // Gain + pan + polarity, per-frame envelopes.
             if let Some(bus) = buses.get_mut(&t.guid) {
@@ -655,6 +669,14 @@ impl ProjectRenderer {
                 if snd.muted {
                     continue;
                 }
+                // Pick the tap matching the send's chain position.
+                let send_src: &[f32] = match snd.mode {
+                    daw_proto::routing::SendMode::PreFx => pre_fx_tap.as_deref().unwrap_or(&src),
+                    daw_proto::routing::SendMode::PostFx => {
+                        pre_fader_tap.as_deref().unwrap_or(&src)
+                    }
+                    daw_proto::routing::SendMode::PostFader => &src,
+                };
                 let dest_bus = match buses.get_mut(&snd.dest_guid) {
                     Some(b) => b,
                     None => continue,
@@ -685,8 +707,8 @@ impl ProjectRenderer {
                     let pan = (snd.pan + p_off).clamp(-1.0, 1.0);
                     let lg = (((1.0 - pan) * 0.5).sqrt() * vol) as f32;
                     let rg = (((1.0 + pan) * 0.5).sqrt() * vol) as f32;
-                    dest_bus.samples[frame * 2] += src[frame * 2] * lg;
-                    dest_bus.samples[frame * 2 + 1] += src[frame * 2 + 1] * rg;
+                    dest_bus.samples[frame * 2] += send_src[frame * 2] * lg;
+                    dest_bus.samples[frame * 2 + 1] += send_src[frame * 2 + 1] * rg;
                 }
             }
 
@@ -924,6 +946,7 @@ fn snapshot_track(p: &ProjectState, t: &daw_proto::Track, tempo_map: &TempoMap) 
                         volume: r.volume,
                         pan: r.pan,
                         muted: r.muted,
+                        mode: r.send_mode,
                         volume_env,
                         pan_env,
                         mute_env,

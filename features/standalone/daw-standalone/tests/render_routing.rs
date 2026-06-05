@@ -986,3 +986,55 @@ fn channel_modes_remap_source_channels() {
         "mono-R {l} {r}"
     );
 }
+
+/// Send taps: a post-fader send scales with the source fader; a
+/// pre-fader (PostFx) send ignores it.
+#[test]
+fn send_modes_tap_pre_or_post_fader() {
+    use daw_proto::routing::SendMode;
+    let run = |mode: SendMode| -> f32 {
+        let (daw, guid) = seeded();
+        let ctx = ProjectContext::Current;
+        let src = Tracks::add(&daw, ctx.clone(), "Src", None).unwrap();
+        let bus = Tracks::add(&daw, ctx.clone(), "Bus", None).unwrap();
+        create_item_with_audio(&daw, &guid, &src, 0.0, 1.0, const_audio(0.5));
+        // Source fader at half; its parent send disabled so ONLY the
+        // bus contributes to master.
+        Tracks::set_volume(&daw, ctx.clone(), TrackRef::Guid(src.clone()), 0.5).unwrap();
+        Routing::set_parent_send_enabled(&daw, ctx.clone(), TrackRef::Guid(src.clone()), false)
+            .unwrap();
+        daw.write_project(&guid, |p| {
+            let mut route = daw_proto::TrackRoute::default();
+            route.route_type = RouteType::Send;
+            route.source_track_guid = src.clone();
+            route.dest_track_guid = Some(bus.clone());
+            route.volume = 1.0;
+            route.send_mode = mode;
+            p.sends.entry(src.clone()).or_default().push(route);
+        });
+        let r = ProjectRenderer::new(&daw, &guid, SAMPLE_RATE);
+        rms_l(&r.render_block(0, 512))
+    };
+    // Constant-power centre pan costs √½ per stage. Post-fader signal
+    // passes the source pan stage + send pan + bus pan (3 stages) and
+    // the 0.5 fader; pre-fader taps skip the source's gain stage
+    // entirely (send pan + bus pan only).
+    let g = (0.5_f32).sqrt();
+    let post_expect = 0.5 * 0.5 * g * g * g;
+    let pre_expect = 0.5 * g * g;
+    let post = run(SendMode::PostFader);
+    let pre = run(SendMode::PostFx);
+    let prefx = run(SendMode::PreFx);
+    assert!(
+        (post - post_expect).abs() < 0.03,
+        "post-fader send scales with fader: {post} vs {post_expect}"
+    );
+    assert!(
+        (pre - pre_expect).abs() < 0.03,
+        "pre-fader send ignores fader: {pre} vs {pre_expect}"
+    );
+    assert!(
+        (prefx - pre_expect).abs() < 0.03,
+        "pre-FX send ignores fader: {prefx} vs {pre_expect}"
+    );
+}
