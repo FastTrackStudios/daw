@@ -1,0 +1,61 @@
+// Schema for daw-csi zone files (xtouch.zones.styx and user
+// overrides via FTS_CSI_ZONES). Validate with:
+//   styx my.zones.styx --validate --schema zones.schema.styx
+
+meta {
+    id https://fasttrackstudios.com/schemas/daw-csi-zones
+    version 2026-06-05
+    description "daw-csi control-surface zone definitions"
+}
+
+schema {
+    @ @object{
+        /// Zone activated at startup (defaults to "home").
+        home @optional(@string)
+        /// Zone name → definition. Names are free-form; @GoZone and
+        /// `include` reference them.
+        zones @map(@Zone)
+    }
+
+    Zone @object{
+        /// Inherit all bindings from another zone; local entries override.
+        include @optional(@string)
+        /// Navigator pinned while this zone is active.
+        navigator @optional(@enum{Track, Folder})
+        /// Per-strip widget → action. Keys may carry modifier
+        /// prefixes: shift+ option+ control+ alt+ (e.g. shift+select).
+        strip @optional(@map(@Action))
+        /// Master-section widget → action (same modifier prefixes).
+        buttons @optional(@map(@Action))
+    }
+
+    Action @enum{
+        // Strip control
+        TrackVolume
+        TrackPan
+        TrackPanReset
+        TrackMute
+        TrackSolo
+        TrackRecordArm
+        TrackSelect
+        FolderSpill
+        // Strip displays
+        TrackName
+        PanDisplay
+        VolumeDisplay
+        FolderIndicator
+        Fixed @object{text @string}
+        Blank
+        // Master / global
+        MasterVolume
+        Play
+        Stop
+        Record
+        ToggleLoop
+        NudgePosition @object{seconds @float}
+        JogPosition @object{seconds_per_tick @float}
+        Bank @object{amount @int}
+        GoZone @object{zone @string}
+        NoAction
+    }
+}

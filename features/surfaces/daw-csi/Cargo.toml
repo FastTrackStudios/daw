@@ -24,6 +24,7 @@ tracing.workspace = true
 eyre.workspace = true
 vox.workspace = true
 facet.workspace = true
+facet-styx.workspace = true
 
 [features]
 default = ["midi-hardware"]

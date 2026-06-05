@@ -99,13 +99,15 @@ impl Navigator {
         *off = (*off as isize + delta).clamp(0, max as isize) as usize;
     }
 
-    /// Toggle folder/track mode. Entering folder mode starts at the
-    /// root; leaving clears the drill-down stack.
-    pub fn toggle_mode(&mut self) {
-        self.mode = match self.mode {
-            NavMode::Track => NavMode::Folder,
-            NavMode::Folder => NavMode::Track,
-        };
+    /// Switch navigator mode (zones pin a mode on activation). A
+    /// mode change resets the folder drill-down; re-setting the
+    /// current mode is a no-op so zone hops within one mode keep
+    /// their banking.
+    pub fn set_mode(&mut self, mode: NavMode) {
+        if self.mode == mode {
+            return;
+        }
+        self.mode = mode;
         self.folder_stack.clear();
         self.folder_offset = 0;
     }
@@ -200,7 +202,7 @@ mod tests {
     fn folder_root_shows_top_level() {
         let tracks = session();
         let mut nav = Navigator::default();
-        nav.toggle_mode();
+        nav.set_mode(NavMode::Folder);
         // Root: drums (folder), bass, vox.
         assert_eq!(
             nav.visible(&tracks, 4),
@@ -212,7 +214,7 @@ mod tests {
     fn folder_drill_and_pop() {
         let tracks = session();
         let mut nav = Navigator::default();
-        nav.toggle_mode();
+        nav.set_mode(NavMode::Folder);
 
         // Drill into DRUMS: spill = [drums, kick, snare, oh].
         assert!(nav.folder_select(&tracks[0]));
@@ -245,7 +247,7 @@ mod tests {
     fn revalidate_drops_dead_folders() {
         let mut tracks = session();
         let mut nav = Navigator::default();
-        nav.toggle_mode();
+        nav.set_mode(NavMode::Folder);
         nav.folder_select(&tracks[0].clone());
         nav.folder_select(&tracks[3].clone());
         assert_eq!(nav.depth(), 2);
@@ -259,11 +261,11 @@ mod tests {
     fn mode_toggle_resets_drill() {
         let tracks = session();
         let mut nav = Navigator::default();
-        nav.toggle_mode();
+        nav.set_mode(NavMode::Folder);
         nav.folder_select(&tracks[0].clone());
-        nav.toggle_mode(); // back to Track
+        nav.set_mode(NavMode::Track); // back to Track
         assert_eq!(nav.mode, NavMode::Track);
-        nav.toggle_mode(); // Folder again — back at root
+        nav.set_mode(NavMode::Folder); // Folder again — back at root
         assert_eq!(nav.depth(), 0);
     }
 }

@@ -33,7 +33,7 @@ async fn fader_gesture_reaches_engine_and_echoes_on_bus() -> eyre::Result<()> {
     let tracks = project.tracks().all().await?;
     assert_eq!(tracks.len(), 2);
 
-    let mut state = DriverState::new(tracks, "master".into(), 1.0);
+    let mut state = DriverState::with_builtin_zones(tracks, "master".into(), 1.0);
 
     // Subscribe the bus BEFORE the gesture so the echo is observable.
     let mut bus = bundle
@@ -84,7 +84,7 @@ async fn buttons_toggle_engine_state() -> eyre::Result<()> {
 
     project.add_track("Vox", None).await?;
     let tracks = project.tracks().all().await?;
-    let mut state = DriverState::new(tracks, "master".into(), 1.0);
+    let mut state = DriverState::with_builtin_zones(tracks, "master".into(), 1.0);
 
     // Mute strip 0 via the surface.
     for intent in state.handle_midi(&[0x90, 0x10, 0x7F]) {
@@ -115,7 +115,7 @@ async fn event_echo_drives_motor_fader_feedback() -> eyre::Result<()> {
     project.add_track("Keys", None).await?;
     let tracks = project.tracks().all().await?;
     let guid = tracks[0].guid.clone();
-    let mut state = DriverState::new(tracks, "master".into(), 1.0);
+    let mut state = DriverState::with_builtin_zones(tracks, "master".into(), 1.0);
     let _ = state.render(); // settle the shadow
 
     // Someone moves the fader in the UI → service → bus event.
