@@ -143,8 +143,8 @@ fn button_from_note(note: u8) -> Button {
     }
 }
 
-/// Note number for a button (inverse of [`button_from_note`]), used
-/// to address its LED.
+/// Note number for a button (inverse of the input decode mapping),
+/// used to address its LED.
 pub fn note_for_button(button: Button) -> u8 {
     match button {
         Button::Rec(s) => s,

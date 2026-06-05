@@ -6,6 +6,11 @@ license.workspace = true
 authors.workspace = true
 description = "Control Surface Integration — CSI-style hardware surface support (Mackie Control / Behringer X-Touch) driven by the daw event bus"
 
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
 [dependencies]
 daw-proto = { path = "../../../crates/daw-proto" }
 daw-control = { path = "../../../crates/daw-control" }
