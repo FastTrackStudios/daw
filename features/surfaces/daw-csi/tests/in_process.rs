@@ -141,3 +141,79 @@ async fn event_echo_drives_motor_fader_feedback() -> eyre::Result<()> {
     );
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn fader_writes_automation_in_write_mode() -> eyre::Result<()> {
+    let bundle = build_in_process_daw(seeded()).await?;
+    let project = bundle.daw.current_project().await?;
+    let transport = project.transport();
+
+    let track = project.add_track("Keys", None).await?;
+    track.select_exclusive().await?;
+    // WRITE mode + rolling transport = every fader move records.
+    track
+        .set_automation_mode(daw_proto::AutomationMode::Write)
+        .await?;
+    transport.play().await?;
+    tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+
+    let tracks = project.tracks().all().await?;
+    assert_eq!(
+        tracks[0].automation_mode,
+        daw_proto::AutomationMode::Write,
+        "mode should round-trip"
+    );
+    let mut state = DriverState::with_builtin_zones(tracks, "master".into(), 1.0);
+    state.handle_midi(&[0x90, 0x33, 0x7F], 0); // → flat track list
+    state.handle_midi(&[0x90, 0x33, 0x00], 50);
+
+    // Ride the fader: a few moves while playing.
+    for (i, pos) in [4000u16, 8000, 12000].into_iter().enumerate() {
+        for intent in state.handle_midi(&mcu::encode_fader(0, pos), 100 + i as u64 * 50) {
+            execute_intent(&project, &transport, intent).await?;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    }
+    transport.stop().await?;
+
+    // The volume envelope now carries recorded points.
+    let env = track
+        .envelopes()
+        .by_type(daw_proto::EnvelopeType::Volume)
+        .await?
+        .expect("volume envelope should exist after writing");
+    let points = env.points().await?;
+    assert!(
+        !points.is_empty(),
+        "write-mode fader moves should record envelope points"
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn metronome_toggle_round_trips_and_clicks() -> eyre::Result<()> {
+    use daw_standalone::audio_engine::render::ProjectRenderer;
+
+    let standalone = seeded();
+    let bundle = build_in_process_daw(standalone).await?;
+    let project = bundle.daw.current_project().await?;
+    let transport = project.transport();
+
+    assert!(!transport.metronome_enabled().await?);
+    transport.set_metronome(true).await?;
+    assert!(transport.metronome_enabled().await?);
+
+    // The renderer overlays clicks on the beat grid — block at t=0
+    // contains the downbeat burst.
+    let r = ProjectRenderer::new(&bundle.standalone, "csi-test", 48_000);
+    let block = r.render_block(0, 2048);
+    let energy: f64 = block.samples.iter().map(|s| (*s as f64).abs()).sum();
+    assert!(energy > 0.0, "metronome should be audible at the downbeat");
+
+    transport.set_metronome(false).await?;
+    let r2 = ProjectRenderer::new(&bundle.standalone, "csi-test", 48_000);
+    let block = r2.render_block(0, 2048);
+    let energy: f64 = block.samples.iter().map(|s| (*s as f64).abs()).sum();
+    assert!(energy == 0.0, "click must stop when the metronome is off");
+    Ok(())
+}

@@ -236,6 +236,31 @@ impl Transport for Standalone {
         })
     }
 
+    fn set_metronome(&self, project: ProjectContext, enabled: bool) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        self.with_project_mut(&guid, |p| {
+            p.transport.metronome = enabled;
+        })?;
+        // The transport pump doesn't watch this field — publish the
+        // discrete event straight onto the subscriber path via the
+        // engine bundle's state broadcaster equivalent: reuse track
+        // hub? Transport events flow through pumps; emit by nudging
+        // shared state is overkill — the bus bridge subscribes via
+        // pumps, so push through the engine's event hook instead.
+        self.transport_engine_for(&guid)
+            .shared
+            .set_metronome(enabled);
+        Ok(())
+    }
+
+    fn metronome_enabled(&self, project: ProjectContext) -> bool {
+        let Some(guid) = resolve_project(self, &project) else {
+            return false;
+        };
+        self.with_project(&guid, |p| p.transport.metronome)
+            .unwrap_or(false)
+    }
+
     fn is_looping(&self, project: ProjectContext) -> bool {
         let Some(guid) = resolve_project(self, &project) else {
             return false;

@@ -81,6 +81,7 @@ pub struct TransportShared {
 
     /// Loop enabled.
     looping: AtomicBool,
+    metronome: AtomicBool,
     loop_start_samples: AtomicI64,
     loop_end_samples: AtomicI64,
 
@@ -99,6 +100,7 @@ impl TransportShared {
             playhead_samples: AtomicI64::new(0),
             play_state: AtomicU8::new(PlayStateRepr::Stopped as u8),
             looping: AtomicBool::new(false),
+            metronome: AtomicBool::new(false),
             loop_start_samples: AtomicI64::new(0),
             loop_end_samples: AtomicI64::new(0),
             playrate_bits: AtomicU64::new(1.0f64.to_bits()),
@@ -198,6 +200,14 @@ impl TransportShared {
         self.playhead_samples.store(p.0, Ordering::Relaxed);
     }
     #[inline]
+    pub fn metronome(&self) -> bool {
+        self.metronome.load(Ordering::Relaxed)
+    }
+
+    pub fn set_metronome(&self, v: bool) {
+        self.metronome.store(v, Ordering::Relaxed);
+    }
+
     pub fn set_looping(&self, v: bool) {
         self.looping.store(v, Ordering::Relaxed);
     }

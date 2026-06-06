@@ -141,6 +141,21 @@ pub enum Intent {
         guid: String,
         fx_idx: u32,
     },
+    SetAutomationMode {
+        guid: String,
+        mode: daw_proto::AutomationMode,
+    },
+    SetInputMonitor {
+        guid: String,
+        monitor: daw_proto::track::InputMonitoringMode,
+    },
+    ToggleMetronome,
+    /// Fader touch / release routed into the automation engine
+    /// (Touch/Latch gating for envelope recording).
+    AutomationTouch {
+        guid: String,
+        touched: bool,
+    },
     SaveProject,
     Undo,
     Redo,
@@ -281,6 +296,8 @@ pub struct DriverState {
     pub scroll_link: bool,
     /// 7-segment readout shows bars/beats instead of time.
     pub beats_display: bool,
+    /// Metronome state (click button LED).
+    pub metronome: bool,
     /// Latest playhead position from the bus (seconds + musical).
     last_time: Option<f64>,
     last_musical: Option<(i32, i32, i32)>,
@@ -324,6 +341,7 @@ impl DriverState {
             pending_taps: HashMap::new(),
             scroll_link: false,
             beats_display: false,
+            metronome: false,
             last_time: None,
             last_musical: None,
             sel_anchor: None,
@@ -588,9 +606,24 @@ impl DriverState {
             }
             SurfaceInput::FaderTouch { strip, touched } => {
                 // Touch isn't bindable — it's motor-feedback
-                // suppression infrastructure.
+                // suppression infrastructure, and it gates Touch/Latch
+                // automation recording on the strip's volume.
                 if let Some(cell) = self.touched.get_mut(strip as usize) {
                     *cell = touched;
+                }
+                if strip < mcu::MASTER
+                    && matches!(
+                        self.zones
+                            .zone(&self.active_zone)
+                            .and_then(|z| z.strip_action(self.latched, StripWidget::Fader)),
+                        Some(Action::TrackVolume)
+                    )
+                    && let Some(t) = self.strip_track(strip)
+                {
+                    return vec![Intent::AutomationTouch {
+                        guid: t.guid.clone(),
+                        touched,
+                    }];
                 }
                 Vec::new()
             }
@@ -1187,6 +1220,44 @@ impl DriverState {
                 self.scroll_link = !self.scroll_link;
                 vec![Intent::Refresh]
             }
+            Action::TrackAutoMode { mode } => {
+                let Some(guid) = self.selected_guid() else {
+                    return Vec::new();
+                };
+                use crate::action::AutoMode as A;
+                use daw_proto::AutomationMode as P;
+                let mode = match mode {
+                    A::Trim => P::TrimRead,
+                    A::Read => P::Read,
+                    A::Touch => P::Touch,
+                    A::Write => P::Write,
+                    A::Latch => P::Latch,
+                };
+                if let Some(t) = self.tracks.iter_mut().find(|t| t.guid == guid) {
+                    t.automation_mode = mode;
+                }
+                vec![Intent::SetAutomationMode { guid, mode }]
+            }
+            Action::CycleInputMonitor => {
+                let Some(t) = strip.and_then(|s| self.strip_track(s)) else {
+                    return Vec::new();
+                };
+                use daw_proto::track::InputMonitoringMode as M;
+                let next = match t.input_monitor {
+                    M::Off => M::Normal,
+                    M::Normal => M::NotWhenPlaying,
+                    M::NotWhenPlaying => M::Off,
+                };
+                let guid = t.guid.clone();
+                if let Some(t) = self.tracks.iter_mut().find(|t| t.guid == guid) {
+                    t.input_monitor = next;
+                }
+                vec![Intent::SetInputMonitor {
+                    guid,
+                    monitor: next,
+                }]
+            }
+            Action::ToggleMetronome => vec![Intent::ToggleMetronome],
             Action::CycleTimeDisplay => {
                 self.beats_display = !self.beats_display;
                 vec![Intent::Refresh]
@@ -1326,6 +1397,16 @@ impl DriverState {
                     }
                 }
             }
+            TrackEvent::AutomationModeChanged { guid, mode } => {
+                if let Some(i) = by_guid(&mut self.tracks, guid) {
+                    self.tracks[i].automation_mode = *mode;
+                }
+            }
+            TrackEvent::InputMonitorChanged { guid, monitor } => {
+                if let Some(i) = by_guid(&mut self.tracks, guid) {
+                    self.tracks[i].input_monitor = *monitor;
+                }
+            }
             TrackEvent::PhaseInvertedChanged { guid, inverted } => {
                 if let Some(i) = by_guid(&mut self.tracks, guid) {
                     self.tracks[i].phase_inverted = *inverted;
@@ -1353,6 +1434,9 @@ impl DriverState {
             }
             TransportEvent::LoopingChanged { looping, .. } => {
                 self.looping = *looping;
+            }
+            TransportEvent::MetronomeChanged { enabled, .. } => {
+                self.metronome = *enabled;
             }
             _ => {}
         }
@@ -1443,6 +1527,23 @@ impl DriverState {
             Action::Flip => self.latched & FLIP != 0,
             Action::Toggle => self.latched & TOGGLE != 0,
             Action::ToggleScrollLink => self.scroll_link,
+            Action::TrackAutoMode { mode } => {
+                use crate::action::AutoMode as A;
+                use daw_proto::AutomationMode as P;
+                let want = match mode {
+                    A::Trim => P::TrimRead,
+                    A::Read => P::Read,
+                    A::Touch => P::Touch,
+                    A::Write => P::Write,
+                    A::Latch => P::Latch,
+                };
+                self.tracks
+                    .iter()
+                    .find(|t| t.selected)
+                    .map(|t| t.automation_mode == want)
+                    .unwrap_or(false)
+            }
+            Action::ToggleMetronome => self.metronome,
             Action::CycleTimeDisplay => self.beats_display,
             // Bypass LED lit = FX ACTIVE (CSI's FXBypassDisplay).
             Action::FxMenuBypass => strip
@@ -1981,7 +2082,16 @@ pub async fn execute_intent(
     };
     match intent {
         Intent::SetVolume { guid, volume } => {
-            if let Some(h) = project.tracks().by_guid(&guid).await? {
+            // Automation-aware: in touch/latch/write modes while
+            // playing this records envelope points (the engine also
+            // updates the static fader value).
+            let location = daw_proto::automation::EnvelopeLocation::new(
+                daw_proto::TrackRef::Guid(guid.clone()),
+                daw_proto::automation::EnvelopeRef::Type(daw_proto::EnvelopeType::Volume),
+            );
+            if project.automation_write(location, volume).await.is_err()
+                && let Some(h) = project.tracks().by_guid(&guid).await?
+            {
                 h.set_volume(volume).await?;
             }
         }
@@ -2141,6 +2251,31 @@ pub async fn execute_intent(
                 && let Some(fx) = h.fx_chain().by_index(fx_idx).await?
             {
                 fx.prev_preset().await?;
+            }
+        }
+        Intent::SetAutomationMode { guid, mode } => {
+            if let Some(h) = project.tracks().by_guid(&guid).await? {
+                h.set_automation_mode(mode).await?;
+            }
+        }
+        Intent::SetInputMonitor { guid, monitor } => {
+            if let Some(h) = project.tracks().by_guid(&guid).await? {
+                h.set_input_monitor(monitor).await?;
+            }
+        }
+        Intent::ToggleMetronome => {
+            let on = transport.metronome_enabled().await?;
+            transport.set_metronome(!on).await?;
+        }
+        Intent::AutomationTouch { guid, touched } => {
+            let location = daw_proto::automation::EnvelopeLocation::new(
+                daw_proto::TrackRef::Guid(guid),
+                daw_proto::automation::EnvelopeRef::Type(daw_proto::EnvelopeType::Volume),
+            );
+            if touched {
+                project.automation_touch(location).await?;
+            } else {
+                project.automation_release(location).await?;
             }
         }
         Intent::SaveProject => project.save().await?,

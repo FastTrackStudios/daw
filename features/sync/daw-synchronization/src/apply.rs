@@ -460,6 +460,22 @@ async fn apply_track(
             })
             .await;
         }
+        TrackEvent::AutomationModeChanged { guid, mode } => {
+            suppression.suppress(SuppressionKey::track(&resolve(guid), "automode"));
+            let mode = *mode;
+            apply_track_mutation(daw, ctx, guid, move |handle| {
+                Box::pin(async move { handle.set_automation_mode(mode).await })
+            })
+            .await;
+        }
+        TrackEvent::InputMonitorChanged { guid, monitor } => {
+            suppression.suppress(SuppressionKey::track(&resolve(guid), "recmon"));
+            let monitor = *monitor;
+            apply_track_mutation(daw, ctx, guid, move |handle| {
+                Box::pin(async move { handle.set_input_monitor(monitor).await })
+            })
+            .await;
+        }
         TrackEvent::PhaseInvertedChanged { guid, inverted } => {
             suppression.suppress(SuppressionKey::track(&resolve(guid), "phase"));
             let inverted = *inverted;

@@ -282,6 +282,27 @@ fn populate_tracks(
 
             let track = Track {
                 guid: guid.clone(),
+                automation_mode: {
+                    use daw_proto::primitives::AutomationMode as P;
+                    use dawfile_reaper::types::track::AutomationMode as R;
+                    match rt.automation_mode {
+                        R::TrimRead => P::TrimRead,
+                        R::Read => P::Read,
+                        R::Touch => P::Touch,
+                        R::Write => P::Write,
+                        R::Latch => P::Latch,
+                        R::Unknown(_) => P::TrimRead,
+                    }
+                },
+                input_monitor: {
+                    use daw_proto::track::InputMonitoringMode as P;
+                    use dawfile_reaper::types::track::MonitorMode as R;
+                    match rt.record.as_ref().map(|r| r.monitor) {
+                        Some(R::On) => P::Normal,
+                        Some(R::Auto) => P::NotWhenPlaying,
+                        _ => P::Off,
+                    }
+                },
                 index: idx as u32,
                 name: rt.name.clone(),
                 color: rt.peak_color.map(|c| native_color_to_rgb(c as u32)),

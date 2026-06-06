@@ -5,6 +5,18 @@
 
 use facet::Facet;
 
+/// Automation modes nameable from zone files (maps onto
+/// `daw_proto::AutomationMode`).
+#[repr(u8)]
+#[derive(Facet, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AutoMode {
+    Trim,
+    Read,
+    Touch,
+    Write,
+    Latch,
+}
+
 /// One bindable action. Strip-context actions resolve "which track"
 /// from the widget's strip via the navigator; global actions ignore
 /// the strip.
@@ -172,6 +184,16 @@ pub enum Action {
     Toggle,
     /// Surface bank follows UI track selection (CSI ScrollLink).
     ToggleScrollLink,
+    /// Set the SELECTED track's automation mode (CSI `TrackAutoMode`;
+    /// the READ/WRITE/TRIM/TOUCH/LATCH buttons). LED lit when the
+    /// selected track is in that mode.
+    TrackAutoMode {
+        mode: AutoMode,
+    },
+    /// Cycle the strip track's input monitoring (off → on → tape).
+    CycleInputMonitor,
+    /// Toggle the metronome / click (LED follows).
+    ToggleMetronome,
     /// Cycle the 7-segment readout: time ↔ bars/beats.
     CycleTimeDisplay,
     /// Bound but intentionally inert (CSI `NoAction`).

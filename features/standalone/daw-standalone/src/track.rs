@@ -167,6 +167,53 @@ impl Tracks for Standalone {
         })
     }
 
+    fn set_automation_mode(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        mode: daw_proto::primitives::AutomationMode,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        let event = self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].automation_mode = mode;
+            let track_guid = p.tracks[i].guid.clone();
+            // The track mode IS the envelopes' mode — propagate so the
+            // existing touch/latch/write machinery records (or stops
+            // recording) immediately. REAPER's I_AUTOMODE semantics.
+            for (key, data) in p.envelopes.iter_mut() {
+                if key.0 == track_guid {
+                    data.automation_mode = mode;
+                }
+            }
+            Ok::<_, DawError>(TrackEvent::AutomationModeChanged {
+                guid: track_guid,
+                mode,
+            })
+        })??;
+        publish_track_events(self, &guid, vec![event]);
+        Ok(())
+    }
+
+    fn set_input_monitor(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        monitor: daw_proto::track::InputMonitoringMode,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
+        let event = self.with_project_mut(&guid, |p| {
+            let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            p.tracks[i].input_monitor = monitor;
+            Ok::<_, DawError>(TrackEvent::InputMonitorChanged {
+                guid: p.tracks[i].guid.clone(),
+                monitor,
+            })
+        })??;
+        publish_track_events(self, &guid, vec![event]);
+        Ok(())
+    }
+
     fn set_phase_inverted(
         &self,
         project: ProjectContext,

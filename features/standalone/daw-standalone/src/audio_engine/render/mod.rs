@@ -603,6 +603,53 @@ impl ProjectRenderer {
             }
         }
 
+        // Metronome click: short sine bursts on the beat grid,
+        // accented on measure starts. Overlaid pre-master-fader so
+        // the click rides the master level like REAPER's default
+        // routing. Gated by the transport engine's atomic (no
+        // snapshot rebuild on toggle).
+        // Peek the engine map WITHOUT creating an engine —
+        // `transport_engine_for` lazily spawns pump tasks (needs a
+        // runtime), and offline render paths run without one. No
+        // engine yet ⇒ transport never started ⇒ no click.
+        let metronome_on = self
+            .daw
+            .transport_engines
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&self.project_guid).map(|b| b.shared.metronome()))
+            .unwrap_or(false);
+        if metronome_on {
+            let bpm_grid = &snap.tempo_map;
+            let first_beat = bpm_grid.seconds_to_beat(start_seconds).ceil() as i64;
+            let last_beat = bpm_grid.seconds_to_beat(end_seconds).floor() as i64;
+            // Also catch a click whose tail started before this block.
+            let click_len = 0.012f64; // 12ms burst
+            for beat in (first_beat - 1)..=last_beat {
+                if beat < 0 {
+                    continue;
+                }
+                let t0 = bpm_grid.beat_to_seconds(beat as f64);
+                if t0 + click_len <= start_seconds || t0 >= end_seconds {
+                    continue;
+                }
+                let accent = (beat as u64).is_multiple_of(snap.beats_per_measure as u64);
+                let freq = if accent { 1568.0 } else { 1046.5 }; // G6 / C6
+                let gain = if accent { 0.5 } else { 0.35 };
+                for frame in 0..frames {
+                    let t = start_seconds + frame as f64 * inv_rate - t0;
+                    if t < 0.0 || t >= click_len {
+                        continue;
+                    }
+                    // Exponential-ish decay envelope.
+                    let env = (1.0 - t / click_len).powi(2);
+                    let sample = ((t * freq * std::f64::consts::TAU).sin() * env * gain) as f32;
+                    master.samples[frame * 2] += sample;
+                    master.samples[frame * 2 + 1] += sample;
+                }
+            }
+        }
+
         // Master fader (RPP `MASTER_VOLUME` / `MASTERMUTESOLO`).
         // Balance pan law: centre = unity (no constant-power dip on
         // an already-mixed stereo bus), panning attenuates the

@@ -31,6 +31,7 @@ zones {
             vpot_press @TrackPanReset
             rec        @TrackRecordArm
             control+rec @TrackTogglePolarity
+            option+rec @CycleInputMonitor
             solo       @TrackSolo
             shift+solo @ClearAllSolo
             mute       @TrackMute
@@ -68,6 +69,12 @@ zones {
             left          @PrevMarker
             right         @NextMarker
             solo_global   @ClearAllSolo
+            click         @ToggleMetronome
+            auto_trim     @TrackAutoMode{mode @Trim}
+            auto_read     @TrackAutoMode{mode @Read}
+            auto_touch    @TrackAutoMode{mode @Touch}
+            auto_write    @TrackAutoMode{mode @Write}
+            auto_latch    @TrackAutoMode{mode @Latch}
         }
     }
 

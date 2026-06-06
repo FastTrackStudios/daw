@@ -80,6 +80,67 @@ pub enum TouchableParam {
 impl TouchableParam {
     /// Map to the matching `EnvelopeLocation` so callers can read /
     /// add points using the standard `Automation` trait.
+    /// Inverse of [`Self::envelope_location`] — resolve a service-side
+    /// `EnvelopeLocation` to the touchable parameter it addresses.
+    /// `resolve_track` maps the location's `TrackRef` to a guid.
+    pub fn from_location(
+        location: &EnvelopeLocation,
+        resolve_track: impl Fn(&TrackRef) -> Option<String>,
+    ) -> Option<Self> {
+        match &location.envelope {
+            EnvelopeRef::Type(EnvelopeType::Volume) => Some(Self::TrackVolume {
+                track_guid: resolve_track(&location.track)?,
+            }),
+            EnvelopeRef::Type(EnvelopeType::Pan) => Some(Self::TrackPan {
+                track_guid: resolve_track(&location.track)?,
+            }),
+            EnvelopeRef::Type(EnvelopeType::Mute) => Some(Self::TrackMute {
+                track_guid: resolve_track(&location.track)?,
+            }),
+            EnvelopeRef::Type(_) => None,
+            EnvelopeRef::Send { send_index, kind } => {
+                let track_guid = resolve_track(&location.track)?;
+                Some(match kind {
+                    SendEnvelopeKind::Volume => Self::SendVolume {
+                        track_guid,
+                        send_index: *send_index,
+                    },
+                    SendEnvelopeKind::Pan => Self::SendPan {
+                        track_guid,
+                        send_index: *send_index,
+                    },
+                    SendEnvelopeKind::Mute => Self::SendMute {
+                        track_guid,
+                        send_index: *send_index,
+                    },
+                })
+            }
+            EnvelopeRef::Take {
+                item_guid,
+                take_guid,
+                kind,
+            } => Some(match kind {
+                TakeEnvelopeKind::Volume => Self::TakeVolume {
+                    item_guid: item_guid.clone(),
+                    take_guid: take_guid.clone(),
+                },
+                TakeEnvelopeKind::Pan => Self::TakePan {
+                    item_guid: item_guid.clone(),
+                    take_guid: take_guid.clone(),
+                },
+                TakeEnvelopeKind::Mute => Self::TakeMute {
+                    item_guid: item_guid.clone(),
+                    take_guid: take_guid.clone(),
+                },
+                TakeEnvelopeKind::Pitch => Self::TakePitch {
+                    item_guid: item_guid.clone(),
+                    take_guid: take_guid.clone(),
+                },
+            }),
+            EnvelopeRef::FxParam { .. } | EnvelopeRef::ByName(_) => None,
+        }
+    }
+
     pub fn envelope_location(&self) -> EnvelopeLocation {
         match self {
             Self::TrackVolume { track_guid } => EnvelopeLocation::new(
@@ -232,8 +293,13 @@ impl Standalone {
 
         // 2) Decide whether to record a point based on mode + touch.
         let location = param.envelope_location();
+        // Envelope-level mode wins when the envelope exists; otherwise
+        // the TRACK's automation mode is the authority (REAPER's
+        // I_AUTOMODE) — first write in Write mode must record even
+        // though no envelope exists yet.
         let mode = self
             .read_envelope_mode(project.clone(), &location)
+            .or_else(|| self.read_track_mode(project.clone(), &param))
             .unwrap_or(AutomationMode::TrimRead);
         let should_record = match mode {
             AutomationMode::Off | AutomationMode::TrimRead | AutomationMode::Read => false,
@@ -271,6 +337,36 @@ impl Standalone {
             },
         );
         Ok(())
+    }
+
+    /// The owning track's automation mode (for track / send scoped
+    /// params). `None` for take params or unknown tracks.
+    fn read_track_mode(
+        &self,
+        project: ProjectContext,
+        param: &TouchableParam,
+    ) -> Option<AutomationMode> {
+        let track_guid = match param {
+            TouchableParam::TrackVolume { track_guid }
+            | TouchableParam::TrackPan { track_guid }
+            | TouchableParam::TrackMute { track_guid }
+            | TouchableParam::SendVolume { track_guid, .. }
+            | TouchableParam::SendPan { track_guid, .. }
+            | TouchableParam::SendMute { track_guid, .. } => track_guid.clone(),
+            _ => return None,
+        };
+        let guid = match project {
+            ProjectContext::Project(g) => g,
+            ProjectContext::Current => self.state.lock().ok()?.current_project_guid.clone()?,
+        };
+        self.with_project(&guid, |p| {
+            p.tracks
+                .iter()
+                .find(|t| t.guid == track_guid)
+                .map(|t| t.automation_mode)
+        })
+        .ok()
+        .flatten()
     }
 
     /// Read the `automation_mode` for the envelope identified by

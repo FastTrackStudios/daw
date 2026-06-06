@@ -182,6 +182,7 @@ pub fn spawn_subscriber_pump(
 
         let mut last_play_state = shared.play_state();
         let mut last_looping = shared.is_looping();
+        let mut last_metronome = shared.metronome();
         let mut last_tempo_bpm = shared.tempo_bpm();
         let mut last_playrate = shared.playrate();
 
@@ -202,11 +203,22 @@ pub fn spawn_subscriber_pump(
                     }
                 }
                 let cur_loop = shared.is_looping();
+                let cur_metro = shared.metronome();
                 if cur_loop != last_looping {
                     last_looping = cur_loop;
                     let ev = TransportStreamEvent::State(TransportEvent::LoopingChanged {
                         project_guid: project_guid.clone(),
                         looping: cur_loop,
+                    });
+                    if tx.send(ev).await.is_err() {
+                        return;
+                    }
+                }
+                if cur_metro != last_metronome {
+                    last_metronome = cur_metro;
+                    let ev = TransportStreamEvent::State(TransportEvent::MetronomeChanged {
+                        project_guid: project_guid.clone(),
+                        enabled: cur_metro,
                     });
                     if tx.send(ev).await.is_err() {
                         return;

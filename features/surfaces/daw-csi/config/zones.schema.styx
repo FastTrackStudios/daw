@@ -103,6 +103,9 @@ schema {
         Flip
         Toggle
         ToggleScrollLink
+        TrackAutoMode @object{mode @enum{Trim, Read, Touch, Write, Latch}}
+        CycleInputMonitor
+        ToggleMetronome
         CycleTimeDisplay
         NoAction
     }

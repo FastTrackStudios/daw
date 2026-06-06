@@ -44,6 +44,10 @@ pub(crate) struct RenderSnapshot {
     /// so they (and its descendants) keep passing audio even though
     /// they aren't soloed themselves. See [`graph::solo_pass`].
     pub(crate) solo_pass: Option<Vec<bool>>,
+    /// Tempo map kept for beat-grid consumers (metronome click).
+    pub(crate) tempo_map: TempoMap,
+    /// Time-signature numerator (beats per measure) for click accents.
+    pub(crate) beats_per_measure: u32,
     /// Master fader gain (linear).
     pub(crate) master_volume: f64,
     /// Master pan (−1…1).
@@ -67,10 +71,13 @@ impl RenderSnapshot {
             .collect();
         let order = graph::topo_order(&tracks);
         let solo_pass = graph::solo_pass(&tracks);
+        let beats_per_measure = p.transport.time_signature.numerator().max(1);
         Arc::new(Self {
             tracks,
             order,
             solo_pass,
+            tempo_map,
+            beats_per_measure,
             master_volume: p.master_volume,
             master_pan: p.master_pan,
             master_muted: p.master_muted,
@@ -238,7 +245,7 @@ pub(crate) struct MidiOtherSnapshot {
 /// origin) at which the segment begins — i.e. the PPQ of the segment
 /// boundary. PPQ values on `MidiNote.start_ppq` are *project-time*
 /// quarter notes when the source is a tempo-locked take.
-struct TempoMap {
+pub(crate) struct TempoMap {
     segments: Vec<TempoSegment>,
 }
 
@@ -256,7 +263,7 @@ impl TempoMap {
     /// Build from `ProjectState`. Always returns at least one
     /// segment — a fallback `(0, 0, project_bpm)` covers projects
     /// with no tempo points.
-    fn from_state(p: &ProjectState) -> Self {
+    pub(crate) fn from_state(p: &ProjectState) -> Self {
         let default_bpm = p.transport.tempo.bpm().max(1.0);
         let mut pts: Vec<(f64, f64)> = p
             .tempo_points
@@ -293,7 +300,7 @@ impl TempoMap {
     }
 
     /// Convert seconds to project-time beats (inverse of `beat_to_seconds`).
-    fn seconds_to_beat(&self, seconds: f64) -> f64 {
+    pub(crate) fn seconds_to_beat(&self, seconds: f64) -> f64 {
         let mut idx = 0usize;
         for (i, s) in self.segments.iter().enumerate() {
             if s.start_seconds <= seconds {
@@ -307,7 +314,7 @@ impl TempoMap {
     }
 
     /// Convert project-time beats (= PPQ in quarter notes) to seconds.
-    fn beat_to_seconds(&self, beat: f64) -> f64 {
+    pub(crate) fn beat_to_seconds(&self, beat: f64) -> f64 {
         // Find the segment whose start_beat ≤ beat.
         let mut idx = 0usize;
         for (i, s) in self.segments.iter().enumerate() {

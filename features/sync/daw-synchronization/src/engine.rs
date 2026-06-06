@@ -468,6 +468,12 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
                 suppression.is_suppressed_value(&SuppressionKey::track(guid, "pan"), *pan)
             }
             // Boolean / discrete fields fall back to key-only matching.
+            TrackEvent::AutomationModeChanged { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "automode"))
+            }
+            TrackEvent::InputMonitorChanged { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "recmon"))
+            }
             TrackEvent::PhaseInvertedChanged { guid, .. } => {
                 suppression.is_suppressed(&SuppressionKey::track(guid, "phase"))
             }

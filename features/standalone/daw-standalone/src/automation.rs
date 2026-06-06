@@ -15,6 +15,7 @@ use daw_proto::automation::{
 };
 use daw_proto::primitives::{AutomationMode, PositionInSeconds};
 use daw_proto::project::ProjectContext;
+use daw_proto::{DawError, DawResult};
 
 use crate::sync::{EnvelopeData, EnvelopeKey, Standalone};
 
@@ -77,6 +78,34 @@ fn resolve_envelope_id(
     Some((track_guid, key))
 }
 
+/// Resolve a service-side envelope location to the touchable param
+/// it addresses (track refs become guids via the project state).
+fn touchable(
+    daw: &Standalone,
+    project: &ProjectContext,
+    location: &EnvelopeLocation,
+) -> DawResult<crate::automation_touch::TouchableParam> {
+    let guid =
+        resolve_project(daw, project).ok_or_else(|| DawError::not_found("Project", "context"))?;
+    let resolve = |track: &daw_proto::TrackRef| -> Option<String> {
+        daw.with_project(&guid, |p| {
+            let idx = match track {
+                daw_proto::TrackRef::Guid(g) => p.tracks.iter().position(|t| &t.guid == g),
+                daw_proto::TrackRef::Index(i) => {
+                    let i = *i as usize;
+                    (i < p.tracks.len()).then_some(i)
+                }
+                daw_proto::TrackRef::Master => None,
+            };
+            idx.map(|i| p.tracks[i].guid.clone())
+        })
+        .ok()
+        .flatten()
+    };
+    crate::automation_touch::TouchableParam::from_location(location, resolve)
+        .ok_or_else(|| DawError::operation_failed("envelope location is not touchable"))
+}
+
 impl Automation for Standalone {
     fn envelopes(&self, project: ProjectContext, track: TrackRef) -> Vec<Envelope> {
         let Some(project_guid) = resolve_project(self, &project) else {
@@ -114,6 +143,28 @@ impl Automation for Standalone {
 
     fn set_visible(&self, project: ProjectContext, location: EnvelopeLocation, visible: bool) {
         mutate_envelope(self, project, location, |e| e.visible = visible);
+    }
+
+    fn touch_param(&self, project: ProjectContext, location: EnvelopeLocation) -> DawResult<()> {
+        let param = touchable(self, &project, &location)?;
+        Standalone::touch_param(self, param);
+        Ok(())
+    }
+
+    fn release_param(&self, project: ProjectContext, location: EnvelopeLocation) -> DawResult<()> {
+        let param = touchable(self, &project, &location)?;
+        Standalone::release_param(self, param);
+        Ok(())
+    }
+
+    fn write_param(
+        &self,
+        project: ProjectContext,
+        location: EnvelopeLocation,
+        value: f64,
+    ) -> DawResult<()> {
+        let param = touchable(self, &project, &location)?;
+        Standalone::write_param(self, project, param, value)
     }
 
     fn set_armed(&self, project: ProjectContext, location: EnvelopeLocation, armed: bool) {
