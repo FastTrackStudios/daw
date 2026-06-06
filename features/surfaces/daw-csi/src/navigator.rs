@@ -17,6 +17,9 @@ use daw_proto::Track;
 pub enum NavMode {
     Track,
     Folder,
+    /// VCA mode: root shows VCA leads; spilling a lead shows
+    /// `[lead, followers…]` (CSI's `TrackToggleVCASpill`).
+    Vca,
 }
 
 #[derive(Debug)]
@@ -73,6 +76,37 @@ impl Navigator {
                     v
                 }
             },
+            NavMode::Vca => match self.folder_stack.last() {
+                // Root: every VCA lead.
+                None => tracks
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, t)| t.grouping.vca_lead != 0)
+                    .map(|(i, _)| i)
+                    .collect(),
+                // Spill: the lead, then every shared-group follower.
+                Some(lead_guid) => {
+                    let lead_mask = tracks
+                        .iter()
+                        .find(|t| &t.guid == lead_guid)
+                        .map(|t| t.grouping.vca_lead)
+                        .unwrap_or(0);
+                    let mut v: Vec<usize> = tracks
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, t)| &t.guid == lead_guid)
+                        .map(|(i, _)| i)
+                        .collect();
+                    v.extend(
+                        tracks
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, t)| t.grouping.vca_follow & lead_mask != 0)
+                            .map(|(i, _)| i),
+                    );
+                    v
+                }
+            },
         }
     }
 
@@ -82,7 +116,7 @@ impl Navigator {
         let cands = self.candidates(tracks);
         let offset = match self.mode {
             NavMode::Track => self.bank_offset,
-            NavMode::Folder => self.folder_offset,
+            NavMode::Folder | NavMode::Vca => self.folder_offset,
         };
         (0..n).map(|i| cands.get(offset + i).copied()).collect()
     }
@@ -94,7 +128,7 @@ impl Navigator {
         let max = len.saturating_sub(strips);
         let off = match self.mode {
             NavMode::Track => &mut self.bank_offset,
-            NavMode::Folder => &mut self.folder_offset,
+            NavMode::Folder | NavMode::Vca => &mut self.folder_offset,
         };
         *off = (*off as isize + delta).clamp(0, max as isize) as usize;
     }
@@ -127,6 +161,28 @@ impl Navigator {
             return true;
         }
         if track.is_folder {
+            self.folder_stack.push(track.guid.clone());
+            self.folder_offset = 0;
+            return true;
+        }
+        false
+    }
+
+    /// VCA-mode spill toggle (CSI's `TrackToggleVCASpill`): spilling
+    /// a lead shows `[lead, followers…]`; toggling the spilled lead
+    /// pops back to the lead list. Returns `true` if it navigated.
+    pub fn vca_select(&mut self, track: &Track) -> bool {
+        if self.mode != NavMode::Vca {
+            return false;
+        }
+        if self.folder_stack.last() == Some(&track.guid) {
+            self.folder_stack.pop();
+            self.folder_offset = 0;
+            return true;
+        }
+        if track.grouping.vca_lead != 0 {
+            // VCA spill is one level deep — replace, don't nest.
+            self.folder_stack.clear();
             self.folder_stack.push(track.guid.clone());
             self.folder_offset = 0;
             return true;

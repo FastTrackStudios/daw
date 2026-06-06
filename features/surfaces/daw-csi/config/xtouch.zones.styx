@@ -55,7 +55,7 @@ zones {
     /// folder spills it (the folder leads its children), SELECT on
     /// the spilled folder pops back up — CSI's ToggleFolderSpill.
     folder {
-        include home
+        include (home)
         navigator @Folder
         strip {
             select     @FolderSpill

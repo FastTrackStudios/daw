@@ -25,11 +25,25 @@ pub enum Action {
     /// Toggle record arm (LED follows).
     TrackRecordArm,
     /// Exclusive-select the strip's track (LED follows selection).
+    /// CSI's `TrackUniqueSelect`.
     TrackSelect,
+    /// Additive select (CSI's `TrackSelect`).
+    TrackSelectAdditive,
     /// CSI `TrackToggleFolderSpill`: drill into a folder / pop back
     /// out of the current spill. Plain tracks fall through to
     /// [`Action::TrackSelect`].
     FolderSpill,
+    /// CSI `TrackToggleVCASpill`: spill a VCA lead's followers across
+    /// the strips / pop back out. Non-leads fall through to select.
+    VcaSpill,
+
+    // ── Strip: sends (strip = send slot of the selected track) ─────
+    /// Fader/v-pot ↔ send level of the strip's send slot.
+    SendVolume,
+    /// V-pot ↔ send pan.
+    SendPan,
+    /// Toggle send mute.
+    SendMute,
 
     // ── Strip: displays ─────────────────────────────────────────────
     /// Track name on an LCD row.
@@ -41,6 +55,12 @@ pub enum Action {
     /// "FOLDR>" on folder tracks, pan otherwise (folder-mode bottom
     /// row).
     FolderIndicator,
+    /// Send destination track name (sends zones).
+    SendNameDisplay,
+    /// Send level in dB.
+    SendVolumeDisplay,
+    /// Send pan position.
+    SendPanDisplay,
     /// A literal string.
     Fixed {
         text: String,
@@ -65,10 +85,19 @@ pub enum Action {
         seconds_per_tick: f64,
     },
     /// Bank the navigator window by `amount` strips (±1 channel,
-    /// ±strip-count page).
+    /// ±strip-count page). Oversized amounts clamp — CSI's
+    /// `Bank Track ±999` = jump to first/last page.
     Bank {
         amount: i32,
     },
+    /// Bank the SEND-slot window (sends zones).
+    BankSends {
+        amount: i32,
+    },
+    /// Un-solo every track (CSI `ClearAllSolo`).
+    ClearAllSolo,
+    /// Un-mute every track.
+    UnmuteAll,
     /// Activate another zone by name (CSI `GoZone`).
     GoZone {
         zone: String,

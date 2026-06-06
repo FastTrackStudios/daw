@@ -47,7 +47,7 @@ async fn fader_gesture_reaches_engine_and_echoes_on_bus() -> eyre::Result<()> {
 
     // Fader strip 0 to the unity mark.
     let raw = mcu::encode_fader(0, taper::volume_to_fader(0.5));
-    let intents = state.handle_midi(&raw);
+    let intents = state.handle_midi(&raw, 0);
     assert_eq!(intents.len(), 1);
     for intent in intents {
         execute_intent(&project, &transport, intent).await?;
@@ -87,20 +87,20 @@ async fn buttons_toggle_engine_state() -> eyre::Result<()> {
     let mut state = DriverState::with_builtin_zones(tracks, "master".into(), 1.0);
 
     // Mute strip 0 via the surface.
-    for intent in state.handle_midi(&[0x90, 0x10, 0x7F]) {
+    for intent in state.handle_midi(&[0x90, 0x10, 0x7F], 0) {
         execute_intent(&project, &transport, intent).await?;
     }
     let t = &project.tracks().all().await?[0];
     assert!(t.muted, "mute button didn't reach the engine");
 
     // Transport: play.
-    for intent in state.handle_midi(&[0x90, 0x5E, 0x7F]) {
+    for intent in state.handle_midi(&[0x90, 0x5E, 0x7F], 0) {
         execute_intent(&project, &transport, intent).await?;
     }
     assert!(transport.is_playing().await?);
 
     // Stop.
-    for intent in state.handle_midi(&[0x90, 0x5D, 0x7F]) {
+    for intent in state.handle_midi(&[0x90, 0x5D, 0x7F], 0) {
         execute_intent(&project, &transport, intent).await?;
     }
     assert!(!transport.is_playing().await?);

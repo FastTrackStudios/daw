@@ -12,6 +12,14 @@
 //! the same bindings in reverse — a fader bound to `@TrackVolume`
 //! gets volume motor feedback, an LCD row bound to `@TrackName`
 //! shows the name.
+//!
+//! Hold gestures: a press whose zone defines a `hold+` binding is
+//! deferred; the release decides tap vs hold by duration. Sends
+//! zones map strips onto the SELECTED track's send slots (CSI's
+//! `SelectedTrackSend` navigator), cached in [`DriverState::sends`]
+//! and refetched by the async edge on selection / zone changes.
+
+use std::collections::HashMap;
 
 use daw_control::Daw;
 use daw_proto::event_bus::{BusFilter, DawEvent};
@@ -25,7 +33,13 @@ use crate::midi::SurfacePort;
 use crate::navigator::{NavMode, Navigator};
 use crate::shadow::Shadow;
 use crate::taper;
-use crate::zones::{ALT, CONTROL, GlobalWidget, Modifiers, OPTION, SHIFT, StripWidget, ZoneSet};
+use crate::zones::{
+    ALT, CONTROL, GlobalWidget, HOLD, Modifiers, OPTION, SHIFT, StripWidget, ZoneSet,
+};
+
+/// Press-to-hold threshold. CSI defaults to ~1s; half that feels
+/// right on transport-sized buttons.
+pub const HOLD_MS: u64 = 500;
 
 /// Surface driver configuration.
 #[derive(Debug, Clone)]
@@ -72,6 +86,29 @@ pub enum Intent {
     SelectExclusive {
         guid: String,
     },
+    SelectAdditive {
+        guid: String,
+    },
+    ClearAllSolo,
+    UnmuteAll,
+    SetSendVolume {
+        guid: String,
+        index: u32,
+        volume: f64,
+    },
+    SetSendPan {
+        guid: String,
+        index: u32,
+        pan: f64,
+    },
+    SetSendMuted {
+        guid: String,
+        index: u32,
+        muted: bool,
+    },
+    /// Re-fetch the selected track's send slots (async edge handles
+    /// this and calls [`DriverState::set_sends`]).
+    RefreshSends,
     Play,
     Stop,
     Record,
@@ -96,6 +133,28 @@ enum Gesture {
     Delta(i8),
 }
 
+/// One send slot of the selected track (sends-zone strip context).
+#[derive(Debug, Clone, Default)]
+pub struct SendSlot {
+    pub dest_name: String,
+    pub volume: f64,
+    pub pan: f64,
+    pub muted: bool,
+}
+
+/// A press waiting for hold/tap resolution at release.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum PendingKey {
+    Strip(u8, StripWidget),
+    Global(GlobalWidget),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PendingPress {
+    mods: Modifiers,
+    at_ms: u64,
+}
+
 /// Everything the gesture/feedback logic reads and mutates. No I/O —
 /// the async edge owns the port and services.
 pub struct DriverState {
@@ -108,6 +167,11 @@ pub struct DriverState {
     pub tracks: Vec<Track>,
     /// Current strip → track-cache index mapping.
     strips: Vec<Option<usize>>,
+    /// Send slots of the selected track (sends zones). Refreshed by
+    /// the async edge via [`Intent::RefreshSends`].
+    pub sends: Vec<SendSlot>,
+    /// Window offset into `sends`.
+    send_bank: usize,
     pub master_guid: String,
     pub master_volume: f64,
     pub play_state: PlayState,
@@ -117,6 +181,8 @@ pub struct DriverState {
     touched: [bool; 9],
     /// Live modifier-key mask (Shift/Option/Control/Alt).
     modifiers: Modifiers,
+    /// Presses deferred until release for hold/tap resolution.
+    pending: HashMap<PendingKey, PendingPress>,
 }
 
 impl DriverState {
@@ -134,12 +200,15 @@ impl DriverState {
             active_zone,
             tracks,
             strips: vec![None; mcu::STRIPS],
+            sends: Vec::new(),
+            send_bank: 0,
             master_guid,
             master_volume,
             play_state: PlayState::Stopped,
             looping: false,
             touched: [false; 9],
             modifiers: 0,
+            pending: HashMap::new(),
         };
         s.enter_zone(&s.zones.home.clone());
         s.rebind_strips();
@@ -165,6 +234,49 @@ impl DriverState {
             .and_then(|i| self.tracks.get(i))
     }
 
+    fn send_slot(&self, strip: u8) -> Option<&SendSlot> {
+        self.sends.get(self.send_bank + strip as usize)
+    }
+
+    fn send_index(&self, strip: u8) -> u32 {
+        (self.send_bank + strip as usize) as u32
+    }
+
+    /// First selected track's guid (sends zones bind to it).
+    pub fn selected_guid(&self) -> Option<String> {
+        self.tracks
+            .iter()
+            .find(|t| t.selected)
+            .map(|t| t.guid.clone())
+    }
+
+    /// Replace the send-slot cache (async edge, after RefreshSends).
+    pub fn set_sends(&mut self, sends: Vec<SendSlot>) {
+        self.sends = sends;
+        self.send_bank = self.send_bank.min(self.sends.len().saturating_sub(1));
+    }
+
+    /// Whether the active zone binds any send action — the async edge
+    /// uses this to refetch sends on selection changes.
+    pub fn uses_sends(&self) -> bool {
+        self.zones
+            .zone(&self.active_zone)
+            .map(|z| {
+                z.strip.values().any(|a| {
+                    matches!(
+                        a,
+                        Action::SendVolume
+                            | Action::SendPan
+                            | Action::SendMute
+                            | Action::SendNameDisplay
+                            | Action::SendVolumeDisplay
+                            | Action::SendPanDisplay
+                    )
+                })
+            })
+            .unwrap_or(false)
+    }
+
     /// Activate a zone: pin its navigator mode and rebind.
     fn enter_zone(&mut self, name: &str) {
         let Some(zone) = self.zones.zone(name) else {
@@ -176,15 +288,17 @@ impl DriverState {
         if let Some(mode) = nav_mode {
             self.nav.set_mode(mode);
         }
+        self.send_bank = 0;
         self.rebind_strips();
     }
 
     // ── Gestures: surface → intents ─────────────────────────────────
 
     /// Decode raw MIDI from the surface, resolve it through the
-    /// active zone, and return the intents to execute. Navigation
-    /// actions mutate local state here and yield `Refresh`.
-    pub fn handle_midi(&mut self, raw: &[u8]) -> Vec<Intent> {
+    /// active zone, and return the intents to execute. `now_ms` is a
+    /// monotonic clock for hold/tap resolution. Navigation actions
+    /// mutate local state here and yield `Refresh`.
+    pub fn handle_midi(&mut self, raw: &[u8], now_ms: u64) -> Vec<Intent> {
         let Some(input) = mcu::decode(raw) else {
             return Vec::new();
         };
@@ -233,37 +347,102 @@ impl DriverState {
                     }
                     return Vec::new();
                 }
-                if !pressed {
-                    return Vec::new();
-                }
-                match button {
-                    Button::Rec(s) => self.dispatch_strip(s, StripWidget::Rec, Gesture::Press),
-                    Button::Solo(s) => self.dispatch_strip(s, StripWidget::Solo, Gesture::Press),
-                    Button::Mute(s) => self.dispatch_strip(s, StripWidget::Mute, Gesture::Press),
-                    Button::Select(s) => {
-                        self.dispatch_strip(s, StripWidget::Select, Gesture::Press)
-                    }
-                    other => self.dispatch_global(GlobalWidget::Button(other), Gesture::Press),
+                let key = match button {
+                    Button::Rec(s) => PendingKey::Strip(s, StripWidget::Rec),
+                    Button::Solo(s) => PendingKey::Strip(s, StripWidget::Solo),
+                    Button::Mute(s) => PendingKey::Strip(s, StripWidget::Mute),
+                    Button::Select(s) => PendingKey::Strip(s, StripWidget::Select),
+                    other => PendingKey::Global(GlobalWidget::Button(other)),
+                };
+                if pressed {
+                    self.button_press(key, now_ms)
+                } else {
+                    self.button_release(key, now_ms)
                 }
             }
         }
     }
 
+    /// Press: defer when a `hold+` binding exists for this widget,
+    /// otherwise dispatch immediately (zero added latency for the
+    /// common case).
+    fn button_press(&mut self, key: PendingKey, now_ms: u64) -> Vec<Intent> {
+        let mods = self.modifiers;
+        let has_hold = self
+            .zones
+            .zone(&self.active_zone)
+            .map(|z| match key {
+                PendingKey::Strip(_, w) => z.strip_has_exact(mods | HOLD, w),
+                PendingKey::Global(w) => z.global_has_exact(mods | HOLD, w),
+            })
+            .unwrap_or(false);
+        if has_hold {
+            self.pending.insert(
+                key,
+                PendingPress {
+                    mods,
+                    at_ms: now_ms,
+                },
+            );
+            return Vec::new();
+        }
+        self.dispatch_key(key, mods)
+    }
+
+    /// Release: resolve a deferred press as tap or hold by duration.
+    fn button_release(&mut self, key: PendingKey, now_ms: u64) -> Vec<Intent> {
+        let Some(p) = self.pending.remove(&key) else {
+            return Vec::new();
+        };
+        let mods = if now_ms.saturating_sub(p.at_ms) >= HOLD_MS {
+            p.mods | HOLD
+        } else {
+            p.mods
+        };
+        self.dispatch_key(key, mods)
+    }
+
+    fn dispatch_key(&mut self, key: PendingKey, mods: Modifiers) -> Vec<Intent> {
+        match key {
+            PendingKey::Strip(s, w) => self.dispatch_strip_with(s, w, Gesture::Press, mods),
+            PendingKey::Global(w) => self.dispatch_global_with(w, Gesture::Press, mods),
+        }
+    }
+
     fn dispatch_strip(&mut self, strip: u8, widget: StripWidget, gesture: Gesture) -> Vec<Intent> {
+        self.dispatch_strip_with(strip, widget, gesture, self.modifiers)
+    }
+
+    fn dispatch_strip_with(
+        &mut self,
+        strip: u8,
+        widget: StripWidget,
+        gesture: Gesture,
+        mods: Modifiers,
+    ) -> Vec<Intent> {
         let Some(zone) = self.zones.zone(&self.active_zone) else {
             return Vec::new();
         };
-        let Some(action) = zone.strip_action(self.modifiers, widget).cloned() else {
+        let Some(action) = zone.strip_action(mods, widget).cloned() else {
             return Vec::new();
         };
         self.apply_action(&action, Some(strip), gesture)
     }
 
     fn dispatch_global(&mut self, widget: GlobalWidget, gesture: Gesture) -> Vec<Intent> {
+        self.dispatch_global_with(widget, gesture, self.modifiers)
+    }
+
+    fn dispatch_global_with(
+        &mut self,
+        widget: GlobalWidget,
+        gesture: Gesture,
+        mods: Modifiers,
+    ) -> Vec<Intent> {
         let Some(zone) = self.zones.zone(&self.active_zone) else {
             return Vec::new();
         };
-        let Some(action) = zone.global_action(self.modifiers, widget).cloned() else {
+        let Some(action) = zone.global_action(mods, widget).cloned() else {
             return Vec::new();
         };
         self.apply_action(&action, None, gesture)
@@ -346,6 +525,10 @@ impl DriverState {
                 .map(|guid| Intent::SelectExclusive { guid })
                 .into_iter()
                 .collect(),
+            Action::TrackSelectAdditive => strip_guid(self)
+                .map(|guid| Intent::SelectAdditive { guid })
+                .into_iter()
+                .collect(),
             Action::FolderSpill => {
                 let Some(t) = strip.and_then(|s| self.strip_track(s)).cloned() else {
                     return Vec::new();
@@ -357,6 +540,87 @@ impl DriverState {
                     return vec![Intent::Refresh];
                 }
                 vec![Intent::SelectExclusive { guid: t.guid }]
+            }
+            Action::VcaSpill => {
+                let Some(t) = strip.and_then(|s| self.strip_track(s)).cloned() else {
+                    return Vec::new();
+                };
+                if self.nav.vca_select(&t) {
+                    self.rebind_strips();
+                    return vec![Intent::Refresh];
+                }
+                vec![Intent::SelectExclusive { guid: t.guid }]
+            }
+            Action::SendVolume => {
+                let Some(strip) = strip else {
+                    return Vec::new();
+                };
+                let Some(guid) = self.selected_guid() else {
+                    return Vec::new();
+                };
+                let index = self.send_index(strip);
+                let volume = match gesture {
+                    Gesture::Fader(pos) => taper::fader_to_volume(pos),
+                    Gesture::Delta(d) => {
+                        let cur = self.send_slot(strip).map(|s| s.volume).unwrap_or(0.0);
+                        (cur + d as f64 * 0.02).max(0.0)
+                    }
+                    Gesture::Press => return Vec::new(),
+                };
+                if self.send_slot(strip).is_none() {
+                    return Vec::new();
+                }
+                if let Some(s) = self.sends.get_mut(self.send_bank + strip as usize) {
+                    s.volume = volume;
+                }
+                vec![Intent::SetSendVolume {
+                    guid,
+                    index,
+                    volume,
+                }]
+            }
+            Action::SendPan => {
+                let Some(strip) = strip else {
+                    return Vec::new();
+                };
+                let Gesture::Delta(delta) = gesture else {
+                    return Vec::new();
+                };
+                let Some(guid) = self.selected_guid() else {
+                    return Vec::new();
+                };
+                if self.send_slot(strip).is_none() {
+                    return Vec::new();
+                }
+                let index = self.send_index(strip);
+                let step = if self.modifiers & SHIFT != 0 {
+                    0.005
+                } else {
+                    0.02
+                };
+                let cur = self.send_slot(strip).map(|s| s.pan).unwrap_or(0.0);
+                let pan = (cur + delta as f64 * step).clamp(-1.0, 1.0);
+                if let Some(s) = self.sends.get_mut(self.send_bank + strip as usize) {
+                    s.pan = pan;
+                }
+                vec![Intent::SetSendPan { guid, index, pan }]
+            }
+            Action::SendMute => {
+                let Some(strip) = strip else {
+                    return Vec::new();
+                };
+                let Some(guid) = self.selected_guid() else {
+                    return Vec::new();
+                };
+                let Some(slot) = self.send_slot(strip) else {
+                    return Vec::new();
+                };
+                let muted = !slot.muted;
+                let index = self.send_index(strip);
+                if let Some(s) = self.sends.get_mut(self.send_bank + strip as usize) {
+                    s.muted = muted;
+                }
+                vec![Intent::SetSendMuted { guid, index, muted }]
             }
             Action::MasterVolume => {
                 let Gesture::Fader(pos) = gesture else {
@@ -376,6 +640,8 @@ impl DriverState {
                 }
             }
             Action::ToggleLoop => vec![Intent::ToggleLoop],
+            Action::ClearAllSolo => vec![Intent::ClearAllSolo],
+            Action::UnmuteAll => vec![Intent::UnmuteAll],
             Action::NudgePosition { seconds } => vec![Intent::NudgePosition { seconds: *seconds }],
             Action::JogPosition { seconds_per_tick } => {
                 let Gesture::Delta(delta) = gesture else {
@@ -395,9 +661,16 @@ impl DriverState {
                 self.rebind_strips();
                 vec![Intent::Refresh]
             }
+            Action::BankSends { amount } => {
+                let max = self.sends.len().saturating_sub(1);
+                self.send_bank =
+                    (self.send_bank as isize + *amount as isize).clamp(0, max as isize) as usize;
+                vec![Intent::Refresh]
+            }
             Action::GoZone { zone } => {
                 self.enter_zone(&zone.clone());
-                vec![Intent::Refresh]
+                // Sends zones need fresh slot data for the new context.
+                vec![Intent::Refresh, Intent::RefreshSends]
             }
             // Display actions are feedback-only; binding one to an
             // input widget is inert.
@@ -405,6 +678,9 @@ impl DriverState {
             | Action::PanDisplay
             | Action::VolumeDisplay
             | Action::FolderIndicator
+            | Action::SendNameDisplay
+            | Action::SendVolumeDisplay
+            | Action::SendPanDisplay
             | Action::Fixed { .. }
             | Action::Blank
             | Action::NoAction => Vec::new(),
@@ -497,36 +773,44 @@ impl DriverState {
     }
 
     /// The feedback text for a display action on a strip.
-    fn display_text(&self, action: &Action, track: Option<&Track>) -> String {
-        let Some(t) = track else {
-            return match action {
-                Action::Fixed { text } => text.clone(),
-                _ => String::new(),
-            };
-        };
+    fn display_text(
+        &self,
+        action: &Action,
+        track: Option<&Track>,
+        send: Option<&SendSlot>,
+    ) -> String {
         match action {
-            Action::TrackName => t.name.clone(),
-            Action::PanDisplay => pan_label(t.pan),
-            Action::VolumeDisplay => volume_label(t.volume),
-            Action::FolderIndicator => {
-                if t.is_folder && self.nav.mode == NavMode::Folder {
-                    format!("FOLDR {}", ">".repeat(self.nav.depth().min(1)))
-                } else {
-                    pan_label(t.pan)
-                }
-            }
+            Action::TrackName => track.map(|t| t.name.clone()).unwrap_or_default(),
+            Action::PanDisplay => track.map(|t| pan_label(t.pan)).unwrap_or_default(),
+            Action::VolumeDisplay => track.map(|t| volume_label(t.volume)).unwrap_or_default(),
+            Action::FolderIndicator => track
+                .map(|t| {
+                    if t.is_folder && self.nav.mode == NavMode::Folder {
+                        format!("FOLDR {}", ">".repeat(self.nav.depth().min(1)))
+                    } else {
+                        pan_label(t.pan)
+                    }
+                })
+                .unwrap_or_default(),
+            Action::SendNameDisplay => send.map(|s| s.dest_name.clone()).unwrap_or_default(),
+            Action::SendVolumeDisplay => send.map(|s| volume_label(s.volume)).unwrap_or_default(),
+            Action::SendPanDisplay => send.map(|s| pan_label(s.pan)).unwrap_or_default(),
             Action::Fixed { text } => text.clone(),
             _ => String::new(),
         }
     }
 
     /// The LED state for an action bound to a lit button.
-    fn led_state(&self, action: &Action, track: Option<&Track>) -> bool {
+    fn led_state(&self, action: &Action, track: Option<&Track>, send: Option<&SendSlot>) -> bool {
         match action {
             Action::TrackMute => track.map(|t| t.muted).unwrap_or(false),
             Action::TrackSolo => track.map(|t| t.soloed).unwrap_or(false),
             Action::TrackRecordArm => track.map(|t| t.armed).unwrap_or(false),
-            Action::TrackSelect | Action::FolderSpill => track.map(|t| t.selected).unwrap_or(false),
+            Action::TrackSelect
+            | Action::TrackSelectAdditive
+            | Action::FolderSpill
+            | Action::VcaSpill => track.map(|t| t.selected).unwrap_or(false),
+            Action::SendMute => send.map(|s| s.muted).unwrap_or(false),
             Action::Play => matches!(self.play_state, PlayState::Playing | PlayState::Recording),
             Action::Record => matches!(self.play_state, PlayState::Recording),
             Action::Stop => matches!(self.play_state, PlayState::Stopped | PlayState::Paused),
@@ -548,6 +832,7 @@ impl DriverState {
 
         for strip in 0..mcu::STRIPS as u8 {
             let track = self.strip_track(strip).cloned();
+            let send = self.send_slot(strip).cloned();
 
             // Motor fader follows the fader binding's value.
             if !self.touched[strip as usize] {
@@ -556,18 +841,36 @@ impl DriverState {
                         .as_ref()
                         .map(|t| taper::volume_to_fader(t.volume))
                         .unwrap_or(0),
+                    Some(Action::SendVolume) => send
+                        .as_ref()
+                        .map(|s| taper::volume_to_fader(s.volume))
+                        .unwrap_or(0),
                     _ => 0,
                 };
                 self.shadow.fader(&mut out, strip, pos);
             }
 
             // V-pot ring follows the vpot binding.
-            match (zone.strip_action(0, StripWidget::VPot), &track) {
-                (Some(Action::TrackPan), Some(t)) => self.shadow.ring(
+            match zone.strip_action(0, StripWidget::VPot) {
+                Some(Action::TrackPan) if track.is_some() => self.shadow.ring(
                     &mut out,
                     strip,
                     RingMode::BoostCut,
-                    mcu::pan_to_ring(t.pan),
+                    mcu::pan_to_ring(track.as_ref().unwrap().pan),
+                    false,
+                ),
+                Some(Action::SendPan) if send.is_some() => self.shadow.ring(
+                    &mut out,
+                    strip,
+                    RingMode::BoostCut,
+                    mcu::pan_to_ring(send.as_ref().unwrap().pan),
+                    false,
+                ),
+                Some(Action::SendVolume) if send.is_some() => self.shadow.ring(
+                    &mut out,
+                    strip,
+                    RingMode::Wrap,
+                    ((send.as_ref().unwrap().volume.min(1.0)) * 11.0).round() as u8,
                     false,
                 ),
                 _ => self
@@ -584,7 +887,7 @@ impl DriverState {
             ] {
                 let lit = zone
                     .strip_action(0, widget)
-                    .map(|a| self.led_state(a, track.as_ref()))
+                    .map(|a| self.led_state(a, track.as_ref(), send.as_ref()))
                     .unwrap_or(false);
                 self.shadow.led(&mut out, button, lit);
             }
@@ -593,19 +896,23 @@ impl DriverState {
             for (widget, row) in [(StripWidget::LcdTop, 0u8), (StripWidget::LcdBottom, 1u8)] {
                 let text = zone
                     .strip_action(0, widget)
-                    .map(|a| self.display_text(a, track.as_ref()))
+                    .map(|a| self.display_text(a, track.as_ref(), send.as_ref()))
                     .unwrap_or_default();
                 self.shadow.lcd(&mut out, strip, row, &text);
             }
 
-            colors[strip as usize] = track
-                .as_ref()
-                .map(|t| {
-                    t.color
-                        .map(mcu::rgb_to_strip_color)
-                        .unwrap_or(StripColor::White)
-                })
-                .unwrap_or(StripColor::Off);
+            // Zone color override beats per-track colors (CSI's
+            // SetXTouchDisplayColors on zone activation).
+            colors[strip as usize] = zone.display_color.unwrap_or_else(|| {
+                track
+                    .as_ref()
+                    .map(|t| {
+                        t.color
+                            .map(mcu::rgb_to_strip_color)
+                            .unwrap_or(StripColor::White)
+                    })
+                    .unwrap_or(StripColor::Off)
+            });
         }
         self.shadow.colors(&mut out, colors);
 
@@ -621,7 +928,7 @@ impl DriverState {
         // Master-section button LEDs follow their bound actions.
         for ((_, widget), action) in zone.global.iter().map(|(k, v)| (*k, v)) {
             if let GlobalWidget::Button(button) = widget {
-                let lit = self.led_state(action, None);
+                let lit = self.led_state(action, None, None);
                 self.shadow.led(&mut out, button, lit);
             }
         }
@@ -669,11 +976,41 @@ where
     }
 }
 
+/// Fetch the selected track's send slots for the driver cache.
+async fn fetch_sends(
+    project: &daw_control::Project,
+    selected_guid: Option<String>,
+) -> Vec<SendSlot> {
+    let Some(guid) = selected_guid else {
+        return Vec::new();
+    };
+    let Ok(Some(handle)) = project.tracks().by_guid(&guid).await else {
+        return Vec::new();
+    };
+    match handle.sends().all().await {
+        Ok(routes) => routes
+            .into_iter()
+            .map(|r| SendSlot {
+                dest_name: r.dest_track_name.unwrap_or_default(),
+                volume: r.volume,
+                pan: r.pan,
+                muted: r.muted,
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+fn now_ms(epoch: std::time::Instant) -> u64 {
+    epoch.elapsed().as_millis() as u64
+}
+
 /// Run the surface driver until the event stream closes or the
 /// surface disconnects. Spawn with `moire::task::spawn`.
 pub async fn run(daw: Daw, config: CsiConfig) -> eyre::Result<()> {
     let mut port = SurfacePort::open(&config.device_match)?;
     let zones = ZoneSet::load()?;
+    let epoch = std::time::Instant::now();
 
     let project = daw.current_project().await?;
     let tracks_api = project.tracks();
@@ -708,11 +1045,18 @@ pub async fn run(daw: Daw, config: CsiConfig) -> eyre::Result<()> {
                 match ev? {
                     None => return Ok(()), // bus closed — host shutting down
                     Some(DawEvent::Track(te)) => {
+                        let selection_changed =
+                            matches!(te.event, TrackEvent::SelectionChanged { .. });
                         if state.apply_track_event(&te.event) {
                             // List shape changed — refetch + revalidate.
                             state.tracks = tracks_api.all().await?;
                             state.nav.revalidate(&state.tracks);
                             state.rebind_strips();
+                        }
+                        // Sends zones track the selected track.
+                        if selection_changed && state.uses_sends() {
+                            let sends = fetch_sends(&project, state.selected_guid()).await;
+                            state.set_sends(sends);
                         }
                     }
                     Some(DawEvent::TransportState(te)) => state.apply_transport_event(&te),
@@ -726,8 +1070,13 @@ pub async fn run(daw: Daw, config: CsiConfig) -> eyre::Result<()> {
                 let Some(raw) = raw else {
                     return Err(eyre::eyre!("surface MIDI input closed"));
                 };
-                let intents = state.handle_midi(&raw);
+                let intents = state.handle_midi(&raw, now_ms(epoch));
                 for intent in intents {
+                    if intent == Intent::RefreshSends {
+                        let sends = fetch_sends(&project, state.selected_guid()).await;
+                        state.set_sends(sends);
+                        continue;
+                    }
                     if let Err(e) = execute_intent(&project, &transport, intent).await {
                         tracing::warn!("daw-csi: intent failed: {e}");
                     }
@@ -742,7 +1091,8 @@ pub async fn run(daw: Daw, config: CsiConfig) -> eyre::Result<()> {
 
 /// Execute one [`Intent`] against the daw-control services. Public so
 /// headless surfaces / tests can drive the same path as the hardware
-/// loop.
+/// loop. (`RefreshSends` is a no-op here — it needs `DriverState`
+/// access, so the run loop handles it inline.)
 pub async fn execute_intent(
     project: &daw_control::Project,
     transport: &daw_control::Transport,
@@ -794,6 +1144,42 @@ pub async fn execute_intent(
                 h.select_exclusive().await?;
             }
         }
+        Intent::SelectAdditive { guid } => {
+            if let Some(h) = project.tracks().by_guid(&guid).await? {
+                h.select().await?;
+            }
+        }
+        Intent::ClearAllSolo => project.tracks().clear_solo().await?,
+        Intent::UnmuteAll => project.tracks().unmute_all().await?,
+        Intent::SetSendVolume {
+            guid,
+            index,
+            volume,
+        } => {
+            if let Some(h) = project.tracks().by_guid(&guid).await?
+                && let Some(send) = h.sends().by_index(index).await?
+            {
+                send.set_volume(volume).await?;
+            }
+        }
+        Intent::SetSendPan { guid, index, pan } => {
+            if let Some(h) = project.tracks().by_guid(&guid).await?
+                && let Some(send) = h.sends().by_index(index).await?
+            {
+                send.set_pan(pan).await?;
+            }
+        }
+        Intent::SetSendMuted { guid, index, muted } => {
+            if let Some(h) = project.tracks().by_guid(&guid).await?
+                && let Some(send) = h.sends().by_index(index).await?
+            {
+                if muted {
+                    send.mute().await?;
+                } else {
+                    send.unmute().await?;
+                }
+            }
+        }
         Intent::Play => transport.play().await?,
         Intent::Stop => transport.stop().await?,
         Intent::Record => transport.record().await?,
@@ -803,9 +1189,9 @@ pub async fn execute_intent(
             let pos = transport.get_position().await?;
             transport.set_position((pos + seconds).max(0.0)).await?;
         }
-        // Navigation already applied; the caller renders after the
-        // intent batch.
-        Intent::Refresh => {}
+        // Navigation / cache refreshes are applied by the run loop;
+        // nothing to do service-side.
+        Intent::Refresh | Intent::RefreshSends => {}
     }
     Ok(())
 }
@@ -813,6 +1199,7 @@ pub async fn execute_intent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::zones::DEFAULT_ZONES;
 
     fn track(guid: &str, name: &str, parent: Option<&str>, is_folder: bool) -> Track {
         Track {
@@ -838,11 +1225,18 @@ mod tests {
         )
     }
 
+    /// Tap = press+release inside the hold window.
+    fn tap(s: &mut DriverState, note: u8, t: u64) -> Vec<Intent> {
+        let mut out = s.handle_midi(&[0x90, note, 0x7F], t);
+        out.extend(s.handle_midi(&[0x90, note, 0x00], t + 50));
+        out
+    }
+
     #[test]
     fn fader_gesture_sets_volume_and_caches() {
         let mut s = state();
         let raw = mcu::encode_fader(0, taper::volume_to_fader(1.0));
-        let intents = s.handle_midi(&raw);
+        let intents = s.handle_midi(&raw, 0);
         assert_eq!(intents.len(), 1);
         let Intent::SetVolume { guid, volume } = &intents[0] else {
             panic!("expected SetVolume, got {intents:?}");
@@ -858,7 +1252,7 @@ mod tests {
         let mut s = state();
         let raw = mcu::encode_fader(mcu::MASTER, 0);
         assert_eq!(
-            s.handle_midi(&raw),
+            s.handle_midi(&raw, 0),
             vec![Intent::SetMasterVolume { volume: 0.0 }]
         );
     }
@@ -866,23 +1260,20 @@ mod tests {
     #[test]
     fn mute_button_toggles_from_cache() {
         let mut s = state();
-        let press = [0x90, 0x10, 0x7F]; // Mute strip 0
         assert_eq!(
-            s.handle_midi(&press),
+            tap(&mut s, 0x10, 0),
             vec![Intent::SetMuted {
                 guid: "drums".into(),
                 muted: true
             }]
         );
-        // Releases are ignored.
-        assert!(s.handle_midi(&[0x90, 0x10, 0x00]).is_empty());
         // After the echo event lands, the next press unmutes.
         s.apply_track_event(&TrackEvent::MuteChanged {
             guid: "drums".into(),
             muted: true,
         });
         assert_eq!(
-            s.handle_midi(&press),
+            tap(&mut s, 0x10, 1000),
             vec![Intent::SetMuted {
                 guid: "drums".into(),
                 muted: false
@@ -895,24 +1286,30 @@ mod tests {
         let mut s = state();
         assert_eq!(s.active_zone, "home");
         // GlobalView is bound to @GoZone{zone folder} in the builtin set.
-        assert_eq!(s.handle_midi(&[0x90, 0x33, 0x7F]), vec![Intent::Refresh]);
+        assert_eq!(
+            tap(&mut s, 0x33, 0),
+            vec![Intent::Refresh, Intent::RefreshSends]
+        );
         assert_eq!(s.active_zone, "folder");
         assert_eq!(s.nav.mode, NavMode::Folder);
         // Root: [DRUMS, Bass]. Select strip 0 (DRUMS folder) → drill.
-        assert_eq!(s.handle_midi(&[0x90, 0x18, 0x7F]), vec![Intent::Refresh]);
+        assert_eq!(tap(&mut s, 0x18, 100), vec![Intent::Refresh]);
         // Spill: [DRUMS, Kick, Snare] — strip 1 is Kick now; selecting
         // it is a plain selection, not navigation.
         assert_eq!(
-            s.handle_midi(&[0x90, 0x19, 0x7F]),
+            tap(&mut s, 0x19, 200),
             vec![Intent::SelectExclusive {
                 guid: "kick".into()
             }]
         );
         // Select DRUMS (strip 0, current spill parent) again → pop.
-        assert_eq!(s.handle_midi(&[0x90, 0x18, 0x7F]), vec![Intent::Refresh]);
+        assert_eq!(tap(&mut s, 0x18, 300), vec![Intent::Refresh]);
         assert_eq!(s.nav.depth(), 0);
         // GlobalView in the folder zone goes home again.
-        assert_eq!(s.handle_midi(&[0x90, 0x33, 0x7F]), vec![Intent::Refresh]);
+        assert_eq!(
+            tap(&mut s, 0x33, 400),
+            vec![Intent::Refresh, Intent::RefreshSends]
+        );
         assert_eq!(s.active_zone, "home");
         assert_eq!(s.nav.mode, NavMode::Track);
     }
@@ -924,17 +1321,16 @@ mod tests {
             .map(|i| track(&format!("t{i}"), &format!("Track {i}"), None, false))
             .collect();
         let mut s = DriverState::with_builtin_zones(tracks, "master".into(), 1.0);
-        assert_eq!(s.handle_midi(&[0x90, 0x31, 0x7F]), vec![Intent::Refresh]); // chan right
+        assert_eq!(tap(&mut s, 0x31, 0), vec![Intent::Refresh]); // chan right
         // Strip 0 now shows track 1.
-        let raw = mcu::encode_fader(0, 16383);
-        let intents = s.handle_midi(&raw);
+        let intents = s.handle_midi(&mcu::encode_fader(0, 16383), 100);
         let Intent::SetVolume { guid, .. } = &intents[0] else {
             panic!();
         };
         assert_eq!(guid, "t1");
         // Bank right (+8) → strip 0 shows t4 (offset clamped to 12−8).
-        assert_eq!(s.handle_midi(&[0x90, 0x2F, 0x7F]), vec![Intent::Refresh]);
-        let intents = s.handle_midi(&mcu::encode_fader(0, 16383));
+        assert_eq!(tap(&mut s, 0x2F, 200), vec![Intent::Refresh]);
+        let intents = s.handle_midi(&mcu::encode_fader(0, 16383), 300);
         let Intent::SetVolume { guid, .. } = &intents[0] else {
             panic!();
         };
@@ -946,7 +1342,7 @@ mod tests {
         let mut s = state();
         let _ = s.render(); // settle shadow
         // Touch strip 0, then a volume event for its track arrives.
-        s.handle_midi(&[0x90, 0x68, 0x7F]);
+        s.handle_midi(&[0x90, 0x68, 0x7F], 0);
         s.apply_track_event(&TrackEvent::VolumeChanged {
             guid: "drums".into(),
             volume: 0.5,
@@ -957,7 +1353,7 @@ mod tests {
             "motor fader moved while touched: {msgs:?}"
         );
         // Release → next render moves the motor.
-        s.handle_midi(&[0x90, 0x68, 0x00]);
+        s.handle_midi(&[0x90, 0x68, 0x00], 100);
         let msgs = s.render();
         assert!(msgs.iter().any(|m| m[0] == 0xE0));
     }
@@ -991,15 +1387,12 @@ mod tests {
     #[test]
     fn transport_buttons() {
         let mut s = state();
-        assert_eq!(s.handle_midi(&[0x90, 0x5E, 0x7F]), vec![Intent::Play]);
-        assert_eq!(s.handle_midi(&[0x90, 0x5D, 0x7F]), vec![Intent::Stop]);
-        assert_eq!(s.handle_midi(&[0x90, 0x56, 0x7F]), vec![Intent::ToggleLoop]);
-        assert_eq!(s.handle_midi(&[0x90, 0x5F, 0x7F]), vec![Intent::Record]);
+        assert_eq!(tap(&mut s, 0x5E, 0), vec![Intent::Play]);
+        assert_eq!(tap(&mut s, 0x5D, 100), vec![Intent::Stop]);
+        assert_eq!(tap(&mut s, 0x56, 200), vec![Intent::ToggleLoop]);
+        assert_eq!(tap(&mut s, 0x5F, 300), vec![Intent::Record]);
         s.play_state = PlayState::Recording;
-        assert_eq!(
-            s.handle_midi(&[0x90, 0x5F, 0x7F]),
-            vec![Intent::StopRecording]
-        );
+        assert_eq!(tap(&mut s, 0x5F, 400), vec![Intent::StopRecording]);
     }
 
     #[test]
@@ -1026,29 +1419,210 @@ zones {
         );
         // Plain mute.
         assert_eq!(
-            s.handle_midi(&[0x90, 0x10, 0x7F]),
+            tap(&mut s, 0x10, 0),
             vec![Intent::SetMuted {
                 guid: "a".into(),
                 muted: true
             }]
         );
         // Hold shift → same button arms instead.
-        s.handle_midi(&[0x90, 0x46, 0x7F]); // shift down
+        s.handle_midi(&[0x90, 0x46, 0x7F], 100); // shift down
         assert_eq!(
-            s.handle_midi(&[0x90, 0x10, 0x7F]),
+            tap(&mut s, 0x10, 150),
             vec![Intent::SetArmed {
                 guid: "a".into(),
                 armed: true
             }]
         );
-        s.handle_midi(&[0x90, 0x46, 0x00]); // shift up
+        s.handle_midi(&[0x90, 0x46, 0x00], 300); // shift up
         assert_eq!(
-            s.handle_midi(&[0x90, 0x10, 0x7F]),
+            tap(&mut s, 0x10, 400),
             vec![Intent::SetMuted {
                 guid: "a".into(),
                 muted: true
             }]
         );
+    }
+
+    #[test]
+    fn hold_binding_defers_and_resolves() {
+        // CSI's official Folder.zon shape: tap = select, hold = spill.
+        let zones = ZoneSet::parse(
+            r#"
+zones {
+    home {
+        navigator @Folder
+        strip {
+            select @TrackSelect
+            hold+select @FolderSpill
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+        let mut s = DriverState::new(
+            zones,
+            vec![
+                track("drums", "DRUMS", None, true),
+                track("kick", "Kick", Some("drums"), false),
+                track("bass", "Bass", None, false),
+            ],
+            "master".into(),
+            1.0,
+        );
+        // Press alone yields nothing (deferred for hold resolution).
+        assert!(s.handle_midi(&[0x90, 0x18, 0x7F], 0).is_empty());
+        // Quick release → tap action (select).
+        assert_eq!(
+            s.handle_midi(&[0x90, 0x18, 0x00], 100),
+            vec![Intent::SelectExclusive {
+                guid: "drums".into()
+            }]
+        );
+        // Press + long release → hold action (folder spill).
+        assert!(s.handle_midi(&[0x90, 0x18, 0x7F], 1000).is_empty());
+        assert_eq!(
+            s.handle_midi(&[0x90, 0x18, 0x00], 1000 + HOLD_MS),
+            vec![Intent::Refresh]
+        );
+        assert_eq!(s.nav.depth(), 1);
+    }
+
+    #[test]
+    fn sends_zone_maps_strips_to_send_slots() {
+        let zones = ZoneSet::parse(
+            r#"
+zones {
+    home {
+        strip {select @TrackSelect}
+        buttons {global_view @GoZone{zone sends}}
+    }
+    sends {
+        display_color @Cyan
+        strip {
+            fader @SendVolume
+            vpot @SendPan
+            mute @SendMute
+            lcd_top @SendNameDisplay
+            lcd_bottom @SendVolumeDisplay
+        }
+        buttons {global_view @GoZone{zone home}}
+    }
+}
+"#,
+        )
+        .unwrap();
+        let mut tracks = vec![
+            track("a", "A", None, false),
+            track("verb", "Verb", None, false),
+        ];
+        tracks[0].selected = true;
+        let mut s = DriverState::new(zones, tracks, "master".into(), 1.0);
+
+        // Enter the sends zone; async edge would now refetch sends.
+        assert_eq!(
+            tap(&mut s, 0x33, 0),
+            vec![Intent::Refresh, Intent::RefreshSends]
+        );
+        s.set_sends(vec![SendSlot {
+            dest_name: "Verb".into(),
+            volume: 0.5,
+            pan: 0.0,
+            muted: false,
+        }]);
+        assert!(s.uses_sends());
+
+        // Fader on strip 0 = send 0 volume of the selected track.
+        let intents = s.handle_midi(&mcu::encode_fader(0, taper::volume_to_fader(1.0)), 100);
+        assert_eq!(
+            intents,
+            vec![Intent::SetSendVolume {
+                guid: "a".into(),
+                index: 0,
+                volume: taper::fader_to_volume(taper::volume_to_fader(1.0)),
+            }]
+        );
+        // Strip 1 has no send slot → inert.
+        assert!(s.handle_midi(&mcu::encode_fader(1, 8000), 200).is_empty());
+
+        // Mute toggles the slot.
+        assert_eq!(
+            tap(&mut s, 0x10, 300),
+            vec![Intent::SetSendMuted {
+                guid: "a".into(),
+                index: 0,
+                muted: true
+            }]
+        );
+
+        // Render: zone color override + send name on the LCD.
+        s.shadow.invalidate();
+        let msgs = s.render();
+        assert!(
+            msgs.iter()
+                .any(|m| m.len() == 15 && m[5] == 0x12 && &m[7..11] == b"Verb"),
+            "send name missing from LCD: {msgs:?}"
+        );
+        let color_msg = msgs.iter().find(|m| m.len() == 15 && m[5] == 0x72).unwrap();
+        assert!(
+            color_msg[6..14]
+                .iter()
+                .all(|&c| c == StripColor::Cyan as u8),
+            "zone color override not applied: {color_msg:?}"
+        );
+    }
+
+    #[test]
+    fn vca_zone_spills_followers() {
+        use daw_proto::track::TrackGrouping;
+        let zones = ZoneSet::parse(
+            r#"
+zones {
+    home {
+        navigator @Vca
+        strip {
+            select @TrackSelect
+            hold+select @VcaSpill
+        }
+    }
+}
+"#,
+        )
+        .unwrap();
+        let mut lead = track("vca", "BAND VCA", None, false);
+        lead.grouping = TrackGrouping {
+            vca_lead: 0b10,
+            ..Default::default()
+        };
+        let mut f1 = track("gtr", "Gtr", None, false);
+        f1.grouping = TrackGrouping {
+            vca_follow: 0b10,
+            ..Default::default()
+        };
+        let plain = track("talk", "Talk", None, false);
+        let mut s = DriverState::new(zones, vec![lead, f1, plain], "master".into(), 1.0);
+
+        // VCA root: only the lead is visible.
+        assert_eq!(s.strip_track(0).map(|t| t.guid.as_str()), Some("vca"));
+        assert!(s.strip_track(1).is_none());
+
+        // Hold select on the lead → spill [lead, follower].
+        s.handle_midi(&[0x90, 0x18, 0x7F], 0);
+        assert_eq!(
+            s.handle_midi(&[0x90, 0x18, 0x00], HOLD_MS),
+            vec![Intent::Refresh]
+        );
+        assert_eq!(s.strip_track(0).map(|t| t.guid.as_str()), Some("vca"));
+        assert_eq!(s.strip_track(1).map(|t| t.guid.as_str()), Some("gtr"));
+
+        // Hold select on the lead again → pop back to the lead list.
+        s.handle_midi(&[0x90, 0x18, 0x7F], 2000);
+        assert_eq!(
+            s.handle_midi(&[0x90, 0x18, 0x00], 2000 + HOLD_MS),
+            vec![Intent::Refresh]
+        );
+        assert!(s.strip_track(1).is_none());
     }
 
     #[test]
@@ -1070,8 +1644,18 @@ zones {
             "master".into(),
             1.0,
         );
-        assert!(s.handle_midi(&[0x90, 0x10, 0x7F]).is_empty()); // mute
-        assert!(s.handle_midi(&[0x90, 0x5E, 0x7F]).is_empty()); // play
-        assert!(!s.handle_midi(&mcu::encode_fader(0, 100)).is_empty());
+        assert!(tap(&mut s, 0x10, 0).is_empty()); // mute
+        assert!(tap(&mut s, 0x5E, 100).is_empty()); // play
+        assert!(!s.handle_midi(&mcu::encode_fader(0, 100), 200).is_empty());
+    }
+
+    #[test]
+    fn builtin_zones_still_have_no_hold_latency() {
+        // The builtin set defines no hold+ bindings — presses must
+        // dispatch on press, not release.
+        assert!(!DEFAULT_ZONES.contains("hold+"));
+        let mut s = state();
+        let press_only = s.handle_midi(&[0x90, 0x5E, 0x7F], 0);
+        assert_eq!(press_only, vec![Intent::Play]);
     }
 }

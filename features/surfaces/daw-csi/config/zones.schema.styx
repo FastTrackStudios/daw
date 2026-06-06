@@ -18,12 +18,17 @@ schema {
     }
 
     Zone @object{
-        /// Inherit all bindings from another zone; local entries override.
-        include @optional(@string)
+        /// Inherit bindings from these zones in order (later wins);
+        /// local entries override. CSI's IncludedZones.
+        include @optional(@seq(@string))
         /// Navigator pinned while this zone is active.
-        navigator @optional(@enum{Track, Folder})
+        navigator @optional(@enum{Track, Folder, Vca})
+        /// Override every scribble backlight while active (CSI's
+        /// SetXTouchDisplayColors); track colors restore on exit.
+        display_color @optional(@enum{Off, Red, Green, Yellow, Blue, Magenta, Cyan, White})
         /// Per-strip widget → action. Keys may carry modifier
-        /// prefixes: shift+ option+ control+ alt+ (e.g. shift+select).
+        /// prefixes: shift+ option+ control+ alt+ hold+
+        /// (e.g. shift+select, hold+select).
         strip @optional(@map(@Action))
         /// Master-section widget → action (same modifier prefixes).
         buttons @optional(@map(@Action))
@@ -38,12 +43,21 @@ schema {
         TrackSolo
         TrackRecordArm
         TrackSelect
+        TrackSelectAdditive
         FolderSpill
+        VcaSpill
+        // Strip: send slots of the selected track
+        SendVolume
+        SendPan
+        SendMute
         // Strip displays
         TrackName
         PanDisplay
         VolumeDisplay
         FolderIndicator
+        SendNameDisplay
+        SendVolumeDisplay
+        SendPanDisplay
         Fixed @object{text @string}
         Blank
         // Master / global
@@ -52,9 +66,12 @@ schema {
         Stop
         Record
         ToggleLoop
+        ClearAllSolo
+        UnmuteAll
         NudgePosition @object{seconds @float}
         JogPosition @object{seconds_per_tick @float}
         Bank @object{amount @int}
+        BankSends @object{amount @int}
         GoZone @object{zone @string}
         NoAction
     }

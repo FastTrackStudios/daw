@@ -59,10 +59,15 @@ pub struct ZonesFile {
 /// One zone as written in the file.
 #[derive(Facet, Debug, Default)]
 pub struct ZoneDef {
-    /// Inherit every binding from this zone; local entries override.
-    pub include: Option<String>,
+    /// Inherit bindings from these zones, in order (later wins);
+    /// local entries override all of them. CSI's `IncludedZones`.
+    pub include: Option<Vec<String>>,
     /// Navigator mode pinned while this zone is active.
     pub navigator: Option<NavigatorKind>,
+    /// Override every scribble strip's backlight while this zone is
+    /// active (CSI's `SetXTouchDisplayColors`); track colors restore
+    /// on exit.
+    pub display_color: Option<DisplayColor>,
     /// Per-strip widget bindings (apply to all 8 strips).
     pub strip: Option<HashMap<String, Action>>,
     /// Master-section widget bindings.
@@ -74,6 +79,7 @@ pub struct ZoneDef {
 pub enum NavigatorKind {
     Track,
     Folder,
+    Vca,
 }
 
 impl From<NavigatorKind> for NavMode {
@@ -81,19 +87,53 @@ impl From<NavigatorKind> for NavMode {
         match k {
             NavigatorKind::Track => NavMode::Track,
             NavigatorKind::Folder => NavMode::Folder,
+            NavigatorKind::Vca => NavMode::Vca,
+        }
+    }
+}
+
+/// The X-Touch scribble palette, as zone config (mirrors
+/// [`crate::mcu::StripColor`]).
+#[repr(u8)]
+#[derive(Facet, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisplayColor {
+    Off,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
+    White,
+}
+
+impl From<DisplayColor> for crate::mcu::StripColor {
+    fn from(c: DisplayColor) -> Self {
+        use crate::mcu::StripColor as S;
+        match c {
+            DisplayColor::Off => S::Off,
+            DisplayColor::Red => S::Red,
+            DisplayColor::Green => S::Green,
+            DisplayColor::Yellow => S::Yellow,
+            DisplayColor::Blue => S::Blue,
+            DisplayColor::Magenta => S::Magenta,
+            DisplayColor::Cyan => S::Cyan,
+            DisplayColor::White => S::White,
         }
     }
 }
 
 // ── Widget + modifier keys ──────────────────────────────────────────
 
-/// Modifier bitmask (Shift / Option / Control / Alt — the four MCU
-/// modifier keys).
+/// Modifier bitmask: the four MCU modifier keys plus the synthetic
+/// HOLD bit — `hold+select` binds a long-press (CSI's `Hold+`); the
+/// driver sets the bit when a press outlasts the hold threshold.
 pub type Modifiers = u8;
 pub const SHIFT: Modifiers = 1 << 0;
 pub const OPTION: Modifiers = 1 << 1;
 pub const CONTROL: Modifiers = 1 << 2;
 pub const ALT: Modifiers = 1 << 3;
+pub const HOLD: Modifiers = 1 << 4;
 
 /// Widgets that exist once per channel strip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -164,6 +204,14 @@ fn parse_global_widget(s: &str) -> Option<GlobalWidget> {
         "right" => GlobalWidget::Button(Button::Right),
         "zoom" => GlobalWidget::Button(Button::Zoom),
         "scrub" => GlobalWidget::Button(Button::Scrub),
+        // MCU encoder-assign keys (Track/Send/Pan/Plugin/EQ/Inst) —
+        // the canonical zone-switch buttons.
+        "assign_track" => GlobalWidget::Button(Button::Assign(crate::mcu::AssignKey::Track)),
+        "assign_send" => GlobalWidget::Button(Button::Assign(crate::mcu::AssignKey::Send)),
+        "assign_pan" => GlobalWidget::Button(Button::Assign(crate::mcu::AssignKey::Pan)),
+        "assign_plugin" => GlobalWidget::Button(Button::Assign(crate::mcu::AssignKey::Plugin)),
+        "assign_eq" => GlobalWidget::Button(Button::Assign(crate::mcu::AssignKey::Eq)),
+        "assign_inst" => GlobalWidget::Button(Button::Assign(crate::mcu::AssignKey::Inst)),
         s if s.starts_with('f') => {
             let n: u8 = s[1..].parse().ok()?;
             (1..=8)
@@ -187,6 +235,7 @@ fn parse_qualified(key: &str) -> eyre::Result<(Modifiers, &str)> {
             "option" => OPTION,
             "control" => CONTROL,
             "alt" => ALT,
+            "hold" => HOLD,
             other => return Err(eyre!("unknown modifier '{other}' in binding '{key}'")),
         };
         rest = tail;
@@ -199,6 +248,7 @@ fn parse_qualified(key: &str) -> eyre::Result<(Modifiers, &str)> {
 #[derive(Debug, Default, Clone)]
 pub struct CompiledZone {
     pub navigator: Option<NavMode>,
+    pub display_color: Option<crate::mcu::StripColor>,
     pub strip: HashMap<(Modifiers, StripWidget), Action>,
     pub global: HashMap<(Modifiers, GlobalWidget), Action>,
 }
@@ -217,6 +267,17 @@ impl CompiledZone {
         self.global
             .get(&(mods, widget))
             .or_else(|| self.global.get(&(0, widget)))
+    }
+
+    /// Whether an EXACT binding exists (no unmodified fallback). The
+    /// driver uses this to decide if a press must wait for hold
+    /// resolution.
+    pub fn strip_has_exact(&self, mods: Modifiers, widget: StripWidget) -> bool {
+        self.strip.contains_key(&(mods, widget))
+    }
+
+    pub fn global_has_exact(&self, mods: Modifiers, widget: GlobalWidget) -> bool {
+        self.global.contains_key(&(mods, widget))
     }
 }
 
@@ -291,14 +352,26 @@ fn compile_zone(
         .ok_or_else(|| eyre!("zone '{name}' referenced but not defined"))?;
 
     visiting.push(name.to_string());
-    let mut zone = match &def.include {
-        Some(parent) => compile_zone(parent, defs, out, visiting)?,
-        None => CompiledZone::default(),
-    };
+    let mut zone = CompiledZone::default();
+    for parent in def.include.as_deref().unwrap_or_default() {
+        let parent = compile_zone(parent, defs, out, visiting)?;
+        // Later includes override earlier ones; locals override all.
+        if parent.navigator.is_some() {
+            zone.navigator = parent.navigator;
+        }
+        if parent.display_color.is_some() {
+            zone.display_color = parent.display_color;
+        }
+        zone.strip.extend(parent.strip);
+        zone.global.extend(parent.global);
+    }
     visiting.pop();
 
     if let Some(nav) = def.navigator {
         zone.navigator = Some(nav.into());
+    }
+    if let Some(color) = def.display_color {
+        zone.display_color = Some(color.into());
     }
     if let Some(strip) = &def.strip {
         for (key, action) in strip {
@@ -351,6 +424,49 @@ mod tests {
     }
 
     #[test]
+    fn converted_csi_official_zones_compile() {
+        // The zon2styx conversion of CSI's official X-Touch zone set
+        // must stay parseable (regenerate with:
+        // cargo run -p daw-csi --bin zon2styx -- <CSI/Surfaces/X_Touch/Zones>).
+        let set = ZoneSet::parse(include_str!("../config/xtouch-csi.zones.styx"))
+            .expect("converted CSI zones must compile");
+        // Home merges CSI's IncludedZones (Track + MasterTrack).
+        let home = set.zone("home").expect("home zone");
+        assert_eq!(
+            home.strip_action(0, StripWidget::Fader),
+            Some(&Action::TrackVolume)
+        );
+        assert_eq!(
+            home.global_action(0, GlobalWidget::MasterFader),
+            Some(&Action::MasterVolume)
+        );
+        // CSI's official folder spill is HOLD+Select.
+        let folder = set.zone("folder").expect("folder zone");
+        assert_eq!(
+            folder.strip_action(HOLD, StripWidget::Select),
+            Some(&Action::FolderSpill)
+        );
+        assert_eq!(
+            folder.strip_action(0, StripWidget::Select),
+            Some(&Action::TrackSelect)
+        );
+        assert_eq!(folder.display_color, Some(crate::mcu::StripColor::Yellow));
+        // The sends zone landed with send actions + cyan scribbles.
+        let sends = set.zone("selected_track_send").expect("sends zone");
+        assert_eq!(
+            sends.strip_action(0, StripWidget::Fader),
+            Some(&Action::SendVolume)
+        );
+        assert_eq!(sends.display_color, Some(crate::mcu::StripColor::Cyan));
+        // VCA zone: hold+select spills.
+        let vca = set.zone("vca").expect("vca zone");
+        assert_eq!(
+            vca.strip_action(HOLD, StripWidget::Select),
+            Some(&Action::VcaSpill)
+        );
+    }
+
+    #[test]
     fn modifier_bindings_and_fallback() {
         let set = ZoneSet::parse(
             r#"
@@ -394,8 +510,8 @@ zones {
         let err = ZoneSet::parse(
             r#"
 zones {
-    home {include other}
-    other {include home}
+    home {include (other)}
+    other {include (home)}
 }
 "#,
         )
@@ -430,7 +546,7 @@ zones {
             rewind @NudgePosition{seconds -5}
         }
     }
-    folder {include home}
+    folder {include (home)}
 }
 "#,
         )
