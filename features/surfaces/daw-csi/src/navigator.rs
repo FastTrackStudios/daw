@@ -52,10 +52,13 @@ impl Navigator {
         match self.mode {
             NavMode::Track => (0..tracks.len()).collect(),
             NavMode::Folder => match self.folder_stack.last() {
+                // Root: only TOP-LEVEL FOLDER tracks — CSI's
+                // folderTopParentTracks_ (loose tracks don't appear
+                // in folder mode; that's what Track mode is for).
                 None => tracks
                     .iter()
                     .enumerate()
-                    .filter(|(_, t)| t.parent_guid.is_none())
+                    .filter(|(_, t)| t.parent_guid.is_none() && t.is_folder)
                     .map(|(i, _)| i)
                     .collect(),
                 Some(parent) => {
@@ -255,15 +258,13 @@ mod tests {
     }
 
     #[test]
-    fn folder_root_shows_top_level() {
+    fn folder_root_shows_top_level_folders_only() {
         let tracks = session();
         let mut nav = Navigator::default();
         nav.set_mode(NavMode::Folder);
-        // Root: drums (folder), bass, vox.
-        assert_eq!(
-            nav.visible(&tracks, 4),
-            vec![Some(0), Some(6), Some(7), None]
-        );
+        // CSI semantics: the root shows TOP-LEVEL FOLDERS only —
+        // drums. Loose tracks (bass, vox) live in Track mode.
+        assert_eq!(nav.visible(&tracks, 4), vec![Some(0), None, None, None]);
     }
 
     #[test]

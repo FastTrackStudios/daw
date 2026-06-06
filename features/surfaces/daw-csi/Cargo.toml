@@ -35,3 +35,5 @@ midi-hardware = ["dep:midir"]
 # against an in-process Standalone (no hardware, no REAPER).
 # `clap-host` lets the FX-zone test load real CLAP plugins.
 daw-standalone = { path = "../../standalone/daw-standalone", features = ["bootstrap", "clap-host", "decode"] }
+# Console output for the xtouch_test hardware exerciser.
+tracing-subscriber = { workspace = true }

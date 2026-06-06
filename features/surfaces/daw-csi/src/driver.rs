@@ -427,8 +427,18 @@ impl DriverState {
     /// mutate local state here and yield `Refresh`.
     pub fn handle_midi(&mut self, raw: &[u8], now_ms: u64) -> Vec<Intent> {
         let Some(input) = mcu::decode(raw) else {
+            tracing::trace!(?raw, "csi: undecoded MIDI from surface");
             return Vec::new();
         };
+        tracing::debug!(zone = %self.active_zone, ?input, "csi: surface input");
+        let intents = self.handle_input(input, now_ms);
+        if !intents.is_empty() {
+            tracing::debug!(?intents, "csi: → intents");
+        }
+        intents
+    }
+
+    fn handle_input(&mut self, input: SurfaceInput, now_ms: u64) -> Vec<Intent> {
         match input {
             SurfaceInput::Fader { strip, pos } => {
                 if strip == mcu::MASTER {
