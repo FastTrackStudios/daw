@@ -45,6 +45,19 @@ pub enum Action {
     /// Toggle send mute.
     SendMute,
 
+    // ── Strip: FX menu (strip = FX slot of the selected track) ─────
+    /// Focus the strip's FX and hop to its param zone (CSI's
+    /// `GoFXSlot`). `zone` names the param zone to enter.
+    FxMenuSelect {
+        zone: String,
+    },
+    /// Toggle the strip's FX bypass (LED lit = enabled).
+    FxMenuBypass,
+
+    // ── Strip: FX params (strip = param slot of the focused FX) ────
+    /// V-pot/fader ↔ the strip's parameter of the focused FX.
+    FxParam,
+
     // ── Strip: displays ─────────────────────────────────────────────
     /// Track name on an LCD row.
     TrackName,
@@ -61,6 +74,12 @@ pub enum Action {
     SendVolumeDisplay,
     /// Send pan position.
     SendPanDisplay,
+    /// FX name (FX-menu zones).
+    FxMenuNameDisplay,
+    /// Parameter name of the focused FX (FX param zones).
+    FxParamNameDisplay,
+    /// Plugin-formatted parameter value ("−12.0 dB").
+    FxParamValueDisplay,
     /// A literal string.
     Fixed {
         text: String,
@@ -92,6 +111,11 @@ pub enum Action {
     },
     /// Bank the SEND-slot window (sends zones).
     BankSends {
+        amount: i32,
+    },
+    /// Bank the FX-PARAM window (FX param zones; plugins routinely
+    /// expose more than 8 parameters).
+    BankFxParams {
         amount: i32,
     },
     /// Un-solo every track (CSI `ClearAllSolo`).

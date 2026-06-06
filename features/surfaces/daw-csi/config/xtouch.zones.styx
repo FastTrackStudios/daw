@@ -48,6 +48,7 @@ zones {
             channel_left  @Bank{amount -1}
             channel_right @Bank{amount 1}
             global_view   @GoZone{zone folder}
+            assign_plugin @GoZone{zone fxmenu}
         }
     }
 
@@ -63,6 +64,60 @@ zones {
         }
         buttons {
             global_view @GoZone{zone home}
+        }
+    }
+
+    /// FX menu: strips show the SELECTED track's FX chain. SELECT
+    /// focuses an FX and opens its parameter zone; MUTE bypasses
+    /// (LED lit = active).
+    fxmenu {
+        display_color @Blue
+        strip {
+            lcd_top @FxMenuNameDisplay
+            lcd_bottom @Blank
+            select  @FxMenuSelect{zone fx}
+            mute    @FxMenuBypass
+            rec     @NoAction
+            solo    @NoAction
+        }
+        buttons {
+            master_fader  @MasterVolume
+            play @Play
+            stop @Stop
+            record @Record
+            cycle @ToggleLoop
+            assign_plugin @GoZone{zone home}
+            global_view   @GoZone{zone home}
+        }
+    }
+
+    /// FX params: strips are the focused FX's parameters — v-pot
+    /// turns, fader rides, both rows show name/value. CHANNEL </>
+    /// pages through plugins with more than 8 parameters.
+    fx {
+        display_color @Green
+        strip {
+            fader      @FxParam
+            vpot       @FxParam
+            lcd_top    @FxParamNameDisplay
+            lcd_bottom @FxParamValueDisplay
+            mute       @NoAction
+            rec        @NoAction
+            solo       @NoAction
+            select     @NoAction
+        }
+        buttons {
+            master_fader  @MasterVolume
+            play @Play
+            stop @Stop
+            record @Record
+            cycle @ToggleLoop
+            channel_left  @BankFxParams{amount -1}
+            channel_right @BankFxParams{amount 1}
+            bank_left     @BankFxParams{amount -8}
+            bank_right    @BankFxParams{amount 8}
+            assign_plugin @GoZone{zone fxmenu}
+            global_view   @GoZone{zone home}
         }
     }
 }

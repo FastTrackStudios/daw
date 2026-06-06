@@ -437,6 +437,9 @@ pub struct Standalone {
     /// here; per-subscriber vox pumps bridge broadcast events into `Tx`.
     pub(crate) track_events:
         Arc<tokio::sync::broadcast::Sender<daw_proto::track::TrackStreamEvent>>,
+    /// FX-domain events (param changes, add/remove, bypass) — feeds
+    /// the event bus for control surfaces / UIs.
+    pub(crate) fx_events: Arc<tokio::sync::broadcast::Sender<daw_proto::fx::FxStreamEvent>>,
     pub(crate) marker_events:
         Arc<tokio::sync::broadcast::Sender<daw_proto::marker::MarkerStreamEvent>>,
     pub(crate) region_events:
@@ -469,6 +472,7 @@ impl Standalone {
             plugin_instances: Arc::new(Mutex::new(std::collections::HashMap::new())),
             loaded_plugins: Arc::new(Mutex::new(std::collections::HashMap::new())),
             track_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
+            fx_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
             marker_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
             region_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
             tempo_map_events: Arc::new(tokio::sync::broadcast::channel(1024).0),

@@ -187,12 +187,21 @@ impl Effects for Standalone {
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
         let key: FxChainKey = (&target.context).into();
-        self.with_project_mut(&guid, |p| {
+        let fx_guid = self.with_project_mut(&guid, |p| {
             let chain = p.fx_chains.get_mut(&key).ok_or_else(not_found_fx)?;
             let i = find_fx_index(chain, &target.fx).ok_or_else(not_found_fx)?;
             chain[i].fx.enabled = enabled;
-            Ok::<(), DawError>(())
-        })?
+            Ok::<String, DawError>(chain[i].fx.guid.clone())
+        })??;
+        self.publish_fx_event(
+            &guid,
+            daw_proto::FxEvent::EnabledChanged {
+                context: target.context,
+                fx_guid,
+                enabled,
+            },
+        );
+        Ok(())
     }
 
     fn set_offline(
@@ -262,6 +271,18 @@ impl Effects for Standalone {
                 .expect("plugin_instances poisoned")
                 .insert(new_guid.clone(), plugin);
         }
+        let added = self
+            .with_project(&guid, |p| {
+                p.fx_chains
+                    .get(&FxChainKey::from(&chain))
+                    .and_then(|c| c.iter().find(|e| e.fx.guid == new_guid))
+                    .map(|e| e.fx.clone())
+            })
+            .ok()
+            .flatten();
+        if let Some(fx) = added {
+            self.publish_fx_event(&guid, daw_proto::FxEvent::Added { context: chain, fx });
+        }
         Some(new_guid)
     }
 
@@ -314,6 +335,13 @@ impl Effects for Standalone {
             .lock()
             .expect("plugin_instances poisoned")
             .remove(&removed_guid);
+        self.publish_fx_event(
+            &guid,
+            daw_proto::FxEvent::Removed {
+                context: target.context,
+                fx_guid: removed_guid,
+            },
+        );
         Ok(())
     }
 
@@ -335,30 +363,20 @@ impl Effects for Standalone {
 
     fn parameters(&self, project: ProjectContext, target: FxTarget) -> Vec<FxParameter> {
         if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
-            let mut plugins = self
-                .plugin_instances
-                .lock()
-                .expect("plugin_instances poisoned");
-            if let Some(plugin) = plugins.get_mut(&fx_guid) {
-                return plugin
-                    .params()
-                    .into_iter()
-                    .map(|p| {
-                        let value = plugin.param_value(p.id).unwrap_or(p.default);
-                        let formatted = plugin
-                            .value_to_text(p.id, value)
-                            .unwrap_or_else(|| format!("{value:.2}"));
-                        FxParameter {
-                            index: p.id,
-                            name: p.name,
-                            value,
-                            formatted,
-                            is_toggle: false,
-                            step_count: None,
-                            step_labels: Vec::new(),
-                        }
-                    })
-                    .collect();
+            // Live plugin: slot-indexed, normalized, engine overrides
+            // preferred — same view FxParams exposes.
+            let stored = resolve_project(self, &project).and_then(|guid| {
+                self.with_project(&guid, |p| {
+                    p.fx_chains
+                        .get(&FxChainKey::from(&target.context))
+                        .and_then(|c| c.iter().find(|e| e.fx.guid == fx_guid))
+                        .map(|e| e.params.clone())
+                })
+                .ok()
+                .flatten()
+            });
+            if let Some(params) = self.slot_parameters(&fx_guid, &stored.unwrap_or_default()) {
+                return params;
             }
         }
 
@@ -408,15 +426,22 @@ impl Effects for Standalone {
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
         let key: FxChainKey = (&request.target.context).into();
-        self.with_project_mut(&guid, |p| {
-            let chain = p.fx_chains.get_mut(&key).ok_or_else(not_found_fx)?;
-            let i = find_fx_index(chain, &request.target.fx).ok_or_else(not_found_fx)?;
-            chain[i]
-                .params
-                .insert(request.index, request.value.clamp(0.0, 1.0));
-            // Update last_touched.
-            Ok::<(), DawError>(())
-        })??;
+        // Resolve the chain index, then delegate to FxParams::set —
+        // one slot→param-id translation + ParameterChanged publish
+        // path for every API surface.
+        let fx_idx = self.with_project(&guid, |p| {
+            p.fx_chains
+                .get(&key)
+                .and_then(|chain| find_fx_index(chain, &request.target.fx))
+        })?;
+        let fx_idx = fx_idx.ok_or_else(not_found_fx)? as u32;
+        daw_proto::FxParams::set(
+            self,
+            request.target.context.clone(),
+            fx_idx,
+            request.index,
+            request.value.clamp(0.0, 1.0),
+        )?;
         // Update last-touched FX.
         let (track_guid, is_input_fx) = match &request.target.context {
             FxChainContext::Track(g) => (g.clone(), false),

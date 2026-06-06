@@ -109,6 +109,21 @@ pub enum Intent {
     /// Re-fetch the selected track's send slots (async edge handles
     /// this and calls [`DriverState::set_sends`]).
     RefreshSends,
+    SetFxParam {
+        guid: String,
+        fx_idx: u32,
+        param_idx: u32,
+        value: f64,
+    },
+    SetFxEnabled {
+        guid: String,
+        fx_idx: u32,
+        enabled: bool,
+    },
+    /// Re-fetch the selected track's FX chain + the focused FX's
+    /// params (async edge → [`DriverState::set_fx`] /
+    /// [`DriverState::set_params`]).
+    RefreshFx,
     Play,
     Stop,
     Record,
@@ -142,6 +157,24 @@ pub struct SendSlot {
     pub muted: bool,
 }
 
+/// One FX slot of the selected track (FX-menu zone strip context).
+#[derive(Debug, Clone, Default)]
+pub struct FxSlot {
+    pub guid: String,
+    pub name: String,
+    pub enabled: bool,
+}
+
+/// One parameter of the focused FX (FX param zone strip context).
+#[derive(Debug, Clone, Default)]
+pub struct ParamSlot {
+    pub name: String,
+    /// Normalized 0–1.
+    pub value: f64,
+    /// Plugin-formatted display value ("−12.0 dB").
+    pub text: String,
+}
+
 /// A press waiting for hold/tap resolution at release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum PendingKey {
@@ -172,6 +205,14 @@ pub struct DriverState {
     pub sends: Vec<SendSlot>,
     /// Window offset into `sends`.
     send_bank: usize,
+    /// FX chain of the selected track (FX-menu zones).
+    pub fx_list: Vec<FxSlot>,
+    /// Which `fx_list` slot the param zone operates on.
+    pub focused_fx: Option<usize>,
+    /// Parameters of the focused FX (FX param zones).
+    pub params: Vec<ParamSlot>,
+    /// Window offset into `params`.
+    param_bank: usize,
     pub master_guid: String,
     pub master_volume: f64,
     pub play_state: PlayState,
@@ -202,6 +243,10 @@ impl DriverState {
             strips: vec![None; mcu::STRIPS],
             sends: Vec::new(),
             send_bank: 0,
+            fx_list: Vec::new(),
+            focused_fx: None,
+            params: Vec::new(),
+            param_bank: 0,
             master_guid,
             master_volume,
             play_state: PlayState::Stopped,
@@ -256,6 +301,33 @@ impl DriverState {
         self.send_bank = self.send_bank.min(self.sends.len().saturating_sub(1));
     }
 
+    /// Replace the FX-chain cache (async edge, after RefreshFx).
+    pub fn set_fx(&mut self, fx: Vec<FxSlot>) {
+        self.fx_list = fx;
+        if self.focused_fx.is_some_and(|i| i >= self.fx_list.len()) {
+            self.focused_fx = None;
+            self.params.clear();
+        }
+    }
+
+    /// Replace the focused FX's parameter cache.
+    pub fn set_params(&mut self, params: Vec<ParamSlot>) {
+        self.params = params;
+        self.param_bank = self.param_bank.min(self.params.len().saturating_sub(1));
+    }
+
+    fn param_slot(&self, strip: u8) -> Option<&ParamSlot> {
+        self.params.get(self.param_bank + strip as usize)
+    }
+
+    fn param_index(&self, strip: u8) -> u32 {
+        (self.param_bank + strip as usize) as u32
+    }
+
+    fn fx_slot(&self, strip: u8) -> Option<&FxSlot> {
+        self.fx_list.get(strip as usize)
+    }
+
     /// Whether the active zone binds any send action — the async edge
     /// uses this to refetch sends on selection changes.
     pub fn uses_sends(&self) -> bool {
@@ -275,6 +347,61 @@ impl DriverState {
                 })
             })
             .unwrap_or(false)
+    }
+
+    /// Whether the active zone binds any FX action — refetch trigger
+    /// for selection changes and FX add/remove events.
+    pub fn uses_fx(&self) -> bool {
+        self.zones
+            .zone(&self.active_zone)
+            .map(|z| {
+                z.strip.values().any(|a| {
+                    matches!(
+                        a,
+                        Action::FxMenuSelect { .. }
+                            | Action::FxMenuBypass
+                            | Action::FxParam
+                            | Action::FxMenuNameDisplay
+                            | Action::FxParamNameDisplay
+                            | Action::FxParamValueDisplay
+                    )
+                })
+            })
+            .unwrap_or(false)
+    }
+
+    /// Apply an FX event from the bus to the caches. Returns `true`
+    /// when the chain SHAPE changed (added/removed) — the caller
+    /// should refetch via RefreshFx semantics.
+    pub fn apply_fx_event(&mut self, event: &daw_proto::FxEvent) -> bool {
+        use daw_proto::FxEvent as E;
+        match event {
+            E::Added { .. } | E::Removed { .. } | E::Moved { .. } => return true,
+            E::EnabledChanged {
+                fx_guid, enabled, ..
+            } => {
+                if let Some(slot) = self.fx_list.iter_mut().find(|f| &f.guid == fx_guid) {
+                    slot.enabled = *enabled;
+                }
+            }
+            E::ParameterChanged {
+                fx_guid,
+                param_index,
+                value,
+                ..
+            } => {
+                // Only the focused FX's params are cached.
+                let focused = self
+                    .focused_fx
+                    .and_then(|i| self.fx_list.get(i))
+                    .is_some_and(|f| &f.guid == fx_guid);
+                if focused && let Some(p) = self.params.get_mut(*param_index as usize) {
+                    p.value = *value;
+                }
+            }
+            _ => {}
+        }
+        false
     }
 
     /// Activate a zone: pin its navigator mode and rebind.
@@ -622,6 +749,84 @@ impl DriverState {
                 }
                 vec![Intent::SetSendMuted { guid, index, muted }]
             }
+            Action::FxMenuSelect { zone } => {
+                let Some(strip) = strip else {
+                    return Vec::new();
+                };
+                if self.fx_slot(strip).is_none() {
+                    return Vec::new();
+                }
+                self.focused_fx = Some(strip as usize);
+                self.param_bank = 0;
+                self.params.clear();
+                let zone = zone.clone();
+                self.enter_zone(&zone);
+                vec![Intent::Refresh, Intent::RefreshFx]
+            }
+            Action::FxMenuBypass => {
+                let Some(strip) = strip else {
+                    return Vec::new();
+                };
+                let Some(guid) = self.selected_guid() else {
+                    return Vec::new();
+                };
+                let Some(slot) = self.fx_slot(strip) else {
+                    return Vec::new();
+                };
+                let enabled = !slot.enabled;
+                let fx_idx = strip as u32;
+                if let Some(s) = self.fx_list.get_mut(strip as usize) {
+                    s.enabled = enabled;
+                }
+                vec![Intent::SetFxEnabled {
+                    guid,
+                    fx_idx,
+                    enabled,
+                }]
+            }
+            Action::FxParam => {
+                let Some(strip) = strip else {
+                    return Vec::new();
+                };
+                let Some(guid) = self.selected_guid() else {
+                    return Vec::new();
+                };
+                let Some(fx_idx) = self.focused_fx else {
+                    return Vec::new();
+                };
+                let value = match gesture {
+                    Gesture::Fader(pos) => pos as f64 / 16383.0,
+                    Gesture::Delta(d) => {
+                        let step = if self.modifiers & SHIFT != 0 {
+                            0.002
+                        } else {
+                            0.01
+                        };
+                        let cur = self.param_slot(strip).map(|p| p.value).unwrap_or(0.0);
+                        (cur + d as f64 * step).clamp(0.0, 1.0)
+                    }
+                    Gesture::Press => return Vec::new(),
+                };
+                if self.param_slot(strip).is_none() {
+                    return Vec::new();
+                }
+                let param_idx = self.param_index(strip);
+                if let Some(p) = self.params.get_mut(self.param_bank + strip as usize) {
+                    p.value = value;
+                }
+                vec![Intent::SetFxParam {
+                    guid,
+                    fx_idx: fx_idx as u32,
+                    param_idx,
+                    value,
+                }]
+            }
+            Action::BankFxParams { amount } => {
+                let max = self.params.len().saturating_sub(1);
+                self.param_bank =
+                    (self.param_bank as isize + *amount as isize).clamp(0, max as isize) as usize;
+                vec![Intent::Refresh]
+            }
             Action::MasterVolume => {
                 let Gesture::Fader(pos) = gesture else {
                     return Vec::new();
@@ -681,6 +886,9 @@ impl DriverState {
             | Action::SendNameDisplay
             | Action::SendVolumeDisplay
             | Action::SendPanDisplay
+            | Action::FxMenuNameDisplay
+            | Action::FxParamNameDisplay
+            | Action::FxParamValueDisplay
             | Action::Fixed { .. }
             | Action::Blank
             | Action::NoAction => Vec::new(),
@@ -773,12 +981,8 @@ impl DriverState {
     }
 
     /// The feedback text for a display action on a strip.
-    fn display_text(
-        &self,
-        action: &Action,
-        track: Option<&Track>,
-        send: Option<&SendSlot>,
-    ) -> String {
+    fn display_text(&self, action: &Action, strip: u8, track: Option<&Track>) -> String {
+        let send = self.send_slot(strip);
         match action {
             Action::TrackName => track.map(|t| t.name.clone()).unwrap_or_default(),
             Action::PanDisplay => track.map(|t| pan_label(t.pan)).unwrap_or_default(),
@@ -795,13 +999,32 @@ impl DriverState {
             Action::SendNameDisplay => send.map(|s| s.dest_name.clone()).unwrap_or_default(),
             Action::SendVolumeDisplay => send.map(|s| volume_label(s.volume)).unwrap_or_default(),
             Action::SendPanDisplay => send.map(|s| pan_label(s.pan)).unwrap_or_default(),
+            Action::FxMenuNameDisplay => self
+                .fx_slot(strip)
+                .map(|f| f.name.clone())
+                .unwrap_or_default(),
+            Action::FxParamNameDisplay => self
+                .param_slot(strip)
+                .map(|p| p.name.clone())
+                .unwrap_or_default(),
+            Action::FxParamValueDisplay => self
+                .param_slot(strip)
+                .map(|p| {
+                    if p.text.is_empty() {
+                        format!("{:>4.0}%", p.value * 100.0)
+                    } else {
+                        p.text.clone()
+                    }
+                })
+                .unwrap_or_default(),
             Action::Fixed { text } => text.clone(),
             _ => String::new(),
         }
     }
 
     /// The LED state for an action bound to a lit button.
-    fn led_state(&self, action: &Action, track: Option<&Track>, send: Option<&SendSlot>) -> bool {
+    fn led_state(&self, action: &Action, strip: Option<u8>, track: Option<&Track>) -> bool {
+        let send = strip.and_then(|s| self.send_slot(s));
         match action {
             Action::TrackMute => track.map(|t| t.muted).unwrap_or(false),
             Action::TrackSolo => track.map(|t| t.soloed).unwrap_or(false),
@@ -811,6 +1034,15 @@ impl DriverState {
             | Action::FolderSpill
             | Action::VcaSpill => track.map(|t| t.selected).unwrap_or(false),
             Action::SendMute => send.map(|s| s.muted).unwrap_or(false),
+            // Bypass LED lit = FX ACTIVE (CSI's FXBypassDisplay).
+            Action::FxMenuBypass => strip
+                .and_then(|s| self.fx_slot(s))
+                .map(|f| f.enabled)
+                .unwrap_or(false),
+            // Select LED marks the focused FX in the menu zone.
+            Action::FxMenuSelect { .. } => {
+                strip.is_some_and(|s| self.focused_fx == Some(s as usize))
+            }
             Action::Play => matches!(self.play_state, PlayState::Playing | PlayState::Recording),
             Action::Record => matches!(self.play_state, PlayState::Recording),
             Action::Stop => matches!(self.play_state, PlayState::Stopped | PlayState::Paused),
@@ -845,6 +1077,10 @@ impl DriverState {
                         .as_ref()
                         .map(|s| taper::volume_to_fader(s.volume))
                         .unwrap_or(0),
+                    Some(Action::FxParam) => self
+                        .param_slot(strip)
+                        .map(|p| (p.value * 16383.0).round() as u16)
+                        .unwrap_or(0),
                     _ => 0,
                 };
                 self.shadow.fader(&mut out, strip, pos);
@@ -873,6 +1109,16 @@ impl DriverState {
                     ((send.as_ref().unwrap().volume.min(1.0)) * 11.0).round() as u8,
                     false,
                 ),
+                Some(Action::FxParam) if self.param_slot(strip).is_some() => {
+                    let value = self.param_slot(strip).unwrap().value;
+                    self.shadow.ring(
+                        &mut out,
+                        strip,
+                        RingMode::Wrap,
+                        (value * 11.0).round().max(1.0) as u8,
+                        false,
+                    )
+                }
                 _ => self
                     .shadow
                     .ring(&mut out, strip, RingMode::SingleDot, 0, false),
@@ -887,7 +1133,7 @@ impl DriverState {
             ] {
                 let lit = zone
                     .strip_action(0, widget)
-                    .map(|a| self.led_state(a, track.as_ref(), send.as_ref()))
+                    .map(|a| self.led_state(a, Some(strip), track.as_ref()))
                     .unwrap_or(false);
                 self.shadow.led(&mut out, button, lit);
             }
@@ -896,7 +1142,7 @@ impl DriverState {
             for (widget, row) in [(StripWidget::LcdTop, 0u8), (StripWidget::LcdBottom, 1u8)] {
                 let text = zone
                     .strip_action(0, widget)
-                    .map(|a| self.display_text(a, track.as_ref(), send.as_ref()))
+                    .map(|a| self.display_text(a, strip, track.as_ref()))
                     .unwrap_or_default();
                 self.shadow.lcd(&mut out, strip, row, &text);
             }
@@ -1001,6 +1247,64 @@ async fn fetch_sends(
     }
 }
 
+/// Fetch the selected track's FX chain for the driver cache.
+async fn fetch_fx(project: &daw_control::Project, selected_guid: Option<String>) -> Vec<FxSlot> {
+    let Some(guid) = selected_guid else {
+        return Vec::new();
+    };
+    let Ok(Some(handle)) = project.tracks().by_guid(&guid).await else {
+        return Vec::new();
+    };
+    match handle.fx_chain().all().await {
+        Ok(list) => list
+            .into_iter()
+            .map(|fx| FxSlot {
+                guid: fx.guid,
+                name: fx.name,
+                enabled: fx.enabled,
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Fetch the focused FX's parameters for the driver cache.
+async fn fetch_params(
+    project: &daw_control::Project,
+    selected_guid: Option<String>,
+    fx_idx: Option<usize>,
+) -> Vec<ParamSlot> {
+    let (Some(guid), Some(fx_idx)) = (selected_guid, fx_idx) else {
+        return Vec::new();
+    };
+    let Ok(Some(handle)) = project.tracks().by_guid(&guid).await else {
+        return Vec::new();
+    };
+    let Ok(Some(fx)) = handle.fx_chain().by_index(fx_idx as u32).await else {
+        return Vec::new();
+    };
+    match fx.parameters().await {
+        Ok(params) => params
+            .into_iter()
+            .map(|p| ParamSlot {
+                name: p.name,
+                value: p.value,
+                text: p.formatted,
+            })
+            .collect(),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Refresh both FX caches (chain + focused params). Public so
+/// headless surfaces / tests can drive the same path as the run loop.
+pub async fn refresh_fx_caches(project: &daw_control::Project, state: &mut DriverState) {
+    let fx = fetch_fx(project, state.selected_guid()).await;
+    state.set_fx(fx);
+    let params = fetch_params(project, state.selected_guid(), state.focused_fx).await;
+    state.set_params(params);
+}
+
 fn now_ms(epoch: std::time::Instant) -> u64 {
     epoch.elapsed().as_millis() as u64
 }
@@ -1033,6 +1337,7 @@ pub async fn run(daw: Daw, config: CsiConfig) -> eyre::Result<()> {
         .events()
         .subscribe(BusFilter {
             tracks: true,
+            fx: true,
             transport_state: true,
             projects: true,
             ..Default::default()
@@ -1053,10 +1358,20 @@ pub async fn run(daw: Daw, config: CsiConfig) -> eyre::Result<()> {
                             state.nav.revalidate(&state.tracks);
                             state.rebind_strips();
                         }
-                        // Sends zones track the selected track.
+                        // Sends / FX zones track the selected track.
                         if selection_changed && state.uses_sends() {
                             let sends = fetch_sends(&project, state.selected_guid()).await;
                             state.set_sends(sends);
+                        }
+                        if selection_changed && state.uses_fx() {
+                            state.focused_fx = None;
+                            refresh_fx_caches(&project, &mut state).await;
+                        }
+                    }
+                    Some(DawEvent::Fx(fe)) => {
+                        if state.apply_fx_event(&fe.event) && state.uses_fx() {
+                            // Chain shape changed — refetch.
+                            refresh_fx_caches(&project, &mut state).await;
                         }
                     }
                     Some(DawEvent::TransportState(te)) => state.apply_transport_event(&te),
@@ -1071,15 +1386,31 @@ pub async fn run(daw: Daw, config: CsiConfig) -> eyre::Result<()> {
                     return Err(eyre::eyre!("surface MIDI input closed"));
                 };
                 let intents = state.handle_midi(&raw, now_ms(epoch));
+                let mut refresh_param_text = false;
                 for intent in intents {
-                    if intent == Intent::RefreshSends {
-                        let sends = fetch_sends(&project, state.selected_guid()).await;
-                        state.set_sends(sends);
-                        continue;
+                    match &intent {
+                        Intent::RefreshSends => {
+                            let sends = fetch_sends(&project, state.selected_guid()).await;
+                            state.set_sends(sends);
+                            continue;
+                        }
+                        Intent::RefreshFx => {
+                            refresh_fx_caches(&project, &mut state).await;
+                            continue;
+                        }
+                        // The plugin formats the display text — refetch
+                        // it after the value lands.
+                        Intent::SetFxParam { .. } => refresh_param_text = true,
+                        _ => {}
                     }
                     if let Err(e) = execute_intent(&project, &transport, intent).await {
                         tracing::warn!("daw-csi: intent failed: {e}");
                     }
+                }
+                if refresh_param_text {
+                    let params =
+                        fetch_params(&project, state.selected_guid(), state.focused_fx).await;
+                    state.set_params(params);
                 }
                 for msg in state.render() {
                     port.send(&msg);
@@ -1180,6 +1511,33 @@ pub async fn execute_intent(
                 }
             }
         }
+        Intent::SetFxParam {
+            guid,
+            fx_idx,
+            param_idx,
+            value,
+        } => {
+            if let Some(h) = project.tracks().by_guid(&guid).await?
+                && let Some(fx) = h.fx_chain().by_index(fx_idx).await?
+            {
+                fx.param(param_idx).set(value).await?;
+            }
+        }
+        Intent::SetFxEnabled {
+            guid,
+            fx_idx,
+            enabled,
+        } => {
+            if let Some(h) = project.tracks().by_guid(&guid).await?
+                && let Some(fx) = h.fx_chain().by_index(fx_idx).await?
+            {
+                if enabled {
+                    fx.enable().await?;
+                } else {
+                    fx.disable().await?;
+                }
+            }
+        }
         Intent::Play => transport.play().await?,
         Intent::Stop => transport.stop().await?,
         Intent::Record => transport.record().await?,
@@ -1191,7 +1549,7 @@ pub async fn execute_intent(
         }
         // Navigation / cache refreshes are applied by the run loop;
         // nothing to do service-side.
-        Intent::Refresh | Intent::RefreshSends => {}
+        Intent::Refresh | Intent::RefreshSends | Intent::RefreshFx => {}
     }
     Ok(())
 }
@@ -1623,6 +1981,130 @@ zones {
             vec![Intent::Refresh]
         );
         assert!(s.strip_track(1).is_none());
+    }
+
+    #[test]
+    fn fx_menu_focus_and_param_flow() {
+        // Builtin set: assign_plugin (0x2B) hops to the FX menu;
+        // select focuses an FX into the param zone.
+        let mut tracks = vec![track("a", "A", None, false)];
+        tracks[0].selected = true;
+        let mut s = DriverState::with_builtin_zones(tracks, "master".into(), 1.0);
+
+        assert_eq!(
+            tap(&mut s, 0x2B, 0),
+            vec![Intent::Refresh, Intent::RefreshSends]
+        );
+        assert_eq!(s.active_zone, "fxmenu");
+        assert!(s.uses_fx());
+        // Async edge would now run RefreshFx; simulate the fetch.
+        s.set_fx(vec![
+            FxSlot {
+                guid: "fx0".into(),
+                name: "FTS EQ".into(),
+                enabled: true,
+            },
+            FxSlot {
+                guid: "fx1".into(),
+                name: "FTS Comp".into(),
+                enabled: false,
+            },
+        ]);
+
+        // LCDs show FX names; mute LED = enabled state.
+        s.shadow.invalidate();
+        let msgs = s.render();
+        assert!(
+            msgs.iter()
+                .any(|m| m.len() == 15 && m[5] == 0x12 && &m[7..13] == b"FTS EQ"),
+            "fx name missing: {msgs:?}"
+        );
+
+        // Bypass strip 1 (currently disabled → enable).
+        assert_eq!(
+            tap(&mut s, 0x11, 100),
+            vec![Intent::SetFxEnabled {
+                guid: "a".into(),
+                fx_idx: 1,
+                enabled: true
+            }]
+        );
+
+        // Select strip 0 → focus + hop to the param zone.
+        assert_eq!(
+            tap(&mut s, 0x18, 200),
+            vec![Intent::Refresh, Intent::RefreshFx]
+        );
+        assert_eq!(s.active_zone, "fx");
+        assert_eq!(s.focused_fx, Some(0));
+        s.set_params(vec![
+            ParamSlot {
+                name: "Freq".into(),
+                value: 0.5,
+                text: "1.0 kHz".into(),
+            },
+            ParamSlot {
+                name: "Gain".into(),
+                value: 0.25,
+                text: "-6.0 dB".into(),
+            },
+        ]);
+
+        // V-pot strip 1 nudges Gain.
+        let intents = s.handle_midi(&[0xB0, 0x11, 0x01], 300);
+        assert_eq!(
+            intents,
+            vec![Intent::SetFxParam {
+                guid: "a".into(),
+                fx_idx: 0,
+                param_idx: 1,
+                value: 0.26
+            }]
+        );
+        // Cache updated for instant ring feedback.
+        assert!((s.params[1].value - 0.26).abs() < 1e-9);
+
+        // Fader strip 0 sets Freq absolutely.
+        let intents = s.handle_midi(&mcu::encode_fader(0, 16383), 400);
+        assert_eq!(
+            intents,
+            vec![Intent::SetFxParam {
+                guid: "a".into(),
+                fx_idx: 0,
+                param_idx: 0,
+                value: 1.0
+            }]
+        );
+
+        // Param-zone render shows names + plugin-formatted values.
+        s.shadow.invalidate();
+        let msgs = s.render();
+        assert!(
+            msgs.iter()
+                .any(|m| m.len() == 15 && m[5] == 0x12 && &m[7..11] == b"Gain"),
+            "param name missing: {msgs:?}"
+        );
+        assert!(
+            msgs.iter()
+                .any(|m| m.len() == 15 && m[5] == 0x12 && &m[7..14] == b"-6.0 dB"),
+            "formatted value missing: {msgs:?}"
+        );
+
+        // Echo from the bus updates the cached value.
+        s.apply_fx_event(&daw_proto::FxEvent::ParameterChanged {
+            context: daw_proto::FxChainContext::Track("a".into()),
+            fx_guid: "fx0".into(),
+            param_index: 1,
+            value: 0.9,
+        });
+        assert!((s.params[1].value - 0.9).abs() < 1e-9);
+
+        // assign_plugin pops back to the menu.
+        assert_eq!(
+            tap(&mut s, 0x2B, 500),
+            vec![Intent::Refresh, Intent::RefreshSends]
+        );
+        assert_eq!(s.active_zone, "fxmenu");
     }
 
     #[test]

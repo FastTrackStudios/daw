@@ -197,14 +197,36 @@ impl ClapHost {
             .map_err(|_| ClapHostError::HostInfo)
     }
 
+    /// Load a bundle through the process-global cache. CLAP libraries
+    /// are NEVER unloaded once loaded: plugins may register
+    /// thread-local destructors (or atexit handlers), and dlclosing
+    /// the library leaves those pointing into unmapped memory —
+    /// observed as a SIGSEGV in `__nptl_deallocate_tsd` at thread
+    /// exit after removing an FX. REAPER keeps plugin binaries
+    /// resident for the same reason. `PluginEntry` is refcounted, so
+    /// cached clones are cheap.
+    fn cached_entry(bundle_path: &Path) -> Result<PluginEntry, ClapHostError> {
+        use std::collections::HashMap;
+        use std::sync::{Mutex, OnceLock};
+        static BUNDLES: OnceLock<Mutex<HashMap<std::path::PathBuf, PluginEntry>>> = OnceLock::new();
+        let cache = BUNDLES.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut map = cache.lock().expect("bundle cache poisoned");
+        if let Some(entry) = map.get(bundle_path) {
+            return Ok(entry.clone());
+        }
+        let entry =
+            unsafe { PluginEntry::load(bundle_path) }.map_err(|_| ClapHostError::BundleLoad)?;
+        map.insert(bundle_path.to_path_buf(), entry.clone());
+        Ok(entry)
+    }
+
     /// List every plugin descriptor inside a `.clap` bundle. Returns
     /// `(id, name)` pairs ordered as the bundle exposes them.
     pub fn list_in_bundle(
         &self,
         bundle_path: &Path,
     ) -> Result<Vec<ClapPluginDescriptor>, ClapHostError> {
-        let entry =
-            unsafe { PluginEntry::load(bundle_path) }.map_err(|_| ClapHostError::BundleLoad)?;
+        let entry = Self::cached_entry(bundle_path)?;
         let factory = entry.get_plugin_factory().ok_or(ClapHostError::NoFactory)?;
         let mut out = Vec::new();
         for d in factory.plugin_descriptors() {
@@ -268,8 +290,7 @@ impl ClapHost {
         bundle_path: &Path,
         plugin_index: usize,
     ) -> Result<LoadedClapPlugin, ClapHostError> {
-        let entry =
-            unsafe { PluginEntry::load(bundle_path) }.map_err(|_| ClapHostError::BundleLoad)?;
+        let entry = Self::cached_entry(bundle_path)?;
         let factory = entry.get_plugin_factory().ok_or(ClapHostError::NoFactory)?;
         let descriptor = factory
             .plugin_descriptors()

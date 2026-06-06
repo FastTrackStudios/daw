@@ -33,4 +33,5 @@ midi-hardware = ["dep:midir"]
 [dev-dependencies]
 # Integration tests drive the full gesture → service → event-bus path
 # against an in-process Standalone (no hardware, no REAPER).
-daw-standalone = { path = "../../standalone/daw-standalone", features = ["bootstrap"] }
+# `clap-host` lets the FX-zone test load real CLAP plugins.
+daw-standalone = { path = "../../standalone/daw-standalone", features = ["bootstrap", "clap-host", "decode"] }
