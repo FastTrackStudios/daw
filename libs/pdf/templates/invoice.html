@@ -101,6 +101,55 @@
     table.lines td.desc { width: 44%; }
     table.lines td.who { color: #444; font-size: 9pt; white-space: nowrap; }
 
+    .overview-breakdown {
+      margin-bottom: 14pt;
+    }
+    .overview-breakdown .layout {
+      display: flex;
+      gap: 14pt;
+      align-items: flex-start;
+    }
+    .overview-breakdown .layout > table { flex: 1; }
+    .overview-breakdown .charts {
+      display: flex;
+      flex-direction: column;
+      gap: 8pt;
+      align-items: center;
+      width: 130pt;
+    }
+    .overview-totals { margin-bottom: 14pt; }
+    .overview-totals .totals { margin-left: auto; width: 50%; }
+    .people-summary {
+      margin: 14pt 0;
+      page-break-inside: avoid;
+    }
+    .people-summary h3 {
+      font-size: 8pt;
+      text-transform: uppercase;
+      letter-spacing: 1pt;
+      color: #999;
+      margin: 0 0 6pt 0;
+    }
+    .people-summary .assignees { width: 60%; }
+    .overview-breakdown h3 {
+      font-size: 8pt;
+      text-transform: uppercase;
+      letter-spacing: 1pt;
+      color: #999;
+      margin: 0 0 6pt 0;
+    }
+
+    .detail { page-break-before: always; }
+    .detail-title {
+      font-size: 10pt;
+      text-transform: uppercase;
+      letter-spacing: 1pt;
+      color: #777;
+      margin: 0 0 8pt 0;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 4pt;
+    }
+
     .breakdown {
       display: flex;
       gap: 18pt;
@@ -205,7 +254,7 @@
   </div>
   <div class="meta">
     <div class="num">{{ number }}</div>
-    <div><span class="status {{ status }}">{{ status }}</span></div>
+    {% if status %}<div><span class="status {{ status }}">{{ status }}</span></div>{% endif %}
     <div>Issued: <strong>{{ issue_date }}</strong></div>
     {% if due_date %}<div>Due: <strong>{{ due_date }}</strong></div>{% endif %}
     <div>Currency: {{ currency }}</div>
@@ -231,37 +280,14 @@
   </div>
 </div>
 
-<table class="lines">
-  <thead>
-    <tr>
-      <th class="desc">Description</th>
-      <th>Assignee</th>
-      <th class="num">Qty</th>
-      <th class="num">Unit price</th>
-      <th class="num">Amount</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for line in lines %}
-    <tr>
-      <td class="desc">{{ line.description }}</td>
-      <td class="who">{{ line.assignee }}</td>
-      <td class="num">{{ line.quantity }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
-      <td class="num">{{ line.unit_price }}</td>
-      <td class="num">{{ line.amount }}</td>
-    </tr>
-    {% endfor %}
-  </tbody>
-</table>
-
 {% if assignees %}
-<div class="breakdown">
-  <div style="flex:1;">
-    <h3>Time by assignee</h3>
+<div class="overview-breakdown">
+  <h3>Time by task</h3>
+  <div class="layout">
     <table class="assignees">
       <thead>
         <tr>
-          <th>Member</th>
+          <th>Task</th>
           <th class="num">Hours</th>
           <th class="num">Share</th>
           <th class="num">Amount</th>
@@ -278,35 +304,63 @@
         {% endfor %}
       </tbody>
     </table>
-  </div>
-  <div class="charts">
-    {% if donut_svg %}<div>{{ donut_svg | safe }}</div>{% endif %}
-    {% if bars_svg %}<div>{{ bars_svg | safe }}</div>{% endif %}
+    <div class="charts">
+      {% if donut_svg %}<div>{{ donut_svg | safe }}</div>{% endif %}
+      {% if bars_svg %}<div>{{ bars_svg | safe }}</div>{% endif %}
+    </div>
   </div>
 </div>
 {% endif %}
 
-<div class="totals">
-  <div class="row sub">
-    <span class="label">Subtotal</span>
-    <span>{{ currency_symbol }}{{ subtotal }}</span>
+{% if people %}
+<div class="people-summary">
+  <h3>Per person</h3>
+  <table class="assignees">
+    <thead>
+      <tr>
+        <th>Member</th>
+        <th class="num">Hours</th>
+        <th class="num">Share</th>
+        <th class="num">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for p in people %}
+      <tr>
+        <td><span class="swatch" style="background:{{ p.color }}"></span>{{ p.name }}</td>
+        <td class="num">{{ p.hours }}</td>
+        <td class="num">{{ p.pct }}%</td>
+        <td class="num">{{ currency_symbol }}{{ p.amount }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="overview-totals">
+  <div class="totals">
+    <div class="row sub">
+      <span class="label">Subtotal</span>
+      <span>{{ currency_symbol }}{{ subtotal }}</span>
+    </div>
+    {% if tax %}
+    <div class="row">
+      <span class="label">Tax</span>
+      <span>{{ currency_symbol }}{{ tax }}</span>
+    </div>
+    {% endif %}
+    <div class="row total">
+      <span>Total</span>
+      <span>{{ currency_symbol }}{{ total }} {{ currency }}</span>
+    </div>
+    {% if balance_due %}
+    <div class="row balance">
+      <span>Balance due</span>
+      <span>{{ currency_symbol }}{{ balance_due }}</span>
+    </div>
+    {% endif %}
   </div>
-  {% if tax %}
-  <div class="row">
-    <span class="label">Tax</span>
-    <span>{{ currency_symbol }}{{ tax }}</span>
-  </div>
-  {% endif %}
-  <div class="row total">
-    <span>Total</span>
-    <span>{{ currency_symbol }}{{ total }} {{ currency }}</span>
-  </div>
-  {% if balance_due %}
-  <div class="row balance">
-    <span>Balance due</span>
-    <span>{{ currency_symbol }}{{ balance_due }}</span>
-  </div>
-  {% endif %}
 </div>
 
 {% if notes %}
@@ -315,13 +369,38 @@
   <p>{{ notes }}</p>
 </div>
 {% endif %}
-
 {% if terms %}
 <div class="notes">
   <h3>Terms</h3>
   <p>{{ terms }}</p>
 </div>
 {% endif %}
+
+<div class="detail">
+  <h2 class="detail-title">Line items</h2>
+  <table class="lines">
+    <thead>
+      <tr>
+        <th class="desc">Description</th>
+        <th>Assignee</th>
+        <th class="num">Qty</th>
+        <th class="num">Unit price</th>
+        <th class="num">Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in lines %}
+      <tr>
+        <td class="desc">{{ line.description }}</td>
+        <td class="who">{{ line.assignee }}</td>
+        <td class="num">{{ line.quantity }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
+        <td class="num">{{ line.unit_price }}</td>
+        <td class="num">{{ line.amount }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 
 {% if footer %}
 <div class="footer-msg">{{ footer }}</div>

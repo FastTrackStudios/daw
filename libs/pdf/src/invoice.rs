@@ -47,10 +47,15 @@ pub struct InvoiceData {
     pub notes: String,
     pub terms: String,
     pub footer: String,
-    /// Per-assignee summary rows + chart data. Empty list
-    /// hides the summary block.
+    /// Per-task summary rows + chart data. Empty list
+    /// hides the overview block.
     #[serde(default)]
     pub assignees: Vec<AssigneeSummary>,
+    /// Per-person concise summary (hours + amount), shown
+    /// between the overview and the line-item detail.
+    /// Empty list hides the block.
+    #[serde(default)]
+    pub people: Vec<AssigneeSummary>,
     /// Pre-rendered donut SVG (raw markup, embedded
     /// verbatim). Empty = no chart.
     #[serde(default)]
