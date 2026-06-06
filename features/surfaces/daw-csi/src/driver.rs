@@ -1039,10 +1039,15 @@ impl DriverState {
             Action::TrackMute => track.map(|t| t.muted).unwrap_or(false),
             Action::TrackSolo => track.map(|t| t.soloed).unwrap_or(false),
             Action::TrackRecordArm => track.map(|t| t.armed).unwrap_or(false),
-            Action::TrackSelect
-            | Action::TrackSelectAdditive
-            | Action::FolderSpill
-            | Action::VcaSpill => track.map(|t| t.selected).unwrap_or(false),
+            Action::TrackSelect | Action::TrackSelectAdditive => {
+                track.map(|t| t.selected).unwrap_or(false)
+            }
+            // Spill affordance: SELECT lights on strips you can drill
+            // into (folders / VCA leads). CSI's official zones show
+            // selection here instead (their spill is Feedback=No);
+            // the lit-when-drillable cue is strictly more useful.
+            Action::FolderSpill => track.map(|t| t.is_folder).unwrap_or(false),
+            Action::VcaSpill => track.map(|t| t.grouping.vca_lead != 0).unwrap_or(false),
             Action::SendMute => send.map(|s| s.muted).unwrap_or(false),
             // Bypass LED lit = FX ACTIVE (CSI's FXBypassDisplay).
             Action::FxMenuBypass => strip
@@ -1991,6 +1996,36 @@ zones {
             vec![Intent::Refresh]
         );
         assert!(s.strip_track(1).is_none());
+    }
+
+    #[test]
+    fn folder_mode_select_leds_mark_drillable_strips() {
+        let mut s = state(); // DRUMS(folder){Kick,Snare}, Bass
+        // Enter folder mode (builtin: GlobalView → folder zone).
+        tap(&mut s, 0x33, 0);
+        s.shadow.invalidate();
+        let msgs = s.render();
+        // Root shows only DRUMS — strip 0's SELECT LED lit (drillable),
+        // strip 1 dark (empty).
+        let led = |msgs: &[Vec<u8>], note: u8| {
+            msgs.iter()
+                .find(|m| m[0] == 0x90 && m[1] == note)
+                .map(|m| m[2] > 0)
+        };
+        assert_eq!(
+            led(&msgs, 0x18),
+            Some(true),
+            "folder strip should light SELECT"
+        );
+        assert_eq!(led(&msgs, 0x19), Some(false), "empty strip dark");
+
+        // Drill in: spill = [DRUMS, Kick, Snare] — parent still lit
+        // (toggling exits), children dark (plain tracks).
+        tap(&mut s, 0x18, 100);
+        s.shadow.invalidate();
+        let msgs = s.render();
+        assert_eq!(led(&msgs, 0x18), Some(true), "spilled parent stays lit");
+        assert_eq!(led(&msgs, 0x19), Some(false), "child (Kick) not drillable");
     }
 
     #[test]

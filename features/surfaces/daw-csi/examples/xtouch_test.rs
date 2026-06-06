@@ -205,27 +205,40 @@ fn demo_session() -> Standalone {
     });
     let ctx = ProjectContext::Project("xtouch-demo".into());
 
-    // (folder name, folder color, members)
+    // (folder name, folder color, members). Colors picked so the
+    // X-Touch scribble quantizer (7-color backlight) lands on the
+    // family color: drums→red, bass→yellow, electric→blue,
+    // acoustic→cyan (closest to light blue), keys→green,
+    // synths/bgvs→magenta (no purple backlight), vocals→white
+    // (pale pink reads as pink on white).
     let folders: &[(&str, u32, &[&str])] = &[
         (
             "Drums",
-            0xE0_4040,
+            0xE0_3030, // red
             &[
                 "Kick In", "Kick Out", "Snare Tp", "Snare Bt", "HiHat", "Rack Tom", "Flr Tom",
                 "OH L", "OH R", "Room",
             ],
         ),
-        ("Bass", 0x40_60E0, &["Bass DI", "Bass Amp"]),
-        ("Electric", 0xE0_8030, &["EG1 L", "EG1 R", "EG2 L", "EG2 R"]),
-        ("Acoustic", 0xE0_C040, &["Acous 1", "Acous 2"]),
+        ("Bass", 0xE6_C832, &["Bass DI", "Bass Amp"]), // yellow
+        (
+            "Electric",
+            0x28_40C8, // dark blue
+            &["EG1 L", "EG1 R", "EG2 L", "EG2 R"],
+        ),
+        ("Acoustic", 0x50_C8E6, &["Acous 1", "Acous 2"]), // light blue → cyan
         (
             "Keys",
-            0x40_C060,
+            0x3C_C850, // green
             &["Piano L", "Piano R", "Rhodes", "Organ"],
         ),
-        ("Synths", 0x80_50E0, &["Pad 1", "Pad 2", "Lead Syn", "Arp"]),
-        ("BGVs", 0x40_C0C0, &["BGV 1", "BGV 2", "BGV 3"]),
-        ("Vocals", 0xC0_50C0, &["Lead Vox", "Vox Dbl"]),
+        (
+            "Synths",
+            0x90_40E0, // purple → magenta backlight
+            &["Pad 1", "Pad 2", "Lead Syn", "Arp"],
+        ),
+        ("BGVs", 0xE0_40E0, &["BGV 1", "BGV 2", "BGV 3"]), // magenta
+        ("Vocals", 0xFF_E8F0, &["Lead Vox", "Vox Dbl"]),   // pink → white backlight
     ];
 
     let mut by_name: std::collections::HashMap<String, String> = std::collections::HashMap::new();
