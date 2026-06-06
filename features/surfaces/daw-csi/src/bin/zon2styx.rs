@@ -330,6 +330,12 @@ fn map_global_widget(name: &str) -> Option<&'static str> {
         "Right" => "right",
         "Zoom" => "zoom",
         "Scrub" => "scrub",
+        "Save" => "save",
+        "Undo" => "undo",
+        "Cancel" => "cancel",
+        "Enter" => "enter",
+        "nameValue" => "name_value",
+        "smpteBeats" => "smpte_beats",
         "Track" => "assign_track",
         "Send" => "assign_send",
         "Pan" => "assign_pan",
@@ -366,6 +372,8 @@ fn map_action(tokens: &[&str]) -> Option<String> {
         "TrackUniqueSelect" => "@TrackSelect".into(),
         "TrackSelect" => "@TrackSelectAdditive".into(),
         "TrackToggleFolderSpill" => "@FolderSpill".into(),
+        "TrackInvertPolarity" => "@TrackTogglePolarity".into(),
+        "TrackRangeSelect" => "@TrackRangeSelect".into(),
         "TrackToggleVCASpill" => "@VcaSpill".into(),
         "ClearAllSolo" => "@ClearAllSolo".into(),
         "NoAction" => "@NoAction".into(),
@@ -378,6 +386,12 @@ fn map_action(tokens: &[&str]) -> Option<String> {
         "TrackSendNameDisplay" => "@SendNameDisplay".into(),
         "TrackSendVolumeDisplay" => "@SendVolumeDisplay".into(),
         "TrackSendPanDisplay" => "@SendPanDisplay".into(),
+        "TrackReceiveVolume" => "@ReceiveVolume".into(),
+        "TrackReceivePan" => "@ReceivePan".into(),
+        "TrackReceiveMute" => "@ReceiveMute".into(),
+        "TrackReceiveNameDisplay" => "@ReceiveNameDisplay".into(),
+        "TrackReceiveVolumeDisplay" => "@ReceiveVolumeDisplay".into(),
+        "TrackReceivePanDisplay" => "@ReceivePanDisplay".into(),
         "Play" => "@Play".into(),
         "Stop" => "@Stop".into(),
         "Record" => "@Record".into(),
@@ -386,6 +400,19 @@ fn map_action(tokens: &[&str]) -> Option<String> {
         "FastForward" => "@NudgePosition{seconds 5}".into(),
         "MoveEditCursor" => "@JogPosition{seconds_per_tick 1}".into(),
         "GoHome" => "@GoZone{zone home}".into(),
+        "SaveProject" => "@SaveProject".into(),
+        "Undo" => "@Undo".into(),
+        "Redo" => "@Redo".into(),
+        "Marker" => "@AddMarker".into(),
+        "CycleTimeDisplayModes" => "@CycleTimeDisplay".into(),
+        "ToggleScrollLink" => "@ToggleScrollLink".into(),
+        "Flip" => "@Flip".into(),
+        // REAPER action passthrough → our command registry. Ids may
+        // arrive quoted in the .zon ("_S&M_FXOFF|") — strip those.
+        "Reaper" => {
+            let id = tokens.get(1)?.trim_matches('"');
+            format!("@Command{{id \"{id}\"}}")
+        }
         "GoZone" => {
             let target = tokens.get(1)?;
             format!("@GoZone{{zone {}}}", zone_key(target))
@@ -395,9 +422,8 @@ fn map_action(tokens: &[&str]) -> Option<String> {
             let amount: i32 = tokens.get(2)?.parse().ok()?;
             match *what {
                 "Track" | "Folder" | "VCA" => format!("@Bank{{amount {amount}}}"),
-                "SelectedTrackSend" | "SelectedTrackReceive" => {
-                    format!("@BankSends{{amount {amount}}}")
-                }
+                "SelectedTrackSend" => format!("@BankSends{{amount {amount}}}"),
+                "SelectedTrackReceive" => format!("@BankReceives{{amount {amount}}}"),
                 _ => return None,
             }
         }

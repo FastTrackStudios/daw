@@ -15,10 +15,13 @@ zones {
             lcd_bottom @PanDisplay
             shift+vpot_press @TrackPanReset
             rec @TrackRecordArm
+            control+rec @TrackTogglePolarity
             solo @TrackSolo
             shift+solo @ClearAllSolo
             mute @TrackMute
+            shift+mute @Command{id "40339"}
             select @TrackSelect
+            shift+select @TrackRangeSelect
             control+select @TrackSelectAdditive
             hold+select @FolderSpill
         }
@@ -39,12 +42,9 @@ zones {
         // Option+RotaryPush|          TrackPanWidth [ 1.0 ]
         // Option+RecordArm|           CycleTrackInputMonitor
         // Option+DisplayLower|        TrackInputMonitorDisplay
-        // Control+RecordArm|          TrackInvertPolarity
         // Control+DisplayLower|       TrackInvertPolarityDisplay
         // Alt+RecordArm|              CycleTrackAutoMode
         // Alt+DisplayLower|           TrackAutoModeDisplay
-        // Shift+Mute|                 Reaper 40339 Feedback=No
-        // Shift+Select|               TrackRangeSelect
     }
     /// Converted from CSI zone "FXEpilogue".
     fxepilogue {
@@ -109,19 +109,47 @@ zones {
             assign_eq @GoZone{zone selected_track_receive}
             assign_send @GoZone{zone selected_track_send}
             assign_plugin @GoZone{zone selected_track_fxmenu}
+            name_value @GoZone{zone home}
+            smpte_beats @CycleTimeDisplay
+            f1 @Command{id "40605"}
+            f2 @Command{id "40271"}
+            f3 @Command{id "40078"}
+            f4 @Command{id "41157"}
+            f5 @Command{id "50124"}
+            f6 @Command{id "40906"}
+            f7 @Command{id "40268"}
+            f8 @Command{id "41050"}
+            flip @Flip
+            save @SaveProject
+            undo @Undo
+            shift+undo @Redo
+            option+undo @Command{id "40072"}
+            enter @Command{id "40021"}
+            marker @AddMarker
             cycle @ToggleLoop
+            drop @Command{id "1157"}
+            replace @Command{id "1155"}
+            click @Command{id "40364"}
+            shift+click @Command{id "_SWS_AWCOUNTRECTOG"}
+            option+click @Command{id "40363"}
             rewind @NudgePosition{seconds -5}
             fast_forward @NudgePosition{seconds 5}
             stop @Stop
+            hold+stop @Command{id "40042"}
             play @Play
             record @Record
             solo_global @ClearAllSolo
+            option+solo_global @Command{id "40745"}
             bank_left @Bank{amount -8}
             bank_right @Bank{amount 8}
             channel_left @Bank{amount -1}
             channel_right @Bank{amount 1}
             shift+channel_left @Bank{amount -999}
             shift+channel_right @Bank{amount 999}
+            up @Command{id "_XENAKIOS_TVPAGEUP"}
+            down @Command{id "_XENAKIOS_TVPAGEDOWN"}
+            left @Command{id "40842"}
+            right @Command{id "40841"}
             jog @JogPosition{seconds_per_tick 1}
         }
         // Not yet portable from CSI:
@@ -133,12 +161,10 @@ zones {
         // Global+Send                 GoZone TrackSend
         // Global+Plugin               GoZone TrackFXMenu
         // Instrument                  LearnFocusedFX
-        // nameValue                   GoHome
-        // nameValue                   Reaper _S&M_WNCLS4
-        // nameValue                   Reaper _S&M_WNCLS3
+        // (duplicate) nameValue                   Reaper _S&M_WNCLS4
+        // (duplicate) nameValue                   Reaper _S&M_WNCLS3
         // AssignmentDisplay           GlobalModeDisplay
         // TimeDisplay                 MCUTimeDisplay
-        // smpteBeats                  CycleTimeDisplayModes
         // GlobalView                  Global
         // MidiTracks                  ToggleEnableLastTouchedFXParamMapping
         // Inputs                      ToggleEnableFocusedFXMapping
@@ -148,15 +174,6 @@ zones {
         // Busses                      GoZone SelectedTrackTCPFX
         // Outputs                     ToggleFollowMCP
         // User                        Reaper 42678
-        // F1                          Reaper 40605
-        // F2                          Reaper 40271
-        // F3                          Reaper 40078
-        // F4                          Reaper 41157
-        // F5                          Reaper 50124
-        // F6                          Reaper 40906
-        // F7                          Reaper 40268
-        // F8                          Reaper 41050
-        // Flip                        Flip
         // Read                        TrackAutoMode 1
         // Write                       TrackAutoMode 3
         // Trim                        TrackAutoMode 0
@@ -170,21 +187,8 @@ zones {
         // Global+Latch                GlobalAutoMode 4
         // Global+Group                GlobalAutoMode 5
         // Shift+Read                  Reaper 40876
-        // Save                        SaveProject Feedback=No
-        // Undo                        Undo Feedback=No
-        // Shift+Undo                  Redo Feedback=No
-        // Option+Undo                 Reaper 40072
         // Cancel                      ClearModifiers
-        // Enter                       Reaper 40021
-        // Marker                      Marker
         // Nudge                       Nudge
-        // Drop                        Reaper 1157
-        // Replace                     Reaper 1155
-        // Click                       Reaper 40364
-        // Shift+Click                 Reaper _SWS_AWCOUNTRECTOG
-        // Option+Click                Reaper 40363
-        // Hold+Stop                   Reaper 40042 Feedback=No
-        // Option+Solo                 Reaper 40745
         // BankLeft                    Bank SelectedTrack -8
         // BankRight                   Bank SelectedTrack 8
         // ChannelLeft                 Bank SelectedTrack -1
@@ -192,10 +196,6 @@ zones {
         // Shift+ChannelLeft           Bank SelectedTrack -999
         // Shift+ChannelRight          Bank SelectedTrack 999
         // Zoom                        Zoom
-        // Up                          Reaper _XENAKIOS_TVPAGEUP
-        // Down                        Reaper _XENAKIOS_TVPAGEDOWN
-        // Left                        Reaper 40842
-        // Right                       Reaper 40841
         // Zoom+Up                     Reaper 40111
         // Zoom+Down                   Reaper 40112
         // Zoom+Right                  Reaper 1012
@@ -243,13 +243,13 @@ zones {
             vpot @NoAction
             rec @NoAction
             solo @NoAction
+            mute @Command{id "_S&M_FXOFF|"}
             fader @NoAction
         }
         // Not yet portable from CSI:
         // DisplayUpper|            FXMenuNameDisplay
         // DisplayLower|            FXBypassDisplay
         // RotaryPush|              GoFXSlot
-        // Mute|                    Reaper "_S&M_FXOFF|"
         // Select|                  ToggleFXBypass
         // Left                     Bank MasterTrackFXMenu -1
         // Right                    Bank MasterTrackFXMenu 1
@@ -267,6 +267,7 @@ zones {
             alt+vpot_press @NoAction
             rec @NoAction
             solo @NoAction
+            mute @Command{id "_S&M_FXOFF|"}
             fader @NoAction
         }
         // Not yet portable from CSI:
@@ -276,29 +277,28 @@ zones {
         // RotaryPush|                GoFXSlot
         // Left                       Bank SelectedTrackFXMenu -1
         // Right                      Bank SelectedTrackFXMenu 1
-        // Mute|                      Reaper "_S&M_FXOFF|"
         // Select|                    ToggleFXBypass
     }
     /// Converted from CSI zone "SelectedTrackReceive".
     selected_track_receive {
         display_color @Magenta
         strip {
+            lcd_top @ReceiveNameDisplay
+            mute @ReceiveMute
+            vpot @ReceivePan
+            fader @ReceiveVolume
             rec @NoAction
             solo @NoAction
             select @NoAction
         }
         buttons {
-            left @BankSends{amount -1}
-            right @BankSends{amount 1}
+            left @BankReceives{amount -1}
+            right @BankReceives{amount 1}
         }
         // Not yet portable from CSI:
-        // DisplayUpper|               TrackReceiveNameDisplay
         // DisplayLower|               TrackReceivePrePostDisplay
         // Touch+DisplayLower|         TrackReceiveVolumeDisplay
         // RotaryPush|                 TrackReceivePrePost
-        // Mute|                       TrackReceiveMute
-        // Rotary|                     TrackReceivePan
-        // Fader|                      TrackReceiveVolume
     }
     /// Converted from CSI zone "SelectedTrackSend".
     selected_track_send {
@@ -369,10 +369,13 @@ zones {
             lcd_bottom @PanDisplay
             shift+vpot_press @TrackPanReset
             rec @TrackRecordArm
+            alt+rec @TrackTogglePolarity
             solo @TrackSolo
             shift+solo @ClearAllSolo
             mute @TrackMute
+            shift+mute @Command{id "40339"}
             select @TrackSelect
+            shift+select @TrackRangeSelect
             control+select @TrackSelectAdditive
         }
         // Not yet portable from CSI:
@@ -385,12 +388,9 @@ zones {
         // Option+RotaryPush|       TrackPanWidth [ 1.0 ]
         // Option+RecordArm|        CycleTrackAutoMode
         // Option+DisplayLower|     TrackAutoModeDisplay
-        // Alt+RecordArm|           TrackInvertPolarity
         // Alt+DisplayLower|        TrackInvertPolarityDisplay
         // Control+RecordArm|       CycleTrackInputMonitor
         // Control+DisplayLower|    TrackInputMonitorDisplay
-        // Shift+Mute|              Reaper 40339 Feedback=No
-        // Shift+Select|            TrackRangeSelect
         // Hold+Select|             TrackVolume [ 0.760 ] Feedback=No
         // BankLeft                 Bank SelectedTracks -8
         // BankRight                Bank SelectedTracks 8
@@ -407,10 +407,13 @@ zones {
             lcd_bottom @PanDisplay
             shift+vpot_press @TrackPanReset
             rec @TrackRecordArm
+            control+rec @TrackTogglePolarity
             solo @TrackSolo
             shift+solo @ClearAllSolo
             mute @TrackMute
+            shift+mute @Command{id "40339"}
             select @TrackSelect
+            shift+select @TrackRangeSelect
             control+select @TrackSelectAdditive
         }
         // Not yet portable from CSI:
@@ -423,12 +426,9 @@ zones {
         // Option+RotaryPush|       TrackPanWidth [ 1.0 ]
         // Option+RecordArm|        CycleTrackInputMonitor
         // Option+DisplayLower|     TrackInputMonitorDisplay
-        // Control+RecordArm|       TrackInvertPolarity
         // Control+DisplayLower|    TrackInvertPolarityDisplay
         // Alt+RecordArm|           CycleTrackAutoMode
         // Alt+DisplayLower|        TrackAutoModeDisplay
-        // Shift+Mute|              Reaper 40339 Feedback=No
-        // Shift+Select|            TrackRangeSelect
         // Hold+Select|             TrackVolume [ 0.760 ] Feedback=No
     }
     /// Converted from CSI zone "TrackFXMenu".
@@ -438,6 +438,7 @@ zones {
             vpot @NoAction
             rec @NoAction
             solo @NoAction
+            mute @Command{id "_S&M_FXOFF|"}
             fader @NoAction
         }
         // Not yet portable from CSI:
@@ -449,24 +450,23 @@ zones {
         // Right                      Bank TrackFXMenu 1
         // Up                         Bank TrackFXMenu -1
         // Down                       Bank TrackFXMenu 1
-        // Mute|                      Reaper "_S&M_FXOFF|"
         // Select|                    ToggleFXBypass
     }
     /// Converted from CSI zone "TrackReceive".
     track_receive {
         display_color @Red
         strip {
+            lcd_bottom @ReceiveNameDisplay
+            mute @ReceiveMute
+            vpot @ReceivePan
+            fader @ReceiveVolume
             rec @NoAction
             solo @NoAction
             select @NoAction
         }
         // Not yet portable from CSI:
         // DisplayUpper|               FixedTextDisplay "TrkRcv"
-        // DisplayLower|               TrackReceiveNameDisplay
         // Touch+DisplayLower|         TrackReceiveVolumeDisplay
-        // Mute|                       TrackReceiveMute
-        // Rotary|                     TrackReceivePan
-        // Fader|                      TrackReceiveVolume
         // Up                          Bank TrackReceivex -1
         // Down                        Bank TrackReceive 1
     }
@@ -499,10 +499,13 @@ zones {
             lcd_bottom @PanDisplay
             shift+vpot_press @TrackPanReset
             rec @TrackRecordArm
+            control+rec @TrackTogglePolarity
             solo @TrackSolo
             shift+solo @ClearAllSolo
             mute @TrackMute
+            shift+mute @Command{id "40339"}
             select @TrackSelect
+            shift+select @TrackRangeSelect
             control+select @TrackSelectAdditive
             hold+select @VcaSpill
         }
@@ -523,11 +526,8 @@ zones {
         // Option+RotaryPush|          TrackPanWidth [ 1.0 ]
         // Option+RecordArm|           CycleTrackInputMonitor
         // Option+DisplayLower|        TrackInputMonitorDisplay
-        // Control+RecordArm|          TrackInvertPolarity
         // Control+DisplayLower|       TrackInvertPolarityDisplay
         // Alt+RecordArm|              CycleTrackAutoMode
         // Alt+DisplayLower|           TrackAutoModeDisplay
-        // Shift+Mute|                 Reaper 40339 Feedback=No
-        // Shift+Select|               TrackRangeSelect
     }
 }

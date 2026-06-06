@@ -18,6 +18,8 @@ pub struct Shadow {
     /// Last meter level sent per strip (the surface decays on its
     /// own; we resend only on rise or after a refresh).
     meters: [u8; mcu::STRIPS],
+    /// 7-segment timecode digit registers (CC 0x40–0x49 values).
+    timecode: [Option<u8>; 10],
 }
 
 impl Default for Shadow {
@@ -29,6 +31,7 @@ impl Default for Shadow {
             lcd: [[None; 2]; mcu::STRIPS],
             colors: None,
             meters: [0; mcu::STRIPS],
+            timecode: [None; 10],
         }
     }
 }
@@ -92,6 +95,17 @@ impl Shadow {
         if self.colors != Some(colors) {
             self.colors = Some(colors);
             out.push(mcu::encode_strip_colors(colors));
+        }
+    }
+
+    /// Queue 7-segment timecode digits that changed.
+    pub fn timecode(&mut self, out: &mut Vec<Vec<u8>>, text: &str) {
+        for msg in mcu::encode_timecode(text) {
+            let i = (msg[1] - 0x40) as usize;
+            if self.timecode[i] != Some(msg[2]) {
+                self.timecode[i] = Some(msg[2]);
+                out.push(msg.to_vec());
+            }
         }
     }
 

@@ -30,9 +30,14 @@ zones {
             vpot       @TrackPan
             vpot_press @TrackPanReset
             rec        @TrackRecordArm
+            control+rec @TrackTogglePolarity
             solo       @TrackSolo
+            shift+solo @ClearAllSolo
             mute       @TrackMute
+            shift+mute @UnmuteAll
             select     @TrackSelect
+            shift+select @TrackRangeSelect
+            control+select @TrackSelectAdditive
             lcd_top    @TrackName
             lcd_bottom @PanDisplay
         }
@@ -50,7 +55,19 @@ zones {
             channel_left  @Bank{amount -1}
             channel_right @Bank{amount 1}
             global_view   @GoZone{zone folder}
+            shift+global_view @ToggleScrollLink
             assign_plugin @GoZone{zone fxmenu}
+            assign_send   @GoZone{zone sends}
+            assign_eq     @GoZone{zone receives}
+            flip          @Flip
+            smpte_beats   @CycleTimeDisplay
+            save          @SaveProject
+            undo          @Undo
+            shift+undo    @Redo
+            marker        @AddMarker
+            left          @PrevMarker
+            right         @NextMarker
+            solo_global   @ClearAllSolo
         }
     }
 
@@ -65,6 +82,8 @@ zones {
         navigator @Folder
         strip {
             select     @FolderSpill
+            hold+select @TrackSelect
+            flip+fader @TrackPan
             lcd_bottom @PanDisplay
         }
         buttons {
@@ -96,6 +115,60 @@ zones {
         }
     }
 
+    /// Sends: strips are the SELECTED track's send slots (cyan, like
+    /// CSI's SelectedTrackSend). Fader rides the send level, v-pot
+    /// pans it, MUTE toggles; CHANNEL </> pages slots.
+    sends {
+        display_color @Cyan
+        strip {
+            fader      @SendVolume
+            vpot       @SendPan
+            mute       @SendMute
+            lcd_top    @SendNameDisplay
+            lcd_bottom @SendVolumeDisplay
+            rec        @NoAction
+            solo       @NoAction
+            select     @NoAction
+        }
+        buttons {
+            master_fader  @MasterVolume
+            play @Play
+            stop @Stop
+            record @Record
+            cycle @ToggleLoop
+            channel_left  @BankSends{amount -1}
+            channel_right @BankSends{amount 1}
+            assign_send   @GoZone{zone home}
+            global_view   @GoZone{zone home}
+        }
+    }
+
+    /// Receives: mirror of sends for the selected track's inputs.
+    receives {
+        display_color @Magenta
+        strip {
+            fader      @ReceiveVolume
+            vpot       @ReceivePan
+            mute       @ReceiveMute
+            lcd_top    @ReceiveNameDisplay
+            lcd_bottom @ReceiveVolumeDisplay
+            rec        @NoAction
+            solo       @NoAction
+            select     @NoAction
+        }
+        buttons {
+            master_fader  @MasterVolume
+            play @Play
+            stop @Stop
+            record @Record
+            cycle @ToggleLoop
+            channel_left  @BankReceives{amount -1}
+            channel_right @BankReceives{amount 1}
+            assign_eq     @GoZone{zone home}
+            global_view   @GoZone{zone home}
+        }
+    }
+
     /// FX params: strips are the focused FX's parameters — v-pot
     /// turns, fader rides, both rows show name/value. CHANNEL </>
     /// pages through plugins with more than 8 parameters.
@@ -121,6 +194,8 @@ zones {
             channel_right @BankFxParams{amount 1}
             bank_left     @BankFxParams{amount -8}
             bank_right    @BankFxParams{amount 8}
+            f1            @FxPrevPreset
+            f2            @FxNextPreset
             assign_plugin @GoZone{zone fxmenu}
             global_view   @GoZone{zone home}
         }

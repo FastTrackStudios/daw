@@ -22,10 +22,49 @@ impl EventBus for Standalone {
         let mut region_rx = filter.regions.then(|| self.region_events.subscribe());
         let mut tempo_rx = filter.tempo_map.then(|| self.tempo_map_events.subscribe());
 
+        // Transport state + position aren't broadcast — they live in
+        // per-subscriber pumps on the transport engine. Bridge one
+        // internal subscription onto the bus.
+        let mut transport_rx = if filter.transport_state || filter.transport_position {
+            use daw_proto::transport::service::Transport as TransportService;
+            let (ttx, trx) = vox::channel();
+            TransportService::subscribe(
+                self,
+                daw_proto::ProjectContext::Current,
+                daw_proto::transport::TransportSubscription {
+                    state: filter.transport_state,
+                    position: filter.transport_position,
+                },
+                ttx,
+            )
+            .await;
+            Some(trx)
+        } else {
+            None
+        };
+
         moire::task::spawn(async move {
             loop {
                 tokio::select! {
                     biased;
+                    res = async { transport_rx.as_mut().unwrap().recv().await }, if transport_rx.is_some() => {
+                        match res {
+                            Ok(Some(ev)) => {
+                                let mut owned = None;
+                                let _ = ev.map(|e| owned = Some(e));
+                                let wrapped = match owned.expect("SelfRef::map runs once") {
+                                    daw_proto::transport::TransportStreamEvent::State(s) =>
+                                        DawEvent::TransportState(s),
+                                    daw_proto::transport::TransportStreamEvent::Position(p) =>
+                                        DawEvent::TransportPosition(p),
+                                };
+                                if tx.send(wrapped).await.is_err() {
+                                    return;
+                                }
+                            }
+                            Ok(None) | Err(_) => transport_rx = None,
+                        }
+                    }
                     res = async { track_rx.as_mut().unwrap().recv().await }, if track_rx.is_some() => {
                         if !forward(&tx, res, &filter, track_guid, DawEvent::Track, &mut track_rx).await {
                             return;
@@ -58,6 +97,7 @@ impl EventBus for Standalone {
                     && marker_rx.is_none()
                     && region_rx.is_none()
                     && tempo_rx.is_none()
+                    && transport_rx.is_none()
                 {
                     return;
                 }

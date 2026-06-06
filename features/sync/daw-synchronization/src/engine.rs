@@ -468,6 +468,9 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
                 suppression.is_suppressed_value(&SuppressionKey::track(guid, "pan"), *pan)
             }
             // Boolean / discrete fields fall back to key-only matching.
+            TrackEvent::PhaseInvertedChanged { guid, .. } => {
+                suppression.is_suppressed(&SuppressionKey::track(guid, "phase"))
+            }
             TrackEvent::MuteChanged { guid, .. } => {
                 suppression.is_suppressed(&SuppressionKey::track(guid, "muted"))
             }

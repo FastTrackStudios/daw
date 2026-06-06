@@ -60,12 +60,19 @@ pub enum Button {
     ChannelRight,
     Flip,
     GlobalView,
+    /// Display buttons: NAME/VALUE (0x34) and SMPTE/BEATS (0x35).
+    NameValue,
+    SmpteBeats,
     Shift,
     Option,
     Control,
     Alt,
     /// F1–F8 (0-based).
     Function(u8),
+    Save,
+    Undo,
+    Cancel,
+    Enter,
     Marker,
     Nudge,
     Cycle,
@@ -116,11 +123,17 @@ fn button_from_note(note: u8) -> Button {
         0x31 => Button::ChannelRight,
         0x32 => Button::Flip,
         0x33 => Button::GlobalView,
+        0x34 => Button::NameValue,
+        0x35 => Button::SmpteBeats,
         0x36..=0x3D => Button::Function(note - 0x36),
         0x46 => Button::Shift,
         0x47 => Button::Option,
         0x48 => Button::Control,
         0x49 => Button::Alt,
+        0x50 => Button::Save,
+        0x51 => Button::Undo,
+        0x52 => Button::Cancel,
+        0x53 => Button::Enter,
         0x54 => Button::Marker,
         0x55 => Button::Nudge,
         0x56 => Button::Cycle,
@@ -163,11 +176,17 @@ pub fn note_for_button(button: Button) -> u8 {
         Button::ChannelRight => 0x31,
         Button::Flip => 0x32,
         Button::GlobalView => 0x33,
+        Button::NameValue => 0x34,
+        Button::SmpteBeats => 0x35,
         Button::Function(f) => 0x36 + f,
         Button::Shift => 0x46,
         Button::Option => 0x47,
         Button::Control => 0x48,
         Button::Alt => 0x49,
+        Button::Save => 0x50,
+        Button::Undo => 0x51,
+        Button::Cancel => 0x52,
+        Button::Enter => 0x53,
         Button::Marker => 0x54,
         Button::Nudge => 0x55,
         Button::Cycle => 0x56,
@@ -355,6 +374,36 @@ pub fn rgb_to_strip_color(rgb: u32) -> StripColor {
         h if h >= 20.0 => StripColor::Yellow,
         _ => StripColor::White,
     }
+}
+
+/// MCU 7-segment timecode: 10 digit registers driven by CC 0x40
+/// (rightmost) … 0x49 (leftmost). Value = 6-bit char code; bit 6
+/// lights the digit's decimal point. `text` may contain '.' after a
+/// digit to set its dot; everything right-aligns.
+pub fn encode_timecode(text: &str) -> Vec<[u8; 3]> {
+    // Fold "12.34" into [(1,false),(2,true),(3,false),(4,false)].
+    let mut cells: Vec<(u8, bool)> = Vec::new();
+    for c in text.chars() {
+        if c == '.' {
+            if let Some(last) = cells.last_mut() {
+                last.1 = true;
+            }
+        } else if c.is_ascii() && !c.is_ascii_control() {
+            cells.push((c as u8, false));
+        }
+    }
+    // Right-align into the 10 digit registers.
+    let mut out = Vec::with_capacity(10);
+    for i in 0..10usize {
+        let (ch, dot) = cells
+            .len()
+            .checked_sub(i + 1)
+            .and_then(|idx| cells.get(idx).copied())
+            .unwrap_or((b' ', false));
+        let value = (ch & 0x3F) | if dot { 0x40 } else { 0 };
+        out.push([0xB0, 0x40 + i as u8, value]);
+    }
+    out
 }
 
 /// Pan (−1..1) to v-pot ring position 1–11 (6 = center).

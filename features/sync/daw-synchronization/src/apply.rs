@@ -460,6 +460,14 @@ async fn apply_track(
             })
             .await;
         }
+        TrackEvent::PhaseInvertedChanged { guid, inverted } => {
+            suppression.suppress(SuppressionKey::track(&resolve(guid), "phase"));
+            let inverted = *inverted;
+            apply_track_mutation(daw, ctx, guid, move |handle| {
+                Box::pin(async move { handle.set_phase_inverted(inverted).await })
+            })
+            .await;
+        }
         TrackEvent::MuteChanged { guid, muted } => {
             suppression.suppress(SuppressionKey::track(&resolve(guid), "muted"));
             let muted = *muted;

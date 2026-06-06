@@ -44,16 +44,24 @@ schema {
         TrackRecordArm
         TrackSelect
         TrackSelectAdditive
+        TrackRangeSelect
+        TrackTogglePolarity
         FolderSpill
         VcaSpill
         // Strip: send slots of the selected track
         SendVolume
         SendPan
         SendMute
+        ReceiveVolume
+        ReceivePan
+        ReceiveMute
         // Strip: FX (menu = chain of the selected track; params = focused FX)
         FxMenuSelect @object{zone @string}
         FxMenuBypass
         FxParam
+        FxNextPreset
+        FxPrevPreset
+        LastTouchedFxParam
         // Strip displays
         TrackName
         PanDisplay
@@ -62,6 +70,9 @@ schema {
         SendNameDisplay
         SendVolumeDisplay
         SendPanDisplay
+        ReceiveNameDisplay
+        ReceiveVolumeDisplay
+        ReceivePanDisplay
         FxMenuNameDisplay
         FxParamNameDisplay
         FxParamValueDisplay
@@ -79,8 +90,20 @@ schema {
         JogPosition @object{seconds_per_tick @float}
         Bank @object{amount @int}
         BankSends @object{amount @int}
+        BankReceives @object{amount @int}
         BankFxParams @object{amount @int}
         GoZone @object{zone @string}
+        SaveProject
+        Undo
+        Redo
+        Command @object{id @string}
+        AddMarker
+        PrevMarker
+        NextMarker
+        Flip
+        Toggle
+        ToggleScrollLink
+        CycleTimeDisplay
         NoAction
     }
 }

@@ -36,6 +36,11 @@ pub enum Action {
     /// CSI `TrackToggleVCASpill`: spill a VCA lead's followers across
     /// the strips / pop back out. Non-leads fall through to select.
     VcaSpill,
+    /// Toggle polarity / phase invert (LED lit = inverted).
+    TrackTogglePolarity,
+    /// Additive range select from the last exclusive selection to the
+    /// pressed strip (CSI's `TrackRangeSelect`).
+    TrackRangeSelect,
 
     // ── Strip: sends (strip = send slot of the selected track) ─────
     /// Fader/v-pot ↔ send level of the strip's send slot.
@@ -44,6 +49,11 @@ pub enum Action {
     SendPan,
     /// Toggle send mute.
     SendMute,
+
+    // ── Strip: receives (strip = receive slot of the selected track) ─
+    ReceiveVolume,
+    ReceivePan,
+    ReceiveMute,
 
     // ── Strip: FX menu (strip = FX slot of the selected track) ─────
     /// Focus the strip's FX and hop to its param zone (CSI's
@@ -57,6 +67,12 @@ pub enum Action {
     // ── Strip: FX params (strip = param slot of the focused FX) ────
     /// V-pot/fader ↔ the strip's parameter of the focused FX.
     FxParam,
+    /// Next / previous preset of the focused FX.
+    FxNextPreset,
+    FxPrevPreset,
+    /// V-pot ↔ the LAST-TOUCHED FX parameter, from anywhere (CSI's
+    /// `LastTouchedFXParam`).
+    LastTouchedFxParam,
 
     // ── Strip: displays ─────────────────────────────────────────────
     /// Track name on an LCD row.
@@ -74,6 +90,12 @@ pub enum Action {
     SendVolumeDisplay,
     /// Send pan position.
     SendPanDisplay,
+    /// Receive source track name.
+    ReceiveNameDisplay,
+    /// Receive level in dB.
+    ReceiveVolumeDisplay,
+    /// Receive pan position.
+    ReceivePanDisplay,
     /// FX name (FX-menu zones).
     FxMenuNameDisplay,
     /// Parameter name of the focused FX (FX param zones).
@@ -113,6 +135,10 @@ pub enum Action {
     BankSends {
         amount: i32,
     },
+    /// Bank the RECEIVE-slot window (receives zones).
+    BankReceives {
+        amount: i32,
+    },
     /// Bank the FX-PARAM window (FX param zones; plugins routinely
     /// expose more than 8 parameters).
     BankFxParams {
@@ -126,6 +152,28 @@ pub enum Action {
     GoZone {
         zone: String,
     },
+    /// Save the project.
+    SaveProject,
+    Undo,
+    Redo,
+    /// Run a registered command by id (CSI's `Reaper NNNN` analog).
+    Command {
+        id: String,
+    },
+    /// Drop a marker at the playhead.
+    AddMarker,
+    /// Jump to the previous / next marker.
+    PrevMarker,
+    NextMarker,
+    /// Latch the FLIP layer on/off (zone bindings under `flip+` take
+    /// over; LED follows the latch).
+    Flip,
+    /// Latch the TOGGLE layer (CSI's `Toggle+` second function).
+    Toggle,
+    /// Surface bank follows UI track selection (CSI ScrollLink).
+    ToggleScrollLink,
+    /// Cycle the 7-segment readout: time ↔ bars/beats.
+    CycleTimeDisplay,
     /// Bound but intentionally inert (CSI `NoAction`).
     NoAction,
 }

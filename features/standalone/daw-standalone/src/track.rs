@@ -174,15 +174,25 @@ impl Tracks for Standalone {
         inverted: bool,
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&guid, |p| {
+        let events = self.with_project_mut(&guid, |p| {
             let i = find_track_index(&p.tracks, &track).ok_or_else(not_found_track)?;
+            let mut events = Vec::new();
             // Polarity group: gang the flip.
             for j in group_followers(&p.tracks, i, |g| g.polarity_lead, |g| g.polarity_follow) {
                 p.tracks[j].phase_inverted = inverted;
+                events.push(TrackEvent::PhaseInvertedChanged {
+                    guid: p.tracks[j].guid.clone(),
+                    inverted,
+                });
             }
             p.tracks[i].phase_inverted = inverted;
-            Ok::<_, DawError>(())
+            events.push(TrackEvent::PhaseInvertedChanged {
+                guid: p.tracks[i].guid.clone(),
+                inverted,
+            });
+            Ok::<_, DawError>(events)
         })??;
+        publish_track_events(self, &guid, events);
         Ok(())
     }
 

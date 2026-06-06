@@ -208,6 +208,22 @@ impl Navigator {
         self.folder_stack.len()
     }
 
+    /// Bank so the track at `track_idx` (index into `tracks`) lands
+    /// on a strip — CSI's ScrollLink. No-op when already visible.
+    pub fn scroll_to(&mut self, tracks: &[Track], track_idx: usize, strips: usize) {
+        let cands = self.candidates(tracks);
+        let Some(pos) = cands.iter().position(|&i| i == track_idx) else {
+            return;
+        };
+        let off = match self.mode {
+            NavMode::Track => &mut self.bank_offset,
+            NavMode::Folder | NavMode::Vca => &mut self.folder_offset,
+        };
+        if pos < *off || pos >= *off + strips {
+            *off = pos - (pos % strips);
+        }
+    }
+
     /// Guid of the folder currently spilled (drill-stack top).
     pub fn current_parent(&self) -> Option<&str> {
         self.folder_stack.last().map(String::as_str)

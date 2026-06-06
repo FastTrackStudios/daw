@@ -134,6 +134,12 @@ pub const OPTION: Modifiers = 1 << 1;
 pub const CONTROL: Modifiers = 1 << 2;
 pub const ALT: Modifiers = 1 << 3;
 pub const HOLD: Modifiers = 1 << 4;
+/// Double-press (driver resolves taps within the double window).
+pub const DOUBLE: Modifiers = 1 << 5;
+/// Latching FLIP layer (fader ↔ v-pot swap lives in zone bindings).
+pub const FLIP: Modifiers = 1 << 6;
+/// Latching TOGGLE layer (CSI's `Toggle+` second function).
+pub const TOGGLE: Modifiers = 1 << 7;
 
 /// Widgets that exist once per channel strip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -192,6 +198,8 @@ fn parse_global_widget(s: &str) -> Option<GlobalWidget> {
         "channel_right" => GlobalWidget::Button(Button::ChannelRight),
         "flip" => GlobalWidget::Button(Button::Flip),
         "global_view" => GlobalWidget::Button(Button::GlobalView),
+        "name_value" => GlobalWidget::Button(Button::NameValue),
+        "smpte_beats" => GlobalWidget::Button(Button::SmpteBeats),
         "marker" => GlobalWidget::Button(Button::Marker),
         "nudge" => GlobalWidget::Button(Button::Nudge),
         "drop" => GlobalWidget::Button(Button::Drop),
@@ -204,6 +212,10 @@ fn parse_global_widget(s: &str) -> Option<GlobalWidget> {
         "right" => GlobalWidget::Button(Button::Right),
         "zoom" => GlobalWidget::Button(Button::Zoom),
         "scrub" => GlobalWidget::Button(Button::Scrub),
+        "save" => GlobalWidget::Button(Button::Save),
+        "undo" => GlobalWidget::Button(Button::Undo),
+        "cancel" => GlobalWidget::Button(Button::Cancel),
+        "enter" => GlobalWidget::Button(Button::Enter),
         // MCU encoder-assign keys (Track/Send/Pan/Plugin/EQ/Inst) —
         // the canonical zone-switch buttons.
         "assign_track" => GlobalWidget::Button(Button::Assign(crate::mcu::AssignKey::Track)),
@@ -236,6 +248,9 @@ fn parse_qualified(key: &str) -> eyre::Result<(Modifiers, &str)> {
             "control" => CONTROL,
             "alt" => ALT,
             "hold" => HOLD,
+            "double" => DOUBLE,
+            "flip" => FLIP,
+            "toggle" => TOGGLE,
             other => return Err(eyre!("unknown modifier '{other}' in binding '{key}'")),
         };
         rest = tail;

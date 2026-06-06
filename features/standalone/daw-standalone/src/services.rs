@@ -17,8 +17,9 @@
 use architect::{Layer, Services, layers};
 use daw_proto::{
     action_registry, audio_engine, automation, dawfile_service, event_bus, ext_state, fx,
-    fx_chains, fx_params, health, input, item, live_midi, marker, midi, plugin_loader, project,
-    region, routing, screenset, take, tempo_map, toolbar, track, transport, window_geometry,
+    fx_chains, fx_params, health, input, item, live_midi, marker, midi, peak, plugin_loader,
+    project, region, routing, screenset, take, tempo_map, toolbar, track, transport,
+    window_geometry,
 };
 
 use crate::sync::Standalone;
@@ -53,6 +54,7 @@ impl Services for Standalone {
             screenset::Service,
             dawfile_service::Service,
             window_geometry::Service,
+            peak::Service,
             plugin_loader::Service,
             event_bus::Service,
         ]
