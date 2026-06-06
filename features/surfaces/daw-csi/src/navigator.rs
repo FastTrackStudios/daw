@@ -207,6 +207,11 @@ impl Navigator {
     pub fn depth(&self) -> usize {
         self.folder_stack.len()
     }
+
+    /// Guid of the folder currently spilled (drill-stack top).
+    pub fn current_parent(&self) -> Option<&str> {
+        self.folder_stack.last().map(String::as_str)
+    }
 }
 
 #[cfg(test)]

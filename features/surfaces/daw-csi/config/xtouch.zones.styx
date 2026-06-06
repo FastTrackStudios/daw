@@ -54,15 +54,18 @@ zones {
         }
     }
 
-    /// Folder mode: top-level tracks on the strips; SELECT on a
-    /// folder spills it (the folder leads its children), SELECT on
-    /// the spilled folder pops back up — CSI's ToggleFolderSpill.
+    /// Folder mode: top-level folders on the strips; SELECT spills a
+    /// folder (the folder leads its children), SELECT on the spilled
+    /// parent pops back up — CSI's ToggleFolderSpill. Folder names
+    /// carry a glyph (`>Name` drillable, `<Name` spilled parent), so
+    /// the bottom row keeps pan — and live volume while the fader is
+    /// touched.
     folder {
         include (home)
         navigator @Folder
         strip {
             select     @FolderSpill
-            lcd_bottom @FolderIndicator
+            lcd_bottom @PanDisplay
         }
         buttons {
             global_view @GoZone{zone home}

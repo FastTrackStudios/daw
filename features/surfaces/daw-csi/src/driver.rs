@@ -994,14 +994,32 @@ impl DriverState {
     fn display_text(&self, action: &Action, strip: u8, track: Option<&Track>) -> String {
         let send = self.send_slot(strip);
         match action {
-            Action::TrackName => track.map(|t| t.name.clone()).unwrap_or_default(),
+            // In folder mode, folder tracks carry a 1-char glyph in
+            // the name cell: `>Name` = drillable, `<Name` = the
+            // spilled parent (SELECT goes back up). Keeps the bottom
+            // row free for pan/volume info.
+            Action::TrackName => track
+                .map(|t| {
+                    if self.nav.mode == NavMode::Folder && t.is_folder {
+                        let icon = if self.nav.current_parent() == Some(t.guid.as_str()) {
+                            '<'
+                        } else {
+                            '>'
+                        };
+                        let name: String = t.name.chars().take(6).collect();
+                        format!("{icon}{name}")
+                    } else {
+                        t.name.clone()
+                    }
+                })
+                .unwrap_or_default(),
             Action::PanDisplay => track.map(|t| pan_label(t.pan)).unwrap_or_default(),
             Action::VolumeDisplay => track.map(|t| volume_label(t.volume)).unwrap_or_default(),
+            // Legacy full-cell indicator (older configs) — the
+            // glyph-in-name style above replaced it in the builtin.
             Action::FolderIndicator => track
                 .map(|t| {
                     if t.is_folder && self.nav.mode == NavMode::Folder {
-                        // "FOLDER" fills 6 of the 7 cells; the
-                        // drilled-into parent gains the ">" arrow.
                         if self.nav.depth() > 0 {
                             "FOLDER>".to_string()
                         } else {
@@ -1159,12 +1177,27 @@ impl DriverState {
                 self.shadow.led(&mut out, button, lit);
             }
 
-            // LCD rows.
+            // LCD rows. While a strip's fader is TOUCHED, the bottom
+            // row shows the live volume instead of its bound display
+            // — CSI's `Touch+DisplayLower TrackVolumeDisplay` from
+            // the official X-Touch zones.
             for (widget, row) in [(StripWidget::LcdTop, 0u8), (StripWidget::LcdBottom, 1u8)] {
-                let text = zone
-                    .strip_action(0, widget)
-                    .map(|a| self.display_text(a, strip, track.as_ref()))
-                    .unwrap_or_default();
+                let touched_volume = row == 1
+                    && self.touched[strip as usize]
+                    && matches!(
+                        zone.strip_action(0, StripWidget::Fader),
+                        Some(Action::TrackVolume)
+                    );
+                let text = if touched_volume {
+                    track
+                        .as_ref()
+                        .map(|t| volume_label(t.volume))
+                        .unwrap_or_default()
+                } else {
+                    zone.strip_action(0, widget)
+                        .map(|a| self.display_text(a, strip, track.as_ref()))
+                        .unwrap_or_default()
+                };
                 self.shadow.lcd(&mut out, strip, row, &text);
             }
 
@@ -2036,6 +2069,40 @@ zones {
         let msgs = s.render();
         assert_eq!(led(&msgs, 0x18), Some(true), "spilled parent stays lit");
         assert_eq!(led(&msgs, 0x19), Some(false), "child (Kick) not drillable");
+    }
+
+    #[test]
+    fn folder_glyphs_and_touch_volume_display() {
+        let mut s = state(); // boots in folder mode
+        s.shadow.invalidate();
+        let msgs = s.render();
+        let lcd_with = |msgs: &[Vec<u8>], text: &[u8]| {
+            msgs.iter()
+                .any(|m| m.len() == 15 && m[5] == 0x12 && m[7..7 + text.len()] == *text)
+        };
+        // Root: drillable folder shows `>DRUMS`; bottom row is pan.
+        assert!(lcd_with(&msgs, b">DRUMS"), "drillable glyph missing");
+        assert!(lcd_with(&msgs, b"  C"), "pan label missing on bottom row");
+
+        // Drill in → parent becomes `<DRUMS` (press to go back).
+        tap(&mut s, 0x18, 0);
+        s.shadow.invalidate();
+        let msgs = s.render();
+        assert!(lcd_with(&msgs, b"<DRUMS"), "spilled-parent glyph missing");
+        // Children show plain names, no glyph.
+        assert!(lcd_with(&msgs, b"Kick"), "child name missing");
+
+        // Touch strip 0's fader → bottom row flips to live volume.
+        s.handle_midi(&[0x90, 0x68, 0x7F], 100);
+        let msgs = s.render();
+        assert!(
+            lcd_with(&msgs, b"+0.0dB"),
+            "touched strip should show volume: {msgs:?}"
+        );
+        // Release → back to pan.
+        s.handle_midi(&[0x90, 0x68, 0x00], 200);
+        let msgs = s.render();
+        assert!(lcd_with(&msgs, b"  C"), "release should restore pan");
     }
 
     #[test]
