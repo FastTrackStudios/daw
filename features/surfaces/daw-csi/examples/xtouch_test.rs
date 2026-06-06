@@ -304,15 +304,12 @@ fn standalone_clap_fx(_s: &Standalone) -> Option<String> {
         return Some(p.to_string_lossy().into_owned());
     }
     let home = std::env::var("HOME").unwrap_or_default();
-    for candidate in [
+    [
         format!("{home}/.clap/delay-plugin.clap"),
         format!("{home}/.clap/chorus-plugin.clap"),
         format!("{home}/.clap/gate-plugin.clap"),
         "/usr/lib/clap/lsp-plugins-clap.clap".to_string(),
-    ] {
-        if std::path::Path::new(&candidate).exists() {
-            return Some(candidate);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|candidate| std::path::Path::new(candidate).exists())
 }

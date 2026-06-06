@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn builtin_zones_compile() {
         let set = ZoneSet::builtin();
-        assert_eq!(set.home, "home");
+        assert_eq!(set.home, "folder");
         let home = set.zone("home").expect("home zone");
         assert_eq!(
             home.strip_action(0, StripWidget::Fader),

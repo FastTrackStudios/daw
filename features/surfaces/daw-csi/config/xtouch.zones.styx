@@ -17,7 +17,9 @@
 
 @ ./zones.schema.styx
 
-home home
+// Boot into folder mode — the band-family view is the home base;
+// GLOBAL VIEW hops to the flat track list ("home" zone) and back.
+home folder
 
 zones {
     /// Track mode: the flat track list banked across the strips.

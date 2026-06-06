@@ -34,6 +34,10 @@ async fn fader_gesture_reaches_engine_and_echoes_on_bus() -> eyre::Result<()> {
     assert_eq!(tracks.len(), 2);
 
     let mut state = DriverState::with_builtin_zones(tracks, "master".into(), 1.0);
+    // Builtin boots in folder mode; these are plain tracks — hop to
+    // the flat list (GLOBAL VIEW).
+    state.handle_midi(&[0x90, 0x33, 0x7F], 0);
+    state.handle_midi(&[0x90, 0x33, 0x00], 50);
 
     // Subscribe the bus BEFORE the gesture so the echo is observable.
     let mut bus = bundle
@@ -85,6 +89,8 @@ async fn buttons_toggle_engine_state() -> eyre::Result<()> {
     project.add_track("Vox", None).await?;
     let tracks = project.tracks().all().await?;
     let mut state = DriverState::with_builtin_zones(tracks, "master".into(), 1.0);
+    state.handle_midi(&[0x90, 0x33, 0x7F], 0); // → flat track list
+    state.handle_midi(&[0x90, 0x33, 0x00], 50);
 
     // Mute strip 0 via the surface.
     for intent in state.handle_midi(&[0x90, 0x10, 0x7F], 0) {
@@ -116,6 +122,8 @@ async fn event_echo_drives_motor_fader_feedback() -> eyre::Result<()> {
     let tracks = project.tracks().all().await?;
     let guid = tracks[0].guid.clone();
     let mut state = DriverState::with_builtin_zones(tracks, "master".into(), 1.0);
+    state.handle_midi(&[0x90, 0x33, 0x7F], 0); // → flat track list
+    state.handle_midi(&[0x90, 0x33, 0x00], 50);
     let _ = state.render(); // settle the shadow
 
     // Someone moves the fader in the UI → service → bus event.

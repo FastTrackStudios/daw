@@ -1000,7 +1000,13 @@ impl DriverState {
             Action::FolderIndicator => track
                 .map(|t| {
                     if t.is_folder && self.nav.mode == NavMode::Folder {
-                        format!("FOLDR {}", ">".repeat(self.nav.depth().min(1)))
+                        // "FOLDER" fills 6 of the 7 cells; the
+                        // drilled-into parent gains the ">" arrow.
+                        if self.nav.depth() > 0 {
+                            "FOLDER>".to_string()
+                        } else {
+                            "FOLDER".to_string()
+                        }
                     } else {
                         pan_label(t.pan)
                     }
@@ -1657,12 +1663,7 @@ mod tests {
     #[test]
     fn zone_hop_changes_select_semantics() {
         let mut s = state();
-        assert_eq!(s.active_zone, "home");
-        // GlobalView is bound to @GoZone{zone folder} in the builtin set.
-        assert_eq!(
-            tap(&mut s, 0x33, 0),
-            vec![Intent::Refresh, Intent::RefreshSends]
-        );
+        // Folder mode is the default home base now.
         assert_eq!(s.active_zone, "folder");
         assert_eq!(s.nav.mode, NavMode::Folder);
         // Root: [DRUMS, Bass]. Select strip 0 (DRUMS folder) → drill.
@@ -1678,13 +1679,18 @@ mod tests {
         // Select DRUMS (strip 0, current spill parent) again → pop.
         assert_eq!(tap(&mut s, 0x18, 300), vec![Intent::Refresh]);
         assert_eq!(s.nav.depth(), 0);
-        // GlobalView in the folder zone goes home again.
+        // GlobalView hops to the flat track list and back.
         assert_eq!(
             tap(&mut s, 0x33, 400),
             vec![Intent::Refresh, Intent::RefreshSends]
         );
         assert_eq!(s.active_zone, "home");
         assert_eq!(s.nav.mode, NavMode::Track);
+        assert_eq!(
+            tap(&mut s, 0x33, 500),
+            vec![Intent::Refresh, Intent::RefreshSends]
+        );
+        assert_eq!(s.active_zone, "folder");
     }
 
     #[test]
@@ -1694,6 +1700,8 @@ mod tests {
             .map(|i| track(&format!("t{i}"), &format!("Track {i}"), None, false))
             .collect();
         let mut s = DriverState::with_builtin_zones(tracks, "master".into(), 1.0);
+        // Plain tracks live in the flat list — hop out of folder mode.
+        tap(&mut s, 0x33, 0);
         assert_eq!(tap(&mut s, 0x31, 0), vec![Intent::Refresh]); // chan right
         // Strip 0 now shows track 1.
         let intents = s.handle_midi(&mcu::encode_fader(0, 16383), 100);
@@ -1734,6 +1742,8 @@ mod tests {
     #[test]
     fn render_full_surface_then_diffs_empty() {
         let mut s = state();
+        // Flat track list so every demo track sits on a strip.
+        tap(&mut s, 0x33, 0);
         let first = s.render();
         assert!(!first.is_empty());
         // LCD for strip 0 contains the track name.
@@ -2001,8 +2011,8 @@ zones {
     #[test]
     fn folder_mode_select_leds_mark_drillable_strips() {
         let mut s = state(); // DRUMS(folder){Kick,Snare}, Bass
-        // Enter folder mode (builtin: GlobalView → folder zone).
-        tap(&mut s, 0x33, 0);
+        // Folder mode is the boot default.
+        assert_eq!(s.active_zone, "folder");
         s.shadow.invalidate();
         let msgs = s.render();
         // Root shows only DRUMS — strip 0's SELECT LED lit (drillable),
