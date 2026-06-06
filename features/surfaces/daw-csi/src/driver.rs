@@ -1194,8 +1194,10 @@ impl DriverState {
                     } else {
                         '>'
                     };
+                    // Glyph FIRST — info may be any length, the
+                    // drill cue must always be visible.
                     let info: String = text.chars().take(6).collect();
-                    text = format!("{info:<6}{icon}");
+                    text = format!("{icon}{info}");
                 }
                 self.shadow.lcd(&mut out, strip, row, &text);
             }
@@ -2090,7 +2092,7 @@ zones {
         assert!(lcd_with(&msgs, b"DRUMS"), "plain name missing");
         assert_eq!(
             strip0_bottom(&msgs).as_deref(),
-            Some(b"  C   >".as_ref()),
+            Some(b">  C   ".as_ref()),
             "bottom row should be pan + drill glyph"
         );
 
@@ -2100,7 +2102,7 @@ zones {
         let msgs = s.render();
         assert_eq!(
             strip0_bottom(&msgs).as_deref(),
-            Some(b"  C   <".as_ref()),
+            Some(b"<  C   ".as_ref()),
             "spilled parent should show the back glyph"
         );
         // Children show plain names + glyph-less pan.
@@ -2120,7 +2122,7 @@ zones {
         let msgs = s.render();
         assert_eq!(
             strip0_bottom(&msgs).as_deref(),
-            Some(b"  C   <".as_ref()),
+            Some(b"<  C   ".as_ref()),
             "release should restore pan + glyph"
         );
     }
