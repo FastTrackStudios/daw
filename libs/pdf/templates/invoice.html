@@ -257,6 +257,7 @@
     {% if status %}<div><span class="status {{ status }}">{{ status }}</span></div>{% endif %}
     <div>Issued: <strong>{{ issue_date }}</strong></div>
     {% if due_date %}<div>Due: <strong>{{ due_date }}</strong></div>{% endif %}
+    {% if period_start and period_end %}<div>Period: <strong>{{ period_start }}</strong> → <strong>{{ period_end }}</strong></div>{% endif %}
     <div>Currency: {{ currency }}</div>
   </div>
 </div>

@@ -33,6 +33,14 @@ pub struct InvoiceData {
     /// (caller wants issue-only display).
     #[serde(default)]
     pub due_date: String,
+    /// Optional billing period start (`YYYY-MM-DD`). Empty
+    /// hides the row.
+    #[serde(default)]
+    pub period_start: String,
+    /// Optional billing period end (`YYYY-MM-DD`). Empty
+    /// hides the row.
+    #[serde(default)]
+    pub period_end: String,
     /// One of `draft / sent / paid / void` (or whatever the
     /// caller's enum slug is).
     pub status: String,
