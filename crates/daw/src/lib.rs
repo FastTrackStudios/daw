@@ -184,6 +184,18 @@ pub mod standalone {
     pub use daw_standalone::*;
 }
 
+// ── Plugin hosting: format-agnostic CLAP/VST3/LV2 plugin host ───────────────
+//
+// The host trait + loader live in `daw-standalone::plugin`. Re-exposed here
+// directly under `daw::plugin` so consumers don't have to think of plugin
+// hosting as a "standalone" concept — it's a general capability the standalone
+// reference implementation happens to provide. The CLAP and VST3 backends are
+// each behind their own feature flag (`clap-host`, `vst3-host`).
+#[cfg(feature = "standalone")]
+pub mod plugin {
+    pub use daw_standalone::plugin::*;
+}
+
 // ── CSI: hardware control surfaces ──────────────────────────────────────────
 #[cfg(feature = "csi")]
 /// Control Surface Integration — Mackie Control / Behringer X-Touch

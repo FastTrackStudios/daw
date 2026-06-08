@@ -91,6 +91,11 @@ ui = ["dep:daw-ui", "daw-ui/web"]
 # daw-theme-reaper parser via daw-ui).
 ui-reaper-theme = ["ui", "daw-ui/reaper-theme"]
 standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
+# Plugin-host backends, exposed via `daw::plugin` (CLAP / VST3). Each pulls in
+# the matching daw-standalone backend feature; consumers (signal, etc.) enable
+# only the formats they need.
+clap-host = ["standalone-audio", "daw-standalone/clap-host"]
+vst3-host = ["standalone-audio", "daw-standalone/vst3-host"]
 file = ["dep:dawfile-reaper"]
 # Cross-format project conversion (`daw::file::convert`, format → RPP). Pulls
 # the importers from `daw-reaper`. `convert` enables every importer; the
