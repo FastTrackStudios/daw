@@ -29,6 +29,11 @@ pub use architect;
 pub use crdt_derive::entity_crdt;
 pub use loro;
 
+// Real-time, offline-first sync over vox (`DocSync` + `DocSyncHost` +
+// `SyncedDoc`). Gated: the core stays transport-free.
+#[cfg(feature = "vox")]
+pub mod sync;
+
 /// Re-exports for awareness / cursor-sync work. `EphemeralStore`
 /// is the Loro primitive for ephemeral state (remote cursors,
 /// presence) — timestamp-LWW, partial-update encoding, stale-

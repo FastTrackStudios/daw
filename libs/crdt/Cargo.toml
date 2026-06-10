@@ -26,8 +26,17 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 #
 # Wasm-clean by construction. No DB deps, no transport deps.
 
+[features]
+default = []
+# The real-time sync transport (`crdt::sync`): the DocSync vox service,
+# the server host (canonical doc + fan-out), and the SyncedDoc client
+# driver. Pulls vox + architect's PubSub.
+vox = ["dep:vox", "dep:facet", "architect/vox"]
+
 [dependencies]
 architect.workspace = true
+vox = { workspace = true, optional = true }
+facet = { workspace = true, optional = true }
 loro.workspace = true
 # Pin to the same minor as `loro` — type identities in
 # `EphemeralStore` ride the loro-internal crate version.
@@ -50,3 +59,12 @@ tokio = { version = "1", default-features = false, features = ["rt"] }
 
 [lib]
 doctest = false
+
+[dev-dependencies]
+# Self-dep so the test targets always see the sync module (cargo enables
+# the feature for tests without making it a default).
+crdt = { path = ".", features = ["vox"] }
+# The sync convergence test serves DocSyncHost over the in-process vox
+# transport and runs replicas under tokio.
+architect = { path = "../../macros/architect", features = ["vox", "local"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
