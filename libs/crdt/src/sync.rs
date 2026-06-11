@@ -110,6 +110,12 @@ pub struct DocSyncHost {
     doc_id: Uuid,
     doc: CrdtDoc,
     hub: architect::PubSub<Vec<u8>>,
+    /// Live sync sessions: incremented on a successful attach, decremented
+    /// when the session's up-pump ends (the replica's connection closed).
+    /// What [`DocRegistry`](crate::registry::DocRegistry) consults before
+    /// evicting an idle host — `PubSub::subscriber_count` is only swept
+    /// lazily (on publish), so it can overcount on a quiet doc.
+    sessions: Arc<std::sync::atomic::AtomicUsize>,
     /// Updates (local or relayed) since the last compaction trigger.
     update_count: Arc<std::sync::atomic::AtomicU32>,
     /// 0 = compaction off. Shared with the local-update bridge so
@@ -171,6 +177,7 @@ impl DocSyncHost {
             doc_id,
             doc,
             hub,
+            sessions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             update_count,
             compact_every,
             compact_tx,
@@ -203,6 +210,33 @@ impl DocSyncHost {
     /// The canonical doc (for mounting entity repos on the server).
     pub fn doc(&self) -> &CrdtDoc {
         &self.doc
+    }
+
+    /// How many sync sessions are currently attached. A session counts
+    /// from a successful [`DocSync::sync`] until its up-channel closes
+    /// (i.e. the replica's connection tore down).
+    pub fn active_sessions(&self) -> usize {
+        self.sessions.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
+/// RAII session counter: increments on construction, decrements on drop
+/// (the host pump task owns one for its lifetime).
+#[cfg(not(target_arch = "wasm32"))]
+struct SessionGuard(Arc<std::sync::atomic::AtomicUsize>);
+
+#[cfg(not(target_arch = "wasm32"))]
+impl SessionGuard {
+    fn new(counter: Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        counter.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        Self(counter)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for SessionGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
     }
 }
 
@@ -279,7 +313,9 @@ impl DocSync for DocSyncHost {
         let count = self.update_count.clone();
         let every = self.compact_every.clone();
         let trigger = self.compact_tx.clone();
+        let session = SessionGuard::new(self.sessions.clone());
         tokio::spawn(async move {
+            let _session = session;
             while let Ok(Some(update)) = up.recv().await {
                 let mut owned: Option<Vec<u8>> = None;
                 let _ = update.map(|u| owned = Some(u.clone()));
@@ -311,6 +347,9 @@ pub struct PresenceHost {
     doc_id: Uuid,
     store: crate::awareness::EphemeralStore,
     hub: architect::PubSub<Vec<u8>>,
+    /// Live presence sessions — same lifecycle as
+    /// [`DocSyncHost::active_sessions`].
+    sessions: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -322,12 +361,20 @@ impl PresenceHost {
             doc_id,
             store: crate::awareness::EphemeralStore::new(timeout_ms),
             hub: architect::PubSub::sliding(64),
+            sessions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
     /// The mirror store (e.g. for server-side "who's online" reads).
     pub fn store(&self) -> &crate::awareness::EphemeralStore {
         &self.store
+    }
+
+    /// How many presence sessions are currently attached — counted from
+    /// a successful [`DocPresence::presence`] until the peer's up-channel
+    /// closes.
+    pub fn active_sessions(&self) -> usize {
+        self.sessions.load(std::sync::atomic::Ordering::Acquire)
     }
 }
 
@@ -352,7 +399,9 @@ impl DocPresence for PresenceHost {
 
         let store = self.store.clone();
         let hub = self.hub.clone();
+        let session = SessionGuard::new(self.sessions.clone());
         tokio::spawn(async move {
+            let _session = session;
             while let Ok(Some(update)) = up.recv().await {
                 let mut owned: Option<Vec<u8>> = None;
                 let _ = update.map(|u| owned = Some(u.clone()));

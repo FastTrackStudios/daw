@@ -35,6 +35,14 @@ pub use loro;
 #[cfg(feature = "vox")]
 pub mod sync;
 
+// Multi-doc registry: one mounted DocSync/DocPresence dispatcher pair
+// serving any number of docs, opened on demand. Server-side (it manages
+// native-only hosts), so it's gated on the target too.
+#[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+pub mod registry;
+#[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+pub use registry::DocRegistry;
+
 // Dioxus hooks (`use_synced_doc`, `use_crdt_list`, `use_crdt_entry`,
 // `use_presence_channel`) — the client-side bridge from a syncing
 // replica to `AtomResult` phase rendering. Pulls Dioxus via
@@ -44,7 +52,8 @@ pub mod hooks;
 #[cfg(feature = "dioxus")]
 pub use hooks::{
     DocHandle, Presence, SyncStatus, use_crdt_entry, use_crdt_list, use_doc_handle, use_presence,
-    use_presence_channel, use_synced_doc, use_synced_doc_with,
+    use_presence_channel, use_presence_channel_keyed, use_synced_doc, use_synced_doc_keyed,
+    use_synced_doc_keyed_with, use_synced_doc_with,
 };
 
 // File-backed persistence — the desktop client's (and a small server's)

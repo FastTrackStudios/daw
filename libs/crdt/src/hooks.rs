@@ -107,14 +107,43 @@ where
     F: FnOnce() -> Fut + 'static,
     Fut: std::future::Future<Output = Result<CrdtDoc, PersistError>> + 'static,
 {
+    let handle = use_synced_doc_keyed_with(doc_id, open);
+    use_context_provider(|| handle)
+}
+
+/// Keyed variant of [`use_synced_doc`]: same machinery (replica + sync
+/// session + revision signal), but the [`DocHandle`] is **returned, not
+/// provided as context** — so a component can hold several docs at once
+/// (the unkeyed context hooks would collide on the single `DocHandle`
+/// context). Pair with a [`DocRegistry`](crate::registry::DocRegistry)
+/// on the server, which serves any `doc_id` over one mounted dispatcher.
+///
+/// `doc_id` is captured on first render; to switch documents, remount
+/// the component (give it a `key`).
+///
+/// ```ignore
+/// let project = use_synced_doc_keyed(project_doc_id);
+/// let inbox = use_synced_doc_keyed(inbox_doc_id);
+/// ```
+pub fn use_synced_doc_keyed(doc_id: Uuid) -> DocHandle {
+    use_synced_doc_keyed_with(doc_id, || async { Ok(CrdtDoc::ephemeral()) })
+}
+
+/// [`use_synced_doc_keyed`] with a custom (possibly async) doc
+/// constructor — see [`use_synced_doc_with`].
+pub fn use_synced_doc_keyed_with<F, Fut>(doc_id: Uuid, open: F) -> DocHandle
+where
+    F: FnOnce() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<CrdtDoc, PersistError>> + 'static,
+{
     let doc_sig = use_signal(|| None::<CrdtDoc>);
     let mut revision = use_signal(|| 0u64);
     let status = use_signal(|| SyncStatus::Connecting);
-    let handle = use_context_provider(|| DocHandle {
+    let handle = DocHandle {
         doc: doc_sig,
         revision,
         status,
-    });
+    };
     let conn = use_connection::<vox::Caller>();
     let mut open_slot = use_hook(|| CopyValue::new(Some(open)));
 
@@ -258,12 +287,22 @@ impl Presence {
 /// provides a [`Presence`] handle, keeps one session against the shared
 /// connection alive, and re-announces this client's keys on reconnect.
 pub fn use_presence_channel(doc_id: Uuid, timeout_ms: i64) -> Presence {
+    let presence = use_presence_channel_keyed(doc_id, timeout_ms);
+    use_context_provider(|| presence)
+}
+
+/// Keyed variant of [`use_presence_channel`]: same machinery, but the
+/// [`Presence`] handle is **returned, not provided as context** — hold
+/// one per doc when a component joins several docs' presence channels
+/// at once. `doc_id` is captured on first render; remount (`key`) to
+/// switch.
+pub fn use_presence_channel_keyed(doc_id: Uuid, timeout_ms: i64) -> Presence {
     let mut peer_sig = use_signal(|| None::<PresencePeer>);
     let mut revision = use_signal(|| 0u64);
-    let presence = use_context_provider(|| Presence {
+    let presence = Presence {
         peer: peer_sig,
         revision,
-    });
+    };
     let conn = use_connection::<vox::Caller>();
 
     use_future(move || async move {

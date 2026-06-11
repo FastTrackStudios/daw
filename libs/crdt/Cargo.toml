@@ -65,7 +65,9 @@ crdt-derive = { path = "../../macros/crdt-derive", version = "*" }
 tokio = { version = "1", default-features = false, features = ["sync", "macros"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1", default-features = false, features = ["rt"] }
+# `rt` for the `tokio::spawn` inside `CrdtDoc::open`'s persistence-writer
+# task; `time` for the `DocRegistry` idle-eviction sweeper's timer.
+tokio = { version = "1", default-features = false, features = ["rt", "time"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # `CrdtDoc::open`'s persistence-writer task on the browser's
