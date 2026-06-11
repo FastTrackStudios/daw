@@ -14,7 +14,8 @@
 //! - **DateTime\<Utc\>** → RFC3339 string. Sub-second precision is
 //!   preserved at the nanosecond level chrono emits; round-tripping
 //!   through parse can normalize nanos → micros on some platforms.
-//! - **u32 / i64** → `LoroValue::I64`. `u32` is range-checked on read.
+//! - **i32 / u32 / i64** → `LoroValue::I64`. `i32` and `u32` are
+//!   range-checked on read.
 //! - **bool** → `LoroValue::Bool`.
 //! - **Option\<T\>** → omit the key when `None` (also accept
 //!   `LoroValue::Null` on read for forward-compat).
@@ -100,6 +101,20 @@ pub fn write_i64(m: &LoroMap, k: &str, v: i64) -> Result<(), RepoError> {
 pub fn write_opt_i64(m: &LoroMap, k: &str, v: Option<i64>) -> Result<(), RepoError> {
     match v {
         Some(n) => write_i64(m, k, n),
+        None => {
+            let _ = m.delete(k);
+            Ok(())
+        }
+    }
+}
+
+pub fn write_i32(m: &LoroMap, k: &str, v: i32) -> Result<(), RepoError> {
+    write_i64(m, k, v as i64)
+}
+
+pub fn write_opt_i32(m: &LoroMap, k: &str, v: Option<i32>) -> Result<(), RepoError> {
+    match v {
+        Some(n) => write_i32(m, k, n),
         None => {
             let _ = m.delete(k);
             Ok(())
@@ -232,6 +247,30 @@ pub fn read_opt_i64(m: &LoroMap, k: &str) -> Result<Option<i64>, RepoError> {
         Some(other) => Err(RepoError::Internal(format!(
             "expected i64 at `{k}`, got {other:?}"
         ))),
+    }
+}
+
+pub fn read_i32(m: &LoroMap, k: &str) -> Result<i32, RepoError> {
+    let n = read_i64(m, k)?;
+    if n < i32::MIN as i64 || n > i32::MAX as i64 {
+        return Err(RepoError::Internal(format!(
+            "out of range i32 at `{k}`: {n}"
+        )));
+    }
+    Ok(n as i32)
+}
+
+pub fn read_opt_i32(m: &LoroMap, k: &str) -> Result<Option<i32>, RepoError> {
+    match read_opt_i64(m, k)? {
+        None => Ok(None),
+        Some(n) => {
+            if n < i32::MIN as i64 || n > i32::MAX as i64 {
+                return Err(RepoError::Internal(format!(
+                    "out of range i32 at `{k}`: {n}"
+                )));
+            }
+            Ok(Some(n as i32))
+        }
     }
 }
 
@@ -410,6 +449,83 @@ pub fn apply_text_diff(m: &LoroMap, key: &str, old: &str, new: &str) -> Result<(
         });
     }
     apply_text_ops(m, key, &ops)
+}
+
+#[cfg(test)]
+mod scalar_tests {
+    use super::*;
+    use loro::LoroDoc;
+
+    fn root(doc: &LoroDoc) -> LoroMap {
+        doc.get_map("root")
+    }
+
+    #[test]
+    fn i32_round_trip() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        write_i32(&m, "n", -42).unwrap();
+        assert_eq!(read_i32(&m, "n").unwrap(), -42);
+    }
+
+    #[test]
+    fn i32_extremes_round_trip() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        write_i32(&m, "min", i32::MIN).unwrap();
+        write_i32(&m, "max", i32::MAX).unwrap();
+        assert_eq!(read_i32(&m, "min").unwrap(), i32::MIN);
+        assert_eq!(read_i32(&m, "max").unwrap(), i32::MAX);
+    }
+
+    #[test]
+    fn read_i32_missing_key_errors() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        assert!(read_i32(&m, "absent").is_err());
+    }
+
+    #[test]
+    fn read_i32_out_of_range_errors() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        write_i64(&m, "big", i32::MAX as i64 + 1).unwrap();
+        write_i64(&m, "small", i32::MIN as i64 - 1).unwrap();
+        assert!(matches!(
+            read_i32(&m, "big"),
+            Err(RepoError::Internal(msg)) if msg.contains("out of range i32")
+        ));
+        assert!(read_i32(&m, "small").is_err());
+    }
+
+    #[test]
+    fn opt_i32_some_round_trips() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        write_opt_i32(&m, "n", Some(7)).unwrap();
+        assert_eq!(read_opt_i32(&m, "n").unwrap(), Some(7));
+    }
+
+    #[test]
+    fn opt_i32_none_omits_the_key() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        // None on a fresh map: key stays absent → reads back as None.
+        write_opt_i32(&m, "n", None).unwrap();
+        assert_eq!(read_opt_i32(&m, "n").unwrap(), None);
+        // Some then None: the key is deleted again.
+        write_opt_i32(&m, "n", Some(3)).unwrap();
+        write_opt_i32(&m, "n", None).unwrap();
+        assert_eq!(read_opt_i32(&m, "n").unwrap(), None);
+    }
+
+    #[test]
+    fn read_opt_i32_out_of_range_errors() {
+        let doc = LoroDoc::new();
+        let m = root(&doc);
+        write_i64(&m, "big", u32::MAX as i64).unwrap();
+        assert!(read_opt_i32(&m, "big").is_err());
+    }
 }
 
 #[cfg(test)]
