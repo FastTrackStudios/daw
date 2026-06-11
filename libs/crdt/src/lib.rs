@@ -30,9 +30,36 @@ pub use crdt_derive::entity_crdt;
 pub use loro;
 
 // Real-time, offline-first sync over vox (`DocSync` + `DocSyncHost` +
-// `SyncedDoc`). Gated: the core stays transport-free.
+// `SyncedDoc`, plus the presence channel). Gated: the core stays
+// transport-free.
 #[cfg(feature = "vox")]
 pub mod sync;
+
+// Dioxus hooks (`use_synced_doc`, `use_crdt_list`, `use_crdt_entry`,
+// `use_presence_channel`) — the client-side bridge from a syncing
+// replica to `AtomResult` phase rendering. Pulls Dioxus via
+// architect's `atom` feature, so it's its own gate.
+#[cfg(feature = "dioxus")]
+pub mod hooks;
+#[cfg(feature = "dioxus")]
+pub use hooks::{
+    DocHandle, Presence, SyncStatus, use_crdt_entry, use_crdt_list, use_doc_handle, use_presence,
+    use_presence_channel, use_synced_doc, use_synced_doc_with,
+};
+
+// File-backed persistence — the desktop client's (and a small server's)
+// way to make a replica survive restarts. Native only.
+#[cfg(not(target_arch = "wasm32"))]
+pub mod fs;
+#[cfg(not(target_arch = "wasm32"))]
+pub use fs::FilePersistence;
+
+// IndexedDB persistence — the browser's way. Wasm only, behind a
+// feature (pulls the `idb` bindings).
+#[cfg(all(target_arch = "wasm32", feature = "indexeddb"))]
+pub mod indexeddb;
+#[cfg(all(target_arch = "wasm32", feature = "indexeddb"))]
+pub use indexeddb::IndexedDbPersistence;
 
 /// Re-exports for awareness / cursor-sync work. `EphemeralStore`
 /// is the Loro primitive for ephemeral state (remote cursors,
@@ -151,11 +178,11 @@ impl CrdtDoc {
     /// snapshot, replay any updates, wire the subscription that
     /// forwards future commits back to storage.
     ///
-    /// Server-side only. Spawns a background task (`tokio::spawn`)
-    /// for fire-and-forget update persistence, so it requires a
-    /// tokio runtime. Wasm clients use [`CrdtDoc::ephemeral`] +
-    /// transport-level sync instead.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// Works on both targets. Loro's local-update callback requires
+    /// `Send + Sync`, but browser storage handles (IndexedDB) aren't —
+    /// so the callback only pushes bytes into a channel, and a single
+    /// spawned writer task (tokio native, `spawn_local` wasm) owns the
+    /// persistence handle and drains it in commit order.
     pub async fn open<P: Persistence>(doc_id: Uuid, persistence: P) -> Result<Self, PersistError> {
         let persistence: Arc<dyn Persistence> = Arc::new(persistence);
         let doc = LoroDoc::new();
@@ -169,17 +196,19 @@ impl CrdtDoc {
                 .map_err(|e| PersistError::Backend(format!("import update: {e}")))?;
         }
 
-        let persist_sub = persistence.clone();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
         let sub = doc.subscribe_local_update(Box::new(move |bytes| {
-            let bytes = bytes.to_vec();
-            let p = persist_sub.clone();
-            tokio::spawn(async move {
-                if let Err(e) = p.append_update(doc_id, &bytes).await {
+            // Writer gone (shutdown) → stop forwarding, keep committing.
+            tx.send(bytes.to_vec()).is_ok()
+        }));
+        let writer = persistence.clone();
+        spawn_persist_writer(async move {
+            while let Some(bytes) = rx.recv().await {
+                if let Err(e) = writer.append_update(doc_id, &bytes).await {
                     tracing::error!(?doc_id, "crdt: failed to persist update: {e}");
                 }
-            });
-            true
-        }));
+            }
+        });
 
         Ok(Self {
             inner: Arc::new(DocInner {
@@ -226,6 +255,18 @@ impl CrdtDoc {
         }
     }
 
+    /// A non-owning handle. **Required** inside loro subscription
+    /// callbacks: a callback that owns a strong `CrdtDoc` can become
+    /// the doc's last owner, making the doc drop *inside* loro's
+    /// unsubscribe path — which re-enters the subscriber registry's
+    /// (non-reentrant) lock to drop the doc's own subscription and
+    /// deadlocks. Hold a `WeakCrdtDoc` there and `upgrade()` on use.
+    pub fn downgrade(&self) -> WeakCrdtDoc {
+        WeakCrdtDoc {
+            inner: Arc::downgrade(&self.inner),
+        }
+    }
+
     /// Typed handle over the entity's root container. Multiple repos
     /// over different entity types all share this doc — writes
     /// commit together, exports cover the whole boundary.
@@ -263,6 +304,32 @@ impl CrdtDoc {
             .map_err(|e| PersistError::Backend(format!("import remote: {e}")))?;
         Ok(())
     }
+
+    /// [`Self::apply_remote`] + write the bytes through this doc's
+    /// persistence. Imports don't fire the local-update subscription
+    /// (only local commits do), so a host applying *relayed* updates
+    /// must persist them explicitly or they'd vanish on restart.
+    pub async fn apply_remote_durable(
+        &self,
+        doc_id: Uuid,
+        bytes: &[u8],
+    ) -> Result<(), PersistError> {
+        self.apply_remote(bytes)?;
+        self.inner.persistence.append_update(doc_id, bytes).await
+    }
+}
+
+/// Non-owning [`CrdtDoc`] handle — see [`CrdtDoc::downgrade`].
+#[derive(Clone)]
+pub struct WeakCrdtDoc {
+    inner: std::sync::Weak<DocInner>,
+}
+
+impl WeakCrdtDoc {
+    /// The doc, if it's still alive.
+    pub fn upgrade(&self) -> Option<CrdtDoc> {
+        self.inner.upgrade().map(|inner| CrdtDoc { inner })
+    }
 }
 
 // ── LoroRepo<E> ───────────────────────────────────────────────────────
@@ -288,6 +355,22 @@ impl<E: EntityCrdt> Clone for LoroRepo<E> {
 
 impl<E: EntityCrdt> LoroRepo<E> {
     pub async fn get(&self, id: Uuid) -> Result<E::Wire, RepoError> {
+        self.get_now(id)
+    }
+
+    pub async fn list(
+        &self,
+        page: Page,
+        sort: Option<Sort>,
+        filter: Option<Filter>,
+    ) -> Result<E::List, RepoError> {
+        self.list_now(page, sort, filter)
+    }
+
+    /// Synchronous `get` — reads never block in Loro (the write lock only
+    /// guards read-modify-write windows), so UI code rendering straight
+    /// off the local replica can read without an executor.
+    pub fn get_now(&self, id: Uuid) -> Result<E::Wire, RepoError> {
         let root = self.inner.doc.get_map(E::ROOT);
         let sub = root
             .get(&id.to_string())
@@ -296,14 +379,11 @@ impl<E: EntityCrdt> LoroRepo<E> {
         E::decode_from(&sub)
     }
 
-    pub async fn list(
-        &self,
-        page: Page,
-        sort: Option<Sort>,
-        _filter: Option<Filter>,
-    ) -> Result<E::List, RepoError> {
+    /// Every row, unsorted, unpaged — the render-time read behind
+    /// `use_crdt_list`. Local replicas are the UI's working set; pages
+    /// sort/slice in memory.
+    pub fn items_now(&self) -> Result<Vec<E::Wire>, RepoError> {
         let root = self.inner.doc.get_map(E::ROOT);
-
         let mut items: Vec<E::Wire> = Vec::with_capacity(root.len());
         let mut decode_err: Option<RepoError> = None;
         root.for_each(|_k, v| {
@@ -317,9 +397,21 @@ impl<E: EntityCrdt> LoroRepo<E> {
                 }
             }
         });
-        if let Some(e) = decode_err {
-            return Err(e);
+        match decode_err {
+            Some(e) => Err(e),
+            None => Ok(items),
         }
+    }
+
+    /// Synchronous `list` — the read path behind the async method, exposed
+    /// for render-time reads (`use_crdt_list` re-runs it per doc revision).
+    pub fn list_now(
+        &self,
+        page: Page,
+        sort: Option<Sort>,
+        _filter: Option<Filter>,
+    ) -> Result<E::List, RepoError> {
+        let mut items = self.items_now()?;
 
         if let Some(s) = sort {
             E::sort_items(&mut items, &s.field, s.order)?;
@@ -397,6 +489,18 @@ impl<E: EntityCrdt> LoroRepo<E> {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────
+
+/// Spawn the persistence writer on whatever executor the target has.
+/// The future is `!Send` on wasm (it owns the browser storage handle);
+/// wasm is single-threaded so `spawn_local` is exactly right.
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_persist_writer(fut: impl std::future::Future<Output = ()> + Send + 'static) {
+    tokio::spawn(fut);
+}
+#[cfg(target_arch = "wasm32")]
+fn spawn_persist_writer(fut: impl std::future::Future<Output = ()> + 'static) {
+    wasm_bindgen_futures::spawn_local(fut);
+}
 
 fn only_map(v: ValueOrContainer) -> Option<LoroMap> {
     match v {

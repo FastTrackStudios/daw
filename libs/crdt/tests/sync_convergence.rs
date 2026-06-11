@@ -103,3 +103,89 @@ async fn replicas_converge_and_late_joiners_catch_up() {
 
     scope.close().await;
 }
+
+/// A replica that edited while offline and then RESTARTED (its
+/// in-memory outbox is gone, but its doc isn't) must still push its
+/// history to the server: `sync` returns the server's version vector
+/// and the client uploads the exact missing delta.
+#[tokio::test(flavor = "multi_thread")]
+async fn offline_history_pushes_back_after_restart() {
+    let doc_id = Uuid::new_v4();
+    let scope = Scope::new();
+
+    let canonical = CrdtDoc::ephemeral();
+    let host = DocSyncHost::new(doc_id, canonical.clone());
+    let router = LayerRouter::new().with(
+        doc_sync_service_descriptor(),
+        crdt::sync::DocSyncDispatcher::new(host),
+    );
+    let local = LocalServer::serve(router, scope.clone());
+
+    // "Offline edits, then restart": the doc has history that predates
+    // the SyncedDoc wiring, so nothing is in the outbox.
+    let replica = CrdtDoc::ephemeral();
+    replica
+        .loro()
+        .get_map("root")
+        .insert("offline", "edit")
+        .expect("insert");
+    replica.loro().commit();
+
+    let client: DocSyncClient = local.establish().await.expect("client");
+    let mut synced = SyncedDoc::new(doc_id, replica);
+    tokio::spawn(async move { synced.run(&client).await });
+
+    converge(&canonical, "server received the offline history", |d| {
+        map_value(d, "offline").as_deref() == Some("edit")
+    })
+    .await;
+    scope.close().await;
+}
+
+/// Minimal probe: a single replica attaches and the sync call returns
+/// the server's encoded version vector.
+#[tokio::test(flavor = "multi_thread")]
+async fn single_replica_attach_returns() {
+    let doc_id = Uuid::new_v4();
+    let scope = Scope::new();
+    let canonical = CrdtDoc::ephemeral();
+    let host = DocSyncHost::new(doc_id, canonical.clone());
+    let router = LayerRouter::new().with(
+        doc_sync_service_descriptor(),
+        crdt::sync::DocSyncDispatcher::new(host),
+    );
+    let local = LocalServer::serve(router, scope.clone());
+
+    let client: DocSyncClient = local.establish().await.expect("client");
+    let (_up_tx, up_rx) = vox::channel::<Vec<u8>>();
+    let (down_tx, _down_rx) = vox::channel::<Vec<u8>>();
+    let vv = tokio::time::timeout(
+        Duration::from_secs(5),
+        client.sync(doc_id, Vec::new(), up_rx, down_tx),
+    )
+    .await
+    .expect("sync call timed out")
+    .expect("sync failed");
+    assert!(loro::VersionVector::decode(&vv).is_ok());
+    scope.close().await;
+}
+
+/// Shutdown regression guard: a host + established client must tear
+/// down promptly. This once deadlocked — the compaction bridge closure
+/// owned a strong `CrdtDoc`, so the doc's final drop happened inside
+/// loro's unsubscribe path (subscriber-registry lock held) and dropping
+/// the doc's own subscription re-entered the lock. Subscription
+/// closures hold `WeakCrdtDoc` only; see `CrdtDoc::downgrade`.
+#[tokio::test(flavor = "multi_thread")]
+async fn establish_then_close() {
+    let doc_id = Uuid::new_v4();
+    let scope = Scope::new();
+    let host = DocSyncHost::new(doc_id, CrdtDoc::ephemeral());
+    let router = LayerRouter::new().with(
+        doc_sync_service_descriptor(),
+        crdt::sync::DocSyncDispatcher::new(host),
+    );
+    let local = LocalServer::serve(router, scope.clone());
+    let _client: DocSyncClient = local.establish().await.expect("client");
+    scope.close().await;
+}

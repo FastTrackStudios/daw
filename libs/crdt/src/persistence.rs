@@ -26,8 +26,21 @@ pub enum PersistError {
     Backend(String),
 }
 
-#[async_trait]
-pub trait Persistence: Send + Sync + 'static {
+/// Marker supertrait: `Send + Sync` on native, nothing on wasm. Browser
+/// storage handles (IndexedDB) are single-threaded and `!Send`; wasm is
+/// single-threaded anyway, so the bound only exists where threads do.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSendSync: Send + Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send + Sync> MaybeSendSync for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSendSync {}
+#[cfg(target_arch = "wasm32")]
+impl<T> MaybeSendSync for T {}
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
+pub trait Persistence: MaybeSendSync + 'static {
     /// Load the most recent compacted snapshot for `doc_id`, or
     /// `None` if there isn't one yet (first-ever open).
     async fn load_snapshot(&self, doc_id: Uuid) -> Result<Option<Vec<u8>>, PersistError>;
