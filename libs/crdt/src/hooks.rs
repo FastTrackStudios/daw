@@ -277,6 +277,7 @@ pub fn use_presence_channel(doc_id: Uuid, timeout_ms: i64) -> Presence {
             let _ = tx.send(());
             true
         }));
+        let peer_for_sweep = peer.clone();
         peer_sig.set(Some(peer));
 
         let bump = async move {
@@ -297,9 +298,21 @@ pub fn use_presence_channel(doc_id: Uuid, timeout_ms: i64) -> Presence {
                 architect::sleep(Duration::from_secs(1)).await;
             }
         };
+        // Expiry sweep — prune vanished peers on a timer. Pruning fires
+        // store events (→ bump → re-render), so it must live HERE, in a
+        // task, never in a render path like `states()`.
+        let sweep_peer = peer_for_sweep;
+        let sweep = async move {
+            let period = Duration::from_millis((timeout_ms as u64 / 2).max(1_000));
+            loop {
+                architect::sleep(period).await;
+                sweep_peer.sweep();
+            }
+        };
         tokio::select! {
             _ = bump => {},
             _ = drive => {},
+            _ = sweep => {},
         }
     });
     presence

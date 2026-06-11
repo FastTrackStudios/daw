@@ -421,10 +421,21 @@ impl PresencePeer {
         self.store.delete(key);
     }
 
-    /// Everyone's current state (expired peers pruned).
+    /// Everyone's current state. Expired peers are pruned by the
+    /// driver's housekeeping (never here — this is called from render
+    /// paths, and `remove_outdated` fires subscriber events, which
+    /// would feed the change-subscription back into another render).
     pub fn states(&self) -> std::collections::HashMap<String, loro::LoroValue> {
-        self.store.remove_outdated();
         self.store.get_all_states().into_iter().collect()
+    }
+
+    /// Prune peers whose state outlived the timeout, notifying
+    /// subscribers (`Timeout` events). Call this from a task on a
+    /// timer — **never from a render path**: pruning fires the store's
+    /// change subscription, and a render that prunes re-renders itself
+    /// forever (a main-thread livelock in the browser).
+    pub fn sweep(&self) {
+        self.store.remove_outdated();
     }
 
     /// The underlying store — for change subscriptions.
