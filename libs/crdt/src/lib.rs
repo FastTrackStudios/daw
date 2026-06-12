@@ -51,9 +51,10 @@ pub use registry::DocRegistry;
 pub mod hooks;
 #[cfg(feature = "dioxus")]
 pub use hooks::{
-    DocHandle, Presence, SyncStatus, use_crdt_entry, use_crdt_list, use_doc_handle, use_presence,
-    use_presence_channel, use_presence_channel_keyed, use_synced_doc, use_synced_doc_keyed,
-    use_synced_doc_keyed_with, use_synced_doc_with,
+    DocHandle, Presence, SyncStatus, use_crdt_entry, use_crdt_list, use_doc_handle, use_doc_slot,
+    use_presence, use_presence_channel, use_presence_channel_into, use_presence_channel_keyed,
+    use_presence_slot, use_synced_doc, use_synced_doc_into, use_synced_doc_into_with,
+    use_synced_doc_keyed, use_synced_doc_keyed_with, use_synced_doc_with,
 };
 
 // File-backed persistence — the desktop client's (and a small server's)

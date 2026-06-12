@@ -68,6 +68,28 @@ impl DocHandle {
         self.doc.read().clone()
     }
 
+    /// Reset the handle to its pre-open state (`None` doc, revision 0,
+    /// [`SyncStatus::Connecting`]) — for slot handles
+    /// ([`use_doc_slot`]) between drivers: call when tearing one
+    /// session down before (or instead of) mounting the next, so no
+    /// reader ever observes the previous doc's state. Writes are
+    /// skipped when already reset, so calling this from a fresh slot
+    /// (or twice) never dirties subscribers.
+    pub fn reset(&self) {
+        let mut doc = self.doc;
+        let mut revision = self.revision;
+        let mut status = self.status;
+        if doc.peek().is_some() {
+            doc.set(None);
+        }
+        if *revision.peek() != 0 {
+            revision.set(0);
+        }
+        if *status.peek() != SyncStatus::Connecting {
+            status.set(SyncStatus::Connecting);
+        }
+    }
+
     /// Reactive read of the doc revision — subscribe a memo/component
     /// to *every* committed change, local or remote.
     pub fn revision(&self) -> u64 {
@@ -136,14 +158,65 @@ where
     F: FnOnce() -> Fut + 'static,
     Fut: std::future::Future<Output = Result<CrdtDoc, PersistError>> + 'static,
 {
-    let doc_sig = use_signal(|| None::<CrdtDoc>);
-    let mut revision = use_signal(|| 0u64);
-    let status = use_signal(|| SyncStatus::Connecting);
-    let handle = DocHandle {
+    let handle = use_doc_slot();
+    use_synced_doc_into_with(handle, doc_id, open);
+    handle
+}
+
+/// Create an **empty slot** [`DocHandle`] owned by the *current* scope
+/// — no doc is opened and no session started until a driver fills it.
+///
+/// This is the ownership half of the split keyed API. Dioxus `Copy`
+/// handles (signals) are owned by the scope that creates them; a
+/// handle created inside a keyed/conditional child and captured by
+/// longer-lived closures (a decoration source, an event callback, a
+/// parent's render) is read **after its owner dropped** the moment the
+/// child remounts — the classic "Copy value used in a scope that is
+/// not a descendant of the owner" violation. The fix dioxus itself
+/// prescribes is hoisting: create the signals in the outliving scope.
+///
+/// So: call `use_doc_slot()` in the stable (page) scope, hand the
+/// handle to everything that captures it, and let a keyed child drive
+/// it with [`use_synced_doc_into`] — the *session* lifecycle stays
+/// keyed (fresh replica per remount) while the *signals* live as long
+/// as every reader. A fresh slot reads as `None` doc / revision 0 /
+/// [`SyncStatus::Connecting`]; see [`DocHandle::reset`].
+pub fn use_doc_slot() -> DocHandle {
+    DocHandle {
+        doc: use_signal(|| None::<CrdtDoc>),
+        revision: use_signal(|| 0u64),
+        status: use_signal(|| SyncStatus::Connecting),
+    }
+}
+
+/// Drive a [`use_doc_slot`] slot: open an ephemeral replica of
+/// `doc_id` and keep one sync session alive for the *calling* scope's
+/// lifetime, writing doc/revision/status **into** the slot's
+/// parent-owned signals. The slot is [`reset`](DocHandle::reset) on
+/// mount, so a remounted driver never lets readers see the previous
+/// doc's revision/status. `doc_id` is captured on first render —
+/// remount (`key:`) to switch documents.
+pub fn use_synced_doc_into(handle: DocHandle, doc_id: Uuid) {
+    use_synced_doc_into_with(handle, doc_id, || async { Ok(CrdtDoc::ephemeral()) });
+}
+
+/// [`use_synced_doc_into`] with a custom (possibly async) doc
+/// constructor — see [`use_synced_doc_with`].
+pub fn use_synced_doc_into_with<F, Fut>(handle: DocHandle, doc_id: Uuid, open: F)
+where
+    F: FnOnce() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<CrdtDoc, PersistError>> + 'static,
+{
+    // A slot can carry a previous driver's state — clear it before any
+    // effect of this mount generation can observe it (no-op writes are
+    // skipped, so a fresh slot stays untouched).
+    use_hook(|| handle.reset());
+    let DocHandle {
         doc: doc_sig,
         revision,
         status,
-    };
+    } = handle;
+    let mut revision = revision;
     let conn = use_connection::<vox::Caller>();
     let mut open_slot = use_hook(|| CopyValue::new(Some(open)));
 
@@ -252,7 +325,6 @@ where
             _ = drive => {},
         }
     });
-    handle
 }
 
 /// Every row of `E` in the synced doc, re-read on every doc revision.
@@ -330,6 +402,20 @@ impl Presence {
             None => Default::default(),
         }
     }
+
+    /// Reset the handle to its pre-join state (no peer, revision 0) —
+    /// for slot handles ([`use_presence_slot`]) between drivers, the
+    /// presence twin of [`DocHandle::reset`]. No-op writes are skipped.
+    pub fn reset(&self) {
+        let mut peer = self.peer;
+        let mut revision = self.revision;
+        if peer.peek().is_some() {
+            peer.set(None);
+        }
+        if *revision.peek() != 0 {
+            revision.set(0);
+        }
+    }
 }
 
 /// Join `doc_id`'s presence channel for the component tree's lifetime:
@@ -346,12 +432,37 @@ pub fn use_presence_channel(doc_id: Uuid, timeout_ms: i64) -> Presence {
 /// at once. `doc_id` is captured on first render; remount (`key`) to
 /// switch.
 pub fn use_presence_channel_keyed(doc_id: Uuid, timeout_ms: i64) -> Presence {
-    let mut peer_sig = use_signal(|| None::<PresencePeer>);
-    let mut revision = use_signal(|| 0u64);
-    let presence = Presence {
+    let presence = use_presence_slot();
+    use_presence_channel_into(presence, doc_id, timeout_ms);
+    presence
+}
+
+/// Create an **empty slot** [`Presence`] owned by the *current* scope
+/// — nobody joins until a driver fills it. The presence twin of
+/// [`use_doc_slot`]: create the handle in the stable (page) scope so
+/// closures that capture it (decoration sources, callbacks) never read
+/// signals owned by a dropped keyed child; drive it from the keyed
+/// child with [`use_presence_channel_into`].
+pub fn use_presence_slot() -> Presence {
+    Presence {
+        peer: use_signal(|| None::<PresencePeer>),
+        revision: use_signal(|| 0u64),
+    }
+}
+
+/// Drive a [`use_presence_slot`] slot: join `doc_id`'s presence
+/// channel for the *calling* scope's lifetime, writing the peer +
+/// revision **into** the slot's parent-owned signals. The slot is
+/// [`reset`](Presence::reset) on mount. `doc_id` is captured on first
+/// render — remount (`key:`) to switch.
+pub fn use_presence_channel_into(presence: Presence, doc_id: Uuid, timeout_ms: i64) {
+    use_hook(|| presence.reset());
+    let Presence {
         peer: peer_sig,
         revision,
-    };
+    } = presence;
+    let mut peer_sig = peer_sig;
+    let mut revision = revision;
     let conn = use_connection::<vox::Caller>();
 
     use_future(move || async move {
@@ -437,7 +548,6 @@ pub fn use_presence_channel_keyed(doc_id: Uuid, timeout_ms: i64) -> Presence {
             _ = sweep => {},
         }
     });
-    presence
 }
 
 /// Pull the [`Presence`] handle provided at the app root.
