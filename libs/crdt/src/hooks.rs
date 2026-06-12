@@ -183,17 +183,66 @@ where
             }
         };
         let drive = async move {
+            let mut status = status;
+            // Exponential backoff with full jitter between failed session
+            // attempts (floor 250ms, cap 10s); reset whenever the shared
+            // connection re-establishes (generation bump) so a recovered
+            // server is consumed immediately. Logs once per state change,
+            // never per attempt.
+            let mut backoff = architect::Backoff::default();
+            let mut last_generation: Option<u64> = None;
+            let mut outage_logged = false;
             loop {
-                let Some(caller) = conn.ready() else {
+                // Re-read the connection every iteration (never capture a
+                // caller across attempts) and skip corpses outright —
+                // `is_connected()` is false the instant the socket dies,
+                // even before the supervisor flips the state.
+                let Some(caller) = conn.ready().filter(vox::Caller::is_connected) else {
                     architect::sleep(Duration::from_millis(200)).await;
                     continue;
                 };
-                status.set(SyncStatus::Live);
-                if let Err(e) = synced.run(&DocSyncClient::new(caller)).await {
-                    tracing::warn!(?doc_id, "crdt: sync session error: {e}");
+                let generation = conn.generation_now();
+                if last_generation != Some(generation) {
+                    backoff.reset();
+                    if outage_logged {
+                        tracing::info!(
+                            ?doc_id,
+                            generation,
+                            "crdt: connection recovered; reattaching sync session"
+                        );
+                        outage_logged = false;
+                    }
+                    last_generation = Some(generation);
                 }
-                status.set(SyncStatus::Offline);
-                architect::sleep(Duration::from_secs(1)).await;
+                if *status.peek() != SyncStatus::Live {
+                    status.set(SyncStatus::Live);
+                }
+                match synced.run(&DocSyncClient::new(caller)).await {
+                    // `Ok` = the session attached and later dropped
+                    // (stream ended / send failed): the start of an
+                    // outage — one warn, then quiet until recovery.
+                    Ok(()) => {
+                        tracing::warn!(?doc_id, "crdt: sync session dropped; reconnecting");
+                        outage_logged = true;
+                    }
+                    // `Err` = attach (or apply) failed — usually a dead
+                    // caller racing the supervisor. One warn per outage.
+                    Err(e) => {
+                        if !outage_logged {
+                            tracing::warn!(
+                                ?doc_id,
+                                "crdt: sync session error: {e}; retrying with backoff"
+                            );
+                            outage_logged = true;
+                        } else {
+                            tracing::debug!(?doc_id, "crdt: sync reattach failed: {e}");
+                        }
+                    }
+                }
+                if *status.peek() != SyncStatus::Offline {
+                    status.set(SyncStatus::Offline);
+                }
+                architect::sleep(backoff.next_delay()).await;
             }
         };
         // Both run for the component's lifetime; the future is dropped
@@ -326,15 +375,49 @@ pub fn use_presence_channel_keyed(doc_id: Uuid, timeout_ms: i64) -> Presence {
             }
         };
         let drive = async move {
+            // Same recovery contract as the doc-sync drive loop: re-read
+            // the connection each attempt, skip dead callers, back off
+            // exponentially with full jitter (reset on generation bump),
+            // and log once per state change — not once per second.
+            let mut backoff = architect::Backoff::default();
+            let mut last_generation: Option<u64> = None;
+            let mut outage_logged = false;
             loop {
-                let Some(caller) = conn.ready() else {
+                let Some(caller) = conn.ready().filter(vox::Caller::is_connected) else {
                     architect::sleep(Duration::from_millis(200)).await;
                     continue;
                 };
-                if let Err(e) = driver.run(&DocPresenceClient::new(caller)).await {
-                    tracing::warn!(?doc_id, "presence session error: {e}");
+                let generation = conn.generation_now();
+                if last_generation != Some(generation) {
+                    backoff.reset();
+                    if outage_logged {
+                        tracing::info!(
+                            ?doc_id,
+                            generation,
+                            "presence: connection recovered; reattaching"
+                        );
+                        outage_logged = false;
+                    }
+                    last_generation = Some(generation);
                 }
-                architect::sleep(Duration::from_secs(1)).await;
+                match driver.run(&DocPresenceClient::new(caller)).await {
+                    Ok(()) => {
+                        tracing::warn!(?doc_id, "presence session dropped; reconnecting");
+                        outage_logged = true;
+                    }
+                    Err(e) => {
+                        if !outage_logged {
+                            tracing::warn!(
+                                ?doc_id,
+                                "presence session error: {e}; retrying with backoff"
+                            );
+                            outage_logged = true;
+                        } else {
+                            tracing::debug!(?doc_id, "presence reattach failed: {e}");
+                        }
+                    }
+                }
+                architect::sleep(backoff.next_delay()).await;
             }
         };
         // Expiry sweep — prune vanished peers on a timer. Pruning fires
