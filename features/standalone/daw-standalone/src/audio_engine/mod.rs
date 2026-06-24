@@ -30,6 +30,8 @@
 pub mod decoder;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub mod materialize;
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+pub mod live;
 #[cfg(feature = "audio")]
 mod mixer;
 #[cfg(feature = "clap-host")]
@@ -53,6 +55,8 @@ pub mod test_tone;
 
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
+#[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
+pub use live::{Identity, InputProbe, LIVE_PREPARE_BLOCK, LiveRig};
 #[cfg(feature = "audio")]
 pub use mixer::{AudioEngine, TrackHandle};
 pub use source::AudioSource;

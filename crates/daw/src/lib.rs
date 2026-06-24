@@ -196,6 +196,21 @@ pub mod plugin {
     pub use daw_standalone::plugin::*;
 }
 
+// ── Live rig: one-call live-monitor engine ──────────────────────────────────
+//
+// `daw::live::LiveRig` packages the "input-armed track + swappable FX chain +
+// running engine" setup so any live-input consumer (guitar amp modeler, vocal
+// monitor, etc.) gets live monitoring in one call — hiding `Tracks` /
+// `FxChains` / `ProjectContext` / `RecordInput` / `TrackRef` entirely. The
+// generic `Identity` / `InputProbe` pass-through `PluginInstance`s ship here
+// too. Requires the audio engine (`standalone-audio`), native-only.
+#[cfg(all(feature = "standalone-audio", not(target_arch = "wasm32")))]
+pub mod live {
+    pub use daw_standalone::audio_engine::live::{
+        Identity, InputProbe, LIVE_PREPARE_BLOCK, LiveRig,
+    };
+}
+
 // ── CSI: hardware control surfaces ──────────────────────────────────────────
 #[cfg(feature = "csi")]
 /// Control Surface Integration — Mackie Control / Behringer X-Touch
