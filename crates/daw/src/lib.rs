@@ -196,15 +196,16 @@ pub mod plugin {
     pub use daw_standalone::plugin::*;
 }
 
-// ── Live monitoring: folded onto the audio engine ───────────────────────────
+// ── Realtime audio engine: no rig API ───────────────────────────────────────
 //
-// The live-monitor capability ("input-armed track + swappable FX chain +
-// running engine") lives on `AudioEngine` itself — the DAW audio engine is
-// "just live capable". Open one with `AudioEngine::open_live(prefs, channel,
-// slots)` (reachable via `daw::standalone::audio_engine::AudioEngine`, gated on
-// `standalone-audio`, native-only); the rest of the live API (`set_chain`,
-// `input_peak`, `output_peak`, `set_output_gain_db`, `prepare_block`) hangs off
-// the returned engine. The former `daw::live::LiveRig` wrapper is gone.
+// `AudioEngine` (reachable via `daw::standalone::audio_engine::AudioEngine`,
+// gated on `standalone-audio`) is a pure realtime audio processor: open it on a
+// project with `AudioEngine::with_project_prefs(daw, guid, shared, &prefs)` and
+// it renders every block — items, live-input stage 0 (when `prefs.want_input`
+// or a track is armed `RecordInput::Audio`), per-track FX, routing, master. It
+// carries no `LiveRig`/`open_live`/`set_chain`/rig concept; consumers (e.g.
+// signal's `GuitarRig`) assemble any "live monitor" rig themselves out of the
+// project/FX primitives + this engine.
 
 // ── CSI: hardware control surfaces ──────────────────────────────────────────
 #[cfg(feature = "csi")]

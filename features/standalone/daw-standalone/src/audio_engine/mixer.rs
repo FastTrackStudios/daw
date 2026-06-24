@@ -248,13 +248,6 @@ pub struct AudioEngine {
     /// Media read-ahead worker (project mode only) — stops with the engine.
     #[cfg(not(target_arch = "wasm32"))]
     _prefetch: Option<super::prefetch::PrefetchWorker>,
-    /// Live-monitor state — present only for an engine opened via
-    /// [`open_live`](Self::open_live) (the input-armed track + swappable FX
-    /// chain + meters). `None` for a plain playback engine; the live methods
-    /// ([`set_chain`](Self::set_chain), [`input_peak`](Self::input_peak), …)
-    /// are no-ops / return `0.0` in that case.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) live: Option<super::live::LiveState>,
 }
 
 impl AudioEngine {
@@ -380,8 +373,6 @@ impl AudioEngine {
             // Private-track-list mode mixes from memory — no mmap to warm.
             #[cfg(not(target_arch = "wasm32"))]
             _prefetch: None,
-            #[cfg(not(target_arch = "wasm32"))]
-            live: None,
         })
     }
 
@@ -494,8 +485,6 @@ impl AudioEngine {
             _input_stream: input_stream,
             #[cfg(not(target_arch = "wasm32"))]
             _prefetch: prefetch,
-            #[cfg(not(target_arch = "wasm32"))]
-            live: None,
         })
     }
 
