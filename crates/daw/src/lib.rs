@@ -196,20 +196,15 @@ pub mod plugin {
     pub use daw_standalone::plugin::*;
 }
 
-// ── Live rig: one-call live-monitor engine ──────────────────────────────────
+// ── Live monitoring: folded onto the audio engine ───────────────────────────
 //
-// `daw::live::LiveRig` packages the "input-armed track + swappable FX chain +
-// running engine" setup so any live-input consumer (guitar amp modeler, vocal
-// monitor, etc.) gets live monitoring in one call — hiding `Tracks` /
-// `FxChains` / `ProjectContext` / `RecordInput` / `TrackRef` entirely. The
-// generic `Identity` / `InputProbe` pass-through `PluginInstance`s ship here
-// too. Requires the audio engine (`standalone-audio`), native-only.
-#[cfg(all(feature = "standalone-audio", not(target_arch = "wasm32")))]
-pub mod live {
-    pub use daw_standalone::audio_engine::live::{
-        Identity, InputProbe, LIVE_PREPARE_BLOCK, LiveRig,
-    };
-}
+// The live-monitor capability ("input-armed track + swappable FX chain +
+// running engine") lives on `AudioEngine` itself — the DAW audio engine is
+// "just live capable". Open one with `AudioEngine::open_live(prefs, channel,
+// slots)` (reachable via `daw::standalone::audio_engine::AudioEngine`, gated on
+// `standalone-audio`, native-only); the rest of the live API (`set_chain`,
+// `input_peak`, `output_peak`, `set_output_gain_db`, `prepare_block`) hangs off
+// the returned engine. The former `daw::live::LiveRig` wrapper is gone.
 
 // ── CSI: hardware control surfaces ──────────────────────────────────────────
 #[cfg(feature = "csi")]

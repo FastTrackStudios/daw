@@ -1,19 +1,25 @@
-//! Live-monitor rig — one input-armed track with a swappable FX chain.
+//! Live-monitor capability for [`AudioEngine`] — one input-armed track with a
+//! swappable FX chain.
 //!
-//! [`LiveRig`] packages the "stand up a single live-monitor track" ritual that
-//! every live-input consumer (guitar amp modeler, vocal-chain monitor, etc.)
-//! would otherwise hand-assemble out of [`Standalone`] + [`AudioEngine`]
-//! internals: seed a tiny project, add an input-armed track, reserve a fixed
-//! set of FX slots, open the engine with a live input stream, install the
-//! per-track meter bank, and roll the transport.
+//! The DAW audio engine is "just live capable": [`AudioEngine::open_live`]
+//! stands up the whole "single live-monitor track" ritual that every live-input
+//! consumer (guitar amp modeler, vocal-chain monitor, etc.) would otherwise
+//! hand-assemble out of [`Standalone`] + [`AudioEngine`] internals — seed a tiny
+//! project, add an input-armed track, reserve a fixed set of FX slots, open the
+//! engine with a live input stream, install the per-track meter bank, and roll
+//! the transport — and returns an `AudioEngine` carrying that live state. The
+//! live methods ([`set_chain`](AudioEngine::set_chain),
+//! [`input_peak`](AudioEngine::input_peak), …) act on it; on a plain playback
+//! engine (no [`open_live`](AudioEngine::open_live)) they are no-ops.
 //!
 //! The result is **one input-armed track in a tiny daw project**: a single
 //! track whose record input is a hardware channel
 //! ([`RecordInput::Audio`](daw_proto::track::RecordInput::Audio)), whose FX
-//! chain is whatever the caller installs via [`set_chain`](LiveRig::set_chain),
-//! routed to master. daw's [`AudioEngine`] opens the output device + a live
-//! input stream and, every block, mixes the armed input channel into the
-//! track's bus, runs its FX chain, and outputs the result.
+//! chain is whatever the caller installs via
+//! [`set_chain`](AudioEngine::set_chain), routed to master. daw's
+//! [`AudioEngine`] opens the output device + a live input stream and, every
+//! block, mixes the armed input channel into the track's bus, runs its FX
+//! chain, and outputs the result.
 //!
 //! ## Instant, GigPerformer-style chain switching
 //!
@@ -23,38 +29,39 @@
 //! [`Standalone`]'s `plugin_instances` map **per block, under a lock**, so
 //! swapping a *pre-prepared* box in under that lock
 //! ([`Standalone::insert_plugin_instance`]) is glitch-free.
-//! [`set_chain`](LiveRig::set_chain) does exactly that: it drops the caller's
-//! pre-prepared boxes into the reserved slot guids and fills the rest with
-//! identity pass-throughs, returning the displaced boxes for off-thread drop.
+//! [`set_chain`](AudioEngine::set_chain) does exactly that: it drops the
+//! caller's pre-prepared boxes into the reserved slot guids and fills the rest
+//! with identity pass-throughs, returning the displaced boxes for off-thread
+//! drop.
 //!
 //! ## Metering
 //!
 //! daw's renderer writes one post-fader peak per track into a [`Meters`] bank;
-//! that is the **output** meter ([`output_peak`](LiveRig::output_peak)). The
+//! that is the **output** meter ([`output_peak`](AudioEngine::output_peak)). The
 //! first reserved FX slot is an [`InputProbe`] pass-through that records the
 //! **input** peak it sees (pre-FX) into a shared atomic
-//! ([`input_peak`](LiveRig::input_peak)).
+//! ([`input_peak`](AudioEngine::input_peak)).
 //!
 //! ## Example
 //!
 //! ```no_run
-//! use daw_standalone::audio_engine::live::LiveRig;
+//! use daw_standalone::audio_engine::AudioEngine;
 //! use daw_audio_io::AudioIoPrefs;
 //!
 //! // Open a live monitor on input channel 0 with up to 8 FX slots.
 //! let prefs = AudioIoPrefs::default();
-//! let rig = LiveRig::open(&prefs, 0, 8).expect("open live rig");
+//! let engine = AudioEngine::open_live(&prefs, 0, 8).expect("open live engine");
 //!
 //! // Build a chain of pre-`prepare`d PluginInstances and install it.
-//! // (each box must already be prepared at `rig.sample_rate()` /
-//! //  `rig.prepare_block()`)
+//! // (each box must already be prepared at `engine.sample_rate()` /
+//! //  `engine.prepare_block()`)
 //! let chain: Vec<Box<dyn daw_standalone::plugin::PluginInstance>> = Vec::new();
-//! let _displaced = rig.set_chain(chain); // drop off-thread
+//! let _displaced = engine.set_chain(chain); // drop off-thread
 //!
 //! // Read meters / drive the output level.
-//! let _in = rig.input_peak();
-//! let _out = rig.output_peak();
-//! rig.set_output_gain_db(-3.0);
+//! let _in = engine.input_peak();
+//! let _out = engine.output_peak();
+//! engine.set_output_gain_db(-3.0);
 //! ```
 
 use std::sync::Arc;
@@ -73,8 +80,9 @@ use crate::plugin::{
 use crate::sync::Standalone;
 use crate::transport_engine::{PlayStateRepr, TransportShared};
 
-/// Block size [`LiveRig`] prepares its built-in probe/identity instances for,
-/// and the size callers should `prepare` their own FX chain boxes at. daw's
+/// Block size [`AudioEngine::open_live`] prepares its built-in probe/identity
+/// instances for, and the size callers should `prepare` their own FX chain
+/// boxes at. daw's
 /// callback block is normally 64–1024 frames; preparing for a larger ceiling
 /// keeps the chain safe against bigger backend buffers without per-block
 /// re-preparation.
@@ -91,10 +99,11 @@ fn db_to_lin(db: f32) -> f32 {
 // ── Shared input-meter state written by the audio-thread probe ───────────────
 
 /// Shared atomic the [`InputProbe`] writes the per-block input peak into, read
-/// by [`LiveRig::input_peak`]. Held by both the rig (reader) and the probe
-/// instance (audio-thread writer). Lock-free: a single `f32`-as-bits atomic.
+/// by [`AudioEngine::input_peak`]. Held by both the engine's [`LiveState`]
+/// (reader) and the probe instance (audio-thread writer). Lock-free: a single
+/// `f32`-as-bits atomic.
 #[derive(Debug, Default)]
-struct InputMeterShared {
+pub(crate) struct InputMeterShared {
     /// Latest block input peak (linear), as `f32` bits.
     peak: AtomicU32,
 }
@@ -247,41 +256,58 @@ impl PluginInstance for Identity {
     }
 }
 
-/// A live-monitor engine: a single input-armed [`Standalone`] track whose FX
-/// chain is swappable, running on daw's [`AudioEngine`].
-///
-/// Construct with [`open`](Self::open); install / swap the FX chain with
-/// [`set_chain`](Self::set_chain). See the [module docs](self) for the model.
-pub struct LiveRig {
-    daw: Standalone,
-    // The engine owns the cpal output + live-input streams; drop = stop.
-    _engine: AudioEngine,
+/// Live-monitor state owned by an [`AudioEngine`] opened via
+/// [`AudioEngine::open_live`]. Holds the input-armed [`Standalone`] track, its
+/// post-fader meter bank, the reserved FX-slot guids, and the input-probe
+/// atomic. Present only on a live engine; a plain playback engine carries
+/// `None` and its live methods are no-ops.
+pub(crate) struct LiveState {
+    pub(crate) daw: Standalone,
     #[allow(dead_code)]
-    shared: Arc<TransportShared>,
-    meters: Arc<Meters>,
+    pub(crate) shared: Arc<TransportShared>,
+    pub(crate) meters: Arc<Meters>,
     #[allow(dead_code)]
-    project_guid: String,
-    track_guid: String,
+    pub(crate) project_guid: String,
+    pub(crate) track_guid: String,
     /// Fixed fx-guids for the reserved slots. Index 0 is the [`InputProbe`];
     /// `1..` carry the installed chain (identities fill the unused tail).
-    slot_guids: Vec<String>,
+    pub(crate) slot_guids: Vec<String>,
     /// Input-meter atomic written by the [`InputProbe`] at slot 0.
-    input_meter: Arc<InputMeterShared>,
-    sample_rate: u32,
+    pub(crate) input_meter: Arc<InputMeterShared>,
 }
 
-impl LiveRig {
+/// A fresh identity pass-through box, prepared at `sr` for [`LIVE_PREPARE_BLOCK`].
+fn fresh_identity(sr: f64) -> Box<dyn PluginInstance> {
+    let mut id = Identity::new();
+    let _ = id.prepare(sr, LIVE_PREPARE_BLOCK);
+    Box::new(id)
+}
+
+/// Live-monitor capability folded onto [`AudioEngine`]: open an input-armed
+/// track with a swappable FX chain and metering. The DAW audio engine is "just
+/// live capable" — [`open_live`](AudioEngine::open_live) returns an engine with
+/// `live: Some(_)`; the rest of the live API ([`set_chain`](AudioEngine::set_chain),
+/// [`input_peak`](AudioEngine::input_peak), [`output_peak`](AudioEngine::output_peak),
+/// [`set_output_gain_db`](AudioEngine::set_output_gain_db),
+/// [`prepare_block`](AudioEngine::prepare_block)) is meaningful only for such an
+/// engine and no-ops / returns `0.0` on a plain playback engine.
+impl AudioEngine {
     /// Open a live-monitor engine: one input-armed track tapping input
     /// `channel` of the device in `prefs`, with `slot_count` reserved FX slots
     /// (initially identity pass-throughs), routed to master, transport rolling.
-    /// Opens the output device + a live input stream.
+    /// Opens the output device + a live input stream. The returned engine has
+    /// its live state installed (`live: Some(_)`).
     ///
-    /// `prefs.want_input` is forced on (a live rig is duplex by definition).
+    /// `prefs.want_input` is forced on (a live engine is duplex by definition).
     /// `slot_count` is the number of *chain* slots available to
     /// [`set_chain`](Self::set_chain); an extra hidden slot holds the input
     /// probe. The resolved device sample rate is available via
     /// [`sample_rate`](Self::sample_rate).
-    pub fn open(prefs: &AudioIoPrefs, channel: u32, slot_count: usize) -> Result<Self, String> {
+    pub fn open_live(
+        prefs: &AudioIoPrefs,
+        channel: u32,
+        slot_count: usize,
+    ) -> Result<Self, String> {
         let daw = Standalone::new();
 
         // 1. Seed a one-track project; make it current so the FX-chain service
@@ -333,7 +359,7 @@ impl LiveRig {
         let shared = Arc::new(TransportShared::new(req_rate, 120.0));
         let mut io = prefs.clone();
         io.want_input = true;
-        let engine =
+        let mut engine =
             AudioEngine::with_project_prefs(daw.clone(), project_guid.clone(), shared.clone(), &io)
                 .map_err(|e| format!("live rig: audio engine failed: {e}"))?;
         let sample_rate = engine.sample_rate();
@@ -351,7 +377,7 @@ impl LiveRig {
             let _ = probe.prepare(sample_rate as f64, LIVE_PREPARE_BLOCK);
             daw.insert_plugin_instance(slot_guids[0].clone(), Box::new(probe));
             for guid in &slot_guids[1..] {
-                daw.insert_plugin_instance(guid.clone(), Self::fresh_identity(sample_rate as f64));
+                daw.insert_plugin_instance(guid.clone(), fresh_identity(sample_rate as f64));
             }
         }
 
@@ -359,48 +385,47 @@ impl LiveRig {
         //    through the chain to master) every block.
         shared.set_play_state(PlayStateRepr::Playing);
 
-        Ok(Self {
+        // 7. Install the live state on the engine and hand it back.
+        engine.live = Some(LiveState {
             daw,
-            _engine: engine,
             shared,
             meters,
             project_guid,
             track_guid,
             slot_guids,
             input_meter,
-            sample_rate,
-        })
+        });
+        Ok(engine)
     }
 
-    fn fresh_identity(sr: f64) -> Box<dyn PluginInstance> {
-        let mut id = Identity::new();
-        let _ = id.prepare(sr, LIVE_PREPARE_BLOCK);
-        Box::new(id)
-    }
-
-    /// Replace the reserved slots' FX with `chain` (each [`PluginInstance`] must
-    /// be pre-`prepare`d by the caller at [`sample_rate`](Self::sample_rate) /
-    /// [`prepare_block`](Self::prepare_block); `LiveRig` fills the remaining
-    /// slots with identities). Glitch-free: swaps boxes under the renderer's
-    /// per-block lock. Returns the displaced boxes for off-thread drop.
+    /// Replace the reserved live slots' FX with `chain` (each [`PluginInstance`]
+    /// must be pre-`prepare`d by the caller at [`sample_rate`](Self::sample_rate)
+    /// / [`prepare_block`](Self::prepare_block); the remaining slots are filled
+    /// with identities). Glitch-free: swaps boxes under the renderer's per-block
+    /// lock. Returns the displaced boxes for off-thread drop.
     ///
     /// A `chain` longer than the reserved slot count is truncated (the extra
-    /// boxes are returned in the displaced vec, undropped).
+    /// boxes are returned in the displaced vec, undropped). **Only meaningful
+    /// for an engine opened via [`open_live`](Self::open_live)** — on a plain
+    /// playback engine this returns `chain` unchanged.
     #[must_use = "the returned boxes should be dropped off the audio thread"]
     pub fn set_chain(
         &self,
         chain: Vec<Box<dyn PluginInstance>>,
     ) -> Vec<Box<dyn PluginInstance>> {
-        let chain_guids = &self.slot_guids[1..]; // slot 0 is the input probe
-        let sr = self.sample_rate as f64;
+        let Some(live) = self.live.as_ref() else {
+            return chain;
+        };
+        let chain_guids = &live.slot_guids[1..]; // slot 0 is the input probe
+        let sr = self.sample_rate() as f64;
         let mut displaced = Vec::new();
         let mut it = chain.into_iter();
         for guid in chain_guids {
             let new_box = match it.next() {
                 Some(b) => b,
-                None => Self::fresh_identity(sr),
+                None => fresh_identity(sr),
             };
-            if let Some(old) = self.daw.insert_plugin_instance(guid.clone(), new_box) {
+            if let Some(old) = live.daw.insert_plugin_instance(guid.clone(), new_box) {
                 displaced.push(old);
             }
         }
@@ -410,42 +435,39 @@ impl LiveRig {
     }
 
     /// Pre-FX input peak (linear) — from the built-in [`InputProbe`] at slot 0.
+    /// Only meaningful for an engine opened via [`open_live`](Self::open_live);
+    /// `0.0` otherwise.
     pub fn input_peak(&self) -> f32 {
-        self.input_meter.load()
+        self.live.as_ref().map(|l| l.input_meter.load()).unwrap_or(0.0)
     }
 
-    /// Post-fader output peak (linear) — the track's meter cell.
+    /// Post-fader output peak (linear) — the live track's meter cell. Only
+    /// meaningful for an engine opened via [`open_live`](Self::open_live); `0.0`
+    /// otherwise.
     pub fn output_peak(&self) -> f32 {
-        self.meters
-            .cell(0)
+        self.live
+            .as_ref()
+            .and_then(|l| l.meters.cell(0))
             .map(|c| c.peak(0).max(c.peak(1)))
             .unwrap_or(0.0)
     }
 
-    /// Set the live track's post-fader output gain (dB → linear volume).
+    /// Set the live track's post-fader output gain (dB → linear volume). No-op
+    /// on a plain playback engine (not opened via [`open_live`](Self::open_live)).
     pub fn set_output_gain_db(&self, db: f32) {
-        let _ = <Standalone as Tracks>::set_volume(
-            &self.daw,
-            ProjectContext::Current,
-            TrackRef::guid(self.track_guid.as_str()),
-            db_to_lin(db) as f64,
-        );
+        if let Some(live) = self.live.as_ref() {
+            let _ = <Standalone as Tracks>::set_volume(
+                &live.daw,
+                ProjectContext::Current,
+                TrackRef::guid(live.track_guid.as_str()),
+                db_to_lin(db) as f64,
+            );
+        }
     }
 
-    /// The device sample rate the engine actually opened at.
-    pub fn sample_rate(&self) -> u32 {
-        self.sample_rate
-    }
-
-    /// The block size callers should `prepare` their FX chain boxes for.
+    /// The block size callers should `prepare` their live FX chain boxes for.
     pub fn prepare_block(&self) -> u32 {
         LIVE_PREPARE_BLOCK
-    }
-
-    /// Escape hatch: the underlying [`Standalone`] for advanced wiring (e.g.
-    /// inspecting the project, adding more tracks). Most consumers won't need it.
-    pub fn daw(&self) -> &Standalone {
-        &self.daw
     }
 }
 

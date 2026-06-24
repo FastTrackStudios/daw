@@ -56,7 +56,7 @@ pub mod test_tone;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
 #[cfg(all(feature = "audio", not(target_arch = "wasm32")))]
-pub use live::{Identity, InputProbe, LIVE_PREPARE_BLOCK, LiveRig};
+pub use live::{Identity, InputProbe, LIVE_PREPARE_BLOCK};
 #[cfg(feature = "audio")]
 pub use mixer::{AudioEngine, TrackHandle};
 pub use source::AudioSource;
