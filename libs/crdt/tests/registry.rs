@@ -190,7 +190,7 @@ async fn admission_hook_rejects_unknown_docs() {
         .await
         .expect_err("denied doc must not attach");
     assert!(
-        matches!(err, vox::VoxError::User(SyncError::UnknownDoc)),
+        matches!(&err, vox::VoxError::User(boxed) if matches!(**boxed, SyncError::UnknownDoc)),
         "expected UnknownDoc, got: {err:?}"
     );
     assert!(!registry.is_open(denied).await, "denied doc was opened");
