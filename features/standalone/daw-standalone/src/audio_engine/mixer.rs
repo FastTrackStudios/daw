@@ -25,6 +25,77 @@ use crate::transport_engine::{PlayStateRepr, TransportShared};
 use super::DecodedAudio;
 use super::render::ProjectRenderer;
 
+// Engine-level device selection. On native this is the shared
+// `daw_audio_io::AudioIoPrefs`; on wasm (where `daw_audio_io` is a
+// native-only dep) a minimal local shim with the same all-default
+// "system default output" meaning keeps the public constructor
+// signatures target-agnostic.
+#[cfg(not(target_arch = "wasm32"))]
+pub use daw_audio_io::AudioIoPrefs;
+
+/// wasm fallback `AudioIoPrefs` — `daw_audio_io` is native-only, so on
+/// the web only the all-default value is meaningful (system default
+/// output device, native rate, default buffer, no input).
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AudioIoPrefs {
+    pub input_device: String,
+    pub output_device: String,
+    pub sample_rate: u32,
+    pub buffer_size: u32,
+    pub want_input: bool,
+}
+
+/// Resolved output device + stream config, opened from [`AudioIoPrefs`].
+/// Two target impls: native goes through `daw_audio_io::open_output`
+/// (JACK-aware device selection); wasm uses the cpal default host.
+struct ResolvedOutput {
+    device: cpal::Device,
+    config: StreamConfig,
+    sample_format: SampleFormat,
+    sample_rate: u32,
+    channels: u16,
+}
+
+impl ResolvedOutput {
+    #[cfg(not(target_arch = "wasm32"))]
+    fn open(prefs: &AudioIoPrefs) -> Result<Self, String> {
+        let host = daw_audio_io::audio_host();
+        let out = daw_audio_io::open_output(&host, prefs)?;
+        Ok(Self {
+            sample_rate: out.sample_rate,
+            channels: out.channels,
+            sample_format: out.sample_format,
+            config: out.config,
+            device: out.device,
+        })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn open(_prefs: &AudioIoPrefs) -> Result<Self, String> {
+        let host = cpal::default_host();
+        let device = host
+            .default_output_device()
+            .ok_or("No audio output device found")?;
+        let supported = device
+            .default_output_config()
+            .map_err(|e| format!("Failed to get default output config: {e}"))?;
+        let sample_rate = supported.sample_rate();
+        let channels = supported.channels();
+        Ok(Self {
+            config: StreamConfig {
+                channels,
+                sample_rate,
+                buffer_size: cpal::BufferSize::Default,
+            },
+            sample_format: supported.sample_format(),
+            sample_rate,
+            channels,
+            device,
+        })
+    }
+}
+
 /// Handle to a loaded track in the audio engine.
 ///
 /// Use this to control per-track gain, mute, and solo after loading.
@@ -168,6 +239,12 @@ pub struct AudioEngine {
     shared: Arc<TransportShared>,
     // cpal stream is kept alive; dropping it stops audio output
     _stream: Stream,
+    /// Live hardware-input stream (project mode, when any track records
+    /// from a hardware channel or `prefs.want_input`). Kept alive so the
+    /// input callback keeps feeding the renderer's ring; dropping the
+    /// engine tears it down. `None` for pure-playback engines.
+    #[cfg(not(target_arch = "wasm32"))]
+    _input_stream: Option<Stream>,
     /// Media read-ahead worker (project mode only) — stops with the engine.
     #[cfg(not(target_arch = "wasm32"))]
     _prefetch: Option<super::prefetch::PrefetchWorker>,
@@ -221,6 +298,10 @@ impl AudioEngine {
     /// Create an engine that shares its sample clock with the given
     /// `TransportShared`. The shared sample-rate is rewritten to the
     /// device's actual rate at startup. Metering is disabled (empty bank).
+    ///
+    /// Opens the default output device (native rate, default buffer) —
+    /// equivalent to [`with_shared_prefs`](Self::with_shared_prefs) with
+    /// `AudioIoPrefs::default()`.
     pub fn with_shared(shared: Arc<TransportShared>) -> Result<Self, String> {
         Self::with_shared_metered(shared, Meters::empty())
     }
@@ -231,23 +312,27 @@ impl AudioEngine {
         shared: Arc<TransportShared>,
         meters: Arc<Meters>,
     ) -> Result<Self, String> {
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or("No audio output device found")?;
+        Self::with_shared_prefs(shared, meters, &AudioIoPrefs::default())
+    }
 
-        let supported_config = device
-            .default_output_config()
-            .map_err(|e| format!("Failed to get default output config: {e}"))?;
-
-        let sample_rate = supported_config.sample_rate();
-        let channels = supported_config.channels();
+    /// As [`with_shared_metered`](Self::with_shared_metered), but the output
+    /// device / sample rate / buffer come from `prefs` (resolved via
+    /// `daw_audio_io::open_output`). `AudioIoPrefs::default()` reproduces the
+    /// classic default-output-device, native-rate, default-buffer behavior.
+    pub fn with_shared_prefs(
+        shared: Arc<TransportShared>,
+        meters: Arc<Meters>,
+        prefs: &AudioIoPrefs,
+    ) -> Result<Self, String> {
+        let out = ResolvedOutput::open(prefs)?;
+        let sample_rate = out.sample_rate;
+        let channels = out.channels;
 
         info!(
             "Audio engine: {} channels, {} Hz, format {:?}, {} meter cells",
             channels,
             sample_rate,
-            supported_config.sample_format(),
+            out.sample_format,
             meters.len(),
         );
 
@@ -261,21 +346,16 @@ impl AudioEngine {
             meters,
         }));
 
-        let config = StreamConfig {
-            channels,
-            sample_rate,
-            buffer_size: cpal::BufferSize::Default,
-        };
-
-        let stream = match supported_config.sample_format() {
+        let config = out.config.clone();
+        let stream = match out.sample_format {
             SampleFormat::F32 => {
-                Self::build_stream::<f32>(&device, &config, state.clone(), shared.clone())?
+                Self::build_stream::<f32>(&out.device, &config, state.clone(), shared.clone())?
             }
             SampleFormat::I16 => {
-                Self::build_stream::<i16>(&device, &config, state.clone(), shared.clone())?
+                Self::build_stream::<i16>(&out.device, &config, state.clone(), shared.clone())?
             }
             SampleFormat::U16 => {
-                Self::build_stream::<u16>(&device, &config, state.clone(), shared.clone())?
+                Self::build_stream::<u16>(&out.device, &config, state.clone(), shared.clone())?
             }
             format => return Err(format!("Unsupported sample format: {format:?}")),
         };
@@ -288,6 +368,8 @@ impl AudioEngine {
             state,
             shared,
             _stream: stream,
+            #[cfg(not(target_arch = "wasm32"))]
+            _input_stream: None,
             // Private-track-list mode mixes from memory — no mmap to warm.
             #[cfg(not(target_arch = "wasm32"))]
             _prefetch: None,
@@ -305,22 +387,32 @@ impl AudioEngine {
         project_guid: String,
         shared: Arc<TransportShared>,
     ) -> Result<Self, String> {
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or("No audio output device found")?;
-        let supported_config = device
-            .default_output_config()
-            .map_err(|e| format!("Failed to get default output config: {e}"))?;
+        Self::with_project_prefs(daw, project_guid, shared, &AudioIoPrefs::default())
+    }
 
-        let sample_rate = supported_config.sample_rate();
-        let channels = supported_config.channels();
+    /// As [`with_project`](Self::with_project), but the output device /
+    /// sample rate / buffer come from `prefs`, and — when `prefs.want_input`
+    /// is set OR any project track records from a hardware channel
+    /// (`RecordInput::Audio`) — a cpal **input** stream is opened too. The
+    /// input callback pushes interleaved frames into a lock-free `rtrb` ring;
+    /// the `ProjectRenderer` drains it in stage 0, routing each track's tapped
+    /// channel into its bus (and FX chain).
+    ///
+    /// `AudioIoPrefs::default()` (no input device, `want_input == false`,
+    /// native rate, default buffer) reproduces [`with_project`]'s classic
+    /// output-only behavior unless a track itself requests audio input.
+    pub fn with_project_prefs(
+        daw: Standalone,
+        project_guid: String,
+        shared: Arc<TransportShared>,
+        prefs: &AudioIoPrefs,
+    ) -> Result<Self, String> {
+        let out = ResolvedOutput::open(prefs)?;
+        let sample_rate = out.sample_rate;
+        let channels = out.channels;
         info!(
             "Audio engine (project mode): {} channels, {} Hz, format {:?}, guid={}",
-            channels,
-            sample_rate,
-            supported_config.sample_format(),
-            project_guid,
+            channels, sample_rate, out.sample_format, project_guid,
         );
         shared.set_sample_rate(sample_rate);
 
@@ -334,34 +426,44 @@ impl AudioEngine {
             meters: Meters::empty(),
         }));
 
-        let config = StreamConfig {
-            channels,
-            sample_rate,
-            buffer_size: cpal::BufferSize::Default,
+        // One renderer for the stream's lifetime — its snapshot cache only
+        // rebuilds when the project revision moves, so steady playback
+        // re-walks nothing.
+        let renderer = Arc::new(ProjectRenderer::new(&daw, &project_guid, sample_rate));
+
+        // Live input: open an input stream when prefs ask for it OR any track
+        // records from a hardware channel. The highest tapped channel sets how
+        // many input channels we must open to reach it. Native-only —
+        // `daw_audio_io` (and live capture) don't exist on the web.
+        #[cfg(not(target_arch = "wasm32"))]
+        let input_stream = {
+            let max_armed = Self::max_audio_input_channel(&daw, &project_guid);
+            if prefs.want_input || max_armed.is_some() {
+                let max_channel = max_armed.unwrap_or(0);
+                let host = daw_audio_io::audio_host();
+                match Self::open_live_input(&host, prefs, sample_rate, max_channel, &renderer) {
+                    Ok(s) => Some(s),
+                    Err(e) => {
+                        error!("Audio engine: live input unavailable ({e}); output-only");
+                        None
+                    }
+                }
+            } else {
+                None
+            }
         };
 
-        let stream = match supported_config.sample_format() {
-            SampleFormat::F32 => Self::build_project_stream::<f32>(
-                &device,
-                &config,
-                daw.clone(),
-                project_guid.clone(),
-                shared.clone(),
-            )?,
-            SampleFormat::I16 => Self::build_project_stream::<i16>(
-                &device,
-                &config,
-                daw.clone(),
-                project_guid.clone(),
-                shared.clone(),
-            )?,
-            SampleFormat::U16 => Self::build_project_stream::<u16>(
-                &device,
-                &config,
-                daw.clone(),
-                project_guid.clone(),
-                shared.clone(),
-            )?,
+        let config = out.config.clone();
+        let stream = match out.sample_format {
+            SampleFormat::F32 => {
+                Self::build_project_stream::<f32>(&out.device, &config, renderer.clone(), shared.clone())?
+            }
+            SampleFormat::I16 => {
+                Self::build_project_stream::<i16>(&out.device, &config, renderer.clone(), shared.clone())?
+            }
+            SampleFormat::U16 => {
+                Self::build_project_stream::<u16>(&out.device, &config, renderer.clone(), shared.clone())?
+            }
             format => return Err(format!("Unsupported sample format: {format:?}")),
         };
         stream
@@ -380,23 +482,88 @@ impl AudioEngine {
             shared,
             _stream: stream,
             #[cfg(not(target_arch = "wasm32"))]
+            _input_stream: input_stream,
+            #[cfg(not(target_arch = "wasm32"))]
             _prefetch: prefetch,
         })
+    }
+
+    /// Highest hardware input channel any track records from
+    /// (`RecordInput::Audio { channel }`), or `None` when no track does.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn max_audio_input_channel(daw: &Standalone, project_guid: &str) -> Option<usize> {
+        daw.read_project(project_guid, |p| {
+            p.tracks
+                .iter()
+                .filter_map(|t| match p.track_ext.get(&t.guid).map(|e| e.record_input) {
+                    Some(daw_proto::track::RecordInput::Audio { channel }) => Some(channel as usize),
+                    _ => None,
+                })
+                .max()
+        })
+        .flatten()
+    }
+
+    /// Open the cpal input stream + lock-free ring and hand the consumer to
+    /// `renderer` (stage 0 drains it). The input callback pushes the
+    /// **interleaved** f32 frames it receives (all `inp.channels`) into the
+    /// ring; overruns are counted. f32 input only.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn open_live_input(
+        host: &cpal::Host,
+        prefs: &daw_audio_io::AudioIoPrefs,
+        sample_rate: u32,
+        max_channel: usize,
+        renderer: &ProjectRenderer,
+    ) -> Result<Stream, String> {
+        use cpal::traits::{DeviceTrait, StreamTrait};
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        let inp = daw_audio_io::open_input(host, prefs, sample_rate, max_channel)?;
+        let channels = inp.channels;
+        // Ring sized for ~100ms of interleaved input (min 8192 frames worth),
+        // matching the duplex monitor's headroom.
+        let capacity = ((sample_rate as usize / 10).max(8192 * channels)).max(channels);
+        let (mut prod, cons) = rtrb::RingBuffer::<f32>::new(capacity);
+        renderer.set_live_input(cons, channels);
+
+        let overruns = Arc::new(AtomicU64::new(0));
+        let overruns_cb = overruns.clone();
+        let stream = inp
+            .device
+            .build_input_stream(
+                &inp.config,
+                move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    // Push every interleaved sample (all channels); the
+                    // renderer de-interleaves per track in stage 0.
+                    for &s in data {
+                        if prod.push(s).is_err() {
+                            overruns_cb.fetch_add(1, Ordering::Relaxed);
+                        }
+                    }
+                },
+                move |err| error!("Audio input stream error: {err}"),
+                None,
+            )
+            .map_err(|e| format!("Failed to build input stream: {e}"))?;
+        stream
+            .play()
+            .map_err(|e| format!("Failed to start input stream: {e}"))?;
+        info!(
+            "Audio engine: live input open — {} channels, {} Hz, max armed channel {}",
+            channels, sample_rate, max_channel,
+        );
+        Ok(stream)
     }
 
     fn build_project_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
         device: &cpal::Device,
         config: &StreamConfig,
-        daw: Standalone,
-        project_guid: String,
+        renderer: Arc<ProjectRenderer>,
         shared: Arc<TransportShared>,
     ) -> Result<Stream, String> {
         let channels = config.channels as usize;
-        let sample_rate = config.sample_rate;
-        // One renderer for the stream's lifetime — its snapshot cache
-        // only rebuilds when the project revision moves, so steady
-        // playback re-walks nothing.
-        let renderer = ProjectRenderer::new(&daw, &project_guid, sample_rate);
+        let daw = renderer.daw().clone();
         let stream = device
             .build_output_stream(
                 config,

@@ -48,6 +48,10 @@ base64 = "0.22"
 # mmap-backed PCM streaming (native only; WASM falls back to decode).
 memmap2 = { workspace = true }
 tokio = { workspace = true }
+# Shared device-selection / open-stream plumbing + lock-free input ring.
+# Native-only (cpal device streams); pulled in by the `audio` feature.
+daw-audio-io = { path = "../../audio/daw-audio-io", features = ["monitor"], optional = true }
+rtrb = { version = "0.3", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { version = "0.3", features = ["futures"] }
@@ -69,7 +73,10 @@ dawfile-reaper = { path = "../../backends/reaper/dawfile-reaper" }
 decode = ["dep:symphonia"]
 # Full audio engine = decode + cpal output stream. Native-only audio
 # output (cpal+wasm-bindgen on WASM, but cpal pulls JS bindings).
-audio = ["decode", "dep:cpal"]
+# `daw-audio-io` + `rtrb` are native-only (`cfg(not(wasm32))` target
+# deps); enabling them here is a no-op on wasm32 where Cargo ignores
+# the target dep, and the live-input paths are themselves `cfg`-gated.
+audio = ["decode", "dep:cpal", "daw-audio-io", "dep:rtrb"]
 # Parse `.rpp` files into `Standalone::ProjectState` (tracks, items,
 # takes, markers, regions, tempo, routing). Native default pulls
 # rayon via `dawfile-reaper/parallel`. For WASM, enable

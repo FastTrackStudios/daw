@@ -47,6 +47,98 @@ use snapshot::{RenderSnapshot, TrackSnapshot};
 
 use crate::sync::Standalone;
 
+/// Live hardware input feeding the renderer (project mode).
+///
+/// The cpal *input* callback (owned by `AudioEngine`) pushes the
+/// interleaved frames it receives — all `channels` of them — into an
+/// `rtrb` ring; the renderer holds the consumer and drains it once per
+/// block in render **stage 0**. The ring is SPSC + lock-free on the
+/// audio thread; only the consumer handle lives behind a `Mutex` (read
+/// once per block, alongside the existing scratch lock).
+///
+/// f32 input only — `AudioEngine` opens the input stream as `f32`.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct LiveInput {
+    /// Ring consumer of interleaved input frames (`channels` per frame).
+    pub(crate) cons: rtrb::Consumer<f32>,
+    /// Number of interleaved channels the input stream delivers.
+    pub(crate) channels: usize,
+    /// De-ring scratch for the block (`frames * channels`), reused.
+    pub(crate) scratch: Vec<f32>,
+    /// Count of blocks where the ring couldn't supply a full block
+    /// (input not keeping up) — the shortfall is zero-filled.
+    pub(crate) underruns: u64,
+}
+
+/// Mix the live hardware input into per-track buses (render stage 0).
+///
+/// Drains up to `frames * channels` interleaved samples from `live`'s
+/// ring into its scratch (zero-filling any shortfall and counting it as
+/// an underrun), then for every track tapping a valid input channel
+/// writes that channel's mono sample into BOTH L and R of the track's
+/// bus and marks it dirty. The existing FX / gain / send / master
+/// stages then process it unchanged.
+///
+/// Split out as a free function so it's unit-testable without standing
+/// up a full `ProjectRenderer` (DB, transport, snapshot).
+///
+/// `input_channels[ti]` is `Some(ch)` for a live-input track, else
+/// `None`. `passes(ti)` is the solo-routing predicate (same one stage 1
+/// uses); a track that fails it contributes silence.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn mix_live_input_into_buses(
+    live: &mut LiveInput,
+    input_channels: &[Option<u32>],
+    passes: impl Fn(usize) -> bool,
+    buses: &mut [StereoBuffer],
+    dirty: &mut [bool],
+    frames: usize,
+) {
+    let channels = live.channels;
+    if channels == 0 || frames == 0 {
+        return;
+    }
+    let want = frames * channels;
+    if live.scratch.len() < want {
+        live.scratch.resize(want, 0.0);
+    }
+    // Drain interleaved input frames from the ring; zero-fill shortfall.
+    let avail = live.cons.slots();
+    let n = want.min(avail);
+    if n < want {
+        live.underruns = live.underruns.wrapping_add(1);
+    }
+    if n > 0 && let Ok(chunk) = live.cons.read_chunk(n) {
+        let (a, b) = chunk.as_slices();
+        live.scratch[..a.len()].copy_from_slice(a);
+        live.scratch[a.len()..a.len() + b.len()].copy_from_slice(b);
+        chunk.commit_all();
+    }
+    for s in &mut live.scratch[n..want] {
+        *s = 0.0;
+    }
+
+    for (ti, ch_opt) in input_channels.iter().enumerate() {
+        let Some(ch) = *ch_opt else { continue };
+        let ch = ch as usize;
+        if ch >= channels {
+            continue;
+        }
+        if !passes(ti) {
+            continue;
+        }
+        let Some(bus) = buses.get_mut(ti) else {
+            continue;
+        };
+        for f in 0..frames.min(bus.frames) {
+            let s = live.scratch[f * channels + ch];
+            bus.samples[f * 2] = s;
+            bus.samples[f * 2 + 1] = s;
+        }
+        dirty[ti] = true;
+    }
+}
+
 /// Stereo render buffer (interleaved L/R/L/R/...).
 #[derive(Debug, Clone)]
 pub struct StereoBuffer {
@@ -144,6 +236,12 @@ pub struct ProjectRenderer {
     /// Reusable block buffers. Mutex for `&self` access — the audio
     /// callback is the only steady-state caller, so it's uncontended.
     scratch: std::sync::Mutex<RenderScratch>,
+    /// Live hardware input (project mode). Installed by `AudioEngine`
+    /// when a track records from a hardware channel or `want_input` is
+    /// set; `None` for pure-playback projects. Read once per block in
+    /// stage 0, alongside the scratch lock.
+    #[cfg(not(target_arch = "wasm32"))]
+    live_input: std::sync::Mutex<Option<LiveInput>>,
 }
 
 impl ProjectRenderer {
@@ -154,6 +252,29 @@ impl ProjectRenderer {
             sample_rate,
             cache: std::sync::Mutex::new(None),
             scratch: std::sync::Mutex::new(RenderScratch::default()),
+            #[cfg(not(target_arch = "wasm32"))]
+            live_input: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// The backend this renderer reads its project from. Lets the cpal
+    /// callback reach the shared `Meters` bank without a second handle.
+    pub(crate) fn daw(&self) -> &Standalone {
+        &self.daw
+    }
+
+    /// Install the live hardware-input ring consumer (project mode).
+    /// `AudioEngine` calls this after opening the cpal input stream so
+    /// stage 0 can read mic/DI channels into the matching track buses.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn set_live_input(&self, cons: rtrb::Consumer<f32>, channels: usize) {
+        if let Ok(mut slot) = self.live_input.lock() {
+            *slot = Some(LiveInput {
+                cons,
+                channels,
+                scratch: Vec::new(),
+                underruns: 0,
+            });
         }
     }
 
@@ -196,6 +317,27 @@ impl ProjectRenderer {
             pre_fx_tap,
             pre_fader_tap,
         } = &mut *scratch;
+
+        // 0) Live hardware input → per-track buses. Tracks whose
+        // `RecordInput::Audio { channel }` taps a valid input channel
+        // get that channel's mono sample broadcast to L+R of their bus
+        // (and marked dirty); the FX / gain / send / master stages then
+        // process it like any other source. No-op when no input stream
+        // is installed or no track taps a channel.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let mut live_guard = self.live_input.lock().expect("live input poisoned");
+            if let Some(live) = live_guard.as_mut() {
+                mix_live_input_into_buses(
+                    live,
+                    &snap.input_channels,
+                    passes,
+                    buses,
+                    dirty,
+                    frames,
+                );
+            }
+        }
 
         // 1) Item playback into per-track buses. Item-level envelopes
         // (take volume / pan / mute / pitch) are evaluated per-frame
@@ -689,5 +831,149 @@ impl ProjectRenderer {
             *cache = Some((revision, snap.clone()));
         }
         Some(snap)
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod live_input_tests {
+    use super::*;
+
+    /// Build a `LiveInput` whose ring is pre-filled with `frames`
+    /// interleaved frames of `channels` channels, where channel `c`
+    /// carries the constant value `(c + 1) as f32 * 0.1`.
+    fn filled_live(channels: usize, frames: usize) -> LiveInput {
+        let want = frames * channels;
+        let (mut prod, cons) = rtrb::RingBuffer::<f32>::new(want.max(1));
+        for f in 0..frames {
+            for c in 0..channels {
+                let _ = prod.push((c as f32 + 1.0) * 0.1);
+                let _ = f; // silence unused in some channel counts
+            }
+        }
+        LiveInput {
+            cons,
+            channels,
+            scratch: Vec::new(),
+            underruns: 0,
+        }
+    }
+
+    #[test]
+    fn live_input_routes_channel_into_track_bus() {
+        let frames = 8;
+        let channels = 4;
+        let mut live = filled_live(channels, frames);
+
+        // 3 tracks: track 0 taps ch 2, track 1 taps nothing, track 2 taps ch 0.
+        let input_channels = vec![Some(2u32), None, Some(0u32)];
+        let mut buses = vec![
+            StereoBuffer::zeroed(frames, 48_000),
+            StereoBuffer::zeroed(frames, 48_000),
+            StereoBuffer::zeroed(frames, 48_000),
+        ];
+        let mut dirty = vec![false; 3];
+
+        mix_live_input_into_buses(
+            &mut live,
+            &input_channels,
+            |_| true,
+            &mut buses,
+            &mut dirty,
+            frames,
+        );
+
+        // Track 0: channel 2 → value 0.3 on both L and R.
+        for f in 0..frames {
+            assert!((buses[0].samples[f * 2] - 0.3).abs() < 1e-6);
+            assert!((buses[0].samples[f * 2 + 1] - 0.3).abs() < 1e-6);
+        }
+        assert!(dirty[0]);
+
+        // Track 1: no input tap → still silent + clean.
+        assert!(buses[1].samples.iter().all(|s| *s == 0.0));
+        assert!(!dirty[1]);
+
+        // Track 2: channel 0 → value 0.1.
+        for f in 0..frames {
+            assert!((buses[2].samples[f * 2] - 0.1).abs() < 1e-6);
+            assert!((buses[2].samples[f * 2 + 1] - 0.1).abs() < 1e-6);
+        }
+        assert!(dirty[2]);
+        // Whole block was available — no underrun.
+        assert_eq!(live.underruns, 0);
+    }
+
+    #[test]
+    fn solo_skipped_track_gets_no_live_input() {
+        let frames = 4;
+        let channels = 2;
+        let mut live = filled_live(channels, frames);
+        let input_channels = vec![Some(0u32)];
+        let mut buses = vec![StereoBuffer::zeroed(frames, 48_000)];
+        let mut dirty = vec![false; 1];
+
+        // `passes` returns false → track contributes nothing.
+        mix_live_input_into_buses(
+            &mut live,
+            &input_channels,
+            |_| false,
+            &mut buses,
+            &mut dirty,
+            frames,
+        );
+        assert!(buses[0].samples.iter().all(|s| *s == 0.0));
+        assert!(!dirty[0]);
+    }
+
+    #[test]
+    fn short_ring_zero_fills_and_counts_underrun() {
+        let frames = 8;
+        let channels = 2;
+        // Only fill HALF the requested frames.
+        let mut live = filled_live(channels, frames / 2);
+        let input_channels = vec![Some(1u32)];
+        let mut buses = vec![StereoBuffer::zeroed(frames, 48_000)];
+        let mut dirty = vec![false; 1];
+
+        mix_live_input_into_buses(
+            &mut live,
+            &input_channels,
+            |_| true,
+            &mut buses,
+            &mut dirty,
+            frames,
+        );
+
+        // First half carries channel-1 signal (0.2); second half zero-filled.
+        for f in 0..frames / 2 {
+            assert!((buses[0].samples[f * 2] - 0.2).abs() < 1e-6);
+        }
+        for f in frames / 2..frames {
+            assert_eq!(buses[0].samples[f * 2], 0.0);
+        }
+        assert_eq!(live.underruns, 1);
+        assert!(dirty[0]);
+    }
+
+    #[test]
+    fn out_of_range_channel_is_ignored() {
+        let frames = 4;
+        let channels = 2;
+        let mut live = filled_live(channels, frames);
+        // Track taps channel 5 which doesn't exist on a 2-channel input.
+        let input_channels = vec![Some(5u32)];
+        let mut buses = vec![StereoBuffer::zeroed(frames, 48_000)];
+        let mut dirty = vec![false; 1];
+
+        mix_live_input_into_buses(
+            &mut live,
+            &input_channels,
+            |_| true,
+            &mut buses,
+            &mut dirty,
+            frames,
+        );
+        assert!(buses[0].samples.iter().all(|s| *s == 0.0));
+        assert!(!dirty[0]);
     }
 }

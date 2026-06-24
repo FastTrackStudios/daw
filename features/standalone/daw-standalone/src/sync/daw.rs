@@ -600,6 +600,37 @@ impl Standalone {
             .contains_key(fx_guid)
     }
 
+    /// Register a **native** (built-in Rust DSP) FX instance under `fx_guid`, so
+    /// the renderer's per-track FX chain processes it exactly like a hosted
+    /// CLAP/VST3 plugin — there is no separate native-FX path, both live in
+    /// `plugin_instances` and go through `PluginInstance::process_block`. The
+    /// instance must already implement [`PluginInstance`](crate::plugin::PluginInstance)
+    /// (e.g. Signal's NAM amp / cab-IR convolver). Returns any previous instance
+    /// under the same guid (hand it off-thread to drop). Pair with a matching
+    /// `fx_guid` entry in the track's FX chain so the renderer picks it up.
+    pub fn insert_plugin_instance(
+        &self,
+        fx_guid: impl Into<String>,
+        instance: Box<dyn crate::plugin::PluginInstance>,
+    ) -> Option<Box<dyn crate::plugin::PluginInstance>> {
+        self.plugin_instances
+            .lock()
+            .expect("plugin_instances poisoned")
+            .insert(fx_guid.into(), instance)
+    }
+
+    /// Remove the FX instance backing `fx_guid`, returning it (e.g. to drop off
+    /// the audio thread). No-op if absent.
+    pub fn remove_plugin_instance(
+        &self,
+        fx_guid: &str,
+    ) -> Option<Box<dyn crate::plugin::PluginInstance>> {
+        self.plugin_instances
+            .lock()
+            .expect("plugin_instances poisoned")
+            .remove(fx_guid)
+    }
+
     /// Whether the plugin backing `fx_guid` is currently activated
     /// (post-`prepare`, pre-`deactivate`). `false` for unloaded /
     /// missing entries.

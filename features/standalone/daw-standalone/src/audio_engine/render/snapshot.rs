@@ -53,6 +53,11 @@ pub(crate) struct RenderSnapshot {
     /// Master pan (−1…1).
     pub(crate) master_pan: f64,
     pub(crate) master_muted: bool,
+    /// Live hardware-input channel per track, indexed like `tracks`.
+    /// `Some(ch)` when the track's `RecordInput::Audio { channel }` taps
+    /// input-device channel `ch`; `None` otherwise. Read by render
+    /// stage 0 to route live input into the track bus.
+    pub(crate) input_channels: Vec<Option<u32>>,
 }
 
 impl RenderSnapshot {
@@ -72,6 +77,7 @@ impl RenderSnapshot {
         let order = graph::topo_order(&tracks);
         let solo_pass = graph::solo_pass(&tracks);
         let beats_per_measure = p.transport.time_signature.numerator().max(1);
+        let input_channels = tracks.iter().map(|t| t.input_channel).collect();
         Arc::new(Self {
             tracks,
             order,
@@ -81,6 +87,7 @@ impl RenderSnapshot {
             master_volume: p.master_volume,
             master_pan: p.master_pan,
             master_muted: p.master_muted,
+            input_channels,
         })
     }
 }
@@ -95,6 +102,9 @@ pub(crate) struct TrackSnapshot {
     pub(crate) muted: bool,
     pub(crate) soloed: bool,
     pub(crate) parent_send: bool,
+    /// Live hardware-input channel this track records/monitors from
+    /// (`RecordInput::Audio { channel }`). `None` for non-audio inputs.
+    pub(crate) input_channel: Option<u32>,
     /// Fixed-lane play mask (bit n = lane n audible). `0` when the
     /// track has no fixed lanes — every item plays.
     pub(crate) lane_play_mask: u64,
@@ -340,6 +350,13 @@ fn snapshot_track(
         .get(&t.guid)
         .map(|e| e.parent_send_enabled)
         .unwrap_or(true);
+
+    // Live hardware input: a track whose record input is
+    // `RecordInput::Audio { channel }` taps that input-device channel.
+    let input_channel = match p.track_ext.get(&t.guid).map(|e| e.record_input) {
+        Some(daw_proto::track::RecordInput::Audio { channel }) => Some(channel),
+        _ => None,
+    };
 
     // Sends: only the Send variant matters (Receives mirror; HW out
     // for v0 also routes to master via parent_send equivalent).
@@ -645,6 +662,7 @@ fn snapshot_track(
         muted: t.muted,
         soloed: t.soloed,
         parent_send,
+        input_channel,
         lane_play_mask: if t.lane_count > 0 {
             t.lane_play_mask
         } else {
