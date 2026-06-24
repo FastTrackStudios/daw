@@ -25,7 +25,7 @@ path = "src/lib.rs"
 [dependencies]
 daw-synchronization = { path = "../daw-synchronization" }
 facet.workspace = true
-facet-postcard = "0.46"
+facet-postcard = "0.50.0-rc.1"
 tokio = { workspace = true, features = ["sync", "time", "net", "io-util", "rt", "macros"] }
 tokio-util = "0.7"
 tracing.workspace = true

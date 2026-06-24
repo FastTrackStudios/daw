@@ -22,7 +22,6 @@ pub mod runner;
 use crate::rpc::{Daw, Project, TrackHandle};
 use eyre::Result;
 use std::{
-    borrow::Cow,
     fs::{self, File},
     future::Future,
     io::Write,
@@ -696,66 +695,44 @@ pub async fn connect_daw_at(socket_override: Option<&Path>) -> Result<Daw> {
 
     let stream = tokio::net::UnixStream::connect(&socket_path).await?;
     let link = vox_stream::StreamLink::unix(stream);
-    let handshake = vox::HandshakeResult {
-        role: vox::SessionRole::Initiator,
-        our_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Odd,
-            max_concurrent_requests: 64,
 
-            initial_channel_credit: 16,
-        },
-        peer_settings: vox::ConnectionSettings {
-            parity: vox::Parity::Even,
-            max_concurrent_requests: 64,
-
-            initial_channel_credit: 16,
-        },
-        peer_supports_retry: true,
-        session_resume_key: None,
-        peer_resume_key: None,
-        our_schema: vec![],
-        peer_schema: vec![],
-        peer_metadata: vec![],
-    };
-    let root = vox::initiator_conduit(vox::BareConduit::new(link), handshake)
-        .establish::<vox::NoopClient>()
+    // vox 0.10 lane model: establish the connection, then open the DAW
+    // service lane (carries `vox-service: reaper-test` automatically),
+    // yielding a ready-to-use `Caller`. The connection handle is kept
+    // alive by the caller it produces.
+    let connection = vox::initiator_on(link)
+        .establish_connection()
         .await
-        .map_err(|e| eyre::eyre!("Failed to establish vox session: {:?}", e))?;
-    let session = root
-        .session
-        .clone()
-        .ok_or_else(|| eyre::eyre!("root session missing handle"))?;
-
-    // Open a virtual connection for DAW services
-    let conn = session
-        .open_connection(
-            vox::ConnectionSettings {
-                parity: vox::Parity::Odd,
-                max_concurrent_requests: 64,
-
-                initial_channel_credit: 16,
-            },
-            vec![
-                vox::MetadataEntry {
-                    key: Cow::Borrowed("vox-service"),
-                    value: vox::MetadataValue::String(Cow::Borrowed("reaper-test")),
-                    flags: vox::MetadataFlags::NONE,
-                },
-                vox::MetadataEntry {
-                    key: Cow::Borrowed("role"),
-                    value: vox::MetadataValue::String(Cow::Borrowed("test-client")),
-                    flags: vox::MetadataFlags::NONE,
-                },
-            ],
-        )
+        .map_err(|e| eyre::eyre!("Failed to establish vox connection: {:?}", e))?;
+    let client = connection
+        .open_lane::<TestLaneClient>()
         .await
-        .map_err(|e| eyre::eyre!("open_connection failed: {e:?}"))?;
+        .map_err(|e| eyre::eyre!("Failed to open DAW lane: {:?}", e))?;
+    // The lane's `Caller` and its spawned driver keep the session alive;
+    // the connection run loop is spawned internally by establish_connection,
+    // so dropping the handle here does not tear it down (mirrors the prior
+    // detached-driver behaviour, where `session` was dropped at fn end).
+    drop(connection);
 
-    let mut driver = vox::Driver::new(conn, ());
-    let caller = vox::Caller::new(driver.caller());
-    moire::task::spawn(async move { driver.run().await });
+    Ok(Daw::new(client.caller))
+}
 
-    Ok(Daw::new(caller))
+/// Minimal `FromVoxLane` client that captures the DAW service lane's
+/// `Caller` (vox 0.10 replacement for the removed `NoopClient`).
+#[derive(Clone)]
+struct TestLaneClient {
+    caller: vox::Caller,
+}
+
+impl vox::FromVoxLane for TestLaneClient {
+    const SERVICE_NAME: &'static str = "reaper-test";
+
+    fn from_vox_lane(
+        caller: vox::Caller,
+        _connection: Option<vox::ConnectionHandle>,
+    ) -> Self {
+        Self { caller }
+    }
 }
 
 /// Discover the first available `/tmp/fts-daw-*.sock` socket that is actually

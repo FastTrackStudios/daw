@@ -20,23 +20,35 @@
 //! This mirrors `daw-reaper`'s [`LocalCaller`] but keeps Standalone
 //! self-contained (no backwards dep on daw-reaper).
 
-use std::borrow::Cow;
 use std::sync::Arc;
 
 use architect::Services;
 use moire::task::JoinHandle;
-use vox::{
-    BareConduit, Caller, ConnectionSettings, Driver, DriverReplySink, Handler, MetadataEntry,
-    MetadataFlags, MetadataValue, Parity,
-};
+use vox::{Caller, ConnectionHandle, DriverReplySink, Handler};
 
 use crate::sync::Standalone;
 
-/// Keeps the server-side acceptor task alive for the lifetime of the
-/// returned [`InProcessDaw`]. Drop it to tear down the in-proc link.
+/// Keeps the server-side acceptor task + client connection alive for the
+/// lifetime of the returned [`InProcessDaw`]. Drop it to tear down the
+/// in-proc link.
 struct KeepAlive {
     _server_task: JoinHandle<()>,
-    _driver_task: JoinHandle<()>,
+    _connection: ConnectionHandle,
+}
+
+/// Minimal `FromVoxLane` client capturing the lane's `Caller`
+/// (vox 0.10 replacement for the removed `NoopClient`).
+#[derive(Clone)]
+struct LocalLaneClient {
+    caller: Caller,
+}
+
+impl vox::FromVoxLane for LocalLaneClient {
+    const SERVICE_NAME: &'static str = "daw-local";
+
+    fn from_vox_lane(caller: Caller, _connection: Option<ConnectionHandle>) -> Self {
+        Self { caller }
+    }
 }
 
 /// Bundle of an in-process [`daw_control::Daw`] + the resources
@@ -79,32 +91,19 @@ where
     let (client_link, server_link) = vox::memory_link_pair(256);
 
     // ── Server side ───────────────────────────────────────────────
+    // vox 0.10 lane model: accept any lane and hand it to the supplied
+    // handler (which dispatches by method id).
     let server_task = moire::task::spawn(async move {
-        let handshake = vox::HandshakeResult {
-            role: vox::SessionRole::Acceptor,
-            our_settings: ConnectionSettings {
-                parity: Parity::Even,
-                max_concurrent_requests: 64,
-                initial_channel_credit: 16,
-            },
-            peer_settings: ConnectionSettings {
-                parity: Parity::Odd,
-                max_concurrent_requests: 64,
-                initial_channel_credit: 16,
-            },
-            peer_supports_retry: true,
-            session_resume_key: None,
-            peer_resume_key: None,
-            our_schema: vec![],
-            peer_schema: vec![],
-            peer_metadata: vec![],
-        };
-        match vox::acceptor_conduit(BareConduit::new(server_link), handshake)
-            .on_connection(handler)
-            .establish::<vox::NoopClient>()
+        let acceptor = vox::lane_acceptor_fn(move |_req, connection| {
+            connection.handle_with(handler.clone());
+            Ok(())
+        });
+        match vox::acceptor_on(server_link)
+            .on_lane(acceptor)
+            .establish_connection()
             .await
         {
-            Ok(_root) => {
+            Ok(_connection) => {
                 tracing::debug!("standalone in-proc server established");
                 std::future::pending::<()>().await;
             }
@@ -115,66 +114,21 @@ where
     });
 
     // ── Client side ───────────────────────────────────────────────
-    let handshake = vox::HandshakeResult {
-        role: vox::SessionRole::Initiator,
-        our_settings: ConnectionSettings {
-            parity: Parity::Odd,
-            max_concurrent_requests: 64,
-            initial_channel_credit: 16,
-        },
-        peer_settings: ConnectionSettings {
-            parity: Parity::Even,
-            max_concurrent_requests: 64,
-            initial_channel_credit: 16,
-        },
-        peer_supports_retry: true,
-        session_resume_key: None,
-        peer_resume_key: None,
-        our_schema: vec![],
-        peer_schema: vec![],
-        peer_metadata: vec![],
-    };
-    let root = vox::initiator_conduit(BareConduit::new(client_link), handshake)
-        .establish::<vox::NoopClient>()
+    let connection = vox::initiator_on(client_link)
+        .establish_connection()
         .await
         .map_err(|e| eyre::eyre!("standalone in-proc initiation failed: {e:?}"))?;
-    let session = root
-        .session
-        .clone()
-        .ok_or_else(|| eyre::eyre!("standalone in-proc root session missing"))?;
-
-    let conn = session
-        .open_connection(
-            ConnectionSettings {
-                parity: Parity::Odd,
-                max_concurrent_requests: 64,
-                initial_channel_credit: 16,
-            },
-            vec![
-                MetadataEntry {
-                    key: Cow::Borrowed("vox-service"),
-                    value: MetadataValue::String(Cow::Borrowed("daw-local")),
-                    flags: MetadataFlags::NONE,
-                },
-                MetadataEntry {
-                    key: Cow::Borrowed("role"),
-                    value: MetadataValue::String(Cow::Borrowed("local")),
-                    flags: MetadataFlags::NONE,
-                },
-            ],
-        )
+    let client = connection
+        .open_lane::<LocalLaneClient>()
         .await
-        .map_err(|e| eyre::eyre!("standalone in-proc open_connection failed: {e:?}"))?;
-
-    let mut driver = Driver::new(conn, ());
-    let caller = Caller::new(driver.caller());
-    let driver_task = moire::task::spawn(async move { driver.run().await });
+        .map_err(|e| eyre::eyre!("standalone in-proc open_lane failed: {e:?}"))?;
+    let caller = client.caller;
 
     Ok(BuiltCaller {
         caller,
         keep_alive: Arc::new(KeepAlive {
             _server_task: server_task,
-            _driver_task: driver_task,
+            _connection: connection,
         }),
     })
 }
