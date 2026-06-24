@@ -431,6 +431,17 @@ impl AudioEngine {
         // re-walks nothing.
         let renderer = Arc::new(ProjectRenderer::new(&daw, &project_guid, sample_rate));
 
+        // Live / programmatic MIDI ring: the UI thread pushes events
+        // through `Standalone::push_note_on`/`_off`/`_cc` (producer), the
+        // renderer drains them once per block (consumer). SPSC + lock-free
+        // like the live-input ring. Sized for a generous burst of events.
+        {
+            let (prod, cons) =
+                rtrb::RingBuffer::<super::render::LiveMidiEvent>::new(4096);
+            renderer.set_live_midi(cons);
+            daw.set_live_midi_producer(prod);
+        }
+
         // Live input: open an input stream when prefs ask for it OR any track
         // records from a hardware channel. The highest tapped channel sets how
         // many input channels we must open to reach it. Native-only —

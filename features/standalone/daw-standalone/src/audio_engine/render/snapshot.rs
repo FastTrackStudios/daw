@@ -94,6 +94,9 @@ impl RenderSnapshot {
 
 /// Snapshot of routing-relevant track data.
 pub(crate) struct TrackSnapshot {
+    /// Project track guid. Carried so the live-MIDI drain can resolve a
+    /// programmatic event's target track guid → snapshot index.
+    pub(crate) guid: String,
     pub(crate) name: String,
     pub(crate) volume: f64,
     pub(crate) pan: f64,
@@ -655,6 +658,7 @@ fn snapshot_track(
         .unwrap_or_default();
 
     TrackSnapshot {
+        guid: t.guid.clone(),
         name: t.name.clone(),
         volume: t.volume,
         pan: t.pan,

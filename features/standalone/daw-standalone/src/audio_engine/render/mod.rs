@@ -139,6 +139,60 @@ pub(crate) fn mix_live_input_into_buses(
     }
 }
 
+/// A single programmatic / live MIDI event addressed to a project track.
+///
+/// The MIDI analog of a live-input audio frame: pushed (lock-free) by a
+/// producer the UI thread reaches through `Standalone`, drained once per
+/// block by the renderer and merged into the target track's per-block
+/// MIDI event list before the FX chain runs. `offset = 0` means
+/// block-start — programmatic pushes don't carry sub-block timing (this
+/// matches how `collect_midi_events` clamps item events to the block).
+#[derive(Clone, Debug)]
+pub(crate) struct LiveMidiEvent {
+    /// Target project track guid (resolved to a snapshot index at drain).
+    pub(crate) track: String,
+    /// Sample offset from block start (0..block_size). Usually 0.
+    pub(crate) offset: u32,
+    pub(crate) message: daw_proto::MidiMessage,
+}
+
+/// Renderer-side handle to the live-MIDI ring (consumer end).
+///
+/// SPSC + lock-free like [`LiveInput`]; only the consumer handle lives
+/// behind a `Mutex`, drained once per block alongside the scratch lock.
+pub(crate) struct LiveMidiQueue {
+    /// Ring consumer of programmatic MIDI events.
+    pub(crate) cons: rtrb::Consumer<LiveMidiEvent>,
+}
+
+/// Drain every queued live-MIDI event into a per-track scratch bucket.
+///
+/// Resolves each event's track guid to a snapshot index via `idx_of`
+/// (built from the snapshot's `guid` fields) and appends a
+/// `PluginMidiEvent` to that track's bucket. Events whose track guid
+/// doesn't resolve are dropped. Split out as a free function so the
+/// drain + per-track merge is unit-testable without a `ProjectRenderer`.
+pub(crate) fn drain_live_midi(
+    queue: &mut LiveMidiQueue,
+    idx_of: impl Fn(&str) -> Option<usize>,
+    buckets: &mut [Vec<crate::plugin::PluginMidiEvent>],
+) {
+    let avail = queue.cons.slots();
+    for _ in 0..avail {
+        let Ok(ev) = queue.cons.pop() else { break };
+        let Some(ti) = idx_of(&ev.track) else {
+            continue;
+        };
+        let Some(bucket) = buckets.get_mut(ti) else {
+            continue;
+        };
+        bucket.push(crate::plugin::PluginMidiEvent {
+            offset: ev.offset,
+            message: ev.message,
+        });
+    }
+}
+
 /// Stereo render buffer (interleaved L/R/L/R/...).
 #[derive(Debug, Clone)]
 pub struct StereoBuffer {
@@ -242,6 +296,11 @@ pub struct ProjectRenderer {
     /// stage 0, alongside the scratch lock.
     #[cfg(not(target_arch = "wasm32"))]
     live_input: std::sync::Mutex<Option<LiveInput>>,
+    /// Live / programmatic MIDI queue (project mode). Installed by
+    /// `AudioEngine`; events pushed by the UI thread through `Standalone`
+    /// are drained once per block (before the FX stage) and merged into
+    /// the target track's per-block MIDI events. `None` until installed.
+    live_midi: std::sync::Mutex<Option<LiveMidiQueue>>,
 }
 
 impl ProjectRenderer {
@@ -254,6 +313,7 @@ impl ProjectRenderer {
             scratch: std::sync::Mutex::new(RenderScratch::default()),
             #[cfg(not(target_arch = "wasm32"))]
             live_input: std::sync::Mutex::new(None),
+            live_midi: std::sync::Mutex::new(None),
         }
     }
 
@@ -275,6 +335,16 @@ impl ProjectRenderer {
                 scratch: Vec::new(),
                 underruns: 0,
             });
+        }
+    }
+
+    /// Install the live / programmatic MIDI ring consumer (project mode).
+    /// The producer end is fed by `Standalone::push_note_on`/`_off`/`_cc`.
+    /// Mirrors `set_live_input`: stage 0.5 drains it once per block and
+    /// merges events into the matching track's MIDI event list.
+    pub(crate) fn set_live_midi(&self, cons: rtrb::Consumer<LiveMidiEvent>) {
+        if let Ok(mut slot) = self.live_midi.lock() {
+            *slot = Some(LiveMidiQueue { cons });
         }
     }
 
@@ -336,6 +406,28 @@ impl ProjectRenderer {
                     dirty,
                     frames,
                 );
+            }
+        }
+
+        // 0.5) Live / programmatic MIDI → per-track scratch buckets.
+        // Drained once per block under the queue lock (like stage 0's
+        // live input), resolving each event's track guid to a snapshot
+        // index. The buckets merge into each track's `collect_midi_events`
+        // list at the FX stage below. Empty / no-op when no queue is
+        // installed and when nothing was pushed this block.
+        let mut live_midi_buckets: Vec<Vec<crate::plugin::PluginMidiEvent>> =
+            Vec::new();
+        {
+            let mut midi_guard = self.live_midi.lock().expect("live midi poisoned");
+            if let Some(queue) = midi_guard.as_mut()
+                && queue.cons.slots() > 0
+            {
+                live_midi_buckets.resize_with(n, Vec::new);
+                // guid → index over the snapshot (built lazily on demand).
+                let idx_of = |guid: &str| -> Option<usize> {
+                    tracks.iter().position(|t| t.guid == guid)
+                };
+                drain_live_midi(queue, idx_of, &mut live_midi_buckets);
             }
         }
 
@@ -458,8 +550,17 @@ impl ProjectRenderer {
                 // MIDI + note-expression events for this block. Both
                 // lists go to every plugin in the chain (REAPER's
                 // default) — non-MIDI plugins ignore them.
-                let midi_events =
+                let mut midi_events =
                     collect_midi_events(t, start_seconds, end_seconds, self.sample_rate, frames);
+                // Merge programmatic / live MIDI pushed for this track
+                // this block (drained in stage 0.5), then re-sort so the
+                // combined list stays offset-ordered for the plugin.
+                if let Some(bucket) = live_midi_buckets.get_mut(ti)
+                    && !bucket.is_empty()
+                {
+                    midi_events.append(bucket);
+                    midi_events.sort_by_key(|e| e.offset);
+                }
                 let note_expr_events = collect_note_expressions(
                     t,
                     start_seconds,
@@ -975,5 +1076,96 @@ mod live_input_tests {
         );
         assert!(buses[0].samples.iter().all(|s| *s == 0.0));
         assert!(!dirty[0]);
+    }
+}
+
+#[cfg(test)]
+mod live_midi_tests {
+    use super::*;
+    use daw_proto::MidiMessage;
+
+    /// Build a `LiveMidiQueue` pre-filled with the given events.
+    fn queue_with(events: Vec<LiveMidiEvent>) -> LiveMidiQueue {
+        let (mut prod, cons) = rtrb::RingBuffer::<LiveMidiEvent>::new(events.len().max(1));
+        for ev in events {
+            let _ = prod.push(ev);
+        }
+        LiveMidiQueue { cons }
+    }
+
+    #[test]
+    fn drain_routes_events_to_the_matching_track_bucket() {
+        let guids = ["track-a", "track-b", "track-c"];
+        let idx_of = |g: &str| guids.iter().position(|x| *x == g);
+
+        let mut queue = queue_with(vec![
+            LiveMidiEvent {
+                track: "track-b".into(),
+                offset: 0,
+                message: MidiMessage::note_on(0, 60, 100),
+            },
+            LiveMidiEvent {
+                track: "track-a".into(),
+                offset: 0,
+                message: MidiMessage::control_change(0, 7, 64),
+            },
+            // Unknown guid → dropped, not merged.
+            LiveMidiEvent {
+                track: "ghost".into(),
+                offset: 0,
+                message: MidiMessage::note_off(0, 60, 0),
+            },
+        ]);
+
+        let mut buckets: Vec<Vec<crate::plugin::PluginMidiEvent>> = vec![Vec::new(); 3];
+        drain_live_midi(&mut queue, idx_of, &mut buckets);
+
+        // track-a (index 0) got the CC; track-b (index 1) got the NoteOn.
+        assert_eq!(buckets[0].len(), 1);
+        assert!(matches!(
+            buckets[0][0].message,
+            MidiMessage::ControlChange { controller: 7, value: 64, .. }
+        ));
+        assert_eq!(buckets[1].len(), 1);
+        assert!(matches!(
+            buckets[1][0].message,
+            MidiMessage::NoteOn { note: 60, velocity: 100, .. }
+        ));
+        // track-c untouched; the unknown-guid event was dropped.
+        assert!(buckets[2].is_empty());
+    }
+
+    #[test]
+    fn drained_events_merge_and_resort_with_collected_events() {
+        // Mirror the render_block merge: an existing offset-ordered list
+        // gets the live bucket appended, then re-sorted by offset.
+        let mut midi_events: Vec<crate::plugin::PluginMidiEvent> = vec![
+            crate::plugin::PluginMidiEvent {
+                offset: 0,
+                message: MidiMessage::note_on(0, 48, 90),
+            },
+            crate::plugin::PluginMidiEvent {
+                offset: 256,
+                message: MidiMessage::note_off(0, 48, 0),
+            },
+        ];
+
+        let mut bucket = vec![
+            crate::plugin::PluginMidiEvent {
+                offset: 128,
+                message: MidiMessage::control_change(0, 1, 100),
+            },
+            crate::plugin::PluginMidiEvent {
+                offset: 0,
+                message: MidiMessage::note_on(0, 60, 100),
+            },
+        ];
+
+        midi_events.append(&mut bucket);
+        midi_events.sort_by_key(|e| e.offset);
+
+        let offsets: Vec<u32> = midi_events.iter().map(|e| e.offset).collect();
+        assert_eq!(offsets, vec![0, 0, 128, 256]);
+        assert!(bucket.is_empty());
     }
 }

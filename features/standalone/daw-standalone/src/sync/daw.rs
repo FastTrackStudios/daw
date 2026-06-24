@@ -451,6 +451,14 @@ pub struct Standalone {
     /// audio engine can install a freshly-sized bank when it attaches; empty
     /// until then, so `track_peak` reports silence.
     pub(crate) meters: Arc<Mutex<Arc<crate::metering::Meters>>>,
+    /// Producer end of the live / programmatic MIDI ring. Installed by
+    /// `AudioEngine::with_project_prefs` (the consumer goes to the
+    /// renderer via `set_live_midi`). `push_note_on`/`_off`/`_cc` push
+    /// `LiveMidiEvent`s here; the renderer drains them once per block.
+    /// `None` until an audio engine attaches; pushes are then dropped.
+    pub(crate) live_midi_tx: Arc<
+        Mutex<Option<rtrb::Producer<crate::audio_engine::render::LiveMidiEvent>>>,
+    >,
 }
 
 impl Default for Standalone {
@@ -477,6 +485,7 @@ impl Standalone {
             region_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
             tempo_map_events: Arc::new(tokio::sync::broadcast::channel(1024).0),
             meters: Arc::new(Mutex::new(crate::metering::Meters::empty())),
+            live_midi_tx: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -617,6 +626,61 @@ impl Standalone {
             .lock()
             .expect("plugin_instances poisoned")
             .insert(fx_guid.into(), instance)
+    }
+
+    /// Install the producer end of the live-MIDI ring. Called by
+    /// `AudioEngine::with_project_prefs` after wiring the consumer to the
+    /// renderer. Replaces any previous producer (e.g. on engine restart).
+    pub(crate) fn set_live_midi_producer(
+        &self,
+        prod: rtrb::Producer<crate::audio_engine::render::LiveMidiEvent>,
+    ) {
+        if let Ok(mut slot) = self.live_midi_tx.lock() {
+            *slot = Some(prod);
+        }
+    }
+
+    /// Push a programmatic MIDI message to `track_guid`, delivered to that
+    /// track's instrument/FX chain at the start of the next render block.
+    /// Lock-free on the ring; dropped (and counted by the ring's slot
+    /// accounting) if no engine is attached or the ring is full. `true`
+    /// when the event was enqueued.
+    fn push_live_midi(&self, track_guid: &str, message: daw_proto::MidiMessage) -> bool {
+        let mut guard = match self.live_midi_tx.lock() {
+            Ok(g) => g,
+            Err(_) => return false,
+        };
+        let Some(prod) = guard.as_mut() else {
+            return false;
+        };
+        prod.push(crate::audio_engine::render::LiveMidiEvent {
+            track: track_guid.to_string(),
+            offset: 0,
+            message,
+        })
+        .is_ok()
+    }
+
+    /// Programmatic Note-On (channel 0) to `track_guid`. A `velocity` of 0
+    /// is a Note-Off by MIDI convention — most instruments treat it so.
+    pub fn push_note_on(&self, track_guid: &str, note: u8, velocity: u8) -> bool {
+        self.push_live_midi(
+            track_guid,
+            daw_proto::MidiMessage::note_on(0, note, velocity),
+        )
+    }
+
+    /// Programmatic Note-Off (channel 0, release velocity 0) to `track_guid`.
+    pub fn push_note_off(&self, track_guid: &str, note: u8) -> bool {
+        self.push_live_midi(track_guid, daw_proto::MidiMessage::note_off(0, note, 0))
+    }
+
+    /// Programmatic Control-Change (channel 0) to `track_guid`.
+    pub fn push_cc(&self, track_guid: &str, controller: u8, value: u8) -> bool {
+        self.push_live_midi(
+            track_guid,
+            daw_proto::MidiMessage::control_change(0, controller, value),
+        )
     }
 
     /// Remove the FX instance backing `fx_guid`, returning it (e.g. to drop off
