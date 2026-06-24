@@ -683,6 +683,27 @@ impl Standalone {
         )
     }
 
+    /// Run `f` against the live FX instance backing `fx_guid`, under the
+    /// `plugin_instances` lock (the same lock the renderer takes per block), and
+    /// return its result. `None` if no instance is loaded under that guid.
+    ///
+    /// This is the in-place control seam for native FX instances whose
+    /// parameters are NOT exposed as host params (e.g. Signal's NAM amp trims):
+    /// the caller downcasts via [`PluginInstance`](crate::plugin::PluginInstance)
+    /// and mutates the instance directly. Hosted plugins with real param
+    /// surfaces should still go through the `FxParams` set path.
+    pub fn with_plugin_instance<R>(
+        &self,
+        fx_guid: &str,
+        f: impl FnOnce(&mut dyn crate::plugin::PluginInstance) -> R,
+    ) -> Option<R> {
+        let mut plugins = self
+            .plugin_instances
+            .lock()
+            .expect("plugin_instances poisoned");
+        plugins.get_mut(fx_guid).map(|p| f(p.as_mut()))
+    }
+
     /// Remove the FX instance backing `fx_guid`, returning it (e.g. to drop off
     /// the audio thread). No-op if absent.
     pub fn remove_plugin_instance(

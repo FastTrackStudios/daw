@@ -194,6 +194,16 @@ pub trait PluginInstance: Send {
 
     /// Release activation. Idempotent — calling twice is fine.
     fn deactivate(&mut self);
+
+    /// Downcast hook for native (built-in Rust DSP) instances whose control
+    /// surface isn't expressed as host params. Hosts that mutate a concrete
+    /// instance in place (e.g. Signal's NAM amp trims via
+    /// [`Standalone::with_plugin_instance`](crate::sync::Standalone::with_plugin_instance))
+    /// downcast through this. Defaults to `None` for hosted CLAP/VST3 plugins,
+    /// which expose their parameters through the host param path instead.
+    fn as_any_mut(&mut self) -> Option<&mut dyn std::any::Any> {
+        None
+    }
 }
 
 /// Errors any plugin backend can raise.
