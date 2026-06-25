@@ -543,7 +543,7 @@ impl AudioEngine {
         let stream = inp
             .device
             .build_input_stream(
-                &inp.config,
+                inp.config.clone(),
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     // Push every interleaved sample (all channels); the
                     // renderer de-interleaves per track in stage 0.
@@ -577,7 +577,7 @@ impl AudioEngine {
         let daw = renderer.daw().clone();
         let stream = device
             .build_output_stream(
-                config,
+                config.clone(),
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
                     let num_samples = data.len();
                     if channels == 0 || num_samples == 0 {
@@ -652,7 +652,7 @@ impl AudioEngine {
 
         let stream = device
             .build_output_stream(
-                config,
+                config.clone(),
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
                     let num_samples = data.len();
                     let mut mix = mix_buffer.lock().unwrap();

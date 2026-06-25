@@ -22,7 +22,7 @@ daw-control = { path = "../../../crates/daw-control", optional = true }
 eyre = { workspace = true, optional = true }
 
 # Audio engine (feature-gated)
-cpal = { version = "0.17", optional = true, features = ["wasm-bindgen"] }
+cpal = { version = "0.18", optional = true, features = ["wasm-bindgen"] }
 symphonia = { version = "0.5", optional = true, features = ["mp3", "ogg", "flac", "wav", "pcm", "aac"] }
 
 # RPP project loading

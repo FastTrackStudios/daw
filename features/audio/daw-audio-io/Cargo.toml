@@ -17,7 +17,7 @@ workspace = true
 [dependencies]
 # Same cpal 0.17.1 (crates.io) the rest of the workspace resolves, so `Stream`
 # and device types unify across daw-standalone and this crate.
-cpal = "0.17"
+cpal = "0.18"
 facet = { workspace = true }
 tracing = { workspace = true }
 # SPSC lock-free ring for the duplex monitor's input → output handoff.

@@ -175,7 +175,7 @@ impl DuplexMonitor {
         let input_stream = inp
             .device
             .build_input_stream(
-                &inp.config,
+                inp.config.clone(),
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     for frame in data.chunks(in_channels) {
                         // Pick the configured channel (falls back to channel 0).
@@ -207,7 +207,7 @@ impl DuplexMonitor {
         let output_stream = out
             .device
             .build_output_stream(
-                &out.config,
+                out.config.clone(),
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| dsp.render(data),
                 |err| tracing::warn!("daw-audio-io: monitor output stream error: {err}"),
                 None,
