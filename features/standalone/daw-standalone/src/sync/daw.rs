@@ -456,9 +456,8 @@ pub struct Standalone {
     /// renderer via `set_live_midi`). `push_note_on`/`_off`/`_cc` push
     /// `LiveMidiEvent`s here; the renderer drains them once per block.
     /// `None` until an audio engine attaches; pushes are then dropped.
-    pub(crate) live_midi_tx: Arc<
-        Mutex<Option<rtrb::Producer<crate::audio_engine::render::LiveMidiEvent>>>,
-    >,
+    pub(crate) live_midi_tx:
+        Arc<Mutex<Option<rtrb::Producer<crate::audio_engine::render::LiveMidiEvent>>>>,
 }
 
 impl Default for Standalone {
@@ -645,7 +644,12 @@ impl Standalone {
     /// Lock-free on the ring; dropped (and counted by the ring's slot
     /// accounting) if no engine is attached or the ring is full. `true`
     /// when the event was enqueued.
-    fn push_live_midi(&self, track_guid: &str, message: daw_proto::MidiMessage) -> bool {
+    ///
+    /// Full-fidelity seam for hardware MIDI sources (e.g. `daw-midi-io`): unlike
+    /// [`push_note_on`](Self::push_note_on) / [`push_cc`](Self::push_cc) this
+    /// carries the original channel, release velocity, pitch-bend and program
+    /// change rather than collapsing to monotimbral channel 0.
+    pub fn push_live_midi(&self, track_guid: &str, message: daw_proto::MidiMessage) -> bool {
         let mut guard = match self.live_midi_tx.lock() {
             Ok(g) => g,
             Err(_) => return false,

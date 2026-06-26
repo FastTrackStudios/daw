@@ -1,0 +1,21 @@
+[package]
+name = "daw-midi-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Reusable hardware MIDI input for the DAW engine — device enumeration/selection (one device, all devices, or a REAPER-style virtual port) feeding parsed daw_proto::MidiMessage events to a sink."
+
+[package.metadata]
+
+[lints]
+workspace = true
+
+[dependencies]
+# Hardware MIDI: ALSA (Linux), CoreMIDI (macOS), WinMM (Windows). Same midir
+# the rest of the workspace resolves so MidiInputConnection types unify.
+midir = { workspace = true }
+# Canonical MIDI message type shared across the engine (NoteOn/NoteOff/CC/...).
+daw-proto = { path = "../../../crates/daw-proto" }
+eyre = { workspace = true }
+tracing = { workspace = true }
