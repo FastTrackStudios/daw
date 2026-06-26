@@ -211,6 +211,90 @@ where
     Err(eyre!("virtual MIDI ports are only supported on Unix"))
 }
 
+/// A raw 3-byte MIDI event with the classic status/note/velocity layout —
+/// ergonomic for UI loops that poll [`MidiStream::drain`] and only care about
+/// notes + CCs. (For full message fidelity use [`MidiInput`] with a sink.)
+#[derive(Clone, Copy, Debug)]
+pub struct MidiEvent {
+    /// Status byte: `0x90 | ch` note-on, `0x80 | ch` note-off, `0xB0 | ch` CC.
+    pub status: u8,
+    /// Note number, or — for a CC — the controller number.
+    pub note: u8,
+    /// Velocity, or — for a CC — the controller value.
+    pub velocity: u8,
+}
+
+impl MidiEvent {
+    pub fn is_note_on(self) -> bool {
+        (self.status & 0xF0) == 0x90 && self.velocity > 0
+    }
+    pub fn is_note_off(self) -> bool {
+        (self.status & 0xF0) == 0x80 || ((self.status & 0xF0) == 0x90 && self.velocity == 0)
+    }
+    /// Control Change (status `0xB0`). For CC, `note` is the controller and
+    /// `velocity` is its value (e.g. CC64 = sustain pedal).
+    pub fn is_cc(self) -> bool {
+        (self.status & 0xF0) == 0xB0
+    }
+    /// Controller number for a CC message.
+    pub fn controller(self) -> u8 {
+        self.note
+    }
+    /// Controller value for a CC message.
+    pub fn cc_value(self) -> u8 {
+        self.velocity
+    }
+}
+
+/// A [`MidiInput`] paired with a lock-free channel — open once, then `drain()`
+/// pending [`MidiEvent`]s from a UI loop each frame. The drop-in replacement for
+/// signal-audio's retired `MidiInput`.
+///
+/// Cloning shares the receiver + keeps the underlying connection alive (the
+/// input lives behind an `Arc`), so it can be stored in Dioxus context and
+/// cloned freely — exactly like the type it replaces.
+#[derive(Clone)]
+pub struct MidiStream {
+    _input: std::sync::Arc<MidiInput>,
+    rx: crossbeam_channel::Receiver<MidiEvent>,
+    /// Ports actually opened (for UI / logs).
+    pub opened: Vec<String>,
+}
+
+impl MidiStream {
+    /// Open `selection` into a bounded channel. Events arrive on midir's OS
+    /// thread; `drain()` consumes them on the UI thread.
+    pub fn open(selection: MidiSelection) -> eyre::Result<Self> {
+        let (tx, rx) = crossbeam_channel::bounded::<MidiEvent>(256);
+        let input = MidiInput::open(selection, move |msg| {
+            if let Some((status, note, velocity)) = msg.to_raw_bytes() {
+                let _ = tx.try_send(MidiEvent {
+                    status,
+                    note,
+                    velocity,
+                });
+            }
+        })?;
+        let opened = input.opened.clone();
+        Ok(Self {
+            _input: std::sync::Arc::new(input),
+            rx,
+            opened,
+        })
+    }
+
+    /// Open every available MIDI input port. `None` if none are available
+    /// (matches signal-audio's old `MidiInput::open_all` ergonomics).
+    pub fn open_all() -> Option<Self> {
+        Self::open(MidiSelection::All).ok()
+    }
+
+    /// Non-blocking drain of all pending events.
+    pub fn drain(&self) -> impl Iterator<Item = MidiEvent> + '_ {
+        self.rx.try_iter()
+    }
+}
+
 /// Parse one complete MIDI message (status byte + data) into a [`MidiMessage`].
 /// Returns `None` for empty input or a leading data byte (running status — not
 /// emitted by midir, which delivers complete messages).

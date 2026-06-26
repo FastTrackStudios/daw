@@ -19,3 +19,5 @@ midir = { workspace = true }
 daw-proto = { path = "../../../crates/daw-proto" }
 eyre = { workspace = true }
 tracing = { workspace = true }
+# Lock-free MPSC for the drain()-style MidiStream (UI loops poll it each frame).
+crossbeam-channel = { workspace = true }
