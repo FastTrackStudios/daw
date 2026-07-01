@@ -10,7 +10,7 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
 daw-proto = { path = "../../../crates/daw-proto" }
-architect = { workspace = true, features = ["vox"] }
+architect = { workspace = true, features = ["vox", "local"] }
 vox = { workspace = true }
 tracing = { workspace = true }
 moire = { workspace = true }
@@ -77,6 +77,9 @@ decode = ["dep:symphonia"]
 # deps); enabling them here is a no-op on wasm32 where Cargo ignores
 # the target dep, and the live-input paths are themselves `cfg`-gated.
 audio = ["decode", "dep:cpal", "daw-audio-io", "dep:rtrb"]
+# Native PipeWire duplex engine (`DuplexAudioEngine`) — one realtime callback
+# (input+output, no ring) via daw-audio-io's `pw_filter` backend. Linux-only.
+pipewire = ["audio", "daw-audio-io/pipewire"]
 # Parse `.rpp` files into `Standalone::ProjectState` (tracks, items,
 # takes, markers, regions, tempo, routing). Native default pulls
 # rayon via `dawfile-reaper/parallel`. For WASM, enable
