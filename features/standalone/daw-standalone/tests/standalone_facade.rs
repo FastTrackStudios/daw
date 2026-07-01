@@ -142,11 +142,12 @@ fn diagnostics_returns_empties_no_panic() {
 }
 
 #[test]
-fn batch_execution_returns_error_per_step() {
+fn batch_execution_routes_into_service_impls() {
     use daw_proto::batch::{
         BatchExecution, BatchInstruction, BatchOp, BatchOptions, BatchRequest, ProjectArg,
-        StepOutcome, TransportOp,
+        StepOutcome,
     };
+    use daw_proto::marker::MarkersOp;
 
     let daw = Standalone::new();
     let info = daw.create().unwrap();
@@ -155,11 +156,15 @@ fn batch_execution_returns_error_per_step() {
         instructions: vec![
             BatchInstruction {
                 step: 0,
-                op: BatchOp::Transport(TransportOp::Play(arg.clone())),
+                op: BatchOp::Marker(MarkersOp::Add {
+                    project: arg.clone(),
+                    position: 1.5,
+                    name: "from-batch".into(),
+                }),
             },
             BatchInstruction {
                 step: 1,
-                op: BatchOp::Transport(TransportOp::Stop(arg)),
+                op: BatchOp::Marker(MarkersOp::All { project: arg }),
             },
         ],
         options: BatchOptions::default(),
@@ -167,8 +172,20 @@ fn batch_execution_returns_error_per_step() {
     let resp = daw.execute(req);
     assert_eq!(resp.results.len(), 2);
     for r in &resp.results {
-        assert!(matches!(r.outcome, StepOutcome::Error(_)));
+        assert!(
+            matches!(r.outcome, StepOutcome::Ok(_)),
+            "batch step should execute for real on standalone: {:?}",
+            r.outcome
+        );
     }
+    let daw_proto::batch::StepOutcome::Ok(daw_proto::batch::BatchOpOutput::Marker(
+        daw_proto::marker::MarkersOpOutput::All(markers),
+    )) = &resp.results[1].outcome
+    else {
+        panic!("step 1 should list the marker added by step 0");
+    };
+    assert_eq!(markers.len(), 1);
+    assert_eq!(markers[0].name, "from-batch");
 }
 
 #[test]
