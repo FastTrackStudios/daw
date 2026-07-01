@@ -16,7 +16,7 @@
 
 use architect::{Layer, Services, layers};
 use daw_proto::{
-    action_registry, audio_engine, automation, dawfile_service, event_bus, ext_state, fx,
+    action_registry, audio_engine, automation, batch, dawfile_service, event_bus, ext_state, fx,
     fx_chains, fx_params, health, input, item, live_midi, marker, midi, peak, plugin_loader,
     project, region, routing, screenset, take, tempo_map, toolbar, track, transport,
     window_geometry,
@@ -30,6 +30,9 @@ impl Services for Standalone {
             transport::Service,
             project::Service,
             marker::Service,
+            // Real since batch execution routes through
+            // daw_proto::batch::run (one RPC, N ops, FromStep chaining).
+            batch::Service,
             region::Service,
             tempo_map::Service,
             audio_engine::Service,
