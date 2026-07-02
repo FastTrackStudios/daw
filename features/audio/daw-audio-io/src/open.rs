@@ -47,7 +47,11 @@ pub fn open_output(host: &cpal::Host, prefs: &AudioIoPrefs) -> Result<OpenedOutp
     };
     Ok(OpenedOutput {
         sample_format: default.sample_format(),
-        config: StreamConfig { channels, sample_rate, buffer_size },
+        config: StreamConfig {
+            channels,
+            sample_rate,
+            buffer_size,
+        },
         device,
         channels,
         sample_rate,
@@ -82,13 +86,18 @@ pub fn open_input(
     } else {
         // ALSA/CoreAudio: pro interfaces (e.g. Yamaha TF) need the full channel
         // count opened so the channel index is reachable in one device stream.
-        let default_ch = device.default_input_config().map(|c| c.channels()).unwrap_or(0);
+        let default_ch = device
+            .default_input_config()
+            .map(|c| c.channels())
+            .unwrap_or(0);
         let max_ch = device
             .supported_input_configs()
             .ok()
             .and_then(|cfgs| cfgs.map(|c| c.channels()).max())
             .unwrap_or(0);
-        (default_ch.max(max_ch) as usize).max(max_channel + 1).max(2)
+        (default_ch.max(max_ch) as usize)
+            .max(max_channel + 1)
+            .max(2)
     };
     let buffer_size = if is_jack {
         BufferSize::Default

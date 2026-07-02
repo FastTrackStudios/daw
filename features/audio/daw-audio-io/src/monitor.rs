@@ -214,8 +214,12 @@ impl DuplexMonitor {
             )
             .map_err(|e| format!("build output stream: {e}"))?;
 
-        input_stream.play().map_err(|e| format!("play input: {e}"))?;
-        output_stream.play().map_err(|e| format!("play output: {e}"))?;
+        input_stream
+            .play()
+            .map_err(|e| format!("play input: {e}"))?;
+        output_stream
+            .play()
+            .map_err(|e| format!("play output: {e}"))?;
 
         // Effective prefs — the actually-matched device names, so the caller can
         // persist exactly what was opened ("remember last used").

@@ -436,8 +436,7 @@ impl AudioEngine {
         // renderer drains them once per block (consumer). SPSC + lock-free
         // like the live-input ring. Sized for a generous burst of events.
         {
-            let (prod, cons) =
-                rtrb::RingBuffer::<super::render::LiveMidiEvent>::new(4096);
+            let (prod, cons) = rtrb::RingBuffer::<super::render::LiveMidiEvent>::new(4096);
             renderer.set_live_midi(cons);
             daw.set_live_midi_producer(prod);
         }
@@ -466,15 +465,24 @@ impl AudioEngine {
 
         let config = out.config.clone();
         let stream = match out.sample_format {
-            SampleFormat::F32 => {
-                Self::build_project_stream::<f32>(&out.device, &config, renderer.clone(), shared.clone())?
-            }
-            SampleFormat::I16 => {
-                Self::build_project_stream::<i16>(&out.device, &config, renderer.clone(), shared.clone())?
-            }
-            SampleFormat::U16 => {
-                Self::build_project_stream::<u16>(&out.device, &config, renderer.clone(), shared.clone())?
-            }
+            SampleFormat::F32 => Self::build_project_stream::<f32>(
+                &out.device,
+                &config,
+                renderer.clone(),
+                shared.clone(),
+            )?,
+            SampleFormat::I16 => Self::build_project_stream::<i16>(
+                &out.device,
+                &config,
+                renderer.clone(),
+                shared.clone(),
+            )?,
+            SampleFormat::U16 => Self::build_project_stream::<u16>(
+                &out.device,
+                &config,
+                renderer.clone(),
+                shared.clone(),
+            )?,
             format => return Err(format!("Unsupported sample format: {format:?}")),
         };
         stream
@@ -507,7 +515,9 @@ impl AudioEngine {
             p.tracks
                 .iter()
                 .filter_map(|t| match p.track_ext.get(&t.guid).map(|e| e.record_input) {
-                    Some(daw_proto::track::RecordInput::Audio { channel }) => Some(channel as usize),
+                    Some(daw_proto::track::RecordInput::Audio { channel }) => {
+                        Some(channel as usize)
+                    }
                     _ => None,
                 })
                 .max()

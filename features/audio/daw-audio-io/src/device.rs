@@ -106,7 +106,10 @@ pub fn pick_device(
         if let Some(d) = found {
             return Ok(d);
         }
-        tracing::warn!(device = n, "daw-audio-io: named audio device not found; using default");
+        tracing::warn!(
+            device = n,
+            "daw-audio-io: named audio device not found; using default"
+        );
     }
     let def = if input {
         host.default_input_device()

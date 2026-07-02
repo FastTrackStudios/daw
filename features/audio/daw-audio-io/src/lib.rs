@@ -34,7 +34,9 @@ pub mod prefs;
 #[cfg(feature = "monitor")]
 pub mod monitor;
 
-pub use device::{DeviceInfo, device_name, input_channels, input_devices, output_devices, pick_device};
+pub use device::{
+    DeviceInfo, device_name, input_channels, input_devices, output_devices, pick_device,
+};
 pub use host::{audio_host, host_is_jack};
 pub use open::{OpenedInput, OpenedOutput, open_input, open_output};
 pub use prefs::{AudioIoPrefs, TrackIo};

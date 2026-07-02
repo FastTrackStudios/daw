@@ -727,10 +727,7 @@ struct TestLaneClient {
 impl vox::FromVoxLane for TestLaneClient {
     const SERVICE_NAME: &'static str = "reaper-test";
 
-    fn from_vox_lane(
-        caller: vox::Caller,
-        _connection: Option<vox::ConnectionHandle>,
-    ) -> Self {
+    fn from_vox_lane(caller: vox::Caller, _connection: Option<vox::ConnectionHandle>) -> Self {
         Self { caller }
     }
 }

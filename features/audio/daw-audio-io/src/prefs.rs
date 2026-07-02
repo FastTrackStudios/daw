@@ -81,14 +81,21 @@ pub struct TrackIo {
 impl Default for TrackIo {
     /// Input channel 0, output to the main L/R pair (0, 1).
     fn default() -> Self {
-        Self { input_channel: 0, output_left: 0, output_right: 1 }
+        Self {
+            input_channel: 0,
+            output_left: 0,
+            output_right: 1,
+        }
     }
 }
 
 impl TrackIo {
     /// A track that records from `channel` and outputs to the main L/R pair.
     pub fn mono_in(channel: usize) -> Self {
-        Self { input_channel: channel, ..Self::default() }
+        Self {
+            input_channel: channel,
+            ..Self::default()
+        }
     }
 
     /// The output channel pair `(left, right)`.

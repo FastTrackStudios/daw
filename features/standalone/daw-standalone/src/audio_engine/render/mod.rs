@@ -108,7 +108,9 @@ pub(crate) fn mix_live_input_into_buses(
     if n < want {
         live.underruns = live.underruns.wrapping_add(1);
     }
-    if n > 0 && let Ok(chunk) = live.cons.read_chunk(n) {
+    if n > 0
+        && let Ok(chunk) = live.cons.read_chunk(n)
+    {
         let (a, b) = chunk.as_slices();
         live.scratch[..a.len()].copy_from_slice(a);
         live.scratch[a.len()..a.len() + b.len()].copy_from_slice(b);
@@ -398,14 +400,7 @@ impl ProjectRenderer {
         {
             let mut live_guard = self.live_input.lock().expect("live input poisoned");
             if let Some(live) = live_guard.as_mut() {
-                mix_live_input_into_buses(
-                    live,
-                    &snap.input_channels,
-                    passes,
-                    buses,
-                    dirty,
-                    frames,
-                );
+                mix_live_input_into_buses(live, &snap.input_channels, passes, buses, dirty, frames);
             }
         }
 
@@ -415,8 +410,7 @@ impl ProjectRenderer {
         // index. The buckets merge into each track's `collect_midi_events`
         // list at the FX stage below. Empty / no-op when no queue is
         // installed and when nothing was pushed this block.
-        let mut live_midi_buckets: Vec<Vec<crate::plugin::PluginMidiEvent>> =
-            Vec::new();
+        let mut live_midi_buckets: Vec<Vec<crate::plugin::PluginMidiEvent>> = Vec::new();
         {
             let mut midi_guard = self.live_midi.lock().expect("live midi poisoned");
             if let Some(queue) = midi_guard.as_mut()
@@ -424,9 +418,8 @@ impl ProjectRenderer {
             {
                 live_midi_buckets.resize_with(n, Vec::new);
                 // guid → index over the snapshot (built lazily on demand).
-                let idx_of = |guid: &str| -> Option<usize> {
-                    tracks.iter().position(|t| t.guid == guid)
-                };
+                let idx_of =
+                    |guid: &str| -> Option<usize> { tracks.iter().position(|t| t.guid == guid) };
                 drain_live_midi(queue, idx_of, &mut live_midi_buckets);
             }
         }
@@ -1124,12 +1117,20 @@ mod live_midi_tests {
         assert_eq!(buckets[0].len(), 1);
         assert!(matches!(
             buckets[0][0].message,
-            MidiMessage::ControlChange { controller: 7, value: 64, .. }
+            MidiMessage::ControlChange {
+                controller: 7,
+                value: 64,
+                ..
+            }
         ));
         assert_eq!(buckets[1].len(), 1);
         assert!(matches!(
             buckets[1][0].message,
-            MidiMessage::NoteOn { note: 60, velocity: 100, .. }
+            MidiMessage::NoteOn {
+                note: 60,
+                velocity: 100,
+                ..
+            }
         ));
         // track-c untouched; the unknown-guid event was dropped.
         assert!(buckets[2].is_empty());
