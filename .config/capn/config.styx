@@ -12,6 +12,12 @@ pre-commit {
 
 pre-push {
   clippy true
+  // Default features only (not --all-features) until two external blockers
+  // clear: keyflow-ui's non-default `desktop` feature pulls session.git,
+  // whose main still targets pre-0.50 facet/vox (breaks against migrated
+  // architect main), and keyflow-sync's cuda features need a CUDA toolchain
+  // the gate host doesn't reliably provide. Widen once session migrates.
+  clippy-features ()
   nextest true
   doc-tests false
   docs false
