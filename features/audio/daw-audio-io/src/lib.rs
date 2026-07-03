@@ -27,9 +27,15 @@
 //! ([`TrackIo`]). The duplex monitor implements the single-track case.
 
 pub mod device;
+pub mod duplex;
 pub mod host;
 pub mod open;
 pub mod prefs;
+pub mod pw;
+
+/// Native PipeWire `pw_filter` duplex backend (Linux, `pipewire` feature).
+#[cfg(all(feature = "pipewire", target_os = "linux"))]
+pub mod duplex_pw;
 
 #[cfg(feature = "monitor")]
 pub mod monitor;
@@ -37,7 +43,7 @@ pub mod monitor;
 pub use device::{
     DeviceInfo, device_name, input_channels, input_devices, output_devices, pick_device,
 };
-pub use host::{audio_host, host_is_jack};
+pub use host::{audio_host, host_is_graph, host_is_jack, host_is_pipewire};
 pub use open::{OpenedInput, OpenedOutput, open_input, open_output};
 pub use prefs::{AudioIoPrefs, TrackIo};
 

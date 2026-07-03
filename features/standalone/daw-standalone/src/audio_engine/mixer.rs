@@ -346,7 +346,7 @@ impl AudioEngine {
             meters,
         }));
 
-        let config = out.config.clone();
+        let config = out.config;
         let stream = match out.sample_format {
             SampleFormat::F32 => {
                 Self::build_stream::<f32>(&out.device, &config, state.clone(), shared.clone())?
@@ -463,7 +463,7 @@ impl AudioEngine {
             }
         };
 
-        let config = out.config.clone();
+        let config = out.config;
         let stream = match out.sample_format {
             SampleFormat::F32 => Self::build_project_stream::<f32>(
                 &out.device,
@@ -553,7 +553,7 @@ impl AudioEngine {
         let stream = inp
             .device
             .build_input_stream(
-                inp.config.clone(),
+                inp.config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     // Push every interleaved sample (all channels); the
                     // renderer de-interleaves per track in stage 0.
@@ -587,7 +587,7 @@ impl AudioEngine {
         let daw = renderer.daw().clone();
         let stream = device
             .build_output_stream(
-                config.clone(),
+                *config,
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
                     let num_samples = data.len();
                     if channels == 0 || num_samples == 0 {
@@ -662,7 +662,7 @@ impl AudioEngine {
 
         let stream = device
             .build_output_stream(
-                config.clone(),
+                *config,
                 move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
                     let num_samples = data.len();
                     let mut mix = mix_buffer.lock().unwrap();

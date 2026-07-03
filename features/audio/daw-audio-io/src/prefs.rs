@@ -14,7 +14,7 @@ use facet::Facet;
 /// can't represent a serialized `None`. The all-default value reproduces the
 /// classic "default output device, native rate, backend-default buffer,
 /// output-only" behavior.
-#[derive(Clone, Debug, PartialEq, Facet)]
+#[derive(Clone, Debug, Default, PartialEq, Facet)]
 pub struct AudioIoPrefs {
     /// Input device name substring. Empty = system default input.
     #[facet(default)]
@@ -32,18 +32,6 @@ pub struct AudioIoPrefs {
     /// DAW playback); `true` = duplex (live monitoring needs the input).
     #[facet(default)]
     pub want_input: bool,
-}
-
-impl Default for AudioIoPrefs {
-    fn default() -> Self {
-        Self {
-            input_device: String::new(),
-            output_device: String::new(),
-            sample_rate: 0,
-            buffer_size: 0,
-            want_input: false,
-        }
-    }
 }
 
 impl AudioIoPrefs {

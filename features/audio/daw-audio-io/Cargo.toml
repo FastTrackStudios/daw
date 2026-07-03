@@ -22,11 +22,22 @@ facet = { workspace = true }
 tracing = { workspace = true }
 # SPSC lock-free ring for the duplex monitor's input → output handoff.
 rtrb = { version = "0.3", optional = true }
+# Native PipeWire duplex backend (one pw_filter, input+output in one realtime
+# callback — no ring). Raw FFI: the high-level crate wraps `stream` but not
+# `filter`. Linux-only; gated behind the `pipewire` feature.
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = { version = "0.10", optional = true }
+libspa = { version = "0.10", optional = true }
 
 [features]
 default = []
-# Prefer the JACK/PipeWire host (pipewire-jack) over the raw ALSA/CoreAudio
-# default — forwards to cpal's jack backend.
+# Prefer cpal's JACK backend (pipewire-jack shim) over the raw ALSA/CoreAudio
+# default.
 jack = ["cpal/jack"]
+# Prefer cpal's native PipeWire host — talks to PipeWire directly (no JACK
+# shim), enumerates real device names + channel counts, targets a specific
+# device, and requests per-node latency natively. Also builds the native
+# `pw_filter` duplex backend (`duplex` module). Linux-only at the cpal level.
+pipewire = ["cpal/pipewire", "dep:pipewire", "dep:libspa"]
 # The live in → process → out duplex monitor. Pulls rtrb. Native-only.
 monitor = ["dep:rtrb"]

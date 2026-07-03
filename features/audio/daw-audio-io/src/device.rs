@@ -85,6 +85,37 @@ pub fn input_channels(host: &cpal::Host, name_substr: Option<&str>) -> Vec<(u32,
         .collect()
 }
 
+/// Rank a device for the requested direction so [`pick_device`] can choose
+/// between same-named nodes. A device that *only* faces the requested direction
+/// (a pure capture source for input, a pure sink for output) outranks a Duplex
+/// node by a wide margin; within a rank, more channels wins. The channel count
+/// comes from the matching default config (0 when the driver won't report one).
+fn device_score(device: &cpal::Device, input: bool) -> u32 {
+    use cpal::traits::DeviceTrait;
+    let dir_bonus = device
+        .description()
+        .ok()
+        .map(|d| match d.direction() {
+            cpal::DeviceDirection::Input if input => 1000,
+            cpal::DeviceDirection::Output if !input => 1000,
+            cpal::DeviceDirection::Duplex => 100,
+            _ => 0,
+        })
+        .unwrap_or(0);
+    let channels = if input {
+        device
+            .default_input_config()
+            .map(|c| c.channels())
+            .unwrap_or(0)
+    } else {
+        device
+            .default_output_config()
+            .map(|c| c.channels())
+            .unwrap_or(0)
+    };
+    dir_bonus + channels as u32
+}
+
 /// Pick an input/output device by name substring, falling back to the host
 /// default when the name is empty or not found (e.g. under JACK, where the
 /// device is the JACK server, not "Yamaha TF").
@@ -94,16 +125,22 @@ pub fn pick_device(
     input: bool,
 ) -> Result<cpal::Device, String> {
     if let Some(n) = name.filter(|s| !s.is_empty()) {
-        let found = if input {
+        // A pro interface can surface under one name as several nodes — e.g. a
+        // PipeWire `Yamaha TF` appears as both a Duplex *sink* (whose monitor is
+        // playback, not the mic inputs) and an Input *source* (the real capture
+        // channels). Score every name match and take the best for the requested
+        // direction, so an input pick lands on the capture source — not the sink
+        // monitor — and grabs the variant exposing the most channels.
+        let devs = if input {
             host.input_devices()
-                .ok()
-                .and_then(|mut it| it.find(|d| device_name(d).contains(n)))
         } else {
             host.output_devices()
-                .ok()
-                .and_then(|mut it| it.find(|d| device_name(d).contains(n)))
         };
-        if let Some(d) = found {
+        let best = devs.ok().and_then(|it| {
+            it.filter(|d| device_name(d).contains(n))
+                .max_by_key(|d| device_score(d, input))
+        });
+        if let Some(d) = best {
             return Ok(d);
         }
         tracing::warn!(

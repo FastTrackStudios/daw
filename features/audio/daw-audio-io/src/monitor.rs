@@ -91,13 +91,13 @@ impl MonitorDsp {
         if n < frames {
             self.shared.underruns.fetch_add(1, Ordering::Relaxed);
         }
-        if n > 0 {
-            if let Ok(chunk) = self.input_cons.read_chunk(n) {
-                let (a, b) = chunk.as_slices();
-                self.in_mono[..a.len()].copy_from_slice(a);
-                self.in_mono[a.len()..a.len() + b.len()].copy_from_slice(b);
-                chunk.commit_all();
-            }
+        if n > 0
+            && let Ok(chunk) = self.input_cons.read_chunk(n)
+        {
+            let (a, b) = chunk.as_slices();
+            self.in_mono[..a.len()].copy_from_slice(a);
+            self.in_mono[a.len()..a.len() + b.len()].copy_from_slice(b);
+            chunk.commit_all();
         }
         for s in &mut self.in_mono[n..frames] {
             *s = 0.0;
@@ -175,7 +175,7 @@ impl DuplexMonitor {
         let input_stream = inp
             .device
             .build_input_stream(
-                inp.config.clone(),
+                inp.config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
                     for frame in data.chunks(in_channels) {
                         // Pick the configured channel (falls back to channel 0).
@@ -207,7 +207,7 @@ impl DuplexMonitor {
         let output_stream = out
             .device
             .build_output_stream(
-                out.config.clone(),
+                out.config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| dsp.render(data),
                 |err| tracing::warn!("daw-audio-io: monitor output stream error: {err}"),
                 None,
