@@ -255,6 +255,11 @@ impl MidiEvent {
 /// cloned freely — exactly like the type it replaces.
 #[derive(Clone)]
 pub struct MidiStream {
+    // `MidiInput` isn't Sync (holds midir connection handles), but this
+    // field is drop-only — never dereferenced past construction. The Arc
+    // exists purely so cloning `MidiStream` shares one connection (closes
+    // once every clone drops), not to hand out concurrent access.
+    #[allow(clippy::arc_with_non_send_sync)]
     _input: std::sync::Arc<MidiInput>,
     rx: crossbeam_channel::Receiver<MidiEvent>,
     /// Ports actually opened (for UI / logs).
@@ -276,8 +281,11 @@ impl MidiStream {
             }
         })?;
         let opened = input.opened.clone();
+        // See the field's doc comment: drop-only, never dereferenced.
+        #[allow(clippy::arc_with_non_send_sync)]
+        let input = std::sync::Arc::new(input);
         Ok(Self {
-            _input: std::sync::Arc::new(input),
+            _input: input,
             rx,
             opened,
         })

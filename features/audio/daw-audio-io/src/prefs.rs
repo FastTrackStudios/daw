@@ -14,7 +14,7 @@ use facet::Facet;
 /// can't represent a serialized `None`. The all-default value reproduces the
 /// classic "default output device, native rate, backend-default buffer,
 /// output-only" behavior.
-#[derive(Clone, Debug, PartialEq, Facet)]
+#[derive(Clone, Debug, Default, PartialEq, Facet)]
 pub struct AudioIoPrefs {
     /// Input device name substring. Empty = system default input.
     #[facet(default)]
@@ -32,18 +32,6 @@ pub struct AudioIoPrefs {
     /// DAW playback); `true` = duplex (live monitoring needs the input).
     #[facet(default)]
     pub want_input: bool,
-}
-
-impl Default for AudioIoPrefs {
-    fn default() -> Self {
-        Self {
-            input_device: String::new(),
-            output_device: String::new(),
-            sample_rate: 0,
-            buffer_size: 0,
-            want_input: false,
-        }
-    }
 }
 
 impl AudioIoPrefs {
@@ -81,14 +69,21 @@ pub struct TrackIo {
 impl Default for TrackIo {
     /// Input channel 0, output to the main L/R pair (0, 1).
     fn default() -> Self {
-        Self { input_channel: 0, output_left: 0, output_right: 1 }
+        Self {
+            input_channel: 0,
+            output_left: 0,
+            output_right: 1,
+        }
     }
 }
 
 impl TrackIo {
     /// A track that records from `channel` and outputs to the main L/R pair.
     pub fn mono_in(channel: usize) -> Self {
-        Self { input_channel: channel, ..Self::default() }
+        Self {
+            input_channel: channel,
+            ..Self::default()
+        }
     }
 
     /// The output channel pair `(left, right)`.
