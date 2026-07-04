@@ -37,13 +37,14 @@ use — instead of hand-writing a transport per backend.
 
 Draws on [`helgoboss-midi`](https://github.com/helgoboss/helgoboss-midi):
 
-- **Raw vs structured split** *(planned)* — add a packed, `Copy`, real-time
-  `ShortMessage` (3-byte channel-voice + system-realtime) unified with the
-  structured `MidiEvent` by a trait; SysEx stays off the `Copy`/RT path. This
-  keeps the hot path allocation- and match-free.
-- **Semantic newtypes** *(planned)* — `KeyNumber` / `ControllerNumber` /
-  `Velocity` / `ProgramNumber` aliases over `U7`, and a general `U4` / `U14`,
-  each with `try_new` (fallible) + clamping `new`.
+- **Raw vs structured split** *(done)* — `raw::RawShortMessage` is a packed,
+  `Copy`, allocation-free 3-byte short message with a `ShortMessage` accessor
+  trait and lossless conversion to/from the non-SysEx `MidiEvent` subset. SysEx
+  stays off the `Copy`/RT path. Pick raw for throughput, structured for matching.
+- **Semantic newtypes** *(done)* — distinct `KeyNumber` / `Velocity` /
+  `ControllerNumber` / `ControllerValue` / `ProgramNumber` / `Pressure` types
+  plus raw `U4` / `U7` / `U14`, each with `new` (clamping, `const`) + `try_new`
+  (fallible), so a note number can't be passed where a controller value is.
 - **Aggregators** *(planned)* — 14-bit CC and RPN/NRPN scanners that fold
   multi-message sequences into single events (helgoboss's
   `ControlChange14BitMessage` / `ParameterNumberMessage`).
