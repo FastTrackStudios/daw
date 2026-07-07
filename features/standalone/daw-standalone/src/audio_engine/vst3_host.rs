@@ -1054,7 +1054,7 @@ impl LoadedVst3Plugin {
             buf.clear();
             bufs.clear();
             for ev in events.midi {
-                if let daw_proto::MidiMessage::SysEx(ref data) = ev.message {
+                if let daw_proto::MidiEvent::SysEx(ref data) = ev.message {
                     // Park the bytes in a stable slot and emit a
                     // DataEvent referencing them. The Vec inside
                     // `bufs` must not move — pre-reserved at
@@ -1762,12 +1762,12 @@ fn module_exit_symbol() -> &'static str {
 /// first-class VST3 representation in this skeleton (CC, pitch bend,
 /// program change — handled via IParameterChanges in the follow-up).
 fn midi_to_vst3_event(ev: &PluginMidiEvent) -> Option<Event> {
-    use daw_proto::MidiMessage;
+    use daw_proto::MidiEvent;
     let sample_offset = ev.offset as i32;
     match ev.message {
-        MidiMessage::NoteOn {
+        MidiEvent::NoteOn {
             channel,
-            note,
+            key,
             velocity,
         } => Some(Event {
             busIndex: 0,
@@ -1777,18 +1777,18 @@ fn midi_to_vst3_event(ev: &PluginMidiEvent) -> Option<Event> {
             r#type: EventTypes_::kNoteOnEvent as u16,
             __field0: Event__type0 {
                 noteOn: NoteOnEvent {
-                    channel: channel as i16,
-                    pitch: note as i16,
+                    channel: channel.index() as i16,
+                    pitch: key.get() as i16,
                     tuning: 0.0,
-                    velocity: velocity as f32 / 127.0,
+                    velocity: velocity.get() as f32 / 127.0,
                     length: 0,
                     noteId: -1,
                 },
             },
         }),
-        MidiMessage::NoteOff {
+        MidiEvent::NoteOff {
             channel,
-            note,
+            key,
             velocity,
         } => Some(Event {
             busIndex: 0,
@@ -1798,17 +1798,17 @@ fn midi_to_vst3_event(ev: &PluginMidiEvent) -> Option<Event> {
             r#type: EventTypes_::kNoteOffEvent as u16,
             __field0: Event__type0 {
                 noteOff: NoteOffEvent {
-                    channel: channel as i16,
-                    pitch: note as i16,
-                    velocity: velocity as f32 / 127.0,
+                    channel: channel.index() as i16,
+                    pitch: key.get() as i16,
+                    velocity: velocity.get() as f32 / 127.0,
                     noteId: -1,
                     tuning: 0.0,
                 },
             },
         }),
-        MidiMessage::PolyPressure {
+        MidiEvent::PolyAftertouch {
             channel,
-            note,
+            key,
             pressure,
         } => Some(Event {
             busIndex: 0,
@@ -1818,9 +1818,9 @@ fn midi_to_vst3_event(ev: &PluginMidiEvent) -> Option<Event> {
             r#type: EventTypes_::kPolyPressureEvent as u16,
             __field0: Event__type0 {
                 polyPressure: PolyPressureEvent {
-                    channel: channel as i16,
-                    pitch: note as i16,
-                    pressure: pressure as f32 / 127.0,
+                    channel: channel.index() as i16,
+                    pitch: key.get() as i16,
+                    pressure: pressure.get() as f32 / 127.0,
                     noteId: -1,
                 },
             },
@@ -1860,24 +1860,23 @@ fn note_expression_dim_to_vst3(dim: daw_proto::midi::NoteExpressionDim) -> Optio
 /// getMidiControllerAssignment` consumes. Returns `None` for events
 /// that have no IMidiMapping path (notes — they go through
 /// IEventList; SysEx — VST3 has no first-class transport for it).
-fn midi_to_ctrl_assignment(message: &daw_proto::MidiMessage) -> Option<(i16, u8, f64)> {
-    use daw_proto::MidiMessage;
+fn midi_to_ctrl_assignment(message: &daw_proto::MidiEvent) -> Option<(i16, u8, f64)> {
+    use daw_proto::MidiEvent;
     match *message {
-        MidiMessage::ControlChange {
+        MidiEvent::ControlChange {
             channel,
             controller,
             value,
-        } => Some((controller as i16, channel, value as f64 / 127.0)),
-        MidiMessage::PitchBend { channel, value } => {
-            // 14-bit signed −8192..8191 → normalized 0..1.
-            let unsigned = (value as i32 + 8192).clamp(0, 16383) as f64;
-            Some((kPitchBend as i16, channel, unsigned / 16383.0))
+        } => Some((controller.get() as i16, channel.index(), value.get() as f64 / 127.0)),
+        MidiEvent::PitchBend { channel, bend } => {
+            // 14-bit unsigned 0..16383 (center 8192) → normalized 0..1.
+            Some((kPitchBend as i16, channel.index(), bend.get() as f64 / 16383.0))
         }
-        MidiMessage::ProgramChange { channel, program } => {
-            Some((kCtrlProgramChange as i16, channel, program as f64 / 127.0))
+        MidiEvent::ProgramChange { channel, program } => {
+            Some((kCtrlProgramChange as i16, channel.index(), program.get() as f64 / 127.0))
         }
-        MidiMessage::ChannelPressure { channel, pressure } => {
-            Some((kAfterTouch as i16, channel, pressure as f64 / 127.0))
+        MidiEvent::ChannelPressure { channel, pressure } => {
+            Some((kAfterTouch as i16, channel.index(), pressure.get() as f64 / 127.0))
         }
         _ => None,
     }

@@ -63,7 +63,7 @@ pub struct PluginDescriptor {
 pub struct PluginMidiEvent {
     /// Sample offset from the start of the block (0..block_size).
     pub offset: u32,
-    pub message: daw_proto::MidiMessage,
+    pub message: daw_proto::MidiEvent,
 }
 
 /// One per-note expression event scheduled at a sample offset.

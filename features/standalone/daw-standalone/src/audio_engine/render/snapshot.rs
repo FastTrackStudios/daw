@@ -246,7 +246,7 @@ pub(crate) struct MidiNoteSnapshot {
 #[derive(Clone)]
 pub(crate) struct MidiOtherSnapshot {
     pub(crate) time_seconds: f64,
-    pub(crate) message: daw_proto::MidiMessage,
+    pub(crate) message: daw_proto::MidiEvent,
 }
 
 /// Cumulative tempo-map: sorted list of `(time_seconds, beat, bpm)`
@@ -470,16 +470,19 @@ fn snapshot_track(
             let midi_other: Vec<MidiOtherSnapshot> = take_guid_opt
                 .as_ref()
                 .map(|tg| {
-                    use daw_proto::MidiMessage;
+                    use daw_proto::{
+                        Channel, ControllerNumber, ControllerValue, KeyNumber, MidiEvent,
+                        PitchBend, Pressure, ProgramNumber,
+                    };
                     let mut out: Vec<MidiOtherSnapshot> = Vec::new();
                     if let Some(ccs) = p.midi_ccs.get(tg) {
                         for cc in ccs {
                             out.push(MidiOtherSnapshot {
                                 time_seconds: to_seconds(cc.position_ppq),
-                                message: MidiMessage::ControlChange {
-                                    channel: cc.channel,
-                                    controller: cc.controller,
-                                    value: cc.value,
+                                message: MidiEvent::ControlChange {
+                                    channel: Channel::new(cc.channel),
+                                    controller: ControllerNumber::new(cc.controller),
+                                    value: ControllerValue::new(cc.value),
                                 },
                             });
                         }
@@ -488,9 +491,13 @@ fn snapshot_track(
                         for pb in pbs {
                             out.push(MidiOtherSnapshot {
                                 time_seconds: to_seconds(pb.position_ppq),
-                                message: MidiMessage::PitchBend {
-                                    channel: pb.channel,
-                                    value: pb.value,
+                                message: MidiEvent::PitchBend {
+                                    channel: Channel::new(pb.channel),
+                                    // Stored as signed −8192..8191; midicore's
+                                    // PitchBend is 14-bit unsigned centered at 8192.
+                                    bend: PitchBend::new(
+                                        (pb.value as i32 + 8192).clamp(0, 16383) as u16,
+                                    ),
                                 },
                             });
                         }
@@ -499,9 +506,9 @@ fn snapshot_track(
                         for pc in pcs {
                             out.push(MidiOtherSnapshot {
                                 time_seconds: to_seconds(pc.position_ppq),
-                                message: MidiMessage::ProgramChange {
-                                    channel: pc.channel,
-                                    program: pc.program,
+                                message: MidiEvent::ProgramChange {
+                                    channel: Channel::new(pc.channel),
+                                    program: ProgramNumber::new(pc.program),
                                 },
                             });
                         }
@@ -510,7 +517,7 @@ fn snapshot_track(
                         for s in sx {
                             out.push(MidiOtherSnapshot {
                                 time_seconds: to_seconds(s.position_ppq),
-                                message: MidiMessage::SysEx(s.data.clone()),
+                                message: MidiEvent::SysEx(s.data.clone()),
                             });
                         }
                     }
@@ -518,9 +525,9 @@ fn snapshot_track(
                         for cp in cps {
                             out.push(MidiOtherSnapshot {
                                 time_seconds: to_seconds(cp.position_ppq),
-                                message: MidiMessage::ChannelPressure {
-                                    channel: cp.channel,
-                                    pressure: cp.pressure,
+                                message: MidiEvent::ChannelPressure {
+                                    channel: Channel::new(cp.channel),
+                                    pressure: Pressure::new(cp.pressure),
                                 },
                             });
                         }
@@ -529,10 +536,10 @@ fn snapshot_track(
                         for pp in pps {
                             out.push(MidiOtherSnapshot {
                                 time_seconds: to_seconds(pp.position_ppq),
-                                message: MidiMessage::PolyPressure {
-                                    channel: pp.channel,
-                                    note: pp.note,
-                                    pressure: pp.pressure,
+                                message: MidiEvent::PolyAftertouch {
+                                    channel: Channel::new(pp.channel),
+                                    key: KeyNumber::new(pp.note),
+                                    pressure: Pressure::new(pp.pressure),
                                 },
                             });
                         }

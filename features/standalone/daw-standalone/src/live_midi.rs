@@ -5,7 +5,7 @@
 //! no-ops.
 
 use daw_proto::live_midi::{
-    LiveMidi, MidiInputDevice, MidiMessage, MidiOutputDevice, SendMidiTiming, StuffMidiTarget,
+    LiveMidi, MidiInputDevice, MidiEvent, MidiOutputDevice, SendMidiTiming, StuffMidiTarget,
 };
 
 use crate::sync::Standalone;
@@ -31,10 +31,10 @@ impl LiveMidi for Standalone {
         false
     }
     fn close_output_device(&self, _id: u32) {}
-    fn send_midi(&self, _device_id: u32, _message: MidiMessage, _timing: SendMidiTiming) {}
+    fn send_midi(&self, _device_id: u32, _message: MidiEvent, _timing: SendMidiTiming) {}
     fn subscribe_input(&self, _device_id: u32) -> bool {
         false
     }
     fn unsubscribe_input(&self, _device_id: u32) {}
-    fn stuff_midi_message(&self, _target: StuffMidiTarget, _message: MidiMessage) {}
+    fn stuff_midi_message(&self, _target: StuffMidiTarget, _message: MidiEvent) {}
 }

@@ -13,7 +13,7 @@ pub(crate) fn collect_midi_events(
     sample_rate: u32,
     frames: usize,
 ) -> Vec<crate::plugin::PluginMidiEvent> {
-    use daw_proto::live_midi::MidiMessage;
+    use daw_proto::live_midi::{Channel, KeyNumber, MidiEvent, Velocity};
 
     let mut out: Vec<crate::plugin::PluginMidiEvent> = Vec::new();
     let to_sample = |t_seconds: f64| -> u32 {
@@ -44,10 +44,10 @@ pub(crate) fn collect_midi_events(
             if n.start_seconds >= start_seconds && n.start_seconds < end_seconds {
                 out.push(crate::plugin::PluginMidiEvent {
                     offset: to_sample(n.start_seconds),
-                    message: MidiMessage::NoteOn {
-                        channel: n.channel,
-                        note: n.pitch,
-                        velocity: n.velocity,
+                    message: MidiEvent::NoteOn {
+                        channel: Channel::new(n.channel),
+                        key: KeyNumber::new(n.pitch),
+                        velocity: Velocity::new(n.velocity),
                     },
                 });
             }
@@ -56,10 +56,10 @@ pub(crate) fn collect_midi_events(
             if end >= start_seconds && end < end_seconds {
                 out.push(crate::plugin::PluginMidiEvent {
                     offset: to_sample(end),
-                    message: MidiMessage::NoteOff {
-                        channel: n.channel,
-                        note: n.pitch,
-                        velocity: 0,
+                    message: MidiEvent::NoteOff {
+                        channel: Channel::new(n.channel),
+                        key: KeyNumber::new(n.pitch),
+                        velocity: Velocity::new(0),
                     },
                 });
             }

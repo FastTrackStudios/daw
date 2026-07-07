@@ -15,8 +15,8 @@
 //! use daw_midi_io::{MidiInput, MidiSelection, MidiMessage};
 //! // Forward every note from all keyboards to a closure.
 //! let _midi = MidiInput::open(MidiSelection::All, |msg: MidiMessage| {
-//!     if let MidiMessage::NoteOn { note, velocity, .. } = msg {
-//!         println!("note {note} vel {velocity}");
+//!     if let MidiMessage::NoteOn { key, velocity, .. } = msg {
+//!         println!("note {} vel {}", key.get(), velocity.get());
 //!     }
 //! }).unwrap();
 //! // Held alive by `_midi`; drop to stop and close the ports.
@@ -26,7 +26,12 @@ use eyre::eyre;
 use midir::{MidiInput as MidirInput, MidiInputConnection};
 
 pub use daw_proto::MidiInputDevice;
-pub use daw_proto::MidiMessage;
+// The canonical MIDI event is `midicore::MidiEvent` (re-exported by daw-proto).
+// This crate already has a local raw-3-byte `MidiEvent` struct (below), so the
+// structured event keeps the historical `MidiMessage` name here to avoid a
+// name clash. `MidiEventExt` supplies `.to_raw_bytes()`.
+pub use daw_proto::MidiEvent as MidiMessage;
+use daw_proto::MidiEventExt;
 
 const CLIENT: &str = "daw-midi-io";
 
@@ -306,33 +311,14 @@ impl MidiStream {
 /// Parse one complete MIDI message (status byte + data) into a [`MidiMessage`].
 /// Returns `None` for empty input or a leading data byte (running status — not
 /// emitted by midir, which delivers complete messages).
+///
+/// Delegates to midicore's canonical byte codec ([`MidiEvent::decode`]), which
+/// resolves note-on-velocity-0 → note-off, decodes CC / program change / pitch
+/// bend / (poly/channel) pressure, and returns `None` for status bytes it does
+/// not model. midir always delivers complete messages, so a single decode of
+/// the whole slice is sufficient.
 fn parse(bytes: &[u8]) -> Option<MidiMessage> {
-    let status = *bytes.first()?;
-    if status < 0x80 {
-        return None;
-    }
-    let channel = status & 0x0F;
-    let d1 = bytes.get(1).copied().unwrap_or(0);
-    let d2 = bytes.get(2).copied().unwrap_or(0);
-    Some(match status & 0xF0 {
-        // Note-on with velocity 0 is a note-off by convention.
-        0x90 if d2 > 0 => MidiMessage::note_on(channel, d1, d2),
-        0x90 | 0x80 => MidiMessage::note_off(channel, d1, d2),
-        0xA0 => MidiMessage::PolyPressure {
-            channel,
-            note: d1,
-            pressure: d2,
-        },
-        0xB0 => MidiMessage::control_change(channel, d1, d2),
-        0xC0 => MidiMessage::program_change(channel, d1),
-        0xD0 => MidiMessage::ChannelPressure {
-            channel,
-            pressure: d1,
-        },
-        0xE0 => MidiMessage::pitch_bend(channel, (((d2 as i16) << 7) | d1 as i16) - 8192),
-        0xF0 => MidiMessage::SysEx(bytes.to_vec()),
-        _ => MidiMessage::Raw(bytes.to_vec()),
-    })
+    MidiMessage::decode(bytes).ok().map(|(event, _consumed)| event)
 }
 
 #[cfg(test)]
@@ -344,34 +330,28 @@ mod tests {
         let m = parse(&[0x92, 60, 100]).unwrap();
         assert!(matches!(
             m,
-            MidiMessage::NoteOn {
-                channel: 2,
-                note: 60,
-                velocity: 100
-            }
+            MidiMessage::NoteOn { channel, key, velocity }
+                if channel.index() == 2 && key.get() == 60 && velocity.get() == 100
         ));
     }
 
     #[test]
     fn note_on_zero_velocity_is_note_off() {
         let m = parse(&[0x90, 60, 0]).unwrap();
-        assert!(m.is_note_off());
+        assert!(matches!(m, MidiMessage::NoteOff { .. }));
     }
 
     #[test]
     fn parses_cc_and_pitch_bend() {
         assert!(matches!(
             parse(&[0xB0, 1, 64]).unwrap(),
-            MidiMessage::ControlChange {
-                controller: 1,
-                value: 64,
-                ..
-            }
+            MidiMessage::ControlChange { controller, value, .. }
+                if controller.get() == 1 && value.get() == 64
         ));
-        // 14-bit center (LSB 0, MSB 64 => 8192) maps to 0.
+        // 14-bit center (LSB 0, MSB 64 => 8192) is zero offset from center.
         assert!(matches!(
             parse(&[0xE0, 0, 64]).unwrap(),
-            MidiMessage::PitchBend { value: 0, .. }
+            MidiMessage::PitchBend { bend, .. } if bend.offset() == 0
         ));
     }
 

@@ -112,7 +112,7 @@ fn vst3i_synth_produces_audio_from_note_on() {
         );
         return;
     };
-    use daw_proto::MidiMessage;
+    use daw_proto::{Channel, KeyNumber, MidiEvent, Velocity};
     use daw_standalone::plugin::{PluginEvents, PluginMidiEvent};
 
     let host = Vst3Host::new();
@@ -141,10 +141,10 @@ fn vst3i_synth_produces_audio_from_note_on() {
         .iter()
         .map(|&note| PluginMidiEvent {
             offset: 0,
-            message: MidiMessage::NoteOn {
-                channel: 0,
-                note,
-                velocity: 100,
+            message: MidiEvent::NoteOn {
+                channel: Channel::new(0),
+                key: KeyNumber::new(note),
+                velocity: Velocity::new(100),
             },
         })
         .collect();

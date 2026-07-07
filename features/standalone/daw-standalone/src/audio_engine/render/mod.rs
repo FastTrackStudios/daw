@@ -155,7 +155,7 @@ pub(crate) struct LiveMidiEvent {
     pub(crate) track: String,
     /// Sample offset from block start (0..block_size). Usually 0.
     pub(crate) offset: u32,
-    pub(crate) message: daw_proto::MidiMessage,
+    pub(crate) message: daw_proto::MidiEvent,
 }
 
 /// Renderer-side handle to the live-MIDI ring (consumer end).
@@ -1075,7 +1075,30 @@ mod live_input_tests {
 #[cfg(test)]
 mod live_midi_tests {
     use super::*;
-    use daw_proto::MidiMessage;
+    use daw_proto::{Channel, ControllerNumber, ControllerValue, KeyNumber, MidiEvent, Velocity};
+
+    // Terse constructors for the canonical `MidiEvent` (channel 0).
+    fn note_on(key: u8, vel: u8) -> MidiEvent {
+        MidiEvent::NoteOn {
+            channel: Channel::new(0),
+            key: KeyNumber::new(key),
+            velocity: Velocity::new(vel),
+        }
+    }
+    fn note_off(key: u8, vel: u8) -> MidiEvent {
+        MidiEvent::NoteOff {
+            channel: Channel::new(0),
+            key: KeyNumber::new(key),
+            velocity: Velocity::new(vel),
+        }
+    }
+    fn control_change(controller: u8, value: u8) -> MidiEvent {
+        MidiEvent::ControlChange {
+            channel: Channel::new(0),
+            controller: ControllerNumber::new(controller),
+            value: ControllerValue::new(value),
+        }
+    }
 
     /// Build a `LiveMidiQueue` pre-filled with the given events.
     fn queue_with(events: Vec<LiveMidiEvent>) -> LiveMidiQueue {
@@ -1095,18 +1118,18 @@ mod live_midi_tests {
             LiveMidiEvent {
                 track: "track-b".into(),
                 offset: 0,
-                message: MidiMessage::note_on(0, 60, 100),
+                message: note_on(60, 100),
             },
             LiveMidiEvent {
                 track: "track-a".into(),
                 offset: 0,
-                message: MidiMessage::control_change(0, 7, 64),
+                message: control_change(7, 64),
             },
             // Unknown guid → dropped, not merged.
             LiveMidiEvent {
                 track: "ghost".into(),
                 offset: 0,
-                message: MidiMessage::note_off(0, 60, 0),
+                message: note_off(60, 0),
             },
         ]);
 
@@ -1117,20 +1140,14 @@ mod live_midi_tests {
         assert_eq!(buckets[0].len(), 1);
         assert!(matches!(
             buckets[0][0].message,
-            MidiMessage::ControlChange {
-                controller: 7,
-                value: 64,
-                ..
-            }
+            MidiEvent::ControlChange { controller, value, .. }
+                if controller.get() == 7 && value.get() == 64
         ));
         assert_eq!(buckets[1].len(), 1);
         assert!(matches!(
             buckets[1][0].message,
-            MidiMessage::NoteOn {
-                note: 60,
-                velocity: 100,
-                ..
-            }
+            MidiEvent::NoteOn { key, velocity, .. }
+                if key.get() == 60 && velocity.get() == 100
         ));
         // track-c untouched; the unknown-guid event was dropped.
         assert!(buckets[2].is_empty());
@@ -1143,22 +1160,22 @@ mod live_midi_tests {
         let mut midi_events: Vec<crate::plugin::PluginMidiEvent> = vec![
             crate::plugin::PluginMidiEvent {
                 offset: 0,
-                message: MidiMessage::note_on(0, 48, 90),
+                message: note_on(48, 90),
             },
             crate::plugin::PluginMidiEvent {
                 offset: 256,
-                message: MidiMessage::note_off(0, 48, 0),
+                message: note_off(48, 0),
             },
         ];
 
         let mut bucket = vec![
             crate::plugin::PluginMidiEvent {
                 offset: 128,
-                message: MidiMessage::control_change(0, 1, 100),
+                message: control_change(1, 100),
             },
             crate::plugin::PluginMidiEvent {
                 offset: 0,
-                message: MidiMessage::note_on(0, 60, 100),
+                message: note_on(60, 100),
             },
         ];
 

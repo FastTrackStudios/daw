@@ -649,7 +649,7 @@ impl Standalone {
     /// [`push_note_on`](Self::push_note_on) / [`push_cc`](Self::push_cc) this
     /// carries the original channel, release velocity, pitch-bend and program
     /// change rather than collapsing to monotimbral channel 0.
-    pub fn push_live_midi(&self, track_guid: &str, message: daw_proto::MidiMessage) -> bool {
+    pub fn push_live_midi(&self, track_guid: &str, message: daw_proto::MidiEvent) -> bool {
         let mut guard = match self.live_midi_tx.lock() {
             Ok(g) => g,
             Err(_) => return false,
@@ -668,22 +668,40 @@ impl Standalone {
     /// Programmatic Note-On (channel 0) to `track_guid`. A `velocity` of 0
     /// is a Note-Off by MIDI convention — most instruments treat it so.
     pub fn push_note_on(&self, track_guid: &str, note: u8, velocity: u8) -> bool {
+        use daw_proto::{Channel, KeyNumber, MidiEvent, Velocity};
         self.push_live_midi(
             track_guid,
-            daw_proto::MidiMessage::note_on(0, note, velocity),
+            MidiEvent::NoteOn {
+                channel: Channel::new(0),
+                key: KeyNumber::new(note),
+                velocity: Velocity::new(velocity),
+            },
         )
     }
 
     /// Programmatic Note-Off (channel 0, release velocity 0) to `track_guid`.
     pub fn push_note_off(&self, track_guid: &str, note: u8) -> bool {
-        self.push_live_midi(track_guid, daw_proto::MidiMessage::note_off(0, note, 0))
+        use daw_proto::{Channel, KeyNumber, MidiEvent, Velocity};
+        self.push_live_midi(
+            track_guid,
+            MidiEvent::NoteOff {
+                channel: Channel::new(0),
+                key: KeyNumber::new(note),
+                velocity: Velocity::new(0),
+            },
+        )
     }
 
     /// Programmatic Control-Change (channel 0) to `track_guid`.
     pub fn push_cc(&self, track_guid: &str, controller: u8, value: u8) -> bool {
+        use daw_proto::{Channel, ControllerNumber, ControllerValue, MidiEvent};
         self.push_live_midi(
             track_guid,
-            daw_proto::MidiMessage::control_change(0, controller, value),
+            MidiEvent::ControlChange {
+                channel: Channel::new(0),
+                controller: ControllerNumber::new(controller),
+                value: ControllerValue::new(value),
+            },
         )
     }
 

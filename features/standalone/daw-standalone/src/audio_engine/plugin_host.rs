@@ -1056,26 +1056,26 @@ fn push_clap_note_expression(buf: &mut EventBuffer, ne: &crate::plugin::PluginNo
 }
 
 fn push_clap_midi(buf: &mut EventBuffer, ev: &crate::plugin::PluginMidiEvent) {
-    use daw_proto::MidiMessage;
+    use daw_proto::{MidiEvent, MidiEventExt};
     let t = ev.offset;
     match ev.message {
-        MidiMessage::NoteOn {
+        MidiEvent::NoteOn {
             channel,
-            note,
+            key,
             velocity,
         } => {
-            let pckn = Pckn::new(0u16, channel as u16, note as u16, Match::All);
-            buf.push(&NoteOnEvent::new(t, pckn, velocity as f64 / 127.0));
+            let pckn = Pckn::new(0u16, channel.index() as u16, key.get() as u16, Match::All);
+            buf.push(&NoteOnEvent::new(t, pckn, velocity.get() as f64 / 127.0));
         }
-        MidiMessage::NoteOff {
+        MidiEvent::NoteOff {
             channel,
-            note,
+            key,
             velocity,
         } => {
-            let pckn = Pckn::new(0u16, channel as u16, note as u16, Match::All);
-            buf.push(&NoteOffEvent::new(t, pckn, velocity as f64 / 127.0));
+            let pckn = Pckn::new(0u16, channel.index() as u16, key.get() as u16, Match::All);
+            buf.push(&NoteOffEvent::new(t, pckn, velocity.get() as f64 / 127.0));
         }
-        MidiMessage::SysEx(ref data) | MidiMessage::Raw(ref data) => {
+        MidiEvent::SysEx(ref data) => {
             // Pass the raw SysEx frame straight through. `clap_event_midi_sysex`
             // borrows the buffer for the duration of the event push;
             // EventBuffer copies the header but the data pointer must
