@@ -1,0 +1,15 @@
+[package]
+name = "midicore"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Ergonomic, backend-agnostic MIDI — the app-facing facade over midicore-proto (types + codec + services) and, via features, concrete I/O backends."
+repository = "https://codeberg.org/FastTrackStudios/midicore"
+
+[features]
+default = ["vox"]
+vox = ["midicore-proto/vox"]
+
+[dependencies]
+midicore-proto.workspace = true
