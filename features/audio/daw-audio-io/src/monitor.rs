@@ -229,6 +229,7 @@ impl DuplexMonitor {
             sample_rate,
             buffer_size: prefs.buffer_size,
             want_input: true,
+            ..prefs.clone()
         };
 
         tracing::info!(

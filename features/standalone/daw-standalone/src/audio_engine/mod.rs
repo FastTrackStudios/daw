@@ -57,7 +57,7 @@ pub mod test_tone;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
 #[cfg(all(feature = "pipewire", target_os = "linux"))]
-pub use duplex_engine::DuplexAudioEngine;
+pub use duplex_engine::{DuplexAudioEngine, PhonesBus};
 #[cfg(feature = "audio")]
 pub use mixer::{AudioEngine, TrackHandle};
 pub use source::AudioSource;

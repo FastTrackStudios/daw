@@ -32,6 +32,27 @@ pub struct AudioIoPrefs {
     /// DAW playback); `true` = duplex (live monitoring needs the input).
     #[facet(default)]
     pub want_input: bool,
+    /// Output routing (0-based channel indices). `main_out` is where the
+    /// stereo master lands (default 0/1). When `phones_out` differs from
+    /// `main_out`, a second stereo bus is written there: master (scaled by
+    /// a live self-mix level) plus, when `phones_mix_in` is set, an external
+    /// monitor-mix input pair blended in. All default 0/0 = legacy 2-out.
+    #[facet(default)]
+    pub main_out_l: usize,
+    #[facet(default)]
+    pub main_out_r: usize,
+    #[facet(default)]
+    pub phones_out_l: usize,
+    #[facet(default)]
+    pub phones_out_r: usize,
+    #[facet(default)]
+    pub phones_mix_in_l: usize,
+    #[facet(default)]
+    pub phones_mix_in_r: usize,
+    /// Enables the phones bus + mix-in routing above (so 0 stays a valid
+    /// channel index without being ambiguous with "unset").
+    #[facet(default)]
+    pub phones_routing: bool,
 }
 
 impl AudioIoPrefs {

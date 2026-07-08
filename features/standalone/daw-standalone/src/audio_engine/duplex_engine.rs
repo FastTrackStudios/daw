@@ -33,6 +33,38 @@ pub struct DuplexAudioEngine {
     sample_rate: u32,
 }
 
+/// Live phones-bus levels — a process-wide handle the host app writes
+/// (headphone volume + self-mix) and the duplex callback reads lock-free.
+pub struct PhonesBus {
+    volume: std::sync::atomic::AtomicU32,
+    self_mix: std::sync::atomic::AtomicU32,
+}
+
+impl PhonesBus {
+    /// The process-wide bus.
+    pub fn shared() -> &'static PhonesBus {
+        static BUS: PhonesBus = PhonesBus {
+            volume: std::sync::atomic::AtomicU32::new(0x3f800000),   // 1.0
+            self_mix: std::sync::atomic::AtomicU32::new(0x3f800000), // 1.0
+        };
+        &BUS
+    }
+
+    pub fn set(&self, volume: f32, self_mix: f32) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.volume.store(volume.to_bits(), Relaxed);
+        self.self_mix.store(self_mix.to_bits(), Relaxed);
+    }
+
+    fn levels(&self) -> (f32, f32) {
+        use std::sync::atomic::Ordering::Relaxed;
+        (
+            f32::from_bits(self.volume.load(Relaxed)),
+            f32::from_bits(self.self_mix.load(Relaxed)),
+        )
+    }
+}
+
 impl DuplexAudioEngine {
     /// Build a duplex engine for `project_guid` on `daw`, sharing `shared`'s
     /// transport clock. Opens one input port per hardware channel up to the
@@ -73,10 +105,33 @@ impl DuplexAudioEngine {
 
         let r = renderer.clone();
         let sh = shared.clone();
+        // Output routing: master lands on `main_out`; an optional phones bus
+        // (master × self-mix + an external monitor-mix input pair, × volume)
+        // lands on `phones_out`. Legacy prefs (routing off) stay 2-out 0/1.
+        let routing = prefs.phones_routing;
+        let (main_l, main_r) = if routing {
+            (prefs.main_out_l, prefs.main_out_r)
+        } else {
+            (0, 1)
+        };
+        let (ph_l, ph_r) = (prefs.phones_out_l, prefs.phones_out_r);
+        let (mix_l, mix_r) = (prefs.phones_mix_in_l, prefs.phones_mix_in_r);
+        let phones = PhonesBus::shared();
+        let ph = phones.clone();
+        let out_ports = if routing {
+            main_l.max(main_r).max(ph_l).max(ph_r) + 1
+        } else {
+            2
+        };
+        let in_ports = if routing {
+            in_channels.max(mix_l.max(mix_r) + 1)
+        } else {
+            in_channels
+        };
         let cfg = DuplexConfig {
             name: NODE_NAME.into(),
-            inputs: in_channels,
-            outputs: 2,
+            inputs: in_ports,
+            outputs: out_ports,
             latency: Some((buffer, sample_rate)),
         };
         let backend = Backend::start(
@@ -94,16 +149,26 @@ impl DuplexAudioEngine {
                 // Render this block (drains exactly what we just pushed).
                 let start = sh.playhead_samples().0.max(0) as u64;
                 let block = r.render_block(start, frames);
-                // Write the stereo master to the duplex output ports.
                 let outs = b.outputs.len();
+                let (vol, self_mix) = ph.levels();
                 for f in 0..frames {
                     let l = block.samples.get(f * 2).copied().unwrap_or(0.0);
                     let rr = block.samples.get(f * 2 + 1).copied().unwrap_or(0.0);
-                    if outs > 0 {
-                        b.outputs[0][f] = l;
+                    if main_l < outs {
+                        b.outputs[main_l][f] = l;
                     }
-                    if outs > 1 {
-                        b.outputs[1][f] = rr;
+                    if main_r < outs {
+                        b.outputs[main_r][f] = rr;
+                    }
+                    if routing && (ph_l != main_l || ph_r != main_r) {
+                        let ext_l = b.inputs.get(mix_l).map(|ch| ch[f]).unwrap_or(0.0);
+                        let ext_r = b.inputs.get(mix_r).map(|ch| ch[f]).unwrap_or(0.0);
+                        if ph_l < outs {
+                            b.outputs[ph_l][f] = (l * self_mix + ext_l) * vol;
+                        }
+                        if ph_r < outs {
+                            b.outputs[ph_r][f] = (rr * self_mix + ext_r) * vol;
+                        }
                     }
                 }
                 sh.advance(frames as u32);
