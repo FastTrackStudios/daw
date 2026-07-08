@@ -206,6 +206,18 @@ impl PllTracker {
     pub fn latency(&self) -> usize {
         0
     }
+
+    /// Current PLL frequency estimate in Hz (the tracked input pitch,
+    /// before octave division). Useful for driving external
+    /// synthesis from the tracker.
+    pub fn frequency(&self) -> f64 {
+        self.vco_freq
+    }
+
+    /// Current input envelope (linear, follows |input|).
+    pub fn envelope_value(&self) -> f64 {
+        self.envelope
+    }
 }
 
 impl Default for PllTracker {
