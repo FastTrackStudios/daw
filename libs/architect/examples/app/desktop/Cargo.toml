@@ -1,0 +1,26 @@
+[package]
+name = "app-desktop"
+version = "0.1.0"
+edition = "2024"
+authors = ["Cody Wright"]
+license = "MIT OR Apache-2.0"
+
+# Native Dioxus desktop target. Same UI as the web app — the platform
+# differences are confined to this binary; `app-ui` stays
+# platform-agnostic.
+
+[dependencies]
+app-ui = { path = "../ui" }
+# In-process backend: serve the full service router (repo + ExampleService)
+# over a vox in-memory link — the desktop runs the whole stack, no server.
+# `app-server` is depended on for its `service_router` lib fn (no default
+# features → no backend/sea-orm baggage, just the generic composition).
+app-server = { path = "../server", default-features = false }
+example-memory = { path = "../features/example/example-memory" }
+architect = { path = "../../../crates/architect", default-features = false, features = ["local"] }
+
+dioxus = { version = "0.7.9", default-features = false, features = ["lib", "desktop", "launch", "router"] }
+vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
+vox-core = "0.10.0-rc.1"
+vox-websocket = "0.10.0-rc.1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -1,0 +1,37 @@
+[package]
+name = "example-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# Per-feature Dioxus components for the `example` feature.
+#
+# The pattern: each feature owns the visual + interaction concerns that
+# belong to it (lists, forms, rows, dialogs). `app-ui` composes one or
+# more feature-ui crates into the pages/shells consumed by the runtime
+# apps (`app-web`, `app-desktop`).
+#
+# Pure presentation: wire types in, events out. No vox/socket dep — the
+# shell (`app-ui`) owns the client and hands data down to these.
+
+[dependencies]
+# `atom` binds `Example` into the optimistic store (`StoreEntity` +
+# `Example::draft`); `form` emits the typed Create/Update form fields.
+example = { path = "../example", features = ["vox", "atom", "form"] }
+dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
+# `form` drives the dumb create/edit forms (per-field validation); `atom`
+# backs the wired views (`architect::Store` + `use_mutation`). The feature
+# crate owns both its dumb components and its data-wired view-blocks.
+architect = { workspace = true, features = ["atom", "form"] }
+uuid = { version = "1", features = ["v4", "js"] }
+
+[dev-dependencies]
+# Render components to a static string and assert on the markup.
+dioxus-ssr = "0.7"
+chrono = { workspace = true }
+uuid = { version = "1", features = ["v4", "js"] }
+
+[lib]
+test = false
+doctest = false

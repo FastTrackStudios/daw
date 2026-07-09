@@ -1,0 +1,77 @@
+[package]
+name = "example-proto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# Demonstration of the architect derive: one struct, one source of
+# truth. Compiles to wasm32 without features; the `server` feature
+# pulls in the SeaORM Model + repo storage that architect emits
+# alongside the wire struct.
+
+[dependencies]
+architect.workspace = true
+chrono.workspace = true
+uuid = { workspace = true, features = ["js"] }
+facet.workspace = true
+thiserror.workspace = true
+
+# Vox — optional. Consumers that want to drive ExampleRepo in-process
+# (no RPC, no dispatcher, no client) disable this feature.
+vox = { workspace = true, optional = true }
+
+# Server-only: sea-orm is referenced by paths emitted from the architect
+# derive when the `server` feature is on. Gated optional so wasm builds
+# (and consumers picking a non-SeaORM backend) never see it.
+sea-orm = { workspace = true, optional = true }
+
+# Test-data generation. Adds Dummy derives to all the wire + emitted
+# structs when the `fake` feature is on.
+fake = { workspace = true, optional = true }
+
+# CRDT layer — referenced by the paths `#[architect(crdt)]` emits for
+# `Note` (EntityCrdt codec, NoteRepoLoro, replica hooks). Optional so
+# consumers that only want the server-owned entities never pull Loro.
+crdt = { workspace = true, optional = true }
+
+[features]
+default = ["vox"]
+
+# Enables `#[vox::service]` on `ExampleRepo` + `ExampleService`. Generates
+# the dispatcher / client types. Drop this to use the traits in-process
+# without pulling vox.
+vox = ["dep:vox", "architect/vox"]
+
+# Forwarded to architect so the macro's server-side emissions
+# (SeaORM Model, RepoStorage, From impls) compile in.
+server = ["architect/server-seaorm", "dep:sea-orm"]
+
+# Adds Dummy derives to Example + Create/Update/List/Model so the
+# struct family is fakeable for tests + db seeding.
+fake = ["dep:fake", "architect/fake"]
+
+# Client-only: binds `Example` into the optimistic store
+# (`impl architect::StoreEntity`) + adds `Example::draft`. Pulls Dioxus
+# (via `architect/atom`), so enable it only in UI crates — never on the
+# server. The weak `crdt?/dioxus` edge lights up the replica-backed
+# `Note` hooks when `crdt` is also enabled.
+atom = ["architect/atom", "crdt?/dioxus"]
+
+# The collaborative layer: `Note`'s EntityCrdt codec + `NoteRepoLoro`
+# (server + native), and — together with `atom` — the replica-backed
+# hooks (`use_note_crdt_list`, `use_note_crdt_actions`). Wasm-clean.
+crdt = ["dep:crdt", "crdt/vox"]
+
+# Client-only: typed form bindings over the Create/Update payloads
+# (`ExampleCreateFields` / `ExampleUpdateFields`). Pulls Dioxus via
+# `architect/form`; UI crates only.
+form = ["architect/form"]
+
+# Convenience bundle — vox + SeaORM emission + fake-rs together.
+# Matches tokio's `full` convention.
+full = ["vox", "server", "fake"]
+
+[lib]
+test = false
+doctest = false

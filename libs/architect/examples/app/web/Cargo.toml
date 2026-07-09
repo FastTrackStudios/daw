@@ -1,0 +1,29 @@
+[package]
+name = "app-web"
+version = "0.1.0"
+edition = "2024"
+authors = ["Cody Wright"]
+license = "MIT OR Apache-2.0"
+
+# Dioxus web target. A thin launcher: all UI + the vox client lifecycle
+# live in `app-ui`, shared verbatim with the desktop target.
+#
+# wasm-bindgen is pinned to 0.2.118: dioxus-web 0.7.9 only compiles
+# against that web-sys generation, while vox (230dcd5) accepts `^0.2`.
+# Without the pin, cargo picks the newest wasm-bindgen vox allows and
+# dioxus-web fails to build (`web_sys::Window::location` not found).
+
+[dependencies]
+# Outside the workspace — referenced by relative path.
+app-ui = { path = "../ui" }
+
+dioxus = { version = "0.7.9", default-features = false, features = ["lib", "web", "launch", "router"] }
+wasm-bindgen = "=0.2.118"
+# dioxus-web 0.7.9's history.rs calls `Window::location()`, gated behind
+# the web-sys "Location" feature. The enabled dioxus features don't pull
+# it in this dependency graph, so enable it directly — feature unification
+# turns it on for dioxus-web too.
+web-sys = { version = "0.3.77", features = ["Location"] }
+# Panic messages in the browser console (file:line + payload) — without
+# this a panic is an opaque `RuntimeError: unreachable`.
+console_error_panic_hook = "0.1"

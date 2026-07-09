@@ -1,0 +1,36 @@
+# Push to main triggers a wiki regeneration from docs/content/.
+#
+# The wiki repo (`architect.wiki.git`) is hidden plumbing — contributors
+# only ever edit docs/ in this repo. Dodeca renders docs/content/ for
+# the public docs site; this workflow keeps the Forgejo wiki tab in
+# sync with the same source.
+#
+# Secret required: `WIKI_TOKEN` — a Forgejo personal access token with
+# `write:repository` scope on the project owner. Set via the repo's
+# Settings → Secrets and Variables.
+
+name: sync-wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/content/**'
+      - 'scripts/sync-wiki.sh'
+      - '.forgejo/workflows/sync-wiki.yml'
+
+jobs:
+  sync:
+    runs-on: docker
+    container:
+      image: ghcr.io/catthehacker/ubuntu:act-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Sync wiki
+        env:
+          FORGEJO_TOKEN: ${{ secrets.WIKI_TOKEN }}
+        run: ./scripts/sync-wiki.sh

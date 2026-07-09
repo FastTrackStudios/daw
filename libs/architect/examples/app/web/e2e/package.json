@@ -1,0 +1,9 @@
+{
+  "name": "app-web-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Headless-browser e2e for the example web app (system chromium via playwright-core). Run with `just web-e2e`.",
+  "dependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

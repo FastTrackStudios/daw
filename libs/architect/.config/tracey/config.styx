@@ -1,0 +1,58 @@
+@schema {id crate:tracey-config@1, cli tracey}
+
+specs (
+    {
+        name example
+        source_url https://codeberg.org/FastTrackStudios/architect
+        include (examples/app/features/example/spec/**/*.md)
+        impls (
+            {
+                name live
+                include (
+                    examples/app/features/example/example-db/**/*.rs
+                    examples/app/features/example/example-memory/**/*.rs
+                )
+                exclude (
+                    examples/app/features/example/**/target/**
+                )
+                test_include (
+                    examples/app/features/example/tests/**/*.rs
+                )
+            }
+            {
+                name mock
+                include (
+                    examples/external-stub/**/*.rs
+                )
+                exclude (
+                    examples/external-stub/**/target/**
+                )
+                test_include (
+                    examples/app/features/example/tests/**/*.rs
+                )
+            }
+        )
+    }
+    {
+        name auth
+        source_url https://codeberg.org/FastTrackStudios/architect
+        include (features/auth/spec/**/*.md)
+        impls (
+            {
+                name live
+                include (
+                    features/auth/auth/**/*.rs
+                    features/auth/auth-db/**/*.rs
+                    features/auth/auth-proto/**/*.rs
+                    features/auth/architect-auth/**/*.rs
+                )
+                exclude (
+                    features/auth/**/target/**
+                )
+                test_include (
+                    features/auth/tests/**/*.rs
+                )
+            }
+        )
+    }
+)

@@ -1,0 +1,16 @@
+# Pipeline model: dev = trunk (always green), main = production.
+# Merging dev -> main is the deploy trigger. No production target is
+# wired yet — this gate keeps the path one edit away from live.
+name: deploy
+on:
+  push:
+    branches: [main]
+jobs:
+  release:
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gates
+        run: cargo test --workspace && cargo clippy --workspace --all-features -- -D warnings
+      - name: Deploy
+        run: echo "DEPLOY GATE: no production target configured yet."

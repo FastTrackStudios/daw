@@ -1,0 +1,59 @@
+# Main CI workflow — runs the full `cargo xtask ci` battery on every
+# push and PR. The xtask owns the actual steps (fmt --check, clippy,
+# check, nextest, tracey validate), so this workflow is just nix +
+# delegate.
+#
+# The dev shell (`nix develop`) pins cargo + nextest + ddc + tracey +
+# geckodriver + firefox, so CI runs the exact same tools as a local
+# `cargo xtask ci`. No "works on my machine" drift.
+
+name: ci
+
+on:
+  push:
+    branches: [main, dev, staging]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: docker
+    container:
+      image: ghcr.io/catthehacker/ubuntu:act-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Cache nix store
+        uses: cachix/cachix-action@v15
+        continue-on-error: true
+        with:
+          name: starcommand
+          extraPullNames: fleet,fts,microvm
+
+      - name: cargo xtask ci
+        run: nix develop --command cargo xtask ci
+
+  e2e:
+    runs-on: docker
+    container:
+      image: ghcr.io/catthehacker/ubuntu:act-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Browser e2e (sqlite backend)
+        run: nix develop --command just test-e2e
+      - name: Browser e2e (memory backend)
+        run: nix develop --command just test-e2e-memory

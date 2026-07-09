@@ -1,0 +1,36 @@
+[package]
+name = "example-test-wasm"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Browser integration tests for the architect-emitted vox surface.
+#
+# Pattern lifted directly from vox's own `rust/wasm-browser-tests` crate:
+# wasm-only deps via target-cfg, depend on `vox-core` + `vox-websocket`
+# directly (NOT through `vox`), use `WsLink::connect` + `initiator_on`
+# to establish the typed client, then drive `ExampleRepoClient` against
+# a running `example-server`.
+#
+# Run with:
+#     wasm-pack test --headless --chrome crates/example-test-wasm
+# (server must be running on ws://127.0.0.1:4040/vox)
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Single dep root — facade carries the wire types + auto-generated
+# ExampleRepoClient. Wasm-clean by construction.
+example = { path = "../../example", features = ["vox"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+vox-core = "0.10.0-rc.1"
+vox-websocket = "0.10.0-rc.1"
+wasm-bindgen = "=0.2.118"
+wasm-bindgen-futures = "0.4"
+wasm-bindgen-test = "0.3"
+uuid = { version = "1", features = ["v4", "js"] }
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false

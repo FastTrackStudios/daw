@@ -1,0 +1,33 @@
+[package]
+name = "example-crdt"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# Loro-backed implementation of `ExampleRepo`. Almost all of the
+# heavy lifting lives in `features/crdt/crdt`'s `LoroRepo<E>`; this crate just
+# supplies the `EntityCrdt for Example` impl (wire ↔ LoroMap codec,
+# id/timestamp policy, sort-field lookup) and the one-line forwarding
+# `impl ExampleRepo for LoroRepo<Example>` block.
+#
+# Architect's `Entity` derive will emit both impls eventually; right
+# now they're hand-written so the macro has a concrete reference.
+
+[features]
+# On by default: pulls the vox surface so this backend can declare its
+# `Services` bundle (and reference `ExampleRepoLayer`).
+default = ["vox"]
+vox = ["example-proto/vox", "architect/vox"]
+
+[dependencies]
+example-proto.workspace = true
+crdt.workspace = true
+architect.workspace = true
+loro.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[lib]
+test = false
+doctest = false

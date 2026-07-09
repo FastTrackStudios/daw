@@ -1,0 +1,54 @@
+[package]
+name = "app-ui"
+version = "0.1.0"
+edition = "2024"
+authors = ["Cody Wright"]
+license = "MIT OR Apache-2.0"
+
+# Runtime UI shell for the example app.
+#
+# Composes one or more feature-ui crates (just `example-ui` here, but
+# the DAW analogue would pull in timeline-ui, mixing-ui, automation-ui,
+# ...) into the pages and chrome that `apps/web` and `apps/desktop`
+# mount as their root component.
+
+[dependencies]
+# Single dep root — facade re-exports the wire types + vox client. The
+# `atom` feature binds `Example` into the optimistic store (`StoreEntity`).
+example = { path = "../features/example/example", features = ["vox", "atom", "form", "crdt"] }
+# Feature-scoped Dioxus components.
+example-ui = { path = "../features/example/example-ui" }
+# The collaborative layer's client side: `use_synced_doc` (the notes
+# replica + its sync driver) and `use_presence_channel` (who's here).
+crdt = { path = "../../../features/crdt/crdt", features = ["dioxus"] }
+dioxus = { version = "0.7.9", default-features = false, features = ["lib", "router"] }
+vox = { version = "0.10.0-rc.1", default-features = false, features = ["runtime"] }
+vox-core = "0.10.0-rc.1"
+vox-websocket = "0.10.0-rc.1"
+uuid = { version = "1", features = ["v4", "js"] }
+# architect's `schedule` policies wrap the (flaky) remote connect in
+# exponential backoff — see `client.rs`. Cross-target: `schedule`'s clock
+# is wasm-clean (browser timers), so the web build gets resilient connect
+# too. The native target below layers `local` on top for `Transport::Local`.
+# `atom` + `form` bring the client-state primitives (`architect::Store`,
+# `architect::form::Field`) the screens + feature-ui drive.
+architect = { path = "../../../crates/architect", default-features = false, features = ["schedule", "atom", "form"] }
+
+# Native (desktop/CLI/tests) only: architect's in-process transport, so
+# `Transport::Local` can serve a backend over a vox in-memory link. Not
+# pulled on wasm — vox's MemoryLink (and tokio rt) aren't wasm-clean, so
+# the browser build stays remote-only. Features merge with the base dep
+# above (→ `schedule` + `local` natively).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+architect = { path = "../../../crates/architect", default-features = false, features = ["local"] }
+
+[dev-dependencies]
+# Headless smoke test: mount the full App (router + connection lifecycle)
+# in a VirtualDom and render it without a window.
+dioxus-ssr = "0.7"
+# The live-loop integration test mounts the real App over the in-process
+# transport (the real service graph from app-server, in-memory backend)
+# and pumps the VirtualDom under tokio.
+app-server = { path = "../server", default-features = false, features = ["backend-memory"] }
+example = { path = "../features/example/example", features = ["vox", "atom", "backend-memory"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

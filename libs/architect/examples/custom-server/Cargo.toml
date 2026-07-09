@@ -1,0 +1,40 @@
+[package]
+name = "example-custom-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+# Demonstrator: a server binary assembled from scratch, with the
+# repo + service impls picked independently. Mirrors the apps/app/server
+# shape but bypasses the `example` facade entirely — every piece is
+# wired by hand.
+#
+# Read this file alongside docs/content/architecture/extensibility.md
+# for the why.
+#
+# Constraints that make this a believable third-party stand-in:
+#  * Does NOT depend on `example` (the facade) or `example-db`
+#    (the in-tree SeaORM-backed repo).
+#  * Does NOT enable `architect/server` on its example-proto dep —
+#    so the architect-emitted `ExampleRepoStorage` never compiles in.
+#  * Uses `example-stub-backend` (external-shaped) for the repo,
+#    and writes its own `ExampleService` impl inline.
+
+[[bin]]
+name = "example-custom-server"
+path = "src/main.rs"
+
+[dependencies]
+example-proto.workspace = true
+example-stub-backend.workspace = true
+architect = { workspace = true, features = ["server-axum"] }
+
+axum.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+eyre.workspace = true
+uuid.workspace = true

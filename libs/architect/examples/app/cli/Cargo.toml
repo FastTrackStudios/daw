@@ -1,0 +1,46 @@
+[package]
+name = "app-cli"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+# Native CLI that talks to a running `app-server` over the vox
+# WebSocket. Same wire types as the web + desktop clients (everything
+# from `example_proto`); same `ExampleRepoClient` the wasm test uses.
+#
+# Argument parsing + config via figue — matches xtask and any future
+# user-facing binary.
+
+[[bin]]
+name = "app"
+path = "src/main.rs"
+
+[dependencies]
+example = { workspace = true, features = ["vox"] }
+figue.workspace = true
+facet.workspace = true
+facet-pretty.workspace = true
+owo-colors.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+eyre.workspace = true
+uuid.workspace = true
+
+# vox client side — native target picks up the non-wasm32 deps via
+# vox-websocket's target-cfg automatically.
+vox-core.workspace = true
+vox-websocket.workspace = true
+
+[dev-dependencies]
+# Integration tests spawn the real server in-process (memory backend) and
+# run the `app` binary against it as a subprocess. Internal crates use the
+# path form (release-plz / the external-deps hook reject `workspace = true`
+# for internal dev-dependencies).
+app-server = { path = "../server" }
+example = { path = "../features/example/example", features = ["backend-memory", "server-axum", "vox"] }
+axum.workspace = true

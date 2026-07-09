@@ -1,0 +1,24 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+# Build / test / docs / wiki orchestration as a Rust binary. Invoke via
+# the `cargo xtask` alias (configured in `.cargo/config.toml`).
+#
+# All argument parsing goes through figue so the CLI surface stays in
+# sync with the bearcove style and `apps/app/cli`.
+
+[dependencies]
+figue.workspace = true
+facet.workspace = true
+owo-colors.workspace = true
+eyre.workspace = true

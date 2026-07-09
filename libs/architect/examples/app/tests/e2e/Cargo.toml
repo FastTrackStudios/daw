@@ -1,0 +1,42 @@
+[package]
+name = "app-tests-e2e"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+# App-level end-to-end tests for the example app.
+#
+# Spawns `example-server` in-process (default in-memory backend so no
+# DB needed), opens a real vox WebSocket against it, drives requests
+# through `ExampleRepoClient`. Lives separate from feature-level tests
+# so it can integrate behavior across multiple features as they're
+# added.
+#
+# Run with:
+#   cargo test -p app-tests-e2e
+
+[dependencies]
+# The real server wiring (vox_router + ExampleServiceImpl) — mount the
+# exact router the bin serves instead of re-deriving it here.
+app-server = { path = "../../server" }
+# Replica drivers for the realtime-sync e2e (SyncedDoc + presence over
+# the real WebSocket).
+crdt = { workspace = true, features = ["vox"] }
+# Facade for the contract types + the in-memory backend we mount.
+example = { workspace = true, features = ["backend-memory", "server-axum", "vox", "crdt"] }
+axum.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+uuid.workspace = true
+
+# Client-side vox on native target — drives the running server like
+# any other vox client would.
+vox-core.workspace = true
+vox-websocket.workspace = true
+
+# In-process transport — for the local round-trip test (no server).
+architect = { workspace = true, features = ["local"] }
+
+[lib]
+doctest = false

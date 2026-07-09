@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Bearcove capn: clippy -D warnings, nextest, doc-tests, cargo-doc,
+# cargo-shear — affected crates only, in parallel. See .config/capn/config.styx.
+#
+# Bypass with HAVE_MERCY=1..3 (capn convention):
+#   HAVE_MERCY=1   skip tests + doc-tests + docs
+#   HAVE_MERCY=2   also skip clippy
+#   HAVE_MERCY=3   skip everything
+set -e
+capn pre-push
