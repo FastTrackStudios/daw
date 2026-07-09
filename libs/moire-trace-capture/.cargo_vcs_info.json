@@ -1,0 +1,6 @@
+{
+  "git": {
+    "sha1": "abc9450d3548245b61fb726294d44760a81d13c4"
+  },
+  "path_in_vcs": "crates/moire-trace-capture"
+}

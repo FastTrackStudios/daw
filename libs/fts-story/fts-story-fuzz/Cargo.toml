@@ -1,0 +1,16 @@
+[package]
+name = "fts-story-fuzz"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+license.workspace = true
+repository.workspace = true
+description = "Interaction fuzzing for fts-story."
+
+[dependencies]
+fts-story-core    = { workspace = true }
+fts-story-runtime = { workspace = true }
+fts-story-snapshots     = { workspace = true }
+proptest = { workspace = true }
+
+[lints]
+workspace = true

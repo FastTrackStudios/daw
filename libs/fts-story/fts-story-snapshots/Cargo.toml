@@ -1,0 +1,40 @@
+[package]
+name = "fts-story-snapshots"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+license.workspace = true
+repository.workspace = true
+description = "Headless Blitz-based visual regression runner for fts-story."
+
+[dependencies]
+fts-story-core    = { workspace = true }
+fts-story-runtime = { workspace = true }
+# Snapshot path uses the same `Lookbook { chrome: false, ... }`
+# entry as `apps/desktop/src/main.rs::SnapshotApp` so both renderers
+# follow the same code path. Without this Blitz would render the bare
+# story render fn while wry rendered through the Lookbook host,
+# producing dissimilar layouts even when the story itself is identical.
+fts-story-shell   = { workspace = true }
+dioxus            = { workspace = true }
+dssim-core = { workspace = true }
+png        = { workspace = true }
+thiserror  = { workspace = true }
+
+# Pin every Blitz crate to our patched fork. Carries the RefCell-borrow
+# fix and any follow-on fixes; bumped via `cargo update -p dioxus-native`.
+dioxus-native     = { git = "https://github.com/DioxusLabs/blitz.git", rev = "9ebd23a", features = ["prelude", "system-fonts"] }
+dioxus-native-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "9ebd23a" }
+blitz-dom         = { git = "https://github.com/DioxusLabs/blitz.git", rev = "9ebd23a" }
+blitz-paint       = { git = "https://github.com/DioxusLabs/blitz.git", rev = "9ebd23a" }
+blitz-traits      = { git = "https://github.com/DioxusLabs/blitz.git", rev = "9ebd23a" }
+
+# Vello CPU rasteriser — matches what blitz's `examples/screenshot.rs`
+# uses. CPU only so snapshots don't need a GPU in CI.
+anyrender           = "0.10"
+anyrender_vello_cpu = "0.12"
+futures-util        = "0.3"
+peniko              = "0.6"
+rgb                 = "0.8"
+
+[lints]
+workspace = true
