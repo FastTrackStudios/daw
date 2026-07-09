@@ -1,0 +1,381 @@
+//! `impl Items for Standalone` — post-architect::rpc port.
+//!
+//! Backed by `ProjectState::items` (HashMap<item_guid, ItemEntry>) plus
+//! `ProjectState::items_by_track` (ordering per track). The old
+//! `StandaloneItem` async service struct and parallel item state were
+//! retired with the port.
+
+use daw_proto::Items;
+use daw_proto::{
+    BeatAttachMode, DawError, DawResult, Duration, FadeShape, Item, ItemRef, PositionInSeconds,
+    ProjectContext, TrackRef,
+};
+
+use crate::sync::{ItemEntry, ProjectState, Standalone};
+
+fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
+    match ctx {
+        ProjectContext::Project(guid) => Some(guid.clone()),
+        ProjectContext::Current => {
+            let state = daw.state.lock().ok()?;
+            state.current_project_guid.clone()
+        }
+    }
+}
+
+fn no_project() -> DawError {
+    DawError::not_found("Project", "context")
+}
+
+fn resolve_track_guid(p: &ProjectState, track: &TrackRef) -> Option<String> {
+    match track {
+        TrackRef::Guid(g) => Some(g.clone()),
+        TrackRef::Index(idx) => p.tracks.get(*idx as usize).map(|t| t.guid.clone()),
+        TrackRef::Master => None,
+    }
+}
+
+fn item_guid_from_ref(p: &ProjectState, item: &ItemRef) -> Option<String> {
+    match item {
+        ItemRef::Guid(g) => Some(g.clone()),
+        ItemRef::ProjectIndex(idx) => {
+            // Loose mapping: take the Nth item by insertion order.
+            p.items.keys().nth(*idx as usize).cloned()
+        }
+        ItemRef::Index(_) => None,
+    }
+}
+
+fn mutate_item<F, R>(
+    daw: &Standalone,
+    project: &ProjectContext,
+    item: &ItemRef,
+    f: F,
+) -> DawResult<R>
+where
+    F: FnOnce(&mut Item) -> R,
+{
+    let guid = resolve_project(daw, project).ok_or_else(no_project)?;
+    daw.with_project_mut(&guid, |p| {
+        let item_guid = item_guid_from_ref(p, item)
+            .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
+        let entry = p
+            .items
+            .get_mut(&item_guid)
+            .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+        Ok::<R, DawError>(f(&mut entry.item))
+    })?
+}
+
+impl Items for Standalone {
+    fn get_items(&self, project: ProjectContext, track: TrackRef) -> Vec<Item> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            let Some(track_guid) = resolve_track_guid(p, &track) else {
+                return Vec::new();
+            };
+            p.items_by_track
+                .get(&track_guid)
+                .map(|guids| {
+                    guids
+                        .iter()
+                        .filter_map(|g| p.items.get(g).map(|e| e.item.clone()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .unwrap_or_default()
+    }
+
+    fn get_item(&self, project: ProjectContext, item: ItemRef) -> Option<Item> {
+        let guid = resolve_project(self, &project)?;
+        self.with_project(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)?;
+            p.items.get(&item_guid).map(|e| e.item.clone())
+        })
+        .ok()
+        .flatten()
+    }
+
+    fn get_all_items(&self, project: ProjectContext) -> Vec<Item> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            p.items.values().map(|e| e.item.clone()).collect()
+        })
+        .unwrap_or_default()
+    }
+
+    fn get_selected_items(&self, project: ProjectContext) -> Vec<Item> {
+        let Some(guid) = resolve_project(self, &project) else {
+            return Vec::new();
+        };
+        self.with_project(&guid, |p| {
+            p.items
+                .values()
+                .filter(|e| e.item.selected)
+                .map(|e| e.item.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+    }
+
+    fn item_count(&self, project: ProjectContext, track: TrackRef) -> u32 {
+        let Some(guid) = resolve_project(self, &project) else {
+            return 0;
+        };
+        self.with_project(&guid, |p| {
+            let Some(track_guid) = resolve_track_guid(p, &track) else {
+                return 0;
+            };
+            p.items_by_track
+                .get(&track_guid)
+                .map(|v| v.len() as u32)
+                .unwrap_or(0)
+        })
+        .unwrap_or(0)
+    }
+
+    fn add_item(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        position: PositionInSeconds,
+        length: Duration,
+    ) -> Option<String> {
+        let guid = resolve_project(self, &project)?;
+        self.with_project_mut(&guid, |p| {
+            let track_guid = resolve_track_guid(p, &track)?;
+            if !p.tracks.iter().any(|t| t.guid == track_guid) {
+                return None;
+            }
+            let counter = p.next_item_counter;
+            p.next_item_counter += 1;
+            let item_guid = format!("standalone-item-{counter:016x}");
+            let order = p.items_by_track.entry(track_guid.clone()).or_default();
+            let index = order.len() as u32;
+            order.push(item_guid.clone());
+            let mut item = Item::default();
+            item.guid = item_guid.clone();
+            item.track_guid = track_guid;
+            item.index = index;
+            item.position = position;
+            item.length = length;
+            p.items.insert(item_guid.clone(), ItemEntry { item });
+            Some(item_guid)
+        })
+        .ok()
+        .flatten()
+    }
+
+    fn delete_item(&self, project: ProjectContext, item: ItemRef) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)
+                .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
+            let entry = p
+                .items
+                .remove(&item_guid)
+                .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+            if let Some(order) = p.items_by_track.get_mut(&entry.item.track_guid) {
+                order.retain(|g| g != &item_guid);
+                for (i, g) in order.iter().enumerate() {
+                    if let Some(e) = p.items.get_mut(g) {
+                        e.item.index = i as u32;
+                    }
+                }
+            }
+            p.takes.remove(&item_guid);
+            Ok::<(), DawError>(())
+        })?
+    }
+
+    fn duplicate_item(&self, project: ProjectContext, item: ItemRef) -> Option<String> {
+        let guid = resolve_project(self, &project)?;
+        self.with_project_mut(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)?;
+            let src = p.items.get(&item_guid)?.clone();
+            let counter = p.next_item_counter;
+            p.next_item_counter += 1;
+            let new_guid = format!("standalone-item-{counter:016x}");
+            let order = p
+                .items_by_track
+                .entry(src.item.track_guid.clone())
+                .or_default();
+            let new_index = order.len() as u32;
+            order.push(new_guid.clone());
+            let mut new_item = src.item.clone();
+            new_item.guid = new_guid.clone();
+            new_item.index = new_index;
+            p.items
+                .insert(new_guid.clone(), ItemEntry { item: new_item });
+            Some(new_guid)
+        })
+        .ok()
+        .flatten()
+    }
+
+    fn set_position(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        position: PositionInSeconds,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.position = position)
+    }
+
+    fn set_length(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        length: Duration,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.length = length)
+    }
+
+    fn move_to_track(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        track: TrackRef,
+    ) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
+            let item_guid = item_guid_from_ref(p, &item)
+                .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
+            let track_guid = resolve_track_guid(p, &track)
+                .ok_or_else(|| DawError::not_found("Track", &format!("{track:?}")))?;
+            // Remove from current track's ordering.
+            let entry = p
+                .items
+                .get(&item_guid)
+                .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+            let prev_track = entry.item.track_guid.clone();
+            if let Some(order) = p.items_by_track.get_mut(&prev_track) {
+                order.retain(|g| g != &item_guid);
+            }
+            // Insert into new track.
+            let order = p.items_by_track.entry(track_guid.clone()).or_default();
+            let new_index = order.len() as u32;
+            order.push(item_guid.clone());
+            if let Some(e) = p.items.get_mut(&item_guid) {
+                e.item.track_guid = track_guid;
+                e.item.index = new_index;
+            }
+            Ok::<(), DawError>(())
+        })?
+    }
+
+    fn set_snap_offset(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        offset: Duration,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.snap_offset = offset)
+    }
+
+    fn set_muted(&self, project: ProjectContext, item: ItemRef, muted: bool) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.muted = muted)
+    }
+
+    fn set_selected(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        selected: bool,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.selected = selected)
+    }
+
+    fn set_locked(&self, project: ProjectContext, item: ItemRef, locked: bool) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.locked = locked)
+    }
+
+    fn select_all_items(&self, project: ProjectContext, selected: bool) -> DawResult<()> {
+        let guid = resolve_project(self, &project).ok_or_else(no_project)?;
+        self.with_project_mut(&guid, |p| {
+            for entry in p.items.values_mut() {
+                entry.item.selected = selected;
+            }
+        })
+    }
+
+    fn set_volume(&self, project: ProjectContext, item: ItemRef, volume: f64) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.volume = volume)
+    }
+
+    fn set_fade_in(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        length: Duration,
+        shape: FadeShape,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| {
+            i.fade_in_length = length;
+            i.fade_in_shape = shape;
+        })
+    }
+
+    fn set_fade_out(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        length: Duration,
+        shape: FadeShape,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| {
+            i.fade_out_length = length;
+            i.fade_out_shape = shape;
+        })
+    }
+
+    fn set_loop_source(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        loop_source: bool,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.loop_source = loop_source)
+    }
+
+    fn set_beat_attach_mode(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        mode: BeatAttachMode,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.beat_attach_mode = mode)
+    }
+
+    fn set_auto_stretch(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        auto_stretch: bool,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.auto_stretch = auto_stretch)
+    }
+
+    fn set_color(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        color: Option<u32>,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.color = color)
+    }
+
+    fn set_group_id(
+        &self,
+        project: ProjectContext,
+        item: ItemRef,
+        group_id: Option<u32>,
+    ) -> DawResult<()> {
+        mutate_item(self, &project, &item, |i| i.group_id = group_id)
+    }
+}

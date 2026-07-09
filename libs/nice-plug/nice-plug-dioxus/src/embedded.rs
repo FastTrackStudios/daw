@@ -371,6 +371,7 @@ impl DioxusEmbeddedEditor {
                                 buttons,
                                 mods,
                                 details: PointerDetails::default(),
+                                element: Default::default(),
                             };
 
                             let ui_event = match event_type {

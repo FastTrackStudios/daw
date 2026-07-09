@@ -1,0 +1,46 @@
+[package]
+name = "daw-audio-sync"
+description = "Audio-thread sync primitives — sample-accurate peer alignment for redundant playback"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+# Companion to `daw-synchronization`. That crate handles state sync (mixer,
+# tracks, markers, …) at main-thread cadence via TCP mesh + suppression. This
+# crate handles the sample-accurate transport layer: audio-callback hook,
+# per-buffer position snapshot, peer clock sync (PTP-style), and drift
+# correction. The two run side-by-side — state sync owns "what does the
+# DAW look like", audio-sync owns "where exactly is the playhead, right now."
+#
+# Designed for live redundant playback: N REAPER instances playing the same
+# project, kept aligned to single-sample tolerance during steady-state via
+# continuous playrate-nudge correction. Failover-ready: each peer always
+# has an up-to-date snapshot of every other peer's sample position.
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+reaper-medium = { workspace = true }
+reaper-low = { workspace = true }
+tokio = { workspace = true, features = ["net", "sync", "time", "rt", "macros"] }
+tracing.workspace = true
+# Stable peer identifiers across restarts of the same machine.
+uuid = { version = "1", features = ["v4", "serde"] }
+# Wire format for the clock-sync protocol. postcard is small + facet-
+# free so we don't drag in vox here.
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+socket2 = { version = "0.5", features = ["all"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+
+[lints]
+workspace = true

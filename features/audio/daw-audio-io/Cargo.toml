@@ -1,0 +1,43 @@
+[package]
+name = "daw-audio-io"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Reusable audio I/O for the DAW engine — host (JACK) selection, device enumeration/selection, and a live duplex monitor (input → process → output)."
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# Same cpal 0.17.1 (crates.io) the rest of the workspace resolves, so `Stream`
+# and device types unify across daw-standalone and this crate.
+cpal = "0.18"
+facet = { workspace = true }
+tracing = { workspace = true }
+# SPSC lock-free ring for the duplex monitor's input → output handoff.
+rtrb = { version = "0.3", optional = true }
+# Native PipeWire duplex backend (one pw_filter, input+output in one realtime
+# callback — no ring). Raw FFI: the high-level crate wraps `stream` but not
+# `filter`. Linux-only; gated behind the `pipewire` feature.
+[target.'cfg(target_os = "linux")'.dependencies]
+pipewire = { version = "0.10", optional = true }
+libspa = { version = "0.10", optional = true }
+
+[features]
+default = []
+# Prefer cpal's JACK backend (pipewire-jack shim) over the raw ALSA/CoreAudio
+# default.
+jack = ["cpal/jack"]
+# Prefer cpal's native PipeWire host — talks to PipeWire directly (no JACK
+# shim), enumerates real device names + channel counts, targets a specific
+# device, and requests per-node latency natively. Also builds the native
+# `pw_filter` duplex backend (`duplex` module). Linux-only at the cpal level.
+pipewire = ["cpal/pipewire", "dep:pipewire", "dep:libspa"]
+# The live in → process → out duplex monitor. Pulls rtrb. Native-only.
+monitor = ["dep:rtrb"]

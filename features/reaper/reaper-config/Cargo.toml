@@ -1,0 +1,15 @@
+[package]
+name = "reaper-config"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Typed Rust mappings for REAPER configuration variables (reaper.ini, project settings, etc.)"
+
+[dependencies]
+serde = { workspace = true }
+bitflags = "2"
+thiserror = { workspace = true }
+
+[lints]
+workspace = true
