@@ -380,6 +380,15 @@ pub mod dawproject {
 #[cfg(feature = "test-harness")]
 pub mod test;
 
+// ── CLI ─────────────────────────────────────────────────────────────────────
+//
+// The `daw` command-line surface (former `apps/daw-cli`), folded in behind
+// the `cli` feature. `daw::cli::cli_main(argv)` is the embeddable entry —
+// the thin `daw` binary (src/bin/daw.rs) and the `fts daw` subcommand both
+// mount it.
+#[cfg(feature = "cli")]
+pub mod cli;
+
 // ── Streaming ergonomics ────────────────────────────────────────────────────
 pub use stream::RxExt;
 mod stream;
