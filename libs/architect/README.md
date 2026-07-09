@@ -1,5 +1,16 @@
 # architect
 
+> **Canonical location.** Architect now lives in-tree in the
+> [FastTrackStudio monorepo](https://codeberg.org/FastTrackStudios/FastTrackStudio)
+> at `libs/architect/` (subtree-imported with full history) — this copy is
+> canonical; the standalone codeberg `architect` repo is historical.
+> External consumers (e.g. the `task` project) depend on it via a git dep
+> on the monorepo — cargo resolves the crate by name in the tree:
+>
+> ```toml
+> architect = { git = "https://codeberg.org/FastTrackStudios/FastTrackStudio.git" }
+> ```
+
 A facet-native, vox-friendly entity framework for Rust. One
 `#[derive(Entity)]` on a plain struct, and you get:
 
@@ -34,22 +45,22 @@ crate. No manual `From<Model> for Example` glue.
 ## Layout
 
 ```
-crates/architect/    the user-facing crate (re-exports the derive + runtime traits)
-apps/architect/cli/  scaffolds new feature crate families (`architect feature new`)
-features/macros/     architect-derive / architect-rpc-derive / architect-action-derive — the proc-macros
-features/crdt/       crdt / crdt-seaorm / crdt-derive — the local-first layer
-
-examples/app/        the reference full-stack demo
-  features/example/  proto / db / memory / crdt / ui + facade for one entity
-  server/            axum + vox; generic vox_router + the ExampleService impl
-  cli/               native vox client (`app` binary)
-  db/                sea-orm-migration CLI
-  ui/                shared Dioxus shell — router + screens + vox client lifecycle
-  web/  desktop/     thin Dioxus launchers (wasm / native) over `ui`
-  tests/e2e/         real client ↔ real server over a vox socket
+architect/  the user-facing crate (re-exports the derive + runtime traits)
+macros/     architect-derive / architect-rpc-derive / architect-action-derive — the proc-macros
+atom/       architect-atom — optimistic client state for Dioxus
+form/       architect-form — typed, validated form state for Dioxus
+auth/       architect-auth / auth / auth-proto / auth-db / auth-client — the auth feature
+crdt/       crdt / crdt-seaorm / crdt-derive — the local-first layer
+docs/       architecture + getting-started docs
 ```
 
-`examples/app/` is the **reference example** — a full Dioxus web +
+All of these are ordinary members of the monorepo's root workspace and
+are consumed as `architect.workspace = true` etc. The standalone repo's
+`examples/app/` reference demo, CLI scaffolder, and xtask were not
+imported — they remain in the standalone repo (and in this subtree's
+git history).
+
+The standalone repo's `examples/app/` is the **reference example** — a full Dioxus web +
 desktop app (list/detail/create/edit/delete/search/duplicate) talking to
 the server entirely over vox. Read it to learn the pattern, then template
 it when spinning up a new project. The conventions it follows — and the

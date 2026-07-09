@@ -1,6 +1,0 @@
-msrv = "1.90"
-
-# Allow Cow over &str where we know there's no allocation difference.
-# This matches the bearcove default; keeps clippy from nagging on
-# common patterns.
-allow-comparison-to-zero = true

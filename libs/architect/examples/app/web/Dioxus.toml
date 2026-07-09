@@ -1,6 +1,0 @@
-[application]
-name = "app-web"
-default_platform = "web"
-
-[web.app]
-title = "architect"
