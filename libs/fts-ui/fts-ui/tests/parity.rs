@@ -1,0 +1,95 @@
+//! Cross-renderer parity tests: Blitz native ⇄ wry desktop.
+//!
+//! Requires the **release** desktop binary to exist before running:
+//!
+//! ```sh
+//! cargo build --release -p fts-ui-showcase-desktop
+//! cargo test  --release -p fts-ui --test parity
+//! ```
+//!
+//! Outputs land in `crates/fts-ui/parity_output/` — one PNG per
+//! renderer plus a side-by-side composite for human review.
+//!
+//! Headless: spawns its own `Xvfb` instance (display `:99` by
+//! default). Required system tools: `Xvfb`, `xdotool`, ImageMagick
+//! (`import`). The test will fail-fast with a useful error message if
+//! any are missing.
+
+use dioxus::prelude::*;
+use fts_story_parity::{ParityConfig, ParityRunner, WryCaptureConfig};
+use fts_ui::prelude::*;
+use fts_ui::stories;
+use std::path::PathBuf;
+
+/// Wrap every Blitz-rendered story in a `ThemeProvider` AND inject the
+/// pre-compiled Tailwind stylesheet inline. Without the stylesheet
+/// Blitz has no rules for `bg-background` / `p-6` / `rounded-md` /
+/// etc., so the rendered Element collapses to default browser styling
+/// even with the right CSS variables defined.
+///
+/// The wry side gets its stylesheet through
+/// `document::Stylesheet { href: TAILWIND_CSS }` in
+/// `apps/desktop/src/main.rs`; the Blitz snapshot path doesn't go
+/// through dx so we load the same compiled file here.
+const TAILWIND_CSS: &str = include_str!("../../../apps/desktop/assets/tailwind.css");
+
+fn theme_wrap(child: Element) -> Element {
+    let state = use_signal(|| ThemeState::new(default_theme_preset(), ThemeMode::Dark));
+    rsx! {
+        style { {TAILWIND_CSS} }
+        ThemeProvider { state, {child} }
+    }
+}
+
+fn binary_path() -> PathBuf {
+    // CARGO_MANIFEST_DIR points at crates/fts-ui; walk up to the
+    // workspace root, then into target/release.
+    let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    p.pop(); // crates
+    p.pop(); // workspace root
+    p.join("target/release/fts-ui-showcase-desktop")
+}
+
+fn cfg() -> ParityConfig {
+    let mut cfg = ParityConfig::for_crate(env!("CARGO_MANIFEST_DIR"));
+    cfg.wry_capture = WryCaptureConfig {
+        binary: binary_path(),
+        ..WryCaptureConfig::default()
+    };
+    cfg
+}
+
+fn run(story: &'static fts_story_runtime::Story) {
+    stories::force_link();
+    fts_story_snapshots::install_wrapper(theme_wrap);
+    let runner = ParityRunner::new(cfg());
+    let report = runner.compare(story).expect("parity run");
+    fts_story_snapshots::clear_wrapper();
+    println!(
+        "parity score for {} = {:.6} (threshold {:.6})",
+        report.story, report.dssim_score, report.threshold
+    );
+    assert!(
+        report.passed,
+        "wry vs blitz dssim {:.6} > threshold {:.6} for {}",
+        report.dssim_score, report.threshold, report.story
+    );
+}
+
+#[test]
+#[ignore = "requires Xvfb/xdotool/imagemagick + a built target/release/fts-ui-showcase-desktop"]
+fn button_primary_parity() {
+    run(&stories::BUTTON_PRIMARY_STORY);
+}
+
+#[test]
+#[ignore = "requires Xvfb/xdotool/imagemagick + a built target/release/fts-ui-showcase-desktop"]
+fn button_matrix_parity() {
+    run(&stories::BUTTON_MATRIX_STORY);
+}
+
+#[test]
+#[ignore = "requires Xvfb/xdotool/imagemagick + a built target/release/fts-ui-showcase-desktop"]
+fn button_sizes_parity() {
+    run(&stories::BUTTON_SIZES_STORY);
+}

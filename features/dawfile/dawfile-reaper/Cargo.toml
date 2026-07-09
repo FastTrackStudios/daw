@@ -1,0 +1,51 @@
+[package]
+name = "dawfile-reaper"
+version = "0.1.0"
+edition = "2024"
+description = "REAPER file parser for DawFile built on the RPP/RPPXML format"
+license = "MIT"
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+
+[dependencies]
+# Parser dependencies
+nom = "8"
+
+# Domain types for conversion
+daw-proto = { workspace = true }
+
+# Common workspace dependencies
+serde = { workspace = true }
+thiserror = { workspace = true }
+base64 = "0.22.1"
+
+# Native-only optional speedups.
+# `parallel` brings in rayon for per-track parsing; turn it off for
+# WASM (no threads / no rayon). `binaries` brings in `libc` for the
+# `rpp_perf` measurement binary (Linux/macOS rusage probe).
+rayon = { version = "1", optional = true }
+libc = { version = "0.2", optional = true }
+
+[features]
+default = ["parallel"]
+parallel = ["dep:rayon"]
+binaries = ["dep:libc"]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "parse_perf"
+harness = false
+
+[[bin]]
+name = "rpp_perf"
+path = "src/bin/rpp_perf.rs"
+required-features = ["binaries"]
+
+[lints]
+workspace = true

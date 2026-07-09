@@ -1,0 +1,19 @@
+[package]
+name = "actions-standalone"
+version = "0.1.0"
+edition = "2021"
+description = "Standalone actions implementation for web and desktop apps"
+
+[dependencies]
+actions-proto.workspace = true
+tracing.workspace = true
+
+# WASM-compatible async primitives (no tokio dependency)
+async-lock = "3.4"
+
+[lib]
+test = false
+doctest = false
+
+[lints]
+workspace = true

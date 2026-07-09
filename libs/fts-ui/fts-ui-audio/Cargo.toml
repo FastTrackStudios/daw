@@ -1,0 +1,21 @@
+[package]
+name = "fts-ui-audio"
+description = "FastTrack Studio audio widget kit — Dioxus port of iced_audio (knobs, sliders, XY pads, meters)"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+dioxus = { workspace = true }
+fts-ui = { workspace = true }
+tracing = { workspace = true }
+
+[features]
+default = []
+# Enable nih_plug ParamPtr adapter for ParamHandle.
+# Consumers building plugins should enable this; UI-only consumers can leave it off.
+nih-plug = []
+
+[lints]
+workspace = true

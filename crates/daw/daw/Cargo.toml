@@ -1,0 +1,141 @@
+[package]
+name = "daw"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[dependencies]
+# Always included — these are WASM-compatible and form the core API
+daw-proto = { workspace = true }
+daw-control = { workspace = true }
+daw-module = { workspace = true }
+
+# UI host adapter (REAPER + Dioxus). Pulled in only when the `reaper-ui`
+# feature is enabled — keeps audio-graph / WASM / embedded targets clean.
+daw-reaper-dioxus = { workspace = true, optional = true }
+
+# Runtime (needed for block_on in plugin context)
+tokio.workspace = true
+
+# Streaming primitives — Rx<T> ergonomic wrapper lives at daw::RxExt
+vox.workspace = true
+facet.workspace = true
+
+# Re-exported through the facade so apps depending only on `daw` can
+# reach `daw::{Services, Layer, layers!}` for service composition.
+architect.workspace = true
+
+# Feature-gated internal crates. daw-reaper carries per-format importer
+# features (default = all-formats); we take it with default-features = false
+# so the facade can opt into formats individually (see convert-<format>).
+daw-reaper = { workspace = true, optional = true, default-features = false }
+daw-standalone = { workspace = true, optional = true }
+dawfile-reaper = { workspace = true, optional = true }
+
+# The reusable, vector-themeable UI component library (widgets / theming /
+# panels: DawWorkspace, TrackControlPanel, …). Exposed as `daw::ui` behind the
+# `ui` feature so apps consume the components through the facade.
+daw-ui = { workspace = true, optional = true }
+
+# Control Surface Integration (Mackie Control / X-Touch). Depends only on
+# daw-proto + daw-control, so it folds into the facade — no cycle.
+daw-csi = { workspace = true, optional = true }
+
+# Source-format parsers — each exposes one DAW's file format (format →
+# daw-proto types) under `daw::<format>`, gated by a per-format feature.
+# Opt into only the formats you need; none of these pull in REAPER. The
+# reaper-based file→RPP `convert()` path lives under the `convert` feature.
+# Each depends only on `daw-proto`, so there is no facade cycle.
+dawfile-protools = { workspace = true, optional = true }
+dawfile-ableton = { workspace = true, optional = true }
+dawfile-logic = { workspace = true, optional = true }
+dawfile-aaf = { workspace = true, optional = true }
+dawfile-dawproject = { workspace = true, optional = true }
+
+# Integration-test harness deps — only pulled in by the `test-harness`
+# feature (folded-in former `reaper-test` crate). None of these dep on
+# `daw`, so there is no cycle.
+vox-stream = { workspace = true, optional = true }
+moire = { workspace = true, optional = true }
+eyre = { workspace = true, optional = true }
+daw-test-macro = { workspace = true, optional = true }
+reaper-launcher = { workspace = true, optional = true }
+
+# NOTE: `daw-extension-runtime` is intentionally NOT folded under a
+# `daw[extension-runtime]` feature. It can't be — `daw-reaper` depends
+# on `keyflow` (for chord detection in MIDI items), and `keyflow`
+# depends on `daw` (for `daw::module::DawModule`). Folding extension-
+# runtime into the facade would create a cycle:
+#
+#   daw → daw-extension-runtime → daw-reaper → keyflow → daw
+#
+# `daw-extension-runtime` therefore stays as a public sibling crate.
+# Extension authors depend on both `daw` and `daw-extension-runtime`
+# at the workspace level — that's a documented exception to the
+# "apps depend only on `daw`" rule.
+
+[features]
+reaper = ["dep:daw-reaper"]
+standalone = ["dep:daw-standalone"]
+standalone-audio = ["standalone", "daw-standalone/audio"]
+# Native PipeWire duplex engine (`daw::standalone::audio_engine::DuplexAudioEngine`)
+# — one low-latency realtime callback (input+output, no ring). Linux-only.
+pipewire = ["standalone-audio", "daw-standalone/pipewire"]
+# Reusable UI components (`daw::ui` — widgets / theming / panels). `web` brings
+# in dioxus (the components render under any dioxus renderer, incl. native Blitz).
+ui = ["dep:daw-ui", "daw-ui/web"]
+# REAPER theme import: `daw::ui::theming::theme_from_reaper` (+ the
+# daw-theme-reaper parser via daw-ui).
+ui-reaper-theme = ["ui", "daw-ui/reaper-theme"]
+standalone-rpp = ["standalone-audio", "daw-standalone/rpp-loader"]
+# Plugin-host backends, exposed via `daw::plugin` (CLAP / VST3). Each pulls in
+# the matching daw-standalone backend feature; consumers (signal, etc.) enable
+# only the formats they need.
+clap-host = ["standalone-audio", "daw-standalone/clap-host"]
+vst3-host = ["standalone-audio", "daw-standalone/vst3-host"]
+file = ["dep:dawfile-reaper"]
+# Cross-format project conversion (`daw::file::convert`, format → RPP). Pulls
+# the importers from `daw-reaper`. `convert` enables every importer; the
+# `convert-<format>` variants compile in only one source format, so a
+# specialized build (e.g. a Pro-Tools-only converter) avoids the other parsers.
+convert = ["file", "reaper", "daw-reaper/all-formats"]
+convert-protools = ["file", "reaper", "daw-reaper/protools"]
+convert-ableton = ["file", "reaper", "daw-reaper/ableton"]
+convert-aaf = ["file", "reaper", "daw-reaper/aaf"]
+convert-dawproject = ["file", "reaper", "daw-reaper/dawproject"]
+reaper-ui = ["dep:daw-reaper-dioxus"]
+# Control surfaces (`daw::csi`) — Mackie Control / Behringer X-Touch driver
+# fed by the event bus. Hardware MIDI via midir (ALSA/CoreMIDI/WinMM).
+csi = ["dep:daw-csi"]
+
+# Source-format parsers, exposed under daw::<format>. Each is independent
+# of REAPER and of each other — opt into only what you read.
+protools = ["dep:dawfile-protools"]
+ableton = ["dep:dawfile-ableton"]
+logic = ["dep:dawfile-logic"]
+aaf = ["dep:dawfile-aaf"]
+dawproject = ["dep:dawfile-dawproject"]
+# All source-format parsers at once.
+formats = ["protools", "ableton", "logic", "aaf", "dawproject"]
+# Integration-test harness (former `reaper-test` crate). Drives daw-reaper
+# over the daw RPC surface; generalized over `DawBackend` (impl `ReaperBackend`).
+test-harness = [
+    "reaper",
+    "dep:reaper-launcher",
+    "dep:vox-stream",
+    "dep:moire",
+    "dep:eyre",
+    "dep:daw-test-macro",
+]
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+dawfile-ableton = { workspace = true }

@@ -1,0 +1,20 @@
+[package]
+name = "input"
+version = "0.1.0"
+edition = "2024"
+description = "Universal input processing with trie-based key dispatch and modal editing"
+
+[dependencies]
+actions-proto = { workspace = true, optional = true }
+actions-keybindings = { workspace = true, optional = true }
+facet = { workspace = true, optional = true }
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

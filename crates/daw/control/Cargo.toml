@@ -1,0 +1,33 @@
+[package]
+name = "daw-control"
+version = "0.1.0"
+edition = "2024"
+
+[package.metadata]
+
+[package.metadata."docs.rs"]
+rustdoc-args = ["--html-in-header", "arborium-header.html"]
+
+[dependencies]
+daw-proto = { workspace = true }
+architect = { workspace = true, features = ["vox"] }
+vox = { workspace = true }
+eyre = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+facet-json = { workspace = true }
+# Used by the lock-poisoning recovery helpers in `lock.rs` so callers
+# get a structured warning when a Mutex/RwLock is recovered.
+tracing = { workspace = true }
+# Stream subscriptions: `moire::task::spawn` drives each in-flight
+# `#[subscribe]` call + client-side filter pump (wasm-compatible —
+# moire maps to moire-wasm on wasm32). `futures` supplies the
+# `select` that ties the call's lifetime to the consumer's Rx.
+moire = { workspace = true }
+futures = { workspace = true }
+facet = { workspace = true }
+vox-types = { workspace = true }
+# Note: No tokio - this crate is WASM-compatible for use in web apps
+
+[lints]
+workspace = true

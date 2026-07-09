@@ -1,0 +1,26 @@
+[package]
+name = "monarchy"
+version.workspace = true
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+description = "A metadata-based hierarchical organization system for Rust"
+keywords = ["hierarchy", "organization", "metadata", "sorting", "categorization"]
+categories = ["data-structures", "algorithms"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = "1.0"
+toml = "0.8"
+thiserror = { workspace = true }
+monarchy_derive = { workspace = true }
+facet = { workspace = true }
+
+[dev-dependencies]
+
+[lints]
+workspace = true
+
+[features]
+default = ["derive"]
+derive = []

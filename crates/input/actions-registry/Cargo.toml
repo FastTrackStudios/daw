@@ -1,0 +1,17 @@
+[package]
+name = "actions-registry"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+actions-proto.workspace = true
+vox.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tracing.workspace = true
+
+[lib]
+test = false
+doctest = false
+
+[lints]
+workspace = true

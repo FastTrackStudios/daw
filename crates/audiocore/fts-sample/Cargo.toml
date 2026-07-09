@@ -1,0 +1,12 @@
+[package]
+name = "fts-sample"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+description = "Shared audio sample loading utilities for FTS plugins"
+
+[dependencies]
+symphonium = { workspace = true }
+crossbeam-channel = { workspace = true }
+tracing = { workspace = true }

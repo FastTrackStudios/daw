@@ -1,0 +1,17 @@
+[package]
+name = "input-dioxus"
+version = "0.1.0"
+edition = "2024"
+description = "Dioxus event conversion bridge for input"
+
+[dependencies]
+input = { workspace = true }
+dioxus = { workspace = true }
+tokio = { workspace = true, features = ["time"] }
+
+[lib]
+test = false
+doctest = false
+
+[lints]
+workspace = true
