@@ -1,0 +1,14 @@
+[package]
+name = "midicore-midir"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+authors.workspace = true
+license.workspace = true
+description = "midir-backed OS MIDI input backend for midicore — enumerate ports, open a PortSelector (device/all/virtual), decode bytes into midicore::MidiEvent."
+
+[dependencies]
+midicore-proto.workspace = true
+midir = "0.11"
+crossbeam-channel = "0.5"
+eyre = "0.6"
+tracing = "0.1"

@@ -1,0 +1,99 @@
+{
+  "modes": {
+    "normal": { "display_name": "NORMAL" },
+    "insert": { "display_name": "INSERT", "passthrough_text": true },
+    "visual": { "display_name": "VISUAL" }
+  },
+  "keymap": {
+    "normal": {
+      "Escape": "input.cancel",
+      "i": "mode:insert",
+      "v": "mode:visual",
+      ":": "fts.standalone.command_palette",
+      "h": "cursor.left",
+      "j": "cursor.down",
+      "k": "cursor.up",
+      "l": "cursor.right",
+      "w": "motion:word",
+      "b": "motion:back_word",
+      "0": "motion:line_start",
+      "$": "motion:line_end",
+      "g g": "motion:doc_start",
+      "Shift+g": "motion:doc_end",
+      "d": "operator:delete",
+      "c": "operator:change",
+      "y": "operator:yank"
+    },
+    "insert": {
+      "Escape": "mode:normal"
+    },
+    "visual": {
+      "Escape": "mode:normal",
+      "d": "operator:delete",
+      "y": "operator:yank"
+    }
+  },
+  "keymap_context": {
+    "normal": [
+      {
+        "when": "tab:performance",
+        "bindings": {
+          "Space": "fts.session.toggle_playback",
+          "Shift+l": "fts.session.toggle_song_loop",
+          "Right": "fts.session.smart_next",
+          "Left": "fts.session.smart_previous",
+          "Down": "fts.session.next_song",
+          "Up": "fts.session.previous_song"
+        }
+      },
+      {
+        "when": "tab:chart",
+        "bindings": {
+          "i": "mode:insert",
+          "h": "chart.cursor.left",
+          "j": "chart.cursor.down",
+          "k": "chart.cursor.up",
+          "l": "chart.cursor.right",
+          "w": "chart.cursor.word_forward",
+          "b": "chart.cursor.word_backward",
+          "0": "chart.cursor.line_start",
+          "$": "chart.cursor.line_end"
+        }
+      },
+      {
+        "when": "tab:rig",
+        "bindings": {
+          "1": "fts.rig.snapshot.recall_1",
+          "2": "fts.rig.snapshot.recall_2",
+          "3": "fts.rig.snapshot.recall_3",
+          "4": "fts.rig.snapshot.recall_4",
+          "5": "fts.rig.snapshot.recall_5",
+          "6": "fts.rig.snapshot.recall_6",
+          "7": "fts.rig.snapshot.recall_7",
+          "8": "fts.rig.snapshot.recall_8",
+          "9": "fts.rig.snapshot.recall_9",
+          "Shift+1": "fts.rig.snapshot.save_1",
+          "Shift+2": "fts.rig.snapshot.save_2",
+          "Shift+3": "fts.rig.snapshot.save_3",
+          "Shift+4": "fts.rig.snapshot.save_4",
+          "Shift+5": "fts.rig.snapshot.save_5",
+          "Shift+6": "fts.rig.snapshot.save_6",
+          "Shift+7": "fts.rig.snapshot.save_7",
+          "Shift+8": "fts.rig.snapshot.save_8",
+          "Shift+9": "fts.rig.snapshot.save_9"
+        }
+      }
+    ]
+  },
+  "mouse": {
+    "normal": {
+      "Left.Click": "mouse.primary",
+      "Right.Click": "mouse.context_menu"
+    }
+  },
+  "scroll": {
+    "normal": {
+      "Ctrl+Scroll": "view.zoom"
+    }
+  }
+}

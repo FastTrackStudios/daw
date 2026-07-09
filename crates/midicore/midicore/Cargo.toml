@@ -1,0 +1,19 @@
+[package]
+name = "midicore"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+authors.workspace = true
+license.workspace = true
+description = "Ergonomic, backend-agnostic MIDI — the single app-facing facade. Re-exports the wire types + codec + services (midicore-proto) and, behind features, concrete I/O backends (midir). Consumers depend ONLY on this crate."
+repository = "https://codeberg.org/FastTrackStudios/midicore"
+
+[features]
+default = ["vox"]
+# The #[architect::rpc] service surface (client + dispatcher + streaming).
+vox = ["midicore-proto/vox"]
+# The midir OS backend, exposed as `midicore::midir` (native only).
+midir = ["dep:midicore-midir"]
+
+[dependencies]
+midicore-proto.workspace = true
+midicore-midir = { workspace = true, optional = true }

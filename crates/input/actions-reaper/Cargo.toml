@@ -1,0 +1,22 @@
+[package]
+name = "actions-reaper"
+version.workspace = true
+edition = "2021"          # kept on 2021 — pre-move workspace edition; migrate deliberately
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+actions-proto.workspace = true
+actions-registry.workspace = true
+vox.workspace = true
+reaper-high.workspace = true
+reaper-medium.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+test = false
+doctest = false

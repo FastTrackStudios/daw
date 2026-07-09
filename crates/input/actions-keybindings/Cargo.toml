@@ -1,0 +1,16 @@
+[package]
+name = "actions-keybindings"
+version = "0.1.0"
+edition = "2021"
+description = "Keybinding dispatcher and shortcut parser for the actions system"
+
+[dependencies]
+actions-proto.workspace = true
+tracing.workspace = true
+
+[lib]
+doctest = false
+
+
+[lints]
+workspace = true
