@@ -1,0 +1,21 @@
+[package]
+name = "monarchy_derive"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { workspace = true }
+quote = { workspace = true }
+proc-macro2 = { workspace = true }
+convert_case = "0.6"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+monarchy = { workspace = true }
