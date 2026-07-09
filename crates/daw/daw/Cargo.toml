@@ -62,6 +62,14 @@ dawfile-dawproject = { workspace = true, optional = true }
 # feature (folded-in former `reaper-test` crate). None of these dep on
 # `daw`, so there is no cycle.
 vox-stream = { workspace = true, optional = true }
+
+# CLI deps (former `apps/daw-cli`, folded in behind the `cli` feature —
+# see src/cli/). All optional so library consumers stay lean.
+clap = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+facet-json = { workspace = true, optional = true }
+libc = { version = "0.2", optional = true }
+tracing-subscriber = { workspace = true, optional = true }
 moire = { workspace = true, optional = true }
 eyre = { workspace = true, optional = true }
 daw-test-macro = { workspace = true, optional = true }
@@ -110,6 +118,21 @@ convert-ableton = ["file", "reaper", "daw-reaper/ableton"]
 convert-aaf = ["file", "reaper", "daw-reaper/aaf"]
 convert-dawproject = ["file", "reaper", "daw-reaper/dawproject"]
 reaper-ui = ["dep:daw-reaper-dioxus"]
+# The `daw` command-line surface (`daw::cli`, former `apps/daw-cli` crate) +
+# the thin `daw` binary. `file` brings dawfile-reaper (toolbar config, rpp).
+cli = [
+    "file",
+    "dep:clap",
+    "dep:eyre",
+    "dep:serde_json",
+    "dep:facet-json",
+    "dep:libc",
+    "dep:vox-stream",
+    "dep:tracing-subscriber",
+]
+# The architect rpc macro gates its vox-emitted items on the consumer
+# crate's `vox` feature (used by the batch wire-probe integration test).
+vox = []
 # Control surfaces (`daw::csi`) — Mackie Control / Behringer X-Touch driver
 # fed by the event bus. Hardware MIDI via midir (ALSA/CoreMIDI/WinMM).
 csi = ["dep:daw-csi"]
@@ -137,5 +160,17 @@ test-harness = [
 [lints]
 workspace = true
 
+[[bin]]
+name = "daw"
+path = "src/bin/daw.rs"
+required-features = ["cli"]
+
 [dev-dependencies]
 dawfile-ableton = { workspace = true }
+# CLI integration tests (former daw-cli tests; gated `#![cfg(feature = "cli")]`):
+# in-process standalone backend over a real vox memory link + local wire probes.
+daw-standalone = { workspace = true, features = ["bootstrap", "audio"] }
+architect = { workspace = true, features = ["vox", "local"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+eyre = { workspace = true }
+serde_json = { workspace = true }
