@@ -27,8 +27,15 @@ use std::time::Duration;
 pub struct Engine {
     /// Human name ("Signal", "Session").
     pub name: &'static str,
-    /// Binary / cargo package name (`signal-engine`).
+    /// Binary / cargo package name (`fasttrackstudio`).
     pub package: &'static str,
+    /// Arguments that select engine mode on that binary (`--engine`) —
+    /// always passed before any caller args.
+    pub args: &'static [&'static str],
+    /// systemd user unit name (without `.service`) — kept distinct from
+    /// the package so `signal-engine.service` survives the single-binary
+    /// consolidation.
+    pub unit: &'static str,
     /// Default TCP port it serves on.
     pub port: u16,
     /// WebSocket path on that port (`/vox`, `/ws`).
@@ -47,10 +54,13 @@ impl Engine {
     }
 }
 
-/// The signal engine — the headless guitar-rig core (`apps/signal-engine`).
+/// The signal engine — the headless guitar-rig core: the fasttrackstudio
+/// binary in `--engine` mode (apps/fasttrackstudio/src/engine_main.rs).
 pub const SIGNAL_ENGINE: Engine = Engine {
     name: "Signal",
-    package: "signal-engine",
+    package: "fasttrackstudio",
+    args: &["--engine"],
+    unit: "signal-engine",
     port: 4040,
     ws_path: "/vox",
 };
@@ -61,14 +71,25 @@ pub const SIGNAL_ENGINE: Engine = Engine {
 pub const SESSION_ENGINE: Engine = Engine {
     name: "Session",
     package: "fts-cli", // served by `fts session engine` (in-process)
+    args: &[],
+    unit: "fts-cli",
     port: 3030,
     ws_path: "/ws",
 };
 
-/// Locate an engine binary: same directory as the current executable
-/// first (installed layout — everything ships side by side), then $PATH.
+/// Locate an engine binary: the current executable itself when it IS the
+/// engine binary (the fasttrackstudio app supervising its own `--engine`
+/// child — never search $PATH for ourselves), then the same directory as
+/// the current executable (installed layout — everything ships side by
+/// side), then $PATH.
 pub fn find_binary(name: &str) -> Option<PathBuf> {
-    // 1. Next to the running executable.
+    // 1. This very executable (self-spawn: app → `<current_exe> --engine`).
+    if let Ok(exe) = std::env::current_exe() {
+        if exe.file_name().and_then(|n| n.to_str()) == Some(name) && exe.is_file() {
+            return Some(exe);
+        }
+    }
+    // 2. Next to the running executable.
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let candidate = dir.join(name);
@@ -77,7 +98,7 @@ pub fn find_binary(name: &str) -> Option<PathBuf> {
             }
         }
     }
-    // 2. $PATH.
+    // 3. $PATH.
     let path = std::env::var_os("PATH")?;
     std::env::split_paths(&path)
         .map(|dir| dir.join(name))
@@ -126,7 +147,7 @@ pub fn spawn(
     let (mut cmd, source) = match find_binary(engine.package) {
         Some(bin) => {
             let mut c = Command::new(&bin);
-            c.args(args);
+            c.args(engine.args).args(args);
             (c, LaunchSource::Binary(bin))
         }
         None => {
@@ -135,8 +156,8 @@ pub fn spawn(
             // is set) — cargo itself will error clearly otherwise.
             let mut c = Command::new("cargo");
             c.arg("run").arg("-p").arg(engine.package);
-            if !args.is_empty() {
-                c.arg("--").args(args);
+            if !engine.args.is_empty() || !args.is_empty() {
+                c.arg("--").args(engine.args).args(args);
             }
             (c, LaunchSource::Cargo)
         }
@@ -168,7 +189,7 @@ pub fn spawn(
 
 /// The systemd user unit `just rig-install` installs for an engine.
 fn systemd_unit(engine: &Engine) -> String {
-    format!("{}.service", engine.package)
+    format!("{}.service", engine.unit)
 }
 
 /// Is the engine's systemd user unit installed on this machine?
