@@ -670,6 +670,11 @@ impl TestRunner {
                 test_cmd.args(["--test", bin]);
             }
 
+            // Run every test binary even when an earlier one fails —
+            // cargo's default fail-fast between targets hides the rest
+            // of the suite behind the first failing file.
+            test_cmd.arg("--no-fail-fast");
+
             test_cmd.args([
                 "--",
                 "--ignored",
