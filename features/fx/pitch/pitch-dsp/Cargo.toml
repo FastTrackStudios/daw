@@ -9,8 +9,9 @@ license.workspace = true
 audiocore-dsp = { workspace = true }
 serde = { workspace = true }
 
-# External pitch/time-stretch libraries
-signalsmith-stretch = "0.1"
+# External pitch/time-stretch libraries (C++ via cc — native only; the
+# `signalsmith` feature keeps it off the wasm/embedded build graph).
+signalsmith-stretch = { version = "0.1", optional = true }
 
 [dev-dependencies]
 criterion = "0.5"
@@ -27,8 +28,14 @@ harness = false
 
 
 [features]
-default = []
+default = ["signalsmith"]
+# The Signalsmith Stretch shifter + the `chain` module (PitchChain /
+# Algorithm) that hard-requires it. C++ via cc, so it cannot build for
+# wasm32-unknown-unknown — the pure-Rust modules (granular / wsola /
+# psola / pll / pog / divider / allpass_shift) stay available without it
+# via `default-features = false`.
+signalsmith = ["dep:signalsmith-stretch"]
 # Links the system `rubberband` library (Rubber Band Library FFI).
 # Off by default so the workspace builds without the system dep;
 # Algorithm::Rubberband falls back to Signalsmith when disabled.
-rubberband = []
+rubberband = ["signalsmith"]
