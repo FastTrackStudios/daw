@@ -1019,10 +1019,27 @@ impl ActionRegistration for crate::Reaper {
         ActionListResponse::default()
     }
 
-    fn execute_command(&self, _command_id: u32) {}
+    fn execute_command(&self, command_id: u32) {
+        let medium = Reaper::get().medium_reaper();
+        medium.main_on_command_ex(
+            CommandId::new(command_id),
+            0,
+            reaper_medium::ProjectContext::CurrentProject,
+        );
+    }
 
-    fn execute_named_action(&self, _command_name: &str) -> bool {
-        false
+    fn execute_named_action(&self, command_name: &str) -> bool {
+        let Some(command_id) = self.lookup_command_id(command_name) else {
+            tracing::debug!("execute_named_action: not found: {command_name}");
+            return false;
+        };
+        let medium = Reaper::get().medium_reaper();
+        medium.main_on_command_ex(
+            CommandId::new(command_id),
+            0,
+            reaper_medium::ProjectContext::CurrentProject,
+        );
+        true
     }
 
     fn execute_action(&self, action_id: &str) -> ActionExecutionResult {

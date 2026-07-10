@@ -381,6 +381,22 @@ impl TestRunner {
             println!("  audiodriver: {audio_driver} (from FTS_AUDIO_DRIVER)");
         }
 
+        // Linux: force the audio system to Dummy audio for tests unless the
+        // caller overrides it. REAPER's ALSA backend routes through the
+        // PipeWire ALSA shim, and `snd_pcm_prepare` can block the MAIN THREAD
+        // forever inside pipewire's `loop_wait` (observed under test
+        // profiles). A blocked main thread never fires extension timers, so
+        // every main-thread RPC hangs and tests die with ConnectionClosed.
+        // Dummy audio (linux_audio_mode=2) keeps the main loop alive and no
+        // test needs a real device. Override with FTS_LINUX_AUDIO_MODE.
+        #[cfg(target_os = "linux")]
+        {
+            let mode = std::env::var("FTS_LINUX_AUDIO_MODE").unwrap_or_else(|_| "2".to_string());
+            let ini = reaper_launcher::ReaperIni::new(&reaper_ini);
+            let _ = ini.set("linux_audio_mode", &mode);
+            println!("  linux_audio_mode: {mode} (2 = Dummy audio; override with FTS_LINUX_AUDIO_MODE)");
+        }
+
         // Patch lastt in [verchk] to suppress version-check dialog
         let now_ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -552,8 +568,9 @@ impl TestRunner {
                     extra_prefix_args.join(" "),
                     reaper_args.join(" ")
                 );
-                cmd.spawn()
-                    .map_err(|e| format!("Failed to spawn via fts-test: {e}"))?
+                cmd.spawn().map_err(|e| {
+                    format!("Failed to spawn REAPER via fts-test launcher `{fts}` (exe `{effective_exe}`): {e}")
+                })?
             } else {
                 let mut cmd = Command::new(&effective_exe);
                 cmd.args(&extra_prefix_args);
@@ -565,8 +582,9 @@ impl TestRunner {
                     extra_prefix_args.join(" "),
                     reaper_args.join(" ")
                 );
-                cmd.spawn()
-                    .map_err(|e| format!("Failed to spawn REAPER: {e}"))?
+                cmd.spawn().map_err(|e| {
+                    format!("Failed to spawn REAPER binary `{effective_exe}`: {e} (set FTS_REAPER_EXECUTABLE or put `reaper` on PATH)")
+                })?
             }
         } else if !headless {
             // GUI mode with a real display: use the GUI REAPER (which has X11/GL in
@@ -583,8 +601,9 @@ impl TestRunner {
                     "  spawning: {env_bin} {gui_reaper_exe} {}",
                     reaper_args.join(" ")
                 );
-                cmd.spawn()
-                    .map_err(|e| format!("Failed to spawn via reaper-env: {e}"))?
+                cmd.spawn().map_err(|e| {
+                    format!("Failed to spawn REAPER via reaper-env `{env_bin}` (exe `{gui_reaper_exe}`): {e}")
+                })?
             } else {
                 // reaper-env not found — fall back to plain GUI REAPER with warning
                 println!("  WARNING: reaper-env not found; plugin GUIs may fail without FHS env");
@@ -593,8 +612,9 @@ impl TestRunner {
                 apply_env(&mut cmd);
                 cmd.stdout(reaper_log_file).stderr(reaper_log_stderr);
                 println!("  spawning: {gui_reaper_exe} {}", reaper_args.join(" "));
-                cmd.spawn()
-                    .map_err(|e| format!("Failed to spawn GUI REAPER: {e}"))?
+                cmd.spawn().map_err(|e| {
+                    format!("Failed to spawn GUI REAPER binary `{gui_reaper_exe}`: {e}")
+                })?
             }
         } else {
             // Headless with a display: use plain reaper (no GUI windows needed)
@@ -608,8 +628,9 @@ impl TestRunner {
                 extra_prefix_args.join(" "),
                 reaper_args.join(" ")
             );
-            cmd.spawn()
-                .map_err(|e| format!("Failed to spawn REAPER: {e}"))?
+            cmd.spawn().map_err(|e| {
+                format!("Failed to spawn REAPER binary `{effective_exe}`: {e} (set FTS_REAPER_EXECUTABLE or put `reaper` on PATH)")
+            })?
         };
 
         let pid = reaper_child.id();
