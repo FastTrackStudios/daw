@@ -724,7 +724,21 @@ pub fn register_action_main_thread(
         description,
         show_in_menu,
         toggleable,
-        move || notify_action_triggered(command_for_trigger.clone()),
+        move || {
+            // Fake-toggle state is host-managed so REAPER's UI (and
+            // execute_action's before/after report) updates synchronously
+            // on trigger; consumers handle the domain logic via the
+            // broadcast.
+            if toggleable {
+                let state = flip_toggle_state(&command_for_trigger);
+                write_shared_toggle_state(&command_for_trigger, state);
+                if let Some(cmd_id) = named_command_lookup(&command_for_trigger) {
+                    write_reaper_toggle_state(0, cmd_id, state);
+                }
+                debug!("Toggle state for '{}' -> {}", command_for_trigger, state);
+            }
+            notify_action_triggered(command_for_trigger.clone());
+        },
     )
 }
 
@@ -822,6 +836,15 @@ fn register_action_core(
     registered_actions()
         .lock_recoverable("action_registry")
         .insert(command_name.to_string(), id);
+    // Toggleable actions start with a recorded OFF state so
+    // `get_toggle_state` distinguishes "toggleable, currently off"
+    // (Some(false)) from "not toggleable" (None).
+    if toggleable {
+        toggle_states()
+            .lock_recoverable("action_registry")
+            .entry(command_name.to_string())
+            .or_insert(false);
+    }
     owned_actions().lock_recoverable("action_registry").insert(
         command_name.to_string(),
         OwnedAction {
@@ -852,11 +875,22 @@ pub fn unregister_action_main_thread(command_name: &str) -> bool {
             .medium_session()
             .plugin_register_remove_gaccel(handle);
     }
-    registered_actions()
+    let removed = registered_actions()
         .lock_recoverable("action_registry")
         .remove(command_name)
         .is_some()
-        || had_owned
+        || had_owned;
+    if removed {
+        // Clear any toggle state so a later re-register starts fresh.
+        toggle_states()
+            .lock_recoverable("action_registry")
+            .remove(command_name);
+        delete_shared_toggle_state(command_name);
+        menu_actions()
+            .lock_recoverable("action_registry")
+            .retain(|a| a.command_name != command_name);
+    }
+    removed
 }
 
 fn check_registered(command_id: u32, command_name: &str) -> DawResult<u32> {
@@ -987,11 +1021,12 @@ impl ActionRegistration for crate::Reaper {
     }
 
     fn unregister(&self, cmd_name: &str) -> DawResult<()> {
-        if unregister_action_threadsafe(cmd_name) {
-            Ok(())
-        } else {
-            Err(DawError::not_found("Action", cmd_name))
+        // Unregistering an unknown action is a no-op, not an error —
+        // callers use this for idempotent teardown.
+        if !unregister_action_threadsafe(cmd_name) {
+            debug!("unregister: '{cmd_name}' was not registered by us (no-op)");
         }
+        Ok(())
     }
 
     fn is_registered(&self, command_name: &str) -> bool {
@@ -1015,8 +1050,88 @@ impl ActionRegistration for crate::Reaper {
             .is_some_and(action_list_contains)
     }
 
-    fn list_actions(&self, _request: ActionListRequest) -> ActionListResponse {
-        ActionListResponse::default()
+    fn list_actions(&self, request: ActionListRequest) -> ActionListResponse {
+        // Runs on REAPER's main thread (ReaperMainThreadDispatcher).
+        let reaper = Reaper::get();
+        let medium = reaper.medium_reaper();
+        let registered = registered_actions()
+            .lock_recoverable("action_registry")
+            .clone();
+        let toggles = toggle_states().lock_recoverable("action_registry").clone();
+        let query = request.query.as_ref().map(|q| q.to_ascii_lowercase());
+        let limit = request.limit.unwrap_or(u32::MAX) as usize;
+        let (section_id, section_name) = action_section_label(request.section);
+        let mut actions = Vec::new();
+        let mut total_count = 0_u32;
+
+        let section = reaper.section_by_id(SectionId::new(section_id));
+        let _ = section.with_raw(|s| {
+            for i in 0..s.action_list_cnt() {
+                let Some(cmd) = s.get_action_by_index(i).map(|a| a.cmd()) else {
+                    continue;
+                };
+
+                let section_context = section_context_for(section_id, s);
+                let description = unsafe {
+                    medium.kbd_get_text_from_cmd(cmd, section_context, |name| name.to_string())
+                }
+                .unwrap_or_default();
+                let command_name =
+                    medium.reverse_named_command_lookup(cmd, |name| name.to_string());
+
+                let normalized = command_name.as_deref().map(normalize_command_name);
+                let registered_by_fts = normalized
+                    .is_some_and(|name| registered.contains_key(name))
+                    || registered.values().any(|id| *id == cmd.get());
+                let toggle_state = action_toggle_state(
+                    medium,
+                    section_id,
+                    section_context,
+                    cmd,
+                    command_name.as_deref(),
+                    &toggles,
+                );
+                let origin = if registered_by_fts {
+                    ActionOrigin::Fts
+                } else {
+                    classify_action(command_name.as_deref(), &description)
+                };
+                let (provider, provider_tags) = if registered_by_fts {
+                    ("fts".to_string(), vec!["fasttrackstudio".to_string()])
+                } else {
+                    action_provider(command_name.as_deref(), &description)
+                };
+
+                let info = ActionInfo {
+                    command_id: cmd.get(),
+                    section_id,
+                    section_name: section_name.clone(),
+                    command_name,
+                    description,
+                    origin,
+                    provider,
+                    provider_tags,
+                    registered_by_fts,
+                    toggle_state,
+                };
+
+                if action_matches_filter(&info, request.filter)
+                    && action_matches_query(&info, query.as_deref())
+                {
+                    if actions.len() >= limit {
+                        total_count += 1;
+                        continue;
+                    }
+                    actions.push(info);
+                    total_count += 1;
+                }
+            }
+        });
+
+        ActionListResponse {
+            total_count,
+            actions,
+        }
     }
 
     fn execute_command(&self, command_id: u32) {
@@ -1043,27 +1158,97 @@ impl ActionRegistration for crate::Reaper {
     }
 
     fn execute_action(&self, action_id: &str) -> ActionExecutionResult {
+        // Runs on REAPER's main thread (ReaperMainThreadDispatcher).
+        let medium = Reaper::get().medium_reaper();
+        let requested_action = action_id.to_string();
+
+        let command_id = if let Ok(id) = action_id.parse::<u32>() {
+            if id == 0 { None } else { Some(CommandId::new(id)) }
+        } else {
+            named_command_lookup(action_id)
+        };
+
+        let Some(command_id) = command_id else {
+            return ActionExecutionResult {
+                requested_action,
+                executed: false,
+                command_id: None,
+                command_name: None,
+                description: None,
+                origin: None,
+                provider: None,
+                provider_tags: Vec::new(),
+                registered_by_fts: false,
+                toggle_state_before: None,
+                toggle_state_after: None,
+            };
+        };
+
+        let before = find_action_info(command_id, ActionSection::Main);
+        execute_main_action(medium, command_id);
+        let after = find_action_info(command_id, ActionSection::Main);
+        let info = after.as_ref().or(before.as_ref());
+
         ActionExecutionResult {
-            requested_action: action_id.to_string(),
-            executed: false,
-            command_id: None,
-            command_name: None,
-            description: None,
-            origin: None,
-            provider: None,
-            provider_tags: Vec::new(),
-            registered_by_fts: false,
-            toggle_state_before: None,
-            toggle_state_after: None,
+            requested_action,
+            executed: true,
+            command_id: Some(command_id.get()),
+            command_name: info.and_then(|info| info.command_name.clone()),
+            description: info.map(|info| info.description.clone()),
+            origin: info.map(|info| info.origin),
+            provider: info.map(|info| info.provider.clone()),
+            provider_tags: info
+                .map(|info| info.provider_tags.clone())
+                .unwrap_or_default(),
+            registered_by_fts: info.is_some_and(|info| info.registered_by_fts),
+            toggle_state_before: before.and_then(|info| info.toggle_state),
+            toggle_state_after: after.and_then(|info| info.toggle_state),
         }
     }
 
     fn set_toggle_state(&self, command_name: &str, is_on: bool) {
-        toggle_states()
-            .lock_recoverable("action_registry")
-            .insert(normalize_command_name(command_name).to_string(), is_on);
-        write_shared_toggle_state(command_name, is_on);
+        // Only actions registered as TOGGLEABLE carry a toggle state —
+        // setting one on a plain action is a no-op (get_toggle_state
+        // keeps returning None). register_toggle seeds the map with
+        // false, so presence in the map IS the toggleability signal.
+        let normalized = normalize_command_name(command_name).to_string();
+        let was_known = {
+            let mut states = toggle_states().lock_recoverable("action_registry");
+            if states.contains_key(&normalized) {
+                states.insert(normalized, is_on);
+                true
+            } else {
+                false
+            }
+        };
 
+        if !was_known {
+            // Cross-process FTS actions (registered by another extension,
+            // visible via the shared toggle-state file) may still be
+            // toggled; anything else is ignored.
+            let Some(cmd_id) = named_command_lookup(command_name) else {
+                debug!("set_toggle_state: '{command_name}' unknown — ignored");
+                return;
+            };
+            let Some(info) = find_action_info(cmd_id, ActionSection::Main) else {
+                return;
+            };
+            if info.origin != ActionOrigin::Fts {
+                debug!("set_toggle_state: '{command_name}' not an FTS action — ignored");
+                return;
+            }
+            if info.toggle_state.is_none() && read_shared_toggle_state(command_name).is_none() {
+                debug!("set_toggle_state: '{command_name}' not toggleable — ignored");
+                return;
+            }
+            write_shared_toggle_state(command_name, is_on);
+            write_reaper_toggle_state(0, cmd_id, is_on);
+            return;
+        }
+
+        write_shared_toggle_state(command_name, is_on);
+        // Nudge REAPER to repaint toolbar/menu toggle indicators — it
+        // queries the toggleaction hook lazily on repaint.
         if let Some(command_id) = self.lookup_command_id(command_name) {
             write_reaper_toggle_state(0, CommandId::new(command_id), is_on);
         }

@@ -11,13 +11,13 @@ use daw::test::reaper_test;
 async fn summarize_project_returns_track_count(ctx: &ReaperTestContext) -> eyre::Result<()> {
     let dawfile = ctx.daw.dawfile();
 
-    // Use a known fixture from dawfile-reaper's resources directory.
+    // Use a known fixture from dawfile-reaper's resources directory
+    // (features/dawfile/dawfile-reaper in the monorepo layout).
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("dawfile-reaper")
-        .join("resources")
-        .join("Basic Template (Tracks Only) .RPP");
+        .join("../../dawfile/dawfile-reaper/resources")
+        .join("Basic Template (Tracks Only) .RPP")
+        .canonicalize()
+        .expect("dawfile-reaper fixture RPP should exist");
 
     let summary = dawfile
         .summarize_project(path.display().to_string())
