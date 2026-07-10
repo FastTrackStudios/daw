@@ -166,6 +166,60 @@ pub fn spawn(
     })
 }
 
+/// The systemd user unit `just rig-install` installs for an engine.
+fn systemd_unit(engine: &Engine) -> String {
+    format!("{}.service", engine.package)
+}
+
+/// Is the engine's systemd user unit installed on this machine?
+///
+/// When it is, prefer [`systemd_start`]/[`systemd_stop`] over [`spawn`]:
+/// the unit keeps crash supervision (Restart=always) while the caller
+/// stays the on/off switch — an explicit stop is final, systemd never
+/// restarts a manually stopped unit, and nothing starts at boot unless
+/// the unit is enabled (rig-install leaves it disabled).
+pub fn systemd_available(engine: &Engine) -> bool {
+    Command::new("systemctl")
+        .args(["--user", "cat", &systemd_unit(engine)])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Is the engine's systemd user unit currently active?
+pub fn systemd_active(engine: &Engine) -> bool {
+    Command::new("systemctl")
+        .args(["--user", "is-active", "--quiet", &systemd_unit(engine)])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn systemctl(verb: &str, engine: &Engine) -> io::Result<()> {
+    let unit = systemd_unit(engine);
+    let status = Command::new("systemctl")
+        .args(["--user", verb, &unit])
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("systemctl --user {verb} {unit}: {status}")))
+    }
+}
+
+/// Start the engine through its systemd user unit.
+pub fn systemd_start(engine: &Engine) -> io::Result<()> {
+    systemctl("start", engine)
+}
+
+/// Stop the engine's systemd user unit (final — no auto-restart).
+pub fn systemd_stop(engine: &Engine) -> io::Result<()> {
+    systemctl("stop", engine)
+}
+
 /// TCP probe: is something listening on the engine's default local port?
 pub fn probe(engine: &Engine) -> bool {
     probe_addr(engine.addr(), Duration::from_millis(300))
