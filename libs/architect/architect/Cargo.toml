@@ -90,6 +90,23 @@ schedule = ["platform"]
 # server/socket. Native only — vox's `MemoryLink` is `#[cfg(not(wasm))]`.
 local = ["vox", "dep:vox-core", "dep:tracing", "tokio/rt"]
 
+# iroh p2p transport (`architect::iroh_link`): serve/consume a vox
+# router over an iroh QUIC endpoint — same acceptor dance as `server-axum`,
+# but the "socket" is a bi-directional QUIC stream reachable by bare
+# EndpointId across networks (n0 relays + address lookup). The client
+# side (connect / IrohLink / iroh_link_source) also compiles on wasm32 —
+# browsers dial relay-only over WebSockets; serving is native only.
+# `tokio/rt` (not rt-multi-thread) so the wasm build stays legal; the
+# native server fns spawn onto whatever runtime the consumer provides.
+iroh = [
+    "vox",
+    "dep:iroh",
+    "tokio/rt",
+    "dep:tracing",
+    "dep:vox-core",
+    "dep:vox-types",
+]
+
 server-seaorm = ["dep:sea-orm", "dep:async-trait"]
 server-axum = [
     "dep:axum",
@@ -209,12 +226,20 @@ vox-core = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
 moire = { workspace = true, optional = true }
 
+# iroh p2p bundle. Only pulled by the `iroh` feature. Target-split
+# because iroh's defaults (portmapper etc.) don't build on wasm32: the
+# native side rides the workspace dep, the wasm side takes the same
+# version with defaults off + a TLS provider (relay-only in browsers).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+iroh = { workspace = true, optional = true }
+
 # Wasm-only platform deps. Browser timers (gloo-timers' `TimeoutFuture`
 # is a real async sleep backed by setTimeout) and `spawn_local` for the
 # `spawn` primitive. Both optional, pulled by the `platform` feature.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { version = "0.3", default-features = false, features = ["futures"], optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
+iroh = { version = "1", default-features = false, features = ["tls-ring"], optional = true }
 
 [dev-dependencies]
 futures-lite = "2"
@@ -223,8 +248,13 @@ futures-lite = "2"
 # server side. Same minimal dioxus profile as architect-atom.
 dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
 vox-core = { workspace = true }
+vox-types = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
 [[test]]
 name = "reconnect_supervisor"
 required-features = ["atom", "platform", "local"]
+
+[[test]]
+name = "iroh_link"
+required-features = ["iroh"]

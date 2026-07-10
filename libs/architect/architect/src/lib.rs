@@ -493,6 +493,13 @@ pub struct Filter {
 #[cfg(feature = "server-axum")]
 pub mod axum_ws;
 
+// iroh p2p transport — serve/consume a vox router over an iroh QUIC
+// endpoint, dialable by bare EndpointId across networks. Clients work
+// on both native and wasm (browsers dial relay-only); serving is
+// native only.
+#[cfg(feature = "iroh")]
+pub mod iroh_link;
+
 #[cfg(feature = "fake")]
 pub mod seed {
     //! Helpers for the architect-emitted `seed_fake_<entity>` functions.
