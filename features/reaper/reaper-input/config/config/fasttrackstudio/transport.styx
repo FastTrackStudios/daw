@@ -1,0 +1,9 @@
+bindings (
+    {keys "<space>",   action 40044,  desc "Play / Stop"}
+    {keys "<S-space>",   action 40073,  desc "Play / Pause"}
+    {keys "<C-S-space>", action 40317,  desc "Play (skip time selection)"}
+    {keys "<enter>",   action 40042,  desc "Go to start of project"}
+    {keys r,           action 1013,   desc "Toggle recording"}
+    {keys ",",         action 40172,  desc "Go to previous marker"}
+    {keys ".",         action 40173,  desc "Go to next marker"}
+)

@@ -1,6 +1,6 @@
 [package]
-name = "reaper-config"
-description = "Typed Rust mappings for REAPER configuration (reaper.ini preferences, extstate, etc.)"
+name = "reaper-kbd"
+description = "Parser and types for REAPER keyboard mapping (.kbd) files"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,9 +8,8 @@ license.workspace = true
 
 [dependencies]
 serde = { workspace = true }
-bitflags = { workspace = true }
 thiserror = { workspace = true }
-facet = { workspace = true }
+bitflags = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,0 +1,59 @@
+[package]
+name = "reaper-dioxus"
+version = "0.1.0"
+edition = "2024"
+description = "Dioxus-native overlay rendering for REAPER extensions"
+
+[dependencies]
+reaper-embed = { path = "../reaper-embed" }
+
+# DAW module system (for PanelDef type)
+daw.workspace = true
+
+# REAPER API access
+reaper-low.workspace = true
+reaper-medium.workspace = true
+reaper-high.workspace = true
+
+# Dioxus-native with blitz rendering
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = [
+    "prelude", "svg", "system-fonts", "autofocus", "incremental",
+] }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
+
+# Rendering pipeline
+anyrender_vello = "0.10"
+vello.workspace = true
+wgpu.workspace = true
+
+# Hot reload (enabled by default for dev, disable for release)
+dioxus-devtools = { version = "0.7", optional = true }
+
+# Event types for forwarding input to Blitz
+keyboard-types = "0.7"
+
+# Utilities
+futures-util = "0.3"
+crossbeam = "0.8"
+raw-window-handle = "0.6"
+tracing.workspace = true
+dioxus-embedded = { git = "https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git", branch = "main", features = ["dioxus-desktop"], optional = true }
+gtk = { version = "0.18", optional = true }
+
+[features]
+default = ["hot-reload"]
+hot-reload = ["dep:dioxus-devtools"]
+desktop-renderer = ["dep:dioxus-embedded", "dep:gtk"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+x11-dl = "2.21"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa.workspace = true
+objc.workspace = true
+
+[lints]
+workspace = true
