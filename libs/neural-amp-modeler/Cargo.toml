@@ -8,5 +8,8 @@ repository = "https://codeberg.org/FastTrackStudios/neural-amp-modeler-rs"
 keywords = ["audio", "dsp", "guitar", "amp-modeling", "neural-network"]
 categories = ["multimedia::audio", "external-ffi-bindings"]
 
+[dependencies]
+serde_json = { workspace = true }
+
 [build-dependencies]
 cc = "1"

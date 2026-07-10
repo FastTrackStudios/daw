@@ -1,6 +1,13 @@
 use std::path::PathBuf;
 
 fn main() {
+    // On wasm32 there is no C++ toolchain/stdlib; the crate uses the pure-Rust
+    // inference engine (src/pure) instead of the vendored C++ core.
+    let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    if target_arch == "wasm32" {
+        return;
+    }
+
     let nam_core = PathBuf::from("NeuralAmpModelerCore");
     let nam_src = nam_core.join("NAM");
     let deps = nam_core.join("Dependencies");

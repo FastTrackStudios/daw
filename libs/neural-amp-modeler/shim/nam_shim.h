@@ -24,6 +24,10 @@ typedef struct {
 /// Load a .nam model file from disk.
 NamLoadResult nam_load(const char* path);
 
+/// Load a .nam model from a NUL-terminated JSON string (the contents of a
+/// .nam file). No filesystem access.
+NamLoadResult nam_load_from_json(const char* json);
+
 /// Free a loaded model.
 void nam_free(NamModel* model);
 

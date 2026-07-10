@@ -40,6 +40,25 @@ NamLoadResult nam_load(const char* path) {
     return result;
 }
 
+NamLoadResult nam_load_from_json(const char* json) {
+    NamLoadResult result = {nullptr, nullptr};
+    try {
+        nlohmann::json j = nlohmann::json::parse(json);
+        auto dsp = nam::get_dsp(j);
+        if (!dsp) {
+            result.error = make_error("Failed to load NAM model (unknown error)");
+            return result;
+        }
+        auto* model = new NamModel{std::move(dsp)};
+        result.model = model;
+    } catch (const std::exception& e) {
+        result.error = make_error(std::string("Failed to load NAM model: ") + e.what());
+    } catch (...) {
+        result.error = make_error("Failed to load NAM model: unknown exception");
+    }
+    return result;
+}
+
 void nam_free(NamModel* model) {
     delete model;
 }
