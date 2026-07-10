@@ -74,7 +74,10 @@ impl Standalone {
     /// Resolve `(fx guid, slot)` against the live plugin instance.
     /// `None` when the FX has no loaded instance (synthetic FX).
     fn plugin_slot(&self, fx_guid: &str, slot: u32, stored: Option<f64>) -> Option<SlotInfo> {
-        let mut plugins = self.plugin_instances.lock().ok()?;
+        let mut plugins = self
+            .plugin_instances
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let plugin = plugins.get_mut(fx_guid)?;
         let info = plugin.params().into_iter().nth(slot as usize)?;
         let plain = stored
@@ -87,7 +90,10 @@ impl Standalone {
     /// Number of parameters the live instance exposes (`None` =
     /// synthetic FX).
     fn plugin_param_count(&self, fx_guid: &str) -> Option<u32> {
-        let mut plugins = self.plugin_instances.lock().ok()?;
+        let mut plugins = self
+            .plugin_instances
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let plugin = plugins.get_mut(fx_guid)?;
         Some(plugin.params().len() as u32)
     }
@@ -111,7 +117,10 @@ impl Standalone {
         fx_guid: &str,
         stored: &std::collections::HashMap<u32, f64>,
     ) -> Option<Vec<FxParameter>> {
-        let mut plugins = self.plugin_instances.lock().ok()?;
+        let mut plugins = self
+            .plugin_instances
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let plugin = plugins.get_mut(fx_guid)?;
         let infos = plugin.params();
         let mut out = Vec::with_capacity(infos.len());

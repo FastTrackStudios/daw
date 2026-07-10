@@ -242,6 +242,41 @@ pub fn link(src: &str, dst: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Outcome of an [`ensure_link`] pass over one port pair.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LinkStatus {
+    /// The link did not exist and was created.
+    Created,
+    /// The link already existed (`pw-link` reports "File exists").
+    Exists,
+    /// The link could not be made (port/node absent, PipeWire down, …).
+    Failed,
+}
+
+/// Idempotently link `src` → `dst`, reporting whether the link was newly
+/// created, already in place, or impossible. `pw-link` exits non-zero for
+/// both "already linked" and real failures, so stderr disambiguates — this
+/// is what lets a watchdog distinguish a healthy graph from a vanished
+/// device using the same cheap enumeration as [`link`].
+pub fn ensure_link(src: &str, dst: &str) -> LinkStatus {
+    let out = Command::new("pw-link")
+        .args([src, dst])
+        .stdout(Stdio::null())
+        .output();
+    match out {
+        Ok(o) if o.status.success() => LinkStatus::Created,
+        Ok(o) => {
+            let err = String::from_utf8_lossy(&o.stderr).to_lowercase();
+            if err.contains("exist") {
+                LinkStatus::Exists
+            } else {
+                LinkStatus::Failed
+            }
+        }
+        Err(_) => LinkStatus::Failed,
+    }
+}
+
 /// Path of the daw-managed WirePlumber drop-in. Named to sort *after* any
 /// hand-written `99-*` rule so the rig's chosen values win.
 fn device_rule_path() -> std::path::PathBuf {

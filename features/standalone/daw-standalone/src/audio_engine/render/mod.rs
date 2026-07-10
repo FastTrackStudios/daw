@@ -242,6 +242,11 @@ struct RenderScratch {
     /// Send-tap copies (only filled when a send actually taps there).
     pre_fx_tap: Vec<f32>,
     pre_fader_tap: Vec<f32>,
+    /// FX guids whose plugin panicked inside `process_block`/`prepare`.
+    /// Once here they are bypassed forever (this engine run) — a plugin
+    /// that panics once can't be trusted on the audio thread again.
+    /// Persists across blocks (never cleared by `reset`).
+    panicked_fx: std::collections::HashSet<String>,
 }
 
 impl RenderScratch {
@@ -374,7 +379,15 @@ impl ProjectRenderer {
             }
         };
 
-        let mut scratch = self.scratch.lock().expect("render scratch poisoned");
+        // Poison-tolerant lock: a control-thread panic while holding one of
+        // these mutexes must NOT take down the audio callback (a panic here
+        // unwinds across the extern "C" PipeWire boundary → abort → process
+        // death mid-song). The guarded state is plain buffers/maps — safe to
+        // keep using after another thread's panic.
+        let mut scratch = self
+            .scratch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         scratch.reset(n, frames, self.sample_rate);
         // Split-borrow every scratch field so the stages below can
         // hold disjoint &muts simultaneously.
@@ -388,6 +401,7 @@ impl ProjectRenderer {
             src,
             pre_fx_tap,
             pre_fader_tap,
+            panicked_fx,
         } = &mut *scratch;
 
         // 0) Live hardware input → per-track buses. Tracks whose
@@ -398,7 +412,10 @@ impl ProjectRenderer {
         // is installed or no track taps a channel.
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let mut live_guard = self.live_input.lock().expect("live input poisoned");
+            let mut live_guard = self
+                .live_input
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(live) = live_guard.as_mut() {
                 mix_live_input_into_buses(live, &snap.input_channels, passes, buses, dirty, frames);
             }
@@ -412,7 +429,10 @@ impl ProjectRenderer {
         // installed and when nothing was pushed this block.
         let mut live_midi_buckets: Vec<Vec<crate::plugin::PluginMidiEvent>> = Vec::new();
         {
-            let mut midi_guard = self.live_midi.lock().expect("live midi poisoned");
+            let mut midi_guard = self
+                .live_midi
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(queue) = midi_guard.as_mut()
                 && queue.cons.slots() > 0
             {
@@ -490,7 +510,7 @@ impl ProjectRenderer {
             .daw
             .plugin_instances
             .lock()
-            .expect("plugin_instances poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
 
         // 2–4) Per-track processing in topo order over the routing
         // graph (children before folder parents, senders before their
@@ -568,13 +588,29 @@ impl ProjectRenderer {
                     let Some(plugin) = plugins.get_mut(fx_guid) else {
                         continue; // synthetic / not loaded
                     };
+                    if panicked_fx.contains(fx_guid) {
+                        continue; // panicked earlier — permanently bypassed
+                    }
                     if !plugin.is_prepared() {
-                        // Lazy prepare on first use; bypass on failure.
-                        if plugin
-                            .prepare(self.sample_rate as f64, frames as u32)
-                            .is_err()
-                        {
-                            continue;
+                        // Lazy prepare on first use; bypass on failure. A
+                        // panicking plugin must not unwind out of the audio
+                        // callback (extern "C" boundary → abort), so it's
+                        // caught, logged once, and bypassed from then on.
+                        let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                            || plugin.prepare(self.sample_rate as f64, frames as u32),
+                        ));
+                        match prepared {
+                            Ok(Ok(())) => {}
+                            Ok(Err(_)) => continue,
+                            Err(_) => {
+                                panicked_fx.insert(fx_guid.clone());
+                                tracing::error!(
+                                    "plugin {fx_guid} PANICKED in prepare on track '{}' — \
+                                     bypassing it from now on",
+                                    t.name,
+                                );
+                                continue;
+                            }
                         }
                     }
                     // De-interleave → process → re-interleave.
@@ -591,11 +627,25 @@ impl ProjectRenderer {
                         midi: &midi_events,
                         note_expressions: &note_expr_events,
                     };
-                    if plugin
-                        .process_block(in_l, in_r, out_l, out_r, &events)
-                        .is_err()
-                    {
-                        continue;
+                    // catch_unwind so a panicking third-party plugin bypasses
+                    // (bus keeps its pre-plugin signal — pass-through) instead
+                    // of unwinding across the extern "C" audio callback and
+                    // aborting mid-song. No allocation on the happy path.
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        plugin.process_block(in_l, in_r, out_l, out_r, &events)
+                    }));
+                    match result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(_)) => continue,
+                        Err(_) => {
+                            panicked_fx.insert(fx_guid.clone());
+                            tracing::error!(
+                                "plugin {fx_guid} PANICKED in process_block on track '{}' — \
+                                 bypassing it from now on",
+                                t.name,
+                            );
+                            continue;
+                        }
                     }
                     for f in 0..frames {
                         bus.samples[f * 2] = out_l[f];
@@ -1201,5 +1251,69 @@ mod live_midi_tests {
         let offsets: Vec<u32> = midi_events.iter().map(|e| e.offset).collect();
         assert_eq!(offsets, vec![0, 0, 128, 256]);
         assert!(bucket.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod poison_recovery_tests {
+    use super::*;
+
+    /// A control-thread panic while holding `plugin_instances` (or a
+    /// renderer-internal mutex) must not cascade: the next audio block's
+    /// lock recovers the poisoned mutex instead of panicking inside the
+    /// extern "C" audio callback (which would abort the process).
+    #[test]
+    fn render_survives_poisoned_plugin_instances() {
+        let daw = Standalone::new();
+        let guid = daw.seed_project(daw_proto::ProjectInfo {
+            guid: "p".into(),
+            name: "p".into(),
+            path: String::new(),
+        });
+
+        // Poison the shared map: panic on another thread while holding it.
+        let map = daw.plugin_instances.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = map.lock().unwrap();
+            panic!("poison plugin_instances");
+        })
+        .join();
+        assert!(
+            daw.plugin_instances.lock().is_err(),
+            "mutex should be poisoned"
+        );
+
+        // Control seams recover in place of panicking…
+        assert!(!daw.has_plugin_instance("nope"));
+        assert!(daw.with_plugin_instance("nope", |_| ()).is_none());
+
+        // …and the render path (which takes the same lock every block)
+        // keeps producing blocks.
+        let renderer = ProjectRenderer::new(&daw, &guid, 48_000);
+        let out = renderer.render_block(0, 128);
+        assert_eq!(out.frames, 128);
+    }
+
+    /// The renderer's own scratch mutex also recovers from poison.
+    #[test]
+    fn render_survives_poisoned_scratch() {
+        let daw = Standalone::new();
+        let guid = daw.seed_project(daw_proto::ProjectInfo {
+            guid: "p".into(),
+            name: "p".into(),
+            path: String::new(),
+        });
+        let renderer = std::sync::Arc::new(ProjectRenderer::new(&daw, &guid, 48_000));
+
+        let r = renderer.clone();
+        let _ = std::thread::spawn(move || {
+            let _guard = r.scratch.lock().unwrap();
+            panic!("poison render scratch");
+        })
+        .join();
+        assert!(renderer.scratch.lock().is_err(), "mutex should be poisoned");
+
+        let out = renderer.render_block(0, 256);
+        assert_eq!(out.frames, 256);
     }
 }

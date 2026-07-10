@@ -268,7 +268,7 @@ impl Effects for Standalone {
         if let Some(plugin) = real_plugin {
             self.plugin_instances
                 .lock()
-                .expect("plugin_instances poisoned")
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .insert(new_guid.clone(), plugin);
         }
         let added = self
@@ -333,7 +333,7 @@ impl Effects for Standalone {
         // Drop any loaded plugin instance backing this FX entry.
         self.plugin_instances
             .lock()
-            .expect("plugin_instances poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&removed_guid);
         self.publish_fx_event(
             &guid,
@@ -502,7 +502,7 @@ impl Effects for Standalone {
             let mut plugins = self
                 .plugin_instances
                 .lock()
-                .expect("plugin_instances poisoned");
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(plugin) = plugins.get_mut(&fx_guid) {
                 plugin
                     .open_gui()
@@ -516,7 +516,7 @@ impl Effects for Standalone {
             let mut plugins = self
                 .plugin_instances
                 .lock()
-                .expect("plugin_instances poisoned");
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(plugin) = plugins.get_mut(&fx_guid) {
                 plugin
                     .close_gui()
@@ -716,7 +716,10 @@ impl Effects for Standalone {
     }
     fn latency(&self, project: ProjectContext, target: FxTarget) -> Option<FxLatency> {
         if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
-            let mut plugins = self.plugin_instances.lock().ok()?;
+            let mut plugins = self
+            .plugin_instances
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(plugin) = plugins.get_mut(&fx_guid) {
                 let samples = plugin.latency() as i32;
                 return Some(FxLatency {

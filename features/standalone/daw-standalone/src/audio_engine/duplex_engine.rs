@@ -11,6 +11,7 @@
 //! The renderer — FX chains, plugins, routing, metering — is reused unchanged.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use daw_audio_io::duplex::{Backend, DuplexBackend, DuplexConfig, EngineStats, ProcessBlock};
@@ -31,6 +32,14 @@ pub struct DuplexAudioEngine {
     _renderer: Arc<ProjectRenderer>,
     stats: Arc<EngineStats>,
     sample_rate: u32,
+    /// Tells the link watchdog thread to exit (set on drop).
+    linker_stop: Arc<AtomicBool>,
+}
+
+impl Drop for DuplexAudioEngine {
+    fn drop(&mut self) {
+        self.linker_stop.store(true, Ordering::Relaxed);
+    }
 }
 
 /// Live phones-bus levels — a process-wide handle the host app writes
@@ -178,7 +187,9 @@ impl DuplexAudioEngine {
 
         // Wire the duplex node to the hardware (a DSP filter isn't auto-linked).
         // Async + retried: the node's ports take a beat to appear in the graph.
-        spawn_linker(prefs.clone(), in_channels);
+        // The thread then stays alive as a re-link watchdog for device loss.
+        let linker_stop = Arc::new(AtomicBool::new(false));
+        spawn_linker(prefs.clone(), in_channels, linker_stop.clone(), stats.clone());
 
         Ok(Self {
             shared,
@@ -186,6 +197,7 @@ impl DuplexAudioEngine {
             _renderer: renderer,
             stats,
             sample_rate,
+            linker_stop,
         })
     }
 
@@ -216,9 +228,91 @@ fn max_armed_channel(daw: &Standalone, project_guid: &str) -> Option<usize> {
     .flatten()
 }
 
-/// Link the hardware device's capture/playback ports to the duplex node, on a
-/// background thread that retries until the node's ports appear (best-effort).
-fn spawn_linker(prefs: AudioIoPrefs, in_channels: usize) {
+/// One watchdog pass over every expected hardware↔duplex link.
+#[derive(Default)]
+struct LinkPass {
+    /// Expected links whose device node is currently in the graph.
+    live: usize,
+    /// Links newly created this pass (0 on a healthy steady-state pass).
+    created: usize,
+    /// Total expected links (0 only when no device is configured).
+    total: usize,
+}
+
+/// Idempotently (re-)establish every expected link for this engine's device
+/// prefs. `Exists` = healthy, `Created` = it was missing and came back (device
+/// re-enumerated / first appearance), `Failed` = the port is gone.
+fn link_pass(input: Option<&str>, output: Option<&str>, in_channels: usize) -> LinkPass {
+    use daw_audio_io::pw::LinkStatus;
+    fn run(pass: &mut LinkPass, src: &str, dst: &str) {
+        pass.total += 1;
+        match pw::ensure_link(src, dst) {
+            LinkStatus::Created => {
+                pass.created += 1;
+                pass.live += 1;
+            }
+            LinkStatus::Exists => pass.live += 1,
+            LinkStatus::Failed => {}
+        }
+    }
+    let mut pass = LinkPass::default();
+    if let Some(name) = input {
+        if let Some(dev) = pw::device_node_name(name, true) {
+            for c in 0..in_channels {
+                run(
+                    &mut pass,
+                    &format!("{dev}:capture_{}", c + 1),
+                    &format!("{NODE_NAME}:input_{c}"),
+                );
+            }
+        } else {
+            pass.total += in_channels; // device node absent — all its links count as down
+        }
+    }
+    if let Some(name) = output {
+        if let Some(dev) = pw::device_node_name(name, false) {
+            run(
+                &mut pass,
+                &format!("{NODE_NAME}:output_0"),
+                &format!("{dev}:playback_1"),
+            );
+            run(
+                &mut pass,
+                &format!("{NODE_NAME}:output_1"),
+                &format!("{dev}:playback_2"),
+            );
+        } else {
+            pass.total += 2;
+        }
+    }
+    pass
+}
+
+/// Link the hardware device's capture/playback ports to the duplex node, and
+/// keep them linked: after the initial (fast-retried) linking pass the thread
+/// stays alive as a watchdog, re-running the idempotent link pass every
+/// [`WATCH_INTERVAL`] so a device that drops and re-enumerates (USB interface
+/// power blip, cable re-seat) is re-linked automatically instead of leaving
+/// the engine "running" into a disconnected graph. Exits when `stop` is set
+/// (the owning [`DuplexAudioEngine`] sets it on drop).
+fn spawn_linker(
+    prefs: AudioIoPrefs,
+    in_channels: usize,
+    stop: Arc<AtomicBool>,
+    stats: Arc<EngineStats>,
+) {
+    const WATCH_INTERVAL: Duration = Duration::from_millis(1500);
+    /// Startup cadence, until the duplex node's own ports appear in the graph.
+    const STARTUP_INTERVAL: Duration = Duration::from_millis(100);
+    /// Re-linking hardware ports can't heal a filter whose own PipeWire
+    /// connection died (daemon restart) — the node is gone from the new
+    /// graph. Once the filter has streamed, this many consecutive
+    /// error/unconnected passes (~10 s) means only a process restart can
+    /// reconnect: crash-only, the service manager brings it back in ~1 s.
+    const DEAD_CONNECTION_PASSES: u32 = 7;
+    /// `pw_filter_state`: -1 = error, 0 = unconnected, 3 = streaming.
+    const STATE_STREAMING: i32 = 3;
+
     let input = prefs.input_name().map(str::to_string);
     // Default output to the input interface (a guitar rig monitors through the
     // same device) when no explicit output device is set.
@@ -226,34 +320,84 @@ fn spawn_linker(prefs: AudioIoPrefs, in_channels: usize) {
         .output_name()
         .or(prefs.input_name())
         .map(str::to_string);
+    if input.is_none() && output.is_none() {
+        return; // nothing to link or watch
+    }
     std::thread::spawn(move || {
-        for _ in 0..20 {
-            std::thread::sleep(Duration::from_millis(100));
-            let mut any = false;
-            if let Some(dev) = input.as_deref().and_then(|n| pw::device_node_name(n, true)) {
-                for c in 0..in_channels {
-                    any |= pw::link(
-                        &format!("{dev}:capture_{}", c + 1),
-                        &format!("{NODE_NAME}:input_{c}"),
+        let mut was_linked = false;
+        let mut ever_linked = false;
+        let mut startup_retries = 20u32;
+        let mut ever_streamed = false;
+        let mut dead_passes = 0u32;
+        loop {
+            // Sleep in short slices so drop tears the thread down promptly.
+            let interval = if was_linked || startup_retries == 0 {
+                WATCH_INTERVAL
+            } else {
+                startup_retries -= 1;
+                STARTUP_INTERVAL
+            };
+            let mut slept = Duration::ZERO;
+            while slept < interval {
+                if stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                let slice = Duration::from_millis(100).min(interval - slept);
+                std::thread::sleep(slice);
+                slept += slice;
+            }
+
+            let state = stats.stream_state.load(Ordering::Relaxed);
+            if state == STATE_STREAMING {
+                ever_streamed = true;
+                dead_passes = 0;
+            } else if ever_streamed && state <= 0 {
+                dead_passes += 1;
+                if dead_passes >= DEAD_CONNECTION_PASSES {
+                    tracing::error!(
+                        "duplex linker: PipeWire connection dead for {dead_passes} passes \
+                         (filter state {state}) — exiting for a supervised restart",
+                    );
+                    std::process::exit(70);
+                }
+            } else {
+                dead_passes = 0;
+            }
+
+            let pass = link_pass(input.as_deref(), output.as_deref(), in_channels);
+            let now_linked = pass.live == pass.total;
+            if now_linked && !was_linked {
+                if ever_linked {
+                    tracing::warn!(
+                        "duplex linker: AUDIO DEVICE RE-LINKED ({}/{} links up)",
+                        pass.live,
+                        pass.total,
+                    );
+                } else {
+                    tracing::info!(
+                        "duplex linker: audio device linked ({}/{} links up)",
+                        pass.live,
+                        pass.total,
                     );
                 }
-            }
-            if let Some(dev) = output
-                .as_deref()
-                .and_then(|n| pw::device_node_name(n, false))
-            {
-                any |= pw::link(
-                    &format!("{NODE_NAME}:output_0"),
-                    &format!("{dev}:playback_1"),
+                ever_linked = true;
+            } else if !now_linked && was_linked {
+                tracing::error!(
+                    "duplex linker: AUDIO DEVICE LOST ({}/{} links up; input={:?} output={:?}) — \
+                     watching for it to return",
+                    pass.live,
+                    pass.total,
+                    input,
+                    output,
                 );
-                any |= pw::link(
-                    &format!("{NODE_NAME}:output_1"),
-                    &format!("{dev}:playback_2"),
+            } else if pass.created > 0 && was_linked {
+                // Partial re-link within one poll interval (fast re-enumerate).
+                tracing::warn!(
+                    "duplex linker: re-linked {} audio port(s) after device change",
+                    pass.created,
                 );
             }
-            if any {
-                break; // linked something — done
-            }
+            was_linked = now_linked;
         }
     });
 }

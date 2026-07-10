@@ -426,6 +426,13 @@ pub struct Standalone {
     /// `ProjectState.fx_chains` (which carries proto-serializable
     /// `FxEntry` metadata only) so the renderer can `lock()` plugins
     /// independently of project state mutations.
+    ///
+    /// Locks on this mutex are poison-TOLERANT everywhere
+    /// (`unwrap_or_else(PoisonError::into_inner)`): the audio callback takes
+    /// it every block, and a control-thread panic while holding it must not
+    /// cascade into a panic inside the extern "C" audio callback (which would
+    /// abort the process). The guarded map stays structurally valid across a
+    /// panic — worst case one entry holds a half-updated plugin state.
     pub(crate) plugin_instances:
         Arc<Mutex<std::collections::HashMap<String, Box<dyn crate::plugin::PluginInstance>>>>,
     /// Plugin binaries that have been explicitly loaded/validated via
@@ -661,7 +668,7 @@ impl Standalone {
     pub fn has_plugin_instance(&self, fx_guid: &str) -> bool {
         self.plugin_instances
             .lock()
-            .expect("plugin_instances poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .contains_key(fx_guid)
     }
 
@@ -680,7 +687,7 @@ impl Standalone {
     ) -> Option<Box<dyn crate::plugin::PluginInstance>> {
         self.plugin_instances
             .lock()
-            .expect("plugin_instances poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(fx_guid.into(), instance)
     }
 
@@ -784,7 +791,7 @@ impl Standalone {
         let mut plugins = self
             .plugin_instances
             .lock()
-            .expect("plugin_instances poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         plugins.get_mut(fx_guid).map(|p| f(p.as_mut()))
     }
 
@@ -796,7 +803,7 @@ impl Standalone {
     ) -> Option<Box<dyn crate::plugin::PluginInstance>> {
         self.plugin_instances
             .lock()
-            .expect("plugin_instances poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(fx_guid)
     }
 
@@ -806,7 +813,7 @@ impl Standalone {
     pub fn plugin_is_prepared(&self, fx_guid: &str) -> bool {
         self.plugin_instances
             .lock()
-            .expect("plugin_instances poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(fx_guid)
             .map(|p| p.is_prepared())
             .unwrap_or(false)
@@ -828,7 +835,7 @@ impl Standalone {
         let mut plugins = self
             .plugin_instances
             .lock()
-            .expect("plugin_instances poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match plugins.get_mut(fx_guid) {
             Some(p) => p.load_state(state),
             None => Err(crate::plugin::PluginError::LoadFailed(format!(
@@ -843,7 +850,7 @@ impl Standalone {
         let mut plugins = self
             .plugin_instances
             .lock()
-            .expect("plugin_instances poisoned");
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match plugins.get_mut(fx_guid) {
             Some(p) => p.save_state(),
             None => Err(crate::plugin::PluginError::LoadFailed(format!(

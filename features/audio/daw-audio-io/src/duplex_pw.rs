@@ -34,6 +34,9 @@ struct DuplexState {
     sink: Vec<f32>,
     process: ProcessFn,
     stats: Arc<EngineStats>,
+    /// Last seen `spa_io_clock.xrun` (accumulated xrun duration) — a rise
+    /// means the graph reported an xrun since the previous block.
+    last_xrun: u64,
 }
 
 unsafe extern "C" fn on_process(data: *mut c_void, position: *mut spa::spa_io_position) {
@@ -47,6 +50,13 @@ unsafe extern "C" fn on_process(data: *mut c_void, position: *mut spa::spa_io_po
         let n = (*position).clock.duration as usize;
         st.stats.calls.fetch_add(1, Ordering::Relaxed);
         st.stats.block_frames.store(n as u32, Ordering::Relaxed);
+        // Xrun accounting: the graph accumulates xrun duration in the position
+        // clock; count each block where it advanced.
+        let xrun = (*position).clock.xrun;
+        if xrun > st.last_xrun {
+            st.stats.xruns.fetch_add(1, Ordering::Relaxed);
+        }
+        st.last_xrun = xrun;
         if n == 0 {
             return;
         }
@@ -98,6 +108,43 @@ unsafe extern "C" fn on_process(data: *mut c_void, position: *mut spa::spa_io_po
     } // unsafe
 }
 
+unsafe extern "C" fn on_state_changed(
+    data: *mut c_void,
+    old: pw::pw_filter_state,
+    state: pw::pw_filter_state,
+    error: *const std::os::raw::c_char,
+) {
+    // SAFETY: same user-data contract as `on_process`; fires on the
+    // pw_thread_loop thread (not the RT data thread), so logging is fine.
+    unsafe {
+        let st = &*(data as *const DuplexState);
+        st.stats.stream_state.store(state, Ordering::Relaxed);
+        let name = |s: pw::pw_filter_state| -> &'static str {
+            let p = pw::pw_filter_state_as_string(s);
+            if p.is_null() {
+                "?"
+            } else {
+                CStr::from_ptr(p).to_str().unwrap_or("?")
+            }
+        };
+        let err = if error.is_null() {
+            None
+        } else {
+            Some(CStr::from_ptr(error).to_string_lossy())
+        };
+        if state == pw::pw_filter_state_PW_FILTER_STATE_ERROR {
+            tracing::error!(
+                "duplex filter state {} -> {} (error: {})",
+                name(old),
+                name(state),
+                err.as_deref().unwrap_or("unknown"),
+            );
+        } else {
+            tracing::warn!("duplex filter state {} -> {}", name(old), name(state));
+        }
+    }
+}
+
 /// A live native-PipeWire duplex node.
 pub struct PipewireBackend {
     thread_loop: *mut pw::pw_thread_loop,
@@ -137,6 +184,7 @@ impl DuplexBackend for PipewireBackend {
             sink: vec![0.0; 4096],
             process,
             stats: stats.clone(),
+            last_xrun: 0,
         });
 
         unsafe {
@@ -224,6 +272,7 @@ impl DuplexBackend for PipewireBackend {
             let mut events: Box<pw::pw_filter_events> = Box::new(std::mem::zeroed());
             events.version = pw::PW_VERSION_FILTER_EVENTS;
             events.process = Some(on_process);
+            events.state_changed = Some(on_state_changed);
             let mut listener: Box<spa::spa_hook> = Box::new(std::mem::zeroed());
             let state_ptr = (&mut *state) as *mut DuplexState as *mut c_void;
             pw::pw_filter_add_listener(filter, &mut *listener, &*events, state_ptr);

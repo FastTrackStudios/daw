@@ -18,7 +18,7 @@
 //! `process` closure — identical on every platform; only the backend differs.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 
 /// What the backend opens: channel counts + the desired block size.
 #[derive(Clone, Debug)]
@@ -61,6 +61,11 @@ pub struct EngineStats {
     pub peak_render_ns: AtomicU64,
     /// Blocks where the graph reported an xrun.
     pub xruns: AtomicU64,
+    /// Last backend stream/filter state code (backend-specific; on the
+    /// PipeWire backend this is `pw_filter_state`, where `-1` = error,
+    /// `3` = streaming). Written by the backend's state listener; owners
+    /// can poll it to detect a dead/errored stream while `calls` stalls.
+    pub stream_state: AtomicI32,
 }
 
 impl EngineStats {
