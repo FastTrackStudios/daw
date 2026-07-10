@@ -15,7 +15,6 @@
 //!    ~1152 sample latency, highest quality monophonic.
 
 pub mod allpass_shift;
-#[cfg(feature = "signalsmith")]
 pub mod chain;
 pub mod divider;
 pub mod granular;
@@ -24,6 +23,4 @@ pub mod pog;
 pub mod psola;
 #[cfg(feature = "rubberband")]
 pub mod rubberband;
-#[cfg(feature = "signalsmith")]
-pub mod signalsmith;
 pub mod wsola;

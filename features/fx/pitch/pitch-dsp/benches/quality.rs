@@ -40,7 +40,6 @@ const TEST_ALGOS: &[(Algorithm, &str)] = &[
     (Algorithm::Granular, "granular"),
     (Algorithm::Psola, "psola"),
     (Algorithm::Wsola, "wsola"),
-    (Algorithm::Signalsmith, "signalsmith"),
     (Algorithm::Allpass, "allpass"),
 ];
 
@@ -786,7 +785,6 @@ fn main() {
 
     let algo_order = [
         "RUBBERBAND*",
-        "signalsmith",
         "allpass",
         "granular",
         "psola",
@@ -877,11 +875,11 @@ fn main() {
     // === Speed vs Quality tradeoff summary ===
     println!();
     println!("=== Speed vs Quality Tradeoff ===");
-    println!("  (from throughput bench: allpass=550x, signalsmith=150x, granular=400x,");
+    println!("  (from throughput bench: allpass=550x, granular=400x,");
     println!("   psola=48x, wsola=110x, rubberband=39x)");
     println!();
 
-    for name in &["allpass", "signalsmith", "granular", "psola", "wsola"] {
+    for name in &["allpass", "granular", "psola", "wsola"] {
         let results: Vec<&QualityResult> = all
             .iter()
             .filter(|r| r.algo_name == *name && r.si_sdr_db.is_finite())

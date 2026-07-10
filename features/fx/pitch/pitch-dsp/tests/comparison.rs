@@ -23,13 +23,12 @@ const BLOCK_SIZE: usize = 512;
 const WARMUP_BLOCKS: usize = 10;
 const DURATION_S: f64 = 2.0;
 
-const ALL_ALGORITHMS: [Algorithm; 8] = [
+const ALL_ALGORITHMS: [Algorithm; 7] = [
     Algorithm::FreqDivider,
     Algorithm::Pll,
     Algorithm::Granular,
     Algorithm::Psola,
     Algorithm::Wsola,
-    Algorithm::Signalsmith,
     Algorithm::Rubberband,
     Algorithm::Allpass,
 ];
@@ -294,7 +293,6 @@ fn algo_name(algo: Algorithm) -> &'static str {
         Algorithm::Granular => "granular",
         Algorithm::Psola => "psola",
         Algorithm::Wsola => "wsola",
-        Algorithm::Signalsmith => "signalsmith",
         Algorithm::Rubberband => "rubberband",
         Algorithm::Allpass => "allpass",
         Algorithm::PolyOctave => "polyoctave",

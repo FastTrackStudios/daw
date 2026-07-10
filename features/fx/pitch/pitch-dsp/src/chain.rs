@@ -15,7 +15,6 @@ use crate::pog::{OctaveShift, PolyOctave};
 use crate::psola::PsolaShifter;
 #[cfg(feature = "rubberband")]
 use crate::rubberband::RubberbandShifter;
-use crate::signalsmith::SignalsmithShifter;
 use crate::wsola::WsolaShifter;
 
 /// Which pitch shifting algorithm to use.
@@ -38,9 +37,6 @@ pub enum Algorithm {
     /// WSOLA waveform-similarity overlap-add. ~1024 sample latency.
     /// Works on any signal (monophonic or polyphonic) without pitch detection.
     Wsola,
-    /// Signalsmith Stretch — high-quality FFT-based spectral pitch shifter.
-    /// Clean, polyphonic-capable. ~256+ sample latency.
-    Signalsmith,
     /// Rubber Band Library — professional pitch shifter with formant preservation.
     /// High quality, ~512+ sample latency.
     Rubberband,
@@ -75,7 +71,7 @@ pub struct PitchChain {
     pub live: bool,
     /// Formant shift in semitones. Range: −24.0 to +24.0.
     /// 0 = no shift. Only affects algorithms that support formant control
-    /// (Rubberband, Signalsmith).
+    /// (Rubberband).
     pub formant_semitones: f64,
     /// When true, formant shift is linked to pitch (formants stay in place).
     /// When false, formant_semitones is applied independently.
@@ -94,7 +90,6 @@ pub struct PitchChain {
     granular: GranularShifter,
     psola: PsolaShifter,
     wsola: WsolaShifter,
-    signalsmith: SignalsmithShifter,
     #[cfg(feature = "rubberband")]
     rubberband: RubberbandShifter,
     allpass: AllpassShifter,
@@ -121,7 +116,6 @@ impl PitchChain {
             granular: GranularShifter::new(),
             psola: PsolaShifter::new(),
             wsola: WsolaShifter::new(),
-            signalsmith: SignalsmithShifter::new(),
             #[cfg(feature = "rubberband")]
             rubberband: RubberbandShifter::new(),
             allpass: AllpassShifter::new(),
@@ -139,11 +133,10 @@ impl PitchChain {
             Algorithm::Granular => self.granular.latency(),
             Algorithm::Psola => self.psola.latency(),
             Algorithm::Wsola => self.wsola.latency(),
-            Algorithm::Signalsmith => self.signalsmith.latency(),
             #[cfg(feature = "rubberband")]
             Algorithm::Rubberband => self.rubberband.latency(),
             #[cfg(not(feature = "rubberband"))]
-            Algorithm::Rubberband => self.signalsmith.latency(),
+            Algorithm::Rubberband => self.wsola.latency(),
             Algorithm::Allpass => self.allpass.latency(),
             Algorithm::PolyOctave => self.pog.latency(),
         }
@@ -172,9 +165,6 @@ impl PitchChain {
             // WSOLA: smaller grains in live mode.
             self.wsola.base_grain_size = if self.live { 256 } else { 1024 };
 
-            // Signalsmith: cheaper preset + smaller blocks.
-            self.signalsmith.live = self.live;
-
             // Rubberband: R2 engine + smaller blocks.
             #[cfg(feature = "rubberband")]
             {
@@ -188,7 +178,6 @@ impl PitchChain {
             let sr = self.sample_rate;
             self.psola.update(sr);
             self.wsola.update(sr);
-            self.signalsmith.update(sr);
             #[cfg(feature = "rubberband")]
             self.rubberband.update(sr);
             self.allpass.update(sr);
@@ -241,11 +230,6 @@ impl PitchChain {
         };
         let _formant_ratio = semitones_to_ratio(effective_formant_st);
 
-        // Signalsmith: arbitrary ratio + formant control.
-        self.signalsmith.speed = ratio;
-        self.signalsmith.mix = self.mix;
-        // formant_semitones and formant_compensate_pitch not yet exposed on SignalsmithShifter.
-
         // Rubberband: arbitrary ratio + formant control.
         #[cfg(feature = "rubberband")]
         {
@@ -278,7 +262,6 @@ impl Processor for PitchChain {
         self.granular.reset();
         self.psola.reset();
         self.wsola.reset();
-        self.signalsmith.reset();
         #[cfg(feature = "rubberband")]
         self.rubberband.reset();
         self.allpass.reset();
@@ -292,7 +275,6 @@ impl Processor for PitchChain {
         self.granular.update(config.sample_rate);
         self.psola.update(config.sample_rate);
         self.wsola.update(config.sample_rate);
-        self.signalsmith.update(config.sample_rate);
         #[cfg(feature = "rubberband")]
         self.rubberband.update(config.sample_rate);
         self.allpass.update(config.sample_rate);
@@ -328,13 +310,8 @@ impl Processor for PitchChain {
                     *s = self.wsola.tick(*s);
                 }
             }
-            Algorithm::Signalsmith => {
-                for s in left.iter_mut() {
-                    *s = self.signalsmith.tick(*s);
-                }
-            }
             // Without the `rubberband` system library, Rubberband falls
-            // back to Signalsmith (closest arbitrary-ratio quality).
+            // back to WSOLA (closest arbitrary-ratio pure-Rust quality).
             #[cfg(feature = "rubberband")]
             Algorithm::Rubberband => {
                 for s in left.iter_mut() {
@@ -344,7 +321,7 @@ impl Processor for PitchChain {
             #[cfg(not(feature = "rubberband"))]
             Algorithm::Rubberband => {
                 for s in left.iter_mut() {
-                    *s = self.signalsmith.tick(*s);
+                    *s = self.wsola.tick(*s);
                 }
             }
             Algorithm::Allpass => {
@@ -373,7 +350,6 @@ mod tests {
             Algorithm::Granular,
             Algorithm::Psola,
             Algorithm::Wsola,
-            Algorithm::Signalsmith,
             Algorithm::Allpass,
             Algorithm::PolyOctave,
         ];

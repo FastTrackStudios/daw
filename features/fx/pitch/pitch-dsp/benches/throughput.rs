@@ -196,7 +196,6 @@ fn main() {
         (Algorithm::Granular, "granular", -7.0),
         (Algorithm::Psola, "psola", -7.0),
         (Algorithm::Wsola, "wsola", -7.0),
-        (Algorithm::Signalsmith, "signalsmith", -7.0),
         (Algorithm::Rubberband, "rubberband", -7.0),
         (Algorithm::Allpass, "allpass", -7.0),
     ];
