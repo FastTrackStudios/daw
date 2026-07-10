@@ -155,7 +155,8 @@ pub fn spawn(
             // Cargo.toml is reachable from the cwd (or CARGO_MANIFEST_DIR
             // is set) — cargo itself will error clearly otherwise.
             let mut c = Command::new("cargo");
-            c.arg("run").arg("-p").arg(engine.package);
+            // Audio engines always run optimized — a debug rig xruns.
+            c.arg("run").arg("--release").arg("-p").arg(engine.package);
             if !engine.args.is_empty() || !args.is_empty() {
                 c.arg("--").args(engine.args).args(args);
             }
