@@ -7,7 +7,7 @@ pub mod icon_gen;
 pub mod plan;
 pub mod profiles;
 pub mod progress;
-pub(crate) mod retry;
+pub mod retry;
 pub mod runner;
 pub mod steps;
 
