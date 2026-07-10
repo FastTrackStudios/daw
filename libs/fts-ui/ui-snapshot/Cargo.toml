@@ -1,7 +1,7 @@
 [package]
 name = "ui-snapshot"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 description = "Headless rendering + fuzzy PNG diffing for fts-ui components (Blitz regression gate)"
 
 [[bin]]
@@ -9,30 +9,30 @@ name = "ui-snapshot"
 path = "src/main.rs"
 
 [dependencies]
-# Dioxus VDom + Blitz DOM/paint stack. Versions are pinned by the workspace
-# [patch] on the FastTrackStudios/blitz fork (see fts-extensions/Cargo.toml).
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = ["prelude"] }
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
+# Dioxus VDom + Blitz DOM/paint stack — workspace-pinned blitz rev (one
+# blitz tree-wide).
+dioxus-native.workspace = true
+blitz-dom.workspace = true
+blitz-paint.workspace = true
+blitz-traits.workspace = true
 
 # Deterministic (CPU) image rendering — no GPU dependency, reproducible
 # pixel output across machines.
 anyrender = "0.11"
-anyrender_vello_cpu = "0.14"
-peniko = "0.6"
-kurbo = "0.13"
+anyrender_vello_cpu.workspace = true
+peniko.workspace = true
+kurbo.workspace = true
 
 # Component under test + dioxus for VirtualDom driving.
 fts-ui = { workspace = true }
-dioxus = "0.7"
+dioxus.workspace = true
 
 # Image IO + fuzzy pixel diffing (same lib Blitz's WPT runner uses).
-png = "0.17"
-image = { version = "0.25", default-features = false, features = ["png"] }
-dify = "0.8"
+png.workspace = true
+image.workspace = true
+dify.workspace = true
 
-clap = { version = "4", features = ["derive"] }
+clap.workspace = true
 
 [lints]
 workspace = true

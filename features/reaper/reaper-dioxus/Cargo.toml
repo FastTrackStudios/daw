@@ -15,21 +15,20 @@ reaper-low.workspace = true
 reaper-medium.workspace = true
 reaper-high.workspace = true
 
-# Dioxus-native with blitz rendering
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = [
-    "prelude", "svg", "system-fonts", "autofocus", "incremental",
-] }
-blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
+# Dioxus-native with blitz rendering — workspace-pinned rev (one blitz
+# tree-wide; `links = servo_style_crate` forbids a second rev).
+dioxus-native.workspace = true
+blitz-dom.workspace = true
+blitz-paint.workspace = true
+blitz-traits.workspace = true
 
 # Rendering pipeline
-anyrender_vello = "0.10"
+anyrender_vello.workspace = true
 vello.workspace = true
 wgpu.workspace = true
 
 # Hot reload (enabled by default for dev, disable for release)
-dioxus-devtools = { version = "0.7", optional = true }
+dioxus-devtools = { workspace = true, optional = true }
 
 # Event types for forwarding input to Blitz
 keyboard-types = "0.7"
@@ -39,13 +38,13 @@ futures-util = "0.3"
 crossbeam = "0.8"
 raw-window-handle = "0.6"
 tracing.workspace = true
-dioxus-embedded = { git = "https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git", branch = "main", features = ["dioxus-desktop"], optional = true }
-gtk = { version = "0.18", optional = true }
+# The upstream `desktop-renderer` feature (dioxus-embedded + gtk) is
+# dropped in the vendored copy: it hung off dioxus-embedded.git (dead
+# starcommand URL) and nothing in-tree consumes it.
 
 [features]
 default = ["hot-reload"]
 hot-reload = ["dep:dioxus-devtools"]
-desktop-renderer = ["dep:dioxus-embedded", "dep:gtk"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

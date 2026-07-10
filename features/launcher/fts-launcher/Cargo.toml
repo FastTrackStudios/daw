@@ -1,19 +1,7 @@
-[workspace]
-members = ["xtask"]
-
-# Stylistic clippy lints allowed during stabilization (same policy as daw/fts-ui):
-# they're churn, not bugs. Tighten in a later cleanup sweep.
-[workspace.lints.clippy]
-field_reassign_with_default = "allow"
-redundant_closure = "allow"
-nonminimal_bool = "allow"
-clone_on_copy = "allow"
-useless_vec = "allow"
-
 [package]
 name = "fts-launcher"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
 license = "MIT"
 description = "FastTrackStudios launcher for Reaper — audio production workflow launcher"
 repository = "https://codeberg.org/FastTrackStudios/fts-launcher"
@@ -34,68 +22,35 @@ desktop = []
 standalone = ["native", "dep:winit", "dep:tracing-subscriber"]
 
 [dependencies]
-# Core launcher engine and UI — always included. Git deps (not local paths)
-# so the repo resolves on a clean CI runner; uncomment the [patch] block at
-# the bottom for local cross-repo development.
+# Core launcher engine and UI. STILL GIT DEPS on dioxus-launcher.git —
+# the launcher-core/launcher-ui/providers crates live in that repo and
+# are not vendored yet (flagged in HANDOFF; note launcher-ui carries its
+# own git fts-ui, a second fts-ui instance beside the in-tree one).
 launcher-core = { git = "https://codeberg.org/FastTrackStudios/dioxus-launcher.git", branch = "main" }
 launcher-ui = { git = "https://codeberg.org/FastTrackStudios/dioxus-launcher.git", branch = "main", default-features = false }
 providers = { git = "https://codeberg.org/FastTrackStudios/dioxus-launcher.git", branch = "main" }
-fts-ui = { git = "https://codeberg.org/FastTrackStudios/fts-ui.git", branch = "main" }
+fts-ui = { workspace = true }
 
-# Dioxus native renderer (Blitz)
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = ["prelude"] }
+# Dioxus native renderer (Blitz) — workspace-pinned rev (one blitz tree-wide)
+dioxus-native = { workspace = true }
 
 # DAW API (safe Rust, async, generic)
-daw = { git = "https://codeberg.org/FastTrackStudios/daw.git", branch = "main" }
-reaper-high = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+daw = { workspace = true }
+reaper-high = { workspace = true }
+reaper-medium = { workspace = true }
 
 # Standalone binary deps (optional)
 winit = { version = "=0.31.0-beta.2", optional = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+tracing-subscriber = { workspace = true, optional = true }
 
 # Serialization
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-facet = "0.50.0-rc.1"
-# 5.0 pairs with facet 0.50 (same pairing as daw / the fts `input` repo).
-facet-styx = "5.0.0-rc.1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+facet = { workspace = true }
+facet-styx = { workspace = true }
 
 # Logging
-tracing = "0.1"
+tracing = { workspace = true }
 
 [lints]
 workspace = true
-
-# moire (daw's NixOS fork patch) is intentionally NOT replicated here: with
-# daw's `test-harness` feature off, no crate in this graph pulls moire, and
-# cargo warns on unused patches. If a daw feature that uses moire is ever
-# enabled, mirror daw's [patch] blocks (codeberg.org/FastTrackStudios/moire
-# rev 7a2f1dc for both the bearcove-git and crates-io sources).
-
-# dioxus: fts-launcher pulls daw with `native` (reaper-ui) → daw-reaper-dioxus
-# → patched dioxus. Mirrors daw's pin: upstream DioxusLabs v0.7.9 (3e43ffa6)
-# to match the `dx` CLI (the old codywright fork 32d9f51 is dead).
-[patch.crates-io]
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus" }
-dioxus-asset-resolver = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-asset-resolver" }
-dioxus-cli-config = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-cli-config" }
-dioxus-config-macros = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-config-macros" }
-dioxus-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-core" }
-dioxus-core-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-core-macro" }
-dioxus-core-types = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-core-types" }
-dioxus-devtools = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-devtools" }
-dioxus-devtools-types = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-devtools-types" }
-dioxus-document = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-document" }
-dioxus-history = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-history" }
-dioxus-hooks = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-hooks" }
-dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-html" }
-dioxus-html-internal-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-html-internal-macro" }
-dioxus-rsx = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-rsx" }
-dioxus-signals = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-signals" }
-dioxus-stores = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-stores" }
-dioxus-stores-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "dioxus-stores-macro" }
-generational-box = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "generational-box" }
-manganis = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "manganis" }
-manganis-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "manganis-core" }
-manganis-macro = { git = "https://github.com/DioxusLabs/dioxus", rev = "3e43ffa6cf1488d5388c888eb5f2494a006ae6de", package = "manganis-macro" }
