@@ -27,15 +27,24 @@ use midicore_proto::{Direction, MidiEvent, PortId, PortInfo, PortSelector, RawSh
 
 const CLIENT: &str = "midicore-midir";
 
-/// List the names of all available MIDI input ports.
+/// List the names of all available MIDI input ports (sorted; our own
+/// clients excluded).
 pub fn input_ports() -> Vec<String> {
     let Ok(midi) = MidirInput::new(&format!("{CLIENT}-enum")) else {
         return Vec::new();
     };
-    midi.ports()
+    let mut ports: Vec<String> = midi
+        .ports()
         .iter()
         .filter_map(|p| midi.port_name(p).ok())
-        .collect()
+        // Our own clients (open streams, virtual ports) appear in the
+        // enumeration; including them makes hot-plug "did the ports
+        // change?" scans observe their own reopens — a feedback loop
+        // that leaks an ALSA seq client per scan until queue exhaustion.
+        .filter(|name| !name.contains(CLIENT))
+        .collect();
+    ports.sort();
+    ports
 }
 
 /// List available MIDI input ports as [`PortInfo`] records (id = port name).
@@ -104,6 +113,10 @@ impl MidiInput {
                 let mut opened = Vec::new();
                 for port in &ports {
                     let name = midi.port_name(port).unwrap_or_else(|_| "unknown".into());
+                    // Never open our own clients (see input_ports).
+                    if name.contains(CLIENT) {
+                        continue;
+                    }
                     // Each connection consumes its own MidirInput handle.
                     let Ok(handle) = MidirInput::new(CLIENT) else { continue };
                     match connect_port(handle, port, &name, sink.clone()) {
