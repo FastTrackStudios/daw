@@ -3,6 +3,7 @@
 #include "nam_shim.h"
 #include "../NeuralAmpModelerCore/NAM/get_dsp.h"
 #include "../NeuralAmpModelerCore/NAM/dsp.h"
+#include "../NeuralAmpModelerCore/NAM/slimmable.h"
 
 #include <cstring>
 #include <memory>
@@ -134,6 +135,18 @@ int nam_has_output_level(const NamModel* model) {
 double nam_get_output_level(const NamModel* model) {
     if (!model || !model->dsp) return 0.0;
     return const_cast<nam::DSP*>(model->dsp.get())->GetOutputLevel();
+}
+
+int nam_set_slimmable_size(NamModel* model, double val) {
+    if (!model || !model->dsp) return 0;
+    auto* slimmable = dynamic_cast<nam::SlimmableModel*>(model->dsp.get());
+    if (!slimmable) return 0;
+    try {
+        slimmable->SetSlimmableSize(val);
+        return 1;
+    } catch (...) {
+        return 0;
+    }
 }
 
 } // extern "C"

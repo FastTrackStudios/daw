@@ -7,10 +7,11 @@
 //! this engine backs `NamModel` on wasm and is validated against the C++
 //! output by the crate's parity tests.
 //!
-//! Supported architectures: `WaveNet` (legacy 0.5.x and modern 0.7.x
-//! configs), `LSTM`, and `SlimmableContainer` (runs the full-size submodel).
-//! Models using active FiLM, blended gating, condition DSPs, or slimmable
-//! channel slicing return a descriptive load error.
+//! Supported architectures: `WaveNet` (legacy 0.5.x, modern 0.7.x, and the
+//! full A2 surface — FiLM, head1x1, GATED/BLENDED/NONE gating, nested
+//! condition DSPs, and slimmable channel slicing), `LSTM`, and
+//! `SlimmableContainer`. Slimmable models default to full size; use
+//! [`PureNamModel::set_slimmable_size`] to select a reduced size.
 
 mod activations;
 mod lstm;
@@ -24,23 +25,27 @@ const DEFAULT_MAX_BUFFER_SIZE: usize = 4096;
 
 enum Dsp {
     WaveNet(wavenet::WaveNet),
+    SlimmableWaveNet(Box<wavenet::SlimmableWaveNet>),
     Lstm(lstm::Lstm),
-    /// Submodels sorted by ascending max_value; the last (full-size) one is
-    /// active, matching ContainerModel's default.
-    Container(Vec<(f64, Box<Dsp>)>),
+    /// Submodels sorted by ascending max_value; `active` defaults to the
+    /// last (full-size) one, matching ContainerModel's default.
+    Container {
+        subs: Vec<(f64, Box<Dsp>)>,
+        active: usize,
+    },
 }
 
 impl Dsp {
     fn active(&mut self) -> &mut Dsp {
         match self {
-            Dsp::Container(subs) => subs.last_mut().expect("non-empty").1.active(),
+            Dsp::Container { subs, active } => subs[*active].1.active(),
             other => other,
         }
     }
 
     fn active_ref(&self) -> &Dsp {
         match self {
-            Dsp::Container(subs) => subs.last().expect("non-empty").1.active_ref(),
+            Dsp::Container { subs, active } => subs[*active].1.active_ref(),
             other => other,
         }
     }
@@ -48,40 +53,75 @@ impl Dsp {
     fn in_channels(&self) -> usize {
         match self.active_ref() {
             Dsp::WaveNet(w) => w.in_channels(),
+            Dsp::SlimmableWaveNet(s) => s.current.in_channels(),
             Dsp::Lstm(l) => l.in_channels(),
-            Dsp::Container(_) => unreachable!(),
+            Dsp::Container { .. } => unreachable!(),
         }
     }
 
     fn out_channels(&self) -> usize {
         match self.active_ref() {
             Dsp::WaveNet(w) => w.out_channels(),
+            Dsp::SlimmableWaveNet(s) => s.current.out_channels(),
             Dsp::Lstm(l) => l.out_channels(),
-            Dsp::Container(_) => unreachable!(),
+            Dsp::Container { .. } => unreachable!(),
         }
     }
 
     fn prewarm_samples(&self) -> usize {
         match self.active_ref() {
             Dsp::WaveNet(w) => w.prewarm_samples(),
+            Dsp::SlimmableWaveNet(s) => s.current.prewarm_samples(),
             Dsp::Lstm(l) => l.prewarm_samples(),
-            Dsp::Container(_) => unreachable!(),
+            Dsp::Container { .. } => unreachable!(),
         }
     }
 
     fn set_max_buffer_size(&mut self, max_frames: usize) {
         match self.active() {
             Dsp::WaveNet(w) => w.set_max_buffer_size(max_frames),
+            Dsp::SlimmableWaveNet(s) => s.current.set_max_buffer_size(max_frames),
             Dsp::Lstm(l) => l.reset_state(),
-            Dsp::Container(_) => unreachable!(),
+            Dsp::Container { .. } => unreachable!(),
         }
     }
 
     fn process_block(&mut self, input: &[f64], output: &mut [f64]) {
         match self.active() {
             Dsp::WaveNet(w) => w.process_block(input, output),
+            Dsp::SlimmableWaveNet(s) => s.current.process_block(input, output),
             Dsp::Lstm(l) => l.process_block(input, output),
-            Dsp::Container(_) => unreachable!(),
+            Dsp::Container { .. } => unreachable!(),
+        }
+    }
+
+    /// Whether this model supports [`Dsp::set_slimmable_size`].
+    fn is_slimmable(&self) -> bool {
+        matches!(self, Dsp::Container { .. } | Dsp::SlimmableWaveNet(_))
+    }
+
+    /// Select the model size for a ratio in [0, 1]. Returns true when the
+    /// active model changed (the caller must reset/prewarm before the next
+    /// process call). Mirrors `SlimmableModel::SetSlimmableSize`:
+    /// containers pick the first submodel with `val < max_value`; slimmable
+    /// WaveNets rebuild with a sliced channel subset.
+    fn set_slimmable_size(&mut self, val: f64) -> bool {
+        match self {
+            Dsp::Container { subs, active } => {
+                let idx = subs
+                    .iter()
+                    .position(|(max_value, _)| val < *max_value)
+                    .unwrap_or(subs.len() - 1);
+                let changed = idx != *active;
+                *active = idx;
+                changed
+            }
+            Dsp::SlimmableWaveNet(s) => {
+                // Extraction constraints were validated at load time, so
+                // this cannot fail; keep the previous model if it ever does.
+                s.set_slimmable_size(val).unwrap_or(false)
+            }
+            _ => false,
         }
     }
 }
@@ -201,16 +241,34 @@ impl PureNamModel {
 
     pub fn input_channels(&self) -> usize {
         match &self.dsp {
-            Dsp::Container(_) => 1,
+            Dsp::Container { .. } => 1,
             d => d.in_channels(),
         }
     }
 
     pub fn output_channels(&self) -> usize {
         match &self.dsp {
-            Dsp::Container(_) => 1,
+            Dsp::Container { .. } => 1,
             d => d.out_channels(),
         }
+    }
+
+    /// Select the slimmable size for models that support dynamic size
+    /// reduction (`SlimmableContainer` and slimmable WaveNets): `val` in
+    /// [0.0, 1.0], where 1.0 is full size (the default). Mirrors the C++
+    /// `SlimmableModel::SetSlimmableSize`. Returns true if the model is
+    /// slimmable, false for ordinary models (no-op).
+    ///
+    /// When the selection changes, the model is reset (and prewarmed) with
+    /// its current sample rate / buffer size before the next process call.
+    pub fn set_slimmable_size(&mut self, val: f64) -> bool {
+        let supported = self.dsp.is_slimmable();
+        let changed = self.dsp.set_slimmable_size(val);
+        if changed && self.max_buffer_size > 0 {
+            let max_buffer_size = self.max_buffer_size;
+            self.reset(self.expected_sample_rate.unwrap_or(-1.0), max_buffer_size);
+        }
+        supported
     }
 }
 
@@ -226,7 +284,13 @@ fn build_dsp(value: &Value) -> Result<Dsp, String> {
     match architecture {
         "WaveNet" => {
             let weights = parse_weights(value)?;
-            Ok(Dsp::WaveNet(wavenet::parse(config, &weights)?))
+            if wavenet::config_is_slimmable(config)? {
+                Ok(Dsp::SlimmableWaveNet(Box::new(wavenet::parse_slimmable(
+                    config, &weights,
+                )?)))
+            } else {
+                Ok(Dsp::WaveNet(wavenet::parse(config, &weights)?))
+            }
         }
         "LSTM" => {
             let weights = parse_weights(value)?;
@@ -263,7 +327,9 @@ fn build_dsp(value: &Value) -> Result<Dsp, String> {
                     .ok_or("SlimmableContainer submodel missing model")?;
                 subs.push((max_value, Box::new(build_dsp(model)?)));
             }
-            Ok(Dsp::Container(subs))
+            // Default to full size (last submodel), matching ContainerModel.
+            let active = subs.len() - 1;
+            Ok(Dsp::Container { subs, active })
         }
         other => Err(format!(
             "unsupported architecture for the pure-Rust engine: {other}"
@@ -271,7 +337,7 @@ fn build_dsp(value: &Value) -> Result<Dsp, String> {
     }
 }
 
-fn parse_weights(value: &Value) -> Result<Vec<f32>, String> {
+pub(crate) fn parse_weights(value: &Value) -> Result<Vec<f32>, String> {
     let arr = value
         .get("weights")
         .and_then(|v| v.as_array())

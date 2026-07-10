@@ -81,6 +81,7 @@ mod ffi {
         pub fn nam_get_input_level(model: *const NamModel) -> c_double;
         pub fn nam_has_output_level(model: *const NamModel) -> c_int;
         pub fn nam_get_output_level(model: *const NamModel) -> c_double;
+        pub fn nam_set_slimmable_size(model: *mut NamModel, val: c_double) -> c_int;
     }
 }
 
@@ -235,6 +236,16 @@ impl NamModel {
             output_channels: self.output_channels(),
         }
     }
+
+    /// Select the slimmable size for models that support dynamic size
+    /// reduction (`SlimmableContainer` and slimmable WaveNets): `val` in
+    /// [0.0, 1.0], where 1.0 is full size (the default). Returns `true`
+    /// if the model is slimmable, `false` for ordinary models (no-op).
+    /// Not real-time safe; the new size takes effect on the next
+    /// `process()` call.
+    pub fn set_slimmable_size(&mut self, val: f64) -> bool {
+        unsafe { ffi::nam_set_slimmable_size(self.ptr, val) != 0 }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -338,6 +349,14 @@ impl NamModel {
             input_channels: self.input_channels(),
             output_channels: self.output_channels(),
         }
+    }
+
+    /// Select the slimmable size for models that support dynamic size
+    /// reduction (`SlimmableContainer` and slimmable WaveNets): `val` in
+    /// [0.0, 1.0], where 1.0 is full size (the default). Returns `true`
+    /// if the model is slimmable, `false` for ordinary models (no-op).
+    pub fn set_slimmable_size(&mut self, val: f64) -> bool {
+        self.inner.set_slimmable_size(val)
     }
 }
 

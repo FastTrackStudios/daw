@@ -69,6 +69,13 @@ int nam_has_output_level(const NamModel* model);
 /// Get the output level in dBu (only valid if nam_has_output_level returns 1).
 double nam_get_output_level(const NamModel* model);
 
+/// Select the slimmable size for models supporting dynamic size reduction
+/// (SlimmableContainer / slimmable WaveNet): val in [0.0, 1.0], 1.0 = full
+/// size. Returns 1 if the model is slimmable and the size was set, 0
+/// otherwise. Not real-time safe; the new size takes effect on the next
+/// process call.
+int nam_set_slimmable_size(NamModel* model, double val);
+
 #ifdef __cplusplus
 }
 #endif
