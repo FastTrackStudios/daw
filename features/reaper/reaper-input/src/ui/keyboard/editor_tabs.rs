@@ -444,6 +444,8 @@ fn AddWheelForm(sections: Vec<String>, on_added: EventHandler<()>) -> Element {
                             horizontal: (*horizontal.read()).then_some(true),
                             desc: { let d = desc.read().clone(); (!d.is_empty()).then_some(d) },
                             context: None,
+            mnemonic: None,
+            why: None,
                         });
                         if ed.save_and_reload().is_ok() {
                             modifiers.set(String::new());

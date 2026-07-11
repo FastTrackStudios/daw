@@ -271,6 +271,8 @@ mod tests {
             desc: Some("Save".into()),
             context: None,
             passthrough: None,
+            mnemonic: None,
+            why: None,
         }]);
         assert!(
             host.write_section("test".into(), "bindings".into(), section)

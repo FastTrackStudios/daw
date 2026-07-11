@@ -121,6 +121,8 @@ impl WorkflowCreator {
                             },
                             context: None,
                             passthrough: None,
+            mnemonic: None,
+            why: None,
                         })
                         .collect(),
                 )

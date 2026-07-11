@@ -89,6 +89,17 @@ pub struct KeybindDef {
     /// this binding run in the main section even from an editor.
     #[facet(skip_serializing_if = Option::is_none)]
     pub passthrough: Option<bool>,
+
+    /// Short memory hook for the mapping, e.g. `"S for Save"`,
+    /// `"R like Record"`. Rendered inline in references/tutorials.
+    #[facet(skip_serializing_if = Option::is_none)]
+    pub mnemonic: Option<String>,
+
+    /// The reasoning behind this mapping — why THIS key: design intent,
+    /// what it mirrors from other DAWs, ergonomics. Longer-form than
+    /// `mnemonic`; shown as expandable detail in references/tutorials.
+    #[facet(skip_serializing_if = Option::is_none)]
+    pub why: Option<String>,
 }
 
 /// A which-key prefix tree loaded from a section file.
@@ -150,6 +161,14 @@ pub struct WheelBindDef {
     /// Context where active. `None` = Global.
     #[facet(skip_serializing_if = Option::is_none)]
     pub context: Option<KeybindContext>,
+
+    /// Short memory hook for the mapping.
+    #[facet(skip_serializing_if = Option::is_none)]
+    pub mnemonic: Option<String>,
+
+    /// The reasoning behind this mapping.
+    #[facet(skip_serializing_if = Option::is_none)]
+    pub why: Option<String>,
 }
 
 /// A single mouse click/drag modifier binding.
@@ -167,6 +186,14 @@ pub struct MouseBindDef {
     /// Human-readable description.
     #[facet(skip_serializing_if = Option::is_none)]
     pub desc: Option<String>,
+
+    /// Short memory hook for the mapping.
+    #[facet(skip_serializing_if = Option::is_none)]
+    pub mnemonic: Option<String>,
+
+    /// The reasoning behind this mapping.
+    #[facet(skip_serializing_if = Option::is_none)]
+    pub why: Option<String>,
 }
 
 /// A single REAPER mouse modifier setting (for the MouseModifierManager).
