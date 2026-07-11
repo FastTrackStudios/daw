@@ -424,6 +424,31 @@ impl Tracks for Standalone {
         Ok(())
     }
 
+    // Track-group slots are a REAPER concept; standalone has no equivalent,
+    // so these are no-ops (naming/membership) and "no free slot" (query).
+    fn set_group_name(&self, _project: ProjectContext, _slot: u32, _name: &str) -> DawResult<()> {
+        Ok(())
+    }
+
+    fn first_free_group_slot(
+        &self,
+        _project: ProjectContext,
+        _band_start: u32,
+        _band_end: u32,
+    ) -> Option<u32> {
+        None
+    }
+
+    fn set_group_membership(
+        &self,
+        _project: ProjectContext,
+        _track: TrackRef,
+        _slot: u32,
+        _member: bool,
+    ) -> DawResult<()> {
+        Ok(())
+    }
+
     fn set_selected(
         &self,
         project: ProjectContext,

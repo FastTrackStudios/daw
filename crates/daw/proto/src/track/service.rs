@@ -88,6 +88,35 @@ pub trait Tracks {
         inverted: bool,
     ) -> DawResult<()>;
 
+    // ── Track groups ────────────────────────────────────────────────
+    //
+    // The DAW's fixed set of track-group slots (REAPER: 128, addressed
+    // 1-based). A slot bundles the flag families (volume/mute/solo/…) so
+    // members move together.
+
+    /// Set the display name of track-group `slot` (1-based).
+    fn set_group_name(&self, project: ProjectContext, slot: u32, name: &str) -> DawResult<()>;
+
+    /// First slot in `[band_start, band_end]` (inclusive, 1-based) that no
+    /// track belongs to, or `None` if the band is full.
+    fn first_free_group_slot(
+        &self,
+        project: ProjectContext,
+        band_start: u32,
+        band_end: u32,
+    ) -> Option<u32>;
+
+    /// Add or remove `track` from track-group `slot` as a *mutual* member —
+    /// every flag family, both lead and follow — so any member's
+    /// mute/solo/volume/etc. moves the whole group equally.
+    fn set_group_membership(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        slot: u32,
+        member: bool,
+    ) -> DawResult<()>;
+
     // ── Selection ───────────────────────────────────────────────────
 
     fn set_selected(

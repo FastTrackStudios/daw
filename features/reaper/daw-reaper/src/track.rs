@@ -427,6 +427,28 @@ fn not_found_track() -> DawError {
     DawError::not_found("Track", "")
 }
 
+/// REAPER track-group flag families. A "mutual" group member sets every
+/// family's `_LEAD` and `_FOLLOW` bit so the whole group moves together.
+const GROUP_FLAG_FAMILIES: &[&str] = &[
+    "MEDIA_EDIT",
+    "VOLUME",
+    "VOLUME_VCA",
+    "PAN",
+    "WIDTH",
+    "MUTE",
+    "SOLO",
+    "RECARM",
+    "POLARITY",
+    "AUTOMODE",
+];
+
+/// `GetSetTrackGroupMembershipEx` window offset + bit for a 1-based slot.
+/// REAPER addresses the 128 slots as four 32-bit windows.
+fn group_slot_window(slot: u32) -> (i32, u32) {
+    let idx = slot - 1;
+    (((idx / 32) * 32) as i32, 1u32 << (idx % 32))
+}
+
 impl Tracks for crate::Reaper {
     fn all(&self, project: ProjectContext) -> Vec<Track> {
         let Some(proj) = resolve_project(&project) else {
@@ -606,6 +628,88 @@ impl Tracks for crate::Reaper {
         let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
         let val = reaper_medium::ReaperPanValue::new_panic(pan.clamp(-1.0, 1.0));
         let _ = t.set_pan_smart(val, Default::default());
+        Ok(())
+    }
+
+    fn set_group_name(&self, project: ProjectContext, slot: u32, name: &str) -> DawResult<()> {
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let low = ReaperHigh::get().medium_reaper().low();
+        let desc = std::ffi::CString::new(format!("TRACK_GROUP_NAME:{slot}"))
+            .map_err(|e| DawError::operation_failed(format!("bad slot desc: {e}")))?;
+        let value = std::ffi::CString::new(name)
+            .map_err(|e| DawError::operation_failed(format!("bad group name: {e}")))?;
+        let mut buf = value.into_bytes_with_nul();
+        let ok = unsafe {
+            low.GetSetProjectInfo_String(
+                proj.raw().as_ptr(),
+                desc.as_ptr(),
+                buf.as_mut_ptr() as *mut std::os::raw::c_char,
+                true, // is_set
+            )
+        };
+        if ok {
+            Ok(())
+        } else {
+            Err(DawError::operation_failed(format!(
+                "set TRACK_GROUP_NAME:{slot} failed"
+            )))
+        }
+    }
+
+    fn first_free_group_slot(
+        &self,
+        project: ProjectContext,
+        band_start: u32,
+        band_end: u32,
+    ) -> Option<u32> {
+        let proj = resolve_project(&project)?;
+        let low = ReaperHigh::get().medium_reaper().low();
+        // A slot is "in use" if any track carries its VCA-lead bit.
+        let probe = std::ffi::CString::new("VOLUME_VCA_LEAD").ok()?;
+        let tracks: Vec<_> = proj.tracks().filter_map(|t| t.raw().ok()).collect();
+        'slots: for slot in band_start..=band_end {
+            let (offset, mask) = group_slot_window(slot);
+            for t in &tracks {
+                let state = unsafe {
+                    low.GetSetTrackGroupMembershipEx(t.as_ptr(), probe.as_ptr(), offset, 0, 0)
+                };
+                if state & mask != 0 {
+                    continue 'slots;
+                }
+            }
+            return Some(slot);
+        }
+        None
+    }
+
+    fn set_group_membership(
+        &self,
+        project: ProjectContext,
+        track: TrackRef,
+        slot: u32,
+        member: bool,
+    ) -> DawResult<()> {
+        let proj = resolve_project(&project).ok_or_else(not_found_proj)?;
+        let t = resolve_track(&proj, &track).ok_or_else(not_found_track)?;
+        let raw = t.raw().map_err(|_| not_found_track())?;
+        let low = ReaperHigh::get().medium_reaper().low();
+        let (offset, mask) = group_slot_window(slot);
+        let value = if member { mask } else { 0 };
+        for fam in GROUP_FLAG_FAMILIES {
+            for suffix in ["_LEAD", "_FOLLOW"] {
+                if let Ok(name) = std::ffi::CString::new(format!("{fam}{suffix}")) {
+                    unsafe {
+                        low.GetSetTrackGroupMembershipEx(
+                            raw.as_ptr(),
+                            name.as_ptr(),
+                            offset,
+                            mask,
+                            value,
+                        );
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
