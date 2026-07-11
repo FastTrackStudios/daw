@@ -473,7 +473,10 @@ impl TestRunner {
             reaper_exe.clone()
         };
         let reaper_ini = self.resources_dir.join("reaper.ini");
-        let reaper_log = PathBuf::from("/tmp/fts-daw-reaper.log");
+        // Inside the rig, not a fixed /tmp name: /tmp/fts-daw-reaper.log
+        // left behind by one user is unwritable for the next (CI runs as
+        // gitea-runner on the same host as dev runs).
+        let reaper_log = self.resources_dir.join("fts-daw-reaper.log");
 
         let reaper_args: Vec<String> = vec![
             "-cfgfile".into(),
@@ -861,7 +864,7 @@ impl RunningReaper {
     pub fn report_failure(&self, runner: &TestRunner) {
         dump_log_on_failure(&runner.extension_log, "extension");
         dump_log_on_failure(&self.reaper_log, "REAPER process");
-        println!("Per-test logs: /tmp/reaper-tests/");
+        println!("Per-test logs: {}/", crate::test::log_dir().display());
     }
 }
 

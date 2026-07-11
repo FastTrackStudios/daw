@@ -119,6 +119,21 @@ pub fn reaper_resources() -> String {
 }
 pub const LOG_DIR: &str = "/tmp/reaper-tests";
 
+/// Per-test log directory. `/tmp/reaper-tests` is shared between users on
+/// one host (CI runs as gitea-runner beside dev runs as the login user),
+/// and a dir created by one user is unwritable for the other — so prefer
+/// `FTS_TEST_LOG_DIR`, then `<FTS_REAPER_RESOURCES>/test-logs` (the rig
+/// is always run-owned), falling back to the legacy shared path.
+pub fn log_dir() -> PathBuf {
+    if let Ok(d) = std::env::var("FTS_TEST_LOG_DIR") {
+        return PathBuf::from(d);
+    }
+    if let Ok(rig) = std::env::var("FTS_REAPER_RESOURCES") {
+        return PathBuf::from(rig).join("test-logs");
+    }
+    PathBuf::from(LOG_DIR)
+}
+
 /// Find a command on PATH.
 fn which_command(name: &str) -> Option<String> {
     Command::new("which").arg(name).output().ok().and_then(|o| {
@@ -880,7 +895,7 @@ impl DawTestContext {
 
     /// Get the path to this test's log file.
     pub fn log_path(&self) -> PathBuf {
-        PathBuf::from(LOG_DIR).join(format!("{}.log", self.test_name))
+        log_dir().join(format!("{}.log", self.test_name))
     }
 }
 
@@ -995,8 +1010,8 @@ pub fn run_daw_test(
     body: impl Fn(&DawTestContext) -> Pin<Box<dyn Future<Output = Result<()>> + '_>>,
 ) -> Result<()> {
     // Ensure log directory exists
-    let log_dir = Path::new(LOG_DIR);
-    fs::create_dir_all(log_dir).map_err(|e| eyre::eyre!("Failed to create log dir: {e}"))?;
+    let log_dir = log_dir();
+    fs::create_dir_all(&log_dir).map_err(|e| eyre::eyre!("Failed to create log dir: {e}"))?;
 
     let log_path = log_dir.join(format!("{test_name}.log"));
     let log_file = File::create(&log_path)
