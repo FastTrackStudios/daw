@@ -1,0 +1,103 @@
+//! Turnkey [`EditorApp`] Dioxus component.
+//!
+//! Apps that just want "a working markdown editor" mount
+//! `EditorApp{}` and get: the [`Editor`] widget, markdown
+//! live-preview decorations, bracket-pair highlighting, vim
+//! modal editing, slash-command palette, and the bundled
+//! stylesheet. No props, no setup.
+//!
+//! For more control (custom decorations, vault-aware
+//! cross-doc resolution, custom keymap, alternate seed text),
+//! call [`Editor`] directly the way `features/editor/examples/
+//! playground/src/main.rs` does — `EditorApp` is just the
+//! "no-config" entry point.
+
+use dioxus::prelude::*;
+
+use crate::{
+    DecoratedRange, Editor, EditorState, Keymap, bracket_match, commands, editor_view,
+    editor_vim::VimState, markdown,
+};
+
+/// Bundled stylesheet — lifted from the playground's
+/// `assets/playground.css` so consumers don't have to vendor it.
+/// `asset!` lets Dioxus serve it through the bundled-assets path
+/// on web + desktop alike.
+pub const EDITOR_STYLE: Asset = asset!("/assets/editor.css");
+
+/// Zero-config markdown editor component. Wraps [`Editor`] with
+/// the standard markdown setup: live-preview decorations,
+/// bracket matching, vim modal editing, slash-command palette,
+/// and the bundled stylesheet linked in `<head>`.
+///
+/// Mount with:
+/// ```ignore
+/// rsx! { editor::EditorApp {} }
+/// ```
+///
+/// Initial document content is a one-line welcome string —
+/// callers that want to seed from disk or persist edits should
+/// use [`Editor`] directly.
+#[component]
+pub fn EditorApp() -> Element {
+    let state = use_signal(|| EditorState::new(WELCOME.to_string()));
+    let keymap = use_signal(standard_markdown_keymap);
+    let vim = use_signal(VimState::new);
+    let slash = use_signal(|| None::<editor_view::slash::SlashState>);
+
+    rsx! {
+        document::Link { rel: "stylesheet", href: EDITOR_STYLE }
+        div { class: "editor-app",
+            div { class: "editor-frame",
+                Editor {
+                    state,
+                    keymap: keymap.read().clone(),
+                    decorations: editor_view::DecorationSource::ptr(combined_decorations),
+                    vim: Some(vim),
+                    slash: Some(slash),
+                }
+                editor_view::slash::SlashMenu { state, slash }
+            }
+        }
+    }
+}
+
+/// Live-preview pass plus bracket-pair highlighting. The two
+/// builders dedupe nothing, but their mark ranges don't
+/// conflict in practice.
+pub fn combined_decorations(state: &EditorState) -> Vec<DecoratedRange> {
+    let mut out = markdown::live_preview(state);
+    out.extend(bracket_match::bracket_match(state));
+    out
+}
+
+/// Bindings the playground exercises — kept narrow on purpose,
+/// since the view's `beforeinput` bridge already handles the
+/// common typing path (Enter / Backspace / Delete go through
+/// commands so list-continuation + atomic-line tracking work).
+pub fn standard_markdown_keymap() -> Keymap {
+    Keymap::new()
+        .with("Mod-a", commands::select_all as _)
+        .with("Mod-b", commands::toggle_bold as _)
+        .with("Mod-i", commands::toggle_italic as _)
+        .with("Mod-k", commands::toggle_link as _)
+        .with("Mod-Shift-k", |s: &_| {
+            commands::add_block_id(s).map(|(t, _)| t)
+        })
+        .with("Mod-l", commands::cycle_list as _)
+        .with("Mod-t", commands::toggle_task as _)
+        .with("Mod-1", |s: &_| commands::set_heading(s, 1))
+        .with("Mod-2", |s: &_| commands::set_heading(s, 2))
+        .with("Mod-3", |s: &_| commands::set_heading(s, 3))
+        .with("Mod-4", |s: &_| commands::set_heading(s, 4))
+        .with("Mod-5", |s: &_| commands::set_heading(s, 5))
+        .with("Mod-6", |s: &_| commands::set_heading(s, 6))
+        .with("Mod-0", |s: &_| commands::set_heading(s, 0))
+        .with("Mod-e", commands::toggle_reading_mode as _)
+        .with("Tab", commands::indent_more as _)
+        .with("Shift-Tab", commands::indent_less as _)
+        .with("Backspace", commands::delete_backward as _)
+        .with("Delete", commands::delete_forward as _)
+}
+
+const WELCOME: &str = "# Welcome to Task\n\nStart typing. Markdown live-preview, vim, and `/` slash commands are wired in.\n";

@@ -1,0 +1,45 @@
+[package]
+name = "editor-state"
+description = "Document, transactions, selections, and decorations for the Editor."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+editor-syntax = { workspace = true, features = ["default-langs"] }
+editor-typst = { workspace = true }
+editor-mermaid = { workspace = true }
+ropey = { workspace = true }
+serde = { workspace = true, optional = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+# Block-id generator. `v7` gives time-prefixed IDs (Logseq's
+# `squuid` model — refs naturally sort by creation order,
+# stays friendly to any future b-tree index for version
+# tracking). `js` routes through `crypto.getRandomValues` on
+# `wasm32-unknown-unknown` for the random tail.
+uuid = { version = "1", features = ["v7", "js"] }
+
+# Keyflow chart → SVG for ```` ```kf ```` fences. Native-only: its
+# `engraver` transitively pulls `keyflow-proto → architect → tokio`,
+# whose `mio` net backend can't compile to `wasm32-unknown-unknown`.
+# On wasm, `kf` blocks fall back to plain source (see
+# `markdown/keyflow.rs`). Lifting this back to an all-targets dep
+# needs a wasm-friendly engraver build upstream.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+editor-keyflow = { workspace = true }
+
+# wasm-only: `performance.now()` for the live-preview perf
+# trace (native uses `Instant`, which traps on wasm32-unknown-
+# unknown).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window", "Performance"] }
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[lints]
+workspace = true

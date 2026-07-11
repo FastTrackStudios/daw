@@ -1,0 +1,66 @@
+[package]
+name = "playground"
+description = "Dioxus dogfooding app for the editor crate. Run with `dx serve --package playground`."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+editor = { workspace = true }
+dioxus = { workspace = true }
+tracing = { workspace = true }
+
+# Native (Blitz) renderer — the *git/dev* version of dioxus-native from our
+# Blitz fork, not the crates.io release. Per the dioxus-native docs, the git
+# version is consumed by depending on `dioxus-native` directly (NOT through
+# the `dioxus` crate's `native` feature, whose pinned version won't match the
+# git tree). Path points at the local fork checkout so we can iterate on
+# Blitz itself; swap to `{ git = "…/blitz", rev = "…" }` once the rev is
+# pushed. The fork still uses crates.io dioxus-core 0.7.x, so it unifies with
+# the `dioxus` crate the web/desktop builds use.
+[dependencies.dioxus-native]
+path = "/run/media/Development/FastTrackStudio/blitz/packages/dioxus-native"
+# `autofocus` lets the editor's `autofocus` attribute take effect so the
+# root div holds focus on launch — Blitz routes key events to the focused
+# node, so without it the editor isn't typable until clicked.
+features = ["prelude", "autofocus"]
+optional = true
+
+# File / stdout logging is desktop-only — wasm can't open files.
+# A future commit can add `tracing-wasm` for the browser path.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+# LSP wiring (desktop/native only — spawns a child process). The
+# client runs on its own thread with a dedicated tokio runtime, so
+# it works under any renderer (dioxus-desktop or Blitz).
+editor-lsp = { path = "../../crates/editor-lsp" }
+tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
+
+# Switch platforms with --no-default-features --features web|desktop.
+#
+# Each renderer feature also pulls `dioxus/launch`: the workspace
+# depends on `dioxus` with `default-features = false, features =
+# ["lib"]`, and `lib` doesn't include `launch` (only the crate's
+# `default` set does). Without this, `dioxus::launch(App)` in `main`
+# fails to resolve (E0425) on every target.
+[features]
+default = ["desktop"]
+desktop = ["dioxus/desktop", "dioxus/launch"]
+web = ["dioxus/web", "dioxus/launch"]
+# Blitz native renderer. Pulls the git/fork `dioxus-native` directly (see the
+# dep above) and flips the editor to its state-driven, contenteditable-free
+# path. Does NOT use `dioxus/native` — that would pull the mismatched
+# crates.io release. Build/run with:
+#   cargo run -p playground --no-default-features --features native
+native = ["dep:dioxus-native", "editor/native"]
+
+# wasm-only: web_sys for URL query reading + tracing-wasm so
+# the browser console gets the same structured log stream as the
+# desktop binary.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = ["Window", "Location"] }
+tracing-wasm = "0.2"
