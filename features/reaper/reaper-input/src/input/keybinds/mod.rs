@@ -49,29 +49,10 @@ impl WhichKeyTree {
 }
 use facet::Facet;
 
-/// Context where keybinds apply
-#[derive(Debug, Clone, Copy, Facet, PartialEq, Eq, Hash, Default)]
-#[repr(C)]
-pub enum KeybindContext {
-    /// All contexts (default)
-    #[default]
-    Global,
-    /// Arrange view (main window)
-    Main,
-    /// MIDI editor window
-    Midi,
-    /// Inline MIDI editor
-    MidiInline,
-    /// Media explorer
-    MediaExplorer,
-}
-
-impl KeybindContext {
-    /// Check if this context matches another (Global matches everything)
-    pub fn matches(&self, other: &KeybindContext) -> bool {
-        *self == KeybindContext::Global || *other == KeybindContext::Global || *self == *other
-    }
-}
+// The portable context enums live in input-config-proto (the wire
+// contract for keybind config editing) so wasm clients never link this
+// crate; re-exported here at their historical paths.
+pub use input_config_proto::KeybindContext;
 
 /// A single keybinding definition
 #[derive(Debug, Clone, Facet)]
@@ -130,32 +111,7 @@ impl Keybind {
     }
 }
 
-/// Mouse modifier context - where mouse modifiers apply
-#[derive(Debug, Clone, Copy, Facet, PartialEq, Eq, Hash, Default)]
-#[repr(C)]
-pub enum MouseModifierContext {
-    /// Media item left edge
-    #[default]
-    MediaItemLeftEdge,
-    /// Media item right edge
-    MediaItemRightEdge,
-    /// Media item bottom half
-    MediaItemBottomHalf,
-    /// Media item fade/autocrossfade
-    MediaItemFade,
-    /// Envelope point
-    EnvelopePoint,
-    /// Envelope segment
-    EnvelopeSegment,
-    /// Track control panel
-    TrackControlPanel,
-    /// Arrange view (empty area)
-    ArrangeView,
-    /// MIDI note
-    MidiNote,
-    /// MIDI CC lane
-    MidiCCLane,
-}
+pub use input_config_proto::MouseModifierContext;
 
 /// A mouse modifier binding (for click+drag behaviors)
 #[derive(Debug, Clone, Facet)]

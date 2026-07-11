@@ -21,6 +21,7 @@
 
 pub mod composer;
 pub mod editor;
+pub mod host;
 pub mod loader;
 pub mod types;
 pub mod undo;
