@@ -1011,7 +1011,8 @@ fn scan_blocks(
             // moves the caret onto the fence to edit source.
             let is_rendered_fence = info.eq_ignore_ascii_case("typst")
                 || info.eq_ignore_ascii_case("mermaid")
-                || info.eq_ignore_ascii_case("kf");
+                || info.eq_ignore_ascii_case("kf")
+                || info.eq_ignore_ascii_case("kf+");
             if !caret_on_opener && !is_rendered_fence {
                 let body_end_estimate = find_fence_close(text, content_start, mc, mlen);
                 let header_html = format!(
@@ -1034,6 +1035,7 @@ fn scan_blocks(
             if info.eq_ignore_ascii_case("typst")
                 || info.eq_ignore_ascii_case("mermaid")
                 || info.eq_ignore_ascii_case("kf")
+                || info.eq_ignore_ascii_case("kf+")
             {
                 let body_end = find_fence_close(text, content_start, mc, mlen);
                 let body = &text[content_start..body_end];
@@ -1048,7 +1050,17 @@ fn scan_blocks(
                 let fence_range = line_from..close_end;
                 if !cursor_touches(primary, fence_range.clone()) && !body.trim().is_empty() {
                     let is_mermaid = info.eq_ignore_ascii_case("mermaid");
-                    let is_keyflow = info.eq_ignore_ascii_case("kf");
+                    // The keyflow fence family — the AUTHOR picks the
+                    // default per snippet, portable in the markdown:
+                    //   ```kf     → engraved chart only (default)
+                    //   ```kf+    → source AND chart together
+                    //   ```kf-src → source only (plain code block —
+                    //               falls through, never widgetized)
+                    // The `</>` hover toggle still lets a reader flip
+                    // source visibility per fence on top of that.
+                    let is_keyflow =
+                        info.eq_ignore_ascii_case("kf") || info.eq_ignore_ascii_case("kf+");
+                    let kf_show_source = info.eq_ignore_ascii_case("kf+");
                     let svg = if is_keyflow {
                         render_keyflow(body)
                     } else if is_mermaid {
@@ -1057,17 +1069,22 @@ fn scan_blocks(
                         render_typst(TypstKind::Block, body)
                     };
                     if let Some(svg) = svg {
-                        // Keyflow shows source AND render together: a
-                        // flex-wrap row that sits side-by-side when the
-                        // editor is wide and stacks when it's narrow.
-                        // The source `<pre>` carries `data-focus-pos`
-                        // like the render, so clicking either drops the
-                        // caret back into the fence body to edit (next
-                        // pass the caret-on branch shows raw source).
+                        // Keyflow defaults to the ENGRAVED CHART ONLY;
+                        // the source `<pre>` ships in the widget but
+                        // stays hidden until the `</>` toggle button
+                        // (top-right, on hover) flips the
+                        // `md-keyflow-show-source` class — then source
+                        // and render sit in a flex-wrap row,
+                        // side-by-side when wide, stacked when narrow.
+                        // In an editable editor, clicking the chart
+                        // still drops the caret into the fence body
+                        // (data-focus-pos), so the caret-inside pass
+                        // shows raw source for editing as before.
                         // Typst/mermaid keep the plain render-only widget.
                         let html = if is_keyflow {
+                            let show = if kf_show_source { " md-keyflow-show-source" } else { "" };
                             format!(
-                                r#"<div class="md-keyflow-widget md-keyflow-split" data-focus-pos="{content_start}"><pre class="md-keyflow-source">{src}</pre><div class="md-keyflow-render">{svg}</div></div>"#,
+                                r#"<div class="md-keyflow-widget md-keyflow-split{show}" data-focus-pos="{content_start}"><button type="button" class="md-keyflow-toggle" title="Toggle chart source">&lt;/&gt;</button><pre class="md-keyflow-source">{src}</pre><div class="md-keyflow-render">{svg}</div></div>"#,
                                 src = escape_html(body),
                             )
                         } else {
@@ -2927,6 +2944,40 @@ mod tests {
         });
         let html = widget.expect("kf fence should engrave a chart widget");
         assert!(html.contains("<svg"), "widget should embed the engraved SVG");
+        // Rendered-only default: the source ships hidden behind the
+        // `</>` toggle (CSS hides .md-keyflow-source until
+        // md-keyflow-show-source is on the widget).
+        assert!(
+            html.contains("md-keyflow-toggle"),
+            "widget should carry the source toggle button"
+        );
+        assert!(
+            html.contains("md-keyflow-source"),
+            "source column still ships in the widget for the toggle"
+        );
+        assert!(
+            !html.contains("md-keyflow-show-source"),
+            "```kf defaults to the engraved chart only"
+        );
+    }
+
+    #[test]
+    fn kf_plus_fence_shows_source_and_chart() {
+        // ```kf+ — the author opts into source + chart together; the
+        // widget ships with the show-source class already on.
+        let s = state("```kf+\nCmaj7 | F#m7b5\n```\n\ntail", 30);
+        let decs = live_preview(&s);
+        let widget = decs.iter().find_map(|d| match &d.kind {
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-keyflow-widget") =>
+            {
+                Some(html.clone())
+            }
+            _ => None,
+        });
+        let html = widget.expect("kf+ fence should engrave a chart widget");
+        assert!(html.contains("md-keyflow-show-source"), "kf+ starts with source visible");
+        assert!(html.contains("<svg"), "kf+ still embeds the engraved SVG");
     }
 
     #[test]

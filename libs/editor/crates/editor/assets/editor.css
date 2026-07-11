@@ -740,13 +740,17 @@
     margin: 0 auto;
 }
 
-/* Keyflow charts render source + engraving together. The split is a
-   flex row that wraps: side-by-side while both columns clear their
-   flex-basis, stacked once the editor gets too narrow — no media
-   query needed. Clicking either column drops the caret back into the
-   fence body (data-focus-pos) so the raw source becomes editable. */
+/* Keyflow charts default to the ENGRAVED OUTPUT ONLY. The source
+   column is hidden until the widget carries `md-keyflow-show-source`
+   (toggled by the `</>` button, wired in editor-view's delegated
+   click handler); with it on, the split is a flex row that wraps:
+   side-by-side while both columns clear their flex-basis, stacked
+   once the editor gets too narrow — no media query needed. In an
+   editable editor, clicking the chart still drops the caret into the
+   fence body (data-focus-pos) so the raw source opens for editing. */
 .editor-root .md-keyflow-widget {
     display: block;
+    position: relative;
     padding: 6px 0;
     color: inherit;
     cursor: text;
@@ -756,6 +760,40 @@
     flex-wrap: wrap;
     gap: 12px;
     align-items: flex-start;
+}
+.editor-root .md-keyflow-toggle {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--ed-border);
+    background: var(--ed-bg-elev);
+    color: var(--ed-text-dim, var(--ed-text));
+    font-family: var(--ed-mono);
+    font-size: 0.7em;
+    line-height: 1.4;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+.editor-root .md-keyflow-widget:hover .md-keyflow-toggle {
+    opacity: 1;
+}
+.editor-root .md-keyflow-toggle:hover {
+    color: var(--ed-text);
+}
+.editor-root .md-keyflow-widget.md-keyflow-show-source .md-keyflow-toggle {
+    opacity: 1;
+    color: var(--ed-link);
+    border-color: var(--ed-link);
+}
+.editor-root .md-keyflow-source {
+    display: none;
+}
+.editor-root .md-keyflow-widget.md-keyflow-show-source .md-keyflow-source {
+    display: block;
 }
 .editor-root .md-keyflow-source {
     flex: 1 1 260px;

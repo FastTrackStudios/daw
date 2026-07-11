@@ -1838,6 +1838,19 @@ pub fn Editor(
                             el.addEventListener('click', evt => {{
                                 let n = evt.target;
                                 while (n && n !== el) {{
+                                    if (n.nodeType === 1 && n.classList
+                                        && n.classList.contains('md-keyflow-toggle')) {{
+                                        // Keyflow chart source toggle —
+                                        // must win over the widget's
+                                        // data-focus-pos ancestor, or
+                                        // the click would drop the
+                                        // caret into the fence instead.
+                                        evt.preventDefault();
+                                        evt.stopPropagation();
+                                        const w = n.closest('.md-keyflow-widget');
+                                        if (w) w.classList.toggle('md-keyflow-show-source');
+                                        return;
+                                    }}
                                     if (n.nodeType === 1 && n.dataset
                                         && n.dataset.copyFrom != null) {{
                                         evt.preventDefault();
