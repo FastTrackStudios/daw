@@ -57,14 +57,132 @@ pub struct VaultPageHit {
     pub preview: String,
 }
 
+/// Host-supplied resolver for `kbd:@action` inline shortcuts — maps an
+/// action id (numeric or named command, e.g. `40044` or
+/// `_FTS_SESSION_TAKE_RANK_PLAYPOS_1`) to the key sequence currently
+/// bound to it (`"<C-S-space>"`, `"n d"`). Mirrors [`VaultLookup`]:
+/// `editor-state` stays app-agnostic, the host owns the keymap.
+/// Unresolved refs render as a distinct "unbound" cap.
+pub trait KbdLookup {
+    fn keys_for_action(&self, action: &str) -> Option<String>;
+}
+
+/// Key-caps widget for a `kbd:` code span. `spec` is what follows the
+/// prefix: a literal key sequence (`<C-s>`, `n d`) or `@action`.
+/// Returns `None` when the spec is empty/unparseable so the caller
+/// falls back to plain inline-code styling.
+fn kbd_widget_html(spec: &str, kbd: Option<&dyn KbdLookup>) -> Option<String> {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return None;
+    }
+    let keys: String = if let Some(action) = spec.strip_prefix('@') {
+        let action = action.trim();
+        if action.is_empty() {
+            return None;
+        }
+        match kbd.and_then(|k| k.keys_for_action(action)) {
+            Some(keys) => keys,
+            // Unresolved action ref: a distinct "unbound" cap showing
+            // the action id, rather than breaking the note.
+            None => {
+                return Some(format!(
+                    r#"<span class="md-kbd md-kbd-unbound" title="No key currently bound to this action"><kbd class="md-kbd-key">@{}</kbd></span>"#,
+                    escape_html(action),
+                ));
+            }
+        }
+    } else {
+        spec.to_string()
+    };
+
+    let chords: Vec<Vec<String>> = keys.split_whitespace().map(kbd_chord_labels).collect();
+    if chords.is_empty() || chords.iter().any(Vec::is_empty) {
+        return None;
+    }
+    let mut html = String::from(r#"<span class="md-kbd">"#);
+    for (ci, chord) in chords.iter().enumerate() {
+        if ci > 0 {
+            html.push_str(r#"<span class="md-kbd-then">then</span>"#);
+        }
+        for (ki, key) in chord.iter().enumerate() {
+            if ki > 0 {
+                html.push_str(r#"<span class="md-kbd-plus">+</span>"#);
+            }
+            html.push_str(&format!(
+                r#"<kbd class="md-kbd-key">{}</kbd>"#,
+                escape_html(key)
+            ));
+        }
+    }
+    html.push_str("</span>");
+    Some(html)
+}
+
+/// One chord token → display labels: `"<C-S-space>"` → `Ctrl Shift
+/// Space`, `"r"` → `R`. `C`/`S`/`A` are Ctrl/Shift/Alt; `M` and `D`
+/// both mean the platform Meta/Cmd key.
+fn kbd_chord_labels(token: &str) -> Vec<String> {
+    let inner = token
+        .strip_prefix('<')
+        .and_then(|t| t.strip_suffix('>'))
+        .unwrap_or(token);
+
+    let mut parts = Vec::new();
+    let mut rest = inner;
+    while let Some((m, tail)) = rest.split_once('-') {
+        let label = match m {
+            "C" => "Ctrl",
+            "S" => "Shift",
+            "A" => "Alt",
+            "M" | "D" => "Meta",
+            _ => break,
+        };
+        parts.push(label.to_string());
+        rest = tail;
+    }
+
+    // Bare-modifier chords like `<C->` have no tail key.
+    if rest.is_empty() {
+        return parts;
+    }
+
+    let key = match rest {
+        "space" => "Space".to_string(),
+        "enter" | "return" => "Enter".to_string(),
+        "esc" | "escape" => "Esc".to_string(),
+        "tab" => "Tab".to_string(),
+        "backspace" => "Backspace".to_string(),
+        "delete" | "del" => "Delete".to_string(),
+        "minus" => "-".to_string(),
+        "plus" => "+".to_string(),
+        "up" => "\u{2191}".to_string(),
+        "down" => "\u{2193}".to_string(),
+        "left" => "\u{2190}".to_string(),
+        "right" => "\u{2192}".to_string(),
+        k if k.chars().count() == 1 => k.to_uppercase(),
+        k => k.to_string(),
+    };
+    parts.push(key);
+    parts
+}
+
 #[must_use]
 pub fn live_preview(state: &EditorState) -> Vec<DecoratedRange> {
-    live_preview_with(state, None)
+    live_preview_with_lookups(state, None, None)
 }
 
 pub fn live_preview_with(
     state: &EditorState,
     vault: Option<&dyn VaultLookup>,
+) -> Vec<DecoratedRange> {
+    live_preview_with_lookups(state, vault, None)
+}
+
+pub fn live_preview_with_lookups(
+    state: &EditorState,
+    vault: Option<&dyn VaultLookup>,
+    kbd: Option<&dyn KbdLookup>,
 ) -> Vec<DecoratedRange> {
     // Per-pass compile budget for Typst — bounds the worst
     // case at a couple of cold compiles per render so a doc
@@ -276,6 +394,26 @@ pub fn live_preview_with(
                     }
                 }
                 continue;
+            }
+            // `kbd:` inline shortcuts — code spans with a `kbd:` prefix
+            // render as key caps. Two forms: literal `kbd:<C-s>` (keys
+            // as written) and action-ref `kbd:@40044` (whatever keys the
+            // host's [`KbdLookup`] says are currently bound). Caret on
+            // the span shows the raw source for editing, like links.
+            if span.class == "md-code" {
+                let body = &text[span.body.clone()];
+                if let Some(spec) = body.strip_prefix("kbd:") {
+                    if !cursor_touches(primary, span.outer.clone()) {
+                        if let Some(html) = kbd_widget_html(spec, kbd) {
+                            out.push(Decoration::replace(span.outer.clone()));
+                            out.push(Decoration::widget(span.outer.start, html));
+                            out.push(Decoration::atomic(span.outer.clone()));
+                            continue;
+                        }
+                    }
+                    // Caret inside (or empty spec): fall through to the
+                    // normal inline-code styling with raw source.
+                }
             }
             let href = match span.class {
                 "md-link" => Some(text[span.body.end + 2..span.outer.end - 1].to_string()),
@@ -2770,6 +2908,69 @@ mod tests {
                 if html.contains("md-properties"))
         });
         assert!(has_widget);
+    }
+
+    #[test]
+    fn kbd_literal_renders_key_caps() {
+        // Caret away: the `kbd:` code span becomes a key-caps widget.
+        let s = state("press `kbd:<C-S-space>` now", 0);
+        let decs = live_preview(&s);
+        let widget = decs.iter().find_map(|d| match &d.kind {
+            crate::decoration::DecorationKind::Widget { html } if html.contains("md-kbd") => {
+                Some(html.clone())
+            }
+            _ => None,
+        });
+        let html = widget.expect("kbd widget emitted");
+        for cap in ["Ctrl", "Shift", "Space"] {
+            assert!(html.contains(cap), "missing cap {cap} in {html}");
+        }
+        // Sequences render a "then" separator.
+        let s = state("do `kbd:g g` twice", 0);
+        let decs = live_preview(&s);
+        assert!(decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-kbd-then"))));
+    }
+
+    #[test]
+    fn kbd_caret_inside_shows_source() {
+        // Caret inside the span: raw source stays editable (plain
+        // inline-code styling, no widget).
+        let src = "press `kbd:<C-s>` now";
+        let caret = src.find("C-s").unwrap();
+        let s = state(src, caret);
+        let decs = live_preview(&s);
+        assert!(!decs.iter().any(|d| matches!(&d.kind,
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-kbd"))));
+    }
+
+    #[test]
+    fn kbd_action_ref_resolves_through_lookup() {
+        struct FakeKbd;
+        impl KbdLookup for FakeKbd {
+            fn keys_for_action(&self, action: &str) -> Option<String> {
+                (action == "40044").then(|| "<space>".to_string())
+            }
+        }
+        let s = state("press `kbd:@40044` to play, `kbd:@99999` is unbound", 0);
+        let decs = live_preview_with_lookups(&s, None, Some(&FakeKbd));
+        let widgets: Vec<String> = decs
+            .iter()
+            .filter_map(|d| match &d.kind {
+                crate::decoration::DecorationKind::Widget { html } if html.contains("md-kbd") => {
+                    Some(html.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(widgets.len(), 2, "both refs should render widgets");
+        assert!(widgets.iter().any(|h| h.contains("Space")), "resolved ref shows keys");
+        assert!(
+            widgets.iter().any(|h| h.contains("md-kbd-unbound") && h.contains("@99999")),
+            "unresolved ref renders the unbound cap"
+        );
     }
 
     #[test]

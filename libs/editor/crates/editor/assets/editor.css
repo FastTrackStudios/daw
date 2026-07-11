@@ -1294,3 +1294,41 @@
     pointer-events: none;
     white-space: normal;
 }
+
+/* ── `kbd:` inline shortcuts ─────────────────────────────────────
+   Key-cap widgets emitted by editor-state's kbd decoration
+   (`kbd:<C-s>` literals and `kbd:@action` refs). Caps follow the
+   design-system Kbd look: rounded, bordered, mono, slightly raised. */
+.editor-root .md-kbd {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    vertical-align: baseline;
+}
+.editor-root .md-kbd-key {
+    font-family: var(--ed-mono);
+    font-size: 0.78em;
+    line-height: 1.5;
+    padding: 0 5px;
+    border-radius: 4px;
+    background: var(--ed-bg-elev);
+    border: 1px solid var(--ed-border);
+    border-bottom-width: 2px;
+    color: var(--ed-text);
+    white-space: nowrap;
+}
+.editor-root .md-kbd-plus,
+.editor-root .md-kbd-then {
+    font-size: 0.7em;
+    color: var(--ed-text-dim, var(--ed-text));
+    opacity: 0.7;
+}
+.editor-root .md-kbd-then {
+    margin: 0 2px;
+    font-style: italic;
+}
+.editor-root .md-kbd-unbound .md-kbd-key {
+    border-style: dashed;
+    color: var(--ed-text-dim, var(--ed-text));
+    opacity: 0.75;
+}

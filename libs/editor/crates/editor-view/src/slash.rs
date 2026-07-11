@@ -599,6 +599,20 @@ pub fn all_commands() -> Vec<CommandEntry> {
             kind: CommandKind::InsertBlockSnippet("$$\n\n$$\n", 4),
             icon: "∫",
         },
+        CommandEntry {
+            label: "Keyboard shortcut",
+            group: "Code",
+            desc: "`kbd:<C-s>` — rendered as key caps",
+            kind: CommandKind::InsertSnippet("`kbd:`", 1),
+            icon: "⌘",
+        },
+        CommandEntry {
+            label: "Shortcut for action",
+            group: "Code",
+            desc: "`kbd:@action` — the keys currently bound to an action id",
+            kind: CommandKind::InsertSnippet("`kbd:@`", 1),
+            icon: "⌘",
+        },
     ]);
 
     // ── Callouts ────────────────────────────────────────────
