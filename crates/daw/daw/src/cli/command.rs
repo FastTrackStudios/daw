@@ -216,7 +216,7 @@ enum Command {
     // -- Process & Project Management --
     /// Launch a REAPER instance
     Launch {
-        /// Profile ID (e.g., "fasttrackstudio", "fts-dev", "sandbox")
+        /// Profile ID (e.g., "fts-reaper", "fts-tracks", "fts-dev")
         #[arg(long)]
         profile: Option<String>,
         /// Legacy alias for --profile
@@ -634,7 +634,7 @@ enum SyncCommand {
         #[arg(long, default_value = "2")]
         count: u32,
         /// DAW launch profile to use for every spawned instance.
-        #[arg(long, default_value = "fasttrackstudio")]
+        #[arg(long, default_value = "fts-reaper")]
         profile: String,
     },
     /// Wire every sync-ready REAPER into a direct-TCP mesh.

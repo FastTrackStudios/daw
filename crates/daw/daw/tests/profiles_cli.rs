@@ -22,11 +22,18 @@ fn daw_json(args: &[&str]) -> eyre::Result<Value> {
 }
 
 #[test]
-fn profiles_include_reaper_dev_and_sandbox_configs() -> eyre::Result<()> {
+fn profiles_are_exactly_reaper_tracks_and_dev() -> eyre::Result<()> {
     let value = daw_json(&["profiles"])?;
     let profiles = value
         .as_array()
         .ok_or_else(|| eyre::eyre!("profiles output should be an array: {value:#?}"))?;
+
+    let mut ids: Vec<&str> = profiles
+        .iter()
+        .filter_map(|profile| profile["id"].as_str())
+        .collect();
+    ids.sort_unstable();
+    assert_eq!(ids, ["fts-dev", "fts-reaper", "fts-tracks"]);
 
     let by_id = |id: &str| {
         profiles
@@ -36,21 +43,26 @@ fn profiles_include_reaper_dev_and_sandbox_configs() -> eyre::Result<()> {
 
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     assert_eq!(
-        by_id("fasttrackstudio")
+        by_id("fts-reaper")
             .and_then(|p| p["resources_dir"].as_str())
             .map(str::to_string),
-        Some(format!("{home}/.fasttrackstudio/Reaper"))
+        Some(format!("{home}/fasttrackstudio"))
+    );
+    assert_eq!(
+        by_id("fts-tracks")
+            .and_then(|p| p["resources_dir"].as_str())
+            .map(str::to_string),
+        Some(format!("{home}/fts-tracks"))
     );
 
     let fts_dev = by_id("fts-dev").ok_or_else(|| eyre::eyre!("missing fts-dev profile"))?;
     assert_eq!(fts_dev["daw"], "reaper");
     assert_eq!(fts_dev["role"], "dev");
     assert_eq!(fts_dev["sandboxed"], false);
-
-    let sandbox = by_id("sandbox").ok_or_else(|| eyre::eyre!("missing sandbox profile"))?;
-    assert_eq!(sandbox["daw"], "reaper");
-    assert_eq!(sandbox["role"], "sandbox");
-    assert_eq!(sandbox["sandboxed"], true);
+    assert_eq!(
+        fts_dev["resources_dir"],
+        Value::String(format!("{home}/fts-dev"))
+    );
 
     Ok(())
 }

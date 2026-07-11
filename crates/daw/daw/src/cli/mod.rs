@@ -211,45 +211,42 @@ fn reaper_profile(
     }
 }
 
-/// Rig layout on a workstation: `~/fasttrackstudio` is the REAL install
-/// (the resources REAPER runs with in production); `~/fts-dev` is the
-/// developer copy for live iteration. Old hidden paths (`~/.fts-dev`,
-/// `~/.config/FastTrackStudio/Reaper`) remain as compat symlinks.
+/// THE three REAPER profiles. Signal rigs (guitar/keys/…) are NOT REAPER
+/// profiles anymore — they live in the signal engine.
+///
+/// - `fts-reaper` — the main DAW instance for recording, resources at
+///   `~/fasttrackstudio` (the real install; the old
+///   `~/.config/FastTrackStudio/Reaper` is a compat symlink to it).
+/// - `fts-tracks` — the live tracks/playback instance, own resources at
+///   `~/fts-tracks` so weekday recording tweaks can't destabilize it.
+/// - `fts-dev` — the isolated dev/testing copy at `~/fts-dev`.
 pub fn daw_profiles() -> Vec<DawProfile> {
     vec![
         reaper_profile(
-            "fasttrackstudio",
-            "FastTrackStudio REAPER",
+            "fts-reaper",
+            "FTS REAPER (recording)",
             "~/fasttrackstudio",
             "session",
             false,
-        ),
-        reaper_profile("fts-dev", "FTS Dev REAPER", "~/fts-dev", "dev", false),
-        reaper_profile(
-            "sandbox",
-            "Sandbox REAPER",
-            "~/fts-dev/sandbox",
-            "sandbox",
-            true,
         ),
         reaper_profile(
             "fts-tracks",
-            "FTS-TRACKS (legacy alias)",
-            "~/fasttrackstudio",
-            "session",
+            "FTS Tracks (live playback)",
+            "~/fts-tracks",
+            "tracks",
             false,
         ),
-        reaper_profile(
-            "fts-signal",
-            "FTS-SIGNAL (legacy alias)",
-            "~/fasttrackstudio",
-            "signal",
-            false,
-        ),
+        reaper_profile("fts-dev", "FTS Dev REAPER", "~/fts-dev", "dev", false),
     ]
 }
 
 pub fn profile_by_id(id: &str) -> Option<DawProfile> {
+    // Legacy ids from the pre-signal profile set resolve to their successors.
+    let id = match id {
+        "fasttrackstudio" | "fts-signal" => "fts-reaper",
+        "sandbox" => "fts-dev",
+        other => other,
+    };
     daw_profiles().into_iter().find(|c| c.id == id)
 }
 
