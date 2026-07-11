@@ -13,20 +13,13 @@ editor = { workspace = true }
 dioxus = { workspace = true }
 tracing = { workspace = true }
 
-# Native (Blitz) renderer — the *git/dev* version of dioxus-native from our
-# Blitz fork, not the crates.io release. Per the dioxus-native docs, the git
-# version is consumed by depending on `dioxus-native` directly (NOT through
-# the `dioxus` crate's `native` feature, whose pinned version won't match the
-# git tree). Path points at the local fork checkout so we can iterate on
-# Blitz itself; swap to `{ git = "…/blitz", rev = "…" }` once the rev is
-# pushed. The fork still uses crates.io dioxus-core 0.7.x, so it unifies with
-# the `dioxus` crate the web/desktop builds use.
+# Native (Blitz) renderer — the workspace-pinned blitz rev (one blitz rev
+# tree-wide; the old absolute-path fork checkout is gone with the monorepo
+# import). Root pins the features incl. `autofocus`, which lets the
+# editor's `autofocus` attribute take effect so the root div holds focus
+# on launch.
 [dependencies.dioxus-native]
-path = "/run/media/Development/FastTrackStudio/blitz/packages/dioxus-native"
-# `autofocus` lets the editor's `autofocus` attribute take effect so the
-# root div holds focus on launch — Blitz routes key events to the focused
-# node, so without it the editor isn't typable until clicked.
-features = ["prelude", "autofocus"]
+workspace = true
 optional = true
 
 # File / stdout logging is desktop-only — wasm can't open files.

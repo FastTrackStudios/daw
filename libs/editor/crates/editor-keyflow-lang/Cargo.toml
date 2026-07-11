@@ -14,7 +14,7 @@ editor-state = { workspace = true }
 # and breaks wasm). `ide` gives the analyzer (`ide::analyze`); the
 # `highlighting` feature (set in the workspace dep) exposes the line
 # highlighter + theme→CSS renderer at `keyflow_text::highlighting::*`.
-keyflow-text = { workspace = true }
+keyflow-text = { workspace = true, features = ["highlighting"] }
 
 [lints]
 workspace = true
