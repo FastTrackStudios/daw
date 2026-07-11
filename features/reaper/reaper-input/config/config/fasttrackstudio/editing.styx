@@ -3,6 +3,18 @@ bindings (
     {keys s,       action 40757, desc "Split items at cursor"}
     {keys d,       action 40006, desc "Delete selected items"}
 
+    // Smart duplicate — copy selection forward by its own measure span
+    // (group + color preserving, tempo-aware). Replaces stock "Duplicate
+    // items" (41295) on Ctrl+D.
+    {keys "<C-d>",  action "_FTS_SMART_DUPLICATE", desc "Smart duplicate",
+     mnemonic "D for Duplicate",
+     why "Ctrl+D duplicates in every editor; the FTS action places the copy a full measure-span later so repeated hits build a section on the grid."}
+
+    // Glue items within the time selection
+    {keys "<C-S-g>", action 42432, desc "Glue items within time selection",
+     mnemonic "G for Glue",
+     why "Ctrl+Shift+G glues the selection's items into one within the time selection."}
+
     // MIDI editor toggle — `e`/`E` open the selected item in the MIDI editor;
     // inside the editor, `e`/`E` close it (bound in midi.styx). One key in,
     // same key out.
