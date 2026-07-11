@@ -284,6 +284,23 @@ pub fn Editor(
     /// the `on_transaction` sink).
     #[props(default)]
     completion: Option<crate::trigger::CompletionSource>,
+    /// When `false` the editor renders read-only: `contenteditable`
+    /// off (the reading-mode root class applies) and the keydown
+    /// dispatch (vim / keymap / slash) is disabled, so nothing can
+    /// mutate the doc. Pair with `state.reading_mode = true` when the
+    /// live-preview pass should also keep every source marker hidden
+    /// regardless of caret position. Link and `[[wikilink]]` clicks
+    /// still fire `on_link_click`. Defaults to `true` (a normal
+    /// editable editor).
+    #[props(default = true)]
+    editable: bool,
+    /// Fired with the raw `data-href` when the user clicks a rendered
+    /// link or `[[wikilink]]` span (for wikilinks that's the link body,
+    /// e.g. `Page`, `Page#Heading`, `Page|alias`). External `http(s)`
+    /// links are additionally opened in a new tab by the view itself;
+    /// wikilinks only fire this — the host owns vault navigation.
+    #[props(default)]
+    on_link_click: Option<Callback<String>>,
 ) -> Element {
     // True when a decoration widget cell currently has focus
     // (frontmatter property contenteditable, chip-add box, etc.).
@@ -1978,6 +1995,19 @@ pub fn Editor(
                         // recomputes diagnostics + overlays.
                         "idle" => idle_sig.set(true),
                         other => {
+                            // Surface link/wikilink clicks to the host
+                            // before the generic dispatch (which only
+                            // drops the selection). The host decides
+                            // what a wikilink click means — e.g. a
+                            // vault view navigates to the target note.
+                            if other == "link-clicked" {
+                                if let (Some(cb), Some(href)) = (
+                                    on_link_click,
+                                    v.get("href").and_then(|h| h.as_str()),
+                                ) {
+                                    cb.call(href.to_string());
+                                }
+                            }
                             // Any doc-mutating message means the user is
                             // actively editing: drop to the `Structural`
                             // pass until the next `idle` ping so expensive
@@ -2020,6 +2050,12 @@ pub fn Editor(
     #[cfg(not(feature = "native"))]
     let editor_id_for_keys = editor_id.clone();
     let on_keydown = move |evt: Event<KeyboardData>| {
+        // Read-only editor: no command may mutate the doc. The
+        // browser can't edit either (contenteditable is off), so
+        // bailing here makes the whole keyboard inert.
+        if !editable {
+            return;
+        }
         // Widget cell has focus (e.g. a frontmatter property
         // contenteditable). The widget owns its keyboard, so
         // every editor-side handler — vim, slash, keymap —
@@ -2625,7 +2661,7 @@ pub fn Editor(
         editor_vim::Mode::Replace => "vim-mode-replace",
         editor_vim::Mode::Command => "vim-mode-command",
     });
-    let read_only = state.read().reading_mode;
+    let read_only = !editable || state.read().reading_mode;
     let root_class = if read_only {
         format!("editor-root reading-mode {vim_class}")
     } else {
