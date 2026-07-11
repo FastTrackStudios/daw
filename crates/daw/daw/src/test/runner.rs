@@ -131,7 +131,8 @@ impl TestRunner {
             return Err("Failed to build daw-bridge".into());
         }
 
-        let lib_path = daw_workspace.join("target/release/libreaper_daw_bridge.so");
+        let lib_path = cargo_target_dir(daw_workspace)
+            .join("release/libreaper_daw_bridge.so");
         let plugins_dir = self.resources_dir.join("UserPlugins");
         install_plugin(&lib_path, "reaper_daw_bridge.so", &plugins_dir)?;
         Ok(())
@@ -182,8 +183,7 @@ impl TestRunner {
             return Err(format!("Failed to build {package}").into());
         }
 
-        let lib_path = workspace
-            .join("target")
+        let lib_path = cargo_target_dir(workspace)
             .join(profile_label)
             .join(format!("lib{}.so", extension.lib_stem));
         let plugins_dir = self.resources_dir.join("UserPlugins");
@@ -975,6 +975,24 @@ pub fn fts_reaper_resources() -> PathBuf {
         return PathBuf::from(p.replace("$HOME", &home));
     }
     PathBuf::from(format!("{home}/.config/FastTrackStudio/Reaper"))
+}
+
+/// Cargo's artifact directory for builds run with `current_dir(workspace)`:
+/// honors `CARGO_TARGET_DIR` (absolute, or relative to the workspace —
+/// cargo resolves relative values against its invocation cwd), falling
+/// back to the default `<workspace>/target`.
+pub fn cargo_target_dir(workspace: &Path) -> PathBuf {
+    match std::env::var_os("CARGO_TARGET_DIR") {
+        Some(dir) => {
+            let dir = PathBuf::from(dir);
+            if dir.is_absolute() {
+                dir
+            } else {
+                workspace.join(dir)
+            }
+        }
+        None => workspace.join("target"),
+    }
 }
 
 /// Install (symlink) a plugin library into the given UserPlugins directory.
