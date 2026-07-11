@@ -148,7 +148,7 @@ impl Provider for DawTracksProvider {
                 "track-fx" => {
                     // Select the track first, then show FX via action
                     track.select_exclusive().await?;
-                    daw.action_registry().execute_command(40291).await?; // Show FX chain for selected track
+                    daw.action_registry().run_action(40291).await?; // Show FX chain for selected track
                     Ok(false)
                 }
                 _ => Ok(false),

@@ -147,13 +147,13 @@ impl ActionRegistry {
     // streaming subscriptions live on a sibling trait. Polling
     // `list_actions` is the current substitute.
 
-    /// Execute a native DAW command by numeric ID.
+    /// Run a native DAW action by numeric command ID.
     ///
     /// Maps to `Main_OnCommandEx(command_id, 0, current_project)` in REAPER.
-    pub async fn execute_command(&self, command_id: u32) -> crate::Result<()> {
+    pub async fn run_action(&self, command_id: u32) -> crate::Result<()> {
         self.clients
             .action_registry
-            .execute_command(command_id)
+            .run_action(command_id)
             .await?;
         Ok(())
     }
@@ -180,7 +180,7 @@ impl ActionRegistry {
     /// actions such as `"FTS_SIGNAL_ARM"` or `"_S&M_WNTSHW1"`).
     pub async fn execute_action(&self, action_id: &str) -> crate::Result<bool> {
         if let Ok(command_id) = action_id.parse::<u32>() {
-            self.execute_command(command_id).await?;
+            self.run_action(command_id).await?;
             Ok(true)
         } else {
             self.execute_named_action(action_id).await

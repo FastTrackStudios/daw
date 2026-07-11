@@ -50,9 +50,9 @@ pub trait ActionRegistration {
     /// Enumerate actions in REAPER's main action list.
     fn list_actions(&self, request: ActionListRequest) -> ActionListResponse;
 
-    /// Execute a native DAW command by numeric ID. Maps to
+    /// Run a native DAW action by numeric command ID. Maps to
     /// `Main_OnCommandEx(command_id, 0, current_project)`.
-    fn execute_command(&self, command_id: u32);
+    fn run_action(&self, command_id: u32);
 
     /// Execute a named action (custom or native).
     fn execute_named_action(&self, command_name: &str) -> bool;

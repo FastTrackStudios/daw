@@ -1134,7 +1134,7 @@ impl ActionRegistration for crate::Reaper {
         }
     }
 
-    fn execute_command(&self, command_id: u32) {
+    fn run_action(&self, command_id: u32) {
         let medium = Reaper::get().medium_reaper();
         medium.main_on_command_ex(
             CommandId::new(command_id),

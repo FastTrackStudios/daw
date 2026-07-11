@@ -44,7 +44,7 @@ impl ActionRegistration for Standalone {
     fn list_actions(&self, _: ActionListRequest) -> ActionListResponse {
         ActionListResponse::default()
     }
-    fn execute_command(&self, _: u32) {}
+    fn run_action(&self, _: u32) {}
     fn execute_named_action(&self, _: &str) -> bool {
         false
     }
