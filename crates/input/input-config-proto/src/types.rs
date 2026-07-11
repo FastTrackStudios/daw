@@ -27,7 +27,7 @@ pub struct ProfileConfig {
 // ── Section ───────────────────────────────────────────────────────────────────
 
 /// Parsed from each section file (e.g. `transport.styx`).
-#[derive(Facet, Debug, Clone, Default)]
+#[derive(Facet, Debug, Clone, Default, PartialEq)]
 pub struct SectionConfig {
     /// Keyboard bindings.
     #[facet(skip_serializing_if = Option::is_none)]
@@ -316,7 +316,7 @@ pub struct ArmedActionDef {
 /// - `description` = optional override; empty string if absent
 ///
 /// The file only needs to describe *what changes* when the workflow is active.
-#[derive(Facet, Debug, Clone, Default)]
+#[derive(Facet, Debug, Clone, Default, PartialEq)]
 pub struct WorkflowConfig {
     /// Optional display-name override. Defaults to kebab→Title Case of filename.
     #[facet(skip_serializing_if = Option::is_none)]
