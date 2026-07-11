@@ -13,6 +13,11 @@ default = ["vox"]
 vox = ["midicore-proto/vox"]
 # The midir OS backend, exposed as `midicore::midir` (native only).
 midir = ["dep:midicore-midir"]
+# The midir backend, routed through JACK/pipewire-jack instead of ALSA.
+# Implies `midir`. Compile-time, whole-binary swap (see midicore-midir).
+midir-jack = ["midir", "midicore-midir/jack"]
+# Intent alias for the deployed live rig: MIDI over PipeWire.
+midir-pipewire = ["midir-jack"]
 
 [dependencies]
 midicore-proto.workspace = true
