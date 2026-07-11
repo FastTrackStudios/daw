@@ -2911,6 +2911,25 @@ mod tests {
     }
 
     #[test]
+    fn kf_fence_engraves_on_all_targets() {
+        // The exact snippet the keyflow guide's chords chapter ships.
+        // editor-keyflow wraps engraver's CPU-only svg tier, so this
+        // path runs on wasm32 too (the old native-only gate is gone).
+        let s = state("```kf\nCmaj7 | F#m7b5 | Bbmaj9 | G7b9\n```\n\ntail", 44);
+        let decs = live_preview(&s);
+        let widget = decs.iter().find_map(|d| match &d.kind {
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-keyflow-widget") =>
+            {
+                Some(html.clone())
+            }
+            _ => None,
+        });
+        let html = widget.expect("kf fence should engrave a chart widget");
+        assert!(html.contains("<svg"), "widget should embed the engraved SVG");
+    }
+
+    #[test]
     fn kbd_literal_renders_key_caps() {
         // Caret away: the `kbd:` code span becomes a key-caps widget.
         let s = state("press `kbd:<C-S-space>` now", 0);

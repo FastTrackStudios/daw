@@ -22,13 +22,11 @@ tracing = { workspace = true }
 # `wasm32-unknown-unknown` for the random tail.
 uuid = { version = "1", features = ["v7", "js"] }
 
-# Keyflow chart → SVG for ```` ```kf ```` fences. Native-only: its
-# `engraver` transitively pulls `keyflow-proto → architect → tokio`,
-# whose `mio` net backend can't compile to `wasm32-unknown-unknown`.
-# On wasm, `kf` blocks fall back to plain source (see
-# `markdown/keyflow.rs`). Lifting this back to an all-targets dep
-# needs a wasm-friendly engraver build upstream.
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Keyflow chart → SVG for ```` ```kf ```` fences. All targets:
+# editor-keyflow wraps engraver's CPU-only `svg` tier (kurbo/peniko/
+# skrifa — default-features off drops the wgpu/vello GPU stack and the
+# PDF deps), which compiles cleanly to wasm32-unknown-unknown. (The
+# old native-only gate predated engraver's `svg` feature split.)
 editor-keyflow = { workspace = true }
 
 # wasm-only: `performance.now()` for the live-preview perf

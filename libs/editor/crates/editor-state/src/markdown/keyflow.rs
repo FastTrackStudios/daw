@@ -38,26 +38,18 @@ pub(crate) fn render_keyflow(body: &str) -> Option<String> {
     }
     COMPILE_BUDGET.with(|c| c.set(budget - 1));
 
-    // `editor-keyflow` (the engraver) is a native-only dependency —
-    // it transitively pulls tokio, which can't target wasm. On wasm
-    // there's no renderer, so `kf` fences fall back to plain source.
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        match editor_keyflow::render_svg(body) {
-            Ok(svg) => {
-                with_keyflow_cache(|c| c.put(body.to_string(), svg.clone()));
-                Some(svg)
-            }
-            Err(e) => {
-                tracing::debug!(?e, body_len = body.len(), "keyflow render failed");
-                None
-            }
+    // `editor-keyflow` wraps engraver's CPU-only `svg` tier (kurbo/
+    // peniko/skrifa — no wgpu, no tokio), which compiles for wasm32
+    // too, so `kf` fences engrave everywhere the editor runs.
+    match editor_keyflow::render_svg(body) {
+        Ok(svg) => {
+            with_keyflow_cache(|c| c.put(body.to_string(), svg.clone()));
+            Some(svg)
         }
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = body;
-        None
+        Err(e) => {
+            tracing::debug!(?e, body_len = body.len(), "keyflow render failed");
+            None
+        }
     }
 }
 
