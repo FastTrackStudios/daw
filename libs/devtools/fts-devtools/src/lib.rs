@@ -69,12 +69,17 @@ pub fn reaper_dirs() -> Vec<PathBuf> {
     #[cfg(target_os = "linux")]
     {
         let r1 = home.join(".config/REAPER");
-        let r2 = home.join(".config/FastTrackStudio/Reaper");
+        // Real install (canonical); the old ~/.config/FastTrackStudio/Reaper
+        // is a compat symlink to it on migrated machines.
+        let r2 = home.join("fasttrackstudio");
+        let r2_legacy = home.join(".config/FastTrackStudio/Reaper");
         if r1.is_dir() {
             dirs.push(r1);
         }
         if r2.is_dir() {
             dirs.push(r2);
+        } else if r2_legacy.is_dir() {
+            dirs.push(r2_legacy);
         }
     }
 

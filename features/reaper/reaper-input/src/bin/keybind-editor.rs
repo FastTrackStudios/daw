@@ -13,7 +13,7 @@
 //! 1. The first CLI argument.
 //! 2. The `FTS_CONFIG_DIR` environment variable.
 //! 3. `$REAPER_HOME/fasttrackstudio/input`.
-//! 4. `~/.fts-dev/fasttrackstudio/input`.
+//! 4. `~/fts-dev/fasttrackstudio/input`.
 
 use std::path::PathBuf;
 
@@ -31,7 +31,7 @@ fn resolve_config_dir() -> PathBuf {
         return PathBuf::from(home).join("fasttrackstudio/input");
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".fts-dev/fasttrackstudio/input")
+    PathBuf::from(home).join("fts-dev/fasttrackstudio/input")
 }
 
 fn main() {

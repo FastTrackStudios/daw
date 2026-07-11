@@ -178,8 +178,8 @@ fn which_command(name: &str) -> Option<String> {
     None
 }
 
-fn default_reaper_executable(root: &std::path::Path) -> String {
-    let app_exe = root.join("Reaper/FTS-LIVE.app/Contents/MacOS/REAPER");
+fn default_reaper_executable(resources: &std::path::Path) -> String {
+    let app_exe = resources.join("FTS-LIVE.app/Contents/MacOS/REAPER");
     if app_exe.exists() {
         return app_exe.to_string_lossy().to_string();
     }
@@ -192,19 +192,18 @@ fn default_reaper_executable(root: &std::path::Path) -> String {
 fn reaper_profile(
     id: &'static str,
     label: &'static str,
-    root: &str,
+    resources: &str,
     role: &'static str,
     sandboxed: bool,
 ) -> DawProfile {
-    let root = expand_home(root);
-    let resources_dir = root.join("Reaper");
+    let resources_dir = expand_home(resources);
     let ini_path = resources_dir.join("reaper.ini");
 
     DawProfile {
         id,
         label,
         daw: "reaper",
-        executable: default_reaper_executable(&root),
+        executable: default_reaper_executable(&resources_dir),
         resources_dir,
         ini_path,
         role,
@@ -212,43 +211,41 @@ fn reaper_profile(
     }
 }
 
+/// Rig layout on a workstation: `~/fasttrackstudio` is the REAL install
+/// (the resources REAPER runs with in production); `~/fts-dev` is the
+/// developer copy for live iteration. Old hidden paths (`~/.fts-dev`,
+/// `~/.config/FastTrackStudio/Reaper`) remain as compat symlinks.
 pub fn daw_profiles() -> Vec<DawProfile> {
     vec![
         reaper_profile(
             "fasttrackstudio",
             "FastTrackStudio REAPER",
-            "~/.fasttrackstudio",
+            "~/fasttrackstudio",
             "session",
             false,
         ),
-        reaper_profile("fts-dev", "FTS Dev REAPER", "~/.fts-dev", "dev", false),
+        reaper_profile("fts-dev", "FTS Dev REAPER", "~/fts-dev", "dev", false),
         reaper_profile(
             "sandbox",
             "Sandbox REAPER",
-            "~/.fts-dev/sandbox",
+            "~/fts-dev/sandbox",
             "sandbox",
             true,
         ),
-        DawProfile {
-            id: "fts-tracks",
-            label: "FTS-TRACKS (legacy alias)",
-            daw: "reaper",
-            executable: default_reaper_executable(&expand_home("~/.fasttrackstudio")),
-            resources_dir: expand_home("~/.fasttrackstudio").join("Reaper"),
-            ini_path: expand_home("~/.fasttrackstudio").join("Reaper/reaper.ini"),
-            role: "session",
-            sandboxed: false,
-        },
-        DawProfile {
-            id: "fts-signal",
-            label: "FTS-SIGNAL (legacy alias)",
-            daw: "reaper",
-            executable: default_reaper_executable(&expand_home("~/.fasttrackstudio")),
-            resources_dir: expand_home("~/.fasttrackstudio").join("Reaper"),
-            ini_path: expand_home("~/.fasttrackstudio").join("Reaper/reaper.ini"),
-            role: "signal",
-            sandboxed: false,
-        },
+        reaper_profile(
+            "fts-tracks",
+            "FTS-TRACKS (legacy alias)",
+            "~/fasttrackstudio",
+            "session",
+            false,
+        ),
+        reaper_profile(
+            "fts-signal",
+            "FTS-SIGNAL (legacy alias)",
+            "~/fasttrackstudio",
+            "signal",
+            false,
+        ),
     ]
 }
 

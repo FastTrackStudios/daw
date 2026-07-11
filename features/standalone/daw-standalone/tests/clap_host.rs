@@ -47,7 +47,7 @@ fn fts_eq_bundle_path() -> Option<PathBuf> {
 
     [
         "/home/cody/.clap/eq-plugin.clap",
-        "/home/cody/.config/FastTrackStudio/Reaper/UserPlugins/FX/eq-plugin.clap",
+        "/home/cody/fasttrackstudio/UserPlugins/FX/eq-plugin.clap",
     ]
     .into_iter()
     .map(PathBuf::from)

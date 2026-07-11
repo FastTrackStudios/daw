@@ -972,12 +972,14 @@ pub fn resolve_gui_reaper_exe() -> String {
 }
 
 /// Canonical REAPER resources directory shared by all rigs and CI.
+/// `~/fasttrackstudio` is the real install; `~/.config/FastTrackStudio/
+/// Reaper` remains as a compat symlink to it.
 pub fn fts_reaper_resources() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
     if let Ok(p) = std::env::var("FTS_REAPER_CONFIG") {
         return PathBuf::from(p.replace("$HOME", &home));
     }
-    PathBuf::from(format!("{home}/.config/FastTrackStudio/Reaper"))
+    PathBuf::from(format!("{home}/fasttrackstudio"))
 }
 
 /// Cargo's artifact directory for builds run with `current_dir(workspace)`:

@@ -56,13 +56,13 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const REAPER_BOOT_TIMEOUT_SECS: u64 = 30;
 /// Resolve the FTS home directory.
 ///
-/// Checks `$FTS_HOME`, then falls back to `~/.fasttrackstudio`.
+/// Checks `$FTS_HOME`, then falls back to `~/fasttrackstudio`.
 fn fts_home() -> String {
     if let Ok(p) = std::env::var("FTS_HOME") {
         return p;
     }
     let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    format!("{home}/.fasttrackstudio")
+    format!("{home}/fasttrackstudio")
 }
 
 /// Resolve the REAPER executable path.
@@ -93,20 +93,22 @@ pub fn reaper_executable() -> String {
 /// Resolve the REAPER resources path.
 ///
 /// Checks `$FTS_REAPER_RESOURCES`, then `$FTS_REAPER_CONFIG`,
-/// then `~/.config/FastTrackStudio/Reaper` (Linux),
+/// then `~/fasttrackstudio` (Linux — the real install; `~/fts-dev` is
+/// the dev-iteration copy and `~/.config/FastTrackStudio/Reaper` is a
+/// compat symlink to `~/fasttrackstudio`),
 /// then falls back to macOS `.app` bundle paths.
 pub fn reaper_resources() -> String {
     if let Ok(p) = std::env::var("FTS_REAPER_RESOURCES") {
         return p;
     }
 
-    // On Linux, use the canonical config directory
+    // On Linux, use the canonical install directory
     if cfg!(target_os = "linux") {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         if let Ok(p) = std::env::var("FTS_REAPER_CONFIG") {
             return p.replace("$HOME", &home);
         }
-        return format!("{home}/.config/FastTrackStudio/Reaper");
+        return format!("{home}/fasttrackstudio");
     }
 
     // macOS .app bundle fallback
@@ -1233,13 +1235,13 @@ impl DawInstanceConfig {
 
     /// Use the FastTrackStudio REAPER config directory.
     ///
-    /// Adds `-cfgfile ~/.config/FastTrackStudio/Reaper/reaper.ini` so the instance
+    /// Adds `-cfgfile ~/fasttrackstudio/reaper.ini` so the instance
     /// uses the FTS config (which has `audiodriver=2` for headless playback, extensions, etc.)
     pub fn with_fts_config(mut self) -> Self {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         let ini = std::env::var("FTS_REAPER_CONFIG")
             .map(|p| format!("{}/reaper.ini", p.replace("$HOME", &home)))
-            .unwrap_or_else(|_| format!("{home}/.config/FastTrackStudio/Reaper/reaper.ini"));
+            .unwrap_or_else(|_| format!("{home}/fasttrackstudio/reaper.ini"));
         self.args.extend(["-cfgfile".to_string(), ini]);
         self
     }

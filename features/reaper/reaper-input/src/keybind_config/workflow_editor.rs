@@ -8,9 +8,9 @@ use crate::keybind_config::types::{KeybindDef, OverlayConfig, ReaperSettingDef, 
 
 /// Create a new workflow with its associated overlay files.
 pub struct WorkflowCreator {
-    /// Workflow directory (e.g., ~/.fts-dev/fasttrackstudio/input/workflows/)
+    /// Workflow directory (e.g., ~/fts-dev/fasttrackstudio/input/workflows/)
     workflow_dir: PathBuf,
-    /// Overlay directory (e.g., ~/.fts-dev/fasttrackstudio/input/keybinds/overlays/)
+    /// Overlay directory (e.g., ~/fts-dev/fasttrackstudio/input/keybinds/overlays/)
     overlay_dir: PathBuf,
 }
 
