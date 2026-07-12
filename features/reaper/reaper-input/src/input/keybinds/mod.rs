@@ -458,7 +458,8 @@ impl PresetBuilder {
         // Check for wheel binding conflicts
         for wheel in section.wheel_binds() {
             let key = format!(
-                "{}:{}:{}",
+                "{:?}:{}:{}:{}",
+                wheel.context,
                 wheel.modifiers.to_lowercase(),
                 wheel.horizontal,
                 wheel.direction as u8
@@ -466,7 +467,8 @@ impl PresetBuilder {
             if !self.allow_override
                 && let Some((_, existing_section)) = self.wheel_bindings.iter().find(|(w, _)| {
                     format!(
-                        "{}:{}:{}",
+                        "{:?}:{}:{}:{}",
+                        w.context,
                         w.modifiers.to_lowercase(),
                         w.horizontal,
                         w.direction as u8
@@ -550,8 +552,14 @@ impl PresetBuilder {
         let mut wheel_map: std::collections::HashMap<String, WheelBind> =
             std::collections::HashMap::new();
         for (wheel, _) in self.wheel_bindings {
+            // Context MUST be part of the key: the same modifier+direction is
+            // bound to different actions per context (e.g. Option+wheel zooms
+            // vertically in both arrange and the MIDI editor, but via different
+            // section action IDs). Omitting context collapses them into one
+            // slot, so one context ends up dispatching the other's action.
             let key = format!(
-                "{}:{}:{}",
+                "{:?}:{}:{}:{}",
+                wheel.context,
                 wheel.modifiers.to_lowercase(),
                 wheel.horizontal,
                 wheel.direction as u8

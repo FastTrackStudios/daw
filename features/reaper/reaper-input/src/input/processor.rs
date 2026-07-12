@@ -482,16 +482,24 @@ fn resolve_wheel_in_bindings(
 ) -> Option<String> {
     let requested_mods = normalize_wheel_modifiers(modifiers);
 
+    let mods_dir_match = |binding: &super::keybinds::WheelBind| {
+        binding.horizontal == horizontal
+            && normalize_wheel_modifiers(&binding.modifiers) == requested_mods
+    };
+
+    // Prefer a binding declared for this exact context over a context-agnostic
+    // (Global) one, independent of definition order — otherwise a Global
+    // arrange binding can shadow the MIDI-editor binding for the same
+    // modifier+direction (they carry different section action IDs).
     bindings
         .iter()
         .rev()
-        .find(|binding| {
-            binding.horizontal == horizontal
-                && binding
-                    .context
-                    .unwrap_or(KeybindContext::Global)
-                    .matches(&context)
-                && normalize_wheel_modifiers(&binding.modifiers) == requested_mods
+        .find(|b| mods_dir_match(b) && b.context == Some(context))
+        .or_else(|| {
+            bindings.iter().rev().find(|b| {
+                mods_dir_match(b)
+                    && b.context.unwrap_or(KeybindContext::Global).matches(&context)
+            })
         })
         .map(|binding| binding.action.clone())
 }
@@ -768,4 +776,57 @@ pub fn clear_pending() {
 pub fn timeout_expired() -> Vec<InputCommand> {
     let mut proc = get_processor().write().unwrap();
     proc.timeout_expired()
+}
+
+#[cfg(test)]
+mod wheel_resolution_tests {
+    use super::resolve_wheel_in_bindings;
+    use crate::input::keybinds::{KeybindContext, WheelBind, WheelDirection};
+
+    fn wb(mods: &str, action: &str, ctx: Option<KeybindContext>) -> WheelBind {
+        WheelBind {
+            modifiers: mods.into(),
+            action: action.into(),
+            direction: WheelDirection::Both,
+            horizontal: false,
+            description: None,
+            context: ctx,
+        }
+    }
+
+    /// Regression: the same modifier+direction is bound to different actions
+    /// per context (Option+wheel = vertical zoom in both arrange and the MIDI
+    /// editor, but via different section action IDs). Each context must
+    /// resolve to its own action — a Global (arrange) binding must not shadow
+    /// the MIDI-editor one.
+    #[test]
+    fn wheel_resolves_per_context() {
+        let bindings = vec![
+            wb("<A->", "1001", None),                        // arrange (Global)
+            wb("<A->", "40663", Some(KeybindContext::Midi)), // MIDI editor
+        ];
+        assert_eq!(
+            resolve_wheel_in_bindings(&bindings, KeybindContext::Midi, "<A->", false),
+            Some("40663".to_string()),
+            "MIDI context must use the MIDI-editor action, not the Global one"
+        );
+        assert_eq!(
+            resolve_wheel_in_bindings(&bindings, KeybindContext::Main, "<A->", false),
+            Some("1001".to_string()),
+            "Arrange context uses the Global action"
+        );
+    }
+
+    /// The exact-context binding wins regardless of definition order.
+    #[test]
+    fn wheel_context_specific_wins_regardless_of_order() {
+        let bindings = vec![
+            wb("<A->", "40663", Some(KeybindContext::Midi)),
+            wb("<A->", "1001", None),
+        ];
+        assert_eq!(
+            resolve_wheel_in_bindings(&bindings, KeybindContext::Midi, "<A->", false),
+            Some("40663".to_string())
+        );
+    }
 }
