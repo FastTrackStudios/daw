@@ -20,6 +20,7 @@
 //! [`MidiEvent`] (SysEx stays off the `Copy` path) and add 14-bit-CC / RPN
 //! aggregators. See `README.md`.
 
+pub mod drum_convert;
 pub mod event;
 pub mod filter;
 pub mod number;
@@ -28,6 +29,7 @@ pub mod raw;
 #[cfg(feature = "vox")]
 pub mod service;
 
+pub use drum_convert::{DrumMap, DrumMapConverter, HatThresholds};
 pub use event::{DecodeError, MidiEvent};
 pub use filter::Filter;
 pub use number::{
