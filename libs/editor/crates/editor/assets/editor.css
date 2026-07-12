@@ -775,29 +775,25 @@
 /* Header row: fence tag + copy (+ toggle when there's a chart). It
    fades in when the pointer is anywhere over the widget, so hovering
    the general area reveals the controls — not just the button. */
-/* One cohesive floating toolbar pill in the top-right corner: the
-   fence tag + copy (+ toggle). Solid elevated surface + border +
-   shadow so it reads as an intentional overlay control, not loose
-   glyphs sitting over the chart. Fades in on hover of the widget. */
+/* Controls (fence tag + copy + `</>` toggle) sit in a right-aligned
+   row at the TOP of the widget — in normal flow, so they're anchored
+   in the block's top-right corner and never float over the chart or
+   source. The tag stays faint; the buttons brighten on hover. */
 .editor-root .md-keyflow-header {
-    position: absolute;
-    top: 6px;
-    right: 6px;
-    z-index: 2;
-    display: inline-flex;
+    display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 2px;
-    padding: 2px 4px;
-    background: var(--ed-bg-elev);
-    border: 1px solid var(--ed-border);
-    border-radius: 7px;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
-    opacity: 0;
-    transition: opacity 120ms ease;
+    min-height: 20px;
+    margin-bottom: 2px;
 }
-.editor-root .md-keyflow-widget:hover .md-keyflow-header,
-.editor-root .md-keyflow-widget.md-keyflow-show-source .md-keyflow-header,
-.editor-root .md-keyflow-source-only .md-keyflow-header {
+.editor-root .md-keyflow-header .md-code-copy,
+.editor-root .md-keyflow-header .md-keyflow-toggle {
+    opacity: 0;
+    transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
+}
+.editor-root .md-keyflow-widget:hover .md-keyflow-header .md-code-copy,
+.editor-root .md-keyflow-widget:hover .md-keyflow-header .md-keyflow-toggle {
     opacity: 1;
 }
 .editor-root .md-keyflow-lang {
