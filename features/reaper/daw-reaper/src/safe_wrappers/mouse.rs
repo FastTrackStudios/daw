@@ -197,6 +197,22 @@ impl MouseSnapshot {
             if src < 0.0 { None } else { Some(src) }
         }
     }
+
+    /// Braced GUID of the item under the mouse (matches `Items`/`ItemRef`
+    /// GUID format), if any.
+    pub fn item_guid(&self) -> Option<String> {
+        let item = self.item?;
+        let medium = reaper_high::Reaper::get().medium_reaper();
+        Some(crate::item::item_guid_string(medium, item))
+    }
+
+    /// GUID of the take under the mouse (matches `Takes`/`TakeRef` GUID
+    /// format), if any.
+    pub fn take_guid(&self) -> Option<String> {
+        let take = self.take?;
+        let low = reaper_low::Reaper::get();
+        Some(crate::safe_wrappers::item::get_take_guid_string(low, take))
+    }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
