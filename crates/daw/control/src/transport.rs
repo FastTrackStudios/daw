@@ -319,19 +319,22 @@ impl Transport {
     // Streaming
     // =========================================================================
 
-    /// Subscribe to transport events. `sub` selects which kinds —
-    /// discrete state changes, continuous position ticks, or both —
-    /// multiplexed onto one `Rx` as `TransportStreamEvent::{State, Position}`.
-    pub async fn subscribe(
-        &self,
-        sub: daw_proto::transport::TransportSubscription,
-    ) -> Result<vox::Rx<daw_proto::transport::TransportStreamEvent>> {
-        let (tx, rx) = vox::channel();
-        self.clients
-            .transport
-            .subscribe(self.context(), sub, tx)
-            .await?;
-        Ok(rx)
+    /// Transport events for **all open projects** via the architect
+    /// `#[subscribe]` stream (state changes + ~30 Hz position ticks).
+    /// Unlike [`subscribe`], this is not scoped to this handle's project —
+    /// consumers that track multiple projects (e.g. the setlist player)
+    /// route each event by its `project_guid`. Drop the stream to
+    /// unsubscribe. Served from each backend's `TransportStreamSource` hub.
+    pub fn events(&self) -> crate::EventStream<daw_proto::transport::TransportStreamEvent> {
+        let (raw_tx, raw_rx) = vox::channel();
+        let stream = self.clients.transport_stream.clone();
+        crate::EventStream::spawn(
+            async move {
+                let _ = stream.events(raw_tx).await;
+            },
+            raw_rx,
+            Box::new(|_| true),
+        )
     }
 }
 

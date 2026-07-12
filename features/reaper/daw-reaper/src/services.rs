@@ -75,6 +75,7 @@ impl Services for Reaper {
             // event hub's PubSub hubs (see `event_hub.rs` + each
             // domain's StreamSource impl). The event-bus base service
             // is empty post-port; only its stream sibling is mounted.
+            transport::StreamService,
             track::StreamService,
             marker::StreamService,
             region::StreamService,

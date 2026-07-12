@@ -420,6 +420,19 @@ pub fn live_preview_with_lookups(
                 "md-wikilink" => Some(text[span.body.clone()].to_string()),
                 _ => None,
             };
+            // For `[[target|display]]` only the display text is shown —
+            // the `target|` prefix is hidden (like the brackets). The
+            // display range is the body after the first `|`; without an
+            // alias it's the whole body. `#Heading`-only links keep
+            // their body verbatim (Obsidian shows "Page#Heading").
+            let display = if span.class == "md-wikilink" {
+                match text[span.body.clone()].find('|') {
+                    Some(rel) => (span.body.start + rel + 1)..span.body.end,
+                    None => span.body.clone(),
+                }
+            } else {
+                span.body.clone()
+            };
             if let Some(h) = href {
                 // Wikilinks: consult the vault to decide
                 // resolved (purple, default) vs unresolved
@@ -439,7 +452,7 @@ pub fn live_preview_with_lookups(
                     span.class
                 };
                 out.push(Decoration::mark_with_attrs(
-                    span.body.clone(),
+                    display.clone(),
                     cls,
                     vec![("data-href".into(), h)],
                 ));
@@ -455,8 +468,18 @@ pub fn live_preview_with_lookups(
             }
         }
         if !cursor_touches(primary, span.outer.clone()) {
-            if span.body.start > span.outer.start {
-                out.push(Decoration::replace(span.outer.start..span.body.start));
+            // Hide the opening bracket(s) and, for an aliased wikilink,
+            // the `target|` prefix up to the display text.
+            let hide_left_to = if span.class == "md-wikilink" {
+                match text[span.body.clone()].find('|') {
+                    Some(rel) => span.body.start + rel + 1,
+                    None => span.body.start,
+                }
+            } else {
+                span.body.start
+            };
+            if hide_left_to > span.outer.start {
+                out.push(Decoration::replace(span.outer.start..hide_left_to));
             }
             if span.outer.end > span.body.end {
                 out.push(Decoration::replace(span.body.end..span.outer.end));
@@ -999,8 +1022,9 @@ fn scan_blocks(
         let trimmed = line.trim_start();
         if let Some((mc, mlen, info_start)) = opens_fence(trimmed) {
             let info_peek = trimmed[info_start..].trim();
-            let is_kf_fence =
-                info_peek.eq_ignore_ascii_case("kf") || info_peek.eq_ignore_ascii_case("kf+");
+            let is_kf_fence = info_peek.eq_ignore_ascii_case("kf")
+                || info_peek.eq_ignore_ascii_case("kf+")
+                || info_peek.eq_ignore_ascii_case("kf-");
             out.push(Decoration::line(line_from, "md-code-block"));
             if is_kf_fence {
                 out.push(Decoration::line(line_from, "md-keyflow-bare"));
@@ -1025,10 +1049,14 @@ fn scan_blocks(
             // rendered SVG already speaks for itself, and the
             // floating header would be a leftover when the user
             // moves the caret onto the fence to edit source.
+            // Keyflow fences build their own header (tag + copy) inside
+            // the widget, so skip the absolute-positioned code header
+            // that ordinary fences overlay.
             let is_rendered_fence = info.eq_ignore_ascii_case("typst")
                 || info.eq_ignore_ascii_case("mermaid")
                 || info.eq_ignore_ascii_case("kf")
-                || info.eq_ignore_ascii_case("kf+");
+                || info.eq_ignore_ascii_case("kf+")
+                || info.eq_ignore_ascii_case("kf-");
             if !caret_on_opener && !is_rendered_fence {
                 let body_end_estimate = find_fence_close(text, content_start, mc, mlen);
                 let header_html = format!(
@@ -1052,6 +1080,7 @@ fn scan_blocks(
                 || info.eq_ignore_ascii_case("mermaid")
                 || info.eq_ignore_ascii_case("kf")
                 || info.eq_ignore_ascii_case("kf+")
+                || info.eq_ignore_ascii_case("kf-")
             {
                 let body_end = find_fence_close(text, content_start, mc, mlen);
                 let body = &text[content_start..body_end];
@@ -1066,59 +1095,85 @@ fn scan_blocks(
                 let fence_range = line_from..close_end;
                 if !cursor_touches(primary, fence_range.clone()) && !body.trim().is_empty() {
                     let is_mermaid = info.eq_ignore_ascii_case("mermaid");
-                    // The keyflow fence family — the AUTHOR picks the
-                    // default per snippet, portable in the markdown:
-                    //   ```kf     → engraved chart only (default)
-                    //   ```kf+    → source AND chart together
-                    //   ```kf-src → source only (plain code block —
-                    //               falls through, never widgetized)
-                    // The `</>` hover toggle still lets a reader flip
-                    // source visibility per fence on top of that.
-                    let is_keyflow =
-                        info.eq_ignore_ascii_case("kf") || info.eq_ignore_ascii_case("kf+");
-                    let kf_show_source = info.eq_ignore_ascii_case("kf+");
-                    let svg = if is_keyflow {
-                        render_keyflow(body)
-                    } else if is_mermaid {
-                        render_mermaid(body)
+                    // The keyflow fence family — the AUTHOR picks per
+                    // snippet what shows, portable in the markdown:
+                    //   ```kf   → engraved chart only (default)
+                    //   ```kf+  → chart AND keyflow-highlighted source
+                    //   ```kf-  → highlighted source only, no chart
+                    // All three shed the code frame and carry a header
+                    // (the `kf` tag + a copy button, top-right). kf/kf+
+                    // also get a `</>` hover toggle to flip the source.
+                    let kf_kind = if info.eq_ignore_ascii_case("kf") {
+                        Some((false, true)) // (show_source, has_chart)
+                    } else if info.eq_ignore_ascii_case("kf+") {
+                        Some((true, true))
+                    } else if info.eq_ignore_ascii_case("kf-") {
+                        Some((true, false))
                     } else {
-                        render_typst(TypstKind::Block, body)
+                        None
                     };
-                    if let Some(svg) = svg {
-                        // Keyflow defaults to the ENGRAVED CHART ONLY;
-                        // the source ships in the widget but stays
-                        // hidden until the `</>` toggle button
-                        // (top-right, on hover) flips the
-                        // `md-keyflow-show-source` class. When shown,
-                        // the layout is ALWAYS STACKED — never
-                        // side-by-side: the keyflow-highlighted source
-                        // block first, the full-width engraved chart
-                        // below it, each with room to breathe. The
-                        // source is highlighted with the same colors
-                        // the live editor uses (`highlight_html`).
-                        // In an editable editor, clicking the chart
-                        // still drops the caret into the fence body
-                        // (data-focus-pos), so the caret-inside pass
-                        // shows raw source for editing as before.
-                        // Typst/mermaid keep the plain render-only widget.
-                        let html = if is_keyflow {
-                            let show = if kf_show_source { " md-keyflow-show-source" } else { "" };
-                            format!(
-                                r#"<div class="md-keyflow-widget{show}" data-focus-pos="{content_start}"><button type="button" class="md-keyflow-toggle" title="Toggle chart source">&lt;/&gt;</button><pre class="md-keyflow-source"><code class="kf-code">{src}</code></pre><div class="md-keyflow-render">{svg}</div></div>"#,
-                                src = editor_keyflow::highlight_html(body),
-                            )
+                    if let Some((show_source, has_chart)) = kf_kind {
+                        // Chart (kf/kf+) needs a successful engrave;
+                        // source-only (kf-) always renders.
+                        let svg = if has_chart { render_keyflow(body) } else { None };
+                        if has_chart && svg.is_none() {
+                            // Bad chart source — leave the raw fence
+                            // (falls through to the code path below).
                         } else {
+                            let show = if show_source { " md-keyflow-show-source" } else { "" };
+                            let only = if has_chart { "" } else { " md-keyflow-source-only" };
+                            // Header (fence tag + copy, plus the source
+                            // toggle when a chart is present). It lives
+                            // INSIDE the display block — the chart's
+                            // top-right corner (or the source block's,
+                            // when there's no chart) — anchored there,
+                            // not overlaid on the widget. Copy grabs the
+                            // raw body.
+                            let toggle = if has_chart {
+                                r#"<button type="button" class="md-keyflow-toggle" title="Show source">&lt;/&gt;</button>"#
+                            } else {
+                                ""
+                            };
+                            let header = format!(
+                                r#"<div class="md-keyflow-header"><span class="md-keyflow-lang">{tag}</span><button class="md-code-copy" data-copy-from="{content_start}" data-copy-to="{body_end}" title="Copy">⧉</button>{toggle}</div>"#,
+                                tag = escape_html(info),
+                            );
+                            let highlighted = editor_keyflow::highlight_html(body);
+                            let html = if let Some(svg) = svg {
+                                // Chart present: header anchors to the
+                                // chart's top-right; the source block (if
+                                // shown) stacks above it.
+                                format!(
+                                    r#"<div class="md-keyflow-widget{show}{only}" data-focus-pos="{content_start}"><div class="md-keyflow-sourcebox"><pre class="md-keyflow-source"><code class="kf-code">{highlighted}</code></pre></div><div class="md-keyflow-render">{header}{svg}</div></div>"#,
+                                )
+                            } else {
+                                // Source only: header anchors to the
+                                // source block's top-right.
+                                format!(
+                                    r#"<div class="md-keyflow-widget{show}{only}" data-focus-pos="{content_start}"><div class="md-keyflow-sourcebox">{header}<pre class="md-keyflow-source"><code class="kf-code">{highlighted}</code></pre></div></div>"#,
+                                )
+                            };
+                            out.push(Decoration::replace(fence_range.clone()));
+                            out.push(Decoration::widget(fence_range.start, html));
+                        }
+                    } else {
+                        let svg = if is_mermaid {
+                            render_mermaid(body)
+                        } else {
+                            render_typst(TypstKind::Block, body)
+                        };
+                        if let Some(svg) = svg {
                             let class = if is_mermaid {
                                 "md-mermaid-widget"
                             } else {
                                 "md-typst-widget"
                             };
-                            format!(
+                            let html = format!(
                                 r#"<div class="{class}" data-focus-pos="{content_start}">{svg}</div>"#,
-                            )
-                        };
-                        out.push(Decoration::replace(fence_range.clone()));
-                        out.push(Decoration::widget(fence_range.start, html));
+                            );
+                            out.push(Decoration::replace(fence_range.clone()));
+                            out.push(Decoration::widget(fence_range.start, html));
+                        }
                     }
                 }
             }
@@ -2398,6 +2453,32 @@ mod tests {
     }
 
     #[test]
+    fn wikilink_alias_shows_only_display_text() {
+        // `[[structure|Structure]]` — the caret away, only "Structure"
+        // is marked; the `[[structure|` prefix and `]]` are replaced.
+        let s = state("[[structure|Structure]]", 30);
+        let decs = live_preview(&s);
+        // The display range is the alias part: byte 12 ("Structure")
+        // .. 21. The link mark covers exactly that, not the target.
+        let disp_start = "[[structure|".len();
+        let disp_end = "[[structure|Structure".len();
+        assert!(
+            decs.iter().any(|d| d.from == disp_start
+                && d.to == disp_end
+                && matches!(&d.kind, crate::decoration::DecorationKind::Mark { class, .. }
+                    if class.starts_with("md-wikilink"))),
+            "only the display text is marked as the link"
+        );
+        // `[[structure|` (0..12) is replaced (hidden) along with `]]`.
+        assert!(
+            decs.iter().any(|d| d.from == 0
+                && d.to == disp_start
+                && matches!(d.kind, crate::decoration::DecorationKind::Replace)),
+            "the target|alias prefix is hidden"
+        );
+    }
+
+    #[test]
     fn footnote_recognized() {
         let s = state("see[^1] here", 0);
         let decs = live_preview(&s);
@@ -2987,19 +3068,28 @@ mod tests {
     }
 
     #[test]
-    fn kf_src_fence_stays_a_code_block() {
-        // ```kf-src is source-only — it must KEEP the code frame
-        // (never widgetized, never bare).
-        let s = state("```kf-src\nCmaj7 | Dm7\n```\n", 0);
+    fn kf_dash_fence_is_highlighted_source_only() {
+        // ```kf- — highlighted source, NO chart, always shown.
+        let s = state("```kf-\nCmaj7 | Dm7\n```\n\ntail", 40);
         let decs = live_preview(&s);
-        assert!(has_line_class(&decs, 0, "md-code-block"), "kf-src is a code block");
-        assert!(!has_line_class(&decs, 0, "md-keyflow-bare"), "kf-src keeps the frame");
-        assert!(
-            !decs.iter().any(|d| matches!(&d.kind,
-                crate::decoration::DecorationKind::Widget { html }
-                    if html.contains("md-keyflow-widget"))),
-            "kf-src never engraves a chart widget"
-        );
+        let widget = decs.iter().find_map(|d| match &d.kind {
+            crate::decoration::DecorationKind::Widget { html }
+                if html.contains("md-keyflow-widget") =>
+            {
+                Some(html.clone())
+            }
+            _ => None,
+        });
+        let html = widget.expect("kf- should widgetize a source block");
+        assert!(html.contains("md-keyflow-source-only"), "kf- is source-only");
+        assert!(html.contains("class=\"kf-root\""), "kf- source is keyflow-highlighted");
+        assert!(!html.contains("<svg"), "kf- has NO chart");
+        assert!(!html.contains("md-keyflow-toggle"), "kf- has no source toggle");
+        // Header with the tag + copy button.
+        assert!(html.contains("md-keyflow-header"), "kf- carries a header");
+        assert!(html.contains("md-code-copy"), "kf- header has a copy button");
+        // Sheds the code frame like the other keyflow fences.
+        assert!(has_line_class(&decs, 0, "md-keyflow-bare"), "kf- is bare");
     }
 
     #[test]

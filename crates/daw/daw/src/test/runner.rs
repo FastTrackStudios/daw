@@ -882,6 +882,21 @@ pub fn find_fts_daw_socket() -> Option<String> {
             && name.ends_with(".sock")
             && !name.contains(".bootstrap.")
         {
+            // /tmp is shared between users (CI runs as gitea-runner
+            // beside dev runs as the login user). A socket owned by
+            // ANOTHER user is a stale leftover we can't connect to
+            // (its perms deny cross-user writes → EACCES) — skip it so
+            // discovery finds the socket THIS run's daw-bridge created.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                let ours = std::fs::metadata(&path)
+                    .map(|m| m.uid() == unsafe { libc::geteuid() })
+                    .unwrap_or(false);
+                if !ours {
+                    continue;
+                }
+            }
             return Some(path.to_string_lossy().into_owned());
         }
     }

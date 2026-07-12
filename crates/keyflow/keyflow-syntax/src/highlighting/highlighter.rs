@@ -672,23 +672,18 @@ impl Highlighter {
                         // This looks like a chord root
                         spans.push(HighlightSpan::from_range(start_pos, 1, HighlightKind::Root));
 
-                        // Look ahead for accidental
+                        // Look ahead for a root accidental. `#`/`b`
+                        // here belong to the root (F# is one note), so
+                        // they take the ROOT color, not the standalone
+                        // accidental color — the accidental inherits
+                        // the color of what it modifies.
                         if i + 1 < tokens.len() {
                             match &tokens[i + 1].token_type {
-                                TokenType::Sharp | TokenType::Flat => {
+                                TokenType::Sharp | TokenType::Flat | TokenType::Letter('b') => {
                                     spans.push(HighlightSpan::from_range(
                                         tokens[i + 1].pos,
                                         1,
-                                        HighlightKind::Accidental,
-                                    ));
-                                    i += 1;
-                                }
-                                // 'b' as flat after root
-                                TokenType::Letter('b') => {
-                                    spans.push(HighlightSpan::from_range(
-                                        tokens[i + 1].pos,
-                                        1,
-                                        HighlightKind::Accidental,
+                                        HighlightKind::Root,
                                     ));
                                     i += 1;
                                 }
@@ -1187,20 +1182,37 @@ impl Highlighter {
 
         while idx + 1 < tokens.len() {
             let next = &tokens[idx + 1];
-            if let TokenType::Number(num) = &next.token_type {
-                let num_val: u8 = num.parse().unwrap_or(0);
-                if [6, 7, 9, 11, 13].contains(&num_val) {
+            match &next.token_type {
+                // A plain extension number (6, 7, 9, 11, 13).
+                TokenType::Number(num) if [6, 7, 9, 11, 13].contains(&num.parse().unwrap_or(0)) => {
                     spans.push(HighlightSpan::from_range(
                         next.pos,
                         num.len(),
                         HighlightKind::Extension,
                     ));
                     idx += 1;
-                } else {
-                    break;
                 }
-            } else {
-                break;
+                // An ALTERATION: `b5`, `#11`, `b9`, `#5`, … — the
+                // accidental modifies the degree that follows, so both
+                // take the Extension color (the accidental inherits the
+                // color of what it's connected to). Requires a number
+                // immediately after the accidental.
+                TokenType::Sharp | TokenType::Flat | TokenType::Letter('b')
+                    if idx + 2 < tokens.len()
+                        && matches!(tokens[idx + 2].token_type, TokenType::Number(_)) =>
+                {
+                    let acc = &tokens[idx + 1];
+                    spans.push(HighlightSpan::from_range(acc.pos, 1, HighlightKind::Extension));
+                    if let TokenType::Number(num) = &tokens[idx + 2].token_type {
+                        spans.push(HighlightSpan::from_range(
+                            tokens[idx + 2].pos,
+                            num.len(),
+                            HighlightKind::Extension,
+                        ));
+                    }
+                    idx += 2;
+                }
+                _ => break,
             }
         }
 
@@ -1396,16 +1408,33 @@ mod tests {
 
     #[test]
     fn test_chord_roots_at_word_start() {
-        // Standalone letters A-G at word boundaries SHOULD be highlighted
+        // Standalone letters A-G at word boundaries SHOULD be highlighted.
+        // A root accidental takes the ROOT color, so `F#` contributes
+        // two Root spans (the F and the #): A, D, F, # → 4.
         let spans = Highlighter::highlight_line("A D F#m");
         let root_count = spans
             .iter()
             .filter(|s| s.kind == HighlightKind::Root)
             .count();
         assert_eq!(
-            root_count, 3,
-            "Should highlight standalone chord letters, found {} roots",
-            root_count
+            root_count, 4,
+            "A, D, F and F's accidental should all be root-colored, found {root_count}"
+        );
+    }
+
+    #[test]
+    fn root_accidental_and_alteration_inherit_color() {
+        // `F#m7b5`: F# is one root (# takes Root color); the b5
+        // alteration is one extension (both b and 5 take Extension).
+        let spans = Highlighter::highlight_chord("F#m7b5");
+        let root = spans.iter().filter(|s| s.kind == HighlightKind::Root).count();
+        assert_eq!(root, 2, "F and # are both root-colored");
+        let ext = spans.iter().filter(|s| s.kind == HighlightKind::Extension).count();
+        assert_eq!(ext, 3, "7, b and 5 are all extension-colored");
+        // Nothing falls through to the gray MeasureCount kind mid-chord.
+        assert!(
+            !spans.iter().any(|s| s.kind == HighlightKind::MeasureCount),
+            "no uncategorized gray tokens in the chord"
         );
     }
 }

@@ -6,12 +6,49 @@
 //! retired with the port.
 
 use daw_proto::Items;
+use daw_proto::event_bus::DawEvent;
+use daw_proto::item::ItemEvent;
 use daw_proto::{
     BeatAttachMode, DawError, DawResult, Duration, FadeShape, Item, ItemRef, PositionInSeconds,
     ProjectContext, TrackRef,
 };
 
 use crate::sync::{ItemEntry, ProjectState, Standalone};
+
+/// Publish an item change onto the cross-domain event bus so subscribers
+/// (the sync engine, inspectors) see it. Item events carry `project_guid`
+/// per variant, so no separate envelope is needed.
+fn publish_item_event(daw: &Standalone, event: ItemEvent) {
+    daw.bus_events.publish(DawEvent::Item(event));
+}
+
+/// Like [`mutate_item`] but the closure — given the project guid, item guid,
+/// and a mutable item (old values readable before it writes) — returns the
+/// [`ItemEvent`] describing the change, which is published on the bus. Keeps
+/// old-value capture, mutation, and publish in one place.
+fn mutate_item_evt<F>(
+    daw: &Standalone,
+    project: &ProjectContext,
+    item: &ItemRef,
+    f: F,
+) -> DawResult<()>
+where
+    F: FnOnce(&str, &str, &mut Item) -> ItemEvent,
+{
+    let guid = resolve_project(daw, project).ok_or_else(no_project)?;
+    let event = daw.with_project_mut(&guid, |p| {
+        let item_guid = item_guid_from_ref(p, item)
+            .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
+        let entry = p
+            .items
+            .get_mut(&item_guid)
+            .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+        let event = f(&guid, &item_guid, &mut entry.item);
+        Ok::<ItemEvent, DawError>(event)
+    })??;
+    publish_item_event(daw, event);
+    Ok(())
+}
 
 fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
@@ -147,39 +184,51 @@ impl Items for Standalone {
         length: Duration,
     ) -> Option<String> {
         let guid = resolve_project(self, &project)?;
-        self.with_project_mut(&guid, |p| {
-            let track_guid = resolve_track_guid(p, &track)?;
-            if !p.tracks.iter().any(|t| t.guid == track_guid) {
-                return None;
-            }
-            let counter = p.next_item_counter;
-            p.next_item_counter += 1;
-            let item_guid = format!("standalone-item-{counter:016x}");
-            let order = p.items_by_track.entry(track_guid.clone()).or_default();
-            let index = order.len() as u32;
-            order.push(item_guid.clone());
-            let mut item = Item::default();
-            item.guid = item_guid.clone();
-            item.track_guid = track_guid;
-            item.index = index;
-            item.position = position;
-            item.length = length;
-            p.items.insert(item_guid.clone(), ItemEntry { item });
-            Some(item_guid)
-        })
-        .ok()
-        .flatten()
+        let created = self
+            .with_project_mut(&guid, |p| {
+                let track_guid = resolve_track_guid(p, &track)?;
+                if !p.tracks.iter().any(|t| t.guid == track_guid) {
+                    return None;
+                }
+                let counter = p.next_item_counter;
+                p.next_item_counter += 1;
+                let item_guid = format!("standalone-item-{counter:016x}");
+                let order = p.items_by_track.entry(track_guid.clone()).or_default();
+                let index = order.len() as u32;
+                order.push(item_guid.clone());
+                let mut item = Item::default();
+                item.guid = item_guid.clone();
+                item.track_guid = track_guid.clone();
+                item.index = index;
+                item.position = position;
+                item.length = length;
+                p.items.insert(item_guid.clone(), ItemEntry { item: item.clone() });
+                Some((item_guid, track_guid, item))
+            })
+            .ok()
+            .flatten();
+        let (item_guid, track_guid, item) = created?;
+        publish_item_event(
+            self,
+            ItemEvent::Created {
+                project_guid: guid,
+                track_guid,
+                item,
+            },
+        );
+        Some(item_guid)
     }
 
     fn delete_item(&self, project: ProjectContext, item: ItemRef) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(no_project)?;
-        self.with_project_mut(&guid, |p| {
+        let (item_guid, track_guid) = self.with_project_mut(&guid, |p| {
             let item_guid = item_guid_from_ref(p, &item)
                 .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
             let entry = p
                 .items
                 .remove(&item_guid)
                 .ok_or_else(|| DawError::not_found("Item", &item_guid))?;
+            let track_guid = entry.item.track_guid.clone();
             if let Some(order) = p.items_by_track.get_mut(&entry.item.track_guid) {
                 order.retain(|g| g != &item_guid);
                 for (i, g) in order.iter().enumerate() {
@@ -189,33 +238,57 @@ impl Items for Standalone {
                 }
             }
             p.takes.remove(&item_guid);
-            Ok::<(), DawError>(())
-        })?
+            Ok::<(String, String), DawError>((item_guid, track_guid))
+        })??;
+        publish_item_event(
+            self,
+            ItemEvent::Deleted {
+                project_guid: guid,
+                track_guid,
+                item_guid,
+            },
+        );
+        Ok(())
     }
 
     fn duplicate_item(&self, project: ProjectContext, item: ItemRef) -> Option<String> {
         let guid = resolve_project(self, &project)?;
-        self.with_project_mut(&guid, |p| {
-            let item_guid = item_guid_from_ref(p, &item)?;
-            let src = p.items.get(&item_guid)?.clone();
-            let counter = p.next_item_counter;
-            p.next_item_counter += 1;
-            let new_guid = format!("standalone-item-{counter:016x}");
-            let order = p
-                .items_by_track
-                .entry(src.item.track_guid.clone())
-                .or_default();
-            let new_index = order.len() as u32;
-            order.push(new_guid.clone());
-            let mut new_item = src.item.clone();
-            new_item.guid = new_guid.clone();
-            new_item.index = new_index;
-            p.items
-                .insert(new_guid.clone(), ItemEntry { item: new_item });
-            Some(new_guid)
-        })
-        .ok()
-        .flatten()
+        let created = self
+            .with_project_mut(&guid, |p| {
+                let item_guid = item_guid_from_ref(p, &item)?;
+                let src = p.items.get(&item_guid)?.clone();
+                let counter = p.next_item_counter;
+                p.next_item_counter += 1;
+                let new_guid = format!("standalone-item-{counter:016x}");
+                let order = p
+                    .items_by_track
+                    .entry(src.item.track_guid.clone())
+                    .or_default();
+                let new_index = order.len() as u32;
+                order.push(new_guid.clone());
+                let mut new_item = src.item.clone();
+                new_item.guid = new_guid.clone();
+                new_item.index = new_index;
+                p.items.insert(
+                    new_guid.clone(),
+                    ItemEntry {
+                        item: new_item.clone(),
+                    },
+                );
+                Some((new_guid, new_item))
+            })
+            .ok()
+            .flatten();
+        let (new_guid, new_item) = created?;
+        publish_item_event(
+            self,
+            ItemEvent::Created {
+                project_guid: guid,
+                track_guid: new_item.track_guid.clone(),
+                item: new_item,
+            },
+        );
+        Some(new_guid)
     }
 
     fn set_position(
@@ -224,7 +297,16 @@ impl Items for Standalone {
         item: ItemRef,
         position: PositionInSeconds,
     ) -> DawResult<()> {
-        mutate_item(self, &project, &item, |i| i.position = position)
+        mutate_item_evt(self, &project, &item, |pg, ig, i| {
+            let old = i.position.as_seconds();
+            i.position = position;
+            ItemEvent::PositionChanged {
+                project_guid: pg.to_string(),
+                item_guid: ig.to_string(),
+                old_position: old,
+                new_position: position.as_seconds(),
+            }
+        })
     }
 
     fn set_length(
@@ -233,7 +315,16 @@ impl Items for Standalone {
         item: ItemRef,
         length: Duration,
     ) -> DawResult<()> {
-        mutate_item(self, &project, &item, |i| i.length = length)
+        mutate_item_evt(self, &project, &item, |pg, ig, i| {
+            let old = i.length.as_seconds();
+            i.length = length;
+            ItemEvent::LengthChanged {
+                project_guid: pg.to_string(),
+                item_guid: ig.to_string(),
+                old_length: old,
+                new_length: length.as_seconds(),
+            }
+        })
     }
 
     fn move_to_track(
@@ -243,7 +334,7 @@ impl Items for Standalone {
         track: TrackRef,
     ) -> DawResult<()> {
         let guid = resolve_project(self, &project).ok_or_else(no_project)?;
-        self.with_project_mut(&guid, |p| {
+        let (item_guid, old_track, new_track) = self.with_project_mut(&guid, |p| {
             let item_guid = item_guid_from_ref(p, &item)
                 .ok_or_else(|| DawError::not_found("Item", &format!("{item:?}")))?;
             let track_guid = resolve_track_guid(p, &track)
@@ -262,11 +353,21 @@ impl Items for Standalone {
             let new_index = order.len() as u32;
             order.push(item_guid.clone());
             if let Some(e) = p.items.get_mut(&item_guid) {
-                e.item.track_guid = track_guid;
+                e.item.track_guid = track_guid.clone();
                 e.item.index = new_index;
             }
-            Ok::<(), DawError>(())
-        })?
+            Ok::<(String, String, String), DawError>((item_guid, prev_track, track_guid))
+        })??;
+        publish_item_event(
+            self,
+            ItemEvent::MovedToTrack {
+                project_guid: guid,
+                item_guid,
+                old_track_guid: old_track,
+                new_track_guid: new_track,
+            },
+        );
+        Ok(())
     }
 
     fn set_snap_offset(
@@ -279,7 +380,14 @@ impl Items for Standalone {
     }
 
     fn set_muted(&self, project: ProjectContext, item: ItemRef, muted: bool) -> DawResult<()> {
-        mutate_item(self, &project, &item, |i| i.muted = muted)
+        mutate_item_evt(self, &project, &item, |pg, ig, i| {
+            i.muted = muted;
+            ItemEvent::MuteChanged {
+                project_guid: pg.to_string(),
+                item_guid: ig.to_string(),
+                muted,
+            }
+        })
     }
 
     fn set_selected(
@@ -288,7 +396,14 @@ impl Items for Standalone {
         item: ItemRef,
         selected: bool,
     ) -> DawResult<()> {
-        mutate_item(self, &project, &item, |i| i.selected = selected)
+        mutate_item_evt(self, &project, &item, |pg, ig, i| {
+            i.selected = selected;
+            ItemEvent::SelectionChanged {
+                project_guid: pg.to_string(),
+                item_guid: ig.to_string(),
+                selected,
+            }
+        })
     }
 
     fn set_locked(&self, project: ProjectContext, item: ItemRef, locked: bool) -> DawResult<()> {
@@ -305,7 +420,14 @@ impl Items for Standalone {
     }
 
     fn set_volume(&self, project: ProjectContext, item: ItemRef, volume: f64) -> DawResult<()> {
-        mutate_item(self, &project, &item, |i| i.volume = volume)
+        mutate_item_evt(self, &project, &item, |pg, ig, i| {
+            i.volume = volume;
+            ItemEvent::VolumeChanged {
+                project_guid: pg.to_string(),
+                item_guid: ig.to_string(),
+                volume,
+            }
+        })
     }
 
     fn set_fade_in(

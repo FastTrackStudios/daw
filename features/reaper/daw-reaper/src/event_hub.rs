@@ -24,7 +24,7 @@ use daw_proto::project::ProjectStreamEvent;
 use daw_proto::region::RegionStreamEvent;
 use daw_proto::tempo_map::TempoMapStreamEvent;
 use daw_proto::track::TrackStreamEvent;
-use daw_proto::transport::{PositionTick, TransportEvent};
+use daw_proto::transport::{PositionTick, TransportEvent, TransportStreamEvent};
 use tokio::sync::broadcast;
 
 // Buffer sizes. Matched to helgobox's defaults for occasional
@@ -74,6 +74,9 @@ pub struct DawEventHub {
     regions_hub: architect::PubSub<RegionStreamEvent>,
     tracks_hub: architect::PubSub<TrackStreamEvent>,
     tempo_map_hub: architect::PubSub<TempoMapStreamEvent>,
+    /// Transport-domain `#[subscribe]` stream hub (`TransportStreamSource`).
+    /// Fed by the 30 Hz REAPER poll (state changes + position ticks).
+    transport_hub: architect::PubSub<TransportStreamEvent>,
     /// Cross-domain bus — every domain's publish also lands here,
     /// wrapped in [`DawEvent`]. Subscribers filter client-side.
     bus_hub: architect::PubSub<DawEvent>,
@@ -93,6 +96,7 @@ impl DawEventHub {
             regions_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
             tracks_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
             tempo_map_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
+            transport_hub: architect::PubSub::sliding(CONTINUOUS_BUFFER),
             bus_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
         }
     }
@@ -119,6 +123,10 @@ impl DawEventHub {
         &self.bus_hub
     }
 
+    pub fn transport_hub(&self) -> &architect::PubSub<TransportStreamEvent> {
+        &self.transport_hub
+    }
+
     // ── Transport state ──────────────────────────────────────────
 
     pub fn subscribe_transport_state(&self) -> broadcast::Receiver<TransportEvent> {
@@ -126,12 +134,16 @@ impl DawEventHub {
     }
 
     pub fn publish_transport_state(&self, event: TransportEvent) {
+        self.transport_hub
+            .publish(TransportStreamEvent::State(event.clone()));
         self.bus_hub.publish(DawEvent::TransportState(event.clone()));
         let _ = self.transport_state_tx.send(event);
     }
 
     pub fn transport_state_subscriber_count(&self) -> usize {
-        self.transport_state_tx.receiver_count() + self.bus_hub.subscriber_count()
+        self.transport_state_tx.receiver_count()
+            + self.transport_hub.subscriber_count()
+            + self.bus_hub.subscriber_count()
     }
 
     // ── Position ─────────────────────────────────────────────────
@@ -141,12 +153,16 @@ impl DawEventHub {
     }
 
     pub fn publish_position(&self, tick: PositionTick) {
+        self.transport_hub
+            .publish(TransportStreamEvent::Position(tick.clone()));
         self.bus_hub.publish(DawEvent::TransportPosition(tick.clone()));
         let _ = self.position_tx.send(tick);
     }
 
     pub fn position_subscriber_count(&self) -> usize {
-        self.position_tx.receiver_count() + self.bus_hub.subscriber_count()
+        self.position_tx.receiver_count()
+            + self.transport_hub.subscriber_count()
+            + self.bus_hub.subscriber_count()
     }
 
     // ── Markers ──────────────────────────────────────────────────

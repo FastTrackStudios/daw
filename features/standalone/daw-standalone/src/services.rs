@@ -63,6 +63,7 @@ impl Services for Standalone {
             // hubs on `Standalone` (see each domain's StreamSource
             // impl). The event-bus base service is empty post-port;
             // only its stream sibling is mounted.
+            transport::StreamService,
             track::StreamService,
             marker::StreamService,
             region::StreamService,

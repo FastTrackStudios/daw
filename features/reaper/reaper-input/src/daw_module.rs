@@ -65,6 +65,10 @@ impl DawModule for InputModule {
     fn init(&self, _ctx: &ModuleContext) {
         crate::bootstrap_in_process_runtime();
         daw::register_timer(crate::check_config_reload);
+        // Re-hook arrange + MIDI-editor windows every tick. MIDI editors open
+        // and close after enable-time, so their wheel hook must be (re)checked
+        // periodically — otherwise scrolls there bypass the plugin entirely.
+        daw::register_timer(crate::check_and_hook_windows);
         crate::trace_console_msg("FTS Input reload watcher armed\n");
         tracing::info!("[input] Module initialized");
     }

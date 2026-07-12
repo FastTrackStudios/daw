@@ -686,19 +686,35 @@ pub fn check_and_hook_midi_editors() {
     let medium_reaper = reaper.medium_reaper();
 
     // Check the active MIDI editor
-    if let Some(midi_editor_hwnd) = medium_reaper.midi_editor_get_active() {
-        let midi_hwnd = midi_editor_hwnd.as_ptr();
+    let Some(midi_editor_hwnd) = medium_reaper.midi_editor_get_active() else {
+        return;
+    };
+    let frame = midi_editor_hwnd.as_ptr();
 
-        // Check if we've already hooked this window
-        let already_hooked = HOOKED_WINDOWS.with(|hooked| hooked.borrow().contains(&midi_hwnd));
+    // `WM_MOUSEWHEEL` in the piano roll is delivered to the notes-view /
+    // piano-view CHILD windows, not the top-level MIDI editor frame — the same
+    // reason the arrange view hooks its trackview child rather than the main
+    // window. Hooking only the frame means scrolls in the piano roll never
+    // reach us and fall through to REAPER's native handling. Hook the children
+    // (plus the frame, for ruler/toolbar-area scrolls).
+    let mut targets = vec![frame];
+    if let Some(notes) = crate::input::reaper_windows::get_notes_view(frame, medium_reaper) {
+        targets.push(notes);
+    }
+    if let Some(piano) = crate::input::reaper_windows::get_piano_view(frame, medium_reaper) {
+        targets.push(piano);
+    }
 
-        if !already_hooked {
-            if let Err(e) = install_wheel_hook(midi_hwnd) {
-                tracing::warn!("Failed to hook MIDI editor window: {}", e);
-            } else {
-                info!("Hooked MIDI editor window for wheel events");
-                crate::trace_console_msg("🎹 Hooked MIDI editor window for wheel events\n");
-            }
+    for hwnd in targets {
+        let already_hooked = HOOKED_WINDOWS.with(|hooked| hooked.borrow().contains(&hwnd));
+        if already_hooked {
+            continue;
+        }
+        if let Err(e) = install_wheel_hook(hwnd) {
+            tracing::warn!("Failed to hook MIDI editor window: {}", e);
+        } else {
+            info!("Hooked MIDI editor view for wheel events");
+            crate::trace_console_msg("🎹 Hooked MIDI editor view for wheel events\n");
         }
     }
 }

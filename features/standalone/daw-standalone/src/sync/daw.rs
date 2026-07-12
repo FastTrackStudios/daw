@@ -447,6 +447,12 @@ pub struct Standalone {
     pub(crate) marker_events: architect::PubSub<daw_proto::marker::MarkerStreamEvent>,
     pub(crate) region_events: architect::PubSub<daw_proto::region::RegionStreamEvent>,
     pub(crate) tempo_map_events: architect::PubSub<daw_proto::tempo_map::TempoMapStreamEvent>,
+    /// Transport-domain stream hub (`TransportStreamSource`). The
+    /// per-project transport pump publishes state changes + ~30 Hz
+    /// position ticks here; the architect `#[subscribe] fn events`
+    /// stream layer fans them out. Subscribers filter by `project_guid`.
+    pub(crate) transport_events:
+        architect::PubSub<daw_proto::transport::TransportStreamEvent>,
     /// Cross-domain event-bus hub (`EventBusStreamSource`). Every
     /// per-domain publish site also wraps its event in [`DawEvent`]
     /// and publishes here; per-project transport pumps bridge
@@ -490,6 +496,7 @@ impl Standalone {
             marker_events: architect::PubSub::sliding(1024),
             region_events: architect::PubSub::sliding(1024),
             tempo_map_events: architect::PubSub::sliding(1024),
+            transport_events: architect::PubSub::sliding(1024),
             bus_events: architect::PubSub::sliding(1024),
             meters: Arc::new(Mutex::new(crate::metering::Meters::empty())),
             #[cfg(feature = "audio")]
@@ -560,28 +567,23 @@ impl Standalone {
         bundle: &Arc<crate::transport_engine::TransportBundle>,
     ) {
         use daw_proto::event_bus::DawEvent;
-        use daw_proto::transport::TransportStreamEvent;
+        use daw_proto::primitives::{Position, PositionInSeconds};
+        use daw_proto::transport::{PositionTick, TransportEvent, TransportStreamEvent};
 
+        let guid = guid.to_string();
+        let bundle = bundle.clone();
         let initial_proto = self
-            .with_project(guid, |p| p.transport.clone())
+            .with_project(&guid, |p| p.transport.clone())
             .unwrap_or_default();
-        let (ttx, mut trx) = vox::channel();
-        let _join = crate::transport_engine::spawn_subscriber_pump(
-            guid.to_string(),
-            bundle.shared.clone(),
-            initial_proto,
-            daw_proto::transport::TransportSubscription {
-                state: true,
-                position: true,
-            },
-            ttx,
-        );
         let bus = self.bus_events.clone();
+        let transport = self.transport_events.clone();
+
         moire::task::spawn(async move {
-            while let Ok(Some(ev)) = trx.recv().await {
-                let mut owned = None;
-                let _ = ev.map(|e| owned = Some(e));
-                match owned.expect("SelfRef::map runs once") {
+            // Publish to BOTH the dedicated transport stream
+            // (`TransportStreamSource`) and the cross-domain event bus.
+            let emit = |ev: TransportStreamEvent| {
+                transport.publish(ev.clone());
+                match ev {
                     TransportStreamEvent::State(s) => {
                         bus.publish(DawEvent::TransportState(s));
                     }
@@ -589,6 +591,29 @@ impl Standalone {
                         bus.publish(DawEvent::TransportPosition(p));
                     }
                 }
+            };
+
+            // Initial snapshot so late subscribers sync without re-querying.
+            emit(TransportStreamEvent::State(TransportEvent::Snapshot {
+                project_guid: guid.clone(),
+                state: initial_proto,
+            }));
+
+            // Poll the bundle's atomics at ~30 Hz and publish. Reading atomics
+            // is RT-safe; the publish (mutex) happens only on this task, never
+            // in the audio callback. `is_playing` rides on each position tick,
+            // so the UI sees play/stop without a separate discrete event
+            // (consumers that need the full state query `Transport::get_state`).
+            loop {
+                moire::time::sleep(std::time::Duration::from_millis(33)).await;
+                let snap = bundle.snapshot();
+                let pos = Position::from_time(PositionInSeconds::from_seconds(snap.seconds.0));
+                emit(TransportStreamEvent::Position(PositionTick {
+                    project_guid: guid.clone(),
+                    playhead: pos.clone(),
+                    edit_cursor: pos,
+                    is_playing: snap.play_state.is_advancing(),
+                }));
             }
         });
     }
