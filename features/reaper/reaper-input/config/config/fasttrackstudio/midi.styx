@@ -1,13 +1,21 @@
 bindings (
-    // Vim-style movement. All IDs are MIDI Editor section actions, verified
-    // against REAPER's action dump (ActionList). They run in the MIDI Editor
-    // section because the binding context is @Midi.
-    {keys h,        action 40183, context @Midi, desc "Move notes left one grid unit"}
-    {keys l,        action 40184, context @Midi, desc "Move notes right one grid unit"}
-    {keys j,        action 40178, context @Midi, desc "Move notes down one semitone"}
-    {keys k,        action 40177, context @Midi, desc "Move notes up one semitone"}
-    {keys "<S-j>",  action 40180, context @Midi, desc "Move notes down one octave"}
-    {keys "<S-k>",  action 40179, context @Midi, desc "Move notes up one octave"}
+    // Navigation — hjkl navigate like the arrange view. `passthrough true`
+    // forces these to run in the MAIN section from inside the editor, so they
+    // drive the shared edit cursor / track selection exactly as in arrange.
+    // (Note move + transpose moved off hjkl onto the arrow keys below.)
+    {keys h,        action 40838, context @Midi, passthrough true, desc "Move edit cursor to current/previous measure"}
+    {keys l,        action 40837, context @Midi, passthrough true, desc "Move edit cursor to next measure"}
+    {keys j,        action 40285, context @Midi, passthrough true, desc "Select next track"}
+    {keys k,        action 40286, context @Midi, passthrough true, desc "Select previous track"}
+
+    // Note move / transpose — arrows run in the MIDI Editor section (@Midi,
+    // no passthrough). IDs verified against REAPER's action dump (ActionList).
+    {keys "<left>",   action 40183, context @Midi, desc "Move notes left one grid unit"}
+    {keys "<right>",  action 40184, context @Midi, desc "Move notes right one grid unit"}
+    {keys "<up>",     action 40177, context @Midi, desc "Move notes up one semitone"}
+    {keys "<down>",   action 40178, context @Midi, desc "Move notes down one semitone"}
+    {keys "<S-up>",   action 40179, context @Midi, desc "Move notes up one octave"}
+    {keys "<S-down>", action 40180, context @Midi, desc "Move notes down one octave"}
 
     // Editing
     {keys d,            action 40002, context @Midi, desc "Delete notes"}
