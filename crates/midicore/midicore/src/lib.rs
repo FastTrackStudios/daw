@@ -13,6 +13,9 @@
 
 pub use midicore_proto::*;
 
+mod monitor;
+pub use monitor::{MidiMonitor, MIDI_MONITOR_CAP};
+
 /// The midir-backed OS MIDI backend (`MidiInput`, `MidiStream`, `input_ports`,
 /// …). Enabled by the `midir` feature; native platforms only.
 #[cfg(feature = "midir")]
