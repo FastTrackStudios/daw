@@ -775,6 +775,10 @@
 /* Header row: fence tag + copy (+ toggle when there's a chart). It
    fades in when the pointer is anywhere over the widget, so hovering
    the general area reveals the controls — not just the button. */
+/* One cohesive floating toolbar pill in the top-right corner: the
+   fence tag + copy (+ toggle). Solid elevated surface + border +
+   shadow so it reads as an intentional overlay control, not loose
+   glyphs sitting over the chart. Fades in on hover of the widget. */
 .editor-root .md-keyflow-header {
     position: absolute;
     top: 6px;
@@ -782,7 +786,12 @@
     z-index: 2;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: 2px;
+    padding: 2px 4px;
+    background: var(--ed-bg-elev);
+    border: 1px solid var(--ed-border);
+    border-radius: 7px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
     opacity: 0;
     transition: opacity 120ms ease;
 }
@@ -793,32 +802,33 @@
 }
 .editor-root .md-keyflow-lang {
     font-family: var(--ed-mono);
-    font-size: 0.72em;
+    font-size: 0.7em;
     letter-spacing: 0.04em;
     color: var(--ed-text-dim, var(--ed-text));
     user-select: none;
+    padding: 0 3px;
 }
 .editor-root .md-keyflow-header .md-code-copy,
 .editor-root .md-keyflow-toggle {
-    padding: 2px 7px;
-    border-radius: 5px;
-    border: 1px solid var(--ed-border);
-    background: var(--ed-bg-elev);
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 0;
+    background: none;
     color: var(--ed-text-dim, var(--ed-text));
     font-family: var(--ed-mono);
-    font-size: 0.72em;
+    font-size: 0.7em;
     line-height: 1.4;
     cursor: pointer;
-    transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+    transition: color 120ms ease, background 120ms ease;
 }
 .editor-root .md-keyflow-header .md-code-copy:hover,
 .editor-root .md-keyflow-toggle:hover {
     color: var(--ed-text);
-    border-color: var(--ed-text-dim, var(--ed-border));
+    background: var(--ed-border);
 }
 .editor-root .md-keyflow-widget.md-keyflow-show-source .md-keyflow-toggle {
     color: var(--ed-link);
-    border-color: var(--ed-link);
+    background: color-mix(in oklab, var(--ed-link) 18%, transparent);
 }
 .editor-root .md-keyflow-source {
     display: none;
