@@ -434,68 +434,6 @@ impl Transport for crate::Reaper {
         TimeSignature::new(num as u32, denom as u32)
     }
 
-    async fn subscribe(
-        &self,
-        _project: ProjectContext,
-        sub: daw_proto::transport::TransportSubscription,
-        tx: vox::Tx<daw_proto::transport::TransportStreamEvent>,
-    ) {
-        use daw_proto::transport::TransportStreamEvent;
-        use tokio::sync::broadcast::error::RecvError;
-
-        let hub = crate::event_hub::hub();
-        // `Tx<T>` isn't Clone, so a single forwarder muxes both
-        // receivers through `select!` rather than spawning two tasks.
-        // Unsubscribed kinds get a never-resolving recv future.
-        let mut state_rx = if sub.state {
-            Some(hub.subscribe_transport_state())
-        } else {
-            None
-        };
-        let mut position_rx = if sub.position {
-            Some(hub.subscribe_position())
-        } else {
-            None
-        };
-        if state_rx.is_none() && position_rx.is_none() {
-            return;
-        }
-
-        moire::task::spawn(async move {
-            loop {
-                tokio::select! {
-                    biased;
-                    res = async { state_rx.as_mut().unwrap().recv().await }, if state_rx.is_some() => {
-                        match res {
-                            Ok(event) => {
-                                if tx.send(TransportStreamEvent::State(event)).await.is_err() {
-                                    return;
-                                }
-                            }
-                            Err(RecvError::Closed) => { state_rx = None; }
-                            Err(RecvError::Lagged(skipped)) => {
-                                tracing::warn!(skipped, "transport state subscriber lagged");
-                            }
-                        }
-                    }
-                    res = async { position_rx.as_mut().unwrap().recv().await }, if position_rx.is_some() => {
-                        match res {
-                            Ok(tick) => {
-                                if tx.send(TransportStreamEvent::Position(tick)).await.is_err() {
-                                    return;
-                                }
-                            }
-                            Err(RecvError::Closed) => { position_rx = None; }
-                            Err(RecvError::Lagged(_)) => continue,
-                        }
-                    }
-                }
-                if state_rx.is_none() && position_rx.is_none() {
-                    return;
-                }
-            }
-        });
-    }
 }
 
 // Compile-time assertion: `crate::Reaper` must remain Arc-safe so

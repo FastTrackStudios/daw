@@ -351,30 +351,4 @@ impl Transport for Standalone {
             .unwrap_or_default()
     }
 
-    async fn subscribe(
-        &self,
-        project: ProjectContext,
-        sub: daw_proto::transport::TransportSubscription,
-        tx: vox::Tx<daw_proto::transport::TransportStreamEvent>,
-    ) {
-        let Some(guid) = resolve_project(self, &project) else {
-            return;
-        };
-        let bundle = self.transport_engine_for(&guid);
-        // Sync proto playhead first so the initial Snapshot event is
-        // fresh.
-        sync_playhead_to_proto(self, &guid);
-        let initial_proto = self
-            .with_project(&guid, |p| p.transport.clone())
-            .unwrap_or_default();
-        // Pump runs as a detached task; it owns the Tx and exits when
-        // the consumer drops it.
-        let _join = crate::transport_engine::spawn_subscriber_pump(
-            guid,
-            bundle.shared.clone(),
-            initial_proto,
-            sub,
-            tx,
-        );
-    }
 }
