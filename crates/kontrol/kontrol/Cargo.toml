@@ -24,6 +24,9 @@ midir.workspace = true
 # coexists with the kernel usbhid/audio drivers so MIDI is undisturbed. The
 # midir dep above is for the future NIHIA DAW-port integration.
 hidapi.workspace = true
+# Raw USB bulk — the two color SCREENS are driven by bulk transfer on the
+# vendor interface (endpoint 0x04), a separate path from the HID Light Guide.
+rusb.workspace = true
 eyre.workspace = true
 tracing.workspace = true
 
