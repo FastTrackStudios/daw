@@ -1070,12 +1070,16 @@ fn scan_blocks(
                     };
                     if let Some(svg) = svg {
                         // Keyflow defaults to the ENGRAVED CHART ONLY;
-                        // the source `<pre>` ships in the widget but
-                        // stays hidden until the `</>` toggle button
+                        // the source ships in the widget but stays
+                        // hidden until the `</>` toggle button
                         // (top-right, on hover) flips the
-                        // `md-keyflow-show-source` class — then source
-                        // and render sit in a flex-wrap row,
-                        // side-by-side when wide, stacked when narrow.
+                        // `md-keyflow-show-source` class. When shown,
+                        // the layout is ALWAYS STACKED — never
+                        // side-by-side: the keyflow-highlighted source
+                        // block first, the full-width engraved chart
+                        // below it, each with room to breathe. The
+                        // source is highlighted with the same colors
+                        // the live editor uses (`highlight_html`).
                         // In an editable editor, clicking the chart
                         // still drops the caret into the fence body
                         // (data-focus-pos), so the caret-inside pass
@@ -1084,8 +1088,8 @@ fn scan_blocks(
                         let html = if is_keyflow {
                             let show = if kf_show_source { " md-keyflow-show-source" } else { "" };
                             format!(
-                                r#"<div class="md-keyflow-widget md-keyflow-split{show}" data-focus-pos="{content_start}"><button type="button" class="md-keyflow-toggle" title="Toggle chart source">&lt;/&gt;</button><pre class="md-keyflow-source">{src}</pre><div class="md-keyflow-render">{svg}</div></div>"#,
-                                src = escape_html(body),
+                                r#"<div class="md-keyflow-widget{show}" data-focus-pos="{content_start}"><button type="button" class="md-keyflow-toggle" title="Toggle chart source">&lt;/&gt;</button><pre class="md-keyflow-source"><code class="kf-code">{src}</code></pre><div class="md-keyflow-render">{svg}</div></div>"#,
+                                src = editor_keyflow::highlight_html(body),
                             )
                         } else {
                             let class = if is_mermaid {
@@ -2978,6 +2982,15 @@ mod tests {
         let html = widget.expect("kf+ fence should engrave a chart widget");
         assert!(html.contains("md-keyflow-show-source"), "kf+ starts with source visible");
         assert!(html.contains("<svg"), "kf+ still embeds the engraved SVG");
+        // The source block is keyflow-highlighted (not plain text) and
+        // wrapped for the stacked layout — never the old flex split.
+        assert!(html.contains("class=\"kf-root\""), "source is kf-highlighted");
+        assert!(html.contains("md-keyflow-source"), "source block present");
+        assert!(!html.contains("md-keyflow-split"), "no side-by-side split");
+        // Source comes BEFORE the rendered chart in the DOM (stacked).
+        let src_at = html.find("md-keyflow-source").unwrap();
+        let render_at = html.find("md-keyflow-render").unwrap();
+        assert!(src_at < render_at, "source stacks above the chart");
     }
 
     #[test]

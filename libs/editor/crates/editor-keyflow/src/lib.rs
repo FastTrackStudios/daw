@@ -83,6 +83,38 @@ pub fn render_svg_live(source: &str) -> Result<String, RenderError> {
     render_inner(source, false)
 }
 
+/// Syntax-highlight keyflow source into HTML — one `<span class="kf-…"
+/// style="color:…">` per token, unstyled gaps HTML-escaped, newlines
+/// preserved. Uses the same per-line highlighter the live editor runs
+/// (`keyflow_text::highlighting`), so a source-visible markdown fence
+/// reads with the exact colors of the editor. Theme colors are baked
+/// inline, so the output is self-contained (no external stylesheet).
+///
+/// Returns the plain HTML-escaped source when nothing highlights.
+pub fn highlight_html(source: &str) -> String {
+    use keyflow_text::highlighting::{HighlightSpan, Highlighter, Renderer, Theme};
+
+    // Highlight per line (the highlighter is line-oriented), shifting
+    // each line's span offsets to absolute positions in `source` —
+    // mirrors editor-keyflow-lang's decoration pass.
+    let mut spans: Vec<HighlightSpan> = Vec::new();
+    let mut line_start = 0usize;
+    for line in source.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let content = content.strip_suffix('\r').unwrap_or(content);
+        for span in Highlighter::highlight_line(content) {
+            spans.push(HighlightSpan::from_range(
+                line_start + span.span.start,
+                span.span.len,
+                span.kind,
+            ));
+        }
+        line_start += line.len();
+    }
+
+    Renderer::to_html_inline(source, &spans, &Theme::default_dark())
+}
+
 /// The `@font-face` CSS for the engraving fonts ([`render_svg_live`]
 /// references these families by name). Inject the returned string
 /// once into the document (e.g. a `<style>` tag); it's ~4 MB of
@@ -267,5 +299,46 @@ mod tests {
             h < 80.0,
             "snippet height should crop to content (~33pt), got {h}"
         );
+    }
+
+    #[test]
+    fn highlight_html_wraps_tokens_and_preserves_source() {
+        let html = highlight_html("Cmaj7 | F#m7b5 | Bbmaj9 | G7b9");
+        // Roots/qualities/extensions each get their own kf-* span
+        // (a chord is split per token, not wrapped whole).
+        assert!(html.contains("class=\"kf-root\""), "root token span: {html}");
+        assert!(html.contains("class=\"kf-quality\""), "quality token span");
+        assert!(html.contains("class=\"kf-extension\""), "extension token span");
+        // Every character of the source survives (nothing dropped):
+        // stripping tags leaves the original text.
+        let stripped = strip_tags(&html);
+        assert_eq!(stripped, "Cmaj7 | F#m7b5 | Bbmaj9 | G7b9");
+    }
+
+    #[test]
+    fn highlight_html_escapes_and_keeps_newlines() {
+        let html = highlight_html("Am7\nDm7");
+        assert!(html.contains('\n'), "newline between lines preserved");
+        assert_eq!(strip_tags(&html), "Am7\nDm7");
+    }
+
+    /// Remove `<span …>`/`</span>` tags and unescape the handful of
+    /// entities the renderer emits, recovering the original source.
+    fn strip_tags(html: &str) -> String {
+        let mut out = String::new();
+        let mut in_tag = false;
+        for c in html.chars() {
+            match c {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                _ if !in_tag => out.push(c),
+                _ => {}
+            }
+        }
+        out.replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
     }
 }
