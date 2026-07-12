@@ -18,11 +18,12 @@ midicore.workspace = true
 # part of the pipewire live-rig binary); pipewire hosts still see the ALSA-seq
 # ports via the pipewire ALSA-seq bridge.
 midir.workspace = true
-# The Light Guide is a raw USB feature (bulk transfer on interface 4 / endpoint
-# 4 for MK3), NOT MIDI — see docs/protocol.md. rusb (libusb) is the real path
-# to the LEDs; the midir dep above is only for the MIDI falsification probe and
-# the future NIHIA DAW-port integration.
-rusb.workspace = true
+# The Light Guide is a HID output report (report 0x82 on the MK3's HID
+# interface), NOT bulk USB or MIDI — CONFIRMED on an S88 MK3, see
+# docs/protocol.md. hidapi (hidraw on Linux) is the path to the LEDs; it
+# coexists with the kernel usbhid/audio drivers so MIDI is undisturbed. The
+# midir dep above is for the future NIHIA DAW-port integration.
+hidapi.workspace = true
 eyre.workspace = true
 tracing.workspace = true
 
