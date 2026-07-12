@@ -775,17 +775,23 @@
 /* Header row: fence tag + copy (+ toggle when there's a chart). It
    fades in when the pointer is anywhere over the widget, so hovering
    the general area reveals the controls — not just the button. */
-/* Controls (fence tag + copy + `</>` toggle) sit in a right-aligned
-   row at the TOP of the widget — in normal flow, so they're anchored
-   in the block's top-right corner and never float over the chart or
-   source. The tag stays faint; the buttons brighten on hover. */
+/* Controls (fence tag + copy + `</>` toggle) are anchored in the
+   TOP-RIGHT CORNER of the block they belong to — the chart render, or
+   the source block when there's no chart — over that block's corner
+   whitespace, not on a line above and not floating over the widget.
+   The tag stays faint as a label; the buttons brighten on hover. */
+.editor-root .md-keyflow-render,
+.editor-root .md-keyflow-sourcebox {
+    position: relative;
+}
 .editor-root .md-keyflow-header {
-    display: flex;
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 2;
+    display: inline-flex;
     align-items: center;
-    justify-content: flex-end;
     gap: 2px;
-    min-height: 20px;
-    margin-bottom: 2px;
 }
 .editor-root .md-keyflow-header .md-code-copy,
 .editor-root .md-keyflow-header .md-keyflow-toggle {

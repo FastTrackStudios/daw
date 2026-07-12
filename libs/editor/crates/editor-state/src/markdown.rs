@@ -1122,9 +1122,13 @@ fn scan_blocks(
                         } else {
                             let show = if show_source { " md-keyflow-show-source" } else { "" };
                             let only = if has_chart { "" } else { " md-keyflow-source-only" };
-                            // Header: the `kf` tag + copy button, plus
-                            // the source toggle when there's a chart to
-                            // toggle against. Copy grabs the raw body.
+                            // Header (fence tag + copy, plus the source
+                            // toggle when a chart is present). It lives
+                            // INSIDE the display block — the chart's
+                            // top-right corner (or the source block's,
+                            // when there's no chart) — anchored there,
+                            // not overlaid on the widget. Copy grabs the
+                            // raw body.
                             let toggle = if has_chart {
                                 r#"<button type="button" class="md-keyflow-toggle" title="Show source">&lt;/&gt;</button>"#
                             } else {
@@ -1134,16 +1138,21 @@ fn scan_blocks(
                                 r#"<div class="md-keyflow-header"><span class="md-keyflow-lang">{tag}</span><button class="md-code-copy" data-copy-from="{content_start}" data-copy-to="{body_end}" title="Copy">⧉</button>{toggle}</div>"#,
                                 tag = escape_html(info),
                             );
-                            let source_block = format!(
-                                r#"<pre class="md-keyflow-source"><code class="kf-code">{src}</code></pre>"#,
-                                src = editor_keyflow::highlight_html(body),
-                            );
-                            let render_block = svg
-                                .map(|s| format!(r#"<div class="md-keyflow-render">{s}</div>"#))
-                                .unwrap_or_default();
-                            let html = format!(
-                                r#"<div class="md-keyflow-widget{show}{only}" data-focus-pos="{content_start}">{header}{source_block}{render_block}</div>"#,
-                            );
+                            let highlighted = editor_keyflow::highlight_html(body);
+                            let html = if let Some(svg) = svg {
+                                // Chart present: header anchors to the
+                                // chart's top-right; the source block (if
+                                // shown) stacks above it.
+                                format!(
+                                    r#"<div class="md-keyflow-widget{show}{only}" data-focus-pos="{content_start}"><div class="md-keyflow-sourcebox"><pre class="md-keyflow-source"><code class="kf-code">{highlighted}</code></pre></div><div class="md-keyflow-render">{header}{svg}</div></div>"#,
+                                )
+                            } else {
+                                // Source only: header anchors to the
+                                // source block's top-right.
+                                format!(
+                                    r#"<div class="md-keyflow-widget{show}{only}" data-focus-pos="{content_start}"><div class="md-keyflow-sourcebox">{header}<pre class="md-keyflow-source"><code class="kf-code">{highlighted}</code></pre></div></div>"#,
+                                )
+                            };
                             out.push(Decoration::replace(fence_range.clone()));
                             out.push(Decoration::widget(fence_range.start, html));
                         }
