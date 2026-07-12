@@ -23,6 +23,12 @@ use daw_proto::{
 use crate::sync::Standalone;
 use crate::transport_engine::{LoopRegionSamples, PlayStateRepr, SampleClock};
 
+impl daw_proto::transport::service::TransportStreamSource for Standalone {
+    fn events_hub(&self) -> &architect::PubSub<daw_proto::transport::TransportStreamEvent> {
+        &self.transport_events
+    }
+}
+
 fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
         ProjectContext::Project(guid) => Some(guid.clone()),

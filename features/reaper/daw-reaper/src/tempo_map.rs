@@ -414,6 +414,12 @@ impl TempoMap for crate::Reaper {
 
 }
 
+impl daw_proto::transport::service::TransportStreamSource for crate::Reaper {
+    fn events_hub(&self) -> &architect::PubSub<daw_proto::transport::TransportStreamEvent> {
+        crate::event_hub::hub().transport_hub()
+    }
+}
+
 impl daw_proto::tempo_map::TempoMapStreamSource for crate::Reaper {
     fn events_hub(&self) -> &architect::PubSub<daw_proto::tempo_map::TempoMapStreamEvent> {
         crate::event_hub::hub().tempo_map_hub()

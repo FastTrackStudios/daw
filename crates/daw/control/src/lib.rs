@@ -144,6 +144,7 @@ pub(crate) use daw_proto::batch::BatchExecutionClient;
 pub(crate) use daw_proto::diagnostics::DiagnosticsClient;
 pub(crate) use daw_proto::dock_host::DockHostingClient;
 pub(crate) use daw_proto::event_bus::EventBusStreamClient;
+pub(crate) use daw_proto::transport::TransportStreamClient;
 pub(crate) use daw_proto::marker::MarkersStreamClient;
 pub(crate) use daw_proto::region::RegionsStreamClient;
 pub(crate) use daw_proto::tempo_map::TempoMapStreamClient;
@@ -247,6 +248,7 @@ architect::clients! {
         pub(crate) diagnostics: DiagnosticsClient,
         // `#[subscribe]` stream siblings — argless subscriptions;
         // filtering happens client-side in the handle wrappers.
+        pub(crate) transport_stream: TransportStreamClient,
         pub(crate) track_stream: TracksStreamClient,
         pub(crate) marker_stream: MarkersStreamClient,
         pub(crate) region_stream: RegionsStreamClient,
@@ -342,6 +344,27 @@ impl Daw {
             .ok_or(Error::NoCurrentProject)?;
 
         Ok(Project::new(info.guid, self.clients.clone()))
+    }
+
+    /// All-projects transport event stream (architect `#[subscribe]`):
+    /// discrete state changes + ~30 Hz position ticks, multiplexed as
+    /// `TransportStreamEvent::{State, Position}`. Not scoped to any one
+    /// project — consumers that track several (e.g. the setlist player)
+    /// route each event by its `project_guid`. Served from each backend's
+    /// `TransportStreamSource` hub; replaces the legacy `SynchronizationEngine`
+    /// transport bridge. Drop the stream to unsubscribe.
+    pub fn transport_events(
+        &self,
+    ) -> crate::EventStream<daw_proto::transport::TransportStreamEvent> {
+        let (raw_tx, raw_rx) = vox::channel();
+        let stream = self.clients.transport_stream.clone();
+        crate::EventStream::spawn(
+            async move {
+                let _ = stream.events(raw_tx).await;
+            },
+            raw_rx,
+            Box::new(|_| true),
+        )
     }
 
     /// Get a specific project by GUID

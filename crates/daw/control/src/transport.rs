@@ -333,6 +333,24 @@ impl Transport {
             .await?;
         Ok(rx)
     }
+
+    /// Transport events for **all open projects** via the architect
+    /// `#[subscribe]` stream (state changes + ~30 Hz position ticks).
+    /// Unlike [`subscribe`], this is not scoped to this handle's project —
+    /// consumers that track multiple projects (e.g. the setlist player)
+    /// route each event by its `project_guid`. Drop the stream to
+    /// unsubscribe. Served from each backend's `TransportStreamSource` hub.
+    pub fn events(&self) -> crate::EventStream<daw_proto::transport::TransportStreamEvent> {
+        let (raw_tx, raw_rx) = vox::channel();
+        let stream = self.clients.transport_stream.clone();
+        crate::EventStream::spawn(
+            async move {
+                let _ = stream.events(raw_tx).await;
+            },
+            raw_rx,
+            Box::new(|_| true),
+        )
+    }
 }
 
 impl std::fmt::Debug for Transport {

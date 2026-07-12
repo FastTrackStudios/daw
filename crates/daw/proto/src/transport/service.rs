@@ -94,4 +94,14 @@ pub trait Transport {
         sub: TransportSubscription,
         tx: Tx<TransportStreamEvent>,
     );
+
+    /// Transport events across all open projects, as they happen —
+    /// discrete state changes and continuous ~30 Hz position ticks,
+    /// multiplexed as `TransportStreamEvent::{State, Position}`.
+    /// Subscribers filter by `project_guid` on the envelope. This is the
+    /// architect `#[subscribe]` stream replacing the legacy `subscribe`
+    /// above (per-subscriber Tx pump); served from each backend's
+    /// `TransportStreamSource` hub.
+    #[subscribe]
+    fn events(&self) -> TransportStreamEvent;
 }
