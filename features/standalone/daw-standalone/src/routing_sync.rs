@@ -13,12 +13,39 @@
 //! `set_source_channels` / `set_dest_channels`. Source spans clamp to
 //! the source track's actual `num_channels` (see [`TrackExt`]).
 
+use daw_proto::event_bus::DawEvent;
+use daw_proto::routing::RoutingEvent;
 use daw_proto::{
     ChannelMapping, DawError, DawResult, ProjectContext, RouteLocation, RouteRef, RouteType,
     Routing, SendMode, TrackRef, TrackRoute,
 };
 
 use crate::sync::{ProjectState, Standalone, TrackExt};
+
+/// Like [`mutate_route`] but publishes the [`RoutingEvent`] the closure
+/// returns (given the resolved `source_track_guid`, `route_type`, and
+/// `route_index`) onto the bus.
+fn mutate_route_evt(
+    daw: &Standalone,
+    project: &ProjectContext,
+    location: &RouteLocation,
+    f: impl FnOnce(&str, &str, RouteType, u32, &mut TrackRoute) -> RoutingEvent,
+) -> DawResult<()> {
+    let pg = resolve_project(daw, project).ok_or_else(not_found_proj)?;
+    let event = daw.with_project_mut(&pg, |p| {
+        let track_guid = resolve_track_guid(p, &location.track).ok_or_else(not_found_track)?;
+        let v = route_kind_vec_mut(p, &track_guid, location.route_type);
+        let i = resolve_route_idx(v, &location.route).ok_or_else(not_found_route)?;
+        let event = f(&pg, &track_guid, location.route_type, i as u32, &mut v[i]);
+        let mirror = (v[i].route_type == RouteType::Send).then(|| v[i].clone());
+        if let Some(send) = mirror {
+            sync_receive_mirror(p, &send);
+        }
+        Ok::<RoutingEvent, DawError>(event)
+    })??;
+    daw.bus_events.publish(DawEvent::Routing(event));
+    Ok(())
+}
 
 fn resolve_project(daw: &Standalone, ctx: &ProjectContext) -> Option<String> {
     match ctx {
@@ -219,7 +246,7 @@ impl Routing for Standalone {
 
     fn add_send(&self, project: ProjectContext, source: TrackRef, dest: TrackRef) -> Option<u32> {
         let pg = resolve_project(self, &project)?;
-        self.with_project_mut(&pg, |p| {
+        let result = self.with_project_mut(&pg, |p| {
             let src_guid = resolve_track_guid(p, &source)?;
             let dest_guid = resolve_track_guid(p, &dest)?;
             if src_guid == dest_guid {
@@ -255,18 +282,26 @@ impl Routing for Standalone {
                 },
                 midi_channel_mapping: None,
             };
-            let new_index = {
+            let (new_index, created) = {
                 let sends = p.sends.entry(src_guid).or_default();
                 let i = sends.len() as u32;
                 sends.push(route.clone());
                 renumber(sends);
-                i
+                (i, sends[i as usize].clone())
             };
             sync_receive_mirror(p, &route);
-            Some(new_index)
+            Some((new_index, created))
         })
         .ok()
-        .flatten()
+        .flatten();
+        let (new_index, created) = result?;
+        self.bus_events
+            .publish(DawEvent::Routing(RoutingEvent::RouteCreated {
+                project_guid: pg,
+                source_track_guid: created.source_track_guid.clone(),
+                route: created,
+            }));
+        Some(new_index)
     }
 
     fn add_hardware_output(
@@ -316,7 +351,7 @@ impl Routing for Standalone {
 
     fn remove_route(&self, project: ProjectContext, location: RouteLocation) -> DawResult<()> {
         let pg = resolve_project(self, &project).ok_or_else(not_found_proj)?;
-        self.with_project_mut(&pg, |p| {
+        let (src_guid, route_type, route_index) = self.with_project_mut(&pg, |p| {
             let track_guid = resolve_track_guid(p, &location.track).ok_or_else(not_found_track)?;
             let v = route_kind_vec_mut(p, &track_guid, location.route_type);
             let i = {
@@ -359,8 +394,20 @@ impl Routing for Standalone {
                     renumber(sends);
                 }
             }
-            Ok::<(), DawError>(())
-        })?
+            Ok::<(String, RouteType, u32), DawError>((
+                removed.source_track_guid,
+                removed.route_type,
+                i as u32,
+            ))
+        })??;
+        self.bus_events
+            .publish(DawEvent::Routing(RoutingEvent::RouteDeleted {
+                project_guid: pg,
+                source_track_guid: src_guid,
+                route_type,
+                route_index,
+            }));
+        Ok(())
     }
 
     fn set_volume(
@@ -369,11 +416,29 @@ impl Routing for Standalone {
         location: RouteLocation,
         volume: f64,
     ) -> DawResult<()> {
-        mutate_route(self, &project, &location, |r| r.volume = volume.max(0.0))
+        mutate_route_evt(self, &project, &location, |pg, src, rt, idx, r| {
+            r.volume = volume.max(0.0);
+            RoutingEvent::VolumeChanged {
+                project_guid: pg.to_string(),
+                source_track_guid: src.to_string(),
+                route_type: rt,
+                route_index: idx,
+                volume: r.volume,
+            }
+        })
     }
 
     fn set_pan(&self, project: ProjectContext, location: RouteLocation, pan: f64) -> DawResult<()> {
-        mutate_route(self, &project, &location, |r| r.pan = pan.clamp(-1.0, 1.0))
+        mutate_route_evt(self, &project, &location, |pg, src, rt, idx, r| {
+            r.pan = pan.clamp(-1.0, 1.0);
+            RoutingEvent::PanChanged {
+                project_guid: pg.to_string(),
+                source_track_guid: src.to_string(),
+                route_type: rt,
+                route_index: idx,
+                pan: r.pan,
+            }
+        })
     }
 
     fn set_muted(
@@ -382,7 +447,16 @@ impl Routing for Standalone {
         location: RouteLocation,
         muted: bool,
     ) -> DawResult<()> {
-        mutate_route(self, &project, &location, |r| r.muted = muted)
+        mutate_route_evt(self, &project, &location, |pg, src, rt, idx, r| {
+            r.muted = muted;
+            RoutingEvent::MuteChanged {
+                project_guid: pg.to_string(),
+                source_track_guid: src.to_string(),
+                route_type: rt,
+                route_index: idx,
+                muted,
+            }
+        })
     }
 
     fn set_mono(
