@@ -1,0 +1,12 @@
+[package]
+name = "tune-dsp"
+version.workspace = true
+edition = "2021"          # matches sibling fx DSP crates (comp-dsp, pitch-dsp)
+authors.workspace = true
+license.workspace = true
+description = "tune-dsp — monophonic pitch detection (YIN), note extraction, and scale-snap correction driving pitch-dsp. Foundation for the Melodyne-style tune FX."
+
+[dependencies]
+pitch-dsp = { workspace = true }
+# Real-FFT STFT/ISTFT for the polyphonic Direct-Note-Access engine (dna.rs).
+realfft = { workspace = true }

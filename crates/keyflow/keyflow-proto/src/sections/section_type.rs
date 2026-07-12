@@ -23,6 +23,7 @@ pub enum SectionType {
     Interlude, // Interlude section
     Breakdown, // Breakdown section
     Vamp,    // Vamp section (repeated section for improvisation/transitions)
+    Refrain, // Refrain section (recurring hook, common in worship charts)
     Pre(Box<SectionType>), // Pre-Chorus, Pre-Verse, etc.
     Post(Box<SectionType>), // Post-Chorus, Post-Verse, etc.
     Custom(String), // Custom section types
@@ -132,6 +133,7 @@ impl SectionType {
             SectionType::Interlude => "interlude".to_string(),
             SectionType::Breakdown => "breakdown".to_string(),
             SectionType::Vamp => "vamp".to_string(),
+            SectionType::Refrain => "refrain".to_string(),
             SectionType::Pre(inner) => format!("pre_{}", inner.key()),
             SectionType::Post(inner) => format!("post_{}", inner.key()),
             SectionType::Custom(name) => {
@@ -166,6 +168,7 @@ impl SectionType {
             SectionType::Interlude => "Interlude".to_string(),
             SectionType::Breakdown => "Breakdown".to_string(),
             SectionType::Vamp => "Vamp".to_string(),
+            SectionType::Refrain => "Refrain".to_string(),
             SectionType::Pre(inner) => format!("Pre-{}", inner.full_name()),
             SectionType::Post(inner) => format!("Post-{}", inner.full_name()),
             SectionType::Custom(name) => name.clone(),
@@ -189,6 +192,7 @@ impl SectionType {
             SectionType::Interlude => "INT".to_string(),
             SectionType::Breakdown => "BD".to_string(),
             SectionType::Vamp => "VMP".to_string(),
+            SectionType::Refrain => "REF".to_string(),
             SectionType::Pre(inner) => format!("PRE-{}", inner.abbreviation()),
             SectionType::Post(inner) => format!("POST-{}", inner.abbreviation()),
             SectionType::Custom(name) => name.clone(), // Custom sections use their full name
@@ -207,7 +211,8 @@ impl SectionType {
             | SectionType::Hits
             | SectionType::Interlude
             | SectionType::Breakdown
-            | SectionType::Vamp => false,
+            | SectionType::Vamp
+            | SectionType::Refrain => false,
             SectionType::Pre(_) | SectionType::Post(_) => false,
             SectionType::Custom(_) => false, // Custom sections don't get numbered
             _ => true,
@@ -255,6 +260,7 @@ impl SectionType {
             "interlude" | "inter" | "int" => return Ok(SectionType::Interlude),
             "breakdown" | "bd" => return Ok(SectionType::Breakdown),
             "vamp" | "vmp" => return Ok(SectionType::Vamp),
+            "refrain" | "ref" => return Ok(SectionType::Refrain),
             _ => {}
         }
 
@@ -561,6 +567,7 @@ fn base_section_type(token: &str) -> Option<SectionType> {
         "interlude" | "inter" | "int" => Some(SectionType::Interlude),
         "breakdown" | "bd" => Some(SectionType::Breakdown),
         "vamp" | "vmp" => Some(SectionType::Vamp),
+        "refrain" | "ref" => Some(SectionType::Refrain),
         _ => None,
     }
 }
@@ -686,20 +693,30 @@ fn extract_paren_comment(input: &str) -> (String, Option<String>) {
     (input.to_string(), None)
 }
 
-fn extract_quoted_comment(input: &str) -> (&str, Option<String>) {
-    // Look for a quoted string at the end
+fn extract_quoted_comment(input: &str) -> (String, Option<String>) {
+    // Look for a quoted string anywhere (the LAST quoted run).
     if let Some(last_quote) = input.rfind('"') {
         // Find the opening quote
         let before_last = &input[..last_quote];
         if let Some(open_quote) = before_last.rfind('"') {
             let comment = input[open_quote + 1..last_quote].trim().to_string();
-            let remaining = input[..open_quote].trim();
+            // Keep BOTH the text before the opening quote AND after the closing
+            // quote — a quoted label can sit in the MIDDLE of a marker, e.g.
+            // `Interlude "Breakdown" 8`, and the trailing measure count `8`
+            // must survive (it was previously dropped).
+            let before = input[..open_quote].trim();
+            let after = input[last_quote + 1..].trim();
+            let remaining = match (before.is_empty(), after.is_empty()) {
+                (true, _) => after.to_string(),
+                (_, true) => before.to_string(),
+                _ => format!("{before} {after}"),
+            };
             if !comment.is_empty() {
                 return (remaining, Some(comment));
             }
         }
     }
-    (input, None)
+    (input.to_string(), None)
 }
 
 /// Extract a preset modifier from the start of the input.
