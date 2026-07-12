@@ -155,6 +155,9 @@ test-harness = [
     "dep:moire",
     "dep:eyre",
     "dep:daw-test-macro",
+    # geteuid() for the socket owner check in find_fts_daw_socket
+    # (skip cross-user stale /tmp sockets).
+    "dep:libc",
 ]
 
 [lints]
