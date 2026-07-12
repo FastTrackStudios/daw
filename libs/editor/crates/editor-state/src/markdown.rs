@@ -814,7 +814,11 @@ fn scan_blocks(
     //     we're inside a fence; `open_line_end` is the byte AFTER
     //     the opening fence's `\n` (or end of doc if the fence is
     //     the last thing).
-    let mut fence: Option<(usize, u8, usize)> = None;
+    // (open_pos, fence_char, fence_len, is_keyflow). The last flag marks
+    // `kf`/`kf+` fences so every line sheds the grey code-block frame —
+    // the engraved chart (and its own source block) stands full width,
+    // not boxed like code. `kf-src` is NOT flagged: it stays a code block.
+    let mut fence: Option<(usize, u8, usize, bool)> = None;
     // Callout-tracking state: while we're inside a `> [!type]…`
     // block, every subsequent `>`-prefixed line inherits the
     // callout's class so CSS can group them visually.
@@ -966,9 +970,12 @@ fn scan_blocks(
         }
 
         // ── Inside a fence ─────────────────────────────────
-        if let Some((_, mc, mlen)) = fence {
+        if let Some((_, mc, mlen, is_kf)) = fence {
             if is_closing_fence(line, mc, mlen) {
                 out.push(Decoration::line(line_from, "md-code-block"));
+                if is_kf {
+                    out.push(Decoration::line(line_from, "md-keyflow-bare"));
+                }
                 // Caret on the closing fence: source stays
                 // visible so the user can edit the `\`\`\``.
                 // Off: hidden via Replace so the line just shows
@@ -976,19 +983,28 @@ fn scan_blocks(
                 if !cursor_touches(primary, line_from..line_to) {
                     out.push(Decoration::replace(line_from..line_to));
                 }
-                if let Some((open_end, _, _)) = fence.take() {
+                if let Some((open_end, _, _, _)) = fence.take() {
                     fenced_ranges.push(open_end..line_to);
                 }
                 continue;
             }
             out.push(Decoration::line(line_from, "md-code-block"));
+            if is_kf {
+                out.push(Decoration::line(line_from, "md-keyflow-bare"));
+            }
             continue;
         }
 
         // ── Starting a fence ───────────────────────────────
         let trimmed = line.trim_start();
         if let Some((mc, mlen, info_start)) = opens_fence(trimmed) {
+            let info_peek = trimmed[info_start..].trim();
+            let is_kf_fence =
+                info_peek.eq_ignore_ascii_case("kf") || info_peek.eq_ignore_ascii_case("kf+");
             out.push(Decoration::line(line_from, "md-code-block"));
+            if is_kf_fence {
+                out.push(Decoration::line(line_from, "md-keyflow-bare"));
+            }
             let caret_on_opener = cursor_touches(primary, line_from..line_to);
             // Caret on opener: leave the `\`\`\`lang` source
             // visible so it's editable. Off: hide source +
@@ -1002,7 +1018,7 @@ fn scan_blocks(
             } else {
                 line_to
             };
-            fence = Some((line_from, mc, mlen));
+            fence = Some((line_from, mc, mlen, is_kf_fence));
             // The lang+copy header overlays the opener line for
             // ordinary code fences. Skip it for fences we
             // render as a widget (typst, mermaid) — the
@@ -1278,7 +1294,7 @@ fn scan_blocks(
 
     // EOF with unclosed fence — close it implicitly at doc end so
     // the inline parser still skips that range.
-    if let Some((open_end, _, _)) = fence {
+    if let Some((open_end, _, _, _)) = fence {
         fenced_ranges.push(open_end..text.len());
     }
 
@@ -2962,6 +2978,27 @@ mod tests {
         assert!(
             !html.contains("md-keyflow-show-source"),
             "```kf defaults to the engraved chart only"
+        );
+        // Every fence line sheds the grey code-block frame (bare) so the
+        // chart renders full width, not boxed like code.
+        assert!(has_line_class(&decs, 0, "md-keyflow-bare"), "opener bare");
+        let close_at = "```kf\nCmaj7 | F#m7b5 | Bbmaj9 | G7b9\n".len();
+        assert!(has_line_class(&decs, close_at, "md-keyflow-bare"), "closer bare");
+    }
+
+    #[test]
+    fn kf_src_fence_stays_a_code_block() {
+        // ```kf-src is source-only — it must KEEP the code frame
+        // (never widgetized, never bare).
+        let s = state("```kf-src\nCmaj7 | Dm7\n```\n", 0);
+        let decs = live_preview(&s);
+        assert!(has_line_class(&decs, 0, "md-code-block"), "kf-src is a code block");
+        assert!(!has_line_class(&decs, 0, "md-keyflow-bare"), "kf-src keeps the frame");
+        assert!(
+            !decs.iter().any(|d| matches!(&d.kind,
+                crate::decoration::DecorationKind::Widget { html }
+                    if html.contains("md-keyflow-widget"))),
+            "kf-src never engraves a chart widget"
         );
     }
 

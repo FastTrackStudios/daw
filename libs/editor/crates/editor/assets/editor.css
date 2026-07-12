@@ -1269,6 +1269,22 @@
     border-bottom-right-radius: 4px;
     padding-bottom: 4px;
 }
+/* Keyflow (`kf`/`kf+`) fences shed the grey code-block frame entirely:
+   the engraved chart — and, in kf+, its own stacked source block —
+   render full width like document content, not boxed like code. Every
+   line of the fence carries `md-keyflow-bare`, so the background,
+   padding, mono font, and the reserved min-height all fall away (no
+   tall empty code box around/under the chart). */
+.editor-root .cm-line.md-code-block.md-keyflow-bare,
+.editor-root .cm-line.md-code-block.md-keyflow-bare:not(.md-code-block + .md-code-block),
+.editor-root .cm-line.md-code-block.md-keyflow-bare:has(+ :not(.md-code-block)),
+.editor-root .cm-line.md-code-block.md-keyflow-bare:last-child {
+    background: none;
+    border-radius: 0;
+    padding: 0;
+    min-height: 0;
+    font-family: inherit;
+}
 
 .debug-pane {
     background: var(--ed-bg-elev);
