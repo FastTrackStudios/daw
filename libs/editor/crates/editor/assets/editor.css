@@ -756,53 +756,74 @@
     margin: 0 auto;
 }
 
-/* Keyflow charts default to the ENGRAVED OUTPUT ONLY. The source
-   block is hidden until the widget carries `md-keyflow-show-source`
-   (toggled by the `</>` button, wired in editor-view's delegated
-   click handler). When shown, the layout is ALWAYS STACKED — the
-   keyflow-highlighted source block first, the full-width engraved
-   chart below it — never side-by-side, so neither is cramped. In an
-   editable editor, clicking the chart still drops the caret into the
-   fence body (data-focus-pos) so the raw source opens for editing. */
+/* Keyflow fence family — `kf` (chart only), `kf+` (chart + source),
+   `kf-` (source only). All shed the code frame and carry a header (the
+   fence tag + a copy button, top-right). The source block sits ABOVE
+   the chart, stacked full width, keyflow-highlighted. It's hidden by
+   default on `kf` until `md-keyflow-show-source` (the `</>` toggle);
+   on `kf+` it ships shown; `kf-` (`md-keyflow-source-only`) has no
+   chart and always shows the source. In an editable editor, clicking
+   the chart drops the caret into the fence body (data-focus-pos) so
+   the raw source opens for editing. */
 .editor-root .md-keyflow-widget {
     display: block;
     position: relative;
-    padding: 6px 0;
+    padding: 4px 0;
     color: inherit;
     cursor: text;
 }
-.editor-root .md-keyflow-toggle {
+/* Header row: fence tag + copy (+ toggle when there's a chart). It
+   fades in when the pointer is anywhere over the widget, so hovering
+   the general area reveals the controls — not just the button. */
+.editor-root .md-keyflow-header {
     position: absolute;
-    top: 8px;
-    right: 8px;
+    top: 6px;
+    right: 6px;
     z-index: 2;
-    padding: 2px 6px;
-    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+.editor-root .md-keyflow-widget:hover .md-keyflow-header,
+.editor-root .md-keyflow-widget.md-keyflow-show-source .md-keyflow-header,
+.editor-root .md-keyflow-source-only .md-keyflow-header {
+    opacity: 1;
+}
+.editor-root .md-keyflow-lang {
+    font-family: var(--ed-mono);
+    font-size: 0.72em;
+    letter-spacing: 0.04em;
+    color: var(--ed-text-dim, var(--ed-text));
+    user-select: none;
+}
+.editor-root .md-keyflow-header .md-code-copy,
+.editor-root .md-keyflow-toggle {
+    padding: 2px 7px;
+    border-radius: 5px;
     border: 1px solid var(--ed-border);
     background: var(--ed-bg-elev);
     color: var(--ed-text-dim, var(--ed-text));
     font-family: var(--ed-mono);
-    font-size: 0.7em;
+    font-size: 0.72em;
     line-height: 1.4;
     cursor: pointer;
-    opacity: 0;
-    transition: opacity 120ms ease;
+    transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
 }
-.editor-root .md-keyflow-widget:hover .md-keyflow-toggle {
-    opacity: 1;
-}
+.editor-root .md-keyflow-header .md-code-copy:hover,
 .editor-root .md-keyflow-toggle:hover {
     color: var(--ed-text);
+    border-color: var(--ed-text-dim, var(--ed-border));
 }
 .editor-root .md-keyflow-widget.md-keyflow-show-source .md-keyflow-toggle {
-    opacity: 1;
     color: var(--ed-link);
     border-color: var(--ed-link);
 }
 .editor-root .md-keyflow-source {
     display: none;
     /* Full-width source block, above the chart. */
-    margin: 0 0 12px;
+    margin: 0 0 10px;
     padding: 10px 12px;
     border-radius: 8px;
     border: 1px solid var(--ed-border);
@@ -814,7 +835,8 @@
     overflow-x: auto;
     color: inherit;
 }
-.editor-root .md-keyflow-widget.md-keyflow-show-source .md-keyflow-source {
+.editor-root .md-keyflow-widget.md-keyflow-show-source .md-keyflow-source,
+.editor-root .md-keyflow-source-only .md-keyflow-source {
     display: block;
 }
 .editor-root .md-keyflow-source .kf-code {
@@ -825,16 +847,16 @@
     color: inherit;
 }
 .editor-root .md-keyflow-render {
-    /* Full-width engraved chart, standalone size (no shrinking to
-       share a row). */
+    /* Full-width engraved chart — fills the column width. */
     width: 100%;
     overflow-x: auto;
 }
 .editor-root .md-keyflow-render svg {
-    max-width: 100%;
+    /* Fill the available width rather than sitting narrow and
+       centered (which read as horizontal padding). */
+    width: 100%;
     height: auto;
     display: block;
-    margin: 0 auto;
 }
 
 /* Slash-command popup. Floats below the editor frame; positions
