@@ -210,6 +210,88 @@ impl MidiEvent {
     }
 }
 
+/// Canonical one-line rendering of a MIDI message for a monitor/log — 1-based
+/// channel (like a DAW), fixed-width verbs so a column of them aligns. This is
+/// midicore's single source of truth for how a `MidiEvent` reads to a human;
+/// UIs (e.g. `midicore-ui`'s monitor panel) format through it.
+impl core::fmt::Display for MidiEvent {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            MidiEvent::NoteOn { channel, key, velocity } => write!(
+                f,
+                "ch{:<2} note-on  {:>3} vel {}",
+                channel.number(),
+                key.get(),
+                velocity.get()
+            ),
+            MidiEvent::NoteOff { channel, key, .. } => {
+                write!(f, "ch{:<2} note-off {:>3}", channel.number(), key.get())
+            }
+            MidiEvent::ControlChange { channel, controller, value } => write!(
+                f,
+                "ch{:<2} cc {:>3} = {}",
+                channel.number(),
+                controller.get(),
+                value.get()
+            ),
+            MidiEvent::ProgramChange { channel, program } => {
+                write!(f, "ch{:<2} program {}", channel.number(), program.get())
+            }
+            MidiEvent::ChannelPressure { channel, pressure } => {
+                write!(f, "ch{:<2} aftertouch {}", channel.number(), pressure.get())
+            }
+            MidiEvent::PolyAftertouch { channel, key, pressure } => write!(
+                f,
+                "ch{:<2} poly-at {} = {}",
+                channel.number(),
+                key.get(),
+                pressure.get()
+            ),
+            MidiEvent::PitchBend { channel, bend } => {
+                write!(f, "ch{:<2} pitch-bend {}", channel.number(), bend.offset())
+            }
+            MidiEvent::Clock => write!(f, "clock"),
+            MidiEvent::Start => write!(f, "start"),
+            MidiEvent::Continue => write!(f, "continue"),
+            MidiEvent::Stop => write!(f, "stop"),
+            MidiEvent::ActiveSensing => write!(f, "active-sensing"),
+            MidiEvent::Reset => write!(f, "reset"),
+            MidiEvent::SysEx(bytes) => write!(f, "sysex ({} bytes)", bytes.len()),
+        }
+    }
+}
+
+/// The broad category of a MIDI message — lets a UI colour-code the monitor
+/// without re-matching every variant. Part of midicore so the taxonomy is
+/// shared, not reinvented per front-end.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum MidiKind {
+    NoteOn,
+    NoteOff,
+    ControlChange,
+    Aftertouch,
+    PitchBend,
+    Program,
+    System,
+}
+
+impl MidiEvent {
+    /// This message's [`MidiKind`] (for colouring / filtering a monitor).
+    pub const fn kind(&self) -> MidiKind {
+        match self {
+            MidiEvent::NoteOn { .. } => MidiKind::NoteOn,
+            MidiEvent::NoteOff { .. } => MidiKind::NoteOff,
+            MidiEvent::ControlChange { .. } => MidiKind::ControlChange,
+            MidiEvent::ChannelPressure { .. } | MidiEvent::PolyAftertouch { .. } => {
+                MidiKind::Aftertouch
+            }
+            MidiEvent::PitchBend { .. } => MidiKind::PitchBend,
+            MidiEvent::ProgramChange { .. } => MidiKind::Program,
+            _ => MidiKind::System,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

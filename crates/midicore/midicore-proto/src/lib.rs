@@ -30,7 +30,7 @@ pub mod raw;
 pub mod service;
 
 pub use drum_convert::{DrumMap, DrumMapConverter, HatThresholds};
-pub use event::{DecodeError, MidiEvent};
+pub use event::{DecodeError, MidiEvent, MidiKind};
 pub use filter::Filter;
 pub use number::{
     Channel, ControllerNumber, ControllerValue, KeyNumber, PitchBend, Pressure, ProgramNumber, U14,
