@@ -1,0 +1,30 @@
+[package]
+name = "kontrol"
+version.workspace = true
+edition = "2021"
+authors.workspace = true
+license.workspace = true
+description = "Native Instruments Komplete Kontrol keyboard driver — MIDI output helpers and Light Guide (per-key RGB LED) control on Linux. Native-only hardware I/O; speaks midicore MidiEvent types over a midir output port."
+
+[dependencies]
+# Types only (MidiEvent + newtypes + byte codec). Root pins this with
+# default-features = false, so no `vox`/`midir` surface is dragged in — we
+# talk to the OS via `midir` directly (MIDI OUTPUT, which midicore-midir does
+# not expose today).
+midicore.workspace = true
+# OS MIDI backend for OUTPUT. Same version the root workspace pins (0.11), so
+# only one midir / alsa-sys shows up in this crate's dependency graph. We keep
+# the default ALSA backend here (the driver crate is a standalone probe, not
+# part of the pipewire live-rig binary); pipewire hosts still see the ALSA-seq
+# ports via the pipewire ALSA-seq bridge.
+midir.workspace = true
+# The Light Guide is a raw USB feature (bulk transfer on interface 4 / endpoint
+# 4 for MK3), NOT MIDI — see docs/protocol.md. rusb (libusb) is the real path
+# to the LEDs; the midir dep above is only for the MIDI falsification probe and
+# the future NIHIA DAW-port integration.
+rusb.workspace = true
+eyre.workspace = true
+tracing.workspace = true
+
+[features]
+default = []
