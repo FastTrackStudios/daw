@@ -12,9 +12,11 @@
 //! about exactly one domain.
 
 use crate::fx::FxStreamEvent;
+use crate::item::{ItemEvent, TakeEvent};
 use crate::marker::MarkerStreamEvent;
 use crate::project::ProjectStreamEvent;
 use crate::region::RegionStreamEvent;
+use crate::routing::RoutingEvent;
 use crate::tempo_map::TempoMapStreamEvent;
 use crate::track::TrackStreamEvent;
 use crate::transport::{PositionTick, TransportEvent};
@@ -34,6 +36,13 @@ pub enum DawEvent {
     TransportState(TransportEvent),
     TransportPosition(PositionTick),
     Project(ProjectStreamEvent),
+    /// Item change. Each `ItemEvent` variant carries its own
+    /// `project_guid`, so no separate envelope is needed.
+    Item(ItemEvent),
+    /// Take change (carries `project_guid` per variant).
+    Take(TakeEvent),
+    /// Routing change (carries `project_guid` per variant).
+    Routing(RoutingEvent),
 }
 
 /// Per-subscriber filter. Every flag defaults to off; callers opt in
@@ -57,6 +66,9 @@ pub struct BusFilter {
     pub transport_state: bool,
     pub transport_position: bool,
     pub projects: bool,
+    pub items: bool,
+    pub takes: bool,
+    pub routing: bool,
     pub project_guid: Option<String>,
 }
 
@@ -71,6 +83,9 @@ impl BusFilter {
             transport_state: true,
             transport_position: true,
             projects: true,
+            items: true,
+            takes: true,
+            routing: true,
             project_guid: None,
         }
     }
@@ -85,6 +100,9 @@ impl BusFilter {
             transport_state: true,
             transport_position: false,
             projects: true,
+            items: true,
+            takes: true,
+            routing: true,
             project_guid: None,
         }
     }
@@ -116,6 +134,9 @@ impl BusFilter {
             || self.transport_state
             || self.transport_position
             || self.projects
+            || self.items
+            || self.takes
+            || self.routing
     }
 }
 
