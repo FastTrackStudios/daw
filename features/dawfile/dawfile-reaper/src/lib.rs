@@ -51,6 +51,7 @@
 use thiserror::Error;
 
 pub mod builder;
+pub mod scaffold;
 pub mod chunk_ops;
 pub mod compat;
 pub mod convert;
