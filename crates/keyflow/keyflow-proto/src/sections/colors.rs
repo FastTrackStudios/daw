@@ -54,6 +54,9 @@ pub fn colors_for_section_type(section_type: &SectionType) -> SectionColors {
         // the catalog's own REFRAIN = blue::S500 = CHORUS.
         SectionType::Refrain => CHORUS,
 
+        // Turnaround - a short transitional instrumental link (reads like a vamp).
+        SectionType::Turnaround => VAMP,
+
         // Utility sections - neutral colors
         SectionType::CountIn | SectionType::Opening | SectionType::End => SLATE,
         SectionType::Hits | SectionType::Breakdown => SLATE,

@@ -24,6 +24,7 @@ pub enum SectionType {
     Breakdown, // Breakdown section
     Vamp,    // Vamp section (repeated section for improvisation/transitions)
     Refrain, // Refrain section (recurring hook, common in worship charts)
+    Turnaround, // Turnaround — short instrumental link/transition back into a section
     Pre(Box<SectionType>), // Pre-Chorus, Pre-Verse, etc.
     Post(Box<SectionType>), // Post-Chorus, Post-Verse, etc.
     Custom(String), // Custom section types
@@ -134,6 +135,7 @@ impl SectionType {
             SectionType::Breakdown => "breakdown".to_string(),
             SectionType::Vamp => "vamp".to_string(),
             SectionType::Refrain => "refrain".to_string(),
+            SectionType::Turnaround => "turnaround".to_string(),
             SectionType::Pre(inner) => format!("pre_{}", inner.key()),
             SectionType::Post(inner) => format!("post_{}", inner.key()),
             SectionType::Custom(name) => {
@@ -169,6 +171,7 @@ impl SectionType {
             SectionType::Breakdown => "Breakdown".to_string(),
             SectionType::Vamp => "Vamp".to_string(),
             SectionType::Refrain => "Refrain".to_string(),
+            SectionType::Turnaround => "Turnaround".to_string(),
             SectionType::Pre(inner) => format!("Pre-{}", inner.full_name()),
             SectionType::Post(inner) => format!("Post-{}", inner.full_name()),
             SectionType::Custom(name) => name.clone(),
@@ -193,6 +196,7 @@ impl SectionType {
             SectionType::Breakdown => "BD".to_string(),
             SectionType::Vamp => "VMP".to_string(),
             SectionType::Refrain => "REF".to_string(),
+            SectionType::Turnaround => "TURN".to_string(),
             SectionType::Pre(inner) => format!("PRE-{}", inner.abbreviation()),
             SectionType::Post(inner) => format!("POST-{}", inner.abbreviation()),
             SectionType::Custom(name) => name.clone(), // Custom sections use their full name
@@ -212,7 +216,8 @@ impl SectionType {
             | SectionType::Interlude
             | SectionType::Breakdown
             | SectionType::Vamp
-            | SectionType::Refrain => false,
+            | SectionType::Refrain
+            | SectionType::Turnaround => false,
             SectionType::Pre(_) | SectionType::Post(_) => false,
             SectionType::Custom(_) => false, // Custom sections don't get numbered
             _ => true,
@@ -261,6 +266,7 @@ impl SectionType {
             "breakdown" | "bd" => return Ok(SectionType::Breakdown),
             "vamp" | "vmp" => return Ok(SectionType::Vamp),
             "refrain" | "ref" => return Ok(SectionType::Refrain),
+            "turnaround" | "turn" => return Ok(SectionType::Turnaround),
             _ => {}
         }
 
@@ -568,6 +574,7 @@ fn base_section_type(token: &str) -> Option<SectionType> {
         "breakdown" | "bd" => Some(SectionType::Breakdown),
         "vamp" | "vmp" => Some(SectionType::Vamp),
         "refrain" | "ref" => Some(SectionType::Refrain),
+        "turnaround" | "turn" => Some(SectionType::Turnaround),
         _ => None,
     }
 }
@@ -848,6 +855,21 @@ mod tests {
         assert_eq!(
             SectionType::parse_with_measure_count("br"),
             Some(ParsedSection::with_measures(SectionType::Bridge, None))
+        );
+        // Turnaround: both "turn" and "turnaround" parse, with a measure count.
+        assert_eq!(
+            SectionType::parse_with_measure_count("Turn 2"),
+            Some(ParsedSection::with_measures(
+                SectionType::Turnaround,
+                Some(MeasureExpression::Absolute(2))
+            ))
+        );
+        assert_eq!(
+            SectionType::parse_with_measure_count("turnaround 4"),
+            Some(ParsedSection::with_measures(
+                SectionType::Turnaround,
+                Some(MeasureExpression::Absolute(4))
+            ))
         );
     }
 
