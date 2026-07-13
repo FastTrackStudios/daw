@@ -55,6 +55,9 @@ mod item;
 mod live_midi;
 mod marker;
 pub mod media_bay;
+/// Seed a project with real on-disk media (grouped tracks + mmap'd stems).
+#[cfg(any(feature = "audio", feature = "decode"))]
+pub mod media_seed;
 pub mod metering;
 mod midi;
 mod peak;

@@ -25,6 +25,7 @@ use crate::transport_engine::{PlayStateRepr, TransportShared};
 use super::DecodedAudio;
 use super::aux_render::{AuxClock, AuxRenderer, AuxSlot};
 use super::render::ProjectRenderer;
+use super::routing;
 
 /// Largest block (in frames) the aux staging buffer covers. Callbacks
 /// larger than this fall back to the direct path (no aux hook) so the
@@ -627,6 +628,9 @@ impl AudioEngine {
         aux: AuxSlot,
     ) -> Result<Stream, String> {
         let channels = config.channels as usize;
+        // Publish the device's real channel count so the metronome UI can
+        // offer every output pair, and default the routing pairs sensibly.
+        routing::MixerRouting::shared().set_channel_count(channels);
         let sample_rate = config.sample_rate;
         let daw = renderer.daw().clone();
         // Interleaved f32 staging buffer, pre-sized so the callback
@@ -685,8 +689,17 @@ impl AudioEngine {
                         if use_stage {
                             let stage = &mut stage[..num_samples];
                             stage.fill(0.0);
-                            // Stopped: zeroed block, hook flushes tails.
+                            // Stopped: zeroed block, hook flushes tails
+                            // (count-in / section cues) onto the guide pair.
                             run_aux(&aux, &renderer, stage, false, pos_seconds);
+                            // Sum the guide into the headphone-check bus even
+                            // while stopped, and honor the main mute.
+                            routing::finish_routing(
+                                stage,
+                                channels,
+                                num_frames,
+                                routing::MixerRouting::shared().snapshot(),
+                            );
                             for (out, &v) in data.iter_mut().zip(stage.iter()) {
                                 *out = T::from_sample(v);
                             }
@@ -707,35 +720,38 @@ impl AudioEngine {
                     // Interleave the stereo block (handle channel-count
                     // mismatch by duplicating or summing), staging as f32
                     // so the aux hook can add before format conversion.
+                    let snap = routing::MixerRouting::shared().snapshot();
                     if use_stage {
                         let stage = &mut stage[..num_samples];
-                        for frame in 0..num_frames {
-                            let l = block.samples.get(frame * 2).copied().unwrap_or(0.0);
-                            let r = block.samples.get(frame * 2 + 1).copied().unwrap_or(0.0);
-                            for ch in 0..channels {
-                                let v = match ch {
-                                    0 => l,
-                                    1 => r,
-                                    _ => (l + r) * 0.5, // surround channels get the mono sum
-                                };
-                                stage[frame * channels + ch] = v;
-                            }
-                        }
+                        // Main mix onto the configured main pair (zeroes the
+                        // block first); the aux hook then adds the guide onto
+                        // the guide pair.
+                        routing::stage_main(stage, channels, num_frames, &block.samples, snap);
                         run_aux(&aux, &renderer, stage, true, pos_seconds);
+                        // Headphone-check sum (main + guide) + main mute.
+                        routing::finish_routing(stage, channels, num_frames, snap);
                         for (out, &v) in data.iter_mut().zip(stage.iter()) {
                             *out = T::from_sample(v);
                         }
                     } else {
-                        for frame in 0..num_frames {
-                            let l = block.samples.get(frame * 2).copied().unwrap_or(0.0);
-                            let r = block.samples.get(frame * 2 + 1).copied().unwrap_or(0.0);
-                            for ch in 0..channels {
-                                let v = match ch {
-                                    0 => l,
-                                    1 => r,
-                                    _ => (l + r) * 0.5,
-                                };
-                                data[frame * channels + ch] = T::from_sample(v);
+                        // Oversized block: bypass staging (and the aux hook,
+                        // so no guide/phones bus) — route the main mix onto
+                        // the main pair, honoring the mute.
+                        let (ml, mr) = snap.main;
+                        for s in data.iter_mut() {
+                            *s = T::from_sample(0.0);
+                        }
+                        if !snap.main_muted {
+                            for frame in 0..num_frames {
+                                let l = block.samples.get(frame * 2).copied().unwrap_or(0.0);
+                                let r = block.samples.get(frame * 2 + 1).copied().unwrap_or(0.0);
+                                let base = frame * channels;
+                                if ml < channels {
+                                    data[base + ml] = T::from_sample(l);
+                                }
+                                if mr < channels {
+                                    data[base + mr] = T::from_sample(r);
+                                }
                             }
                         }
                     }

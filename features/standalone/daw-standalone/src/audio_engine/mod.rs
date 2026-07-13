@@ -44,6 +44,9 @@ pub mod plugin_host;
 pub mod prefetch;
 #[cfg(any(feature = "decode", feature = "audio"))]
 pub mod render;
+/// Lock-free output routing (main / guide / headphone-check bus + main mute).
+#[cfg(feature = "audio")]
+pub mod routing;
 /// Streaming audio sources (mmap PCM + decoded memory) — REAPER's model.
 pub mod source;
 #[cfg(feature = "vst3-host")]
@@ -65,6 +68,8 @@ pub use decoder::{DecodedAudio, decode_audio, decode_audio_with_extension};
 pub use duplex_engine::{DuplexAudioEngine, PhonesBus};
 #[cfg(feature = "audio")]
 pub use mixer::{AudioEngine, TrackHandle};
+#[cfg(feature = "audio")]
+pub use routing::{MixerRouting, RoutingSnapshot};
 pub use source::AudioSource;
 #[cfg(not(target_arch = "wasm32"))]
 pub use source::PcmFile;

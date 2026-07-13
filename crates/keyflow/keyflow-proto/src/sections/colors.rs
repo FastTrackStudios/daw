@@ -50,6 +50,10 @@ pub fn colors_for_section_type(section_type: &SectionType) -> SectionColors {
         // Vamp sections - lime (repeated/improvisation)
         SectionType::Vamp => VAMP,
 
+        // Refrain - the recurring hook reads as chorus-family (blue), matching
+        // the catalog's own REFRAIN = blue::S500 = CHORUS.
+        SectionType::Refrain => CHORUS,
+
         // Utility sections - neutral colors
         SectionType::CountIn | SectionType::Opening | SectionType::End => SLATE,
         SectionType::Hits | SectionType::Breakdown => SLATE,
