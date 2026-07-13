@@ -19,9 +19,11 @@ pub mod correct;
 pub mod detect;
 pub mod dna;
 pub mod note;
+pub mod tracker;
 
 pub use correct::{correct_notes, CorrectConfig, NoteCorrection, Scale};
-pub use dna::{DnaConfig, DnaEngine, SeparatedNote};
+pub use dna::{DnaConfig, DnaEngine, NoteSpan, SeparatedNote};
+pub use tracker::{spans_from_frames, track_notes, TrackConfig, TrackedNote};
 pub use detect::{hz_to_midi, midi_to_hz, PitchFrame, YinConfig, YinDetector};
 pub use note::{segment_notes, Note, NoteConfig};
 

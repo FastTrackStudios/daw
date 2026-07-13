@@ -10,3 +10,11 @@ description = "tune-dsp — monophonic pitch detection (YIN), note extraction, a
 pitch-dsp = { workspace = true }
 # Real-FFT STFT/ISTFT for the polyphonic Direct-Note-Access engine (dna.rs).
 realfft = { workspace = true }
+# Optional: Basic Pitch (Spotify) polyphonic note transcription via pure-Rust
+# ONNX inference. Off by default so the core stays light and dependency-free.
+tract-onnx = { workspace = true, optional = true }
+
+[features]
+default = []
+# Enables the `basic_pitch` module (bundled ~230 KB Apache-2 model + tract).
+basic-pitch = ["dep:tract-onnx"]

@@ -70,6 +70,17 @@ pub struct SeparatedNote {
     pub audio: Vec<f64>,
 }
 
+/// A note laid on the STFT frame grid: active from `start_frame` for
+/// `f0.len()` frames, with a per-frame fundamental (Hz). Produced by the note
+/// tracker ([`crate::tracker`]) and consumed by [`DnaEngine::separate_spans`].
+#[derive(Clone, Debug)]
+pub struct NoteSpan {
+    /// First active frame index.
+    pub start_frame: usize,
+    /// Per-frame fundamental in Hz (length = number of active frames).
+    pub f0: Vec<f64>,
+}
+
 /// The DNA engine. Holds the FFT plans + window tables; reusable across buffers.
 pub struct DnaEngine {
     cfg: DnaConfig,
@@ -281,6 +292,150 @@ impl DnaEngine {
                 }
                 let _ = f0_energy[ni];
                 SeparatedNote { f0_hz: f0, audio }
+            })
+            .collect()
+    }
+
+    /// STFT geometry accessors — the tracker needs these to map frame indices
+    /// to time and to lay note spans on the same grid the separator uses.
+    #[inline]
+    pub fn window(&self) -> usize {
+        self.cfg.window
+    }
+    /// Hop size in samples.
+    #[inline]
+    pub fn hop(&self) -> usize {
+        self.cfg.hop.max(1)
+    }
+    /// Sample rate the engine runs at.
+    #[inline]
+    pub fn sample_rate(&self) -> f64 {
+        self.sample_rate
+    }
+    /// Number of analysis frames a buffer of `len` samples produces.
+    #[inline]
+    pub fn frame_count(&self, len: usize) -> usize {
+        let n = self.cfg.window;
+        if len < n {
+            0
+        } else {
+            (len - n) / self.hop() + 1
+        }
+    }
+
+    /// Estimate the fundamentals present in *every* analysis frame. Frame `i`
+    /// starts at sample `i * hop`. This is the front end the note tracker links
+    /// into sustained notes over time.
+    pub fn analyze_pitch_frames(&self, signal: &[f64]) -> Vec<Vec<f64>> {
+        let n = self.cfg.window;
+        let hop = self.hop();
+        let mut in_buf = self.fwd.make_input_vec();
+        let mut spectrum = self.fwd.make_output_vec();
+        let mut mag = vec![0.0f64; self.n_bins];
+        let mut out = Vec::new();
+        let mut pos = 0;
+        while pos + n <= signal.len() {
+            for i in 0..n {
+                in_buf[i] = signal[pos + i] * self.window[i];
+            }
+            self.fwd.process(&mut in_buf, &mut spectrum).ok();
+            for (m, s) in mag.iter_mut().zip(spectrum.iter()) {
+                *m = s.norm();
+            }
+            out.push(self.estimate_pitches(&mag));
+            pos += hop;
+        }
+        out
+    }
+
+    /// Time-varying separation driven by note spans (from the tracker).
+    ///
+    /// Each [`NoteSpan`] is active over a contiguous range of frames with its
+    /// own per-frame f0 (so vibrato and drift are followed). Within each frame,
+    /// only the spans active *there* compete for spectral energy, so a note that
+    /// has ended stops claiming bins — the key improvement over the static
+    /// whole-buffer [`DnaEngine::separate`].
+    pub fn separate_spans(&self, signal: &[f64], spans: &[NoteSpan]) -> Vec<SeparatedNote> {
+        let n = self.cfg.window;
+        let hop = self.hop();
+        if signal.len() < n || spans.is_empty() {
+            return Vec::new();
+        }
+
+        let mut outs = vec![vec![0.0f64; signal.len()]; spans.len()];
+        let mut norm = vec![0.0f64; signal.len()];
+
+        let mut in_buf = self.fwd.make_input_vec();
+        let mut spectrum = self.fwd.make_output_vec();
+        let mut note_spec = self.inv.make_input_vec();
+        let mut synth = self.inv.make_output_vec();
+
+        // Reused per-frame: which spans are active + their f0 this frame.
+        let mut active: Vec<(usize, f64)> = Vec::with_capacity(spans.len());
+
+        let n_frames = self.frame_count(signal.len());
+        for fi in 0..n_frames {
+            let pos = fi * hop;
+
+            active.clear();
+            for (si, span) in spans.iter().enumerate() {
+                if fi >= span.start_frame && fi < span.start_frame + span.f0.len() {
+                    active.push((si, span.f0[fi - span.start_frame]));
+                }
+            }
+            if active.is_empty() {
+                for i in 0..n {
+                    norm[pos + i] += self.window[i] * self.window[i];
+                }
+                continue;
+            }
+
+            for i in 0..n {
+                in_buf[i] = signal[pos + i] * self.window[i];
+            }
+            self.fwd.process(&mut in_buf, &mut spectrum).ok();
+
+            for &(si, f0) in &active {
+                for k in 0..self.n_bins {
+                    let w_this = self.harmonic_weight(k, f0);
+                    if w_this <= 0.0 {
+                        note_spec[k] = Complex::new(0.0, 0.0);
+                        continue;
+                    }
+                    let mut w_sum = 0.0;
+                    for &(_, g) in &active {
+                        w_sum += self.harmonic_weight(k, g);
+                    }
+                    let mask = if w_sum > 1e-12 { w_this / w_sum } else { 0.0 };
+                    note_spec[k] = spectrum[k] * mask;
+                }
+                self.inv.process(&mut note_spec, &mut synth).ok();
+                let scale = 1.0 / n as f64;
+                for i in 0..n {
+                    outs[si][pos + i] += synth[i] * self.window[i] * scale;
+                }
+            }
+
+            for i in 0..n {
+                norm[pos + i] += self.window[i] * self.window[i];
+            }
+        }
+
+        spans
+            .iter()
+            .enumerate()
+            .map(|(si, span)| {
+                let mut audio = std::mem::take(&mut outs[si]);
+                for (s, &d) in audio.iter_mut().zip(norm.iter()) {
+                    if d > 1e-9 {
+                        *s /= d;
+                    }
+                }
+                let mid = span.f0.len() / 2;
+                SeparatedNote {
+                    f0_hz: span.f0.get(mid).copied().unwrap_or(0.0),
+                    audio,
+                }
             })
             .collect()
     }
