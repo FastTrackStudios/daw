@@ -164,13 +164,16 @@ where
     }
 }
 
-/// Serve a whole [`crate::LayerRouter`] over an iroh endpoint — the iroh
-/// analogue of [`crate::axum_ws::serve_router`], collapsing the
-/// `lane_acceptor_fn(|_, conn| conn.handle_with(router.clone()))` +
-/// [`serve_endpoint`] boilerplate to one call.
+/// Serve a whole router over an iroh endpoint — the iroh analogue of
+/// [`crate::axum_ws::serve_router`], accepting any vox [`Handler`] and
+/// collapsing the `lane_acceptor_fn(|_, conn| conn.handle_with(router.clone()))`
+/// + [`serve_endpoint`] boilerplate to one call.
 #[cfg(not(target_arch = "wasm32"))]
-pub async fn serve_router(endpoint: &iroh::Endpoint, router: crate::LayerRouter) {
-    serve_endpoint(endpoint, router.acceptor()).await;
+pub async fn serve_router<H>(endpoint: &iroh::Endpoint, router: H)
+where
+    H: vox::Handler<vox::DriverReplySink> + Clone + Send + Sync + 'static,
+{
+    serve_endpoint(endpoint, crate::layer::handler_acceptor(router)).await;
 }
 
 /// One acceptor shared by every connection/stream the endpoint accepts

@@ -680,12 +680,24 @@ impl LayerRouter {
     /// [`crate::axum_ws::serve_router`] / [`crate::iroh_link::serve_router`],
     /// which wrap this directly.
     pub fn acceptor(&self) -> impl vox::LaneAcceptor {
-        let router = self.clone();
-        vox::lane_acceptor_fn(move |_req, connection| {
-            connection.handle_with(router.clone());
-            Ok(())
-        })
+        handler_acceptor(self.clone())
     }
+}
+
+/// A lane acceptor that dispatches every incoming lane onto a clone of
+/// `handler` — any vox [`Handler`], whether a [`LayerRouter`] or a wrapper
+/// around one (e.g. a snapshot-gating router). The single home for the
+/// `lane_acceptor_fn(|_, conn| conn.handle_with(handler.clone()))` closure
+/// every transport consumer otherwise repeats; [`crate::axum_ws::serve_router`]
+/// and [`crate::iroh_link::serve_router`] wrap it.
+pub fn handler_acceptor<H>(handler: H) -> impl vox::LaneAcceptor
+where
+    H: Handler<DriverReplySink> + Clone + Send + Sync + 'static,
+{
+    vox::lane_acceptor_fn(move |_req, connection| {
+        connection.handle_with(handler.clone());
+        Ok(())
+    })
 }
 
 impl LayerSink for LayerRouter {

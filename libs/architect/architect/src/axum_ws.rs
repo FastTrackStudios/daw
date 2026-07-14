@@ -75,13 +75,17 @@ where
     let _ = closed_rx.await;
 }
 
-/// Serve a whole [`crate::LayerRouter`] over an upgraded axum WebSocket —
-/// the common case. Collapses the per-binary `lane_acceptor_fn(|_, conn|
-/// conn.handle_with(router.clone()))` + [`serve`] boilerplate to one call,
-/// so a vox route is just:
+/// Serve a whole router over an upgraded axum WebSocket — the common case.
+/// Accepts any vox [`Handler`](vox_core::Handler): a [`crate::LayerRouter`], or
+/// a wrapper around one (e.g. a snapshot-gating router). Collapses the
+/// per-binary `lane_acceptor_fn(|_, conn| conn.handle_with(router.clone()))` +
+/// [`serve`] boilerplate to one call, so a vox route is just:
 /// `ws.on_upgrade(move |sock| serve_router(sock, state.router.clone()))`.
-pub async fn serve_router(socket: WebSocket, router: crate::LayerRouter) {
-    serve(socket, router.acceptor()).await;
+pub async fn serve_router<H>(socket: WebSocket, router: H)
+where
+    H: vox::Handler<vox::DriverReplySink> + Clone + Send + Sync + 'static,
+{
+    serve(socket, crate::layer::handler_acceptor(router)).await;
 }
 
 // ── Link adapter ──────────────────────────────────────────────────────

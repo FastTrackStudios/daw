@@ -57,12 +57,8 @@ impl LocalServer {
         // requested lane (it dispatches by method id). Hold the
         // connection alive until the task is aborted on scope close.
         let task = tokio::task::spawn(async move {
-            let acceptor = vox_core::lane_acceptor_fn(move |_req, connection| {
-                connection.handle_with(router.clone());
-                Ok(())
-            });
             match vox_core::acceptor_on(server_link)
-                .on_lane(acceptor)
+                .on_lane(router.acceptor())
                 .establish_connection()
                 .await
             {
@@ -136,12 +132,8 @@ impl LocalServer {
         let router = self.router.clone();
 
         let task = tokio::task::spawn(async move {
-            let acceptor = vox_core::lane_acceptor_fn(move |_req, connection| {
-                connection.handle_with(router.clone());
-                Ok(())
-            });
             match vox_core::acceptor_on(server_link)
-                .on_lane(acceptor)
+                .on_lane(router.acceptor())
                 .establish_connection()
                 .await
             {
