@@ -448,7 +448,11 @@ impl ProjectRenderer {
         // (take volume / pan / mute / pitch) are evaluated per-frame
         // inside mix_item_into_bus via cursors.
         for (ti, t) in tracks.iter().enumerate() {
-            if any_soloed && !t.soloed {
+            // Gate on the solo-routing MASK, not the raw per-track `soloed`
+            // flag: soloing a folder must keep its children audible (they pass
+            // as descendants) and soloing a leaf keeps its folder ancestors as
+            // pass-through. `passes(ti)` is the same predicate stage 0 uses.
+            if any_soloed && !passes(ti) {
                 continue;
             }
             let bus = &mut buses[ti];
@@ -1315,5 +1319,225 @@ mod poison_recovery_tests {
 
         let out = renderer.render_block(0, 256);
         assert_eq!(out.frames, 256);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod folder_routing_tests {
+    use super::*;
+    use crate::audio_engine::decoder::DecodedAudio;
+    use crate::audio_engine::materialize::attach_audio_source;
+    use crate::media_seed::{StemSpec, seed_media_tracks};
+    use daw_proto::{ProjectContext, ProjectInfo, TrackRef, Tracks};
+
+    fn rms(s: &[f32]) -> f64 {
+        if s.is_empty() {
+            return 0.0;
+        }
+        (s.iter().map(|v| (*v as f64).powi(2)).sum::<f64>() / s.len() as f64).sqrt()
+    }
+
+    /// Seed the REAL media path — Vocals{Lead,BGV}, Drums{Kick,Snare}, ungrouped
+    /// Loop — then inject synthetic constant audio into every take so the items
+    /// sound headlessly (no real WAV files needed).
+    fn seeded() -> (Standalone, String) {
+        let daw = Standalone::new();
+        let guid = daw.seed_project(ProjectInfo {
+            guid: "route-test".into(),
+            name: "RT".into(),
+            path: String::new(),
+        });
+        let stems = vec![
+            StemSpec::new("Lead", "/x/lead.wav", Some("Vocals")),
+            StemSpec::new("BGV", "/x/bgv.wav", Some("Vocals")),
+            StemSpec::new("Kick", "/x/kick.wav", Some("Drums")),
+            StemSpec::new("Snare", "/x/snare.wav", Some("Drums")),
+            StemSpec::new("Loop", "/x/loop.wav", None),
+        ];
+        seed_media_tracks(&daw, &guid, &stems, 0.0, 10.0);
+        let takes: Vec<String> = daw
+            .read_project(&guid, |p| {
+                p.takes
+                    .values()
+                    .flat_map(|tl| tl.takes.iter().map(|t| t.guid.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for tg in takes {
+            attach_audio_source(
+                &daw,
+                &guid,
+                &tg,
+                DecodedAudio {
+                    samples: vec![0.5; 4096],
+                    channels: 1,
+                    sample_rate: 48_000,
+                },
+            );
+        }
+        (daw, guid)
+    }
+
+    fn guid_of(daw: &Standalone, guid: &str, name: &str) -> String {
+        daw.read_project(guid, |p| {
+            p.tracks
+                .iter()
+                .find(|t| t.name == name)
+                .map(|t| t.guid.clone())
+        })
+        .flatten()
+        .unwrap_or_else(|| panic!("no track named {name}"))
+    }
+
+    // (a) The seed populates folder parents.
+    #[test]
+    fn seed_populates_folder_parents() {
+        let (daw, guid) = seeded();
+        let tracks = daw.read_project(&guid, |p| p.tracks.clone()).unwrap();
+        let by = |n: &str| tracks.iter().find(|t| t.name == n).expect(n);
+        let vocals = by("Vocals");
+        let drums = by("Drums");
+        assert!(vocals.is_folder && vocals.parent_guid.is_none(), "Vocals folder");
+        assert!(drums.is_folder && drums.parent_guid.is_none(), "Drums folder");
+        assert!(!by("Lead").is_folder);
+        assert_eq!(by("Lead").parent_guid.as_deref(), Some(vocals.guid.as_str()));
+        assert_eq!(by("BGV").parent_guid.as_deref(), Some(vocals.guid.as_str()));
+        assert_eq!(by("Kick").parent_guid.as_deref(), Some(drums.guid.as_str()));
+        assert_eq!(by("Snare").parent_guid.as_deref(), Some(drums.guid.as_str()));
+        assert_eq!(by("Loop").parent_guid, None);
+    }
+
+    // (b) The render snapshot resolves parent_idx for children.
+    #[test]
+    fn snapshot_resolves_parent_idx() {
+        let (daw, guid) = seeded();
+        let snap = daw.read_project(&guid, RenderSnapshot::build).unwrap();
+        let sidx = |n: &str| snap.tracks.iter().position(|t| t.name == n).expect(n);
+        let vi = sidx("Vocals");
+        let di = sidx("Drums");
+        assert_eq!(snap.tracks[sidx("Lead")].parent_idx, Some(vi));
+        assert_eq!(snap.tracks[sidx("BGV")].parent_idx, Some(vi));
+        assert_eq!(snap.tracks[sidx("Kick")].parent_idx, Some(di));
+        assert_eq!(snap.tracks[sidx("Snare")].parent_idx, Some(di));
+        assert_eq!(snap.tracks[sidx("Loop")].parent_idx, None);
+    }
+
+    // (c) Muting a folder must silence its children (folder-bus cascade).
+    #[test]
+    fn muting_folder_silences_children() {
+        let (daw, guid) = seeded();
+        let ctx = ProjectContext::Project(guid.clone());
+        let vocals = guid_of(&daw, &guid, "Vocals");
+        let lead = guid_of(&daw, &guid, "Lead");
+        let bgv = guid_of(&daw, &guid, "BGV");
+        let renderer = ProjectRenderer::new(&daw, &guid, 48_000);
+
+        let base = renderer.render_block(0, 512);
+        assert!(rms(&base.samples) > 0.01, "baseline should have audio");
+
+        // Reference: mute the two vocal LEAVES individually.
+        Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(lead.clone()), true).unwrap();
+        Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(bgv.clone()), true).unwrap();
+        let leaves = renderer.render_block(0, 512);
+        Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(lead), false).unwrap();
+        Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(bgv), false).unwrap();
+
+        // Mute the FOLDER — must cascade to the same output.
+        Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(vocals), true).unwrap();
+        let folder = renderer.render_block(0, 512);
+
+        assert!(
+            rms(&folder.samples) < rms(&base.samples) - 1e-4,
+            "muting the Vocals folder must reduce master (base={:.4}, folder={:.4})",
+            rms(&base.samples),
+            rms(&folder.samples)
+        );
+        for (a, b) in folder.samples.iter().zip(leaves.samples.iter()) {
+            assert!(
+                (a - b).abs() < 1e-4,
+                "folder mute must cascade exactly like muting its children"
+            );
+        }
+    }
+
+    // (d) Soloing a leaf must isolate it.
+    #[test]
+    fn soloing_leaf_isolates_it() {
+        let (daw, guid) = seeded();
+        let ctx = ProjectContext::Project(guid.clone());
+        let kick = guid_of(&daw, &guid, "Kick");
+        let others = ["Lead", "BGV", "Snare", "Loop"];
+        let renderer = ProjectRenderer::new(&daw, &guid, 48_000);
+
+        // Reference: mute everything except Kick.
+        for n in others {
+            Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(guid_of(&daw, &guid, n)), true)
+                .unwrap();
+        }
+        let only_kick = renderer.render_block(0, 512);
+        for n in others {
+            Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(guid_of(&daw, &guid, n)), false)
+                .unwrap();
+        }
+
+        // Solo Kick — must isolate to the same output.
+        Tracks::set_soloed(&daw, ctx.clone(), TrackRef::Guid(kick), true).unwrap();
+        let solo = renderer.render_block(0, 512);
+
+        assert!(rms(&solo.samples) > 0.01, "soloed kick should be audible");
+        for (a, b) in solo.samples.iter().zip(only_kick.samples.iter()) {
+            assert!(
+                (a - b).abs() < 1e-4,
+                "solo must isolate exactly like muting all other tracks"
+            );
+        }
+    }
+
+    // (d′) Soloing a FOLDER must keep its children audible (REAPER: solo a folder
+    // → its whole sub-mix plays, everything else muted). Stage 1 must gate item
+    // playback on the solo-routing MASK (soloed track + ancestors + descendants),
+    // NOT the raw per-track `soloed` flag — a folder's children aren't soloed
+    // themselves, so raw-flag gating silences them. This reproduces the live
+    // "solo doesn't behave" report for folder solo.
+    #[test]
+    fn soloing_folder_keeps_children_audible() {
+        let (daw, guid) = seeded();
+        let ctx = ProjectContext::Project(guid.clone());
+        let vocals = guid_of(&daw, &guid, "Vocals");
+        let others = ["Kick", "Snare", "Loop"];
+        let renderer = ProjectRenderer::new(&daw, &guid, 48_000);
+
+        // Reference: mute everything except the vocal children (what soloing the
+        // Vocals folder should sound like).
+        for n in others {
+            Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(guid_of(&daw, &guid, n)), true)
+                .unwrap();
+        }
+        let only_vocals = renderer.render_block(0, 512);
+        for n in others {
+            Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(guid_of(&daw, &guid, n)), false)
+                .unwrap();
+        }
+        assert!(
+            rms(&only_vocals.samples) > 0.01,
+            "reference vocal sub-mix must be audible"
+        );
+
+        // Solo the Vocals FOLDER — its children must stay audible.
+        Tracks::set_soloed(&daw, ctx.clone(), TrackRef::Guid(vocals), true).unwrap();
+        let solo_folder = renderer.render_block(0, 512);
+
+        assert!(
+            rms(&solo_folder.samples) > 0.01,
+            "soloing the Vocals folder silenced its children (rms={:.5}) — stage 1 gated on raw \
+             `soloed` instead of the solo-routing mask",
+            rms(&solo_folder.samples)
+        );
+        for (a, b) in solo_folder.samples.iter().zip(only_vocals.samples.iter()) {
+            assert!(
+                (a - b).abs() < 1e-4,
+                "folder solo must isolate to exactly the folder's children"
+            );
+        }
     }
 }

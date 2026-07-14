@@ -280,3 +280,49 @@ fn play_state_to_proto(s: PlayStateRepr) -> daw_proto::PlayState {
         PlayStateRepr::Recording => daw_proto::PlayState::Recording,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The playhead must NEVER freeze because the output device died. When the
+    /// audio callback owns the transport it disables the soft clock (the
+    /// callback drives `advance()`); if that device then dies the callback stops
+    /// firing. The stream-error handler recovers by re-enabling the soft clock
+    /// (a plain `enable_soft_clock()` / `soft_clock_enabled = true`) — this test
+    /// exercises exactly that recovery and asserts the playhead resumes.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn soft_clock_recovery_unfreezes_playhead() {
+        let bundle = TransportBundle::spawn(48_000, 120.0);
+        bundle.shared.set_play_state(PlayStateRepr::Playing);
+
+        // 1. Soft clock enabled → playhead advances from wall-clock.
+        platform::sleep(Duration::from_millis(120)).await;
+        let advanced = bundle.shared.playhead_samples().0;
+        assert!(
+            advanced > 0,
+            "soft clock should advance the playhead while enabled"
+        );
+
+        // 2. Audio callback takes over → soft clock disabled. Simulating a dead
+        //    device (no callback firing), the playhead must FREEZE.
+        bundle.disable_soft_clock();
+        platform::sleep(Duration::from_millis(40)).await; // let the in-flight tick settle
+        let frozen_at = bundle.shared.playhead_samples().0;
+        platform::sleep(Duration::from_millis(120)).await;
+        assert_eq!(
+            bundle.shared.playhead_samples().0,
+            frozen_at,
+            "with the soft clock disabled and no audio callback, the playhead must not advance"
+        );
+
+        // 3. Recovery: the stream-error callback re-enables the soft clock. The
+        //    playhead must resume — never left frozen by a dead device.
+        bundle.enable_soft_clock();
+        platform::sleep(Duration::from_millis(120)).await;
+        assert!(
+            bundle.shared.playhead_samples().0 > frozen_at,
+            "re-enabling the soft clock (the stream-error recovery) must resume the playhead"
+        );
+    }
+}

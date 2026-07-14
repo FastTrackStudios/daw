@@ -12,6 +12,7 @@
 //! the track list snapshot); never blocking under contention because
 //! both sides are short-lived.
 
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
 use std::sync::{Arc, Mutex};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -244,6 +245,13 @@ impl MixerState {
 pub struct AudioEngine {
     state: Arc<Mutex<MixerState>>,
     shared: Arc<TransportShared>,
+    /// Set by the cpal stream's error callback when the output device
+    /// dies (e.g. PipeWire drops the connection mid-playback). The stream
+    /// stops firing, so the callback can no longer drive `advance()`; the
+    /// error handler re-enables the project soft clock immediately (playhead
+    /// keeps moving, silently) and raises this flag so a supervisor can
+    /// reopen the device. Observe via [`stream_errored`](Self::stream_errored).
+    stream_error: Arc<AtomicBool>,
     /// Post-render aux hook slot (project mode only; see
     /// [`aux_render`](super::aux_render)). The audio callback `try_lock`s
     /// it once per block; [`set_aux_renderer`](Self::set_aux_renderer)
@@ -359,16 +367,29 @@ impl AudioEngine {
         }));
 
         let config = out.config;
+        let stream_error = Arc::new(AtomicBool::new(false));
         let stream = match out.sample_format {
-            SampleFormat::F32 => {
-                Self::build_stream::<f32>(&out.device, &config, state.clone(), shared.clone())?
-            }
-            SampleFormat::I16 => {
-                Self::build_stream::<i16>(&out.device, &config, state.clone(), shared.clone())?
-            }
-            SampleFormat::U16 => {
-                Self::build_stream::<u16>(&out.device, &config, state.clone(), shared.clone())?
-            }
+            SampleFormat::F32 => Self::build_stream::<f32>(
+                &out.device,
+                &config,
+                state.clone(),
+                shared.clone(),
+                stream_error.clone(),
+            )?,
+            SampleFormat::I16 => Self::build_stream::<i16>(
+                &out.device,
+                &config,
+                state.clone(),
+                shared.clone(),
+                stream_error.clone(),
+            )?,
+            SampleFormat::U16 => Self::build_stream::<u16>(
+                &out.device,
+                &config,
+                state.clone(),
+                shared.clone(),
+                stream_error.clone(),
+            )?,
             format => return Err(format!("Unsupported sample format: {format:?}")),
         };
 
@@ -379,6 +400,7 @@ impl AudioEngine {
         Ok(Self {
             state,
             shared,
+            stream_error,
             // Slot exists for API symmetry but is never read by the
             // private-mixer callback — the aux hook only fires in
             // project mode (`with_project*` / `attached_to`).
@@ -481,6 +503,16 @@ impl AudioEngine {
 
         let config = out.config;
         let aux: AuxSlot = AuxSlot::default();
+        // Recovery wiring: if the output device dies mid-playback, the stream's
+        // error callback re-enables THIS project's soft clock (so the playhead
+        // keeps advancing) and raises `stream_error` for the supervisor to
+        // reopen the device. The soft-clock flag is the same `Arc` the audio
+        // callback disabled when it took over driving `advance()`.
+        let soft_clock_enabled = daw
+            .transport_engine_for(&project_guid)
+            .soft_clock_enabled
+            .clone();
+        let stream_error = Arc::new(AtomicBool::new(false));
         let stream = match out.sample_format {
             SampleFormat::F32 => Self::build_project_stream::<f32>(
                 &out.device,
@@ -488,6 +520,8 @@ impl AudioEngine {
                 renderer.clone(),
                 shared.clone(),
                 aux.clone(),
+                soft_clock_enabled.clone(),
+                stream_error.clone(),
             )?,
             SampleFormat::I16 => Self::build_project_stream::<i16>(
                 &out.device,
@@ -495,6 +529,8 @@ impl AudioEngine {
                 renderer.clone(),
                 shared.clone(),
                 aux.clone(),
+                soft_clock_enabled.clone(),
+                stream_error.clone(),
             )?,
             SampleFormat::U16 => Self::build_project_stream::<u16>(
                 &out.device,
@@ -502,6 +538,8 @@ impl AudioEngine {
                 renderer.clone(),
                 shared.clone(),
                 aux.clone(),
+                soft_clock_enabled.clone(),
+                stream_error.clone(),
             )?,
             format => return Err(format!("Unsupported sample format: {format:?}")),
         };
@@ -519,6 +557,7 @@ impl AudioEngine {
         Ok(Self {
             state,
             shared,
+            stream_error,
             aux,
             _stream: stream,
             #[cfg(not(target_arch = "wasm32"))]
@@ -626,6 +665,8 @@ impl AudioEngine {
         renderer: Arc<ProjectRenderer>,
         shared: Arc<TransportShared>,
         aux: AuxSlot,
+        soft_clock_enabled: Arc<AtomicBool>,
+        stream_error: Arc<AtomicBool>,
     ) -> Result<Stream, String> {
         let channels = config.channels as usize;
         // Publish the device's real channel count so the metronome UI can
@@ -759,7 +800,18 @@ impl AudioEngine {
                     shared.advance(num_frames as u32);
                 },
                 move |err| {
-                    error!("Audio stream error: {err}");
+                    // Device died (e.g. PipeWire dropped the connection). The
+                    // callback that drives `advance()` will stop firing, so
+                    // re-enable the soft clock NOW — the playhead must never
+                    // freeze from a dead device (play would silently do nothing).
+                    // Raise `stream_error` so the audio supervisor reopens the
+                    // device and audio comes back on its own.
+                    soft_clock_enabled.store(true, AtomicOrdering::Relaxed);
+                    stream_error.store(true, AtomicOrdering::Relaxed);
+                    error!(
+                        "Audio stream error: {err} — soft clock re-enabled (playhead continues); \
+                         flagged for device re-attach"
+                    );
                 },
                 None,
             )
@@ -773,11 +825,21 @@ impl AudioEngine {
         &self.shared
     }
 
+    /// `true` once the output device's error callback has fired (the stream is
+    /// dead). The engine has already re-enabled the project soft clock so the
+    /// playhead keeps advancing; a supervisor should drop this engine and
+    /// re-attach to reopen the device. Latched — stays `true` until the engine
+    /// is dropped and replaced.
+    pub fn stream_errored(&self) -> bool {
+        self.stream_error.load(AtomicOrdering::Relaxed)
+    }
+
     fn build_stream<T: cpal::SizedSample + cpal::FromSample<f32>>(
         device: &cpal::Device,
         config: &StreamConfig,
         state: Arc<Mutex<MixerState>>,
         shared: Arc<TransportShared>,
+        stream_error: Arc<AtomicBool>,
     ) -> Result<Stream, String> {
         let channels = config.channels as usize;
         let max_buffer_size = 8192 * channels;
@@ -814,7 +876,10 @@ impl AudioEngine {
                     }
                 },
                 move |err| {
-                    error!("Audio stream error: {err}");
+                    // Private-mixer path has no project soft clock to fall back
+                    // on, but still flag the death so a supervisor can reopen.
+                    stream_error.store(true, AtomicOrdering::Relaxed);
+                    error!("Audio stream error: {err} — flagged for device re-attach");
                 },
                 None,
             )

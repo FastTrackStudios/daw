@@ -33,12 +33,24 @@ impl StemSpec {
     }
 }
 
-/// Result of seeding: how many stem tracks + folder tracks were created, and
-/// the materialize report (how many sources loaded / failed).
+/// One track created by seeding, with the identity a caller needs to decorate
+/// it afterwards (colour, default mute, …) without re-reading the project.
+#[derive(Debug, Clone)]
+pub struct SeededTrack {
+    pub guid: String,
+    pub name: String,
+    pub group: Option<String>,
+    pub is_folder: bool,
+}
+
+/// Result of seeding: how many stem tracks + folder tracks were created, the
+/// full list of created tracks (folders + stems, in creation order), and the
+/// materialize report (how many sources loaded / failed).
 #[derive(Debug, Default)]
 pub struct SeedReport {
     pub tracks_created: usize,
     pub folders_created: usize,
+    pub tracks: Vec<SeededTrack>,
     pub materialize: MaterializeReport,
 }
 
@@ -84,6 +96,12 @@ pub fn seed_media_tracks(
                 // Open a folder at this track.
                 let _ = Tracks::set_folder_depth(daw, ctx.clone(), TrackRef::Guid(g.clone()), 1);
                 report.folders_created += 1;
+                report.tracks.push(SeededTrack {
+                    guid: g.clone(),
+                    name: name.clone(),
+                    group: group.clone(),
+                    is_folder: true,
+                });
                 Some(g)
             }
             None => None,
@@ -95,6 +113,12 @@ pub fn seed_media_tracks(
                 continue;
             };
             report.tracks_created += 1;
+            report.tracks.push(SeededTrack {
+                guid: track.clone(),
+                name: stem.name.clone(),
+                group: group.clone(),
+                is_folder: false,
+            });
 
             // The last child of a folder closes it (depth −1).
             if folder_track.is_some() && i == last {
