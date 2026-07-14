@@ -27,6 +27,22 @@ use midicore_proto::{Direction, MidiEvent, PortId, PortInfo, PortSelector, RawSh
 
 const CLIENT: &str = "midicore-midir";
 
+/// Per-client sequence so every opened connection gets a UNIQUE jack/ALSA
+/// client name. Multiple rigs (guitar / keys / synth) each open their own MIDI
+/// inputs in the same process; with a shared client name the pipewire-jack
+/// backend merges the same-named clients and the hardware→client link is
+/// shared, so only one rig's callback fires and the others receive no events
+/// (the "MIDI keyboard isn't routed to the synth" bug). A unique name per
+/// client keeps each rig's input independently connectable.
+static CLIENT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn client_name() -> String {
+    format!(
+        "{CLIENT}-{}",
+        CLIENT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    )
+}
+
 /// List the names of all available MIDI input ports (sorted; our own
 /// clients excluded).
 pub fn input_ports() -> Vec<String> {
@@ -80,7 +96,7 @@ impl MidiInput {
     {
         match selector {
             PortSelector::Default => {
-                let midi = MidirInput::new(CLIENT)?;
+                let midi = MidirInput::new(&client_name())?;
                 let port = midi
                     .ports()
                     .into_iter()
@@ -104,7 +120,7 @@ impl MidiInput {
                 Ok(Self { _conns: vec![conn], opened: vec![name] })
             }
             PortSelector::All => {
-                let midi = MidirInput::new(CLIENT)?;
+                let midi = MidirInput::new(&client_name())?;
                 let ports = midi.ports();
                 if ports.is_empty() {
                     return Err(eyre!("no MIDI input ports available"));
@@ -118,7 +134,7 @@ impl MidiInput {
                         continue;
                     }
                     // Each connection consumes its own MidirInput handle.
-                    let Ok(handle) = MidirInput::new(CLIENT) else { continue };
+                    let Ok(handle) = MidirInput::new(&client_name()) else { continue };
                     match connect_port(handle, port, &name, sink.clone()) {
                         Ok(conn) => {
                             tracing::info!(port = %name, "midicore-midir: opened input");
@@ -148,7 +164,7 @@ where
     F: Fn(TimedEvent) + Send + 'static,
     P: Fn(&str) -> bool,
 {
-    let midi = MidirInput::new(CLIENT)?;
+    let midi = MidirInput::new(&client_name())?;
     let port = midi
         .ports()
         .into_iter()
@@ -189,7 +205,7 @@ where
     F: Fn(TimedEvent) + Send + 'static,
 {
     use midir::os::unix::VirtualInput;
-    let midi = MidirInput::new(CLIENT)?;
+    let midi = MidirInput::new(&client_name())?;
     midi.create_virtual(
         name,
         move |ts, bytes, _| {
