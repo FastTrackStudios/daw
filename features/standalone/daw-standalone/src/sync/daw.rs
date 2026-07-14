@@ -735,7 +735,7 @@ impl Standalone {
     /// accounting) if no engine is attached or the ring is full. `true`
     /// when the event was enqueued.
     ///
-    /// Full-fidelity seam for hardware MIDI sources (e.g. `daw-midi-io`): unlike
+    /// Full-fidelity seam for hardware MIDI sources (e.g. `midicore`): unlike
     /// [`push_note_on`](Self::push_note_on) / [`push_cc`](Self::push_cc) this
     /// carries the original channel, release velocity, pitch-bend and program
     /// change rather than collapsing to monotimbral channel 0.
