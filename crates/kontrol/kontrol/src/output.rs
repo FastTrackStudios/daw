@@ -1,13 +1,14 @@
-//! Thin MIDI **output** layer over `midir` — used only by the falsification
+//! Thin MIDI **output** helpers for the S88 MK3, over midicore's MIDI output
+//! primitive ([`midicore::midir::MidiOutput`]) — used only by the falsification
 //! probe (proving note-ons on Main/DAW do NOT light the guide) and as the seam
 //! for future NIHIA DAW-port integration.
 //!
-//! `midicore-midir` only exposes MIDI *input* today, so this crate opens its
-//! own `midir::MidiOutput` connections. Everything here is native-only
-//! hardware I/O; there is no wasm/no_std path.
+//! The domain here — the S88 port names ([`ports`]) and the Light-Guide
+//! note-on [`Encoding`] candidates — stays; the raw `midir` connection plumbing
+//! now lives in `midicore`, so this crate no longer re-rolls it.
 
-use eyre::{eyre, Result};
-use midir::{MidiOutput as MidirOutput, MidiOutputConnection};
+use eyre::Result;
+use midicore::{midir::MidiOutput, PortSelector};
 
 use crate::LightColor;
 
@@ -46,11 +47,9 @@ impl Encoding {
     }
 }
 
-const CLIENT: &str = "kontrol";
-
-/// A single open MIDI output port.
+/// A single open MIDI output port (backed by [`midicore::midir::MidiOutput`]).
 pub struct MidiOut {
-    conn: MidiOutputConnection,
+    out: MidiOutput,
     /// The port name actually opened (for logs / the probe).
     pub name: String,
 }
@@ -58,44 +57,19 @@ pub struct MidiOut {
 impl MidiOut {
     /// Open the first output port whose name contains `needle` (case-insensitive).
     pub fn open_contains(needle: &str) -> Result<Self> {
-        let needle_lc = needle.to_lowercase();
-        let midi = MidirOutput::new(&format!("{CLIENT}-out"))?;
-        let port = midi
-            .ports()
-            .into_iter()
-            .find(|p| {
-                midi.port_name(p)
-                    .map(|n| n.to_lowercase().contains(&needle_lc))
-                    .unwrap_or(false)
-            })
-            .ok_or_else(|| eyre!("no MIDI output port matching {needle:?}"))?;
-        let name = midi.port_name(&port).unwrap_or_default();
-        let conn = midi
-            .connect(&port, CLIENT)
-            .map_err(|e| eyre!("connect MIDI output {name:?}: {e}"))?;
+        let out = MidiOutput::open(PortSelector::NameContains(needle.to_string()))?;
+        let name = out.opened.clone();
         tracing::info!(port = %name, "kontrol: opened MIDI output");
-        Ok(Self { conn, name })
+        Ok(Self { out, name })
     }
 
     /// Send raw MIDI bytes to the port.
     pub fn send(&mut self, bytes: &[u8]) -> Result<()> {
-        self.conn
-            .send(bytes)
-            .map_err(|e| eyre!("MIDI send to {:?}: {e}", self.name))
+        self.out.send(bytes)
     }
 }
 
-/// List the names of all available MIDI **output** ports (our own clients excluded).
+/// List the names of all available MIDI **output** ports.
 pub fn output_ports() -> Vec<String> {
-    let Ok(midi) = MidirOutput::new(&format!("{CLIENT}-enum")) else {
-        return Vec::new();
-    };
-    let mut ports: Vec<String> = midi
-        .ports()
-        .iter()
-        .filter_map(|p| midi.port_name(p).ok())
-        .filter(|n| !n.contains(CLIENT))
-        .collect();
-    ports.sort();
-    ports
+    midicore::midir::output_ports()
 }

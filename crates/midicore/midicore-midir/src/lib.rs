@@ -21,7 +21,9 @@
 //! ```
 
 use eyre::eyre;
-use midir::{MidiInput as MidirInput, MidiInputConnection};
+use midir::{
+    MidiInput as MidirInput, MidiInputConnection, MidiOutput as MidirOutput, MidiOutputConnection,
+};
 
 use midicore_proto::{Direction, MidiEvent, PortId, PortInfo, PortSelector, RawShortMessage, TimedEvent};
 
@@ -272,5 +274,136 @@ impl MidiStream {
     /// Non-blocking drain of all pending events.
     pub fn drain(&self) -> impl Iterator<Item = RawShortMessage> + '_ {
         self.rx.try_iter()
+    }
+}
+
+// ── Output ──────────────────────────────────────────────────────────────────
+
+/// List the names of all available MIDI **output** ports (sorted; our own
+/// clients excluded). The output analogue of [`input_ports`].
+pub fn output_ports() -> Vec<String> {
+    let Ok(midi) = MidirOutput::new(&format!("{CLIENT}-enum-out")) else {
+        return Vec::new();
+    };
+    let mut ports: Vec<String> = midi
+        .ports()
+        .iter()
+        .filter_map(|p| midi.port_name(p).ok())
+        // Exclude our own clients, same as `input_ports` (a shared client-name
+        // prefix keeps hot-plug scans from observing their own reopens).
+        .filter(|name| !name.contains(CLIENT))
+        .collect();
+    ports.sort();
+    ports
+}
+
+/// List available MIDI output ports as [`PortInfo`] records (id = port name).
+pub fn output_devices() -> Vec<PortInfo> {
+    output_ports()
+        .into_iter()
+        .map(|name| PortInfo {
+            id: PortId(name.clone()),
+            name,
+            direction: Direction::Output,
+            virtual_port: false,
+        })
+        .collect()
+}
+
+/// An open MIDI **output** connection — send raw bytes or encoded
+/// [`MidiEvent`]s. Drop to close the port. The output analogue of
+/// [`MidiInput`]; each open gets a process-unique client name (see
+/// [`client_name`]).
+pub struct MidiOutput {
+    conn: MidiOutputConnection,
+    /// Name of the port actually opened (for UI / logs).
+    pub opened: String,
+}
+
+impl MidiOutput {
+    /// Open `selector` for output. `Default` opens the first port; `Id` /
+    /// `NameContains` match by name; `Virtual` creates a port other apps
+    /// connect to (Unix only). `All` is not meaningful for a single output.
+    pub fn open(selector: PortSelector) -> eyre::Result<Self> {
+        match selector {
+            PortSelector::Default => {
+                let midi = MidirOutput::new(&client_name())?;
+                let port = midi
+                    .ports()
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| eyre!("no MIDI output ports available"))?;
+                let name = midi.port_name(&port).unwrap_or_default();
+                Self::connect(midi, &port, name)
+            }
+            PortSelector::Id(PortId(id)) => Self::open_where(|n| n == id),
+            PortSelector::NameContains(needle) => {
+                let needle = needle.to_lowercase();
+                Self::open_where(move |n| n.to_lowercase().contains(&needle))
+            }
+            PortSelector::Virtual(name) => Self::open_virtual(&name),
+            PortSelector::All => {
+                Err(eyre!("PortSelector::All is not supported for MIDI output"))
+            }
+        }
+    }
+
+    fn open_where<P: Fn(&str) -> bool>(pred: P) -> eyre::Result<Self> {
+        let midi = MidirOutput::new(&client_name())?;
+        let port = midi
+            .ports()
+            .into_iter()
+            .find(|p| midi.port_name(p).map(|n| pred(&n)).unwrap_or(false))
+            .ok_or_else(|| eyre!("no MIDI output port matched"))?;
+        let name = midi.port_name(&port).unwrap_or_default();
+        Self::connect(midi, &port, name)
+    }
+
+    fn connect(
+        midi: MidirOutput,
+        port: &midir::MidiOutputPort,
+        name: String,
+    ) -> eyre::Result<Self> {
+        let conn = midi
+            .connect(port, CLIENT)
+            .map_err(|e| eyre!("connect MIDI output '{name}': {e}"))?;
+        tracing::info!(port = %name, "midicore-midir: opened output");
+        Ok(Self { conn, opened: name })
+    }
+
+    /// Send raw MIDI bytes to the port.
+    pub fn send(&mut self, bytes: &[u8]) -> eyre::Result<()> {
+        self.conn
+            .send(bytes)
+            .map_err(|e| eyre!("MIDI send to '{}': {e}", self.opened))
+    }
+
+    /// Encode a [`MidiEvent`] with midicore's codec and send it.
+    pub fn send_event(&mut self, event: &MidiEvent) -> eyre::Result<()> {
+        let mut buf = [0u8; 8];
+        let n = event
+            .encode(&mut buf)
+            .ok_or_else(|| eyre!("cannot encode {event:?} to MIDI bytes"))?;
+        self.send(&buf[..n])
+    }
+}
+
+#[cfg(unix)]
+impl MidiOutput {
+    fn open_virtual(name: &str) -> eyre::Result<Self> {
+        use midir::os::unix::VirtualOutput;
+        let midi = MidirOutput::new(&client_name())?;
+        let conn = midi
+            .create_virtual(name)
+            .map_err(|e| eyre!("create virtual MIDI output '{name}': {e}"))?;
+        tracing::info!(port = %name, "midicore-midir: created virtual output");
+        Ok(Self { conn, opened: name.to_string() })
+    }
+}
+
+#[cfg(not(unix))]
+impl MidiOutput {
+    fn open_virtual(_name: &str) -> eyre::Result<Self> {
+        Err(eyre!("virtual MIDI ports are only supported on Unix"))
     }
 }
