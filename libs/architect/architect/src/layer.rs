@@ -679,9 +679,9 @@ impl LayerRouter {
     /// boilerplate that engine binaries otherwise repeat per transport; see
     /// [`crate::axum_ws::serve_router`] / [`crate::iroh_link::serve_router`],
     /// which wrap this directly.
-    pub fn acceptor(&self) -> impl vox_core::LaneAcceptor {
+    pub fn acceptor(&self) -> impl vox::LaneAcceptor {
         let router = self.clone();
-        vox_core::lane_acceptor_fn(move |_req, connection| {
+        vox::lane_acceptor_fn(move |_req, connection| {
             connection.handle_with(router.clone());
             Ok(())
         })
