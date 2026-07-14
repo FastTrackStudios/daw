@@ -500,6 +500,12 @@ pub mod axum_ws;
 #[cfg(feature = "iroh")]
 pub mod iroh_link;
 
+// Engine-binary host — assemble a headless vox server (runtime + tracing +
+// panic logger + `/health` + `/vox` + optional iroh + optional SPA bundle)
+// from a router. Native only.
+#[cfg(feature = "host")]
+pub mod host;
+
 #[cfg(feature = "fake")]
 pub mod seed {
     //! Helpers for the architect-emitted `seed_fake_<entity>` functions.

@@ -143,6 +143,18 @@ diagnostics = ["moire/diagnostics"]
 client = ["vox", "atom", "form"]
 server = ["vox", "server-seaorm", "server-axum", "dispatch-tokio"]
 
+# `architect::host` — assemble a headless vox engine binary from a router:
+# the multi-thread runtime, tracing + panic-logger bootstrap, and an
+# `EngineHost` that serves a `LayerRouter` over `/vox` (+ `/health`, optional
+# iroh, optional static SPA bundle). Native only — folds the boilerplate every
+# engine binary otherwise repeats. Add `iroh` alongside for p2p serving.
+host = [
+    "server-axum",
+    "dep:tracing-subscriber",
+    "dep:tower-http",
+    "dep:include_dir",
+]
+
 # Dispatcher impls (see `architect::dispatch`). The current-thread
 # dispatcher is always available; runtime-specific impls are gated.
 #
@@ -222,6 +234,13 @@ async-trait = { version = "0.1", optional = true }
 axum = { workspace = true, optional = true }
 futures = { version = "0.3", optional = true }
 tracing = { workspace = true, optional = true }
+
+# `host` bundle — the engine-binary bootstrap. All optional; only the `host`
+# feature (native engine binaries) pulls them, so the wasm client never sees
+# a global subscriber init or a static-file server.
+tracing-subscriber = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
+include_dir = { workspace = true, optional = true }
 vox-core = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
 moire = { workspace = true, optional = true }
