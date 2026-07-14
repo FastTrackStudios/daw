@@ -678,7 +678,10 @@ impl LayerRouter {
     /// the `lane_acceptor_fn(|_, conn| conn.handle_with(router.clone()))`
     /// boilerplate that engine binaries otherwise repeat per transport; see
     /// [`crate::axum_ws::serve_router`] / [`crate::iroh_link::serve_router`],
-    /// which wrap this directly.
+    /// which wrap this directly. Native-only: serving a router is a
+    /// server-side concern (the wasm build is a vox *client*), and the
+    /// acceptor's thread bounds don't hold on single-threaded wasm.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn acceptor(&self) -> impl vox::LaneAcceptor {
         handler_acceptor(self.clone())
     }
@@ -690,6 +693,10 @@ impl LayerRouter {
 /// `lane_acceptor_fn(|_, conn| conn.handle_with(handler.clone()))` closure
 /// every transport consumer otherwise repeats; [`crate::axum_ws::serve_router`]
 /// and [`crate::iroh_link::serve_router`] wrap it.
+///
+/// Native-only: the acceptor is moved onto a serving task, so it needs the
+/// `Send + Sync` bounds that only hold off wasm (wasm vox is single-threaded).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn handler_acceptor<H>(handler: H) -> impl vox::LaneAcceptor
 where
     H: Handler<DriverReplySink> + Clone + Send + Sync + 'static,
