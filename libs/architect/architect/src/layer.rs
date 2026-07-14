@@ -672,6 +672,20 @@ impl LayerRouter {
     pub fn is_empty(&self) -> bool {
         self.handlers.is_empty()
     }
+
+    /// A lane acceptor that dispatches every incoming lane onto a clone of
+    /// this router — the one call every transport consumer needs. Collapses
+    /// the `lane_acceptor_fn(|_, conn| conn.handle_with(router.clone()))`
+    /// boilerplate that engine binaries otherwise repeat per transport; see
+    /// [`crate::axum_ws::serve_router`] / [`crate::iroh_link::serve_router`],
+    /// which wrap this directly.
+    pub fn acceptor(&self) -> impl vox_core::LaneAcceptor {
+        let router = self.clone();
+        vox_core::lane_acceptor_fn(move |_req, connection| {
+            connection.handle_with(router.clone());
+            Ok(())
+        })
+    }
 }
 
 impl LayerSink for LayerRouter {

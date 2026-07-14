@@ -75,6 +75,15 @@ where
     let _ = closed_rx.await;
 }
 
+/// Serve a whole [`crate::LayerRouter`] over an upgraded axum WebSocket —
+/// the common case. Collapses the per-binary `lane_acceptor_fn(|_, conn|
+/// conn.handle_with(router.clone()))` + [`serve`] boilerplate to one call,
+/// so a vox route is just:
+/// `ws.on_upgrade(move |sock| serve_router(sock, state.router.clone()))`.
+pub async fn serve_router(socket: WebSocket, router: crate::LayerRouter) {
+    serve(socket, router.acceptor()).await;
+}
+
 // ── Link adapter ──────────────────────────────────────────────────────
 
 pub struct AxumWsLink {
