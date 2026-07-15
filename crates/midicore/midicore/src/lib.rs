@@ -20,12 +20,18 @@ pub use monitor::{MidiMonitor, MIDI_MONITOR_CAP};
 /// every rig otherwise re-derives. A non-empty name narrows to that port
 /// (`NameContains`); no name opens *every* input (`All`), the omni default a
 /// live rig wants (PipeWire fans every device into one stream).
+// r[impl primitives.midi.attach]
 pub fn selector_for(name: Option<&str>) -> PortSelector {
     match name {
         Some(n) if !n.is_empty() => PortSelector::NameContains(n.to_string()),
         _ => PortSelector::All,
     }
 }
+
+// The MIDI attach lifecycle (drop-old-before-open, monitor-tap sink wiring,
+// hot-plug rescan) — one helper per pattern, so no rig re-derives it.
+#[cfg(feature = "midir")]
+pub mod attach;
 
 /// The midir-backed OS MIDI backend (`MidiInput`, `MidiStream`, `input_ports`,
 /// …). Enabled by the `midir` feature; native platforms only.

@@ -36,8 +36,10 @@ const CLIENT: &str = "midicore-midir";
 /// shared, so only one rig's callback fires and the others receive no events
 /// (the "MIDI keyboard isn't routed to the synth" bug). A unique name per
 /// client keeps each rig's input independently connectable.
+// r[impl primitives.midi.client-identity]
 static CLIENT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+// r[impl primitives.midi.client-identity]
 fn client_name() -> String {
     format!(
         "{CLIENT}-{}",
