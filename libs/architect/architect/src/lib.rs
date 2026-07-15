@@ -273,6 +273,13 @@ pub use stream::{use_store_stream, use_stream};
 #[cfg(feature = "vox")]
 pub use vox;
 
+// Rig-backend glue (`rig` feature, native only): the `RigBackend` trait —
+// provided `router()`, the sliding event hub, and the shared meter/status
+// pump (one interval, once-start guard, running-edge publish, MIDI hot-plug
+// rescan, per-tick panic containment) — so instrument rigs cannot drift.
+#[cfg(all(feature = "rig", not(target_arch = "wasm32")))]
+pub mod rig;
+
 // Effect-style service composition. `Layer` + `layers!` let callers
 // bundle architect-rpc services into a single value and mount them as
 // a unit via `.provide(backend)`. See [`layer`] module docs.

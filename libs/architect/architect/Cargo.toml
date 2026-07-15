@@ -85,6 +85,13 @@ schedule = ["platform"]
 # A consumer that brings its own repo impl (or fronts a remote API)
 # enables `server-axum` only and never compiles sea-orm.
 
+# Rig-backend glue (`architect::rig`): the `RigBackend` trait — provided
+# `router()`, the sliding event hub, and the shared meter/status pump
+# (interval + once-guard + running-edge + MIDI hot-plug rescan) that every
+# instrument-rig backend serves through. Native only (the pump is an OS
+# thread).
+rig = ["vox", "dep:tracing"]
+
 # In-process transport (`architect::local`): serve a `LayerRouter` over a
 # vox in-memory link so a typed client consumes a local backend with no
 # server/socket. Native only — vox's `MemoryLink` is `#[cfg(not(wasm))]`.
