@@ -440,6 +440,12 @@ pub struct Standalone {
     /// in `plugin_instances` after an FX is inserted.
     pub(crate) loaded_plugins:
         Arc<Mutex<std::collections::HashMap<String, daw_proto::LoadedPluginInfo>>>,
+    /// Injected built-in FX factory (see [`crate::plugin::FxFactory`]).
+    /// `Effects::add` consults it for names the plugin-file backends
+    /// don't claim; `list_installed` appends its catalog. `None` until
+    /// the app installs one (`set_fx_factory`) — built-in names then
+    /// fall back to synthetic no-DSP entries, as before.
+    pub(crate) fx_factory: Arc<Mutex<Option<Arc<dyn crate::plugin::FxFactory>>>>,
     /// Track-domain stream hub. Mutating `Tracks` methods publish
     /// here; the architect stream layer attaches every subscriber
     /// sink (`TracksStreamSource`).
@@ -464,6 +470,15 @@ pub struct Standalone {
     /// audio engine can install a freshly-sized bank when it attaches; empty
     /// until then, so `track_peak` reports silence.
     pub(crate) meters: Arc<Mutex<Arc<crate::metering::Meters>>>,
+    /// Meter-frame stream hub (`PeaksStreamSource`). A process-wide
+    /// pump (spawned lazily by the first `set_meters`, i.e. when an
+    /// audio engine attaches) reads the meter bank at ~30 Hz and
+    /// publishes one [`MeterFrame`](daw_proto::MeterFrame) per tick;
+    /// the architect `#[subscribe] fn meters` stream layer fans them
+    /// out. Subscribers filter by `project_guid`.
+    pub(crate) meter_events: architect::PubSub<daw_proto::MeterFrame>,
+    /// Whether the meter pump has been spawned (once per process).
+    pub(crate) meter_pump_started: Arc<std::sync::atomic::AtomicBool>,
     /// Producer end of the live / programmatic MIDI ring. Installed by
     /// `AudioEngine::with_project_prefs` (the consumer goes to the
     /// renderer via `set_live_midi`). `push_note_on`/`_off`/`_cc` push
@@ -492,6 +507,7 @@ impl Standalone {
             )),
             plugin_instances: Arc::new(Mutex::new(std::collections::HashMap::new())),
             loaded_plugins: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            fx_factory: Arc::new(Mutex::new(None)),
             track_events: architect::PubSub::sliding(1024),
             marker_events: architect::PubSub::sliding(1024),
             region_events: architect::PubSub::sliding(1024),
@@ -499,6 +515,8 @@ impl Standalone {
             transport_events: architect::PubSub::sliding(1024),
             bus_events: architect::PubSub::sliding(1024),
             meters: Arc::new(Mutex::new(crate::metering::Meters::empty())),
+            meter_events: architect::PubSub::sliding(64),
+            meter_pump_started: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(feature = "audio")]
             live_midi_tx: Arc::new(Mutex::new(None)),
         }
@@ -515,6 +533,54 @@ impl Standalone {
     /// service share the same cells.
     pub fn set_meters(&self, meters: Arc<crate::metering::Meters>) {
         *self.meters.lock().expect("meters poisoned") = meters;
+    }
+
+    /// Spawn the ~30 Hz meter pump (once per process): reads the
+    /// current meter bank's atomics — RT-safe, the audio callback
+    /// never blocks on it — builds one [`daw_proto::MeterFrame`] for
+    /// the current project and publishes it on the `meter_events` hub
+    /// (`PeaksStreamSource`). Called lazily from `meters_hub()` (the
+    /// first stream subscription), which runs in async context — so a
+    /// backend used purely synchronously (offline render, tests) never
+    /// needs a runtime and never pays for the pump. An empty bank
+    /// (engine detached) publishes nothing, so remote meters simply
+    /// stop updating.
+    pub(crate) fn spawn_meter_pump(&self) {
+        use std::sync::atomic::Ordering;
+        if self.meter_pump_started.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let this = self.clone();
+        moire::task::spawn(async move {
+            loop {
+                moire::time::sleep(std::time::Duration::from_millis(33)).await;
+                let bank = this.meters();
+                if bank.is_empty() {
+                    continue;
+                }
+                let Some(project_guid) = ({
+                    let s = this.state.lock().expect("standalone state poisoned");
+                    s.current_project_guid.clone()
+                }) else {
+                    continue;
+                };
+                let tracks = (0..bank.len())
+                    .map(|i| {
+                        let cell = bank.cell(i).expect("index < len");
+                        daw_proto::TrackLevels {
+                            peak_left: cell.peak(0),
+                            peak_right: cell.peak(1),
+                            hold_left: cell.hold(0),
+                            hold_right: cell.hold(1),
+                        }
+                    })
+                    .collect();
+                this.meter_events.publish(daw_proto::MeterFrame {
+                    project_guid,
+                    tracks,
+                });
+            }
+        });
     }
 
     /// Get or lazily-create the transport engine bundle for `guid`.
@@ -705,6 +771,23 @@ impl Standalone {
     /// (e.g. Signal's NAM amp / cab-IR convolver). Returns any previous instance
     /// under the same guid (hand it off-thread to drop). Pair with a matching
     /// `fx_guid` entry in the track's FX chain so the renderer picks it up.
+    /// Install the built-in FX factory (see [`crate::plugin::FxFactory`]).
+    /// Replaces any previous factory.
+    pub fn set_fx_factory(&self, factory: Arc<dyn crate::plugin::FxFactory>) {
+        *self
+            .fx_factory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(factory);
+    }
+
+    /// The installed built-in FX factory, if any.
+    pub fn fx_factory(&self) -> Option<Arc<dyn crate::plugin::FxFactory>> {
+        self.fx_factory
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     pub fn insert_plugin_instance(
         &self,
         fx_guid: impl Into<String>,

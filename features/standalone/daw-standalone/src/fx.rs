@@ -132,9 +132,25 @@ fn built_in_installed() -> Vec<InstalledFx> {
     .collect()
 }
 
+/// Instantiate `name` as a live DSP instance: plugin-file backends
+/// first (CLAP/VST3 by path), then the injected built-in FX factory
+/// ([`crate::plugin::FxFactory`]). `None` ⇒ synthetic fallback.
+fn instantiate(daw: &Standalone, name: &str) -> Option<Box<dyn crate::plugin::PluginInstance>> {
+    if let Some(p) = crate::plugin::load_plugin(name).ok().flatten() {
+        return Some(p);
+    }
+    // Instances are re-`prepare`d at the stream's real rate by the
+    // renderer; 48 kHz is only the construction-time default.
+    daw.fx_factory()?.create(name, 48_000.0)
+}
+
 impl Effects for Standalone {
     fn list_installed(&self) -> Vec<InstalledFx> {
-        built_in_installed()
+        let mut list = built_in_installed();
+        if let Some(factory) = self.fx_factory() {
+            list.extend(factory.installed());
+        }
+        list
     }
 
     fn last_touched(&self) -> Option<LastTouchedFx> {
@@ -223,10 +239,11 @@ impl Effects for Standalone {
     fn add(&self, project: ProjectContext, chain: FxChainContext, name: &str) -> Option<String> {
         let guid = resolve_project(self, &project)?;
         let key: FxChainKey = (&chain).into();
-        // Try to load a real plugin first (CLAP today; VST3/LV2 land
-        // when their backends ship). On failure or for synthetic names
-        // fall through to the existing synthetic 8-param entry.
-        let mut real_plugin = crate::plugin::load_plugin(name).ok().flatten();
+        // Try to instantiate real DSP first — plugin-file backends
+        // (CLAP today; VST3/LV2 land when their backends ship), then
+        // the injected built-in FX factory. On failure or for unknown
+        // names fall through to the existing synthetic 8-param entry.
+        let mut real_plugin = instantiate(self, name);
         let real_param_count = real_plugin
             .as_mut()
             .map(|p| p.params().len() as u32)
@@ -236,6 +253,7 @@ impl Effects for Standalone {
             .as_ref()
             .map(|d| d.format)
             .unwrap_or(crate::plugin::PluginFormat::Synthetic);
+        let has_instance = real_plugin.is_some();
 
         let new_guid = self
             .with_project_mut(&guid, |p| {
@@ -259,7 +277,16 @@ impl Effects for Standalone {
                 chain_vec.push(FxEntry {
                     fx,
                     state_chunk: String::new(),
-                    params: default_params(),
+                    // Live instances resolve params against the plugin
+                    // (stored values are PLAIN overrides under the real
+                    // param id — see `fx_params.rs`), so start with no
+                    // overrides and let the DSP keep its defaults.
+                    // Synthetic FX keep the 8 generic slot params.
+                    params: if has_instance {
+                        Default::default()
+                    } else {
+                        default_params()
+                    },
                 });
                 new_guid
             })
@@ -289,33 +316,59 @@ impl Effects for Standalone {
     fn add_at(&self, project: ProjectContext, request: AddFxAtRequest) -> Option<String> {
         let guid = resolve_project(self, &project)?;
         let key: FxChainKey = (&request.context).into();
-        self.with_project_mut(&guid, |p| {
-            let chain_vec = p.fx_chains.entry(key).or_default();
-            let pos = (request.index as usize).min(chain_vec.len());
-            let new_guid = Uuid::new_v4().to_string();
-            p.next_fx_counter += 1;
+        // Same real-DSP-first path as `add` (plugin files, then the
+        // built-in factory), falling back to a synthetic entry.
+        let mut real_plugin = instantiate(self, &request.name);
+        let real_param_count = real_plugin
+            .as_mut()
+            .map(|p| p.params().len() as u32)
+            .unwrap_or(8);
+        let real_descriptor = real_plugin.as_ref().map(|p| p.descriptor());
+        let has_instance = real_plugin.is_some();
+        let new_guid = self
+            .with_project_mut(&guid, |p| {
+                let chain_vec = p.fx_chains.entry(key).or_default();
+                let pos = (request.index as usize).min(chain_vec.len());
+                let new_guid = Uuid::new_v4().to_string();
+                p.next_fx_counter += 1;
 
-            let mut fx = Fx::new(new_guid.clone(), pos as u32, request.name.clone());
-            fx.plugin_name = request.name.clone();
-            fx.plugin_type = guess_fx_type(&request.name);
-            fx.parameter_count = 8;
+                let mut fx = Fx::new(new_guid.clone(), pos as u32, request.name.clone());
+                fx.plugin_name = real_descriptor
+                    .as_ref()
+                    .map(|d| d.name.clone())
+                    .unwrap_or_else(|| request.name.clone());
+                fx.plugin_type = match real_descriptor.as_ref().map(|d| d.format) {
+                    Some(crate::plugin::PluginFormat::Clap) => daw_proto::fx::FxType::Clap,
+                    Some(crate::plugin::PluginFormat::Vst3) => daw_proto::fx::FxType::Vst3,
+                    _ => guess_fx_type(&request.name),
+                };
+                fx.parameter_count = real_param_count;
 
-            chain_vec.insert(
-                pos,
-                FxEntry {
-                    fx,
-                    state_chunk: String::new(),
-                    params: default_params(),
-                },
-            );
-            // Renumber.
-            for (i, e) in chain_vec.iter_mut().enumerate() {
-                e.fx.index = i as u32;
-            }
-            Some(new_guid)
-        })
-        .ok()
-        .flatten()
+                chain_vec.insert(
+                    pos,
+                    FxEntry {
+                        fx,
+                        state_chunk: String::new(),
+                        params: if has_instance {
+                            Default::default()
+                        } else {
+                            default_params()
+                        },
+                    },
+                );
+                // Renumber.
+                for (i, e) in chain_vec.iter_mut().enumerate() {
+                    e.fx.index = i as u32;
+                }
+                Some(new_guid)
+            })
+            .ok()
+            .flatten()?;
+        // Stash the loaded plugin instance for the renderer to find.
+        if let Some(plugin) = real_plugin {
+            self.insert_plugin_instance(new_guid.clone(), plugin);
+        }
+        Some(new_guid)
     }
 
     fn remove(&self, project: ProjectContext, target: FxTarget) -> DawResult<()> {

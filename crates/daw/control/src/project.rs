@@ -204,6 +204,27 @@ impl Project {
         self.tracks().count().await
     }
 
+    /// Live per-track meter stream for this project (architect
+    /// `#[subscribe]`): one [`MeterFrame`](daw_proto::MeterFrame) at
+    /// ~30 Hz while an audio engine is attached, carrying linear
+    /// `0..1` peak + peak-hold levels for EVERY track (`tracks[i]` =
+    /// project track index `i`). The server streams every project's
+    /// frames; filtering to this project happens client-side. One
+    /// subscription drives a whole mixer — far cheaper than polling
+    /// `track_peak` per track. Drop the stream to unsubscribe.
+    pub fn meter_events(&self) -> crate::EventStream<daw_proto::MeterFrame> {
+        let (raw_tx, raw_rx) = vox::channel();
+        let stream = self.clients.peaks_stream.clone();
+        let want = self.guid.clone();
+        crate::EventStream::spawn(
+            async move {
+                let _ = stream.meters(raw_tx).await;
+            },
+            raw_rx,
+            Box::new(move |ev| ev.project_guid == want),
+        )
+    }
+
     /// Live post-fader peak level for one track channel (0 = left,
     /// 1 = right). dB values, −150 = silence. Drives hardware meter
     /// bridges and UI meters.

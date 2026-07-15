@@ -149,6 +149,7 @@ pub(crate) use daw_proto::marker::MarkersStreamClient;
 pub(crate) use daw_proto::region::RegionsStreamClient;
 pub(crate) use daw_proto::tempo_map::TempoMapStreamClient;
 pub(crate) use daw_proto::track::TracksStreamClient;
+pub(crate) use daw_proto::PeaksStreamClient;
 pub(crate) use daw_proto::plugin_loader::PluginLoadingClient;
 pub(crate) use daw_proto::toolbar::ToolbarClient;
 pub(crate) use daw_proto::window_manager::WindowManagerClient;
@@ -254,6 +255,7 @@ architect::clients! {
         pub(crate) region_stream: RegionsStreamClient,
         pub(crate) tempo_map_stream: TempoMapStreamClient,
         pub(crate) event_bus_stream: EventBusStreamClient,
+        pub(crate) peaks_stream: PeaksStreamClient,
     }
 }
 

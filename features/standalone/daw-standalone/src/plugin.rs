@@ -114,6 +114,27 @@ pub struct PluginParamInfo {
     pub default: f64,
 }
 
+/// Factory turning a built-in FX name/ident into a live DSP
+/// [`PluginInstance`].
+///
+/// The built-in FX themselves live ABOVE this crate (`signal-fx` wraps
+/// the DSP cores, and depends on the `daw` facade — a direct dep here
+/// would be a cycle), so the factory is **injected**: the app installs
+/// one via `Standalone::set_fx_factory`, and `Effects::add` consults
+/// it for any name the plugin-file backends (CLAP/VST3) don't claim —
+/// the same `plugin_instances` seam signal rigs already use via
+/// `Standalone::insert_plugin_instance`.
+pub trait FxFactory: Send + Sync {
+    /// Catalog of creatable built-ins. Appended to
+    /// `Effects::list_installed` so browsers can offer them.
+    fn installed(&self) -> Vec<daw_proto::fx::InstalledFx>;
+
+    /// Instantiate `name_or_ident` at `sample_rate` (the instance is
+    /// re-`prepare`d at the stream's real rate by the renderer).
+    /// `None` if the name isn't one of this factory's built-ins.
+    fn create(&self, name_or_ident: &str, sample_rate: f64) -> Option<Box<dyn PluginInstance>>;
+}
+
 /// A boxed, format-neutral plugin instance.
 ///
 /// All methods take `&mut self` because plugin internals are

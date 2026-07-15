@@ -13,6 +13,16 @@ use daw_proto::{
 use crate::metering::linear_to_db;
 use crate::sync::Standalone;
 
+// Meter frames stream from the hub fed by the ~30 Hz pump, spawned
+// lazily on the first subscription (`meters_hub` is called from the
+// stream host's async attach path — see `sync/daw.rs`).
+impl daw_proto::PeaksStreamSource for Standalone {
+    fn meters_hub(&self) -> &architect::PubSub<daw_proto::MeterFrame> {
+        self.spawn_meter_pump();
+        &self.meter_events
+    }
+}
+
 impl Peaks for Standalone {
     fn track_peak(&self, project: ProjectContext, track: TrackRef, channel: u32) -> TrackPeak {
         let Some(index) = self.resolve_track_index(project, &track) else {

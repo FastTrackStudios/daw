@@ -1,6 +1,6 @@
 //! Peak metering service — track meters + take waveform peak data.
 
-use super::{TakePeakData, TrackPeak};
+use super::{MeterFrame, TakePeakData, TrackPeak};
 use crate::item::{ItemRef, TakeRef};
 use crate::project::ProjectContext;
 use crate::track::TrackRef;
@@ -21,4 +21,13 @@ pub trait Peaks {
         take: TakeRef,
         block_size: u32,
     ) -> TakePeakData;
+
+    /// Live per-track meter frames (~30 Hz) for every project with an
+    /// attached audio engine, as they happen. Levels are linear `0..1`
+    /// (peak + peak-hold per channel); subscribers filter by
+    /// `project_guid` client-side and convert to dB for display.
+    /// Replaces polling `track_peak` per track per frame — one frame
+    /// carries the whole mixer.
+    #[subscribe]
+    fn meters(&self) -> MeterFrame;
 }

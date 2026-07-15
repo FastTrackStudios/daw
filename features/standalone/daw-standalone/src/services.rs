@@ -69,6 +69,7 @@ impl Services for Standalone {
             region::StreamService,
             tempo_map::StreamService,
             event_bus::StreamService,
+            peak::StreamService,
         ]
     }
 }
