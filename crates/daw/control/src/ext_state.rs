@@ -94,6 +94,42 @@ impl ExtState {
             .await?)
     }
 
+    /// Project-scoped get: value stored inside the project file itself.
+    ///
+    /// Returns `None` if the key doesn't exist.
+    pub async fn get_project(
+        &self,
+        project: daw_proto::ProjectContext,
+        section: &str,
+        key: &str,
+    ) -> crate::Result<Option<String>> {
+        Ok(self
+            .clients
+            .ext_state
+            .get_project(project, section.to_string(), key.to_string())
+            .await?)
+    }
+
+    /// Project-scoped set: value lives inside the project file.
+    pub async fn set_project(
+        &self,
+        project: daw_proto::ProjectContext,
+        section: &str,
+        key: &str,
+        value: &str,
+    ) -> crate::Result<()> {
+        self.clients
+            .ext_state
+            .set_project(
+                project,
+                section.to_string(),
+                key.to_string(),
+                value.to_string(),
+            )
+            .await??;
+        Ok(())
+    }
+
     /// Get a typed value by section and key, automatically deserializing from JSON.
     ///
     /// Returns `None` if the key doesn't exist or is empty.

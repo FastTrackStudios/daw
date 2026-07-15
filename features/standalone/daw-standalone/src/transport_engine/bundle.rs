@@ -258,8 +258,12 @@ pub fn spawn_subscriber_pump(
                 let pos = daw_proto::primitives::Position::from_time(
                     daw_proto::primitives::PositionInSeconds::from_seconds(snap.seconds.0),
                 );
+                // Carry the real project guid: consumers (e.g. session's
+                // setlist events pump) map ticks → songs by guid, and an
+                // empty guid silently drops every per-song TransportUpdate
+                // (frozen musical position on all standalone remotes).
                 let tick = daw_proto::transport::PositionTick {
-                    project_guid: String::new(),
+                    project_guid: project_guid.clone(),
                     playhead: pos.clone(),
                     edit_cursor: pos,
                     is_playing: snap.play_state.is_advancing(),
