@@ -58,16 +58,43 @@ pub enum SyncError {
     Internal(String),
 }
 
-/// The sync wire trait. `from` is the client's encoded Loro version
-/// vector (empty for a fresh replica); the server sends the missing
-/// history through `down` first, then every subsequent update from any
-/// peer. Updates the client makes flow through `up`.
+/// A frame on the sync **down** channel.
 ///
-/// Returns the **server's** encoded version vector at attach time, so
-/// the client can push back any history the server is missing (a
-/// replica that edited offline, restarted, then reconnected — its
-/// outbox is gone but its doc still holds the ops). Catch-up is
-/// bidirectional by construction.
+/// vox 0.10 scopes channels to their request — delivering the response
+/// terminates the channels (`RequestTerminated(ResponseDelivered)`), so
+/// the attach can't return a value and keep streaming. The server's
+/// version vector therefore rides the down channel as the first frame
+/// instead of the return value, and the [`DocSync::sync`] call itself
+/// stays in flight for the whole session.
+#[derive(Debug, Clone, PartialEq, Eq, facet::Facet)]
+#[repr(u8)]
+pub enum SyncDown {
+    /// First frame after a successful attach: the **server's** encoded
+    /// version vector (so the client can push back any history the
+    /// server is missing — a replica that edited offline, restarted,
+    /// then reconnected: its outbox is gone but its doc still holds the
+    /// ops; catch-up is bidirectional by construction) plus the exact
+    /// history the client is missing (may be empty for an up-to-date
+    /// replica).
+    Attached {
+        server_vv: Vec<u8>,
+        backlog: Vec<u8>,
+    },
+    /// A Loro update from any peer (or the server itself), live.
+    Update(Vec<u8>),
+}
+
+/// The sync wire trait. `from` is the client's encoded Loro version
+/// vector (empty for a fresh replica). On attach the server sends
+/// [`SyncDown::Attached`] (server version vector + missing history)
+/// through `down`, then every subsequent update from any peer. Updates
+/// the client makes flow through `up`.
+///
+/// **The call is the session** (vox 0.10 channel scoping): a successful
+/// attach holds the request open — `sync` only returns once the
+/// replica's connection closes (or the client cancels the in-flight
+/// call, which is the unsubscribe). An attach *failure* returns the
+/// error immediately.
 #[vox::service]
 pub trait DocSync {
     async fn sync(
@@ -75,14 +102,16 @@ pub trait DocSync {
         doc_id: Uuid,
         from: Vec<u8>,
         up: vox::Rx<Vec<u8>>,
-        down: vox::Tx<Vec<u8>>,
-    ) -> Result<Vec<u8>, SyncError>;
+        down: vox::Tx<SyncDown>,
+    ) -> Result<(), SyncError>;
 }
 
 /// Presence wire trait — who's here and what they're doing (cursors,
-/// selections, online status). Same channel shape as [`DocSync`], but
-/// the payloads are Loro `EphemeralStore` encodings: timestamp-LWW
-/// state that expires on its own, never persisted. On attach the
+/// selections, online status). Same session shape as [`DocSync`] (the
+/// in-flight call is the session; it only returns when the peer's
+/// connection closes), but the payloads are Loro `EphemeralStore`
+/// encodings: timestamp-LWW state that expires on its own, never
+/// persisted, so no version-vector envelope is needed. On attach the
 /// server sends the current presence picture, then live updates.
 #[vox::service]
 pub trait DocPresence {
@@ -109,7 +138,7 @@ pub trait DocPresence {
 pub struct DocSyncHost {
     doc_id: Uuid,
     doc: CrdtDoc,
-    hub: architect::PubSub<Vec<u8>>,
+    hub: architect::PubSub<SyncDown>,
     /// Live sync sessions: incremented on a successful attach, decremented
     /// when the session's up-pump ends (the replica's connection closed).
     /// What [`DocRegistry`](crate::registry::DocRegistry) consults before
@@ -167,7 +196,7 @@ impl DocSyncHost {
         let every = compact_every.clone();
         let trigger = compact_tx.clone();
         let sub = doc.loro().subscribe_local_update(Box::new(move |bytes| {
-            bridge.publish(bytes.to_vec());
+            bridge.publish(SyncDown::Update(bytes.to_vec()));
             if should_compact(&count, every.load(Ordering::Relaxed)) {
                 let _ = trigger.send(());
             }
@@ -255,15 +284,63 @@ fn should_compact(count: &std::sync::atomic::AtomicU32, every: u32) -> bool {
     true
 }
 
+/// One attached sync session, produced by [`DocSyncHost::attach`] and
+/// driven to completion by [`SyncSession::pump`]. Owns the session's
+/// [`SessionGuard`], so the session is counted from the attach (inside
+/// whatever lock the caller holds — see
+/// [`DocRegistry`](crate::registry::DocRegistry)) until the pump ends.
 #[cfg(not(target_arch = "wasm32"))]
-impl DocSync for DocSyncHost {
-    async fn sync(
+pub struct SyncSession {
+    doc: CrdtDoc,
+    doc_id: Uuid,
+    hub: architect::PubSub<SyncDown>,
+    count: Arc<std::sync::atomic::AtomicU32>,
+    every: Arc<std::sync::atomic::AtomicU32>,
+    trigger: tokio::sync::mpsc::UnboundedSender<()>,
+    _session: SessionGuard,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl SyncSession {
+    /// Pump this replica's local updates into the canonical doc —
+    /// durably (imports don't fire the persistence subscription) — and
+    /// out to everyone else. Runs until the replica's connection closes
+    /// (the up channel ends). This is the body of the held-open
+    /// [`DocSync::sync`] call — **do not** hold any registry/host lock
+    /// across it.
+    pub async fn pump(self, mut up: vox::Rx<Vec<u8>>) {
+        while let Ok(Some(update)) = up.recv().await {
+            let mut owned: Option<Vec<u8>> = None;
+            let _ = update.map(|u| owned = Some(u.clone()));
+            let Some(bytes) = owned else { continue };
+            if let Err(e) = self.doc.apply_remote_durable(self.doc_id, &bytes).await {
+                tracing::warn!("doc-sync: dropping bad update: {e}");
+                continue;
+            }
+            self.hub.publish(SyncDown::Update(bytes));
+            if should_compact(
+                &self.count,
+                self.every.load(std::sync::atomic::Ordering::Relaxed),
+            ) {
+                let _ = self.trigger.send(());
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl DocSyncHost {
+    /// The attach phase of [`DocSync::sync`], separated from the pump so
+    /// a multi-doc server ([`DocRegistry`](crate::registry::DocRegistry))
+    /// can attach under its lock (session counted before any sweep can
+    /// re-check) and pump **after** releasing it — a held-open call must
+    /// never keep a lock.
+    pub fn attach(
         &self,
         doc_id: Uuid,
         from: Vec<u8>,
-        mut up: vox::Rx<Vec<u8>>,
-        down: vox::Tx<Vec<u8>>,
-    ) -> Result<Vec<u8>, SyncError> {
+        down: vox::Tx<SyncDown>,
+    ) -> Result<SyncSession, SyncError> {
         if doc_id != self.doc_id {
             return Err(SyncError::UnknownDoc);
         }
@@ -301,36 +378,36 @@ impl DocSync for DocSyncHost {
         // The server's frontier *at attach* — the client diffs its own
         // doc against this and pushes back whatever the server lacks.
         let server_vv = self.doc.loro().oplog_vv().encode();
-        self.hub.complete_attach(pending, Some(backlog));
+        self.hub
+            .complete_attach(pending, Some(SyncDown::Attached { server_vv, backlog }));
 
-        // Pump this replica's local updates into the canonical doc —
-        // durably (imports don't fire the persistence subscription) —
-        // and out to everyone else. The task ends when the replica's
+        Ok(SyncSession {
+            doc: self.doc.clone(),
+            doc_id: self.doc_id,
+            hub: self.hub.clone(),
+            count: self.update_count.clone(),
+            every: self.compact_every.clone(),
+            trigger: self.compact_tx.clone(),
+            _session: SessionGuard::new(self.sessions.clone()),
+        })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl DocSync for DocSyncHost {
+    async fn sync(
+        &self,
+        doc_id: Uuid,
+        from: Vec<u8>,
+        up: vox::Rx<Vec<u8>>,
+        down: vox::Tx<SyncDown>,
+    ) -> Result<(), SyncError> {
+        // The call is the session (vox 0.10 channel scoping): attach,
+        // then hold the request open pumping until the replica's
         // connection closes.
-        let doc = self.doc.clone();
-        let hub = self.hub.clone();
-        let doc_id = self.doc_id;
-        let count = self.update_count.clone();
-        let every = self.compact_every.clone();
-        let trigger = self.compact_tx.clone();
-        let session = SessionGuard::new(self.sessions.clone());
-        tokio::spawn(async move {
-            let _session = session;
-            while let Ok(Some(update)) = up.recv().await {
-                let mut owned: Option<Vec<u8>> = None;
-                let _ = update.map(|u| owned = Some(u.clone()));
-                let Some(bytes) = owned else { continue };
-                if let Err(e) = doc.apply_remote_durable(doc_id, &bytes).await {
-                    tracing::warn!("doc-sync: dropping bad update: {e}");
-                    continue;
-                }
-                hub.publish(bytes);
-                if should_compact(&count, every.load(std::sync::atomic::Ordering::Relaxed)) {
-                    let _ = trigger.send(());
-                }
-            }
-        });
-        Ok(server_vv)
+        let session = self.attach(doc_id, from, down)?;
+        session.pump(up).await;
+        Ok(())
     }
 }
 
@@ -378,14 +455,45 @@ impl PresenceHost {
     }
 }
 
+/// One attached presence session — the counterpart of [`SyncSession`]
+/// for [`PresenceHost`]. Same split, same reason (attach under a lock,
+/// pump the held-open call after releasing it).
 #[cfg(not(target_arch = "wasm32"))]
-impl DocPresence for PresenceHost {
-    async fn presence(
+pub struct PresenceSession {
+    store: crate::awareness::EphemeralStore,
+    hub: architect::PubSub<Vec<u8>>,
+    _session: SessionGuard,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PresenceSession {
+    /// Merge this peer's updates into the mirror store and fan them out.
+    /// Runs until the peer's connection closes. The body of the
+    /// held-open [`DocPresence::presence`] call — **do not** hold any
+    /// registry/host lock across it.
+    pub async fn pump(self, mut up: vox::Rx<Vec<u8>>) {
+        while let Ok(Some(update)) = up.recv().await {
+            let mut owned: Option<Vec<u8>> = None;
+            let _ = update.map(|u| owned = Some(u.clone()));
+            let Some(bytes) = owned else { continue };
+            if let Err(e) = self.store.apply(&bytes) {
+                tracing::warn!("doc-presence: dropping bad update: {e}");
+                continue;
+            }
+            self.hub.publish(bytes);
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl PresenceHost {
+    /// The attach phase of [`DocPresence::presence`] — see
+    /// [`DocSyncHost::attach`] for the split's rationale.
+    pub fn attach(
         &self,
         doc_id: Uuid,
-        mut up: vox::Rx<Vec<u8>>,
         down: vox::Tx<Vec<u8>>,
-    ) -> Result<(), SyncError> {
+    ) -> Result<PresenceSession, SyncError> {
         if doc_id != self.doc_id {
             return Err(SyncError::UnknownDoc);
         }
@@ -397,22 +505,26 @@ impl DocPresence for PresenceHost {
         let snapshot = (!snapshot.is_empty()).then_some(snapshot);
         self.hub.complete_attach(pending, snapshot);
 
-        let store = self.store.clone();
-        let hub = self.hub.clone();
-        let session = SessionGuard::new(self.sessions.clone());
-        tokio::spawn(async move {
-            let _session = session;
-            while let Ok(Some(update)) = up.recv().await {
-                let mut owned: Option<Vec<u8>> = None;
-                let _ = update.map(|u| owned = Some(u.clone()));
-                let Some(bytes) = owned else { continue };
-                if let Err(e) = store.apply(&bytes) {
-                    tracing::warn!("doc-presence: dropping bad update: {e}");
-                    continue;
-                }
-                hub.publish(bytes);
-            }
-        });
+        Ok(PresenceSession {
+            store: self.store.clone(),
+            hub: self.hub.clone(),
+            _session: SessionGuard::new(self.sessions.clone()),
+        })
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl DocPresence for PresenceHost {
+    async fn presence(
+        &self,
+        doc_id: Uuid,
+        up: vox::Rx<Vec<u8>>,
+        down: vox::Tx<Vec<u8>>,
+    ) -> Result<(), SyncError> {
+        // Held open like `DocSync::sync` — the in-flight call is the
+        // presence session.
+        let session = self.attach(doc_id, down)?;
+        session.pump(up).await;
         Ok(())
     }
 }
@@ -505,13 +617,19 @@ pub struct PresenceDriver {
 impl PresenceDriver {
     /// Attach, re-announce our keys, then exchange updates until the
     /// connection drops or the future is cancelled.
+    ///
+    /// Like [`SyncedDoc::run`], the `presence` call is held in flight
+    /// for the whole session; this races it against an up pump and a
+    /// down pump in one select, so the call keeps being polled while a
+    /// send awaits (a send made before the request has even gone out
+    /// would otherwise wedge). The re-announce frames go up first —
+    /// they sit in the up channel until the server's pump (which starts
+    /// after its attach) reads them, so they can't be lost to the
+    /// attach race.
     pub async fn run(&mut self, client: &DocPresenceClient) -> Result<(), PersistError> {
         let (up_tx, up_rx) = vox::channel::<Vec<u8>>();
         let (down_tx, mut down_rx) = vox::channel::<Vec<u8>>();
-        client
-            .presence(self.doc_id, up_rx, down_tx)
-            .await
-            .map_err(|e| PersistError::Backend(format!("presence attach: {e}")))?;
+        let call = std::pin::pin!(client.presence(self.doc_id, up_rx, down_tx));
 
         // Re-announce what we own — after a reconnect the server's
         // mirror may have expired us.
@@ -523,35 +641,54 @@ impl PresenceDriver {
             .iter()
             .cloned()
             .collect();
-        for key in keys {
-            let encoded = self.peer.store.encode(&key);
-            if !encoded.is_empty() && up_tx.send(encoded).await.is_err() {
-                return Ok(());
-            }
-        }
+        let announcements: Vec<Vec<u8>> = keys
+            .into_iter()
+            .map(|key| self.peer.store.encode(&key))
+            .filter(|encoded| !encoded.is_empty())
+            .collect();
 
-        loop {
-            tokio::select! {
-                Some(update) = self.outbox.recv() => {
-                    if up_tx.send(update).await.is_err() {
-                        return Ok(());
-                    }
-                }
-                incoming = down_rx.recv() => {
-                    match incoming {
-                        Ok(Some(update)) => {
-                            let mut owned: Option<Vec<u8>> = None;
-                            let _ = update.map(|u| owned = Some(u.clone()));
-                            if let Some(bytes) = owned
-                                && let Err(e) = self.peer.store.apply(&bytes)
-                            {
-                                tracing::warn!("presence: dropping bad update: {e}");
-                            }
-                        }
-                        _ => return Ok(()),
-                    }
+        let outbox = &mut self.outbox;
+        let up = async move {
+            for encoded in announcements {
+                if up_tx.send(encoded).await.is_err() {
+                    return;
                 }
             }
+            while let Some(update) = outbox.recv().await {
+                if up_tx.send(update).await.is_err() {
+                    return;
+                }
+            }
+            // Outbox closed (the peer handle was dropped) — the session
+            // stays up for reads until the call or down side ends it.
+            std::future::pending::<()>().await
+        };
+
+        let store = self.peer.store.clone();
+        let down = async move {
+            loop {
+                match down_rx.recv().await {
+                    Ok(Some(update)) => {
+                        let mut owned: Option<Vec<u8>> = None;
+                        let _ = update.map(|u| owned = Some(u.clone()));
+                        if let Some(bytes) = owned
+                            && let Err(e) = store.apply(&bytes)
+                        {
+                            tracing::warn!("presence: dropping bad update: {e}");
+                        }
+                    }
+                    _ => return,
+                }
+            }
+        };
+
+        tokio::select! {
+            res = call => match res {
+                Ok(()) => Ok(()),
+                Err(e) => Err(PersistError::Backend(format!("presence attach: {e}"))),
+            },
+            () = up => Ok(()),   // up channel gone — connection closed
+            () = down => Ok(()), // down stream ended
         }
     }
 }
@@ -597,52 +734,79 @@ impl SyncedDoc {
     /// cancelled. Spawn it with whatever executor the platform has; on
     /// disconnect, call again with a fresh client — the version vector
     /// makes re-sync a delta, not a re-download.
+    ///
+    /// The `sync` call is held in flight for the whole session (vox 0.10
+    /// channel scoping — a delivered response terminates the channels),
+    /// so this races the in-flight call against the down channel: the
+    /// first [`SyncDown::Attached`] frame carries the server's version
+    /// vector (for bidirectional catch-up) + our missing history, and
+    /// the call future only resolves when the session ends (server gone,
+    /// or an attach error).
     pub async fn run(&mut self, client: &DocSyncClient) -> Result<(), PersistError> {
         let (up_tx, up_rx) = vox::channel::<Vec<u8>>();
-        let (down_tx, mut down_rx) = vox::channel::<Vec<u8>>();
+        let (down_tx, mut down_rx) = vox::channel::<SyncDown>();
         let our_vv = self.doc.loro().oplog_vv();
-        let server_vv = client
-            .sync(self.doc_id, our_vv.encode(), up_rx, down_tx)
-            .await
-            .map_err(|e| PersistError::Backend(format!("doc sync attach: {e}")))?;
-
-        // Bidirectional catch-up: if we hold history the server lacks
-        // (edited offline, restarted — the in-memory outbox is gone but
-        // the doc isn't), push the exact missing delta up front.
-        let server_vv = loro::VersionVector::decode(&server_vv)
-            .map_err(|e| PersistError::Backend(format!("doc sync: bad server vv: {e}")))?;
-        if !server_vv.includes_vv(&our_vv) {
-            let missing = self
-                .doc
-                .loro()
-                .export(loro::ExportMode::Updates {
-                    from: std::borrow::Cow::Owned(server_vv),
-                })
-                .map_err(|e| PersistError::Backend(format!("doc sync: export delta: {e}")))?;
-            if up_tx.send(missing).await.is_err() {
-                return Ok(()); // connection gone; caller re-runs
-            }
-        }
+        let mut call = std::pin::pin!(client.sync(self.doc_id, our_vv.encode(), up_rx, down_tx));
 
         loop {
             tokio::select! {
+                // The held-open call resolved: attach failed, or the
+                // server ended the session. Either way this session is
+                // over; the caller re-runs with a fresh client.
+                res = &mut call => {
+                    return match res {
+                        Ok(()) => Ok(()),
+                        Err(e) => Err(PersistError::Backend(format!("doc sync attach: {e}"))),
+                    };
+                }
                 // Local edits (live, or buffered while offline) go up.
                 Some(update) = self.outbox.recv() => {
                     if up_tx.send(update).await.is_err() {
                         return Ok(()); // connection gone; caller re-runs
                     }
                 }
-                // Remote history + live peer updates merge in.
+                // Attach frame, then remote history + live peer updates.
                 incoming = down_rx.recv() => {
+                    let mut owned: Option<SyncDown> = None;
                     match incoming {
-                        Ok(Some(update)) => {
-                            let mut owned: Option<Vec<u8>> = None;
-                            let _ = update.map(|u| owned = Some(u.clone()));
-                            if let Some(bytes) = owned {
-                                self.doc.apply_remote(&bytes)?;
-                            }
+                        Ok(Some(frame)) => {
+                            let _ = frame.map(|f| owned = Some(f.clone()));
                         }
                         _ => return Ok(()), // stream ended
+                    }
+                    match owned {
+                        Some(SyncDown::Attached { server_vv, backlog }) => {
+                            if !backlog.is_empty() {
+                                self.doc.apply_remote(&backlog)?;
+                            }
+                            // Bidirectional catch-up: if we hold history
+                            // the server lacks (edited offline, restarted
+                            // — the in-memory outbox is gone but the doc
+                            // isn't), push the exact missing delta.
+                            let server_vv = loro::VersionVector::decode(&server_vv).map_err(
+                                |e| PersistError::Backend(format!("doc sync: bad server vv: {e}")),
+                            )?;
+                            if !server_vv.includes_vv(&our_vv) {
+                                let missing = self
+                                    .doc
+                                    .loro()
+                                    .export(loro::ExportMode::Updates {
+                                        from: std::borrow::Cow::Owned(server_vv),
+                                    })
+                                    .map_err(|e| {
+                                        PersistError::Backend(format!(
+                                            "doc sync: export delta: {e}"
+                                        ))
+                                    })?;
+                                if up_tx.send(missing).await.is_err() {
+                                    return Ok(()); // connection gone; caller re-runs
+                                }
+                            }
+                        }
+                        Some(SyncDown::Update(bytes)) => {
+                            self.doc.apply_remote(&bytes)?;
+                        }
+                        None => {}
                     }
                 }
             }

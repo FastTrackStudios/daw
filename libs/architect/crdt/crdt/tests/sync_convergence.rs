@@ -142,10 +142,14 @@ async fn offline_history_pushes_back_after_restart() {
     scope.close().await;
 }
 
-/// Minimal probe: a single replica attaches and the sync call returns
-/// the server's encoded version vector.
+/// Minimal probe: a single replica attaches, the first down frame is
+/// `Attached` with a decodable server version vector, the call stays in
+/// flight for the session (vox 0.10 channel scoping — the call IS the
+/// session), and closing the up channel ends it cleanly.
 #[tokio::test(flavor = "multi_thread")]
 async fn single_replica_attach_returns() {
+    use crdt::sync::SyncDown;
+
     let doc_id = Uuid::new_v4();
     let scope = Scope::new();
     let canonical = CrdtDoc::ephemeral();
@@ -157,16 +161,37 @@ async fn single_replica_attach_returns() {
     let local = LocalServer::serve(router, scope.clone());
 
     let client: DocSyncClient = local.establish().await.expect("client");
-    let (_up_tx, up_rx) = vox::channel::<Vec<u8>>();
-    let (down_tx, _down_rx) = vox::channel::<Vec<u8>>();
-    let vv = tokio::time::timeout(
-        Duration::from_secs(5),
-        client.sync(doc_id, Vec::new(), up_rx, down_tx),
-    )
-    .await
-    .expect("sync call timed out")
-    .expect("sync failed");
-    assert!(loro::VersionVector::decode(&vv).is_ok());
+    let (up_tx, up_rx) = vox::channel::<Vec<u8>>();
+    let (down_tx, mut down_rx) = vox::channel::<SyncDown>();
+    let mut call = std::pin::pin!(client.sync(doc_id, Vec::new(), up_rx, down_tx));
+
+    // The Attached frame arrives while the call is still in flight.
+    let mut attached: Option<SyncDown> = None;
+    tokio::select! {
+        res = &mut call => panic!("sync call ended before the session: {res:?}"),
+        frame = tokio::time::timeout(Duration::from_secs(5), down_rx.recv()) => {
+            let frame = frame.expect("attach frame timed out").expect("down channel error");
+            let frame = frame.expect("down channel closed before attach");
+            let _ = frame.map(|f| attached = Some(f.clone()));
+        }
+    }
+    match attached {
+        Some(SyncDown::Attached { server_vv, backlog }) => {
+            assert!(loro::VersionVector::decode(&server_vv).is_ok());
+            // A fresh doc's backlog is a valid (possibly header-only)
+            // Loro export — it must import cleanly.
+            let probe = loro::LoroDoc::new();
+            probe.import(&backlog).expect("backlog imports cleanly");
+        }
+        other => panic!("expected Attached first, got {other:?}"),
+    }
+
+    // Closing the up channel ends the session; the held call resolves.
+    drop(up_tx);
+    tokio::time::timeout(Duration::from_secs(5), call)
+        .await
+        .expect("session end timed out")
+        .expect("sync session errored");
     scope.close().await;
 }
 

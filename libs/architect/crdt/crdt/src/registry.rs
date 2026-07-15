@@ -284,16 +284,23 @@ impl DocSync for DocRegistry {
         doc_id: Uuid,
         from: Vec<u8>,
         up: vox::Rx<Vec<u8>>,
-        down: vox::Tx<Vec<u8>>,
-    ) -> Result<Vec<u8>, SyncError> {
+        down: vox::Tx<crate::sync::SyncDown>,
+    ) -> Result<(), SyncError> {
         if !(self.admission)(doc_id) {
             return Err(SyncError::UnknownDoc);
         }
-        let mut docs = self.shared.docs.lock().await;
-        let entry = self.entry(&mut docs, doc_id).await?;
-        // Delegate while still holding the registry lock — the attach
-        // completes (session counted) before any sweep can re-check.
-        entry.sync.sync(doc_id, from, up, down).await
+        // Attach while holding the registry lock — the session is
+        // counted before any sweep can re-check — but pump the held-open
+        // call AFTER releasing it: `sync` now stays in flight for the
+        // whole session (vox 0.10 channel scoping), and a lock held
+        // across it would wedge every other doc's attach.
+        let session = {
+            let mut docs = self.shared.docs.lock().await;
+            let entry = self.entry(&mut docs, doc_id).await?;
+            entry.sync.attach(doc_id, from, down)?
+        };
+        session.pump(up).await;
+        Ok(())
     }
 }
 
@@ -307,8 +314,13 @@ impl DocPresence for DocRegistry {
         if !(self.admission)(doc_id) {
             return Err(SyncError::UnknownDoc);
         }
-        let mut docs = self.shared.docs.lock().await;
-        let entry = self.entry(&mut docs, doc_id).await?;
-        entry.presence.presence(doc_id, up, down).await
+        // Same attach-under-lock / pump-after-release split as `sync`.
+        let session = {
+            let mut docs = self.shared.docs.lock().await;
+            let entry = self.entry(&mut docs, doc_id).await?;
+            entry.presence.attach(doc_id, down)?
+        };
+        session.pump(up).await;
+        Ok(())
     }
 }

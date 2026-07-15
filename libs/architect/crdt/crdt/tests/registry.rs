@@ -182,9 +182,11 @@ async fn admission_hook_rejects_unknown_docs() {
 
     let client: DocSyncClient = local.establish().await.expect("client");
 
-    // Denied id: rejected before the factory ever runs.
+    // Denied id: rejected before the factory ever runs — an attach
+    // failure resolves the call immediately (only a successful attach
+    // holds it open).
     let (_up_tx, up_rx) = vox::channel::<Vec<u8>>();
-    let (down_tx, _down_rx) = vox::channel::<Vec<u8>>();
+    let (down_tx, _down_rx) = vox::channel::<crdt::sync::SyncDown>();
     let err = client
         .sync(denied, Vec::new(), up_rx, down_tx)
         .await
@@ -195,14 +197,20 @@ async fn admission_hook_rejects_unknown_docs() {
     );
     assert!(!registry.is_open(denied).await, "denied doc was opened");
 
-    // Allowed id: attaches normally.
-    let (_up_tx, up_rx) = vox::channel::<Vec<u8>>();
-    let (down_tx, _down_rx) = vox::channel::<Vec<u8>>();
-    client
-        .sync(allowed, Vec::new(), up_rx, down_tx)
-        .await
-        .expect("allowed doc attaches");
+    // Allowed id: attaches normally — the Attached frame arrives while
+    // the call stays in flight; closing the up channel ends the session.
+    let (up_tx, up_rx) = vox::channel::<Vec<u8>>();
+    let (down_tx, mut down_rx) = vox::channel::<crdt::sync::SyncDown>();
+    let mut call = std::pin::pin!(client.sync(allowed, Vec::new(), up_rx, down_tx));
+    tokio::select! {
+        res = &mut call => panic!("sync call ended before the session: {res:?}"),
+        frame = down_rx.recv() => {
+            frame.expect("down channel error").expect("down closed before attach");
+        }
+    }
     assert!(registry.is_open(allowed).await);
+    drop(up_tx);
+    call.await.expect("allowed session ends cleanly");
 
     scope.close().await;
 }
