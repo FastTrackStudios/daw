@@ -369,6 +369,25 @@ impl Daw {
         )
     }
 
+    /// All-projects live meter stream (architect `#[subscribe]`): one
+    /// [`MeterFrame`](daw_proto::MeterFrame) at ~30 Hz per project
+    /// with an active engine, linear `0..1` peak + peak-hold for every
+    /// track (`tracks[i]` = project track index `i`). Unfiltered —
+    /// consumers that follow the "current" project route each frame by
+    /// its `project_guid` (see [`Project::meter_events`] for the
+    /// single-project flavor). Drop the stream to unsubscribe.
+    pub fn meter_events(&self) -> crate::EventStream<daw_proto::MeterFrame> {
+        let (raw_tx, raw_rx) = vox::channel();
+        let stream = self.clients.peaks_stream.clone();
+        crate::EventStream::spawn(
+            async move {
+                let _ = stream.meters(raw_tx).await;
+            },
+            raw_rx,
+            Box::new(|_| true),
+        )
+    }
+
     /// Get a specific project by GUID
     ///
     /// # Errors

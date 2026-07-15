@@ -18,6 +18,7 @@
 
 use std::sync::OnceLock;
 
+use daw_proto::MeterFrame;
 use daw_proto::event_bus::DawEvent;
 use daw_proto::marker::MarkerStreamEvent;
 use daw_proto::project::ProjectStreamEvent;
@@ -77,6 +78,12 @@ pub struct DawEventHub {
     /// Transport-domain `#[subscribe]` stream hub (`TransportStreamSource`).
     /// Fed by the 30 Hz REAPER poll (state changes + position ticks).
     transport_hub: architect::PubSub<TransportStreamEvent>,
+    /// Live meter-frame hub (`PeaksStreamSource`). Fed by the ~30 Hz
+    /// REAPER meter poll (`peak::poll_and_broadcast_meters`); one
+    /// [`MeterFrame`] per tick for the active project. Continuous
+    /// data — NOT bridged onto the cross-domain bus (same policy as
+    /// daw-standalone's meter pump).
+    meters_hub: architect::PubSub<MeterFrame>,
     /// Cross-domain bus — every domain's publish also lands here,
     /// wrapped in [`DawEvent`]. Subscribers filter client-side.
     bus_hub: architect::PubSub<DawEvent>,
@@ -97,6 +104,7 @@ impl DawEventHub {
             tracks_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
             tempo_map_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
             transport_hub: architect::PubSub::sliding(CONTINUOUS_BUFFER),
+            meters_hub: architect::PubSub::sliding(CONTINUOUS_BUFFER),
             bus_hub: architect::PubSub::sliding(OCCASIONAL_BUFFER),
         }
     }
@@ -125,6 +133,24 @@ impl DawEventHub {
 
     pub fn transport_hub(&self) -> &architect::PubSub<TransportStreamEvent> {
         &self.transport_hub
+    }
+
+    pub fn meters_hub(&self) -> &architect::PubSub<MeterFrame> {
+        &self.meters_hub
+    }
+
+    // ── Meters ───────────────────────────────────────────────────
+
+    /// Publish one live meter frame. Continuous / high-rate — goes to
+    /// the `#[subscribe]` meters hub only, never the cross-domain bus.
+    pub fn publish_meter_frame(&self, frame: MeterFrame) {
+        self.meters_hub.publish(frame);
+    }
+
+    /// Wire subscribers on the meters stream. The meter poll skips all
+    /// work (no peak reads, no publish) while this is zero.
+    pub fn meters_subscriber_count(&self) -> usize {
+        self.meters_hub.subscriber_count()
     }
 
     // ── Transport state ──────────────────────────────────────────

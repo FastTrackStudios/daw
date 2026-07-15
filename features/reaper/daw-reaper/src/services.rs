@@ -32,7 +32,7 @@
 use architect::{Layer, Services, layers};
 use daw_proto::{
     action_registry, audio_engine, automation, batch, dawfile_service, diagnostics, event_bus,
-    ext_state, fx, fx_chains, fx_params, health, input, item, live_midi, marker, midi,
+    ext_state, fx, fx_chains, fx_params, health, input, item, live_midi, marker, midi, peak,
     plugin_loader, project, region, routing, screenset, take, tempo_map, toolbar, track, transport,
     window_geometry, window_manager,
 };
@@ -71,6 +71,7 @@ impl Services for Reaper {
             automation::Service,
             batch::Service,
             diagnostics::Service,
+            peak::Service,
             // `#[subscribe]` stream siblings — served from the central
             // event hub's PubSub hubs (see `event_hub.rs` + each
             // domain's StreamSource impl). The event-bus base service
@@ -81,6 +82,7 @@ impl Services for Reaper {
             region::StreamService,
             tempo_map::StreamService,
             event_bus::StreamService,
+            peak::StreamService,
         ]
     }
 }

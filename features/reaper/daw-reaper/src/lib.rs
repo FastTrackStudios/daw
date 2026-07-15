@@ -155,6 +155,10 @@ pub use region::poll_and_broadcast_regions;
 // Tracks polling — coarse Added/Removed only for Phase 2.
 pub use track::poll_and_broadcast_tracks;
 
+// Live meter frames — reads active-project track peaks per tick and
+// publishes one MeterFrame on the hub (`Peaks::meters` stream).
+pub use peak::poll_and_broadcast_meters;
+
 // Re-export toolbar deferred ops processor
 pub use toolbar::process_deferred_ops as process_toolbar_ops;
 

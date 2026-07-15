@@ -423,6 +423,7 @@ extern "C" fn timer_callback() {
             daw::reaper::poll_and_broadcast_fx();
             daw::reaper::poll_and_broadcast_routing();
             daw::reaper::poll_and_broadcast_takes();
+            daw::reaper::poll_and_broadcast_meters();
 
             // Process deferred toolbar operations
             daw::reaper::process_toolbar_ops();
