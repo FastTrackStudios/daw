@@ -24,6 +24,12 @@ use crate::LayerRouter;
 pub fn block_on<F: Future>(fut: F) -> F::Output {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        // 16 MiB worker stacks (reserved, not committed): vox 0.10's
+        // debug-build channel encode recurses deeply on large payloads
+        // (e.g. session Setlists served over `/vox`) and overflows tokio's
+        // default 2 MiB workers. Engine binaries serve those payloads on
+        // this runtime, so size it like the in-process session engines do.
+        .thread_stack_size(16 * 1024 * 1024)
         .build()
         .expect("tokio runtime")
         .block_on(fut)
