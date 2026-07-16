@@ -151,13 +151,33 @@ impl<'a> TileBuilder<'a> {
 
         let mut event_idx = 0;
         while self.pos < text.len() || event_idx < events.len() {
-            // Drop events that fall *behind* the current pos —
+            // Consume events that fall *behind* the current pos —
             // typically Mark{Start,End} pairs whose range was
-            // entirely consumed by a Replace that we already
-            // walked past. Without this, the next iteration's
-            // `next_event_pos < self.pos` traps the loop in an
-            // infinite no-op spin.
+            // (partially) covered by a Replace/Widget that we
+            // already walked past. Without this, the next
+            // iteration's `next_event_pos < self.pos` traps the
+            // loop in an infinite no-op spin.
+            //
+            // Mark events must still update `active_marks` even
+            // when skipped: a mark that ends inside a consumed
+            // range would otherwise stay open forever (e.g. the
+            // vim block caret `0..1` inside hidden YAML
+            // frontmatter `0..N` used to wrap the ENTIRE rest of
+            // the doc in `ed-modal-caret-block`). Applying both
+            // start and end keeps the bookkeeping exact: a mark
+            // fully inside the hidden range nets to zero (paints
+            // nothing), one that extends past it stays active and
+            // paints only its visible slice.
             while event_idx < events.len() && events[event_idx].at < self.pos {
+                match &events[event_idx].kind {
+                    EventKind::MarkStart(spec) => active_marks.push(spec.clone()),
+                    EventKind::MarkEnd(spec) => {
+                        if let Some(p) = active_marks.iter().rposition(|m| m == spec) {
+                            active_marks.remove(p);
+                        }
+                    }
+                    _ => {}
+                }
                 event_idx += 1;
             }
             // Apply all events whose position == self.pos. A
@@ -686,6 +706,103 @@ mod tests {
         assert_eq!(
             children_kinds(&arena, line),
             vec![TileKind::Widget, TileKind::Text]
+        );
+    }
+
+    /// Collect every Mark tile in the tree with its class + length.
+    fn collect_marks(arena: &Arena, root: TileId) -> Vec<(String, usize)> {
+        let mut out = Vec::new();
+        let mut stack = vec![root];
+        while let Some(id) = stack.pop() {
+            let t = arena.get(id);
+            if let TileBody::Mark { spec } = &t.body {
+                out.push((spec.class.clone(), t.length));
+            }
+            stack.extend(t.children.iter().copied());
+        }
+        out
+    }
+
+    #[test]
+    fn mark_fully_inside_replace_paints_nothing() {
+        // Regression: the vim block caret is a 1-char mark. When the
+        // caret sits at 0 inside hidden YAML frontmatter (a Replace
+        // covering 0..N), the mark's End event fell behind `pos` after
+        // the replace was consumed and was dropped without popping —
+        // the mark stayed active and wrapped the ENTIRE rest of the
+        // doc. It must paint nothing (its whole range is hidden).
+        for decs in [
+            // Both orders at from==0: pipeline sort is stable on `from`,
+            // so real inputs can arrive either way.
+            vec![
+                Decoration::replace(0..8),
+                Decoration::mark(0..1, "ed-modal-caret-block"),
+            ],
+            vec![
+                Decoration::mark(0..1, "ed-modal-caret-block"),
+                Decoration::replace(0..8),
+            ],
+        ] {
+            let (arena, doc) = build_tiles("---\nx---\nhello", &decs);
+            assert_eq!(
+                collect_marks(&arena, doc),
+                Vec::<(String, usize)>::new(),
+                "a mark fully inside a hidden range must render no Mark tile"
+            );
+        }
+    }
+
+    #[test]
+    fn mark_fully_inside_replace_widget_paints_nothing() {
+        // Same as above but the hidden range is a length-bearing
+        // Widget (the markdown frontmatter property table is one).
+        let decs = vec![
+            DecoratedRange {
+                from: 0,
+                to: 8,
+                kind: DecorationKind::Widget {
+                    html: "<table/>".into(),
+                },
+            },
+            Decoration::mark(0..1, "ed-modal-caret-block"),
+        ];
+        let (arena, doc) = build_tiles("---\nx---\nhello", &decs);
+        assert_eq!(
+            collect_marks(&arena, doc),
+            Vec::<(String, usize)>::new(),
+            "a mark fully inside a replace widget must render no Mark tile"
+        );
+    }
+
+    #[test]
+    fn mark_starting_inside_replace_paints_only_visible_tail() {
+        // A mark that starts inside a hidden range but extends past it
+        // paints only its visible slice.
+        let decs = vec![Decoration::replace(0..5), Decoration::mark(2..8, "sel")];
+        let (arena, doc) = build_tiles("0123456789", &decs);
+        assert_eq!(
+            collect_marks(&arena, doc),
+            vec![("sel".to_string(), 3)], // bytes 5..8
+        );
+    }
+
+    #[test]
+    fn mark_spanning_hidden_range_paints_visible_slices_only() {
+        // vim ggVG on a doc with hidden markers: the selection mark
+        // legitimately crosses the hidden range; the hidden bytes are
+        // not wrapped, the visible slices on both sides are.
+        let decs = vec![Decoration::mark(0..10, "sel"), Decoration::replace(3..6)];
+        let (arena, doc) = build_tiles("0123456789", &decs);
+        let line = arena.get(doc).children[0];
+        assert_eq!(
+            children_kinds(&arena, line),
+            vec![TileKind::Mark, TileKind::Widget, TileKind::Mark]
+        );
+        let mut marks = collect_marks(&arena, doc);
+        marks.sort();
+        assert_eq!(
+            marks,
+            vec![("sel".to_string(), 3), ("sel".to_string(), 4)]
         );
     }
 
