@@ -181,10 +181,10 @@ async fn serve_iroh(router: LayerRouter, cfg: IrohConfig) {
         }
     };
     tracing::info!("iroh endpoint id: {}", endpoint.id());
-    if let Some(id_path) = &cfg.id_path {
-        if let Err(e) = std::fs::write(id_path, format!("{}\n", endpoint.id())) {
-            tracing::warn!(error = %e, "could not write iroh endpoint-id file");
-        }
+    if let Some(id_path) = &cfg.id_path
+        && let Err(e) = std::fs::write(id_path, format!("{}\n", endpoint.id()))
+    {
+        tracing::warn!(error = %e, "could not write iroh endpoint-id file");
     }
     iroh_link::serve_router(&endpoint, router).await;
 }

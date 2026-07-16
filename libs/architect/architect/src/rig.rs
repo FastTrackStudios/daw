@@ -141,7 +141,7 @@ pub fn spawn_meter_pump<S: RigBackend>(name: &'static str, source: S) {
                     // (only while running — a stopped rig has nothing to
                     // attach to).
                     tick_no = tick_no.wrapping_add(1);
-                    if tick_no % PORT_SCAN_TICKS == 0 {
+                    if tick_no.is_multiple_of(PORT_SCAN_TICKS) {
                         let now = sorted(source.midi_ports());
                         if now != known_ports {
                             known_ports = now;

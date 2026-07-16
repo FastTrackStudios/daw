@@ -37,22 +37,12 @@ core-foundation = "0.9.1"
 objc = "0.2.7"
 uuid = { version = "0.8", features = ["v4"] }
 
-[dev-dependencies]
-rtrb = "0.2"
-softbuffer = "0.4"
+# [dev-dependencies] + examples dropped in the FTS vendor copy — the
+# upstream demos don't compile against the workspace's newer softbuffer
+# and we only consume the library (via nice-plug-dioxus).
 
 # [workspace] table dropped in the FTS vendor copy — the crate is
 # absorbed into the root workspace; the femtovg example subcrate is
 # removed with it.
 [lints.clippy]
 missing-safety-doc = "allow"
-
-[[example]]
-name = "open_window"
-test = true
-doctest = true
-
-[[example]]
-name = "open_parented"
-test = true
-doctest = true
