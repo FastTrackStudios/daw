@@ -55,7 +55,12 @@ softbuffer = { version = "0.4", optional = true }
 # Window management - using fork with raw-window-handle 0.6 for softbuffer compatibility.
 # NOTE: nice-plug-core links raw-window-handle 0.5; this crate deliberately links 0.6
 # (required by blitz/wgpu 28) and bridges ParentWindowHandle via a manual adapter in editor.rs.
-baseview = { git = "https://github.com/Codys-Wright/baseview.git", branch = "upgrade_rwh" }
+# Vendored at libs/vendor/baseview — the fork repo this pinned
+# (Codys-Wright/baseview.git @ upgrade_rwh, 00e438ff) was deleted
+# upstream, which broke `cargo metadata` on every fresh CARGO_HOME
+# (hosted CI runners) and needed a fetch override in the flake's crane
+# vendoring. Same tree, now a path dep.
+baseview = { path = "../../vendor/baseview" }
 
 # raw-window-handle 0.6 (compatible with baseview fork, wgpu, and softbuffer)
 raw-window-handle = "0.6"
