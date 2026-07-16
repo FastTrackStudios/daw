@@ -43,6 +43,10 @@ pub fn EditorApp() -> Element {
     let state = use_signal(|| EditorState::new(WELCOME.to_string()));
     let keymap = use_signal(standard_markdown_keymap);
     let vim = use_signal(VimState::new);
+    // Vim is a physical-keyboard idiom — soft keyboards have no Esc,
+    // so Normal mode on a phone is a trap. Decide once at mount:
+    // coarse pointer → plain editing (`vim: None`).
+    let vim = (!use_hook(editor_view::coarse_pointer)).then_some(vim);
     let slash = use_signal(|| None::<editor_view::slash::SlashState>);
 
     rsx! {
@@ -53,7 +57,7 @@ pub fn EditorApp() -> Element {
                     state,
                     keymap: keymap.read().clone(),
                     decorations: editor_view::DecorationSource::ptr(combined_decorations),
-                    vim: Some(vim),
+                    vim,
                     slash: Some(slash),
                 }
                 editor_view::slash::SlashMenu { state, slash }

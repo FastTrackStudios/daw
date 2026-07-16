@@ -95,6 +95,27 @@
     counter-reset: cm-line;
     padding-left: 60px;
     position: relative;
+    /* Touch: `manipulation` keeps pan/pinch but drops double-tap
+       zoom (and with it the ~350ms synthetic-click delay), so taps
+       place the caret immediately instead of arming a zoom gesture.
+       The grey iOS tap flash reads as a stray selection over
+       decorated text — kill it; the caret is the feedback. */
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Coarse pointers (phones / tablets) ──────────────────────
+   Vim is already unmounted on these devices (hosts pass
+   `vim: None` when `coarse_pointer()` — soft keyboards have no
+   Esc); the rules here make plain editing comfortable:
+   - 16px body text: anything smaller makes iOS Safari auto-zoom
+     the whole page when the contenteditable gains focus.
+   - Slightly looser leading = fatter tap-to-place-caret rows. */
+@media (pointer: coarse) {
+    .editor-root {
+        font-size: 16px;
+        line-height: 1.7;
+    }
 }
 
 /* Vim modal carets. The block/underscore shapes are PAINTED as
@@ -956,6 +977,23 @@
     padding: 12px;
     color: var(--ed-text-dim, #7a7e8a);
     font-style: italic;
+}
+/* Menus select on click/tap (rows carry onclick, `.selected` is
+   keyboard state — nothing is hover-gated), so touch only needs
+   bigger targets: 44px rows per the Apple HIG minimum, and the
+   same no-zoom/no-flash treatment as the editor surface. Shared
+   by the slash palette and the `[[`/`#` completion menu (it
+   reuses .slash-menu/.slash-row). */
+@media (pointer: coarse) {
+    .editor-frame .slash-menu {
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .editor-frame .slash-row {
+        min-height: 44px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+    }
 }
 
 /* Embed widgets — sized via inline style coming from
