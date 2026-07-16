@@ -1214,8 +1214,8 @@ impl ActionRegistration for crate::Reaper {
         let normalized = normalize_command_name(command_name).to_string();
         let was_known = {
             let mut states = toggle_states().lock_recoverable("action_registry");
-            if states.contains_key(&normalized) {
-                states.insert(normalized, is_on);
+            if let Some(state) = states.get_mut(&normalized) {
+                *state = is_on;
                 true
             } else {
                 false
