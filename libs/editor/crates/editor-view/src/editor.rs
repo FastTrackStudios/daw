@@ -223,6 +223,33 @@ fn widget_focused_dom() -> bool {
     false
 }
 
+/// One-shot device-class probe: is the primary pointer coarse (a
+/// touchscreen phone / tablet)? Hosts consult this ONCE at page
+/// mount to decide whether to wire vim modal editing — soft
+/// keyboards have no Esc key, so landing in Normal mode on a touch
+/// device is a trap (letters become motions and "typing looks
+/// broken"). Pass `vim: None` when this returns `true`.
+///
+/// Deliberately not reactive: a convertible flipping between
+/// laptop and tablet mid-session keeps whatever it mounted with —
+/// swapping the modal-editing model under the user's fingers would
+/// be worse than either steady state.
+#[cfg(target_arch = "wasm32")]
+#[must_use]
+pub fn coarse_pointer() -> bool {
+    web_sys::window()
+        .and_then(|w| w.match_media("(pointer: coarse)").ok().flatten())
+        .is_some_and(|m| m.matches())
+}
+/// Non-wasm builds (desktop webview, Blitz native) have no
+/// `matchMedia` to ask synchronously; they're keyboard-first
+/// environments, so report a fine pointer.
+#[cfg(not(target_arch = "wasm32"))]
+#[must_use]
+pub fn coarse_pointer() -> bool {
+    false
+}
+
 #[cfg(all(target_arch = "wasm32", not(feature = "native")))]
 fn now_ms() -> f64 {
     // Cheap call — browsers cache it. Falls back to 0 if for
