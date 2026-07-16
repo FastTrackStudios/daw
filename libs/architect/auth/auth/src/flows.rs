@@ -2,7 +2,7 @@
 
 pub mod admin {
     use auth_proto::{
-        AuthAccountCreate, AuthFlowError, AuthSessionBundle, AuthUser, AuthUserCreate,
+        AuthAccountCreate, AuthFlowError, AuthSessionBundle, AuthUser, AuthUserCreate, OrgMember,
     };
     use chrono::Utc;
 
@@ -18,6 +18,13 @@ pub mod admin {
 
     const ADMIN_ROLE: &str = "admin";
 
+    /// First 8 hex chars of a user id — last-resort display label when a
+    /// member has neither a name nor an email.
+    fn short_id(id: uuid::Uuid) -> String {
+        let s = id.to_string();
+        s.get(..8).unwrap_or(&s).to_string()
+    }
+
     impl<S> ArchitectAuth<S>
     where
         S: AuthStorage,
@@ -29,6 +36,75 @@ pub mod admin {
             let limit = input.limit.clamp(1, 100);
             let (users, total) = self.storage.list_users(input.offset, limit).await?;
             Ok(ListUsersResult { users, total })
+        }
+
+        /// Enumerate the members of the caller's active organization.
+        ///
+        /// Shared backend for `AuthService::list_org_members`. The org
+        /// is derived from the session's `active_organization_id` (this
+        /// store is already org-scoped by the `/org/<slug>/vox` mount).
+        /// Joins `list_members_by_organization` with per-user lookups to
+        /// fill `name`/`email`; falls back to enumerating the store's
+        /// users (role `"member"`) when the org has no membership rows.
+        pub(crate) async fn org_members_for_token(
+            &self,
+            token: String,
+        ) -> Result<Vec<OrgMember>, AuthFlowError> {
+            fn display(user: &AuthUser) -> (String, String) {
+                let email = user
+                    .email
+                    .clone()
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_default();
+                let name = user
+                    .name
+                    .clone()
+                    .filter(|s| !s.trim().is_empty())
+                    .or_else(|| {
+                        user.email.clone().filter(|s| !s.trim().is_empty())
+                    })
+                    .unwrap_or_else(|| short_id(user.id));
+                (name, email)
+            }
+
+            let bundle = self.current_session(CurrentSession { token }).await?;
+
+            if let Some(org_id) = bundle.session.active_organization_id {
+                let members = self.storage.list_members_by_organization(org_id).await?;
+                if !members.is_empty() {
+                    let mut out = Vec::with_capacity(members.len());
+                    for member in members {
+                        let user = self.storage.find_user_by_id(member.user_id).await?;
+                        let (name, email) = match &user {
+                            Some(user) => display(user),
+                            None => (short_id(member.user_id), String::new()),
+                        };
+                        out.push(OrgMember {
+                            user_id: member.user_id,
+                            name,
+                            email,
+                            role: member.role,
+                        });
+                    }
+                    return Ok(out);
+                }
+            }
+
+            // Fallback: no membership rows for this org yet — enumerate
+            // the org store's users so the list is never spuriously empty.
+            let (users, _total) = self.storage.list_users(0, 1000).await?;
+            Ok(users
+                .into_iter()
+                .map(|user| {
+                    let (name, email) = display(&user);
+                    OrgMember {
+                        user_id: user.id,
+                        name,
+                        email,
+                        role: "member".to_string(),
+                    }
+                })
+                .collect())
         }
 
         // r[impl auth.admin.requires-role]
@@ -1790,6 +1866,13 @@ pub mod email_password {
 
         async fn sign_out(&self, token: String) -> Result<(), AuthFlowError> {
             ArchitectAuth::sign_out(self, SignOut { token }).await
+        }
+
+        async fn list_org_members(
+            &self,
+            token: String,
+        ) -> Result<Vec<auth_proto::OrgMember>, AuthFlowError> {
+            self.org_members_for_token(token).await
         }
     }
 

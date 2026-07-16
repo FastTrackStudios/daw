@@ -775,7 +775,7 @@ pub mod vox {
         RefreshSession, SignOut, flows::bearer_tokens,
     };
     use auth_proto::{
-        AuthFlowError, AuthService, AuthSessionBundle, AuthUser, SignInEmailPassword,
+        AuthFlowError, AuthService, AuthSessionBundle, AuthUser, OrgMember, SignInEmailPassword,
         SignUpEmailPassword,
     };
     use uuid::Uuid;
@@ -840,6 +840,10 @@ pub mod vox {
 
         async fn sign_out(&self, token: String) -> Result<(), AuthFlowError> {
             self.auth.sign_out(SignOut { token }).await
+        }
+
+        async fn list_org_members(&self, token: String) -> Result<Vec<OrgMember>, AuthFlowError> {
+            self.auth.org_members_for_token(token).await
         }
     }
 

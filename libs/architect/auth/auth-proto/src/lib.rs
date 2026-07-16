@@ -118,6 +118,7 @@ pub struct AuthSessionBundle {
 // trait moved into `service` (`AuthServiceDispatcher::new(..)` +
 // `auth_service_service_descriptor()`).
 pub use service::AUTHORIZATION_METADATA_KEY;
+pub use service::OrgMember;
 pub use service::prelude::*;
 #[cfg(feature = "vox")]
 pub use service::{AuthServiceDispatcher, auth_service_service_descriptor};
