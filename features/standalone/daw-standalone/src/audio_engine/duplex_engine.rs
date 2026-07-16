@@ -126,7 +126,7 @@ impl DuplexAudioEngine {
         let (ph_l, ph_r) = (prefs.phones_out_l, prefs.phones_out_r);
         let (mix_l, mix_r) = (prefs.phones_mix_in_l, prefs.phones_mix_in_r);
         let phones = PhonesBus::shared();
-        let ph = phones.clone();
+        let ph = phones; // &'static — the callback closure copies the reference
         let out_ports = if routing {
             main_l.max(main_r).max(ph_l).max(ph_r) + 1
         } else {
