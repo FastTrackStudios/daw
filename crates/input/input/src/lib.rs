@@ -20,7 +20,7 @@ pub mod sequence;
 pub mod trie;
 
 pub use command::{ActionId, InputArgs, InputCommand};
-pub use config::{ConfigError, KeymapConfig};
+pub use config::{ConfigError, KeymapConfig, parse_key_chord, parse_key_sequence};
 pub use context::{ActionContext, WhenExpr};
 pub use event::{InputEvent, KeyEvent, MouseAction, MouseButton, MouseEvent, ScrollEvent};
 pub use key::{KeyChord, KeyCode, Modifiers};
