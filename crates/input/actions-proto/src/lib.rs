@@ -154,6 +154,13 @@ pub enum ActionCategory {
     View,
     Settings,
     Dev,
+    // ── General app categories (app-agnostic consumers, e.g. Task) ──
+    // Additive: appended after the DAW categories so existing discriminants
+    // are unchanged.
+    Note,
+    Navigation,
+    Inbox,
+    Editor,
 }
 
 impl std::fmt::Display for ActionCategory {
@@ -167,6 +174,10 @@ impl std::fmt::Display for ActionCategory {
             Self::View => write!(f, "View"),
             Self::Settings => write!(f, "Settings"),
             Self::Dev => write!(f, "Dev"),
+            Self::Note => write!(f, "Note"),
+            Self::Navigation => write!(f, "Navigation"),
+            Self::Inbox => write!(f, "Inbox"),
+            Self::Editor => write!(f, "Editor"),
         }
     }
 }

@@ -165,12 +165,12 @@ impl ReaperInputProcessor {
     /// The last context handed to [`set_reaper_context`] — i.e. where the
     /// most recent key event was headed.
     pub fn reaper_context(&self) -> KeybindContext {
-        self.reaper_context
+        self.reaper_context.clone()
     }
 
     /// Update the REAPER context (e.g., when focus changes to MIDI editor).
     pub fn set_reaper_context(&mut self, ctx: KeybindContext) {
-        self.reaper_context = ctx;
+        self.reaper_context = ctx.clone();
         // Remove all context tags first
         self.context.remove_tag("context:main");
         self.context.remove_tag("context:midi");
@@ -185,6 +185,9 @@ impl ReaperInputProcessor {
             KeybindContext::Midi => self.context.set_tag("context:midi"),
             KeybindContext::MidiInline => self.context.set_tag("context:midi_inline"),
             KeybindContext::MediaExplorer => self.context.set_tag("context:media_explorer"),
+            KeybindContext::Custom(name) => {
+                self.context.set_tag(format!("context:{name}"));
+            }
         }
     }
 
@@ -361,9 +364,12 @@ impl ReaperInputProcessor {
             let Some(overlay) = self.available_overrides.get(name) else {
                 continue;
             };
-            if let Some(action) =
-                resolve_wheel_in_bindings(&overlay.wheel_bindings, context, modifiers, horizontal)
-            {
+            if let Some(action) = resolve_wheel_in_bindings(
+                &overlay.wheel_bindings,
+                context.clone(),
+                modifiers,
+                horizontal,
+            ) {
                 return Some(action);
             }
         }
@@ -494,11 +500,11 @@ fn resolve_wheel_in_bindings(
     bindings
         .iter()
         .rev()
-        .find(|b| mods_dir_match(b) && b.context == Some(context))
+        .find(|b| mods_dir_match(b) && b.context == Some(context.clone()))
         .or_else(|| {
             bindings.iter().rev().find(|b| {
                 mods_dir_match(b)
-                    && b.context.unwrap_or(KeybindContext::Global).matches(&context)
+                    && b.context.clone().unwrap_or(KeybindContext::Global).matches(&context)
             })
         })
         .map(|binding| binding.action.clone())

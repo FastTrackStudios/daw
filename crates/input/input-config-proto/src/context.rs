@@ -6,7 +6,14 @@
 use facet::Facet;
 
 /// Keybind context — where a keyboard/wheel binding applies.
-#[derive(Debug, Clone, Copy, Facet, PartialEq, Eq, Hash, Default)]
+///
+/// The DAW-specific variants (`Main`/`Midi`/`MidiInline`/`MediaExplorer`)
+/// are REAPER's editor sections. `Custom` keeps the enum **open** so
+/// app-agnostic consumers (e.g. a general Dioxus app) can name their own
+/// contexts — its payload is the raw context tag used in when-expressions
+/// (`context:<name>`). Because of `Custom`, this enum is no longer `Copy`;
+/// clone it where a value is needed from behind a reference.
+#[derive(Debug, Clone, Facet, PartialEq, Eq, Hash, Default)]
 #[repr(C)]
 pub enum KeybindContext {
     /// All contexts (default)
@@ -20,6 +27,9 @@ pub enum KeybindContext {
     MidiInline,
     /// Media explorer
     MediaExplorer,
+    /// App-defined context, keyed by an arbitrary tag name. Round-trips
+    /// through Facet/styx like any other variant.
+    Custom(String),
 }
 
 impl KeybindContext {

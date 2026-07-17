@@ -16,6 +16,8 @@ overlay-prewarm = []
 [dependencies]
 input = { workspace = true }
 input-config-proto = { workspace = true }
+input-dioxus = { workspace = true }
+input-keybinds = { workspace = true }
 reaper-high = { workspace = true }
 reaper-medium = { workspace = true }
 reaper-low = { workspace = true }
