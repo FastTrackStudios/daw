@@ -32,7 +32,7 @@ fn main() {
     // Platform-specific flags
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     match target_os.as_str() {
-        "macos" => {
+        "macos" | "ios" => {
             build.flag("-stdlib=libc++");
         }
         "windows" => {
@@ -46,7 +46,7 @@ fn main() {
 
     // Link C++ stdlib
     match target_os.as_str() {
-        "macos" => println!("cargo:rustc-link-lib=c++"),
+        "macos" | "ios" => println!("cargo:rustc-link-lib=c++"),
         "linux" => {
             println!("cargo:rustc-link-lib=stdc++");
         }
@@ -56,6 +56,11 @@ fn main() {
     // Build the reference renderer tool for integration tests.
     // This is a standalone C++ executable that processes audio through NAM
     // directly, so we can compare its output against our Rust bindings.
+    // Host-only: it shells out to the host g++, meaningless when
+    // cross-compiling (iOS).
+    if target_os == "ios" {
+        return;
+    }
     let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
     let ref_tool = out_dir.join("reference_render");
 
