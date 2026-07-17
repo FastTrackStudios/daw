@@ -25,6 +25,24 @@ pub mod admin {
         s.get(..8).unwrap_or(&s).to_string()
     }
 
+    /// The Guest / anonymous stand-in account is not a real member.
+    fn member_excluded(name: &str, email: &str) -> bool {
+        name.eq_ignore_ascii_case("guest") || email.to_ascii_lowercase().starts_with("guest@")
+    }
+
+    /// Drop duplicate members — same user id, or the same display name
+    /// (a person seeded under two accounts). Keeps the first seen.
+    fn dedupe_members(members: Vec<OrgMember>) -> Vec<OrgMember> {
+        let mut seen_id = std::collections::HashSet::new();
+        let mut seen_name = std::collections::HashSet::new();
+        members
+            .into_iter()
+            .filter(|m| {
+                seen_id.insert(m.user_id) && seen_name.insert(m.name.to_ascii_lowercase())
+            })
+            .collect()
+    }
+
     impl<S> ArchitectAuth<S>
     where
         S: AuthStorage,
@@ -38,14 +56,17 @@ pub mod admin {
             Ok(ListUsersResult { users, total })
         }
 
-        /// Enumerate the members of the caller's active organization.
+        /// Enumerate the members of THIS org (the store is org-scoped by
+        /// the `/org/<slug>/vox` mount).
         ///
-        /// Shared backend for `AuthService::list_org_members`. The org
-        /// is derived from the session's `active_organization_id` (this
-        /// store is already org-scoped by the `/org/<slug>/vox` mount).
-        /// Joins `list_members_by_organization` with per-user lookups to
-        /// fill `name`/`email`; falls back to enumerating the store's
-        /// users (role `"member"`) when the org has no membership rows.
+        /// Backend for `AuthService::list_org_members`. Auth is NOT
+        /// required — the endpoint already scopes the org, and a session
+        /// token is per-org, so a cross-org viewer's token (or none) must
+        /// not gate the read. When the caller HAS a valid session for
+        /// this org AND the org has real membership rows, those are used
+        /// (precise roles); otherwise it enumerates the store's users
+        /// with role `"member"`. Guest/anonymous accounts and duplicate
+        /// people are dropped either way.
         pub(crate) async fn org_members_for_token(
             &self,
             token: String,
@@ -60,51 +81,60 @@ pub mod admin {
                     .name
                     .clone()
                     .filter(|s| !s.trim().is_empty())
-                    .or_else(|| {
-                        user.email.clone().filter(|s| !s.trim().is_empty())
-                    })
+                    .or_else(|| user.email.clone().filter(|s| !s.trim().is_empty()))
                     .unwrap_or_else(|| short_id(user.id));
                 (name, email)
             }
 
-            let bundle = self.current_session(CurrentSession { token }).await?;
-
-            if let Some(org_id) = bundle.session.active_organization_id {
-                let members = self.storage.list_members_by_organization(org_id).await?;
-                if !members.is_empty() {
-                    let mut out = Vec::with_capacity(members.len());
-                    for member in members {
-                        let user = self.storage.find_user_by_id(member.user_id).await?;
-                        let (name, email) = match &user {
-                            Some(user) => display(user),
-                            None => (short_id(member.user_id), String::new()),
-                        };
-                        out.push(OrgMember {
-                            user_id: member.user_id,
-                            name,
-                            email,
-                            role: member.role,
-                        });
+            // Precise path: valid session for THIS org + real membership
+            // rows. A foreign/absent token just falls through (no error).
+            if !token.is_empty() {
+                if let Ok(bundle) = self.current_session(CurrentSession { token }).await {
+                    if let Some(org_id) = bundle.session.active_organization_id {
+                        let members = self.storage.list_members_by_organization(org_id).await?;
+                        if !members.is_empty() {
+                            let mut out = Vec::with_capacity(members.len());
+                            for member in members {
+                                let user = self.storage.find_user_by_id(member.user_id).await?;
+                                let (name, email) = match &user {
+                                    Some(user) => display(user),
+                                    None => (short_id(member.user_id), String::new()),
+                                };
+                                if member_excluded(&name, &email) {
+                                    continue;
+                                }
+                                out.push(OrgMember {
+                                    user_id: member.user_id,
+                                    name,
+                                    email,
+                                    role: member.role,
+                                });
+                            }
+                            return Ok(dedupe_members(out));
+                        }
                     }
-                    return Ok(out);
                 }
             }
 
-            // Fallback: no membership rows for this org yet — enumerate
-            // the org store's users so the list is never spuriously empty.
+            // Default: enumerate the org store's users (no membership
+            // rows, or no valid session for this org).
             let (users, _total) = self.storage.list_users(0, 1000).await?;
-            Ok(users
+            let out = users
                 .into_iter()
-                .map(|user| {
+                .filter_map(|user| {
                     let (name, email) = display(&user);
-                    OrgMember {
+                    if member_excluded(&name, &email) {
+                        return None;
+                    }
+                    Some(OrgMember {
                         user_id: user.id,
                         name,
                         email,
                         role: "member".to_string(),
-                    }
+                    })
                 })
-                .collect())
+                .collect();
+            Ok(dedupe_members(out))
         }
 
         // r[impl auth.admin.requires-role]
