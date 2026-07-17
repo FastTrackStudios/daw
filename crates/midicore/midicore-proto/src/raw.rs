@@ -16,10 +16,11 @@ use crate::number::{Channel, ControllerNumber, ControllerValue, KeyNumber, Pitch
 
 /// Number of meaningful bytes for a short-message status byte.
 const fn message_len(status: u8) -> usize {
-    if status >= 0xF8 {
-        1 // system real-time
-    } else if status >= 0xF0 {
-        1 // treat other system-common conservatively (unsupported by codec)
+    if status >= 0xF0 {
+        // System real-time (>= 0xF8) is genuinely 1 byte; other
+        // system-common is treated conservatively as 1 (unsupported by
+        // the codec).
+        1
     } else {
         match status & 0xF0 {
             0xC0 | 0xD0 => 2, // program change / channel pressure
@@ -49,6 +50,8 @@ pub trait ShortMessage {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Facet)]
 pub struct RawShortMessage([u8; 3]);
 
+// len() is 1..=3 by construction — an `is_empty` would be misleading.
+#[allow(clippy::len_without_is_empty)]
 impl RawShortMessage {
     /// Build from explicit bytes (data bytes are masked to 7 bits).
     pub const fn from_bytes(status: u8, data1: u8, data2: u8) -> Self {

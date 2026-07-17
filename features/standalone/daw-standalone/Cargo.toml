@@ -112,6 +112,10 @@ vst3-host = ["dep:vst3", "dep:libloading"]
 web = ["decode", "dep:wasm-bindgen", "dep:js-sys"]
 
 [[example]]
+name = "meter_probe"
+required-features = ["bootstrap", "audio"]
+
+[[example]]
 name = "play_rpp"
 required-features = ["rpp-loader"]
 

@@ -37,7 +37,7 @@ impl Filter {
             Filter::OnChannel(ch) => event.channel() == Some(*ch),
             Filter::Notes => matches!(event, NoteOn { .. } | NoteOff { .. }),
             Filter::ControlChange(which) => match event {
-                ControlChange { controller, .. } => which.map_or(true, |c| c == *controller),
+                ControlChange { controller, .. } => which.is_none_or(|c| c == *controller),
                 _ => false,
             },
             Filter::Realtime => matches!(
@@ -56,6 +56,9 @@ impl Filter {
     pub fn or(self, other: Filter) -> Filter {
         Filter::Or(Box::new(self), Box::new(other))
     }
+    // Deliberately a builder method like `and`/`or` (readable chained:
+    // `Filter::Notes.not()`), not the `std::ops::Not` operator.
+    #[allow(clippy::should_implement_trait)]
     pub fn not(self) -> Filter {
         Filter::Not(Box::new(self))
     }
