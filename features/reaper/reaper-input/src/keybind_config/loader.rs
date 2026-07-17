@@ -221,7 +221,7 @@ fn convert_keybind(def: &KeybindDef) -> Keybind {
     if let Some(ref d) = def.desc {
         kb = kb.with_description(d.clone());
     }
-    if let Some(ctx) = def.context {
+    if let Some(ctx) = def.context.clone() {
         kb = kb.with_context(ctx);
     }
     if def.passthrough == Some(true) {
@@ -272,7 +272,7 @@ fn convert_wheel(def: &WheelBindDef) -> WheelBind {
     if let Some(ref d) = def.desc {
         wb = wb.with_description(d.clone());
     }
-    if let Some(ctx) = def.context {
+    if let Some(ctx) = def.context.clone() {
         wb = wb.with_context(ctx);
     }
     wb

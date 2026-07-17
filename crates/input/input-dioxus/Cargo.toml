@@ -7,6 +7,7 @@ description = "Dioxus event conversion bridge for input"
 [dependencies]
 input = { workspace = true }
 dioxus = { workspace = true }
+fts-ui = { workspace = true }
 tokio = { workspace = true, features = ["time"] }
 
 [lib]

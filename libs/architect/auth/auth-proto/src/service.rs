@@ -20,6 +20,19 @@
 //! new trait methods, no re-mount.
 
 use crate::{AuthFlowError, AuthSessionBundle, AuthUser, SignInEmailPassword, SignUpEmailPassword};
+use uuid::Uuid;
+
+/// Flattened membership row for the org-members enumeration RPC: the
+/// member's `role` joined with the user's display `name` + `email`, so
+/// clients (rates editor, owner dashboard) get a ready-to-render list
+/// without a second per-user round-trip.
+#[derive(Clone, Debug, PartialEq, ::facet::Facet)]
+pub struct OrgMember {
+    pub user_id: Uuid,
+    pub name: String,
+    pub email: String,
+    pub role: String,
+}
 
 /// Metadata key carrying the session token on vox calls.
 ///
@@ -59,4 +72,16 @@ pub trait AuthService {
     /// Revoke the session behind a token. Idempotent: unknown or
     /// already-revoked tokens succeed without revealing existence.
     async fn sign_out(&self, token: String) -> Result<(), AuthFlowError>;
+
+    /// List the members of the caller's active organization.
+    ///
+    /// No `org_id` parameter: this service is mounted per-org (the
+    /// `/org/<slug>/vox` route binds an org-scoped `ArchitectAuth`
+    /// backed by that org's own auth store), and the target org is
+    /// derived from the caller's session (`active_organization_id`).
+    /// Each row carries `role` from the membership plus the user's
+    /// display `name` + `email`. If the org has no membership rows yet,
+    /// implementations fall back to enumerating the org store's users
+    /// with role `"member"` so the list is never spuriously empty.
+    async fn list_org_members(&self, token: String) -> Result<Vec<OrgMember>, AuthFlowError>;
 }

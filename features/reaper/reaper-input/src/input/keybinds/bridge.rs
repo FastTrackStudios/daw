@@ -291,7 +291,8 @@ pub fn preset_to_keymap_config(
         // Tag the action with its routing (MIDI editor section / forced main /
         // plain) so execution follows the *binding's* intent, not whichever
         // window has focus when the key fires.
-        let action = crate::input::handler::mark_action(&binding.action, ctx, binding.passthrough);
+        let action =
+            crate::input::handler::mark_action(&binding.action, ctx.clone(), binding.passthrough);
 
         if ctx == KeybindContext::Global {
             global_bindings.insert(input_seq, action);
@@ -484,174 +485,10 @@ fn anchor_modifiers(translated_prefix: &str) -> Vec<&'static str> {
 // Key Notation Translation
 // ---------------------------------------------------------------------------
 
-/// Convert an input-reaper key sequence string to input crate notation.
-///
-/// Handles multi-character sequences like `gg`, bracketed keys like `<C-s>`,
-/// and mixed sequences like `g<C-a>`.
-///
-/// # Examples
-/// - `"a"` → `"a"`
-/// - `"gg"` → `"g g"`
-/// - `"<C-s>"` → `"Ctrl+s"`
-/// - `"<S-Tab>"` → `"Shift+Tab"`
-/// - `"<M-w>"` → `"Meta+w"`
-/// - `"<C-S-a>"` → `"Ctrl+Shift+a"`
-/// - `"g<C-a>"` → `"g Ctrl+a"`
-pub fn translate_sequence(reaper_seq: &str) -> String {
-    let mut chords = Vec::new();
-    let mut chars = reaper_seq.chars().peekable();
-
-    while let Some(c) = chars.next() {
-        if c == '<' {
-            // Parse bracketed key like <C-S-a> or <space>
-            let mut bracket_content = String::new();
-            for ch in chars.by_ref() {
-                if ch == '>' {
-                    break;
-                }
-                bracket_content.push(ch);
-            }
-            chords.push(translate_bracketed(&bracket_content));
-        } else {
-            // Simple single character key
-            chords.push(c.to_lowercase().to_string());
-        }
-    }
-
-    chords.join(" ")
-}
-
-/// Translate a bracketed key expression (without angle brackets) to input crate notation.
-///
-/// `"C-S-a"` → `"Ctrl+Shift+a"`
-/// `"space"` → `"Space"`
-/// `"M-w"` → `"Meta+w"`
-fn translate_bracketed(content: &str) -> String {
-    // Check if it's a special key without modifiers
-    let lower = content.to_lowercase();
-    if let Some(special) = translate_special_key(&lower) {
-        return special;
-    }
-
-    // The last '-'-separated component is always the key; all preceding parts are modifiers.
-    let parts: Vec<&str> = content.split('-').collect();
-    if parts.is_empty() {
-        return String::new();
-    }
-
-    // Extract the key (last part) and modifiers (all preceding parts).
-    let key_str = parts.last().unwrap();
-    let lower_key = key_str.to_lowercase();
-    let key = translate_special_key(&lower_key).unwrap_or(lower_key);
-
-    let mut modifiers: Vec<String> = Vec::new();
-    // `<C-...>` follows the platform's primary modifier convention:
-    //   - Linux/Windows: Ctrl (the "Ctrl+S to save" key)
-    //   - macOS:         Cmd  (the "Cmd+S to save" key)
-    // SWELL on macOS reports Cmd as FCONTROL (and our handler maps
-    // that to meta), so `<C-x>` bindings authored for the Linux
-    // convention also work for Mac users without rewriting every
-    // config. `<CC-x>` (carat) addresses the *physical* macOS Ctrl
-    // explicitly.
-    //
-    // On macOS, if a chord uses BOTH `<C-…>` and `<M-…>` (e.g.
-    // `<C-M-z>` for Ctrl+Cmd+Z), the second one would collapse to a
-    // duplicate "Meta" — and last-wins binding registration would
-    // overwrite the plain `<C-z>` Undo with whatever `<C-M-z>` was
-    // bound to (typically a multi-modifier "open undo history" action).
-    // Detect that case and treat the later modifier as raw Ctrl so the
-    // chord stays distinct.
-    for part in &parts[..parts.len() - 1] {
-        let upper = part.to_uppercase();
-        let resolved: Option<&'static str> = match upper.as_str() {
-            #[cfg(target_os = "macos")]
-            "C" | "CTRL" | "CONTROL" => {
-                if modifiers.iter().any(|m| m == "Meta") {
-                    Some("Ctrl")
-                } else {
-                    Some("Meta")
-                }
-            }
-            #[cfg(not(target_os = "macos"))]
-            "C" | "CTRL" | "CONTROL" => Some("Ctrl"),
-            "CC" | "RAWCTRL" => Some("Ctrl"),
-            "S" | "SHIFT" => Some("Shift"),
-            "A" | "ALT" | "OPT" | "OPTION" => Some("Alt"),
-            // `D` is vim's Cmd notation (<D-x>). An unknown modifier must
-            // NOT fall through to None — that silently strips it and binds
-            // the bare key (e.g. `<D-1>` squatting plain `1`).
-            #[cfg(target_os = "macos")]
-            "M" | "META" | "CMD" | "COMMAND" | "WIN" | "SUPER" | "D" => {
-                if modifiers.iter().any(|m| m == "Meta") {
-                    Some("Ctrl")
-                } else {
-                    Some("Meta")
-                }
-            }
-            #[cfg(not(target_os = "macos"))]
-            "M" | "META" | "CMD" | "COMMAND" | "WIN" | "SUPER" | "D" => Some("Meta"),
-            _ => None,
-        };
-        if let Some(m) = resolved
-            && !modifiers.iter().any(|existing| existing == m)
-        {
-            modifiers.push(m.to_string());
-        }
-    }
-
-    if modifiers.is_empty() {
-        key
-    } else {
-        modifiers.push(key);
-        modifiers.join("+")
-    }
-}
-
-/// Translate input-reaper special key names to input crate names.
-fn translate_special_key(name: &str) -> Option<String> {
-    match name {
-        "space" | "spc" => Some("Space".to_string()),
-        "tab" => Some("Tab".to_string()),
-        "enter" | "return" | "ret" | "cr" => Some("Enter".to_string()),
-        "esc" | "escape" => Some("Escape".to_string()),
-        "backspace" | "bs" => Some("Backspace".to_string()),
-        "delete" | "del" => Some("Delete".to_string()),
-        "up" => Some("Up".to_string()),
-        "down" => Some("Down".to_string()),
-        "left" => Some("Left".to_string()),
-        "right" => Some("Right".to_string()),
-        "home" => Some("home".to_string()),
-        "end" => Some("end".to_string()),
-        "pageup" | "pgup" => Some("pageup".to_string()),
-        "pagedown" | "pgdn" => Some("pagedown".to_string()),
-        "insert" | "ins" => Some("insert".to_string()),
-        // Punctuation keys spelled out (to avoid parse ambiguity with separators)
-        "plus" => Some("equals".to_string()), // <plus> = the =/+ key (VK_OEM_PLUS)
-        "minus" => Some("minus".to_string()), // <minus> = the -/_ key (VK_OEM_MINUS)
-        "equals" | "equal" => Some("equals".to_string()),
-        // Numpad keys
-        "kp_+" | "kp_plus" => Some("kp_plus".to_string()),
-        "kp_-" | "kp_minus" => Some("kp_minus".to_string()),
-        "kp_*" | "kp_multiply" => Some("kp_multiply".to_string()),
-        "kp_/" | "kp_divide" => Some("kp_divide".to_string()),
-        "kp_." | "kp_period" => Some("kp_period".to_string()),
-        "kp_enter" => Some("kp_enter".to_string()),
-        "kp_0" => Some("kp_0".to_string()),
-        "kp_1" => Some("kp_1".to_string()),
-        "kp_2" => Some("kp_2".to_string()),
-        "kp_3" => Some("kp_3".to_string()),
-        "kp_4" => Some("kp_4".to_string()),
-        "kp_5" => Some("kp_5".to_string()),
-        "kp_6" => Some("kp_6".to_string()),
-        "kp_7" => Some("kp_7".to_string()),
-        "kp_8" => Some("kp_8".to_string()),
-        "kp_9" => Some("kp_9".to_string()),
-        "f1" | "f2" | "f3" | "f4" | "f5" | "f6" | "f7" | "f8" | "f9" | "f10" | "f11" | "f12" => {
-            Some(name.to_string())
-        }
-        _ => None,
-    }
-}
+/// Key-notation translation is app-agnostic and now lives in the shared
+/// `input-keybinds` crate; re-exported here so callers keep using
+/// `bridge::translate_sequence`.
+pub use input_keybinds::translate_sequence;
 
 // ---------------------------------------------------------------------------
 // Context → WhenExpr string
@@ -665,6 +502,7 @@ fn context_to_when_expr(ctx: KeybindContext) -> String {
         KeybindContext::Midi => "context:midi".to_string(),
         KeybindContext::MidiInline => "context:midi_inline".to_string(),
         KeybindContext::MediaExplorer => "context:media_explorer".to_string(),
+        KeybindContext::Custom(name) => format!("context:{name}"),
     }
 }
 

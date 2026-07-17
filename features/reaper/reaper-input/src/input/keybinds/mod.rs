@@ -107,7 +107,7 @@ impl Keybind {
 
     /// Get the effective context (defaults to Global)
     pub fn effective_context(&self) -> KeybindContext {
-        self.context.unwrap_or(KeybindContext::Global)
+        self.context.clone().unwrap_or(KeybindContext::Global)
     }
 }
 
@@ -225,7 +225,7 @@ impl WheelBind {
 
     /// Get the effective context (defaults to Global)
     pub fn effective_context(&self) -> KeybindContext {
-        self.context.unwrap_or(KeybindContext::Global)
+        self.context.clone().unwrap_or(KeybindContext::Global)
     }
 
     /// Check if this binding matches the given direction

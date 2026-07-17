@@ -1096,7 +1096,7 @@ fn load_workflows_from_dir_into(manager: &mut WorkflowManager, dir: &Path) {
                 if let Some(ref d) = b.desc {
                     kb = kb.with_description(d.clone());
                 }
-                if let Some(ctx) = b.context {
+                if let Some(ctx) = b.context.clone() {
                     kb = kb.with_context(ctx);
                 }
                 kb
@@ -1109,7 +1109,7 @@ fn load_workflows_from_dir_into(manager: &mut WorkflowManager, dir: &Path) {
                 if let Some(ref d) = w.desc {
                     wb = wb.with_description(d.clone());
                 }
-                if let Some(ctx) = w.context {
+                if let Some(ctx) = w.context.clone() {
                     wb = wb.with_context(ctx);
                 }
                 wb
@@ -1321,7 +1321,7 @@ fn load_one_profile_workflows(
                 if let Some(ref d) = b.desc {
                     kb = kb.with_description(d.clone());
                 }
-                if let Some(ctx) = b.context {
+                if let Some(ctx) = b.context.clone() {
                     kb = kb.with_context(ctx);
                 }
                 kb
@@ -1334,7 +1334,7 @@ fn load_one_profile_workflows(
                 if let Some(ref d) = w.desc {
                     wb = wb.with_description(d.clone());
                 }
-                if let Some(ctx) = w.context {
+                if let Some(ctx) = w.context.clone() {
                     wb = wb.with_context(ctx);
                 }
                 wb
