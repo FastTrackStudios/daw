@@ -78,6 +78,7 @@ pub struct EngineHost {
     router: LayerRouter,
     addr: String,
     web: Option<WebBundle>,
+    extra: Option<Router>,
     #[cfg(feature = "iroh")]
     iroh: Option<IrohConfig>,
 }
@@ -95,9 +96,22 @@ impl EngineHost {
             router,
             addr: addr.into(),
             web: None,
+            extra: None,
             #[cfg(feature = "iroh")]
             iroh: None,
         }
+    }
+
+    /// Merge extra axum routes onto the host app (e.g. an HTTP bridge for
+    /// clients that can't speak vox over WebSocket — watchOS remotes). The
+    /// routes are mounted alongside `/health` + `/vox`, before the SPA
+    /// fallback, so they win over the web bundle.
+    pub fn extend(mut self, routes: Router) -> Self {
+        self.extra = Some(match self.extra {
+            Some(existing) => existing.merge(routes),
+            None => routes,
+        });
+        self
     }
 
     /// Also serve the router over an iroh endpoint. The secret key persists at
@@ -136,6 +150,10 @@ impl EngineHost {
                 }
             }),
         );
+
+        if let Some(extra) = self.extra {
+            app = app.merge(extra);
+        }
 
         match self.web {
             Some(WebBundle::Dir(dir)) => {
