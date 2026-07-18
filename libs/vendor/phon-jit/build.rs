@@ -100,9 +100,19 @@ fn emit_arm64_macos(out: &Path, generated: &Path) {
     // strip it). The `explicit_tail_calls` feature does exist in 1.94, so
     // RUSTC_BOOTSTRAP lets the real tail-call stencils build (keeping the fast
     // JIT, not degrading it). Remove once phon-jit builds on stable natively.
-    let rustc = env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string());
-    // SAFETY: a build script runs single-threaded before any rustc child spawns.
-    unsafe { env::set_var("RUSTC_BOOTSTRAP", "1") };
+    // Prefer the pinned nightly rustc the FTS flake provides
+    // (PHON_JIT_NIGHTLY_RUSTC) — the blessed path, the same real nightly
+    // upstream Vox uses for these stencils. Outside the dev shell (no nightly),
+    // fall back to the pinned stable rustc with RUSTC_BOOTSTRAP=1, which enables
+    // the same explicit_tail_calls feature 1.94's compiler already carries.
+    let rustc = match env::var("PHON_JIT_NIGHTLY_RUSTC") {
+        Ok(nightly) => nightly,
+        Err(_) => {
+            // SAFETY: a build script runs single-threaded before any child spawns.
+            unsafe { env::set_var("RUSTC_BOOTSTRAP", "1") };
+            env::var("RUSTC").unwrap_or_else(|_| "rustc".to_string())
+        }
+    };
     assert!(
         compile_object(&rustc, &[], src, &obj, &target, true),
         "rustc failed to compile tail-call stencils"
