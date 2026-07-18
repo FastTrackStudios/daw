@@ -134,15 +134,22 @@ impl Spawned {
 /// from a cargo `target/` dir (dev tree) — `cargo run -p <package>`.
 /// The current environment is propagated (plus `extra_env`).
 ///
-/// `detach: true` puts the child in its own session (Unix `setsid`) with
-/// stdio nulled, so it outlives the launcher; `false` keeps it attached
-/// with inherited stdio — Ctrl-C reaches it through the shared process
-/// group, which is exactly the foreground semantics wanted.
+/// `detach: true` puts the child in its own process group with stdio nulled,
+/// so it outlives the launcher; `false` keeps it attached with inherited
+/// stdio — Ctrl-C reaches it through the shared process group, the foreground
+/// semantics the `fts` CLI wants.
+///
+/// `supervise: true` (the desktop app) makes the child OURS to reap: it runs
+/// in its own process group (so [`kill_group`] takes the engine and any
+/// grandchildren in one shot on our exit) and gets `FTS_SUPERVISOR_PID` so the
+/// engine's own watchdog exits if we vanish — even if we're SIGKILLed and
+/// never get to reap it. Independent of `detach`.
 pub fn spawn(
     engine: &Engine,
     args: &[String],
     extra_env: &[(String, String)],
     detach: bool,
+    supervise: bool,
 ) -> io::Result<Spawned> {
     let (mut cmd, source) = match find_binary(engine.package) {
         Some(bin) => {
@@ -168,16 +175,24 @@ pub fn spawn(
         cmd.env(k, v);
     }
 
+    if supervise {
+        // The engine's watchdog polls this pid and exits when it disappears —
+        // the guarantee against orphans even if we die without reaping.
+        cmd.env("FTS_SUPERVISOR_PID", std::process::id().to_string());
+    }
+
     if detach {
         cmd.stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        #[cfg(unix)]
-        {
-            use std::os::unix::process::CommandExt;
-            // New session: survives the launcher's terminal/process group.
-            cmd.process_group(0);
-        }
+    }
+
+    #[cfg(unix)]
+    if detach || supervise {
+        use std::os::unix::process::CommandExt;
+        // Own process group (pgid == child pid). detach: survive the launcher's
+        // Ctrl-C. supervise: let kill_group() take the whole subtree on exit.
+        cmd.process_group(0);
     }
 
     let child = cmd.spawn()?;
@@ -186,6 +201,28 @@ pub fn spawn(
         source,
         ws_url: engine.ws_url(),
     })
+}
+
+/// Kill a supervised child's whole process group (the engine + any
+/// grandchildren). `pid` is the child pid, which is also its process-group id
+/// (see `spawn(supervise: true)`). No-op / best-effort on non-unix.
+pub fn kill_group(pid: u32, sig: KillSignal) {
+    #[cfg(unix)]
+    unsafe {
+        // Negative pid => the whole process group.
+        libc::kill(-(pid as i32), sig as i32);
+    }
+    #[cfg(not(unix))]
+    let _ = (pid, sig);
+}
+
+/// Signals used for engine teardown.
+#[derive(Clone, Copy)]
+pub enum KillSignal {
+    /// Ask nicely (the engine's Drop path can flush + close the audio device).
+    Term = 15,
+    /// Force.
+    Kill = 9,
 }
 
 /// The systemd user unit `just rig-install` installs for an engine.
