@@ -12,6 +12,11 @@
   perSystem = { pkgs, lib, config, ... }: {
     devShells.default = pkgs.mkShell ({
       packages = (with pkgs; [
+        # The command runner the whole repo drives through (just web-stage,
+        # just rig-install, …). NixOS hosts have it system-wide, which masked
+        # its absence here; nix-darwin (airlock) does not, so builds that shell
+        # out to `just` failed there.
+        just
         cargo-watch
         cargo-nextest
         bacon
@@ -40,6 +45,11 @@
         # integration-test harness (`just reaper-integration-test`).
         pkgs.xorg.xorgserver
         pkgs.xvfb-run
+        # linuxdeploy — dx's AppImage bundler (`dx bundle --package-types
+        # appimage`) shells out to it; without it packaging aborts. Not in the
+        # flake's (older) nixpkgs pin, so take it from the current-unstable
+        # nixpkgs-dx set that already provides the dx toolchain.
+        config.fts.pkgsDx.linuxdeploy
       ]
       ++ config.fts.buildInputs
       ++ config.fts.nativeBuildInputs;

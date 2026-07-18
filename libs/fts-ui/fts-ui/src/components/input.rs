@@ -34,6 +34,10 @@ pub struct InputProps {
     #[props(default)]
     pub placeholder: String,
 
+    /// HTML input type ("text", "password", "email", …). Defaults to "text".
+    #[props(default)]
+    pub input_type: Option<String>,
+
     #[props(default = false)]
     pub disabled: bool,
 
@@ -70,6 +74,7 @@ pub fn Input(props: InputProps) -> Element {
     rsx! {
         input {
             class: crate::cn::merge_slice(&[base, size_class, variant_class, props.class.as_str()]),
+            r#type: props.input_type.clone().unwrap_or_else(|| "text".to_string()),
             value: "{value}",
             placeholder: "{props.placeholder}",
             disabled: if props.disabled { Some(true) } else { None },

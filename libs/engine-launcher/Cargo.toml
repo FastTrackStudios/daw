@@ -12,5 +12,10 @@ description = "Locate, spawn, and probe FastTrackStudio's headless engines (fast
 
 [dependencies]
 
+# Process-group teardown for supervised children (kill the engine + any
+# grandchildren in one killpg on the app's exit).
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [lints]
 workspace = true
