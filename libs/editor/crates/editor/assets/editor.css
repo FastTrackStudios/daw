@@ -73,6 +73,21 @@
     padding: 16px 16px 16px 0;
 }
 
+/* Notes/vault embeds read as prose (Obsidian-style): drop the
+   line-number gutter, and pull the text column in to 24px so it lines
+   up with the note title rendered above the editor. */
+.editor-frame--flush .editor-root {
+    padding-left: 24px;
+}
+.editor-frame--flush .cm-line::before {
+    display: none;
+}
+/* Collapsed properties: the header's chevron toggles this on the
+   editor wrapper to hide the frontmatter properties widget. */
+.editor-app.props-collapsed .md-properties {
+    display: none;
+}
+
 .editor-root {
     width: 100%;
     outline: none;
