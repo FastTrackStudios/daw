@@ -70,7 +70,9 @@
     background: transparent;
     border: none;
     border-radius: 0;
-    padding: 16px 16px 16px 0;
+    /* No top padding: the note title/header sits directly above, so the
+       properties (the editor's first block) should tuck right under it. */
+    padding: 0 16px 16px 0;
 }
 
 /* Notes/vault embeds read as prose (Obsidian-style): drop the
@@ -81,6 +83,16 @@
 }
 .editor-frame--flush .cm-line::before {
     display: none;
+}
+/* Sit the properties block right under the title — no leading margin,
+   no top padding. Three classes so this beats the base
+   `.editor-root .md-properties` rule regardless of source order. */
+.editor-frame--flush .editor-root .md-properties {
+    margin-top: 0;
+    padding-top: 0;
+}
+.editor-frame--flush .editor-root .md-property-row:first-child {
+    padding-top: 0;
 }
 /* Collapsed properties: the header's chevron toggles this on the
    editor wrapper to hide the frontmatter properties widget. */
