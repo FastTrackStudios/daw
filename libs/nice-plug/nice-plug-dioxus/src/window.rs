@@ -690,54 +690,51 @@ impl WindowHandler for DioxusWindowHandler {
     }
 
     fn on_event(&mut self, _window: &mut Window, event: Event) -> EventStatus {
-        match &event {
-            Event::Window(baseview::WindowEvent::Resized(info)) => {
-                // Use PHYSICAL size for wgpu and Blitz viewport
-                let physical_size = info.physical_size();
-                self.width = physical_size.width as u32;
-                self.height = physical_size.height as u32;
-                self.scale_factor = info.scale() as f32;
-                self.received_resize = true;
+        if let Event::Window(baseview::WindowEvent::Resized(info)) = &event {
+            // Use PHYSICAL size for wgpu and Blitz viewport
+            let physical_size = info.physical_size();
+            self.width = physical_size.width;
+            self.height = physical_size.height;
+            self.scale_factor = info.scale() as f32;
+            self.received_resize = true;
 
-                nice_plug_core::nice_log!(
-                    "[RESIZE EVENT] physical: {}x{}, logical: {}x{}, scale: {}",
+            nice_plug_core::nice_log!(
+                "[RESIZE EVENT] physical: {}x{}, logical: {}x{}, scale: {}",
+                self.width,
+                self.height,
+                info.logical_size().width,
+                info.logical_size().height,
+                self.scale_factor
+            );
+
+            // Update the stored size in DioxusState (for persistence) using logical size
+            let logical_size = info.logical_size();
+            let logical_w = logical_size.width as u32;
+            let logical_h = logical_size.height as u32;
+            self.dioxus_state.set_size(logical_w, logical_h);
+
+            // Update reactive window size signal so overlay components re-query their rects
+            if let Some(mut sig) = self.window_size_signal {
+                sig.set((logical_w, logical_h));
+            }
+
+            // Update viewport with PHYSICAL size (this is how Blitz expects it)
+            if let Some(doc) = &mut self.dioxus_doc {
+                doc.inner_mut().set_viewport(Viewport::new(
                     self.width,
                     self.height,
-                    info.logical_size().width,
-                    info.logical_size().height,
-                    self.scale_factor
-                );
-
-                // Update the stored size in DioxusState (for persistence) using logical size
-                let logical_size = info.logical_size();
-                let logical_w = logical_size.width as u32;
-                let logical_h = logical_size.height as u32;
-                self.dioxus_state.set_size(logical_w, logical_h);
-
-                // Update reactive window size signal so overlay components re-query their rects
-                if let Some(mut sig) = self.window_size_signal {
-                    sig.set((logical_w, logical_h));
-                }
-
-                // Update viewport with PHYSICAL size (this is how Blitz expects it)
-                if let Some(doc) = &mut self.dioxus_doc {
-                    doc.inner_mut().set_viewport(Viewport::new(
-                        self.width,
-                        self.height,
-                        self.scale_factor,
-                        ColorScheme::Light,
-                    ));
-                }
-
-                // Resize wgpu surface with physical size
-                if let Some(wgpu_state) = &mut self.wgpu_state {
-                    wgpu_state.resize(self.width, self.height);
-                }
-
-                self.needs_redraw.store(true, Ordering::Relaxed);
-                return EventStatus::Captured;
+                    self.scale_factor,
+                    ColorScheme::Light,
+                ));
             }
-            _ => {}
+
+            // Resize wgpu surface with physical size
+            if let Some(wgpu_state) = &mut self.wgpu_state {
+                wgpu_state.resize(self.width, self.height);
+            }
+
+            self.needs_redraw.store(true, Ordering::Relaxed);
+            return EventStatus::Captured;
         }
 
         // Translate and dispatch event to Dioxus

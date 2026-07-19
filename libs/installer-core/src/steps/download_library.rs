@@ -94,9 +94,9 @@ pub async fn download_library(
             let total_size = response.content_length().unwrap_or(0);
 
             // Skip download if already cached and correct size
-            if archive_path.exists() {
-                if let Ok(meta) = tokio::fs::metadata(&archive_path).await {
-                    if total_size > 0 && meta.len() == total_size {
+            if archive_path.exists()
+                && let Ok(meta) = tokio::fs::metadata(&archive_path).await
+                    && total_size > 0 && meta.len() == total_size {
                         info!("Library archive already cached at {}", archive_path.display());
                         let _ = tx
                             .send(InstallEvent::StepProgress {
@@ -107,8 +107,6 @@ pub async fn download_library(
                             .await;
                         return Ok(());
                     }
-                }
-            }
 
             let mut file = tokio::fs::File::create(&archive_path)
                 .await

@@ -30,7 +30,7 @@ pub fn Toggle(param_ptr: ParamPtr, #[props(default)] label: Option<&'static str>
             GLOW = t.accent_glow,
         )
     } else {
-        format!("{INSET}", INSET = t.shadow_inset,)
+        t.shadow_inset.to_string()
     };
 
     rsx! {

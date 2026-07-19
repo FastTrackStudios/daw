@@ -381,7 +381,7 @@ pub fn EqGraph(
 
     // ── GPU-accelerated graph rendering via vello SceneOverlay ──────────
     // Create shared render state (persists across renders via use_hook)
-    let render_state = use_hook(|| EqGraphRenderState::new());
+    let render_state = use_hook(EqGraphRenderState::new);
 
     // Register the vello painter overlay as BACKGROUND so it renders behind the DOM.
     // Popup divs and selection rect overlays then appear on top naturally.
@@ -742,7 +742,7 @@ pub fn EqGraph(
 
                 if let Some(idx) = clicked {
                     let now = now_ms();
-                    let is_double = { *last_click.read() }.map_or(false, |(t, lx, ly)| {
+                    let is_double = { *last_click.read() }.is_some_and(|(t, lx, ly)| {
                         now - t < double_click_threshold_ms &&
                         ((x-lx).powi(2) + (y-ly).powi(2)).sqrt() < double_click_distance
                     });
@@ -788,7 +788,7 @@ pub fn EqGraph(
 
                 // Empty area: double-click to add, single to start selection
                 let now = now_ms();
-                let is_double = { *last_click.read() }.map_or(false, |(t, lx, ly)| {
+                let is_double = { *last_click.read() }.is_some_and(|(t, lx, ly)| {
                     now - t < double_click_threshold_ms &&
                     ((x-lx).powi(2) + (y-ly).powi(2)).sqrt() < double_click_distance
                 });
@@ -856,8 +856,8 @@ pub fn EqGraph(
                                 graph_h: graph_height,
                                 is_dragging: dragging.is_some(),
                                 bands,
-                                on_band_change: on_band_change.clone(),
-                                on_band_remove: on_band_remove.clone(),
+                                on_band_change: on_band_change,
+                                on_band_remove: on_band_remove,
                                 on_dismiss: move |_| { set_focused(None); },
                             }
                         }
@@ -877,8 +877,8 @@ pub fn EqGraph(
                             graph_w: graph_width,
                             graph_h: graph_height,
                             bands,
-                            on_band_change: on_band_change.clone(),
-                            on_band_remove: on_band_remove.clone(),
+                            on_band_change: on_band_change,
+                            on_band_remove: on_band_remove,
                             on_dismiss: move |_| { context_menu.set(None); },
                         }
                     }
@@ -977,7 +977,7 @@ fn BandPopup(
                         ),
                         title: if band_enabled { "Bypass" } else { "Enable" },
                         onclick: {
-                            let cb = on_band_change.clone();
+                            let cb = on_band_change;
                             move |evt: MouseEvent| {
                                 evt.stop_propagation();
                                 let updated = {
@@ -997,7 +997,7 @@ fn BandPopup(
                         ),
                         title: if band_solo { "Unsolo" } else { "Solo" },
                         onclick: {
-                            let cb = on_band_change.clone();
+                            let cb = on_band_change;
                             move |evt: MouseEvent| {
                                 evt.stop_propagation();
                                 let updated = {
@@ -1025,7 +1025,7 @@ fn BandPopup(
                         style: "cursor:pointer; width:18px; height:18px; border-radius:50%;                                 border:1px solid #666; display:flex; align-items:center;                                 justify-content:center; font-size:14px; color:#888;                                 line-height:1;",
                         title: "Delete",
                         onclick: {
-                            let cb = on_band_remove.clone();
+                            let cb = on_band_remove;
                             move |evt: MouseEvent| {
                                 evt.stop_propagation();
                                 if let Some(c) = &cb { c.call(band_idx); }
@@ -1054,7 +1054,7 @@ fn BandPopup(
                                             if is_sel { "#fff" } else { "#ccc" },
                                         ),
                                         onclick: {
-                                            let cb = on_band_change.clone();
+                                            let cb = on_band_change;
                                             move |evt: MouseEvent| {
                                                 evt.stop_propagation();
                                                 let updated = {
@@ -1116,7 +1116,7 @@ fn BandContextMenu(
         div {
             style: "position:absolute; inset:0; z-index:20;",
             onmousedown: {
-                let dismiss = on_dismiss.clone();
+                let dismiss = on_dismiss;
                 move |evt: MouseEvent| { evt.stop_propagation(); dismiss.call(()); }
             },
         }
@@ -1136,8 +1136,8 @@ fn BandContextMenu(
                 style: format!("padding:4px 10px; cursor:pointer; color:{};",
                     if is_enabled { "#aaa" } else { "#f66" }),
                 onclick: {
-                    let cb = on_band_change.clone();
-                    let dismiss = on_dismiss.clone();
+                    let cb = on_band_change;
+                    let dismiss = on_dismiss;
                     move |evt: MouseEvent| {
                         evt.stop_propagation();
                         let upd = { let mut bv = bands.write(); if band_idx < bv.len() { bv[band_idx].enabled = !bv[band_idx].enabled; Some(bv[band_idx].clone()) } else { None } };
@@ -1153,8 +1153,8 @@ fn BandContextMenu(
                 style: format!("padding:4px 10px; cursor:pointer; color:{};",
                     if is_solo { "#fc0" } else { "#aaa" }),
                 onclick: {
-                    let cb = on_band_change.clone();
-                    let dismiss = on_dismiss.clone();
+                    let cb = on_band_change;
+                    let dismiss = on_dismiss;
                     move |evt: MouseEvent| {
                         evt.stop_propagation();
                         let upd = { let mut bv = bands.write(); if band_idx < bv.len() { bv[band_idx].solo = !bv[band_idx].solo; Some(bv[band_idx].clone()) } else { None } };
@@ -1171,8 +1171,8 @@ fn BandContextMenu(
             div {
                 style: "padding:4px 10px; cursor:pointer;",
                 onclick: {
-                    let cb = on_band_change.clone();
-                    let dismiss = on_dismiss.clone();
+                    let cb = on_band_change;
+                    let dismiss = on_dismiss;
                     move |evt: MouseEvent| {
                         evt.stop_propagation();
                         let upd = { let mut bv = bands.write(); if band_idx < bv.len() { bv[band_idx].gain = 0.0; Some(bv[band_idx].clone()) } else { None } };
@@ -1201,8 +1201,8 @@ fn BandContextMenu(
                                 if is_cur { "rgba(100,150,255,0.2)" } else { "transparent" },
                             ),
                             onclick: {
-                                let cb = on_band_change.clone();
-                                let dismiss = on_dismiss.clone();
+                                let cb = on_band_change;
+                                let dismiss = on_dismiss;
                                 move |evt: MouseEvent| {
                                     evt.stop_propagation();
                                     let upd = {
@@ -1230,8 +1230,8 @@ fn BandContextMenu(
             div {
                 style: "padding:4px 10px; cursor:pointer; color:rgba(255,80,80,0.8);",
                 onclick: {
-                    let cb = on_band_remove.clone();
-                    let dismiss = on_dismiss.clone();
+                    let cb = on_band_remove;
+                    let dismiss = on_dismiss;
                     move |evt: MouseEvent| {
                         evt.stop_propagation();
                         if let Some(c) = &cb { c.call(band_idx); }
@@ -1300,8 +1300,8 @@ fn generate_all_eq_curves(
     let (combined_stroke, combined_fill) = build_curve_paths(
         &frequencies,
         &combined_response,
-        &freq_to_x,
-        &db_to_y,
+        freq_to_x,
+        db_to_y,
         zero_y,
     );
 
@@ -1318,7 +1318,7 @@ fn generate_all_eq_curves(
             .collect();
 
         let (stroke, fill) =
-            build_curve_paths(&frequencies, &band_response, &freq_to_x, &db_to_y, zero_y);
+            build_curve_paths(&frequencies, &band_response, freq_to_x, db_to_y, zero_y);
         band_curves.push((idx, stroke, fill));
     }
 

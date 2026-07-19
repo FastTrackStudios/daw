@@ -83,7 +83,7 @@ impl PsolaShifter {
 
         // Scale grain size to sample rate.
         self.grain_size = ((Self::DEFAULT_GRAIN as f64 * sample_rate) / 48000.0) as usize;
-        if self.grain_size % 2 != 0 {
+        if !self.grain_size.is_multiple_of(2) {
             self.grain_size += 1;
         }
 

@@ -326,7 +326,7 @@ impl LufsMeter {
         let buf: Vec<f64> = self.block_ms_buf.iter().copied().collect();
 
         // Momentary: last 4 × 100 ms = 400 ms
-        let momentary = if buf.len() >= 1 {
+        let momentary = if !buf.is_empty() {
             let start = buf.len().saturating_sub(4);
             Self::loudness_from_blocks(&buf[start..])
         } else {

@@ -275,6 +275,12 @@ pub struct PeakWaveformPainter {
     show_transfer: bool,
 }
 
+impl Default for PeakWaveformPainter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PeakWaveformPainter {
     pub fn new() -> Self {
         Self {
@@ -343,7 +349,7 @@ impl PeakWaveformPainter {
             scene.stroke(
                 &Stroke::new(1.0),
                 transform,
-                &thresh_color,
+                thresh_color,
                 None,
                 &Line::new((x, thresh_y), (x_end, thresh_y)),
             );
@@ -365,7 +371,7 @@ impl PeakWaveformPainter {
             scene.stroke(
                 &Stroke::new(0.5),
                 transform,
-                &guide_color,
+                guide_color,
                 None,
                 &Line::new((0.0, y), (w - scale_margin, y)),
             );
@@ -373,7 +379,7 @@ impl PeakWaveformPainter {
             scene.stroke(
                 &Stroke::new(1.0),
                 transform,
-                &tick_color,
+                tick_color,
                 None,
                 &Line::new((tick_x_start, y), (tick_x_end, y)),
             );
@@ -386,7 +392,7 @@ impl PeakWaveformPainter {
         scene.fill(
             Fill::NonZero,
             transform,
-            &Color::from_rgba8(255, 255, 255, 10),
+            Color::from_rgba8(255, 255, 255, 10),
             None,
             &Rect::new(0.0, 0.0, curve_w, h),
         );
@@ -402,14 +408,14 @@ impl PeakWaveformPainter {
             scene.stroke(
                 &Stroke::new(0.5),
                 transform,
-                &grid_color,
+                grid_color,
                 None,
                 &Line::new((x, 0.0), (x, h)),
             );
             scene.stroke(
                 &Stroke::new(0.5),
                 transform,
-                &grid_color,
+                grid_color,
                 None,
                 &Line::new((0.0, y), (curve_w, y)),
             );
@@ -426,7 +432,7 @@ impl PeakWaveformPainter {
             scene.stroke(
                 &Stroke::new(1.0),
                 transform,
-                &ref_color,
+                ref_color,
                 None,
                 &Line::new(
                     (tc_db_to_x(db0), tc_db_to_y(db0)),
@@ -451,7 +457,7 @@ impl PeakWaveformPainter {
                 path.line_to((x, y));
             }
         }
-        scene.stroke(&Stroke::new(2.0), transform, &curve_color, None, &path);
+        scene.stroke(&Stroke::new(2.0), transform, curve_color, None, &path);
 
         // Input level indicator (ball on curve)
         if let Some(level) = self.input_level_db {
@@ -462,7 +468,7 @@ impl PeakWaveformPainter {
                 scene.fill(
                     Fill::NonZero,
                     transform,
-                    &Color::from_rgba8(255, 255, 255, 200),
+                    Color::from_rgba8(255, 255, 255, 200),
                     None,
                     &Circle::new((bx, by), 3.0),
                 );
@@ -586,7 +592,7 @@ impl CanvasPainter for PeakWaveformPainter {
         scene.fill(
             Fill::NonZero,
             transform,
-            &Color::from_rgba8(8, 8, 8, 255),
+            Color::from_rgba8(8, 8, 8, 255),
             None,
             &Rect::new(0.0, 0.0, w, h),
         );
@@ -635,14 +641,14 @@ impl CanvasPainter for PeakWaveformPainter {
             scene.stroke(
                 &Stroke::new(4.0),
                 transform,
-                &Color::from_rgba8(0, 200, 210, 30),
+                Color::from_rgba8(0, 200, 210, 30),
                 None,
                 &edge,
             );
             scene.stroke(
                 &Stroke::new(1.5),
                 transform,
-                &Color::from_rgba8(60, 210, 220, 200),
+                Color::from_rgba8(60, 210, 220, 200),
                 None,
                 &edge,
             );
@@ -664,14 +670,14 @@ impl CanvasPainter for PeakWaveformPainter {
             scene.stroke(
                 &Stroke::new(4.0),
                 transform,
-                &Color::from_rgba8(255, 60, 60, 30),
+                Color::from_rgba8(255, 60, 60, 30),
                 None,
                 &edge,
             );
             scene.stroke(
                 &Stroke::new(1.5),
                 transform,
-                &Color::from_rgba8(255, 80, 80, 210),
+                Color::from_rgba8(255, 80, 80, 210),
                 None,
                 &edge,
             );

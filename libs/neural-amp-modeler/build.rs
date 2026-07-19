@@ -19,8 +19,8 @@ fn main() {
         .std("c++20")
         // Include paths
         .include(&nam_core)
-        .include(&deps.join("eigen"))
-        .include(&deps.join("nlohmann"))
+        .include(deps.join("eigen"))
+        .include(deps.join("nlohmann"))
         // Unity build: all NAM sources compiled in one TU to preserve
         // static ConfigParserHelper registrations from linker stripping.
         .file("shim/nam_all.cpp")
@@ -69,8 +69,8 @@ fn main() {
         .cpp(true)
         .std("c++20")
         .include(&nam_core)
-        .include(&deps.join("eigen"))
-        .include(&deps.join("nlohmann"))
+        .include(deps.join("eigen"))
+        .include(deps.join("nlohmann"))
         .opt_level(3)
         .warnings(false);
 
@@ -96,8 +96,8 @@ fn main() {
                 .cpp(true)
                 .std("c++20")
                 .include(&nam_core)
-                .include(&deps.join("eigen"))
-                .include(&deps.join("nlohmann"))
+                .include(deps.join("eigen"))
+                .include(deps.join("nlohmann"))
                 .opt_level(3)
                 .warnings(false);
             match target_os.as_str() {

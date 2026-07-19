@@ -30,7 +30,7 @@ fn rgb565_be(r: u8, g: u8, b: u8) -> [u8; 2] {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ctx = Context::new()?;
-    let mut h = ctx.open_device_with_vid_pid(VID, PID).ok_or("S88 MK3 not found / no perm (sudo?)")?;
+    let h = ctx.open_device_with_vid_pid(VID, PID).ok_or("S88 MK3 not found / no perm (sudo?)")?;
     let _ = h.set_auto_detach_kernel_driver(true);
     h.claim_interface(IFACE)?;
     println!("claimed interface {IFACE}; sending 1280x480 colour bars to the screens…");

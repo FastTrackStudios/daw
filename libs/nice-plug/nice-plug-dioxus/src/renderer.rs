@@ -153,7 +153,7 @@ impl Renderer {
         // Paint the Dioxus DOM
         paint_scene(
             &mut VelloScenePainter::new(&mut self.scene),
-            &mut *doc.inner_mut(),
+            &mut doc.inner_mut(),
             scale as f64,
             width,
             height,

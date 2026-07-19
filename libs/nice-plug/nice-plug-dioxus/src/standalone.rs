@@ -415,7 +415,7 @@ pub fn render_screenshot(
     // Paint the DOM
     paint_scene(
         &mut VelloScenePainter::new(&mut scene),
-        &mut *dioxus_doc.inner_mut(),
+        &mut dioxus_doc.inner_mut(),
         1.0, // scale
         width,
         height,
@@ -471,7 +471,7 @@ pub fn render_screenshot(
     let bytes_per_pixel = 4u32;
     let unpadded_bpr = width * bytes_per_pixel;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let padded_bpr = (unpadded_bpr + align - 1) / align * align;
+    let padded_bpr = unpadded_bpr.div_ceil(align) * align;
 
     let staging = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("screenshot staging"),

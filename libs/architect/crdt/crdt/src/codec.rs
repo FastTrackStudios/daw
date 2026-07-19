@@ -344,8 +344,7 @@ pub fn text_child(m: &LoroMap, key: &str) -> Result<LoroText, RepoError> {
             "expected text container at `{key}`, got {other:?}"
         )));
     }
-    m.get_or_create_container(key, LoroText::new())
-        .map_err(loro_err)
+    m.ensure_mergeable_text(key).map_err(loro_err)
 }
 
 /// Read the current text. Returns "" if the key is absent.
@@ -369,9 +368,7 @@ pub fn read_text_with_migration(m: &LoroMap, key: &str) -> Result<String, RepoEr
         Some(loro::ValueOrContainer::Value(LoroValue::String(s))) => {
             let legacy = (*s).to_string();
             m.delete(key).map_err(loro_err)?;
-            let t = m
-                .get_or_create_container(key, LoroText::new())
-                .map_err(loro_err)?;
+            let t = m.ensure_mergeable_text(key).map_err(loro_err)?;
             if !legacy.is_empty() {
                 t.insert(0, &legacy).map_err(loro_err)?;
             }

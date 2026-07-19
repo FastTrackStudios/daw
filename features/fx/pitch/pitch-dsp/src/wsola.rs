@@ -400,7 +400,7 @@ impl WsolaShifter {
 
         // Scale grain size to actual sample rate.
         let mut grain = ((self.base_grain_size as f64 * sample_rate) / 48000.0) as usize;
-        if grain % 2 != 0 {
+        if !grain.is_multiple_of(2) {
             grain += 1;
         }
         grain = grain.max(32);
@@ -460,7 +460,7 @@ impl WsolaShifter {
 
     pub fn latency(&self) -> usize {
         let mut grain = ((self.base_grain_size as f64 * self.sample_rate) / 48000.0) as usize;
-        if grain % 2 != 0 {
+        if !grain.is_multiple_of(2) {
             grain += 1;
         }
         grain.max(32)

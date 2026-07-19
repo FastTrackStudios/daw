@@ -181,7 +181,7 @@ impl raw_window_handle::HasWindowHandle for RwhAdapter {
         let raw = match self.0 {
             ParentWindowHandle::X11Window(window) => {
                 let handle = raw_window_handle::XcbWindowHandle::new(
-                    NonZeroU32::new(window as u32).expect("X11 window ID should not be 0"),
+                    NonZeroU32::new(window).expect("X11 window ID should not be 0"),
                 );
                 RawWindowHandle::Xcb(handle)
             }

@@ -40,15 +40,14 @@ pub async fn run_all_steps(ctx: InstallContext, tx: EventSender) -> eyre::Result
     }
 
     // Resolve latest REAPER version (non-fatal — falls back to hardcoded)
-    if let Some(version) = plan::fetch_latest_reaper_version().await {
-        if version != plan.reaper_version {
+    if let Some(version) = plan::fetch_latest_reaper_version().await
+        && version != plan.reaper_version {
             info!(
                 "Using latest REAPER version {version} (was {})",
                 plan.reaper_version
             );
             plan.reaper_version = version;
         }
-    }
 
     info!("Starting installation to {}", plan.install_root.display());
     tokio::fs::create_dir_all(&plan.install_root).await?;

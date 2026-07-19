@@ -51,15 +51,14 @@ impl InstallPlan {
         let mut errors = Vec::new();
 
         // Check parent directory is writable
-        if let Some(parent) = self.install_root.parent() {
-            if parent.exists()
+        if let Some(parent) = self.install_root.parent()
+            && parent.exists()
                 && std::fs::metadata(parent)
                     .map(|m| m.permissions().readonly())
                     .unwrap_or(true)
             {
                 errors.push(format!("Directory {} is not writable", parent.display()));
             }
-        }
 
         if errors.is_empty() {
             Ok(())

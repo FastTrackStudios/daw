@@ -88,9 +88,9 @@ pub mod admin {
 
             // Precise path: valid session for THIS org + real membership
             // rows. A foreign/absent token just falls through (no error).
-            if !token.is_empty() {
-                if let Ok(bundle) = self.current_session(CurrentSession { token }).await {
-                    if let Some(org_id) = bundle.session.active_organization_id {
+            if !token.is_empty()
+                && let Ok(bundle) = self.current_session(CurrentSession { token }).await
+                    && let Some(org_id) = bundle.session.active_organization_id {
                         let members = self.storage.list_members_by_organization(org_id).await?;
                         if !members.is_empty() {
                             let mut out = Vec::with_capacity(members.len());
@@ -113,8 +113,6 @@ pub mod admin {
                             return Ok(dedupe_members(out));
                         }
                     }
-                }
-            }
 
             // Default: enumerate the org store's users (no membership
             // rows, or no valid session for this org).

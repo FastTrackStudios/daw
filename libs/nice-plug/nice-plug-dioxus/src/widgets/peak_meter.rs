@@ -111,7 +111,7 @@ pub struct PeakMeterWithHoldProps {
 #[component]
 pub fn PeakMeterWithHold(props: PeakMeterWithHoldProps) -> Element {
     let mut peak_level = use_signal(|| f32::NEG_INFINITY);
-    let mut peak_time = use_signal(|| std::time::Instant::now());
+    let mut peak_time = use_signal(std::time::Instant::now);
 
     let hold_time = Duration::from_millis(props.hold_time_ms);
 

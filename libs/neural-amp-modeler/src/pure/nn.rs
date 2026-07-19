@@ -59,7 +59,7 @@ impl Conv1x1 {
         bias: bool,
         groups: usize,
     ) -> Result<Self, String> {
-        if groups == 0 || in_channels % groups != 0 || out_channels % groups != 0 {
+        if groups == 0 || !in_channels.is_multiple_of(groups) || !out_channels.is_multiple_of(groups) {
             return Err(format!(
                 "Conv1x1: channels ({in_channels} in / {out_channels} out) must divide evenly by groups ({groups})"
             ));
@@ -151,7 +151,7 @@ impl Conv1D {
         dilation: usize,
         groups: usize,
     ) -> Result<Self, String> {
-        if groups == 0 || in_channels % groups != 0 || out_channels % groups != 0 {
+        if groups == 0 || !in_channels.is_multiple_of(groups) || !out_channels.is_multiple_of(groups) {
             return Err(format!(
                 "Conv1D: channels ({in_channels} in / {out_channels} out) must divide evenly by groups ({groups})"
             ));

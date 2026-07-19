@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 2) USB bulk to the vendor interface.
     let ctx = Context::new()?;
-    let mut h = ctx.open_device_with_vid_pid(VID, PID).ok_or("no device / sudo?")?;
+    let h = ctx.open_device_with_vid_pid(VID, PID).ok_or("no device / sudo?")?;
     let _ = h.set_auto_detach_kernel_driver(true);
     h.claim_interface(IFACE)?;
     let px = bars();

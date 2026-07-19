@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use eyre::Context;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::progress::{EventSender, InstallEvent, InstallStep};
 

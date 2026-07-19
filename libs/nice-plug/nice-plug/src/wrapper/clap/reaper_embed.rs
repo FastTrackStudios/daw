@@ -22,7 +22,7 @@ use crate::prelude::{
 
 /// The extension ID for REAPER's embedded UI CLAP extension.
 pub const CLAP_EXT_REAPER_EMBED_UI: &CStr =
-    unsafe { CStr::from_bytes_with_nul_unchecked(b"cockos.reaper_embedui\0") };
+    unsafe { c"cockos.reaper_embedui" };
 
 /// REAPER FX embed message constants (from reaper_plugin_fx_embed.h)
 pub mod embed_msg {

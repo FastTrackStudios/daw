@@ -99,7 +99,7 @@ impl SpectrumAnalyzer {
     /// The default of 2048 is a good starting point.
     pub fn new(sample_rate: f32, fft_size: usize) -> Self {
         assert!(
-            fft_size >= 4 && fft_size % 2 == 0,
+            fft_size >= 4 && fft_size.is_multiple_of(2),
             "fft_size must be even and >= 4"
         );
 
@@ -108,7 +108,7 @@ impl SpectrumAnalyzer {
         let hop_size = fft_size / 2; // 50% overlap
 
         // Smooth time constant ~30 ms: alpha = exp(-hop / (fs * 0.030))
-        let smooth_alpha = (-1.0_f32 * hop_size as f32 / (sample_rate * 0.030)).exp();
+        let smooth_alpha = (-(hop_size as f32) / (sample_rate * 0.030)).exp();
 
         // RMS time constant ~300 ms
         let rms_alpha = (-1.0_f32 / (sample_rate * 0.300)).exp();
@@ -214,12 +214,12 @@ impl SpectrumAnalyzer {
 
     /// Rebuild the FFT engine for a new size.
     fn rebuild_fft(&mut self, new_size: usize) {
-        if new_size < 4 || new_size % 2 != 0 {
+        if new_size < 4 || !new_size.is_multiple_of(2) {
             return;
         }
         let num_bins = new_size / 2 + 1;
         let hop_size = new_size / 2;
-        let smooth_alpha = (-1.0_f32 * hop_size as f32 / (self.sample_rate * 0.030)).exp();
+        let smooth_alpha = (-(hop_size as f32) / (self.sample_rate * 0.030)).exp();
         let window = hann_window(new_size);
         let mut planner = RealFftPlanner::<f32>::new();
         let r2c = planner.plan_fft_forward(new_size);

@@ -50,6 +50,12 @@ pub struct TransferCurvePainter {
     range_db: f32,
 }
 
+impl Default for TransferCurvePainter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TransferCurvePainter {
     pub fn new() -> Self {
         Self {
@@ -93,7 +99,7 @@ impl CanvasPainter for TransferCurvePainter {
         scene.fill(
             Fill::NonZero,
             transform,
-            &Color::from_rgba8(14, 14, 18, 255),
+            Color::from_rgba8(14, 14, 18, 255),
             None,
             &Rect::new(0.0, 0.0, w, h),
         );
@@ -108,7 +114,7 @@ impl CanvasPainter for TransferCurvePainter {
             scene.stroke(
                 &grid_stroke,
                 transform,
-                &grid_color,
+                grid_color,
                 None,
                 &Line::new((x, 0.0), (x, h)),
             );
@@ -116,7 +122,7 @@ impl CanvasPainter for TransferCurvePainter {
             scene.stroke(
                 &grid_stroke,
                 transform,
-                &grid_color,
+                grid_color,
                 None,
                 &Line::new((0.0, y), (w, y)),
             );
@@ -135,7 +141,7 @@ impl CanvasPainter for TransferCurvePainter {
             scene.stroke(
                 &Stroke::new(1.0),
                 transform,
-                &ref_color,
+                ref_color,
                 None,
                 &Line::new((db_to_x(db0), db_to_y(db0)), (db_to_x(db1), db_to_y(db1))),
             );
@@ -157,7 +163,7 @@ impl CanvasPainter for TransferCurvePainter {
                 path.line_to((x, y));
             }
         }
-        scene.stroke(&Stroke::new(2.0), transform, &accent_color, None, &path);
+        scene.stroke(&Stroke::new(2.0), transform, accent_color, None, &path);
 
         // Threshold crosshair
         let crosshair_color = Color::from_rgba8(255, 100, 100, 77); // rgba(255,100,100,0.3)
@@ -166,14 +172,14 @@ impl CanvasPainter for TransferCurvePainter {
         scene.stroke(
             &Stroke::new(1.0),
             transform,
-            &crosshair_color,
+            crosshair_color,
             None,
             &Line::new((thresh_x, 0.0), (thresh_x, h)),
         );
         scene.stroke(
             &Stroke::new(1.0),
             transform,
-            &crosshair_color,
+            crosshair_color,
             None,
             &Line::new((0.0, thresh_y), (w, thresh_y)),
         );
@@ -186,7 +192,7 @@ impl CanvasPainter for TransferCurvePainter {
             scene.fill(
                 Fill::NonZero,
                 transform,
-                &Color::from_rgba8(255, 255, 255, 230),
+                Color::from_rgba8(255, 255, 255, 230),
                 None,
                 &Circle::new((bx, by), 3.0),
             );
