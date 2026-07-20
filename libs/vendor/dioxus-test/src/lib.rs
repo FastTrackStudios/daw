@@ -141,6 +141,9 @@ mod keyboard;
 pub mod matchers;
 mod result;
 
+/// Re-exported for tests that build key events (FTS extension).
+pub use keyboard_types;
+
 pub use condition::{AllElementsCondition, ElementCondition, MAX_TRIES};
 pub use document::{DocumentTester, by_testid, render};
 pub use element::ResolvedElement;

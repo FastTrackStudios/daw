@@ -1,0 +1,118 @@
+//! Shared harness for the native (Blitz) component tests.
+//!
+//! `mount` renders `<Editor>` headlessly through `dioxus-test`, focuses
+//! it, and returns the tester. The harness component also renders probe
+//! divs mirroring the Rust-side state (selection head/anchor, vim mode,
+//! raw doc text) so tests can assert on editor *state*, not just HTML.
+
+use dioxus::prelude::*;
+use dioxus_test::{DocumentTester, by_testid, render};
+use editor_state::{EditorState, Selection};
+use editor_view::Editor;
+use editor_vim::VimState;
+
+pub use dioxus_test::keyboard_types::{Key, Modifiers};
+pub use dioxus_test::matchers::{contains_substring, eq, inner_html};
+
+/// Per-test configuration, delivered to [`Harness`] via root context.
+#[derive(Clone)]
+pub struct Setup {
+    pub text: &'static str,
+    pub caret: usize,
+    pub vim: bool,
+}
+
+impl Setup {
+    pub fn text(text: &'static str) -> Self {
+        Self {
+            text,
+            caret: 0,
+            vim: false,
+        }
+    }
+    pub fn caret(mut self, caret: usize) -> Self {
+        self.caret = caret;
+        self
+    }
+    pub fn vim(mut self) -> Self {
+        self.vim = true;
+        self
+    }
+}
+
+#[component]
+pub fn Harness() -> Element {
+    let setup = use_context::<Setup>();
+    let state = use_signal(|| {
+        let mut s = EditorState::new(setup.text);
+        s.selection = Selection::caret(setup.caret);
+        s
+    });
+    let vim_sig = use_signal(VimState::new);
+    let vim = if setup.vim { Some(vim_sig) } else { None };
+
+    let s = state.read();
+    let primary = s.selection.primary();
+    let mode = format!("{:?}", vim_sig.read().mode);
+    let doc = s.doc.to_string();
+    drop(s);
+
+    rsx! {
+        Editor { state, vim }
+        div { "data-testid": "head", "{primary.head}" }
+        div { "data-testid": "anchor", "{primary.anchor}" }
+        div { "data-testid": "mode", "{mode}" }
+        div { "data-testid": "doc", "{doc}" }
+    }
+}
+
+/// Render + focus the editor. Returns the tester.
+pub fn mount(setup: Setup) -> DocumentTester {
+    let tester = render(Harness).with_root_context(setup).build();
+    tester
+        .query(".editor-root")
+        .immediately()
+        .expect("editor root should render")
+        .focus();
+    tester
+}
+
+/// Assert the probe with `testid` shows exactly `value` (async — lets
+/// pending renders flush first).
+pub async fn expect_probe(tester: &DocumentTester, testid: &str, value: &str) {
+    tester
+        .query(by_testid(testid))
+        .expect(inner_html(eq(value.to_string())))
+        .await
+        .unwrap_or_else(|e| panic!("probe {testid} != {value}: {e:?}"));
+}
+
+/// Press a sequence of vim-style keys, where each &str is either a
+/// single character or a named key ("Escape", "Enter", ...).
+pub fn press(tester: &DocumentTester, keys: &[&str]) {
+    for k in keys {
+        let key = parse_key(k);
+        tester.press_key(key, Modifiers::empty());
+    }
+}
+
+pub fn parse_key(k: &str) -> Key {
+    if k.chars().count() == 1 {
+        Key::Character(k.to_string())
+    } else {
+        match k {
+            "Escape" => Key::Escape,
+            "Enter" => Key::Enter,
+            "Backspace" => Key::Backspace,
+            "Delete" => Key::Delete,
+            "Tab" => Key::Tab,
+            "ArrowLeft" => Key::ArrowLeft,
+            "ArrowRight" => Key::ArrowRight,
+            "ArrowUp" => Key::ArrowUp,
+            "ArrowDown" => Key::ArrowDown,
+            "Home" => Key::Home,
+            "End" => Key::End,
+            other => panic!("unmapped key name: {other}"),
+        }
+    }
+}

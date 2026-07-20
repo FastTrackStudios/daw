@@ -105,6 +105,37 @@ pub fn text_input_spec(cur: &EditorState, press: &KeySpec) -> Option<Transaction
     let p = cur.selection.primary();
     let (from, to) = (p.from(), p.to());
 
+    // Deletion keys — contenteditable's other default action. A non-empty
+    // selection deletes itself; a caret eats one char backward/forward
+    // (char-wise via the rope, so multi-byte graphemes stay intact).
+    match press.key.as_str() {
+        "Backspace" | "Delete" => {
+            let rope = cur.doc.rope();
+            let (df, dt) = if from != to {
+                (from, to)
+            } else if press.key == "Backspace" {
+                if from == 0 {
+                    return None;
+                }
+                let ci = rope.byte_to_char(from);
+                (rope.char_to_byte(ci - 1), from)
+            } else {
+                if to >= rope.len_bytes() {
+                    return None;
+                }
+                let ci = rope.byte_to_char(to);
+                (to, rope.char_to_byte(ci + 1))
+            };
+            return Some(
+                TransactionSpec::new()
+                    .changes(Changes::replace(df..dt, ""))
+                    .selection(Selection::caret(df))
+                    .annotate("origin", "native-input"),
+            );
+        }
+        _ => {}
+    }
+
     let inserted: &str = match press.key.as_str() {
         "Enter" => "\n",
         "Tab" => "\t",
@@ -331,13 +362,53 @@ mod tests {
     fn named_keys_and_modified_keys_are_not_text() {
         assert!(text_input_spec(&at("a", 1), &key("ArrowLeft")).is_none());
         assert!(text_input_spec(&at("a", 1), &key("Escape")).is_none());
-        assert!(text_input_spec(&at("a", 1), &key("Backspace")).is_none());
         // Ctrl/Meta chords are commands, never literal text.
         let ctrl_a = KeySpec {
             ctrl: true,
             ..key("a")
         };
         assert!(text_input_spec(&at("a", 1), &ctrl_a).is_none());
+    }
+
+    #[test]
+    fn backspace_deletes_char_backward() {
+        let st = at("abc", 2);
+        let spec = text_input_spec(&st, &key("Backspace")).expect("backspace edits");
+        let next = st.update(spec);
+        assert_eq!(next.doc.to_string(), "ac");
+        assert_eq!(next.selection.primary().head, 1);
+        // At doc start there is nothing to delete.
+        assert!(text_input_spec(&at("abc", 0), &key("Backspace")).is_none());
+    }
+
+    #[test]
+    fn delete_deletes_char_forward() {
+        let st = at("abc", 1);
+        let spec = text_input_spec(&st, &key("Delete")).expect("delete edits");
+        let next = st.update(spec);
+        assert_eq!(next.doc.to_string(), "ac");
+        assert_eq!(next.selection.primary().head, 1);
+        // At doc end there is nothing to delete.
+        assert!(text_input_spec(&at("abc", 3), &key("Delete")).is_none());
+    }
+
+    #[test]
+    fn deletion_keys_eat_a_selection_whole() {
+        let mut st = at("hello", 0);
+        st.selection = Selection::single(Range::new(1, 4));
+        let spec = text_input_spec(&st, &key("Backspace")).expect("selection deletes");
+        let next = st.update(spec);
+        assert_eq!(next.doc.to_string(), "ho");
+        assert_eq!(next.selection.primary().head, 1);
+    }
+
+    #[test]
+    fn backspace_is_charwise_over_multibyte() {
+        let st = at("aé", 3); // 'é' is 2 bytes
+        let spec = text_input_spec(&st, &key("Backspace")).expect("backspace edits");
+        let next = st.update(spec);
+        assert_eq!(next.doc.to_string(), "a");
+        assert_eq!(next.selection.primary().head, 1);
     }
 
     #[test]

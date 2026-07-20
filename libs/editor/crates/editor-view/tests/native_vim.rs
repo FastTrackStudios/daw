@@ -1,0 +1,165 @@
+//! Vim behavior through the real rendered component — mode transitions,
+//! motions, operators, visual mode, undo — driven by keydown events
+//! through Blitz focus routing, asserted via the mode/head/doc probes
+//! AND the mode class on the rendered root.
+#![cfg(feature = "native")]
+
+mod common;
+use common::*;
+use dioxus_test::matchers::{attribute, some};
+
+async fn expect_root_class(t: &dioxus_test::DocumentTester, fragment: &str) {
+    t.query(".editor-root")
+        .expect(attribute(
+            "class",
+            some(contains_substring(fragment.to_string())),
+        ))
+        .await
+        .unwrap_or_else(|e| panic!("root class should contain {fragment}: {e:?}"));
+}
+
+#[tokio::test]
+async fn starts_in_normal_mode_with_class() {
+    let t = mount(Setup::text("abc").vim());
+    expect_probe(&t, "mode", "Normal").await;
+    expect_root_class(&t, "vim-mode-normal").await;
+}
+
+#[tokio::test]
+async fn i_enters_insert_escape_returns() {
+    let t = mount(Setup::text("abc").vim());
+    press(&t, &["i"]);
+    expect_probe(&t, "mode", "Insert").await;
+    expect_root_class(&t, "vim-mode-insert").await;
+    press(&t, &["Escape"]);
+    expect_probe(&t, "mode", "Normal").await;
+    expect_root_class(&t, "vim-mode-normal").await;
+}
+
+#[tokio::test]
+async fn insert_mode_typing_flows_to_doc() {
+    let t = mount(Setup::text("bc").vim());
+    press(&t, &["i"]);
+    t.type_text("a");
+    expect_probe(&t, "doc", "abc").await;
+    press(&t, &["Escape"]);
+    expect_probe(&t, "mode", "Normal").await;
+}
+
+#[tokio::test]
+async fn normal_mode_letters_do_not_insert() {
+    let t = mount(Setup::text("abc").vim());
+    press(&t, &["j", "k", "x"]); // x deletes, j/k move — none insert
+    expect_probe(&t, "doc", "bc").await; // x deleted 'a'
+}
+
+#[tokio::test]
+async fn hjkl_moves_in_normal_mode() {
+    let t = mount(Setup::text("abc\ndef").vim());
+    press(&t, &["l", "l"]);
+    expect_probe(&t, "head", "2").await;
+    press(&t, &["j"]);
+    expect_probe(&t, "head", "6").await;
+    press(&t, &["h"]);
+    expect_probe(&t, "head", "5").await;
+    press(&t, &["k"]);
+    expect_probe(&t, "head", "1").await;
+}
+
+#[tokio::test]
+async fn counts_multiply_motions() {
+    let t = mount(Setup::text("abcdefgh").vim());
+    press(&t, &["3", "l"]);
+    expect_probe(&t, "head", "3").await;
+}
+
+#[tokio::test]
+async fn w_and_b_word_motions() {
+    let t = mount(Setup::text("foo bar baz").vim());
+    press(&t, &["w"]);
+    expect_probe(&t, "head", "4").await;
+    press(&t, &["w"]);
+    expect_probe(&t, "head", "8").await;
+    press(&t, &["b"]);
+    expect_probe(&t, "head", "4").await;
+}
+
+#[tokio::test]
+async fn dw_deletes_word() {
+    let t = mount(Setup::text("foo bar").vim());
+    press(&t, &["d", "w"]);
+    expect_probe(&t, "doc", "bar").await;
+    expect_probe(&t, "head", "0").await;
+}
+
+#[tokio::test]
+async fn dd_deletes_line() {
+    let t = mount(Setup::text("one\ntwo\nthree").caret(5).vim());
+    press(&t, &["d", "d"]);
+    expect_probe(&t, "doc", "one\nthree").await;
+}
+
+#[tokio::test]
+async fn x_deletes_char_under_cursor() {
+    let t = mount(Setup::text("abc").caret(1).vim());
+    press(&t, &["x"]);
+    expect_probe(&t, "doc", "ac").await;
+}
+
+#[tokio::test]
+async fn o_opens_line_below_in_insert() {
+    let t = mount(Setup::text("ab").vim());
+    press(&t, &["o"]);
+    expect_probe(&t, "mode", "Insert").await;
+    expect_probe(&t, "doc", "ab\n").await;
+    t.type_text("cd");
+    expect_probe(&t, "doc", "ab\ncd").await;
+}
+
+#[tokio::test]
+async fn shift_o_opens_line_above() {
+    // Regression guard for the shift-normalization path: Blitz reports
+    // 'o' + shift, the editor must uppercase it before vim sees it.
+    let t = mount(Setup::text("ab").caret(1).vim());
+    t.press_key(parse_key("O"), Modifiers::SHIFT);
+    expect_probe(&t, "mode", "Insert").await;
+    expect_probe(&t, "doc", "\nab").await;
+}
+
+#[tokio::test]
+async fn visual_mode_extends_and_deletes() {
+    let t = mount(Setup::text("abcdef").vim());
+    press(&t, &["v", "l", "l"]);
+    expect_probe(&t, "mode", "VisualChar").await;
+    expect_root_class(&t, "vim-mode-visual").await;
+    press(&t, &["d"]);
+    expect_probe(&t, "doc", "def").await;
+    expect_probe(&t, "mode", "Normal").await;
+}
+
+#[tokio::test]
+async fn undo_restores_deleted_text() {
+    let t = mount(Setup::text("foo bar").vim());
+    press(&t, &["d", "w"]);
+    expect_probe(&t, "doc", "bar").await;
+    press(&t, &["u"]);
+    expect_probe(&t, "doc", "foo bar").await;
+}
+
+#[tokio::test]
+async fn a_appends_after_cursor() {
+    let t = mount(Setup::text("ac").vim());
+    press(&t, &["a"]);
+    expect_probe(&t, "mode", "Insert").await;
+    t.type_text("b");
+    expect_probe(&t, "doc", "abc").await;
+}
+
+#[tokio::test]
+async fn dollar_and_zero_line_motions() {
+    let t = mount(Setup::text("hello\nworld").caret(2).vim());
+    press(&t, &["$"]);
+    expect_probe(&t, "head", "4").await; // on 'o' (normal-mode caret sits ON last char)
+    press(&t, &["0"]);
+    expect_probe(&t, "head", "0").await;
+}
