@@ -139,6 +139,7 @@ mod document;
 mod element;
 mod keyboard;
 pub mod matchers;
+mod pointer;
 mod result;
 
 /// Re-exported for tests that build key events (FTS extension).
