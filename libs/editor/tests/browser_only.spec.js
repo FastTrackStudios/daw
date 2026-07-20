@@ -104,6 +104,33 @@ test.describe("browser-only behaviors", () => {
     expect(state.text).toBe("xかな");
   });
 
+  test("holding k at the top never drops into insert mode", async ({
+    page,
+  }) => {
+    // Regression: with a frontmatter properties widget at the top,
+    // repeated `k` used to walk the DOM selection into a property
+    // cell (via the visual-arrow Selection.modify shortcut), the
+    // cell's focus flipped vim to Insert, and further `k`s typed
+    // "kkkk" into the doc.
+    const doc = "---\ntitle: t\ntags: []\n---\nbody line";
+    await open(page, doc, { vim: true });
+    // Down to the body line, then hammer `k` well past the top.
+    await page.keyboard.press("G");
+    for (let i = 0; i < 10; i++) {
+      await page.keyboard.press("k");
+    }
+    // Still in Normal mode…
+    await expect(page.locator(".vim-mode")).toHaveText("NORMAL");
+    // …and more `k`s must not type anything.
+    await page.keyboard.press("k");
+    await page.keyboard.press("k");
+    await page.keyboard.press("k");
+    const state = await readState(page);
+    expect(state.text).not.toContain("kk");
+    expect(state.text).toBe(doc);
+    await expect(page.locator(".vim-mode")).toHaveText("NORMAL");
+  });
+
   test("vim j moves by VISUAL row on a soft-wrapped line", async ({
     page,
   }) => {
