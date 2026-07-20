@@ -117,7 +117,11 @@ fn render_horizontal(props: ProgressBarProps) -> Element {
                 div {
                     class: "absolute inset-0 flex items-center px-3 text-sm font-medium pointer-events-none",
                     style: if props.always_black_bg {
-                        "color: white; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);".to_string()
+                        // Theme-adaptive: card-foreground reads correctly on the
+                        // card-token background in BOTH light (Task) and dark
+                        // (desktop Signal stage) themes — the old hardcoded
+                        // `white` rendered as an invisible white box in light mode.
+                        "color: var(--color-card-foreground); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);".to_string()
                     } else if props.is_inactive {
                         format!("color: {};", props.bright_color)
                     } else {
