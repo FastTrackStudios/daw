@@ -593,7 +593,12 @@ pub fn delete_backward(state: &EditorState) -> Option<TransactionSpec> {
     if from == 0 {
         return None;
     }
-    Some(TransactionSpec::new().changes(Changes::delete(from - 1..from)))
+    // Char-wise via the rope — `from - 1` would split a multi-byte
+    // character and panic downstream on the invalid boundary.
+    let rope = state.doc.rope();
+    let ci = rope.byte_to_char(from);
+    let prev = rope.char_to_byte(ci - 1);
+    Some(TransactionSpec::new().changes(Changes::delete(prev..from)))
 }
 
 /// Toggle bold markdown markers (`**…**`) at the caret /
@@ -943,7 +948,12 @@ pub fn delete_forward(state: &EditorState) -> Option<TransactionSpec> {
     if to >= state.doc.len() {
         return None;
     }
-    Some(TransactionSpec::new().changes(Changes::delete(to..to + 1)))
+    // Char-wise via the rope — `to + 1` would split a multi-byte
+    // character and panic downstream on the invalid boundary.
+    let rope = state.doc.rope();
+    let ci = rope.byte_to_char(to);
+    let next = rope.char_to_byte(ci + 1);
+    Some(TransactionSpec::new().changes(Changes::delete(to..next)))
 }
 
 #[cfg(test)]

@@ -105,46 +105,34 @@ pub fn text_input_spec(cur: &EditorState, press: &KeySpec) -> Option<Transaction
     let p = cur.selection.primary();
     let (from, to) = (p.from(), p.to());
 
-    // Deletion keys — contenteditable's other default action. A non-empty
-    // selection deletes itself; a caret eats one char backward/forward
-    // (char-wise via the rope, so multi-byte graphemes stay intact).
+    // Default actions the web path gets from contenteditable +
+    // `beforeinput` interception, expressed through the SAME shared
+    // commands (`editor_state::commands`) the web bridge calls — one
+    // implementation, two renderers:
+    //   Enter     → list/task/blockquote continuation (plain \n fallback)
+    //   Backspace → bracket-pair aware, char-wise backward delete
+    //   Delete    → char-wise forward delete
+    //   brackets  → auto-pair / skip-over-closer
+    let tag = |spec: TransactionSpec| Some(spec.annotate("origin", "native-input"));
     match press.key.as_str() {
-        "Backspace" | "Delete" => {
-            let rope = cur.doc.rope();
-            let (df, dt) = if from != to {
-                (from, to)
-            } else if press.key == "Backspace" {
-                if from == 0 {
-                    return None;
-                }
-                let ci = rope.byte_to_char(from);
-                (rope.char_to_byte(ci - 1), from)
-            } else {
-                if to >= rope.len_bytes() {
-                    return None;
-                }
-                let ci = rope.byte_to_char(to);
-                (to, rope.char_to_byte(ci + 1))
-            };
-            return Some(
-                TransactionSpec::new()
-                    .changes(Changes::replace(df..dt, ""))
-                    .selection(Selection::caret(df))
-                    .annotate("origin", "native-input"),
-            );
-        }
+        "Enter" => return editor_state::commands::enter_continue_list(cur).and_then(tag),
+        "Backspace" => return editor_state::commands::delete_backward(cur).and_then(tag),
+        "Delete" => return editor_state::commands::delete_forward(cur).and_then(tag),
         _ => {}
     }
 
     let inserted: &str = match press.key.as_str() {
-        "Enter" => "\n",
         "Tab" => "\t",
         // A single typed grapheme arrives as `Key::Character`. Named keys
-        // ("ArrowLeft", "Escape", "Backspace", …) are multi-char strings
-        // we must not insert; gate on "exactly one char, not a control".
+        // ("ArrowLeft", "Escape", …) are multi-char strings we must not
+        // insert; gate on "exactly one char, not a control".
         other if is_text_input(other) => other,
         _ => return None,
     };
+
+    if let Some(spec) = editor_state::commands::insert_bracket(cur, inserted) {
+        return tag(spec);
+    }
 
     Some(
         TransactionSpec::new()

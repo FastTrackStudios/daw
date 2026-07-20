@@ -68,6 +68,43 @@ async fn backspace_joins_lines() {
 }
 
 #[tokio::test]
+async fn enter_continues_bullet_list() {
+    // Shared-command behavior (editor_state::commands::enter_continue_list)
+    // — the same code the web bridge routes Enter through.
+    let t = mount(Setup::text("- foo").caret(5));
+    press(&t, &["Enter"]);
+    expect_probe(&t, "doc", "- foo\n- ").await;
+    expect_probe(&t, "head", "8").await;
+}
+
+#[tokio::test]
+async fn enter_on_empty_list_item_exits_list() {
+    let t = mount(Setup::text("- foo\n- ").caret(8));
+    press(&t, &["Enter"]);
+    expect_probe(&t, "doc", "- foo\n").await;
+}
+
+#[tokio::test]
+async fn bracket_autopairs_and_backspace_removes_pair() {
+    let t = mount(Setup::text(""));
+    t.type_text("(");
+    expect_probe(&t, "doc", "()").await;
+    expect_probe(&t, "head", "1").await;
+    press(&t, &["Backspace"]);
+    expect_probe(&t, "doc", "").await;
+}
+
+#[tokio::test]
+async fn multibyte_typing_and_backspace() {
+    let t = mount(Setup::text(""));
+    t.type_text("aé");
+    expect_probe(&t, "doc", "aé").await;
+    press(&t, &["Backspace"]);
+    expect_probe(&t, "doc", "a").await;
+    expect_probe(&t, "head", "1").await;
+}
+
+#[tokio::test]
 async fn multi_char_typing_renders() {
     let t = mount(Setup::text(""));
     t.type_text("hello world");
