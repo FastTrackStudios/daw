@@ -165,8 +165,10 @@ fn draw_badge(pixmap: &mut Pixmap, style: &RigStyle, font: &FontRef, sz: f32) {
     let badge_rect = make_rounded_rect(badge_x, badge_y, badge_w, badge_h, badge_radius);
 
     // Shadow
-    let mut paint = Paint::default();
-    paint.anti_alias = true;
+    let mut paint = Paint {
+        anti_alias: true,
+        ..Paint::default()
+    };
     for offset in [2.0_f32, 1.0] {
         paint.set_color(Color::from_rgba(0.0, 0.0, 0.0, 0.15).unwrap());
         let sr = make_rounded_rect(badge_x, badge_y - offset, badge_w, badge_h, badge_radius);
@@ -181,8 +183,10 @@ fn draw_badge(pixmap: &mut Pixmap, style: &RigStyle, font: &FontRef, sz: f32) {
     paint.set_color(Color::from_rgba(
         (style.r * 0.5).min(1.0), (style.g * 0.5).min(1.0), (style.b * 0.5).min(1.0), 0.8
     ).unwrap());
-    let mut stroke = Stroke::default();
-    stroke.width = (sz * 0.012).max(1.0);
+    let stroke = Stroke {
+        width: (sz * 0.012).max(1.0),
+        ..Stroke::default()
+    };
     pixmap.stroke_path(&badge_rect, &paint, &stroke, Transform::identity(), None);
 
     // Text

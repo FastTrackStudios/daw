@@ -21,8 +21,7 @@ pub struct GoldenClip {
     last_r: f64,
 }
 
-const PHI: f64 = 1.618033988749894;
-const INV_PHI: f64 = 0.618033988749894;
+const INV_PHI: f64 = 0.618033988749894; // 1/φ, φ = 1.618033988749894
 const ONE_MINUS_INV_PHI: f64 = 0.381966011250105;
 
 impl GoldenClip {

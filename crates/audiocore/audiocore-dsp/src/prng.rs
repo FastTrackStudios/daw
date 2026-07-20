@@ -14,6 +14,7 @@ impl XorShift32 {
     }
 
     #[inline]
+    #[allow(clippy::should_implement_trait)] // xorshift idiom, not an Iterator
     pub fn next(&mut self) -> u32 {
         self.state ^= self.state << 13;
         self.state ^= self.state >> 17;

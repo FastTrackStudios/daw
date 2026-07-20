@@ -78,8 +78,8 @@ impl HasDisplayHandle for NativeHandleWrapper {
 impl HasWindowHandle for NativeHandleWrapper {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
         use raw_window_handle::XlibWindowHandle;
-        let mut handle = XlibWindowHandle::new(self.window.try_into().unwrap_or(0));
-        handle.visual_id = self.visual_id.try_into().unwrap_or(0);
+        let mut handle = XlibWindowHandle::new(self.window);
+        handle.visual_id = self.visual_id.into();
         let raw = RawWindowHandle::Xlib(handle);
         Ok(unsafe { WindowHandle::borrow_raw(raw) })
     }

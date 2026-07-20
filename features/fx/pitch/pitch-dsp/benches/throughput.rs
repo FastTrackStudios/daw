@@ -220,8 +220,8 @@ fn main() {
     // Sort by mode, then algo name for clean output.
     results.sort_by(|a, b| {
         a.mode
-            .cmp(&b.mode)
-            .then(a.algo_name.cmp(&b.algo_name))
+            .cmp(b.mode)
+            .then(a.algo_name.cmp(b.algo_name))
             .then(a.clip_name.cmp(&b.clip_name))
     });
 

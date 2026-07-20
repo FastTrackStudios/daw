@@ -1257,6 +1257,7 @@ struct AllEqCurves {
 }
 
 #[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn generate_all_eq_curves(
     bands: &[EqBand],
     sample_rate: f64,
@@ -1372,6 +1373,7 @@ where
 ///
 /// Returns (stroke_path, fill_path)
 #[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 fn generate_eq_curve_path(
     bands: &[EqBand],
     sample_rate: f64,

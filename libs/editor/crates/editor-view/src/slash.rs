@@ -586,6 +586,18 @@ pub fn all_commands() -> Vec<CommandEntry> {
             icon: "⤳",
         },
         CommandEntry {
+            label: "Tabs",
+            group: "Code",
+            desc: "Switchable tab panels",
+            // Caret lands after the first `=== Tab 1\n` so the
+            // user types straight into the opening panel.
+            kind: CommandKind::InsertBlockSnippet(
+                "```tabs\n=== Tab 1\n\n=== Tab 2\n\n```\n",
+                16,
+            ),
+            icon: "⑃",
+        },
+        CommandEntry {
             label: "Inline math",
             group: "Math",
             desc: "$x$",

@@ -364,7 +364,7 @@ mod tests {
         }
         // Should have completed approximately one cycle
         assert!(
-            last_phase < 0.01 || last_phase > 0.99,
+            !(0.01..=0.99).contains(&last_phase),
             "Should be near wrap point after 1 second: {last_phase}"
         );
     }
