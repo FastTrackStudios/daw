@@ -697,6 +697,33 @@ impl LoadedClapPlugin {
         self.instance.call_on_main_thread_callback();
     }
 
+    /// Main-thread `clap_plugin_params.flush` for GUI-only hosts (plugin
+    /// NOT activated): without a process loop, GUI-issued parameter
+    /// gestures sit in the wrapper's output queue forever — the editor
+    /// looks frozen (drags snap back, added bands never appear). A DAW's
+    /// process() drains this implicitly; a GUI-only host must flush at
+    /// UI rate. No-op while activated (process handles it then).
+    pub fn flush_params(&mut self) {
+        let params = match self
+            .instance
+            .plugin_handle()
+            .get_extension::<PluginParams>()
+        {
+            Some(params) => params,
+            None => return,
+        };
+        let Some(mut inactive) = self.instance.inactive_plugin_handle() else {
+            return;
+        };
+        let input_events = EventBuffer::new();
+        let mut output_events = EventBuffer::new();
+        params.flush(
+            &mut inactive,
+            &input_events.as_input(),
+            &mut output_events.as_output(),
+        );
+    }
+
     /// Close the floating window if one was opened via
     /// [`Self::open_gui_floating`]. Idempotent.
     pub fn close_gui(&mut self) {
