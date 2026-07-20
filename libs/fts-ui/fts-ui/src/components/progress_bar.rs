@@ -125,7 +125,9 @@ fn render_horizontal(props: ProgressBarProps) -> Element {
                     } else if props.is_inactive {
                         format!("color: {};", props.bright_color)
                     } else {
-                        "color: white; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);".to_string()
+                        // Theme-adaptive so the label reads on the subtle
+                        // muted-color tint used by the non-stage (plain) selection.
+                        "color: var(--color-foreground); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);".to_string()
                     },
                     if let Some(ref label) = props.label {
                         span { "{label}" }
