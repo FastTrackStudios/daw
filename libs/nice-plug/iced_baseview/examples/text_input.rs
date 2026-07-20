@@ -114,6 +114,5 @@ impl MyProgram {
                 .width(Fill)
                 .align_x(Center),
             )
-            .into()
     }
 }

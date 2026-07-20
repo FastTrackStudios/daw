@@ -107,6 +107,7 @@ async fn extract_with_dpp(
 }
 
 /// Fallback: mount DMG with hdiutil, copy REAPER.app, detach.
+#[allow(dead_code)] // kept as the hdiutil fallback path
 async fn extract_with_hdiutil(
     dmg_path: &Path,
     reaper_dir: &Path,
@@ -203,6 +204,7 @@ async fn extract_with_hdiutil(
 }
 
 /// Find REAPER.app inside a mounted DMG volume.
+#[allow(dead_code)] // used by the hdiutil fallback path
 async fn find_reaper_app(mount_path: &Path) -> eyre::Result<PathBuf> {
     let mut entries = tokio::fs::read_dir(mount_path).await?;
     while let Some(entry) = entries.next_entry().await? {

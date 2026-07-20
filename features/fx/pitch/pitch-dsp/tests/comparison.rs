@@ -74,7 +74,7 @@ fn gen_white_noise(sample_rate: f64, duration_s: f64, seed: u64) -> Vec<f64> {
             state ^= state >> 7;
             state ^= state << 17;
             // Map to -0.5..0.5
-            (state as f64 / u64::MAX as f64 - 0.5)
+            state as f64 / u64::MAX as f64 - 0.5
         })
         .collect()
 }
@@ -154,7 +154,7 @@ fn read_wav(path: &str) -> Option<Vec<f64>> {
         }
         pos += 8 + chunk_size;
         // Align to 2-byte boundary
-        if chunk_size % 2 != 0 {
+        if !chunk_size.is_multiple_of(2) {
             pos += 1;
         }
     }
@@ -325,7 +325,7 @@ fn render(algo: Algorithm, semitones: f64, input: &[f64]) -> Vec<f64> {
     chain.update(config());
     chain.reset();
 
-    let total_blocks = (input.len() + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    let total_blocks = input.len().div_ceil(BLOCK_SIZE);
     let mut output = Vec::with_capacity(input.len());
 
     for b in 0..total_blocks {

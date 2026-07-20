@@ -105,7 +105,7 @@ impl KWeightingFilter {
 /// Reference: EBU R128 (2014), Annex 1; ITU-R BS.1770-4.
 fn k_weighting_coefficients(fs: f64) -> (Biquad, Biquad) {
     // Stage 1: High-shelf pre-filter (+4 dB above ~1.5 kHz)
-    // Analog prototype: H(s) = (s^2 + 1.9952623149688797 * db4 * s + 1) / (s^2 + s/0.7071067811865476 + 1)
+    // Analog prototype: H(s) = (s^2 + 1.9952623149688797 * db4 * s + 1) / (s^2 + s·√2 + 1)
     // For fs == 48000 the exact EBU coefficients are:
     let stage1 = if (fs - 48000.0).abs() < 1.0 {
         Biquad {
@@ -126,12 +126,12 @@ fn k_weighting_coefficients(fs: f64) -> (Biquad, Biquad) {
         let vh = db4;
         let vb = db4.sqrt();
         let k2 = k * k;
-        let norm = 1.0 + k / 0.7071067811865476 + k2;
-        let b0 = (vh + vb * k / 0.7071067811865476 + k2) / norm;
+        let norm = 1.0 + k / std::f64::consts::FRAC_1_SQRT_2 + k2;
+        let b0 = (vh + vb * k / std::f64::consts::FRAC_1_SQRT_2 + k2) / norm;
         let b1 = 2.0 * (k2 - vh) / norm;
-        let b2 = (vh - vb * k / 0.7071067811865476 + k2) / norm;
+        let b2 = (vh - vb * k / std::f64::consts::FRAC_1_SQRT_2 + k2) / norm;
         let a1 = 2.0 * (k2 - 1.0) / norm;
-        let a2 = (1.0 - k / 0.7071067811865476 + k2) / norm;
+        let a2 = (1.0 - k / std::f64::consts::FRAC_1_SQRT_2 + k2) / norm;
         Biquad {
             b0,
             b1,
