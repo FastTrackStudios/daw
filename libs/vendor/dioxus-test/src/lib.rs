@@ -139,6 +139,7 @@ mod document;
 mod element;
 mod keyboard;
 pub mod matchers;
+mod pointer;
 mod result;
 
 pub use condition::{AllElementsCondition, ElementCondition, MAX_TRIES};
