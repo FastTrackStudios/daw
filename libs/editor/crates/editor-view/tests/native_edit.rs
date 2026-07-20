@@ -105,6 +105,39 @@ async fn multibyte_typing_and_backspace() {
 }
 
 #[tokio::test]
+async fn ctrl_backspace_deletes_word() {
+    let t = mount(Setup::text("foo bar").caret(7));
+    t.press_key(parse_key("Backspace"), Modifiers::CONTROL);
+    expect_probe(&t, "doc", "foo ").await;
+    expect_probe(&t, "head", "4").await;
+    t.press_key(parse_key("Backspace"), Modifiers::CONTROL);
+    expect_probe(&t, "doc", "").await;
+}
+
+#[tokio::test]
+async fn ctrl_delete_deletes_word_forward() {
+    let t = mount(Setup::text("foo bar").caret(0));
+    t.press_key(parse_key("Delete"), Modifiers::CONTROL);
+    expect_probe(&t, "doc", " bar").await;
+}
+
+#[tokio::test]
+async fn tab_indents_list_item_and_shift_tab_outdents() {
+    let t = mount(Setup::text("- foo").caret(5));
+    press(&t, &["Tab"]);
+    expect_probe(&t, "doc", "  - foo").await;
+    t.press_key(parse_key("Tab"), Modifiers::SHIFT);
+    expect_probe(&t, "doc", "- foo").await;
+}
+
+#[tokio::test]
+async fn tab_outside_list_inserts_literal_tab() {
+    let t = mount(Setup::text("foo").caret(3));
+    press(&t, &["Tab"]);
+    expect_probe(&t, "doc", "foo\t").await;
+}
+
+#[tokio::test]
 async fn multi_char_typing_renders() {
     let t = mount(Setup::text(""));
     t.type_text("hello world");

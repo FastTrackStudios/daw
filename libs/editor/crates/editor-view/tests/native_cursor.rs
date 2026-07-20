@@ -64,6 +64,29 @@ async fn vertical_move_clamps_column() {
 }
 
 #[tokio::test]
+async fn ctrl_arrows_jump_word_groups() {
+    let t = mount(Setup::text("foo bar-baz").caret(0));
+    t.press_key(parse_key("ArrowRight"), Modifiers::CONTROL);
+    expect_probe(&t, "head", "3").await; // after "foo"
+    t.press_key(parse_key("ArrowRight"), Modifiers::CONTROL);
+    expect_probe(&t, "head", "7").await; // after "bar"
+    t.press_key(parse_key("ArrowRight"), Modifiers::CONTROL);
+    expect_probe(&t, "head", "8").await; // after "-" (punct group)
+    t.press_key(parse_key("ArrowLeft"), Modifiers::CONTROL);
+    expect_probe(&t, "head", "7").await;
+    t.press_key(parse_key("ArrowLeft"), Modifiers::CONTROL);
+    expect_probe(&t, "head", "4").await; // start of "bar"
+}
+
+#[tokio::test]
+async fn ctrl_shift_arrow_extends_by_word() {
+    let t = mount(Setup::text("foo bar").caret(0));
+    t.press_key(parse_key("ArrowRight"), Modifiers::CONTROL | Modifiers::SHIFT);
+    expect_probe(&t, "anchor", "0").await;
+    expect_probe(&t, "head", "3").await;
+}
+
+#[tokio::test]
 async fn click_positions_caret_on_line() {
     let t = mount(Setup::text("hello\nworld").caret(0));
     // Click the second rendered line — caret must land inside [6, 11].

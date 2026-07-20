@@ -20,6 +20,7 @@ pub struct Setup {
     pub text: &'static str,
     pub caret: usize,
     pub vim: bool,
+    pub markdown: bool,
 }
 
 impl Setup {
@@ -28,6 +29,7 @@ impl Setup {
             text,
             caret: 0,
             vim: false,
+            markdown: false,
         }
     }
     pub fn caret(mut self, caret: usize) -> Self {
@@ -36,6 +38,11 @@ impl Setup {
     }
     pub fn vim(mut self) -> Self {
         self.vim = true;
+        self
+    }
+    /// Attach the standard markdown live-preview decoration source.
+    pub fn markdown(mut self) -> Self {
+        self.markdown = true;
         self
     }
 }
@@ -50,6 +57,9 @@ pub fn Harness() -> Element {
     });
     let vim_sig = use_signal(VimState::new);
     let vim = if setup.vim { Some(vim_sig) } else { None };
+    let decorations = setup
+        .markdown
+        .then(|| editor_view::DecorationSource::ptr(editor_state::markdown::live_preview));
 
     let s = state.read();
     let primary = s.selection.primary();
@@ -58,7 +68,7 @@ pub fn Harness() -> Element {
     drop(s);
 
     rsx! {
-        Editor { state, vim }
+        Editor { state, vim, decorations }
         div { "data-testid": "head", "{primary.head}" }
         div { "data-testid": "anchor", "{primary.anchor}" }
         div { "data-testid": "mode", "{mode}" }

@@ -99,6 +99,16 @@ pub fn handle_text_input(
 /// behavior is unit-testable without a Dioxus runtime.
 #[must_use]
 pub fn text_input_spec(cur: &EditorState, press: &KeySpec) -> Option<TransactionSpec> {
+    // Word-wise deletion (Ctrl-Backspace / Ctrl-Delete) — shared-core
+    // mirror of the browser's deleteGroupBackward/Forward defaults.
+    if (press.ctrl || press.meta) && !press.alt {
+        let tag = |spec: TransactionSpec| Some(spec.annotate("origin", "native-input"));
+        match press.key.as_str() {
+            "Backspace" => return editor_state::commands::delete_word_backward(cur).and_then(tag),
+            "Delete" => return editor_state::commands::delete_word_forward(cur).and_then(tag),
+            _ => {}
+        }
+    }
     if press.ctrl || press.meta {
         return None;
     }
@@ -122,7 +132,17 @@ pub fn text_input_spec(cur: &EditorState, press: &KeySpec) -> Option<Transaction
     }
 
     let inserted: &str = match press.key.as_str() {
-        "Tab" => "\t",
+        // Tab on a list/task line indents the item (Shift-Tab outdents);
+        // elsewhere it inserts a literal tab (Shift-Tab does nothing).
+        "Tab" => {
+            if let Some(spec) = editor_state::commands::tab_list_indent(cur, press.shift) {
+                return tag(spec);
+            }
+            if press.shift {
+                return None;
+            }
+            "\t"
+        }
         // A single typed grapheme arrives as `Key::Character`. Named keys
         // ("ArrowLeft", "Escape", …) are multi-char strings we must not
         // insert; gate on "exactly one char, not a control".
@@ -179,11 +199,26 @@ pub fn handle_navigation(
 /// to a caret at the new head. Split out for unit testing.
 #[must_use]
 pub fn nav_target(cur: &EditorState, press: &KeySpec) -> Option<Range> {
-    if press.ctrl || press.meta || press.alt {
+    if press.alt {
         return None;
     }
+    let head = cur.selection.primary().head.min(cur.doc.len());
+    // Mod (ctrl/meta) + horizontal arrows: word-group motion, the
+    // shared-core mirror of the browser's Ctrl-ArrowLeft/Right.
+    if press.ctrl || press.meta {
+        let new_head = match press.key.as_str() {
+            "ArrowLeft" => editor_state::commands::word_boundary_left(cur, head),
+            "ArrowRight" => editor_state::commands::word_boundary_right(cur, head),
+            _ => return None,
+        };
+        let anchor = if press.shift {
+            cur.selection.primary().anchor
+        } else {
+            new_head
+        };
+        return Some(Range::new(anchor, new_head));
+    }
     let rope = cur.doc.rope();
-    let head = cur.selection.primary().head.min(rope.len_bytes());
     let char_idx = rope.byte_to_char(head);
 
     let new_head: usize = match press.key.as_str() {
