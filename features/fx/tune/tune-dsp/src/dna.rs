@@ -174,6 +174,7 @@ impl DnaEngine {
                 let hi = (((center + 2.0 * bw) * self.cfg.window as f64 / self.sample_rate).ceil()
                     as usize)
                     .min(residual.len() - 1);
+                #[allow(clippy::needless_range_loop)]
                 for bin in lo..=hi {
                     residual[bin] = 0.0;
                 }

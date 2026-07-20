@@ -138,6 +138,7 @@ impl PsolaShifter {
         let mut cmnd_vals = vec![1.0f64; max_lag + 1];
         let mut running_sum = 0.0f64;
 
+        #[allow(clippy::needless_range_loop)]
         for lag in 1..=max_lag {
             let mut diff = 0.0f64;
             let n = window - lag;
@@ -208,6 +209,7 @@ impl PsolaShifter {
             let mut correlation = 0.0f64;
             let mut energy_cand = 0.0f64;
 
+            #[allow(clippy::needless_range_loop)]
             for i in 0..tail_len {
                 let s = self.analysis_buf.read(candidate as usize + i);
                 correlation += tail[i] * s;

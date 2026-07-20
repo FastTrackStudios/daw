@@ -35,7 +35,7 @@ fn build_signal() -> Vec<f64> {
     out.extend(tone((SR * 0.5) as usize, 0.05, 0));
     let mut lcg = Lcg(0x1234_5678);
     out.extend((0..(SR * 0.2) as usize).map(|_| 0.3 * lcg.next()));
-    out.extend(std::iter::repeat(0.0).take((SR * 0.3) as usize));
+    out.extend(std::iter::repeat_n(0.0, (SR * 0.3) as usize));
     out
 }
 

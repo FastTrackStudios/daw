@@ -1859,6 +1859,15 @@ pub fn Editor(
                                         evt.preventDefault();
                                         return;
                                     }}
+                                    if (n.nodeType === 1 && n.tagName === 'LABEL'
+                                        && n.closest && n.closest('.md-tabs-widget')) {{
+                                        // Tab-strip label: don't let the
+                                        // browser park the caret in the
+                                        // widget (which would revert it
+                                        // to fence source).
+                                        evt.preventDefault();
+                                        return;
+                                    }}
                                     n = n.parentNode;
                                 }}
                             }});
@@ -1896,6 +1905,22 @@ pub fn Editor(
                                         if (!isNaN(p)) {{
                                             dioxus.send({{ kind: 'task-toggle', pos: p }});
                                         }}
+                                        return;
+                                    }}
+                                    if (n.nodeType === 1 && n.tagName === 'LABEL'
+                                        && n.closest && n.closest('.md-tabs-widget')) {{
+                                        // Tabs widget: switch the CSS-only
+                                        // tab ourselves — preventDefault
+                                        // suppresses the label's native
+                                        // radio activation, and letting the
+                                        // click fall through to the
+                                        // data-focus-pos ancestor would
+                                        // drop the caret into the fence.
+                                        evt.preventDefault();
+                                        evt.stopPropagation();
+                                        const id = n.getAttribute('for');
+                                        const r = id && document.getElementById(id);
+                                        if (r) r.checked = true;
                                         return;
                                     }}
                                     if (n.nodeType === 1 && n.dataset
