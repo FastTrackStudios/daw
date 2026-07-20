@@ -34,6 +34,9 @@ impl DocumentTester {
             virtual_dom,
             DocumentConfig {
                 style_threading: blitz_dom::StyleThreading::Sequential,
+                // Same provider dioxus-native registers (html feature):
+                // without it `dangerous_inner_html` silently no-ops.
+                html_parser_provider: Some(std::sync::Arc::new(blitz_html::HtmlProvider)),
                 ..Default::default()
             },
         )));
@@ -50,6 +53,7 @@ impl DocumentTester {
             virtual_dom,
             DocumentConfig {
                 style_threading: blitz_dom::StyleThreading::Sequential,
+                html_parser_provider: Some(std::sync::Arc::new(blitz_html::HtmlProvider)),
                 ..Default::default()
             },
         )));
