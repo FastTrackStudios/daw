@@ -9,6 +9,9 @@ publish = false
 
 [dependencies]
 blitz-dom = { workspace = true }
+# HTML parser provider so `dangerous_inner_html` works in tests exactly
+# as under dioxus-native (which registers the same provider).
+blitz-html = { workspace = true }
 dioxus-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
 dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
 dioxus-native-dom = { workspace = true }

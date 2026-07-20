@@ -156,6 +156,75 @@ async fn a_appends_after_cursor() {
 }
 
 #[tokio::test]
+async fn yy_p_duplicates_line() {
+    let t = mount(Setup::text("one\ntwo").vim());
+    press(&t, &["y", "y", "p"]);
+    expect_probe(&t, "doc", "one\none\ntwo").await;
+}
+
+#[tokio::test]
+async fn dw_then_p_pastes_deleted_word() {
+    let t = mount(Setup::text("foo bar").vim());
+    press(&t, &["d", "w"]);
+    expect_probe(&t, "doc", "bar").await;
+    press(&t, &["$", "p"]);
+    expect_probe(&t, "doc", "barfoo ").await;
+}
+
+#[tokio::test]
+async fn diw_deletes_inner_word() {
+    let t = mount(Setup::text("foo bar baz").caret(5).vim());
+    press(&t, &["d", "i", "w"]);
+    expect_probe(&t, "doc", "foo  baz").await;
+}
+
+#[tokio::test]
+async fn ciw_changes_word_and_types() {
+    let t = mount(Setup::text("foo bar baz").caret(5).vim());
+    press(&t, &["c", "i", "w"]);
+    expect_probe(&t, "mode", "Insert").await;
+    t.type_text("qux");
+    expect_probe(&t, "doc", "foo qux baz").await;
+}
+
+#[tokio::test]
+async fn count_applies_to_operator_motion() {
+    let t = mount(Setup::text("a b c d").vim());
+    press(&t, &["d", "2", "w"]);
+    expect_probe(&t, "doc", "c d").await;
+}
+
+#[tokio::test]
+async fn visual_line_deletes_whole_lines() {
+    let t = mount(Setup::text("one\ntwo\nthree").caret(5).vim());
+    press(&t, &["V", "d"]);
+    expect_probe(&t, "doc", "one\nthree").await;
+}
+
+#[tokio::test]
+async fn gg_and_g_jump_doc_bounds() {
+    let t = mount(Setup::text("one\ntwo\nthree").caret(5).vim());
+    press(&t, &["g", "g"]);
+    expect_probe(&t, "head", "0").await;
+    press(&t, &["G"]);
+    expect_probe(&t, "head", "8").await; // first non-blank of "three"
+}
+
+#[tokio::test]
+async fn r_replaces_char_under_cursor() {
+    let t = mount(Setup::text("abc").caret(1).vim());
+    press(&t, &["r", "x"]);
+    expect_probe(&t, "doc", "axc").await;
+}
+
+#[tokio::test]
+async fn capital_d_deletes_to_eol() {
+    let t = mount(Setup::text("hello\nworld").caret(2).vim());
+    press(&t, &["D"]);
+    expect_probe(&t, "doc", "he\nworld").await;
+}
+
+#[tokio::test]
 async fn dollar_and_zero_line_motions() {
     let t = mount(Setup::text("hello\nworld").caret(2).vim());
     press(&t, &["$"]);

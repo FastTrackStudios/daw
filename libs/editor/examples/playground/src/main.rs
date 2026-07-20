@@ -445,7 +445,11 @@ fn App() -> Element {
         .with("Tab", commands::indent_more as _)
         .with("Shift-Tab", commands::indent_less as _)
         .with("Backspace", commands::delete_backward as _)
-        .with("Delete", commands::delete_forward as _);
+        .with("Delete", commands::delete_forward as _)
+        // Word-wise deletes — same shared commands the native path
+        // wires as its Ctrl-Backspace/Delete default action.
+        .with("Mod-Backspace", commands::delete_word_backward as _)
+        .with("Mod-Delete", commands::delete_word_forward as _);
 
     // Vim modal state. Default-on per user preference — toggle
     // with `?novim=1` in the URL to fall back to plain editing.
