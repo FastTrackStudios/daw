@@ -1,0 +1,25 @@
+[package]
+name = "dioxus-test"
+version = "0.1.0"
+edition = "2024"
+description = "Vendored DioxusLabs/dioxus-test on the workspace dioxus 0.7.9 + blitz-git pins. Headless component testing on blitz-dom."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/DioxusLabs/dioxus-test/"
+publish = false
+
+[dependencies]
+blitz-dom = { workspace = true }
+dioxus-core = "=0.7.9"
+dioxus-html = "=0.7.9"
+dioxus-native-dom = { workspace = true }
+test-that = { version = "0.5.2", default-features = false, features = ["regex", "num-traits"] }
+tokio = { workspace = true }
+tracing = { workspace = true }
+# ── FTS keyboard extension (src/keyboard.rs) ──────────────────────────
+blitz-traits = { workspace = true }
+keyboard-types = "0.7"
+smol_str = "0.3"
+
+[dev-dependencies]
+dioxus = { workspace = true }
+indoc = "2.0.7"

@@ -54,6 +54,7 @@ fn mouse_pointer_event(
         // offsets inside REAPER docker windows (blitz alpha.6 drift fix,
         // mirrors daw-reaper-dioxus).
         element: blitz_traits::events::Point { x, y },
+        active_pointers: Default::default(),
         mods: keyboard_types::Modifiers::empty(),
         details: blitz_traits::events::PointerDetails::default(),
     }
@@ -1649,6 +1650,7 @@ fn panel_wndproc_inner(
                     },
                     buttons: blitz_traits::events::MouseEventButtons::empty(),
                     mods: keyboard_types::Modifiers::empty(),
+                    element: blitz_traits::events::Point { x, y },
                 }),
             );
             0

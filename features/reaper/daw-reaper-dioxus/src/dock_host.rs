@@ -79,6 +79,7 @@ fn pointer_event_at(x: f32, y: f32, button: u8) -> blitz_traits::events::BlitzPo
         // Same value as every other coord field — no page/screen
         // offsets inside REAPER docker windows.
         element: blitz_traits::events::Point { x, y },
+        active_pointers: Default::default(),
     }
 }
 
@@ -126,6 +127,7 @@ fn dto_to_blitz_event(dto: UiEventDto) -> Option<blitz_traits::events::UiEvent> 
             },
             buttons: blitz_traits::events::MouseEventButtons::empty(),
             mods: keyboard_types::Modifiers::empty(),
+            element: blitz_traits::events::Point { x, y },
         }),
         UiEventDto::KeyDown { key } => UiEvent::KeyDown(build_key_event(key)),
         UiEventDto::KeyUp { key } => UiEvent::KeyUp(build_key_event(key)),
