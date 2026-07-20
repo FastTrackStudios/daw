@@ -168,6 +168,7 @@ impl GainCurve {
         let mut max_dist = 0.0;
         let mut max_idx = start + 1;
 
+        #[allow(clippy::needless_range_loop)] // parallel index math over points
         for i in (start + 1)..end {
             let t = if dt > 0.0 {
                 (points[i].time - t0) / dt
