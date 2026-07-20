@@ -35,6 +35,10 @@ ureq = { version = "2", optional = true }
 # .clap bundles and dylibs). Behind `clap-host` feature.
 clack-host = { workspace = true, optional = true }
 clack-extensions = { workspace = true, optional = true }
+# rwh 0.6 for bridging host windows into embedded CLAP GUIs — the same
+# crates.io version clack-extensions' raw-window-handle_06 resolves to,
+# so the Window::from_raw_window_handle types line up.
+raw-window-handle-06 = { package = "raw-window-handle", version = "0.6", optional = true }
 thiserror = { workspace = true }
 
 # VST3 plugin hosting (auto-generated Steinberg COM bindings). Native-only.
@@ -103,7 +107,7 @@ bootstrap = ["dep:daw-control", "dep:eyre"]
 http-resolver = ["dep:ureq"]
 # Host CLAP plugins (load .clap bundles, inspect params, process audio).
 # Native-only (clack-host dynamically loads native dylibs).
-clap-host = ["dep:clack-host", "dep:clack-extensions"]
+clap-host = ["dep:clack-host", "dep:clack-extensions", "dep:raw-window-handle-06"]
 # Host VST3 plugins (load .vst3 bundles, inspect descriptor, process audio).
 # Native-only (libloading + native dylibs).
 vst3-host = ["dep:vst3", "dep:libloading"]
