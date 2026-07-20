@@ -26,9 +26,9 @@ standalone = ["native", "dep:winit", "dep:tracing-subscriber"]
 # the launcher-core/launcher-ui/providers crates live in that repo and
 # are not vendored yet (flagged in HANDOFF; note launcher-ui carries its
 # own git fts-ui, a second fts-ui instance beside the in-tree one).
-launcher-core = { git = "https://codeberg.org/FastTrackStudios/dioxus-launcher.git", branch = "main" }
-launcher-ui = { git = "https://codeberg.org/FastTrackStudios/dioxus-launcher.git", branch = "main", default-features = false }
-providers = { git = "https://codeberg.org/FastTrackStudios/dioxus-launcher.git", branch = "main" }
+launcher-core = { git = "https://codeberg.org/FastTrackStudios/dioxus-launcher.git", branch = "dioxus-0.8" }
+launcher-ui = { git = "https://codeberg.org/FastTrackStudios/dioxus-launcher.git", branch = "dioxus-0.8", default-features = false }
+providers = { git = "https://codeberg.org/FastTrackStudios/dioxus-launcher.git", branch = "dioxus-0.8" }
 fts-ui = { workspace = true }
 
 # Dioxus native renderer (Blitz) — workspace-pinned rev (one blitz tree-wide)

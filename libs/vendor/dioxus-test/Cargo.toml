@@ -2,15 +2,15 @@
 name = "dioxus-test"
 version = "0.1.0"
 edition = "2024"
-description = "Vendored DioxusLabs/dioxus-test on the workspace dioxus 0.7.9 + blitz-git pins. Headless component testing on blitz-dom."
+description = "Vendored DioxusLabs/dioxus-test on the workspace dioxus 0.8 git + blitz beta.1 pins. Headless component testing on blitz-dom."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/DioxusLabs/dioxus-test/"
 publish = false
 
 [dependencies]
 blitz-dom = { workspace = true }
-dioxus-core = "=0.7.9"
-dioxus-html = "=0.7.9"
+dioxus-core = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
+dioxus-html = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc" }
 dioxus-native-dom = { workspace = true }
 test-that = { version = "0.5.2", default-features = false, features = ["regex", "num-traits"] }
 tokio = { workspace = true }
