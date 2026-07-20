@@ -99,6 +99,7 @@ pub fn build_segments(
         for &next in &raw[1..] {
             let gap = next.0 - current.1;
             if gap <= max_gap_blks {
+                #[allow(clippy::needless_range_loop)]
                 for b in (current.1 + 1)..next.0 {
                     is_tonal[b] = true;
                 }

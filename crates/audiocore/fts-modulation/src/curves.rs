@@ -266,7 +266,7 @@ mod tests {
         let a = evaluate(CurveType::Stairs, 0.15, 0.0, 1.0, 0.1);
         let b = evaluate(CurveType::Stairs, 0.25, 0.0, 1.0, 0.1);
         // Both should be in the same step or adjacent
-        assert!(a >= 0.0 && a <= 1.0);
-        assert!(b >= 0.0 && b <= 1.0);
+        assert!((0.0..=1.0).contains(&a));
+        assert!((0.0..=1.0).contains(&b));
     }
 }

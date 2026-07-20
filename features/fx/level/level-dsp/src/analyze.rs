@@ -156,6 +156,7 @@ pub fn render_gain_envelope(analysis: &Analysis, cfg: RenderConfig) -> Vec<GainP
 
     for seg in &analysis.segments {
         if cfg.per_block {
+            #[allow(clippy::needless_range_loop)]
             for i in seg.from..=seg.to {
                 let bl_db = analysis.blocks[i].features.rms_db;
                 if bl_db > cfg.gate_db {
@@ -166,6 +167,7 @@ pub fn render_gain_envelope(analysis: &Analysis, cfg: RenderConfig) -> Vec<GainP
         } else if seg.avg_rms_db > cfg.gate_db {
             let delta = (target_db - seg.avg_rms_db) * cfg.amount;
             let g = delta.clamp(-cfg.max_cut_db, cfg.max_gain_db);
+            #[allow(clippy::needless_range_loop)]
             for i in seg.from..=seg.to {
                 gain_db[i] = g;
             }
@@ -178,6 +180,7 @@ pub fn render_gain_envelope(analysis: &Analysis, cfg: RenderConfig) -> Vec<GainP
         for seg in &analysis.segments {
             if seg.to > seg.from {
                 let mut cur = gain_db[seg.from];
+                #[allow(clippy::needless_range_loop)]
                 for i in (seg.from + 1)..=seg.to {
                     cur += a * (gain_db[i] - cur);
                     gain_db[i] = cur;

@@ -191,6 +191,7 @@ pub fn live_preview_with_lookups(
     reset_compile_budget();
     reset_mermaid_budget();
     reset_keyflow_budget();
+    reset_tabs_budget();
     reset_block_index();
 
     let text = state.doc.to_string();
@@ -533,6 +534,9 @@ use mermaid::{render_mermaid, reset_compile_budget as reset_mermaid_budget};
 
 mod keyflow;
 use keyflow::{render_keyflow, reset_compile_budget as reset_keyflow_budget};
+
+mod tabs;
+use tabs::{render_tabs, reset_render_budget as reset_tabs_budget};
 
 pub(crate) fn escape_html(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -1056,7 +1060,8 @@ fn scan_blocks(
                 || info.eq_ignore_ascii_case("mermaid")
                 || info.eq_ignore_ascii_case("kf")
                 || info.eq_ignore_ascii_case("kf+")
-                || info.eq_ignore_ascii_case("kf-");
+                || info.eq_ignore_ascii_case("kf-")
+                || info.eq_ignore_ascii_case("tabs");
             if !caret_on_opener && !is_rendered_fence {
                 let body_end_estimate = find_fence_close(text, content_start, mc, mlen);
                 let header_html = format!(
@@ -1081,6 +1086,7 @@ fn scan_blocks(
                 || info.eq_ignore_ascii_case("kf")
                 || info.eq_ignore_ascii_case("kf+")
                 || info.eq_ignore_ascii_case("kf-")
+                || info.eq_ignore_ascii_case("tabs")
             {
                 let body_end = find_fence_close(text, content_start, mc, mlen);
                 let body = &text[content_start..body_end];
@@ -1153,6 +1159,22 @@ fn scan_blocks(
                                     r#"<div class="md-keyflow-widget{show}{only}" data-focus-pos="{content_start}"><div class="md-keyflow-sourcebox">{header}<pre class="md-keyflow-source"><code class="kf-code">{highlighted}</code></pre></div></div>"#,
                                 )
                             };
+                            out.push(Decoration::replace(fence_range.clone()));
+                            out.push(Decoration::widget(fence_range.start, html));
+                        }
+                    } else if info.eq_ignore_ascii_case("tabs") {
+                        // ```tabs — split the body into `=== Tab`
+                        // panels and render one self-contained,
+                        // CSS-only tab widget (hidden radios +
+                        // `<label>` strip + `:checked ~ .panel`
+                        // rules — no JS, since the widget is a
+                        // static injected HTML string). The scope
+                        // hash folds in `content_start` so two
+                        // blocks never share a radio group.
+                        if let Some(inner) = render_tabs(body, content_start) {
+                            let html = format!(
+                                r#"<div class="md-tabs-widget" data-focus-pos="{content_start}">{inner}</div>"#,
+                            );
                             out.push(Decoration::replace(fence_range.clone()));
                             out.push(Decoration::widget(fence_range.start, html));
                         }

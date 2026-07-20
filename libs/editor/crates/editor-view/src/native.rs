@@ -99,21 +99,60 @@ pub fn handle_text_input(
 /// behavior is unit-testable without a Dioxus runtime.
 #[must_use]
 pub fn text_input_spec(cur: &EditorState, press: &KeySpec) -> Option<TransactionSpec> {
+    // Word-wise deletion (Ctrl-Backspace / Ctrl-Delete) — shared-core
+    // mirror of the browser's deleteGroupBackward/Forward defaults.
+    if (press.ctrl || press.meta) && !press.alt {
+        let tag = |spec: TransactionSpec| Some(spec.annotate("origin", "native-input"));
+        match press.key.as_str() {
+            "Backspace" => return editor_state::commands::delete_word_backward(cur).and_then(tag),
+            "Delete" => return editor_state::commands::delete_word_forward(cur).and_then(tag),
+            _ => {}
+        }
+    }
     if press.ctrl || press.meta {
         return None;
     }
     let p = cur.selection.primary();
     let (from, to) = (p.from(), p.to());
 
+    // Default actions the web path gets from contenteditable +
+    // `beforeinput` interception, expressed through the SAME shared
+    // commands (`editor_state::commands`) the web bridge calls — one
+    // implementation, two renderers:
+    //   Enter     → list/task/blockquote continuation (plain \n fallback)
+    //   Backspace → bracket-pair aware, char-wise backward delete
+    //   Delete    → char-wise forward delete
+    //   brackets  → auto-pair / skip-over-closer
+    let tag = |spec: TransactionSpec| Some(spec.annotate("origin", "native-input"));
+    match press.key.as_str() {
+        "Enter" => return editor_state::commands::enter_continue_list(cur).and_then(tag),
+        "Backspace" => return editor_state::commands::delete_backward(cur).and_then(tag),
+        "Delete" => return editor_state::commands::delete_forward(cur).and_then(tag),
+        _ => {}
+    }
+
     let inserted: &str = match press.key.as_str() {
-        "Enter" => "\n",
-        "Tab" => "\t",
+        // Tab on a list/task line indents the item (Shift-Tab outdents);
+        // elsewhere it inserts a literal tab (Shift-Tab does nothing).
+        "Tab" => {
+            if let Some(spec) = editor_state::commands::tab_list_indent(cur, press.shift) {
+                return tag(spec);
+            }
+            if press.shift {
+                return None;
+            }
+            "\t"
+        }
         // A single typed grapheme arrives as `Key::Character`. Named keys
-        // ("ArrowLeft", "Escape", "Backspace", …) are multi-char strings
-        // we must not insert; gate on "exactly one char, not a control".
+        // ("ArrowLeft", "Escape", …) are multi-char strings we must not
+        // insert; gate on "exactly one char, not a control".
         other if is_text_input(other) => other,
         _ => return None,
     };
+
+    if let Some(spec) = editor_state::commands::insert_bracket(cur, inserted) {
+        return tag(spec);
+    }
 
     Some(
         TransactionSpec::new()
@@ -160,11 +199,26 @@ pub fn handle_navigation(
 /// to a caret at the new head. Split out for unit testing.
 #[must_use]
 pub fn nav_target(cur: &EditorState, press: &KeySpec) -> Option<Range> {
-    if press.ctrl || press.meta || press.alt {
+    if press.alt {
         return None;
     }
+    let head = cur.selection.primary().head.min(cur.doc.len());
+    // Mod (ctrl/meta) + horizontal arrows: word-group motion, the
+    // shared-core mirror of the browser's Ctrl-ArrowLeft/Right.
+    if press.ctrl || press.meta {
+        let new_head = match press.key.as_str() {
+            "ArrowLeft" => editor_state::commands::word_boundary_left(cur, head),
+            "ArrowRight" => editor_state::commands::word_boundary_right(cur, head),
+            _ => return None,
+        };
+        let anchor = if press.shift {
+            cur.selection.primary().anchor
+        } else {
+            new_head
+        };
+        return Some(Range::new(anchor, new_head));
+    }
     let rope = cur.doc.rope();
-    let head = cur.selection.primary().head.min(rope.len_bytes());
     let char_idx = rope.byte_to_char(head);
 
     let new_head: usize = match press.key.as_str() {
@@ -331,13 +385,53 @@ mod tests {
     fn named_keys_and_modified_keys_are_not_text() {
         assert!(text_input_spec(&at("a", 1), &key("ArrowLeft")).is_none());
         assert!(text_input_spec(&at("a", 1), &key("Escape")).is_none());
-        assert!(text_input_spec(&at("a", 1), &key("Backspace")).is_none());
         // Ctrl/Meta chords are commands, never literal text.
         let ctrl_a = KeySpec {
             ctrl: true,
             ..key("a")
         };
         assert!(text_input_spec(&at("a", 1), &ctrl_a).is_none());
+    }
+
+    #[test]
+    fn backspace_deletes_char_backward() {
+        let st = at("abc", 2);
+        let spec = text_input_spec(&st, &key("Backspace")).expect("backspace edits");
+        let next = st.update(spec);
+        assert_eq!(next.doc.to_string(), "ac");
+        assert_eq!(next.selection.primary().head, 1);
+        // At doc start there is nothing to delete.
+        assert!(text_input_spec(&at("abc", 0), &key("Backspace")).is_none());
+    }
+
+    #[test]
+    fn delete_deletes_char_forward() {
+        let st = at("abc", 1);
+        let spec = text_input_spec(&st, &key("Delete")).expect("delete edits");
+        let next = st.update(spec);
+        assert_eq!(next.doc.to_string(), "ac");
+        assert_eq!(next.selection.primary().head, 1);
+        // At doc end there is nothing to delete.
+        assert!(text_input_spec(&at("abc", 3), &key("Delete")).is_none());
+    }
+
+    #[test]
+    fn deletion_keys_eat_a_selection_whole() {
+        let mut st = at("hello", 0);
+        st.selection = Selection::single(Range::new(1, 4));
+        let spec = text_input_spec(&st, &key("Backspace")).expect("selection deletes");
+        let next = st.update(spec);
+        assert_eq!(next.doc.to_string(), "ho");
+        assert_eq!(next.selection.primary().head, 1);
+    }
+
+    #[test]
+    fn backspace_is_charwise_over_multibyte() {
+        let st = at("aé", 3); // 'é' is 2 bytes
+        let spec = text_input_spec(&st, &key("Backspace")).expect("backspace edits");
+        let next = st.update(spec);
+        assert_eq!(next.doc.to_string(), "a");
+        assert_eq!(next.selection.primary().head, 1);
     }
 
     #[test]

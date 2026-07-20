@@ -125,6 +125,7 @@ impl AntiAliasFilter {
         );
     }
 
+    #[allow(clippy::too_many_arguments)] // writes one biquad's 5 coeffs in place
     fn biquad_lpf(
         freq: f64,
         q: f64,
@@ -389,6 +390,7 @@ impl Oversampler {
 
         // Upsample
         let kernel_len = self.kernel.len();
+        #[allow(clippy::needless_range_loop)] // i also drives the stride into up_left
         for i in 0..n {
             let center = hist_len + i * ratio;
             let s = data[i];
@@ -406,6 +408,7 @@ impl Oversampler {
         callback(&mut self.up_left[os_start..os_end]);
 
         // AA filter + downsample
+        #[allow(clippy::needless_range_loop)] // i also drives the stride into up_left
         for i in 0..n {
             let os_idx = os_start + i * ratio;
             for j in 0..ratio {

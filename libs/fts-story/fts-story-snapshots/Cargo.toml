@@ -22,11 +22,11 @@ thiserror  = { workspace = true }
 
 # Pin every Blitz crate to our patched fork. Carries the RefCell-borrow
 # fix and any follow-on fixes; bumped via `cargo update -p dioxus-native`.
-dioxus-native     = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62", features = ["prelude", "system-fonts"] }
-dioxus-native-dom = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-blitz-dom         = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-blitz-paint       = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
-blitz-traits      = { git = "https://github.com/DioxusLabs/blitz.git", rev = "02523b833ada999d70f72784b592d61df7279f62" }
+dioxus-native     = { workspace = true }
+dioxus-native-dom = { workspace = true }
+blitz-dom         = { workspace = true }
+blitz-paint       = { workspace = true }
+blitz-traits      = { workspace = true }
 
 # Vello CPU rasteriser — matches what blitz's `examples/screenshot.rs`
 # uses. CPU only so snapshots don't need a GPU in CI.

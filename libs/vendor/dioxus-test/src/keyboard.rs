@@ -9,7 +9,10 @@
 //! conversion all behave exactly as they do in a running app.
 
 use blitz_dom::Document as _;
-use blitz_traits::events::{BlitzKeyEvent, KeyState, UiEvent};
+use blitz_traits::events::{
+    BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, KeyState, MouseEventButton,
+    MouseEventButtons, Point, PointerCoords, PointerDetails, UiEvent,
+};
 use keyboard_types::{Code, Key, Location, Modifiers};
 use smol_str::SmolStr;
 
@@ -84,5 +87,44 @@ impl DocumentTester {
             };
             self.press_key(key, Modifiers::empty());
         }
+    }
+
+    /// Presses and releases the primary mouse button at page coordinates
+    /// `(x, y)`. Unlike [`crate::ResolvedElement::click`] this goes through
+    /// Blitz's real hit-testing and focus handling (focus follows
+    /// pointerdown), so overlays, z-order, and per-tile mousedown handlers
+    /// all behave as they would in a running app.
+    pub fn click_at(&self, x: f32, y: f32) {
+        self.send_ui_event(UiEvent::PointerDown(pointer_event(
+            x,
+            y,
+            MouseEventButtons::Primary,
+        )));
+        self.send_ui_event(UiEvent::PointerUp(pointer_event(
+            x,
+            y,
+            MouseEventButtons::empty(),
+        )));
+    }
+}
+
+fn pointer_event(x: f32, y: f32, buttons: MouseEventButtons) -> BlitzPointerEvent {
+    BlitzPointerEvent {
+        id: BlitzPointerId::Mouse,
+        is_primary: true,
+        coords: PointerCoords {
+            page_x: x,
+            page_y: y,
+            screen_x: x,
+            screen_y: y,
+            client_x: x,
+            client_y: y,
+        },
+        button: MouseEventButton::Main,
+        buttons,
+        mods: Modifiers::empty(),
+        details: PointerDetails::default(),
+        element: Point { x: 0.0, y: 0.0 },
+        active_pointers: Default::default(),
     }
 }

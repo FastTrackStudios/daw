@@ -125,11 +125,7 @@ impl Modulator {
             // we approximate with the same smoothing characteristic
             self.output_stereo = self.output_stereo
                 + (scaled2 - self.output_stereo)
-                    * if scaled2 > self.output_stereo {
-                        self.smoother.value() / self.output.max(1e-10) // crude ratio
-                    } else {
-                        self.smoother.value() / self.output.max(1e-10)
-                    }
+                    * (self.smoother.value() / self.output.max(1e-10)) // crude ratio
                     .clamp(0.0, 1.0);
             // Actually, let's just do direct smoothing with a fixed coefficient
             let coeff = RcSmoother::coeff(0.0, self.sample_rate); // instant for now
@@ -286,7 +282,7 @@ mod tests {
 
         let transport = transport_120bpm(0.0);
         let out = m.tick(&transport, 0.0);
-        assert!(out >= 0.0 && out <= 1.0, "Output should be in range: {out}");
+        assert!((0.0..=1.0).contains(&out), "Output should be in range: {out}");
     }
 
     #[test]
@@ -410,7 +406,7 @@ mod tests {
             let transport = transport_120bpm(pos);
             let out = m.tick(&transport, 0.0);
             assert!(
-                out >= -0.01 && out <= 1.01,
+                (-0.01..=1.01).contains(&out),
                 "Output out of range at sample {i}: {out}"
             );
         }

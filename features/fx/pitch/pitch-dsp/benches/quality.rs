@@ -542,11 +542,10 @@ fn bench_sine() -> Vec<QualityResult> {
 
             for &(algo, name) in TEST_ALGOS {
                 // FreqDivider/PLL only do octave down.
-                if matches!(algo, Algorithm::FreqDivider | Algorithm::Pll) {
-                    if shift != -12.0 {
+                if matches!(algo, Algorithm::FreqDivider | Algorithm::Pll)
+                    && shift != -12.0 {
                         continue;
                     }
-                }
 
                 let input = Arc::clone(&input);
                 let rb_output = Arc::clone(&rb_output);
@@ -667,7 +666,7 @@ fn bench_mdb() -> Vec<QualityResult> {
     if let Ok(entries) = std::fs::read_dir(&annot_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             let path = entry.path();
-            if path.extension().map_or(true, |ext| ext != "csv") {
+            if path.extension().is_none_or(|ext| ext != "csv") {
                 continue;
             }
 

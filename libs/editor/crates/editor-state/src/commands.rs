@@ -387,6 +387,112 @@ pub fn indent_less(state: &EditorState) -> Option<TransactionSpec> {
     Some(TransactionSpec::new().changes(Changes::from_sorted(changes)))
 }
 
+/// Byte offset of the previous word-group boundary from `pos` — CM6's
+/// "group" semantics (`Ctrl-ArrowLeft` / `Alt-ArrowLeft` on mac): skip
+/// any whitespace backward, then a run of same-class characters
+/// (word chars vs punctuation). Newlines count as whitespace, so the
+/// motion crosses line boundaries like the browser's does.
+#[must_use]
+pub fn word_boundary_left(state: &EditorState, pos: usize) -> usize {
+    let rope = state.doc.rope();
+    let mut ci = rope.byte_to_char(pos.min(rope.len_bytes()));
+    while ci > 0 && char_class(rope.char(ci - 1)) == CharClass::Space {
+        ci -= 1;
+    }
+    if ci > 0 {
+        let cls = char_class(rope.char(ci - 1));
+        while ci > 0 && char_class(rope.char(ci - 1)) == cls {
+            ci -= 1;
+        }
+    }
+    rope.char_to_byte(ci)
+}
+
+/// Byte offset of the next word-group boundary from `pos` — mirror of
+/// [`word_boundary_left`].
+#[must_use]
+pub fn word_boundary_right(state: &EditorState, pos: usize) -> usize {
+    let rope = state.doc.rope();
+    let len = rope.len_chars();
+    let mut ci = rope.byte_to_char(pos.min(rope.len_bytes()));
+    while ci < len && char_class(rope.char(ci)) == CharClass::Space {
+        ci += 1;
+    }
+    if ci < len {
+        let cls = char_class(rope.char(ci));
+        while ci < len && char_class(rope.char(ci)) == cls {
+            ci += 1;
+        }
+    }
+    rope.char_to_byte(ci)
+}
+
+/// Delete from the previous word-group boundary to the caret (CM6's
+/// `deleteGroupBackward`, the `Ctrl-Backspace` default). A non-empty
+/// selection deletes itself.
+#[must_use]
+pub fn delete_word_backward(state: &EditorState) -> Option<TransactionSpec> {
+    let p = state.selection.primary();
+    let (from, to) = (p.from(), p.to());
+    if from != to {
+        return Some(TransactionSpec::new().changes(Changes::delete(from..to)));
+    }
+    let target = word_boundary_left(state, from);
+    if target == from {
+        return None;
+    }
+    Some(TransactionSpec::new().changes(Changes::delete(target..from)))
+}
+
+/// Delete from the caret to the next word-group boundary (CM6's
+/// `deleteGroupForward`, the `Ctrl-Delete` default).
+#[must_use]
+pub fn delete_word_forward(state: &EditorState) -> Option<TransactionSpec> {
+    let p = state.selection.primary();
+    let (from, to) = (p.from(), p.to());
+    if from != to {
+        return Some(TransactionSpec::new().changes(Changes::delete(from..to)));
+    }
+    let target = word_boundary_right(state, to);
+    if target == to {
+        return None;
+    }
+    Some(TransactionSpec::new().changes(Changes::delete(to..target)))
+}
+
+/// The Tab default action on a markdown list/task line: indent the item
+/// (`dedent` = Shift-Tab, outdent). Returns `None` when the caret line
+/// isn't a list item — the caller inserts a literal tab (or nothing on
+/// Shift-Tab), matching Obsidian's behavior.
+#[must_use]
+pub fn tab_list_indent(state: &EditorState, dedent: bool) -> Option<TransactionSpec> {
+    let doc = state.doc.to_string();
+    let (line_from, line_to) = line_bounds(&doc, state.selection.primary().head);
+    parse_list_continuation(&doc[line_from..line_to])?;
+    if dedent {
+        indent_less(state)
+    } else {
+        indent_more(state)
+    }
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum CharClass {
+    Space,
+    Word,
+    Punct,
+}
+
+fn char_class(c: char) -> CharClass {
+    if c.is_whitespace() {
+        CharClass::Space
+    } else if c.is_alphanumeric() || c == '_' {
+        CharClass::Word
+    } else {
+        CharClass::Punct
+    }
+}
+
 // ── helpers ─────────────────────────────────────────────────
 
 fn line_bounds(doc: &str, pos: usize) -> (usize, usize) {
@@ -593,7 +699,12 @@ pub fn delete_backward(state: &EditorState) -> Option<TransactionSpec> {
     if from == 0 {
         return None;
     }
-    Some(TransactionSpec::new().changes(Changes::delete(from - 1..from)))
+    // Char-wise via the rope — `from - 1` would split a multi-byte
+    // character and panic downstream on the invalid boundary.
+    let rope = state.doc.rope();
+    let ci = rope.byte_to_char(from);
+    let prev = rope.char_to_byte(ci - 1);
+    Some(TransactionSpec::new().changes(Changes::delete(prev..from)))
 }
 
 /// Toggle bold markdown markers (`**…**`) at the caret /
@@ -943,7 +1054,12 @@ pub fn delete_forward(state: &EditorState) -> Option<TransactionSpec> {
     if to >= state.doc.len() {
         return None;
     }
-    Some(TransactionSpec::new().changes(Changes::delete(to..to + 1)))
+    // Char-wise via the rope — `to + 1` would split a multi-byte
+    // character and panic downstream on the invalid boundary.
+    let rope = state.doc.rope();
+    let ci = rope.byte_to_char(to);
+    let next = rope.char_to_byte(ci + 1);
+    Some(TransactionSpec::new().changes(Changes::delete(to..next)))
 }
 
 #[cfg(test)]

@@ -31,7 +31,7 @@ use std::path::PathBuf;
 /// `document::Stylesheet { href: TAILWIND_CSS }` in
 /// `apps/desktop/src/main.rs`; the Blitz snapshot path doesn't go
 /// through dx so we load the same compiled file here.
-const TAILWIND_CSS: &str = include_str!("../../../apps/desktop/assets/tailwind.css");
+const TAILWIND_CSS: &str = include_str!("../../../../apps/task/desktop/assets/tailwind.css");
 
 fn theme_wrap(child: Element) -> Element {
     let state = use_signal(|| ThemeState::new(default_theme_preset(), ThemeMode::Dark));
