@@ -16,9 +16,18 @@
 use dioxus::prelude::*;
 
 use daw_ui::panels::{
-    ClipView, DawWorkspace, LaneDisplay, MarkerView, RegionView, TempoMarkerView, TrackView,
+    ArrangeEdit, ClipView, DawWorkspace, LaneDisplay, MarkerView, RegionView, TempoMarkerView,
+    TrackView,
 };
-use daw_ui::theming::{ThemeContext, ThemeProvider};
+use daw_ui::theming::reaper_import::ReaperTheme;
+use daw_ui::theming::{theme_from_reaper, ThemeContext, ThemeProvider};
+
+/// The stock REAPER 7 theme, embedded (no filesystem on wasm). Loading it
+/// exercises the whole importer: `.ReaperTheme` palette → tokens, `rtconfig`
+/// globals/params, and the WALTER program → mcp/tcp strip layouts. Images are
+/// absent (vector fallback) — colours + layout are what this tests.
+const REAPER7_INI: &str = include_str!("assets/reaper7/Default_7.0.ReaperTheme");
+const REAPER7_RTCONFIG: &str = include_str!("assets/reaper7/rtconfig.txt");
 
 fn main() {
     dioxus::launch(App);
@@ -113,10 +122,35 @@ fn sample_tracks() -> Vec<TrackView> {
     ]
 }
 
+/// Which theme the workspace renders under.
+#[derive(Clone, Copy, PartialEq)]
+enum ThemeChoice {
+    FtsDark,
+    Reaper7,
+}
+
 #[component]
 fn App() -> Element {
     let tracks = use_signal(sample_tracks);
-    let playhead = use_signal(|| 6.0_f64);
+    let mut playhead = use_signal(|| 6.0_f64);
+    let mut choice = use_signal(|| ThemeChoice::FtsDark);
+
+    // Build both theme contexts once (the REAPER import runs the WALTER
+    // interpreter over 2k lines of rtconfig — not something to redo per
+    // render), then pick per the toggle.
+    let dark_ctx = use_hook(ThemeContext::new);
+    let reaper_ctx = use_hook(|| {
+        let rt = ReaperTheme::from_sources(REAPER7_INI, REAPER7_RTCONFIG);
+        ThemeContext::new().with_theme(theme_from_reaper(&rt))
+    });
+    let theme_ctx = match choice() {
+        ThemeChoice::FtsDark => dark_ctx.clone(),
+        ThemeChoice::Reaper7 => reaper_ctx.clone(),
+    };
+    let theme_label = match choice() {
+        ThemeChoice::FtsDark => "FTS dark theme",
+        ThemeChoice::Reaper7 => "REAPER 7 (imported · palette + WALTER)",
+    };
 
     let markers = vec![
         MarkerView { time: 0.0, name: "Intro".into(), color: None, idx: 1 },
@@ -146,13 +180,32 @@ fn App() -> Element {
                 }
                 span {
                     style: "font-size:11px; color:#52525b;",
-                    "DawWorkspace · sample data · FTS dark theme"
+                    "DawWorkspace · sample data · {theme_label}"
+                }
+                div { style: "flex:1;" }
+                // Theme toggle — the payoff: flip the whole workspace between
+                // the FTS default and a live-imported stock REAPER 7 theme.
+                for (c, label) in [(ThemeChoice::FtsDark, "FTS Dark"), (ThemeChoice::Reaper7, "REAPER 7")] {
+                    button {
+                        onclick: move |_| choice.set(c),
+                        style: {
+                            let on = choice() == c;
+                            format!(
+                                "padding:4px 12px; margin-left:6px; border-radius:6px; font-size:11px; \
+                                 cursor:pointer; border:1px solid {}; background:{}; color:{};",
+                                if on { "#3f76e0" } else { "#3f3f46" },
+                                if on { "#1e3a6e" } else { "#18181b" },
+                                if on { "#e4e4e7" } else { "#a1a1aa" },
+                            )
+                        },
+                        "{label}"
+                    }
                 }
             }
             div {
                 style: "flex:1; min-height:0;",
                 ThemeProvider {
-                    theme: ThemeContext::new(),
+                    theme: theme_ctx,
                     DawWorkspace {
                         tracks: tracks(),
                         markers,
@@ -163,6 +216,12 @@ fn App() -> Element {
                         pps: 34.0,
                         seconds: 28.0,
                         beats_per_measure: 4,
+                        // Click the ruler / timeline to move the playhead.
+                        on_edit: move |edit| {
+                            if let ArrangeEdit::Seek(t) = edit {
+                                playhead.set(t);
+                            }
+                        },
                     }
                 }
             }
