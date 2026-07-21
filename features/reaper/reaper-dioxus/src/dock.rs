@@ -8,11 +8,6 @@
 //! direct X11 child window with a proper 32-bit ARGB visual as the GPU
 //! render surface, reparented into the dock panel's X11 hierarchy.
 
-#[cfg(feature = "desktop-renderer")]
-use dioxus_embedded::{
-    EmbeddedBounds, ParentWindow,
-    desktop::{DioxusDesktopEmbeddedConfig, DioxusDesktopEmbeddedView, to_desktop_rect},
-};
 use dioxus_native::prelude::*;
 #[cfg(not(target_os = "linux"))]
 use raw_window_handle::{
@@ -25,8 +20,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::os::raw::c_int;
-#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-use std::os::raw::c_ulong;
 use std::ptr;
 
 use crate::embedded::EmbeddedView;
@@ -79,27 +72,11 @@ pub struct DockablePanelConfig {
     pub show_on_first_launch: bool,
 }
 
-/// Renderer backend for a dockable panel.
-#[cfg(feature = "desktop-renderer")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DockablePanelRenderer {
-    /// Existing CPU/GPU native renderer built on Blitz.
-    Native,
-    /// Browser-backed Dioxus desktop renderer embedded as a child webview.
-    Desktop,
-}
-
 /// A live dockable panel registered with REAPER's docker system.
 struct LivePanel {
     config: DockablePanelConfig,
     hwnd: raw::HWND,
     view: Option<EmbeddedView>,
-    #[cfg(feature = "desktop-renderer")]
-    renderer: DockablePanelRenderer,
-    #[cfg(feature = "desktop-renderer")]
-    desktop_view: Option<DioxusDesktopEmbeddedView>,
-    #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-    desktop_parent: Option<LinuxDesktopParent>,
     visible: bool,
     contexts: Vec<Box<dyn FnOnce()>>,
     /// Track failed init attempts to avoid infinite retry spam.
@@ -122,23 +99,6 @@ struct LivePanel {
     wants_text_input: bool,
 }
 
-#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-struct LinuxDesktopParent {
-    bridge_hwnd: raw::HWND,
-    parent: ParentWindow,
-}
-
-#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-impl Drop for LinuxDesktopParent {
-    fn drop(&mut self) {
-        if !self.bridge_hwnd.is_null() {
-            unsafe {
-                swell().DestroyWindow(self.bridge_hwnd);
-            }
-        }
-    }
-}
-
 /// REAPER recognises this class name as a text-input-capable window and will
 /// not process global action shortcuts while it has focus. reaimgui uses the
 /// same magic string — it's originally for EEL2/LICE standalone text boxes.
@@ -151,8 +111,6 @@ const DEFAULT_CLASS: &str = "FTSDioxusPanel\0";
 
 thread_local! {
     static PANELS: RefCell<HashMap<PanelId, LivePanel>> = RefCell::new(HashMap::new());
-    #[cfg(feature = "desktop-renderer")]
-    static PANEL_RENDERER_OVERRIDES: RefCell<HashMap<PanelId, DockablePanelRenderer>> = RefCell::new(HashMap::new());
 }
 
 static REAPER_API: std::sync::OnceLock<&'static Reaper> = std::sync::OnceLock::new();
@@ -190,14 +148,6 @@ pub fn init(reaper: &'static Reaper, swell: &'static Swell) {
         Ok(()) => tracing::info!("Dock panel hwnd_info registered"),
         Err(e) => tracing::warn!("hwnd_info registration failed (REAPER < 6.29?): {e:?}"),
     }
-}
-
-/// Override the renderer for a panel before it is registered.
-#[cfg(feature = "desktop-renderer")]
-pub fn set_panel_renderer(id: PanelId, renderer: DockablePanelRenderer) {
-    PANEL_RENDERER_OVERRIDES.with(|overrides| {
-        overrides.borrow_mut().insert(id, renderer);
-    });
 }
 
 /// Accelerator handler that passes keyboard events to dock panels
@@ -598,18 +548,10 @@ pub fn register_panel(
     }
 
     let default_dock = config.default_dock_position;
-    #[cfg(feature = "desktop-renderer")]
-    let renderer = renderer_for_panel(config.id);
     let panel = LivePanel {
         config,
         hwnd,
         view: None,
-        #[cfg(feature = "desktop-renderer")]
-        renderer,
-        #[cfg(feature = "desktop-renderer")]
-        desktop_view: None,
-        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-        desktop_parent: None,
         visible: false,
         contexts,
         init_attempts: 0,
@@ -739,9 +681,6 @@ pub fn update_panels() {
         let swell = swell();
         let reaper = reaper();
 
-        #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-        pump_gtk_events();
-
         for panel in panels.values_mut() {
             if !panel.visible {
                 continue;
@@ -811,20 +750,6 @@ pub fn update_panels() {
             let h = (rect.bottom - rect.top).unsigned_abs();
 
             if w > 0 && h > 0 {
-                #[cfg(feature = "desktop-renderer")]
-                if let Some(desktop_view) = &mut panel.desktop_view {
-                    if let Err(err) =
-                        desktop_view.set_bounds(to_desktop_rect(EmbeddedBounds::new(0, 0, w, h)))
-                    {
-                        tracing::debug!(
-                            panel = panel.config.id,
-                            "Failed to resize desktop webview panel: {err}"
-                        );
-                    }
-                    desktop_view.poll();
-                    continue;
-                }
-
                 if let Some(view) = &mut panel.view {
                     let (cur_w, cur_h) = view.size();
                     if w != cur_w || h != cur_h {
@@ -880,14 +805,6 @@ pub fn unregister_all_panels() {
         for (_, mut panel) in panels.drain() {
             // Drop EmbeddedView first (releases GPU resources)
             panel.view = None;
-            #[cfg(feature = "desktop-renderer")]
-            {
-                panel.desktop_view = None;
-                #[cfg(target_os = "linux")]
-                {
-                    panel.desktop_parent = None;
-                }
-            }
             if !panel.hwnd.is_null() {
                 unsafe {
                     reaper.DockWindowRemove(panel.hwnd);
@@ -1031,26 +948,6 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
         .max(panel.config.default_height);
     tracing::info!(w, h, "Panel '{}' client rect", panel.config.id);
 
-    #[cfg(feature = "desktop-renderer")]
-    if panel.renderer == DockablePanelRenderer::Desktop {
-        match create_desktop_view(panel, w, h) {
-            Ok(()) => {
-                tracing::info!(
-                    "Created desktop renderer webview for panel '{}'",
-                    panel.config.id
-                );
-            }
-            Err(err) => {
-                tracing::warn!(
-                    "Desktop renderer webview creation failed for '{}': {}",
-                    panel.config.id,
-                    err
-                );
-            }
-        }
-        return;
-    }
-
     let contexts = std::mem::take(&mut panel.contexts);
 
     // On Linux, SWELL docked panels don't own a GDK window we can render
@@ -1116,174 +1013,7 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
 }
 
 fn panel_needs_init(panel: &LivePanel) -> bool {
-    #[cfg(feature = "desktop-renderer")]
-    if panel.renderer == DockablePanelRenderer::Desktop {
-        return panel.desktop_view.is_none();
-    }
-
     panel.view.is_none()
-}
-
-#[cfg(feature = "desktop-renderer")]
-fn create_desktop_view(
-    panel: &mut LivePanel,
-    width: u32,
-    height: u32,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let parent = create_desktop_parent(panel.hwnd, width, height)?;
-    let config = DioxusDesktopEmbeddedConfig::default()
-        .with_bounds(to_desktop_rect(EmbeddedBounds::new(0, 0, width, height)));
-
-    let dom = VirtualDom::new(panel.config.app);
-    let view = DioxusDesktopEmbeddedView::new(&parent.parent, dom, config, || {})?;
-
-    #[cfg(target_os = "linux")]
-    {
-        panel.desktop_parent = Some(parent);
-    }
-    panel.desktop_view = Some(view);
-    Ok(())
-}
-
-#[cfg(all(feature = "desktop-renderer", target_os = "windows"))]
-struct DesktopParent {
-    parent: ParentWindow,
-}
-
-#[cfg(all(feature = "desktop-renderer", target_os = "macos"))]
-struct DesktopParent {
-    parent: ParentWindow,
-}
-
-#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-type DesktopParent = LinuxDesktopParent;
-
-#[cfg(all(feature = "desktop-renderer", target_os = "windows"))]
-fn create_desktop_parent(
-    hwnd: raw::HWND,
-    _width: u32,
-    _height: u32,
-) -> Result<DesktopParent, Box<dyn std::error::Error>> {
-    Ok(DesktopParent {
-        parent: unsafe { ParentWindow::from_hwnd(hwnd as isize)? },
-    })
-}
-
-#[cfg(all(feature = "desktop-renderer", target_os = "macos"))]
-fn create_desktop_parent(
-    hwnd: raw::HWND,
-    _width: u32,
-    _height: u32,
-) -> Result<DesktopParent, Box<dyn std::error::Error>> {
-    Ok(DesktopParent {
-        parent: unsafe { ParentWindow::from_ns_view(hwnd as *mut std::ffi::c_void)? },
-    })
-}
-
-#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-fn create_desktop_parent(
-    hwnd: raw::HWND,
-    width: u32,
-    height: u32,
-) -> Result<DesktopParent, Box<dyn std::error::Error>> {
-    init_gtk_for_desktop_renderer()?;
-
-    let mut x_window_id: c_ulong = 0;
-    let rect = raw::RECT {
-        left: 0,
-        top: 0,
-        right: width as i32,
-        bottom: height as i32,
-    };
-
-    let bridge_hwnd = unsafe {
-        swell().SWELL_CreateXBridgeWindow(
-            hwnd,
-            &mut x_window_id as *mut c_ulong as *mut *mut c_void,
-            &rect as *const _,
-        )
-    };
-
-    if bridge_hwnd.is_null() {
-        return Err("SWELL_CreateXBridgeWindow returned null".into());
-    }
-    if x_window_id == 0 {
-        unsafe {
-            swell().DestroyWindow(bridge_hwnd);
-        }
-        return Err("SWELL_CreateXBridgeWindow did not assign an X11 window id".into());
-    }
-
-    unsafe {
-        let prop_key = CString::new("SWELL_XBRIDGE_KBHOOK_CHECK")?;
-        let msg = raw::WM_USER as i32 + 100;
-        swell().SetProp(bridge_hwnd, prop_key.as_ptr(), msg as *mut c_void);
-    }
-
-    let parent = unsafe { ParentWindow::from_xlib_window(x_window_id as u64)? };
-    Ok(LinuxDesktopParent {
-        bridge_hwnd,
-        parent,
-    })
-}
-
-#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-fn init_gtk_for_desktop_renderer() -> Result<(), Box<dyn std::error::Error>> {
-    use std::sync::Once;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    static INIT: Once = Once::new();
-    static OK: AtomicBool = AtomicBool::new(false);
-
-    INIT.call_once(|| {
-        if gtk::init().is_ok() {
-            OK.store(true, Ordering::Relaxed);
-        }
-    });
-
-    if OK.load(Ordering::Relaxed) {
-        Ok(())
-    } else {
-        Err("gtk::init failed; embedded desktop renderer requires GTK/WebKitGTK on Linux".into())
-    }
-}
-
-#[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
-fn pump_gtk_events() {
-    while gtk::events_pending() {
-        gtk::main_iteration_do(false);
-    }
-}
-
-#[cfg(feature = "desktop-renderer")]
-fn renderer_for_panel(id: PanelId) -> DockablePanelRenderer {
-    if let Some(renderer) =
-        PANEL_RENDERER_OVERRIDES.with(|overrides| overrides.borrow().get(id).copied())
-    {
-        return renderer;
-    }
-
-    if desktop_renderer_panel_list_matches(id) {
-        return DockablePanelRenderer::Desktop;
-    }
-
-    match std::env::var("REAPER_DIOXUS_RENDERER") {
-        Ok(value) if value.eq_ignore_ascii_case("desktop") => DockablePanelRenderer::Desktop,
-        Ok(value) if value.eq_ignore_ascii_case("native") => DockablePanelRenderer::Native,
-        _ => DockablePanelRenderer::Native,
-    }
-}
-
-#[cfg(feature = "desktop-renderer")]
-fn desktop_renderer_panel_list_matches(id: PanelId) -> bool {
-    let Ok(value) = std::env::var("REAPER_DIOXUS_DESKTOP_PANELS") else {
-        return false;
-    };
-
-    value
-        .split(',')
-        .map(str::trim)
-        .any(|panel_id| panel_id == "*" || panel_id == id)
 }
 
 #[cfg(not(target_os = "linux"))]

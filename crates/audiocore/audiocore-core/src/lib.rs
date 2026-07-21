@@ -12,11 +12,23 @@
 
 // Re-export core dependencies
 pub use nice_plug;
+#[allow(
+    ambiguous_glob_reexports,
+    reason = "nice_plug::prelude and nice_plug_dioxus::prelude both export `Modifiers`; \
+              this crate re-exports both for convenience and never re-exports the \
+              ambiguous name itself, so the conflict is harmless"
+)]
 pub use nice_plug::prelude::*;
 
 #[cfg(feature = "gui")]
 pub use nice_plug_dioxus;
 #[cfg(feature = "gui")]
+#[allow(
+    ambiguous_glob_reexports,
+    reason = "nice_plug::prelude and nice_plug_dioxus::prelude both export `Modifiers`; \
+              this crate re-exports both for convenience and never re-exports the \
+              ambiguous name itself, so the conflict is harmless"
+)]
 pub use nice_plug_dioxus::prelude::*;
 
 #[cfg(feature = "gui")]
@@ -28,9 +40,21 @@ pub use audiocore_gui;
 
 /// Prelude for convenient imports.
 pub mod prelude {
+    #[allow(
+        ambiguous_glob_reexports,
+        reason = "nice_plug::prelude and nice_plug_dioxus::prelude both export `Modifiers`; \
+                  this crate re-exports both for convenience and never re-exports the \
+                  ambiguous name itself, so the conflict is harmless"
+    )]
     pub use nice_plug::prelude::*;
 
     #[cfg(feature = "gui")]
+    #[allow(
+        ambiguous_glob_reexports,
+        reason = "nice_plug::prelude and nice_plug_dioxus::prelude both export `Modifiers`; \
+                  this crate re-exports both for convenience and never re-exports the \
+                  ambiguous name itself, so the conflict is harmless"
+    )]
     pub use nice_plug_dioxus::prelude::*;
 }
 

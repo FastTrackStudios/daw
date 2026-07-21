@@ -74,10 +74,7 @@ pub fn load_audio(
             None,
         )
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("{e}"),
-            ))
+            Box::new(std::io::Error::other(format!("{e}")))
         })?;
 
     let name = path
@@ -86,7 +83,7 @@ pub fn load_audio(
         .unwrap_or("sample")
         .to_string();
 
-    let num_channels = decoded.channels() as usize;
+    let num_channels = decoded.channels();
     if num_channels == 0 {
         return Err("Empty audio file".into());
     }

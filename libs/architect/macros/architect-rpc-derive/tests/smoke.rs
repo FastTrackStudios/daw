@@ -462,6 +462,10 @@ mod empty {
 // ── Reified ops: #[rpc(ops)] ────────────────────────────────────────
 
 mod ops_plain {
+    #![allow(
+        unused_imports,
+        reason = "the #[rpc(ops)] expansion re-imports the trait name at the trait's own span for the reified-op module; false positive"
+    )]
     use super::rpc;
 
     #[rpc(ops)]
@@ -521,6 +525,10 @@ mod ops_plain {
 }
 
 mod ops_subst {
+    #![allow(
+        unused_imports,
+        reason = "the #[rpc(ops)] expansion re-imports the trait name at the trait's own span for the reified-op module; false positive"
+    )]
     use architect::ops::{OpResolver, ResolveArg};
 
     use super::rpc;
@@ -619,6 +627,10 @@ mod ops_subst {
 }
 
 mod ops_skip {
+    #![allow(
+        unused_imports,
+        reason = "the #[rpc(ops)] expansion re-imports the trait name at the trait's own span for the reified-op module; false positive"
+    )]
     use super::rpc;
 
     #[rpc(ops)]

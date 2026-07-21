@@ -836,7 +836,7 @@ mod tests {
             Some(&"session:edit".to_string())
         );
         // No Shift variants when the anchor doesn't include Shift.
-        assert!(entries.get("Alt+m Shift+r").is_none());
+        assert!(!entries.contains_key("Alt+m Shift+r"));
     }
 
     #[test]

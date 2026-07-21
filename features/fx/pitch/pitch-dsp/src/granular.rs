@@ -306,10 +306,10 @@ mod tests {
             let omega = 2.0 * PI * bin as f64 / fft_size as f64;
             let mut re = 0.0f64;
             let mut im = 0.0f64;
-            for i in 0..fft_size {
+            for (i, &s) in signal.iter().enumerate().take(fft_size) {
                 let w = 0.5 * (1.0 - (2.0 * PI * i as f64 / fft_size as f64).cos());
-                re += signal[i] * w * (omega * i as f64).cos();
-                im -= signal[i] * w * (omega * i as f64).sin();
+                re += s * w * (omega * i as f64).cos();
+                im -= s * w * (omega * i as f64).sin();
             }
             let mag_sq = re * re + im * im;
             if bin < split_bin {
