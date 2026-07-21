@@ -26,5 +26,14 @@ default = []
 native = ["editor-view/native"]
 web = ["editor-view/web"]
 
+[dev-dependencies]
+# The blitz_minimal example — a real dioxus-native window. Dev-dep only;
+# library consumers never pull the renderer through the umbrella.
+dioxus-native = { workspace = true }
+
+[[example]]
+name = "blitz_minimal"
+required-features = ["native"]
+
 [lints]
 workspace = true
