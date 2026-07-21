@@ -175,12 +175,22 @@
    Blitz agree on these metrics). Works identically on web. */
 .ed-modal-caret-block {
     display: inline-block;
-    height: 1em;
-    line-height: 1em;
-    vertical-align: text-bottom;
+    /* Cover the whole glyph cell — ascenders AND descenders (g, y, p) —
+       centered on the line so nothing clips. `text-bottom` + a 1em box
+       cut descenders off and floated above the cap; `middle` + a box a
+       bit taller than the em hugs the character correctly. */
+    height: 1.25em;
+    line-height: 1.25em;
+    vertical-align: middle;
     background: var(--ed-accent);
     color: var(--ed-bg, #1e1e2e);
     border-radius: 2px;
+    /* Keep a whitespace char under the caret from collapsing (it would
+       jam the surrounding words together), and guarantee a visible box
+       even over a space or other zero-advance glyph. */
+    white-space: pre;
+    min-width: 0.42em;
+    text-align: center;
 }
 .ed-modal-caret-underscore {
     box-shadow: inset 0 -2px 0 var(--ed-danger);

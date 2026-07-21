@@ -114,12 +114,13 @@ pub fn render_tile(arena: &Arena, tile: TileId, on_click: Callback<usize>) -> El
         }
         TileKind::Line => {
             let pos = crate::tile::pos::pos_at_start(arena, tile);
-            // Empty lines render with a `<br>` so the line has a
-            // clickable row even with no content. A click anywhere on
-            // the line that isn't a child span (the gutter side, the
-            // indent, trailing whitespace) lands the caret at the line
-            // start; child spans `stop_propagation` so a click on text
-            // lands at that span instead.
+            // Empty line: an empty div. `.cm-line { min-height: 1lh }`
+            // gives it a full clickable row without any content — Blitz
+            // honors `1lh`. (The web path emits a `<br>` here so the
+            // browser caret can land in the empty contenteditable line;
+            // Blitz needs no such placeholder, and a `<br>` there renders
+            // several line-heights tall.) A click anywhere on the row
+            // lands the caret at the line start.
             if t.children.is_empty() {
                 rsx! {
                     div {
@@ -127,7 +128,6 @@ pub fn render_tile(arena: &Arena, tile: TileId, on_click: Callback<usize>) -> El
                         "data-tile-id": "{tid}",
                         "data-tile-pos": "{pos}",
                         onmousedown: move |_e: Event<MouseData>| on_click.call(pos),
-                        br {}
                     }
                 }
             } else {
