@@ -215,6 +215,25 @@
        background of whichever span owns the run — so all of them need it. */
     background: color-mix(in srgb, var(--ed-accent) 32%, transparent);
 }
+/* NATIVE inline-mark backgrounds (code, highlight). Same Blitz
+   limitation as the caret/selection: `draw_inline_backgrounds` paints
+   the background of the span that DIRECTLY owns the glyph run, and the
+   live-preview marks put their background on the OUTER mark span while
+   the glyphs live in an inner tile <span> — so the fill never reaches
+   the text. Push the background onto every descendant span (the glyph
+   owner may itself be nested: code inside a link, etc.). Web keeps the
+   outer-span rule (`.md-code` / `.md-highlight` above); the browser
+   paints an inline background on any ancestor, so this is native-only.
+   Use an OPAQUE highlight mix (blend toward --ed-bg, not transparent)
+   so the fork's `draw_inline_backgrounds` gives it a tight glyph box
+   like a marker, rather than the full-line-height box it reserves for
+   translucent selection fills. */
+.ed-render-native .md-code span {
+    background: var(--ed-bg-elev);
+}
+.ed-render-native .md-highlight span {
+    background: color-mix(in oklab, var(--ed-warn) 30%, var(--ed-bg));
+}
 .ed-modal-caret-underscore {
     box-shadow: inset 0 -2px 0 var(--ed-danger);
 }
