@@ -28,12 +28,32 @@
 //! The ruler shares the lanes' horizontal scroll: the lane scroller's
 //! `onscroll` mirrors `scroll_left` into the ruler content's offset.
 
+use input::{InputCommand, KeymapConfig};
+use input_dioxus::use_input_processor;
+
 use crate::panels::model::{
     EnvelopeView, LaneDisplay, MarkerView, RegionView, TempoMarkerView, TrackView,
 };
 use crate::panels::track_control_panel::TrackControlPanel;
 use crate::prelude::*;
 use crate::theming::{Color, use_theme};
+
+/// Keymap for the arrange view's wheel gestures, routed through the
+/// `input`/`input-dioxus` action system (the same gesture→action layer the
+/// rest of FTS uses). Ctrl+wheel zooms, Shift+wheel scrolls horizontally; the
+/// processor resolves the gesture to an action string, and the handler reads
+/// the raw wheel delta for direction/amount (the processor drops the delta).
+fn arrange_keymap() -> KeymapConfig {
+    use std::collections::HashMap;
+    let normal = HashMap::from([
+        ("Ctrl+Scroll".to_string(), "view.zoom".to_string()),
+        ("Shift+Scroll".to_string(), "view.hscroll".to_string()),
+    ]);
+    KeymapConfig {
+        scroll: HashMap::from([("normal".to_string(), normal)]),
+        ..Default::default()
+    }
+}
 
 /// A user edit gesture from the arrange view, reported to the host (via
 /// [`ArrangeView`]'s `on_edit`) so it can drive the engine and update the
@@ -226,7 +246,19 @@ pub fn ArrangeView(
     #[props(default)]
     on_edit: Option<EventHandler<ArrangeEdit>>,
 ) -> Element {
+    // Horizontal zoom lives here: `pps` (pixels-per-second) is seeded from the
+    // prop, then Ctrl+wheel mutates this signal. Shadow the prop with the
+    // signal's value so every downstream `pps` use (grid, clips, cursors) picks
+    // up the current zoom. (Same gesture set as reaper-input's scrolling
+    // actions; a later pass can route these through input-dioxus once that
+    // crate is wasm-clean.)
+    let mut zoom = use_signal(|| pps);
+    let pps = zoom();
     let content_w = (seconds * pps).max(600.0) as u32;
+
+    // Input processor: resolves wheel gestures to action strings via the
+    // `input` keymap (config-driven, wasm-clean).
+    let input = use_input_processor(arrange_keymap());
 
     // Shared clip-drag state + edit callback, provided to the lane clips.
     let drag = use_signal(|| None::<DragState>);
@@ -306,7 +338,6 @@ pub fn ArrangeView(
     let grid_measure = ar.grid_measure.css();
     let grid_beat = ar.grid_beat.css();
     let grid_sub = ar.grid_sub.css();
-    let vgrid = ar.vgrid.css();
     let edit_cursor = ar.edit_cursor.css();
     let play_cursor = ar.play_cursor.css();
 
@@ -520,14 +551,50 @@ pub fn ArrangeView(
 
                     TrackControlPanel { tracks: tracks.clone(), width: tcp_width, scroll: false }
 
-                // Timeline lanes (own horizontal scroll, mirrored to the ruler).
+                // Timeline lanes. Horizontal position is driven by `scroll_x`
+                // (single source of truth, shared with the ruler): the inner
+                // content is translated by `-scroll_x` under `overflow:hidden`.
+                // The wheel drives zoom + horizontal scroll; plain vertical
+                // wheel falls through to the outer vertical scroller.
                 div {
                     style: format!(
-                        "flex:1 1 0; min-width:0; overflow-x:auto; position:relative; \
+                        "flex:1 1 0; min-width:0; overflow:hidden; position:relative; \
                          background:{empty_bg};"
                     ),
-                    onscroll: move |evt| {
-                        scroll_x.set(evt.data.scroll_left());
+                    onwheel: move |evt: WheelEvent| {
+                        let d = evt.data().delta().strip_units();
+                        // Resolve the gesture through the input keymap, then read
+                        // the raw delta for direction/amount (the processor drops
+                        // it). Unbound gestures (plain vertical wheel) return no
+                        // command → native scroll of the outer vertical scroller.
+                        for cmd in input.handle_wheel(&evt) {
+                            let action = match &cmd {
+                                InputCommand::Action(a) => Some(a.as_str()),
+                                InputCommand::ActionWithArgs { action, .. } => Some(action.as_str()),
+                                _ => None,
+                            };
+                            match action {
+                                Some("view.zoom") => {
+                                    // Zoom about the pointer: keep the time under
+                                    // the cursor fixed as `pps` changes.
+                                    let cx = evt.data().client_coordinates().x;
+                                    let t = ((cx - origin + scroll_x()) / pps).max(0.0);
+                                    let factor = if d.y < 0.0 { 1.15 } else { 1.0 / 1.15 };
+                                    let new_pps = (pps * factor).clamp(2.0, 400.0);
+                                    zoom.set(new_pps);
+                                    scroll_x.set((t * new_pps - (cx - origin)).max(0.0));
+                                }
+                                Some("view.hscroll") => {
+                                    scroll_x.set((scroll_x() + d.y + d.x).max(0.0));
+                                }
+                                _ => {}
+                            }
+                        }
+                        // Trackpad horizontal swipe (no modifier) isn't a keymap
+                        // gesture — scroll directly so two-finger sideways works.
+                        if d.x.abs() > d.y.abs() {
+                            scroll_x.set((scroll_x() + d.x).max(0.0));
+                        }
                     },
                     // Advance / commit an in-flight clip drag. Handlers live on
                     // the scroller so the drag keeps tracking even when the
@@ -546,20 +613,9 @@ pub fn ArrangeView(
                     },
                     onmouseup: move |_| commit_drag(),
                     onmouseleave: move |_| commit_drag(),
-                    // `arrange_vgrid` shading in the empty area below the tracks.
-                    for i in 0..n_at(g.major) {
-                        div {
-                            key: "v{i}",
-                            style: format!(
-                                "position:absolute; top:{lanes_h}px; bottom:0; left:{x:.1}px; \
-                                 width:1px; background:{vgrid}; pointer-events:none;",
-                                x = i as f64 * g.major * pps,
-                            ),
-                        }
-                    }
-                    // NOTE: no `min-height:100%` here — blitz resolves the
-                    // percentage against an indefinite scroll height and
-                    // culls the *in-flow* children (the lanes) entirely.
+                    // Translated content: `-scroll_x` pans it horizontally under
+                    // the `overflow:hidden` scroller (blitz now honours
+                    // `min-height:100%` here, so the grid fills the full height).
                     div {
                         // `min-width:100%` makes the arrange body (and every
                         // track-row lane inside it) fill the scroller's width
@@ -567,14 +623,13 @@ pub fn ArrangeView(
                         // narrower, so empty arrange fills the panel instead of
                         // showing bare background; `width:content_w` still wins
                         // (→ horizontal scroll) once the timeline is longer.
-                        // (min-*width* is safe — the blitz culling note above is
-                        // specific to min-*height* against indefinite scroll.)
-                        // `min-height:100%` fills the scroller vertically so the
-                        // grid lines (top:0→bottom:0) continue past the last
-                        // track into the empty area, REAPER-style.
+                        // `min-width:100%`/`min-height:100%` fill the scroller so
+                        // grid + lanes cover the whole arrange view; `left` pans
+                        // it by the shared `scroll_x`.
                         style: format!(
                             "position:relative; width:{content_w}px; min-width:100%; \
-                             min-height:100%; background:{arrange_bg};"
+                             min-height:100%; left:{sx:.1}px; background:{arrange_bg};",
+                            sx = -scroll_x(),
                         ),
                         // Empty-timeline click: move the edit cursor and drop
                         // the clip selection. Clips stop propagation, so this

@@ -20,6 +20,11 @@ eyre = { workspace = true }
 dioxus = { workspace = true, optional = true }
 dioxus-native = { workspace = true, optional = true }
 
+# Input/actions: gesture → action-string keymap for the arrange view's
+# zoom/scroll/playhead (both wasm-clean). Enabled by the `web` feature.
+input = { workspace = true, optional = true }
+input-dioxus = { workspace = true, optional = true }
+
 # Logging
 tracing = { workspace = true, optional = true }
 
@@ -38,7 +43,7 @@ daw-theme-reaper = { workspace = true, optional = true }
 
 [features]
 default = ["web"]
-web = ["dep:dioxus", "dep:tracing", "dock-dioxus/web"]
+web = ["dep:dioxus", "dep:tracing", "dock-dioxus/web", "dep:input", "dep:input-dioxus"]
 native = ["dep:dioxus-native"]
 # Folder-hierarchy mixer (`widgets::mixer::Mixer`, driven by
 # `daw_proto::track::FolderDepthChange`). daw-proto is already a hard dep.
@@ -57,7 +62,7 @@ reaper-test-panels = [
 # sample data (no DAW backend), served in the browser via `dx serve`.
 # Pulls the dioxus WEB RENDERER (the base `web` feature only enables the
 # dioxus dep for rsx, not a renderer).
-playground = ["web", "dioxus/web", "dioxus/launch"]
+playground = ["web", "reaper-theme", "dioxus/web", "dioxus/launch"]
 
 # Web-build helpers for the widgets (e.g. knob pointer-lock / coords).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
