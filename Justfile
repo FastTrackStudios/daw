@@ -117,10 +117,17 @@ task-install:
 
 # Install Patchbay (the PipeWire studio-routing app): release binary in
 # ~/.local/lib/fts, `patchbay` on PATH, launcher entry + icon.
-patchbay-install:
+# dx web build of the patchbay browser remote → apps/patchbay/web-dist/,
+# embedded into fts-patchbay by `--features embed-web` (patchbay-install).
+patchbay-web-stage:
+    cd apps/patchbay/web && dx build --platform web --release
+    rm -rf apps/patchbay/web-dist
+    cp -r target/dx/patchbay-web/release/web/public apps/patchbay/web-dist
+
+patchbay-install: patchbay-web-stage
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo build --release -p fts-patchbay
+    cargo build --release -p fts-patchbay --features embed-web
     install -d ~/.local/lib/fts
     install -m 755 target/release/fts-patchbay ~/.local/lib/fts/patchbay.new
     mv -T ~/.local/lib/fts/patchbay.new ~/.local/lib/fts/patchbay
@@ -213,13 +220,23 @@ release-package: web-stage
 tailwind-eq:
     tailwindcss -i features/fx/eq/eq-ui/tailwind.css -o features/fx/eq/eq-ui/assets/tailwind.css --minify
 
+# Rebuild comp-ui's embedded Tailwind (features/fx/comp/comp-ui/assets/
+# tailwind.css) after class changes in comp-ui / fts-ui.
+tailwind-comp:
+    tailwindcss -i features/fx/comp/comp-ui/tailwind.css -o features/fx/comp/comp-ui/assets/tailwind.css --minify
+
+# Rebuild trigger-ui's embedded Tailwind (features/fx/trigger/trigger-ui/
+# assets/tailwind.css) after class changes in trigger-ui / fts-ui.
+tailwind-trigger:
+    tailwindcss -i features/fx/trigger/trigger-ui/tailwind.css -o features/fx/trigger/trigger-ui/assets/tailwind.css --minify
+
 # Bundle every FTS plugin as .clap + .vst3 (target/bundled/, names from
 # bundler.toml). Debug of a single plugin: cargo run -p fts-plugin-xtask
 # -- bundle -p eq-plugin
 plugins-bundle:
     #!/usr/bin/env bash
     set -euo pipefail
-    for p in eq comp reverb delay tune modulation nam level saturate signal guide gate limiter; do
+    for p in eq comp reverb delay tune modulation nam level saturate signal guide gate limiter trigger; do
         cargo run -q -p fts-plugin-xtask -- bundle -p "$p-plugin" --release
     done
     ls target/bundled/
