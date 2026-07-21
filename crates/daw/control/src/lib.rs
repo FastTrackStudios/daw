@@ -683,8 +683,15 @@ impl Daw {
 
 // ============================================================================
 // Global singleton support (for backwards compatibility / single-host usage)
-// Not available on WASM — vox's CallerDyn uses MaybeSend/MaybeSync
-// which are empty traits on wasm32, so Daw is not Sync and can't be in a static.
+//
+// Native: an `OnceLock<Daw>` static (needs `Daw: Sync`).
+// WASM: vox's `CallerDyn` uses the empty `MaybeSend`/`MaybeSync` markers, so
+// `Daw` is not `Sync` and can't live in a static. But wasm is single-threaded
+// and the browser remote talks to exactly one engine, set once at startup and
+// never torn down — so a `thread_local` `OnceCell` holding a leaked
+// `&'static Daw` gives the identical `Daw::get()`/`try_get()` API without any
+// `Sync` bound. Both paths expose the same surface, so `daw-ui` components use
+// `Daw::get()` unchanged on web.
 // ============================================================================
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -730,6 +737,54 @@ mod global {
         /// Check if the DAW has been initialized.
         pub fn is_initialized() -> bool {
             GLOBAL_DAW.get().is_some()
+        }
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+mod global {
+    use super::*;
+    use std::cell::OnceCell;
+
+    thread_local! {
+        /// The one browser-side `Daw`, leaked to `'static` on first `init`
+        /// (it lives for the whole page session). Single-threaded, so a
+        /// `thread_local` is effectively global without needing `Sync`.
+        static GLOBAL_DAW: OnceCell<&'static Daw> = const { OnceCell::new() };
+    }
+
+    impl Daw {
+        /// Initialize the global DAW connection (for single-host usage).
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if already initialized.
+        pub fn init(handle: Caller) -> crate::Result<()> {
+            GLOBAL_DAW.with(|cell| {
+                cell.set(&*Box::leak(Box::new(Daw::new(handle))))
+                    .map_err(|_| Error::InvalidOperation("DAW already initialized".to_string()))
+            })
+        }
+
+        /// Get the global DAW instance.
+        ///
+        /// # Panics
+        ///
+        /// Panics if `init()` has not been called.
+        pub fn get() -> &'static Daw {
+            Self::try_get().expect("DAW not initialized. Call Daw::init() first.")
+        }
+
+        /// Try to get the global DAW instance without panicking.
+        ///
+        /// Returns `None` if `init()` has not been called yet.
+        pub fn try_get() -> Option<&'static Daw> {
+            GLOBAL_DAW.with(|cell| cell.get().copied())
+        }
+
+        /// Check if the DAW has been initialized.
+        pub fn is_initialized() -> bool {
+            Self::try_get().is_some()
         }
     }
 }
