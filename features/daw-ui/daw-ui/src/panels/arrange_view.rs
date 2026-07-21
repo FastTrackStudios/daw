@@ -40,14 +40,21 @@ use crate::theming::{Color, use_theme};
 
 /// Keymap for the arrange view's wheel gestures, routed through the
 /// `input`/`input-dioxus` action system (the same gesture→action layer the
-/// rest of FTS uses). Ctrl+wheel zooms, Shift+wheel scrolls horizontally; the
-/// processor resolves the gesture to an action string, and the handler reads
+/// rest of FTS uses — and the same set as reaper-input's scroll-zoom config).
+/// The processor resolves the gesture to an action string; the handler reads
 /// the raw wheel delta for direction/amount (the processor drops the delta).
+///
+/// - plain wheel → vertical scroll
+/// - Shift+wheel → horizontal scroll
+/// - Alt+wheel → vertical zoom (track height)
+/// - Alt+Shift+wheel → horizontal zoom (timeline)
 fn arrange_keymap() -> KeymapConfig {
     use std::collections::HashMap;
     let normal = HashMap::from([
-        ("Ctrl+Scroll".to_string(), "view.zoom".to_string()),
+        ("Scroll".to_string(), "view.vscroll".to_string()),
         ("Shift+Scroll".to_string(), "view.hscroll".to_string()),
+        ("Alt+Scroll".to_string(), "view.zoom_v".to_string()),
+        ("Alt+Shift+Scroll".to_string(), "view.zoom_h".to_string()),
     ]);
     KeymapConfig {
         scroll: HashMap::from([("normal".to_string(), normal)]),
@@ -260,6 +267,37 @@ pub fn ArrangeView(
     // `input` keymap (config-driven, wasm-clean).
     let input = use_input_processor(arrange_keymap());
 
+    // Every view axis is a signal the wheel + middle-drag handlers drive:
+    // `scroll_x`/`scroll_y` pan (translation), `zoom` (pps) is horizontal zoom,
+    // `row_scale` is vertical zoom (track height).
+    // Horizontal scroll (shared with the ruler) + vertical scroll (translation).
+    let mut scroll_x = use_signal(|| 0.0f64);
+    let mut scroll_y = use_signal(|| 0.0f64);
+    let mut row_scale = use_signal(|| 1.0f32);
+    // Measured viewport size (blitz `get_client_rect`): `view_w` (lanes width)
+    // lets the grid + ruler extend to the visible right edge; `view_h` (body
+    // height) clamps vertical scroll to the content (no infinite vertical
+    // scroll — horizontal is unbounded).
+    let mut view_w = use_signal(|| 0.0f64);
+    let mut view_h = use_signal(|| 0.0f64);
+    // Middle-mouse pan anchor: (start client x, y, start scroll_x, scroll_y).
+    let mut pan = use_signal(|| None::<(f64, f64, f64, f64)>);
+
+    // Vertical zoom: render height-scaled copies so the TCP rows and arrange
+    // lanes (which must line up) grow/shrink together. Signals are Copy, so the
+    // clones are cheap.
+    let rs = row_scale();
+    let tracks: Vec<TrackView> = tracks
+        .into_iter()
+        .map(|mut t| {
+            t.height = ((t.height as f32 * rs).round() as u32).max(16);
+            for e in &mut t.envelopes {
+                e.height = ((e.height as f32 * rs).round() as u32).max(8);
+            }
+            t
+        })
+        .collect();
+
     // Shared clip-drag state + edit callback, provided to the lane clips.
     let drag = use_signal(|| None::<DragState>);
     use_context_provider(|| ArrangeCtx {
@@ -301,13 +339,16 @@ pub fn ArrangeView(
     };
 
     let g = grid_steps(pps, bpm, beats_per_measure);
-    let n_at = |step: f64| (seconds / step).ceil() as i64;
+    // Draw the grid + ruler out to whichever is longer: the project length or
+    // the visible right edge (`scroll_x + measured viewport width`), so lines +
+    // bar numbers fill the whole view instead of stopping at the content. Pad a
+    // little past the edge to avoid a visible seam while scrolling. `view_w` is
+    // 0 until the first measurement, so this falls back to `seconds`.
+    let horizon = ((scroll_x() + view_w()) / pps).max(seconds) + g.major * 2.0;
+    let n_at = move |step: f64| (horizon / step).ceil() as i64;
     // Total lane height — track rows + visible envelope lanes (the grid
     // covers the tracks; `arrange_vgrid` shades the empty area below).
     let lanes_h: u32 = tracks.iter().map(|t| t.total_height()).sum();
-
-    // The lanes scroller owns horizontal scroll; the ruler mirrors it.
-    let mut scroll_x = use_signal(|| 0.0f64);
 
     // Convert a click's window-x to a timeline time. `element_coordinates()`
     // is a no-op in this blitz pin (and `get_client_rect` reports x=0 for the
@@ -370,8 +411,14 @@ pub fn ArrangeView(
                              left:{x:.1}px; cursor:text;",
                             x = -scroll_x(),
                         ),
-                        // Click the ruler to move the edit cursor / transport.
+                        // Left-click the ruler to move the edit cursor / transport
+                        // (middle button is reserved for panning).
                         onmousedown: move |evt: MouseEvent| {
+                            if evt.trigger_button()
+                                != Some(dioxus_elements::input_data::MouseButton::Primary)
+                            {
+                                return;
+                            }
                             emit(ArrangeEdit::Seek(seek_time(evt.client_coordinates().x)));
                         },
 
@@ -545,9 +592,22 @@ pub fn ArrangeView(
             // (CSS computes overflow-y:auto alongside it) and the TCP and
             // lanes would scroll apart.
             div {
-                style: "flex:1 1 0; min-height:0; overflow-y:auto;",
+                // Vertical scroll is a signal too (`scroll_y`): the inner
+                // TCP+lanes row is translated by `-scroll_y` under
+                // `overflow:hidden`, so plain wheel + middle-drag can drive it.
+                style: "flex:1 1 0; min-height:0; overflow:hidden;",
+                onmounted: move |evt| {
+                    spawn(async move {
+                        if let Ok(rect) = evt.get_client_rect().await {
+                            view_h.set(rect.size.height);
+                        }
+                    });
+                },
                 div {
-                    style: "display:flex; align-items:flex-start;",
+                    style: format!(
+                        "display:flex; align-items:flex-start; position:relative; top:{ty:.1}px;",
+                        ty = -scroll_y(),
+                    ),
 
                     TrackControlPanel { tracks: tracks.clone(), width: tcp_width, scroll: false }
 
@@ -561,12 +621,22 @@ pub fn ArrangeView(
                         "flex:1 1 0; min-width:0; overflow:hidden; position:relative; \
                          background:{empty_bg};"
                     ),
+                    // Measure the lanes viewport width so the grid + ruler draw
+                    // out to the visible right edge.
+                    onmounted: move |evt| {
+                        spawn(async move {
+                            if let Ok(rect) = evt.get_client_rect().await {
+                                view_w.set(rect.size.width);
+                            }
+                        });
+                    },
+                    // Wheel gestures via the input keymap (the handler reads the
+                    // raw delta since the processor drops it). Horizontal scroll
+                    // is unbounded (scroll right forever); vertical scroll is
+                    // clamped to the content height (`lanes_h - view_h`).
                     onwheel: move |evt: WheelEvent| {
                         let d = evt.data().delta().strip_units();
-                        // Resolve the gesture through the input keymap, then read
-                        // the raw delta for direction/amount (the processor drops
-                        // it). Unbound gestures (plain vertical wheel) return no
-                        // command → native scroll of the outer vertical scroller.
+                        let max_sy = (lanes_h as f64 - view_h()).max(0.0);
                         for cmd in input.handle_wheel(&evt) {
                             let action = match &cmd {
                                 InputCommand::Action(a) => Some(a.as_str()),
@@ -574,7 +644,17 @@ pub fn ArrangeView(
                                 _ => None,
                             };
                             match action {
-                                Some("view.zoom") => {
+                                Some("view.vscroll") => {
+                                    scroll_y.set((scroll_y() + d.y).clamp(0.0, max_sy));
+                                }
+                                Some("view.hscroll") => {
+                                    scroll_x.set((scroll_x() + d.y + d.x).max(0.0));
+                                }
+                                Some("view.zoom_v") => {
+                                    let f = if d.y < 0.0 { 1.1 } else { 1.0 / 1.1 };
+                                    row_scale.set((row_scale() * f).clamp(0.3, 4.0));
+                                }
+                                Some("view.zoom_h") => {
                                     // Zoom about the pointer: keep the time under
                                     // the cursor fixed as `pps` changes.
                                     let cx = evt.data().client_coordinates().x;
@@ -584,35 +664,52 @@ pub fn ArrangeView(
                                     zoom.set(new_pps);
                                     scroll_x.set((t * new_pps - (cx - origin)).max(0.0));
                                 }
-                                Some("view.hscroll") => {
-                                    scroll_x.set((scroll_x() + d.y + d.x).max(0.0));
-                                }
                                 _ => {}
                             }
                         }
-                        // Trackpad horizontal swipe (no modifier) isn't a keymap
-                        // gesture — scroll directly so two-finger sideways works.
+                        // Trackpad horizontal swipe (no modifier) → hscroll.
                         if d.x.abs() > d.y.abs() {
                             scroll_x.set((scroll_x() + d.x).max(0.0));
                         }
                     },
-                    // Advance / commit an in-flight clip drag. Handlers live on
-                    // the scroller so the drag keeps tracking even when the
-                    // pointer leaves the clip it grabbed.
-                    onmousemove: move |evt: MouseEvent| {
-                        let mut drag = drag;
-                        let cur = *drag.peek();
-                        if let Some(mut d) = cur {
-                            let x = evt.client_coordinates().x;
-                            if (x - d.start_x).abs() > 3.0 {
-                                d.moved = true;
-                            }
-                            d.delta = (x - d.start_x) / pps;
-                            drag.set(Some(d));
+                    // Middle-mouse-button drag pans both axes (REAPER's pan).
+                    onmousedown: move |evt: MouseEvent| {
+                        if evt.trigger_button()
+                            == Some(dioxus_elements::input_data::MouseButton::Auxiliary)
+                        {
+                            let c = evt.client_coordinates();
+                            pan.set(Some((c.x, c.y, scroll_x(), scroll_y())));
                         }
                     },
-                    onmouseup: move |_| commit_drag(),
-                    onmouseleave: move |_| commit_drag(),
+                    // Pan (if middle-dragging) or advance an in-flight clip drag.
+                    // Handlers live on the scroller so the gesture keeps tracking
+                    // even when the pointer leaves the clip it grabbed.
+                    onmousemove: move |evt: MouseEvent| {
+                        let c = evt.client_coordinates();
+                        if let Some((sx0, sy0, scx, scy)) = *pan.peek() {
+                            let max_sy = (lanes_h as f64 - view_h()).max(0.0);
+                            scroll_x.set((scx - (c.x - sx0)).max(0.0));
+                            scroll_y.set((scy - (c.y - sy0)).clamp(0.0, max_sy));
+                            return;
+                        }
+                        let mut drag = drag;
+                        let cur = *drag.peek();
+                        if let Some(mut dd) = cur {
+                            if (c.x - dd.start_x).abs() > 3.0 {
+                                dd.moved = true;
+                            }
+                            dd.delta = (c.x - dd.start_x) / pps;
+                            drag.set(Some(dd));
+                        }
+                    },
+                    onmouseup: move |_| {
+                        pan.set(None);
+                        commit_drag();
+                    },
+                    onmouseleave: move |_| {
+                        pan.set(None);
+                        commit_drag();
+                    },
                     // Translated content: `-scroll_x` pans it horizontally under
                     // the `overflow:hidden` scroller (blitz now honours
                     // `min-height:100%` here, so the grid fills the full height).
@@ -635,6 +732,11 @@ pub fn ArrangeView(
                         // the clip selection. Clips stop propagation, so this
                         // only fires off-clip.
                         onmousedown: move |evt: MouseEvent| {
+                            if evt.trigger_button()
+                                != Some(dioxus_elements::input_data::MouseButton::Primary)
+                            {
+                                return;
+                            }
                             emit(ArrangeEdit::Seek(seek_time(evt.client_coordinates().x)));
                             emit(ArrangeEdit::ClearSelection);
                         },
