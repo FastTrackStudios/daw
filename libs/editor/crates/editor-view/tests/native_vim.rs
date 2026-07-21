@@ -224,6 +224,78 @@ async fn capital_d_deletes_to_eol() {
     expect_probe(&t, "doc", "he\nworld").await;
 }
 
+// ── Change-family text objects (ciw / ci" / ci( / ca( / diw / dap) ──
+
+#[tokio::test]
+async fn ci_quote_changes_inside_quotes() {
+    let t = mount(Setup::text(r#"say "hello" now"#).caret(7).vim());
+    press(&t, &["c", "i", "\""]);
+    expect_probe(&t, "mode", "Insert").await;
+    t.type_text("bye");
+    expect_probe(&t, "doc", r#"say "bye" now"#).await;
+}
+
+#[tokio::test]
+async fn ci_paren_changes_inside_parens() {
+    let t = mount(Setup::text("f(a, b) end").caret(3).vim());
+    press(&t, &["c", "i", "("]);
+    t.type_text("x");
+    expect_probe(&t, "doc", "f(x) end").await;
+}
+
+#[tokio::test]
+async fn ca_paren_changes_around_parens() {
+    let t = mount(Setup::text("f(a, b) end").caret(3).vim());
+    press(&t, &["c", "a", "("]);
+    t.type_text("!");
+    expect_probe(&t, "doc", "f! end").await;
+}
+
+#[tokio::test]
+async fn ci_brace_changes_inside_braces() {
+    let t = mount(Setup::text("x {old} y").caret(4).vim());
+    press(&t, &["c", "i", "{"]);
+    t.type_text("new");
+    expect_probe(&t, "doc", "x {new} y").await;
+}
+
+#[tokio::test]
+async fn caw_deletes_word_and_space_then_types() {
+    // Engine semantic (see vim.rs daw tests): `aw` spans the word plus
+    // surrounding whitespace on BOTH sides.
+    let t = mount(Setup::text("foo bar baz").caret(5).vim());
+    press(&t, &["c", "a", "w"]);
+    t.type_text("X");
+    expect_probe(&t, "doc", "fooXbaz").await;
+}
+
+#[tokio::test]
+async fn yiw_then_p_duplicates_word() {
+    let t = mount(Setup::text("abc def").caret(1).vim());
+    press(&t, &["y", "i", "w", "e", "p"]);
+    expect_probe(&t, "doc", "abcabc def").await;
+}
+
+#[tokio::test]
+async fn k_spam_at_top_never_enters_insert() {
+    // Regression guard (web sibling lives in browser_only.spec.js):
+    // hammering `k` past the top of a doc with YAML frontmatter must
+    // never flip to Insert or type anything.
+    let t = mount(
+        Setup::text("---\ntitle: t\ntags: []\n---\nbody line")
+            .caret(28) // on "body line"
+            .vim()
+            .markdown(),
+    );
+    for _ in 0..10 {
+        press(&t, &["k"]);
+    }
+    expect_probe(&t, "mode", "Normal").await;
+    press(&t, &["k", "k", "k"]);
+    expect_probe(&t, "mode", "Normal").await;
+    expect_probe(&t, "doc", "---\ntitle: t\ntags: []\n---\nbody line").await;
+}
+
 #[tokio::test]
 async fn dollar_and_zero_line_motions() {
     let t = mount(Setup::text("hello\nworld").caret(2).vim());

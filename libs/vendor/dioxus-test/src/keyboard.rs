@@ -89,6 +89,11 @@ impl DocumentTester {
         }
     }
 
+    /// The blitz-dom node id that currently holds focus (test diagnostics).
+    pub fn blitz_focus(&self) -> Option<usize> {
+        self.document.borrow_mut().inner_mut().get_focussed_node_id()
+    }
+
     /// Presses and releases the primary mouse button at page coordinates
     /// `(x, y)`. Unlike [`crate::ResolvedElement::click`] this goes through
     /// Blitz's real hit-testing and focus handling (focus follows

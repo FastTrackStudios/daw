@@ -346,7 +346,14 @@ pub fn Editor(
     // True while the editor root (or a descendant) holds DOM focus.
     // Gates the painted modal caret — like the native caret, it must
     // not render on an unfocused editor.
-    let editor_focused = use_signal(|| false);
+    //
+    // Native starts TRUE: the root requests `autofocus`, and Blitz's
+    // autofocus path calls `set_focus_to` directly WITHOUT dispatching
+    // a focusin event — waiting for `onfocusin` would leave the signal
+    // false forever and no caret would ever paint (Blitz also only
+    // moves focus on click for text INPUTS, so clicking the editor
+    // fires no focusin either). Web keeps the event-driven default.
+    let editor_focused = use_signal(|| cfg!(feature = "native"));
     // Trigger-autocomplete open state (`[[` / `#`). Owned by the
     // editor (unlike `slash`, which the host threads in) because the
     // host's only contract is the candidate source prop.
@@ -1623,6 +1630,12 @@ pub fn Editor(
                             // synchronously via an inline JS
                             // helper at the top of dispatch.
                             el.addEventListener('focusin', evt => {{
+                                // Focus drift caused by the vim visual-arrow
+                                // `Selection.modify` walk (flagged below) is
+                                // not user intent — never flip to Insert for
+                                // it, or holding `k` at the top starts
+                                // typing "kkkk" into a property cell.
+                                if (el.dataset.selModify) return;
                                 const role = evt.target.dataset.editRole;
                                 if (role) {{
                                     el.dataset.widgetFocused = '1';
@@ -2312,7 +2325,34 @@ pub fn Editor(
                         if (!el) return;
                         const sel = window.getSelection();
                         if (!sel) return;
+                        // Snapshot: if the walk escapes the editor's line
+                        // content we restore. `k` on the top row otherwise
+                        // drifts the DOM selection into the frontmatter
+                        // properties widget's cells — the cell focus flips
+                        // vim to Insert and the next `k`s TYPE. (Regression:
+                        // "holding k at the top drops into insert mode".)
+                        const before = sel.rangeCount > 0
+                            ? sel.getRangeAt(0).cloneRange() : null;
+                        // Flag the walk so the focusin handler above knows
+                        // any focus change here is drift, not user intent
+                        // (focusin fires synchronously inside modify()).
+                        el.dataset.selModify = '1';
                         sel.modify('{action}', '{dir}', '{gran}');
+                        delete el.dataset.selModify;
+                        const n = sel.anchorNode;
+                        const host = n && (n.nodeType === 1 ? n : n.parentElement);
+                        const escaped = !host || !host.closest
+                            || !el.contains(host)
+                            || !host.closest('.cm-line')
+                            || host.closest('[data-edit-role]')
+                            || host.closest('.md-property-row');
+                        if (escaped && before) {{
+                            sel.removeAllRanges();
+                            sel.addRange(before);
+                            // The walk may have moved focus into a widget
+                            // input — hand it back to the editor root.
+                            if (document.activeElement !== el) el.focus();
+                        }}
                     }})();
                     "#,
                     id = editor_id_for_keys,
@@ -2767,6 +2807,12 @@ pub fn Editor(
             let click_sink = on_transaction;
             let mut click_state = state;
             Callback::new(move |pos: usize| {
+                // A click in the content is user intent to edit here —
+                // count it as focus (Blitz won't fire focusin for it).
+                let mut focused = editor_focused;
+                if !*focused.peek() {
+                    focused.set(true);
+                }
                 let cur = click_state.read().clone();
                 push_selection(&mut click_state, &cur, click_deco.as_ref(), click_sink, pos, pos);
             })
