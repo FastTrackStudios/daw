@@ -139,12 +139,31 @@ impl DragState {
 #[derive(Clone, Copy)]
 struct ArrangeCtx {
     drag: Signal<Option<DragState>>,
+    /// In-flight track-height resize (bottom-edge drag).
+    resize: Signal<Option<ResizeState>>,
+    /// Vertical-zoom multiplier (the view's global `row_scale`), so lanes +
+    /// TCP scale identically and drag deltas convert px→base correctly.
+    row_scale: Signal<f32>,
     on_edit: Option<EventHandler<ArrangeEdit>>,
     pps: f64,
     /// Min clip length (seconds) when trimming.
     min_len: f64,
     /// Edge grab zone (px) for trim vs move at a clip's left/right border.
     edge_px: f64,
+}
+
+/// An in-flight track-height resize: grab the row's bottom edge and drag.
+/// Snapshot the base height + pointer y on mousedown; each move sets the
+/// track's height Signal to `start_h + (dy / row_scale)` (the drag is in
+/// screen px, the base is pre-zoom), clamped to a sane range. Ports the
+/// `slip_drag` begin/move/end shape from reaper-input.
+#[derive(Clone, Copy)]
+struct ResizeState {
+    /// The track's base-height signal being resized.
+    height: Signal<u32>,
+    start_y: f64,
+    start_h: u32,
+    scale: f32,
 }
 
 /// Adaptive tick spacing: the smallest "nice" step whose px spacing at this
@@ -307,26 +326,22 @@ pub fn ArrangeView(
     let mut view_h = use_signal(|| 0.0f64);
     // Middle-mouse pan anchor: (start client x, y, start scroll_x, scroll_y).
     let mut pan = use_signal(|| None::<(f64, f64, f64, f64)>);
+    // In-flight track-height resize (row bottom-edge drag).
+    let resize = use_signal(|| None::<ResizeState>);
 
-    // Vertical zoom: render height-scaled copies so the TCP rows and arrange
-    // lanes (which must line up) grow/shrink together. Signals are Copy, so the
-    // clones are cheap.
+    // Vertical zoom is a render-time multiplier (`row_scale`) applied to each
+    // track's base height signal — so the TCP rows and arrange lanes (which
+    // must line up) grow/shrink together, and drag-to-resize (which sets the
+    // per-track base height Signal) composes with it. Provided to the lanes +
+    // TCP so they scale identically.
     let rs = row_scale();
-    let tracks: Vec<TrackView> = tracks
-        .into_iter()
-        .map(|mut t| {
-            t.height = ((t.height as f32 * rs).round() as u32).max(16);
-            for e in &mut t.envelopes {
-                e.height = ((e.height as f32 * rs).round() as u32).max(8);
-            }
-            t
-        })
-        .collect();
 
     // Shared clip-drag state + edit callback, provided to the lane clips.
     let drag = use_signal(|| None::<DragState>);
     use_context_provider(|| ArrangeCtx {
         drag,
+        resize,
+        row_scale,
         on_edit,
         pps,
         min_len: 0.05,
@@ -373,7 +388,8 @@ pub fn ArrangeView(
     let n_at = move |step: f64| (horizon / step).ceil() as i64;
     // Total lane height — track rows + visible envelope lanes (the grid
     // covers the tracks; `arrange_vgrid` shades the empty area below).
-    let lanes_h: u32 = tracks.iter().map(|t| t.total_height()).sum();
+    let lanes_h: u32 =
+        (tracks.iter().map(|t| t.total_height()).sum::<u32>() as f32 * rs).round() as u32;
 
     // Convert a click's window-x to a timeline time. `element_coordinates()`
     // is a no-op in this blitz pin (and `get_client_rect` reports x=0 for the
@@ -640,7 +656,7 @@ pub fn ArrangeView(
                         ty = -scroll_y(),
                     ),
 
-                    TrackControlPanel { tracks: tracks.clone(), width: tcp_width, scroll: false }
+                    TrackControlPanel { tracks: tracks.clone(), width: tcp_width, scroll: false, height_scale: rs }
 
                 // Timeline lanes. Horizontal position is driven by `scroll_x`
                 // (single source of truth, shared with the ruler): the inner
@@ -717,6 +733,14 @@ pub fn ArrangeView(
                     // even when the pointer leaves the clip it grabbed.
                     onmousemove: move |evt: MouseEvent| {
                         let c = evt.client_coordinates();
+                        // Track-height resize takes priority (a bottom-edge drag
+                        // is in flight): new base = start_h + Δy/zoom, clamped.
+                        if let Some(r) = *resize.peek() {
+                            let mut h = r.height;
+                            let dy = (c.y - r.start_y) / r.scale as f64;
+                            h.set(((r.start_h as f64 + dy).round() as i64).clamp(16, 800) as u32);
+                            return;
+                        }
                         if let Some((sx0, sy0, scx, scy)) = *pan.peek() {
                             let max_sy = (lanes_h as f64 - view_h()).max(0.0);
                             scroll_x.set((scx - (c.x - sx0)).max(0.0));
@@ -734,10 +758,14 @@ pub fn ArrangeView(
                         }
                     },
                     onmouseup: move |_| {
+                        let mut resize = resize;
+                        resize.set(None);
                         pan.set(None);
                         commit_drag();
                     },
                     onmouseleave: move |_| {
+                        let mut resize = resize;
+                        resize.set(None);
                         pan.set(None);
                         commit_drag();
                     },
@@ -912,7 +940,12 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
     let lanes_on = track.lane_count > 1;
     let one_lane = lanes_on && track.lane_display == LaneDisplay::One;
     let lane_count = if one_lane { 1 } else { track.lane_count.max(1) };
-    let lane_area_h = track.height.saturating_sub(4) as f64;
+    // Displayed row height = the track's base-height Signal × the view's
+    // vertical zoom. The bottom-edge handle resizes the base Signal.
+    let rs = (ctx.row_scale)();
+    let height_sig = track.height;
+    let row_h = ((height_sig)() as f32 * rs).round().max(8.0) as u32;
+    let lane_area_h = row_h.saturating_sub(4) as f64;
     let lane_h = lane_area_h / lane_count as f64;
     let item_h = if lane_count > 1 {
         (lane_h - 1.0).max(4.0)
@@ -924,10 +957,30 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
     rsx! {
         div {
             style: format!(
-                "position:relative; height:{h}px; background:{row_bg}; \
+                "position:relative; height:{row_h}px; background:{row_bg}; \
                  border-bottom:1px solid {divider}; box-sizing:border-box;",
-                h = track.height,
             ),
+            // Bottom-edge resize handle: drag to set this track's height. Begins
+            // the resize (snapshot base height + pointer y + zoom); the scroller's
+            // shared onmousemove/up apply + release it (slip_drag shape).
+            div {
+                style: "position:absolute; left:0; right:0; bottom:0; height:5px; \
+                        cursor:ns-resize; z-index:5;",
+                onmousedown: move |evt: MouseEvent| {
+                    if evt.trigger_button()
+                        == Some(dioxus_elements::input_data::MouseButton::Primary)
+                    {
+                        evt.stop_propagation();
+                        let mut resize = ctx.resize;
+                        resize.set(Some(ResizeState {
+                            height: height_sig,
+                            start_y: evt.client_coordinates().y,
+                            start_h: (height_sig)(),
+                            scale: rs.max(0.05),
+                        }));
+                    }
+                },
+            }
             for (ci, clip) in track.clips.iter().enumerate() {
                 {
                     // Item body: the item/track colour tinted over the parity
@@ -1277,7 +1330,9 @@ fn EnvelopeLane(envelope: EnvelopeView, pps: f64, alt: bool) -> Element {
     let theme = use_theme().theme;
     let ar = theme.arrange;
     let i = alt as usize;
-    let h = envelope.height;
+    // Scale with the view's vertical zoom so the lane lines up with its TCP row.
+    let rs = (use_context::<ArrangeCtx>().row_scale)();
+    let h = ((envelope.height as f32 * rs).round() as u32).max(6);
     let curve = envelope
         .color
         .as_deref()

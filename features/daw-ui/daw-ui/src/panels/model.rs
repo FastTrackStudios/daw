@@ -162,8 +162,10 @@ pub struct TrackView {
     pub depth: u32,
     /// Whether this track is a folder parent (renders a folder header).
     pub is_folder: bool,
-    /// Lane height in px (TCP rows + arrange lanes share this so they align).
-    pub height: u32,
+    /// Base lane height in px (TCP rows + arrange lanes share this so they
+    /// align). A `Signal` so drag-to-resize updates every panel at once; the
+    /// view's global vertical zoom multiplies it at render.
+    pub height: Signal<u32>,
 
     // ── fixed item lanes (REAPER 7 comping) ──
     /// Number of fixed lanes (0/1 = no lane subdivision).
@@ -206,7 +208,7 @@ impl TrackView {
             parent_send: true,
             depth: 0,
             is_folder: false,
-            height: DEFAULT_LANE_HEIGHT,
+            height: Signal::new(DEFAULT_LANE_HEIGHT),
             lane_count: 0,
             lane_play_mask: 0,
             lane_names: Vec::new(),
@@ -233,7 +235,7 @@ impl TrackView {
     }
     /// Builder: set lane/row height in px.
     pub fn height(mut self, h: u32) -> Self {
-        self.height = h;
+        self.height = Signal::new(h);
         self
     }
     /// Builder: set initial stereo metering levels (+ peak hold) and mark the
@@ -267,7 +269,7 @@ impl TrackView {
     /// the track row plus every visible envelope lane (they must agree so
     /// the rows stay aligned).
     pub fn total_height(&self) -> u32 {
-        self.height
+        (self.height)()
             + self
                 .envelopes
                 .iter()

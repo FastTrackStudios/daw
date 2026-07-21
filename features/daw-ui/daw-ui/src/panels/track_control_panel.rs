@@ -26,6 +26,10 @@ pub fn TrackControlPanel(
     /// so the rows stay aligned with the timeline lanes.
     #[props(default = true)]
     scroll: bool,
+    /// Vertical-zoom multiplier on row heights (matches the arrange lanes so
+    /// rows stay aligned). `1.0` = base height.
+    #[props(default = 1.0)]
+    height_scale: f32,
 ) -> Element {
     let overflow = if scroll { "auto" } else { "visible" };
     let surface = use_theme().theme.panel().surface.css();
@@ -43,6 +47,7 @@ pub fn TrackControlPanel(
                     key: "{track.id}",
                     track: track.clone(),
                     panel_w: width,
+                    height_scale,
                     on_select: {
                         let selections = selections.clone();
                         move |id: usize| {
@@ -61,10 +66,17 @@ pub fn TrackControlPanel(
 /// with the arrange lanes) filled by the theme's TCP context, with REAPER's
 /// folder indent on the left.
 #[component]
-fn TcpRow(track: TrackView, panel_w: u32, on_select: EventHandler<usize>) -> Element {
+fn TcpRow(
+    track: TrackView,
+    panel_w: u32,
+    #[props(default = 1.0)] height_scale: f32,
+    on_select: EventHandler<usize>,
+) -> Element {
     let indent = track.depth * INDENT;
-    let h = track.height;
-    let total = track.total_height();
+    // Displayed row height = base-height Signal × vertical zoom (aligns with
+    // the arrange lanes; drag-to-resize sets the base Signal).
+    let h = (((track.height)() as f32 * height_scale).round() as u32).max(8);
+    let total = ((track.total_height() as f32 * height_scale).round() as u32).max(8);
     let id = track.id;
     // The strip's actual px box — lets an imported REAPER theme re-run
     // WALTER at this exact size (flow themes rewrap/cull per width).
@@ -93,7 +105,7 @@ fn TcpRow(track: TrackView, panel_w: u32, on_select: EventHandler<usize>) -> Ele
                 // ECP rows under the track, one per visible envelope.
                 for (i, env) in envelopes.into_iter().enumerate() {
                     {
-                        let eh = env.height;
+                        let eh = ((env.height as f32 * height_scale).round() as u32).max(6);
                         rsx! {
                             div {
                                 key: "e{i}",
