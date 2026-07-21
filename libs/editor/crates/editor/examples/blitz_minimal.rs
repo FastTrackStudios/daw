@@ -1,4 +1,6 @@
-//! Minimal Blitz-native editor — the whole embedding story in one file.
+//! Full Blitz-native editor demo — the whole embedding story in one file,
+//! seeded with a document that exercises every live-preview style (the
+//! native counterpart of the web `playground`).
 //!
 //! Run from the repo root:
 //!
@@ -6,15 +8,15 @@
 //! cargo run -p editor --example blitz_minimal --no-default-features --features native
 //! ```
 //!
-//! This opens a real `dioxus-native` (Blitz / Vello / wgpu) window — no
-//! webview, no JS — with a working markdown editor: live-preview
-//! decorations (bold/heading markers hide and reveal around the caret,
-//! `((uuid))` block-ref chips, hidden `id::` lines), vim modal editing
-//! (hjkl, operators + text objects like `ciw`/`ci"`, visual mode, undo),
-//! list-continuing Enter, bracket auto-pairing, and word-wise
+//! Opens a real `dioxus-native` (Blitz / Vello / wgpu) window — no webview,
+//! no JS — with the full markdown editor: live-preview decorations
+//! (headings, bold/italic/code/highlight, links & tags, blockquotes,
+//! lists, task checkboxes, callouts, tables, code blocks, math), a true
+//! reverse-video vim block caret, visual-mode selection (styled + gap-free
+//! multi-line), list-continuing Enter, bracket auto-pairing, and word-wise
 //! Ctrl-motions — all driven by the same shared `editor_state` core the
-//! web build uses, and all covered by the headless `dioxus-test` suites
-//! in `editor-view/tests/native_*.rs`.
+//! web build uses, and covered by the headless `dioxus-test` suites in
+//! `editor-view/tests/native_*.rs`.
 //!
 //! Styling is inlined (`dangerous_inner_html`) because Blitz does not
 //! load external stylesheets — same rule as the signal-domain UIs.
@@ -23,18 +25,87 @@ use dioxus::prelude::*;
 use editor::{EditorState, combined_decorations, editor_view, standard_markdown_keymap};
 use editor_view::DecorationSource;
 
+/// Full showcase document — exercises every live-preview style so the
+/// native demo matches the web playground. Markers hide/reveal as the
+/// caret enters each line.
 const SEED: &str = "\
 # Editor on Blitz
 
-This window is **pure Rust** — Blitz DOM, Vello, wgpu. No webview.
+This window is **pure Rust** — Blitz DOM, Vello, wgpu. No webview. It runs
+the same `editor_state` core and live-preview pipeline as the web build.
 
-- vim is on: try `hjkl`, `dd`, `ciw`, `vi(` …
-- Enter continues lists like this one
-- brackets auto-pair: (try typing one)
-- **bold** and `# heading` markers reveal near the caret
+## Inline styles
 
-1. ordered lists renumber on Enter
-2. `Tab` indents a list item, `Shift-Tab` outdents
+**bold**, *italic*, ***bold italic***, ~~strikethrough~~, ==highlight==,
+`inline code`, and a footnote reference[^1].
+
+Links: [Anthropic](https://anthropic.com), an autolink <https://obsidian.md>,
+wikilinks [[Editor Roadmap]] and [[Project README|the readme]], tags
+#editor #live-preview #notes/howto.
+
+## Headings
+
+# Heading 1
+## Heading 2
+### Heading 3
+#### Heading 4
+
+## Block styles
+
+> Blockquotes are just blockquotes.
+> Multi-line works too.
+
+- Unordered list item
+- Another item, with `code` inside
+  - nested bullet
+
+1. Ordered list
+2. Stays numbered on Enter
+
+- [ ] Click the checkbox to toggle
+- [x] Done
+- [/] In progress
+
+### Callouts
+
+> [!note] Note
+> Callouts share the blockquote syntax.
+
+> [!tip] Tip
+> Press `/` anywhere to open the slash-command menu.
+
+> [!warning] Warning
+> High-stakes call-out style.
+
+### Table
+
+| Feature     | Status        | Notes                    |
+|-------------|---------------|--------------------------|
+| Headings    | Mod-1..6      | Mod-0 strips             |
+| Tables      | GFM pipe form | rendered inline          |
+| Vim         | default-on    | operators, text objects  |
+| Selection   | visual mode   | styled + multi-line      |
+
+### Code block
+
+```rust
+fn main() {
+    println!(\"pure-Rust editor on Blitz\");
+}
+```
+
+### Math
+
+Inline math via Typst: $E = m c^2$, and a display equation:
+
+$$ sum_(i=1)^n i = n(n+1)/2 $$
+
+---
+
+Try it: vim is on (`hjkl`, `dd`, `ciw`, `vi(`, `v` to select), Enter
+continues lists, brackets auto-pair, and `Tab` indents list items.
+
+[^1]: footnotes render as markers you can hover.
 ";
 
 fn main() {

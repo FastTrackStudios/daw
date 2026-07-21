@@ -27,6 +27,15 @@ async fn shot_descender() {
 }
 
 #[tokio::test]
+async fn shot_full_styles() {
+    // A rich doc exercising the live-preview styles, to eyeball native
+    // rendering of headings/bold/lists/callouts/table/code.
+    let doc = "# Heading one\n\n**bold**, *italic*, `code`, ==highlight== and a [link](x).\n\n## Heading two\n\n> Blockquote line\n\n- bullet one\n- bullet two\n\n1. ordered\n2. numbered\n\n- [ ] todo\n- [x] done\n\n> [!note] Note\n> callout body\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```rust\nfn main() {}\n```";
+    let t = mount(Setup::text(doc).caret(200).markdown().theme(THEME));
+    t.render_png(out("editor_full_styles.png"));
+}
+
+#[tokio::test]
 async fn shot_visual_selection() {
     // Enter visual mode and extend a few chars — the range must be
     // highlighted, not just the caret moved.
