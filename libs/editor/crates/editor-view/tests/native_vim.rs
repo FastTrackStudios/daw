@@ -304,3 +304,23 @@ async fn dollar_and_zero_line_motions() {
     press(&t, &["0"]);
     expect_probe(&t, "head", "0").await;
 }
+
+#[tokio::test]
+async fn visual_mode_paints_selection_highlight() {
+    // Regression: visual mode must PAINT the selected range, not just move
+    // the caret. The .ed-selection mark wraps the selected chars.
+    let t = mount(Setup::text("select this").vim());
+    press(&t, &["v", "l", "l", "l"]);
+    t.query(".editor-root")
+        .expect(inner_html(contains_substring("ed-selection")))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn no_selection_highlight_without_visual() {
+    // A plain caret (Normal mode) must not paint a selection.
+    let t = mount(Setup::text("select this").vim());
+    let html = t.query(".editor-root").immediately().unwrap().outer_html();
+    assert!(!html.contains("ed-selection"), "no selection in Normal mode");
+}

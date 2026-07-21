@@ -193,6 +193,16 @@
     color: var(--ed-bg, #1e1e2e);
     border-radius: 2px;
 }
+
+/* NATIVE selection highlight. Blitz has no contenteditable selection, so
+   `native_selection_decoration` marks the selected range and we paint its
+   inline background — same `draw_inline_backgrounds` path as the block
+   caret (on the glyph-owning inner span), so it never shifts text. A
+   translucent accent reads as a selection without hiding the glyphs.
+   Web uses the browser's own selection, so this is native-scoped. */
+.ed-render-native .ed-selection > span {
+    background: color-mix(in srgb, var(--ed-accent) 32%, transparent);
+}
 .ed-modal-caret-underscore {
     box-shadow: inset 0 -2px 0 var(--ed-danger);
 }

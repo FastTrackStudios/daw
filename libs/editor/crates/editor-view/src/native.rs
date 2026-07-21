@@ -68,6 +68,29 @@ pub fn native_caret_decoration(
     )]
 }
 
+/// Selection highlight for the native renderer. The web path shows the
+/// browser's own `contenteditable` selection; Blitz has none, so we paint
+/// the primary selection range ourselves as a background mark (the same
+/// `draw_inline_backgrounds` mechanism the block caret uses, so it never
+/// shifts text). Empty selections (a plain caret) paint nothing. Spans
+/// crossing line boundaries are split per line by the tile builder.
+#[must_use]
+pub fn native_selection_decoration(
+    s: &EditorState,
+    focused: dioxus::prelude::Signal<bool>,
+) -> Vec<DecoratedRange> {
+    use dioxus::prelude::*;
+    if !focused() {
+        return Vec::new();
+    }
+    s.selection
+        .ranges()
+        .iter()
+        .filter(|r| r.from() != r.to())
+        .map(|r| DecoratedRange::mark(r.from()..r.to(), "ed-selection"))
+        .collect()
+}
+
 /// Default text-input action for the native keydown handler — the work the
 /// web path hands to `contenteditable`. Returns `true` if the key was
 /// consumed (caller should `prevent_default` and stop).

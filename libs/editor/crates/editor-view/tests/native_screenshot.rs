@@ -27,6 +27,22 @@ async fn shot_descender() {
 }
 
 #[tokio::test]
+async fn shot_visual_selection() {
+    // Enter visual mode and extend a few chars — the range must be
+    // highlighted, not just the caret moved.
+    let t = mount(Setup::text("select this text
+and more").caret(0).vim().theme(THEME));
+    press(&t, &["v", "l", "l", "l", "l", "l"]);
+    t.pump().await.ok();
+    t.render_png(out("editor_selection.png"));
+    // multi-line: extend down into the next line
+    let m = mount(Setup::text("select this text\nand more here").caret(7).vim().theme(THEME));
+    press(&m, &["v", "j", "l", "l"]);
+    m.pump().await.ok();
+    m.render_png(out("editor_selection_multi.png"));
+}
+
+#[tokio::test]
 async fn shot_mode_line_height() {
     // Normal (block) then Insert (bar) on the SAME 3-line doc; line 2/3
     // y-positions must be identical between the two — the caret must not
