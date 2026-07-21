@@ -10,10 +10,16 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
 daw-proto = { workspace = true }
-architect = { workspace = true, features = ["vox", "local"] }
+# `platform` = the portable async-runtime seam (`architect::platform::{spawn,
+# sleep, JoinHandle}` — tokio on native, browser timers/`spawn_local` on wasm),
+# replacing the retired moire.
+architect = { workspace = true, features = ["vox", "local", "platform"] }
 vox = { workspace = true }
 tracing = { workspace = true }
-moire = { workspace = true }
+# `sync`-only tokio (wasm-clean: no net/mio) for `tokio::sync::RwLock` etc.,
+# native + wasm. Direct (not `workspace = true`) so `default-features = false`
+# is allowed; native unifies to full via the native target dep below.
+tokio = { version = "1", default-features = false, features = ["sync"] }
 uuid = { version = "1", features = ["v4"] }
 web-time = "1"
 
@@ -55,7 +61,6 @@ rtrb = { version = "0.3", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { version = "0.3", features = ["futures"] }
-async-lock = "3"
 wasm-bindgen = { version = "0.2", optional = true }
 js-sys = { version = "0.3", optional = true }
 

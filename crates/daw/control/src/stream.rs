@@ -16,7 +16,7 @@ use core::future::Future;
 // (multi-thread tokio) but `!Send` on wasm32 (single-threaded vox runtime,
 // `Rc<RefCell<…>>`). On native `MaybeSend: Send` (blanket for every `T: Send`),
 // so the bound is byte-for-byte `Send` and the spawned task stays `Send` for
-// `moire::task::spawn`; on wasm32 the bound vanishes and `moire::task::spawn`
+// `architect::platform::spawn`; on wasm32 the bound vanishes and the spawn
 // maps to `spawn_local` (no `Send` required). Native codegen is unchanged.
 #[cfg(not(target_arch = "wasm32"))]
 pub trait MaybeSend: Send {}
@@ -51,7 +51,7 @@ where
         admit: Box<dyn Fn(&T) -> bool + Send + Sync>,
     ) -> Self {
         let (stop_tx, stop_rx) = futures::channel::oneshot::channel::<()>();
-        moire::task::spawn(async move {
+        architect::platform::spawn(async move {
             futures::pin_mut!(call);
             // Ends when the call ends (connection gone) or the
             // EventStream is dropped (stop_rx resolves) — either way

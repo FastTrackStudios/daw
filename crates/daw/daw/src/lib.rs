@@ -46,11 +46,32 @@ use std::sync::OnceLock;
 
 static DAW_INSTANCE: OnceLock<DawInstance> = OnceLock::new();
 
+// wasm-only global `Daw` handle. daw-control's global singleton
+// (`rpc::Daw::init`/`get`/`try_get`) is native-only, so the facade holds the
+// handle here instead. `rpc::Daw` wraps vox connection types that are `!Sync`
+// on wasm's single-threaded runtime, so a plain `static` (which must be `Sync`)
+// can't hold it directly.
+#[cfg(target_arch = "wasm32")]
+struct WasmDaw(rpc::Daw);
+// SAFETY: wasm32 is single-threaded — there is no other thread to share with
+// or send to, so the `!Send`/`!Sync` vox connection types inside `Daw` are
+// never accessed across threads. This mirrors how wasm-bindgen treats
+// browser-global singletons. (`OnceLock<T>: Sync` requires `T: Send + Sync`.)
+#[cfg(target_arch = "wasm32")]
+unsafe impl Sync for WasmDaw {}
+#[cfg(target_arch = "wasm32")]
+unsafe impl Send for WasmDaw {}
+#[cfg(target_arch = "wasm32")]
+static WASM_DAW: OnceLock<WasmDaw> = OnceLock::new();
+
 /// Facade-only runtime state. The `Daw` itself is NOT stored here — there is a
 /// single global `Daw`, owned by `daw-control` (`rpc::Daw::get()`), which
 /// `daw::get()` delegates to. This holds only the things the facade adds on top:
 /// the runtime for `block_on` and the timer-callback list.
 struct DawInstance {
+    // Native-only: the `block_on` runtime. wasm32 has no blocking runtime; the
+    // browser drives the facade purely through async `daw::get()` calls.
+    #[cfg(not(target_arch = "wasm32"))]
     runtime: std::sync::Arc<tokio::runtime::Runtime>,
     _timer_callbacks: std::sync::Mutex<Vec<fn()>>,
 }
@@ -99,6 +120,7 @@ pub fn init(raw_host_context: Option<*const std::ffi::c_void>) -> bool {
 ///
 /// Extension hosts that build a custom in-process DAW service graph can use this
 /// to make `daw::get()` and `daw::block_on()` available to reusable modules.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn init_from_parts(daw: rpc::Daw, runtime: std::sync::Arc<tokio::runtime::Runtime>) -> bool {
     // Install the single global Daw (owned by daw-control) so both
     // `daw::get()` and `rpc::Daw::get()` resolve to the same instance.
@@ -114,19 +136,41 @@ pub fn init_from_parts(daw: rpc::Daw, runtime: std::sync::Arc<tokio::runtime::Ru
         .is_ok()
 }
 
+/// wasm build of [`init_from_parts`]: install the global `Daw` so `daw::get()`
+/// resolves, with no `block_on` runtime (the browser has none — reusable
+/// modules drive the facade through async calls). The in-browser setlist
+/// engine calls this after building its in-process `daw-control` client.
+#[cfg(target_arch = "wasm32")]
+pub fn init_from_parts(daw: rpc::Daw) -> bool {
+    // The facade owns the handle (daw-control's global singleton is
+    // native-only); `daw::get()` reads it back out of WASM_DAW.
+    WASM_DAW.set(WasmDaw(daw)).is_ok()
+}
+
 /// Get the global `Daw` handle.
 ///
 /// Delegates to the single global owned by `daw-control` (`rpc::Daw::get()`),
 /// so the facade and lower-level code always see the same instance. Returns
 /// `None` if no DAW has been initialized.
 pub fn get() -> Option<&'static rpc::Daw> {
-    rpc::Daw::try_get()
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        rpc::Daw::try_get()
+    }
+    // wasm: the facade owns the handle in WASM_DAW (daw-control's global
+    // singleton is native-only).
+    #[cfg(target_arch = "wasm32")]
+    {
+        WASM_DAW.get().map(|w| &w.0)
+    }
 }
 
 /// Run an async operation on the DAW runtime.
 ///
 /// Use from sync contexts (timer callbacks, process()) to call
-/// async `Daw` methods.
+/// async `Daw` methods. Native-only — wasm32 has no blocking runtime; browser
+/// callers must `.await` the async `daw::get()` methods directly.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn block_on<F: std::future::Future>(f: F) -> Option<F::Output> {
     DAW_INSTANCE.get().map(|i| i.runtime.block_on(f))
 }
