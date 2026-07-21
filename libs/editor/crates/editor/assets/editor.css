@@ -162,35 +162,36 @@
     caret-color: var(--ed-warn);
 }
 
-/* Steady (non-blinking) blocks — terminal-vim style; a blinking
-   repaint over real text reads as the document flashing. Painted
-   only while the editor has focus (modal_caret_decoration).
+/* Steady (non-blinking) reverse-video block over the glyph — terminal-vim
+   style; a blinking repaint over real text reads as the document
+   flashing. Painted only while the editor has focus.
 
-   `display: inline-block` is REQUIRED for the native (Blitz) renderer:
-   Blitz doesn't paint `background` (or `outline`) on a plain inline
-   span, so an inline block caret was invisible and its reverse-video
-   glyph vanished. inline-block gives it a real painted box. The fixed
-   `height`/`line-height` + `vertical-align: text-bottom` make that box
-   hug the character cell without perturbing line height (browsers and
-   Blitz agree on these metrics). Works identically on web. */
+   WEB: a plain inline mark; the browser paints the inline background and
+   the glyph keeps its exact advance, so nothing shifts. */
 .ed-modal-caret-block {
-    display: inline-block;
-    /* Cover the whole glyph cell — ascenders AND descenders (g, y, p) —
-       centered on the line so nothing clips. `text-bottom` + a 1em box
-       cut descenders off and floated above the cap; `middle` + a box a
-       bit taller than the em hugs the character correctly. */
-    height: 1.25em;
-    line-height: 1.25em;
-    vertical-align: middle;
+    background: var(--ed-accent);
+    color: var(--ed-bg, #1e1e2e);
+    border-radius: 1px;
+}
+.ed-modal-caret-block > span {
+    color: var(--ed-bg, #1e1e2e);
+}
+
+/* NATIVE (Blitz) block caret. Blitz's `draw_inline_backgrounds` paints a
+   background behind a glyph run EXACTLY at its position (offset + advance,
+   ascent→descent) with ZERO layout change — but only for the element that
+   OWNS the glyph run. Our caret mark is
+   `<span.ed-modal-caret-block><span>glyph</span></span>`, so the
+   background must sit on the INNER span (which owns the text), NOT the
+   outer one (whose child owns it) — that's why a background on the outer
+   span never painted, and why `inline-block` (which DID paint but nudged
+   the glyph) was a dead end. As a plain inline this cannot move or resize
+   the glyph, and covers descenders for free. Scoped to `.ed-render-native`
+   so the web block rule above is untouched. */
+.ed-render-native .ed-modal-caret-block > span {
     background: var(--ed-accent);
     color: var(--ed-bg, #1e1e2e);
     border-radius: 2px;
-    /* Keep a whitespace char under the caret from collapsing (it would
-       jam the surrounding words together), and guarantee a visible box
-       even over a space or other zero-advance glyph. */
-    white-space: pre;
-    min-width: 0.42em;
-    text-align: center;
 }
 .ed-modal-caret-underscore {
     box-shadow: inset 0 -2px 0 var(--ed-danger);
@@ -214,10 +215,13 @@
 .ed-native-caret {
     display: inline-block;
     width: 0;
-    height: 1.1em;
+    /* Match the glyph's own extent and CENTER it in the line box so the
+       bar never exceeds the natural line height — otherwise switching
+       Normal↔Insert (block↔bar) nudges the line vertically. */
+    height: 1em;
     margin: 0 -0.75px;
     border-left: 1.5px solid var(--ed-accent);
-    vertical-align: text-bottom;
+    vertical-align: middle;
 }
 
 /* Reading mode: dim the editor frame so it's clearly distinct

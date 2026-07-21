@@ -22,6 +22,11 @@ impl DocumentTester {
     /// background so anti-aliased text reads correctly.
     pub fn render_png(&self, path: impl AsRef<Path>) {
         let mut doc = self.document.borrow_mut();
+        // Apply any pending vdom mutations and re-resolve layout so the PNG
+        // reflects the CURRENT state — e.g. after key events changed the
+        // doc or the caret decoration since `build()`.
+        while doc.poll(None) {}
+        doc.inner_mut().resolve(1.0);
         let (w, h, scale) = {
             let inner = doc.inner();
             let vp = inner.viewport();

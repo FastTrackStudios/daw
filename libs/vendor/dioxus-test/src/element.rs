@@ -198,7 +198,9 @@ impl ResolvedElement {
             .map(ElementId)
     }
 
-    pub(crate) fn attribute(&self, arg: &str) -> Option<String> {
+    /// Read a raw attribute value from the resolved element (FTS: exposed
+    /// for tests that measure layout by `data-*` markers).
+    pub fn attribute(&self, arg: &str) -> Option<String> {
         let guard = self.document.borrow();
         self.node_id
             .resolve(&guard.inner())

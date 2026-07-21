@@ -2828,7 +2828,10 @@ pub fn Editor(
     #[cfg(feature = "native")]
     let rendered = rsx! {
         div {
-            class: "{root_class}",
+            // `ed-render-native` scopes the Blitz-specific caret metrics
+            // (inline-block block caret + advance-width compensation) that
+            // would shift text on the web renderer.
+            class: "{root_class} ed-render-native",
             "data-editor-id": "{editor_id}",
             contenteditable: "{contenteditable}",
             spellcheck: "false",

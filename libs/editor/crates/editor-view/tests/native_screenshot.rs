@@ -12,7 +12,7 @@ use common::*;
 const THEME: &str = "
 :root { --background:#ffffff; --muted:#f2f4f7; --foreground:#1a1c20;
         --muted-foreground:#6b7280; --primary:#1d4ed8; }
-.cm-line { font-size: 44px; line-height: 1.6; }
+.cm-line { font-size: 22px; line-height: 1.6; }
 ";
 
 fn out(name: &str) -> String {
@@ -24,6 +24,32 @@ async fn shot_descender() {
     // Caret on the 'g' (descender) of "going gypsy".
     let t = mount(Setup::text("going gypsy").caret(0).vim().theme(THEME));
     t.render_png(out("editor_descender.png"));
+}
+
+#[tokio::test]
+async fn shot_mode_line_height() {
+    // Normal (block) then Insert (bar) on the SAME 3-line doc; line 2/3
+    // y-positions must be identical between the two — the caret must not
+    // change line height.
+    let n = mount(Setup::text("line one
+line two
+line three").caret(2).vim().theme(THEME));
+    n.render_png(out("editor_mode_normal.png"));
+    let i = mount(Setup::text("line one
+line two
+line three").caret(2).vim().theme(THEME));
+    press(&i, &["i"]);
+    i.render_png(out("editor_mode_insert.png"));
+}
+
+#[tokio::test]
+async fn shot_shift_probe() {
+    // Two identical lines; caret on the 'w' of the TOP line (offset 6).
+    // If inline-block changes advance, "world" on top misaligns with the
+    // bottom line's "world".
+    let t = mount(Setup::text("hello world
+hello world").caret(6).vim().theme(THEME));
+    t.render_png(out("editor_shift.png"));
 }
 
 #[tokio::test]

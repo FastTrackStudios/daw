@@ -56,7 +56,8 @@ pub fn native_caret_decoration(
     if let Some(vim) = vim {
         match vim.read().mode {
             editor_vim::Mode::Insert | editor_vim::Mode::Command => {}
-            // Normal / Visual* / Replace paint their own caret.
+            // Normal / Visual* / Replace paint their own block / underscore
+            // via `crate::editor::modal_caret_decoration`.
             _ => return Vec::new(),
         }
     }
