@@ -14,6 +14,9 @@ use editor_vim::VimState;
 pub use dioxus_test::keyboard_types::{Key, Modifiers};
 pub use dioxus_test::matchers::{contains_substring, eq, inner_html};
 
+/// The editor stylesheet, inlined so screenshots paint with real styles.
+pub const EDITOR_CSS: &str = include_str!("../../../editor/assets/editor.css");
+
 /// Per-test configuration, delivered to [`Harness`] via root context.
 #[derive(Clone)]
 pub struct Setup {
@@ -21,6 +24,7 @@ pub struct Setup {
     pub caret: usize,
     pub vim: bool,
     pub markdown: bool,
+    pub theme: Option<&'static str>,
 }
 
 impl Setup {
@@ -30,6 +34,7 @@ impl Setup {
             caret: 0,
             vim: false,
             markdown: false,
+            theme: None,
         }
     }
     pub fn caret(mut self, caret: usize) -> Self {
@@ -43,6 +48,12 @@ impl Setup {
     /// Attach the standard markdown live-preview decoration source.
     pub fn markdown(mut self) -> Self {
         self.markdown = true;
+        self
+    }
+    /// Inject extra CSS (design tokens etc.) so screenshots render with a
+    /// real theme instead of the editor CSS's dark fallbacks.
+    pub fn theme(mut self, css: &'static str) -> Self {
+        self.theme = Some(css);
         self
     }
 }
@@ -67,7 +78,12 @@ pub fn Harness() -> Element {
     let doc = s.doc.to_string();
     drop(s);
 
+    let theme = setup.theme;
     rsx! {
+        style { dangerous_inner_html: EDITOR_CSS }
+        if let Some(css) = theme {
+            style { dangerous_inner_html: css }
+        }
         Editor { state, vim, decorations }
         div { "data-testid": "head", "{primary.head}" }
         div { "data-testid": "anchor", "{primary.anchor}" }

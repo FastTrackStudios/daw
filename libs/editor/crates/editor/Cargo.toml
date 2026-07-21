@@ -30,6 +30,7 @@ web = ["editor-view/web"]
 # The blitz_minimal example — a real dioxus-native window. Dev-dep only;
 # library consumers never pull the renderer through the umbrella.
 dioxus-native = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [[example]]
 name = "blitz_minimal"

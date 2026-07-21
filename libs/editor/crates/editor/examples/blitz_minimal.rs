@@ -38,8 +38,31 @@ This window is **pure Rust** — Blitz DOM, Vello, wgpu. No webview.
 ";
 
 fn main() {
+    // `RUST_LOG=editor_view=debug` shows the keydown dispatch trace.
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        // stderr: unbuffered, so traces reach a piped log immediately.
+        .with_writer(std::io::stderr)
+        .init();
     dioxus_native::launch(App);
 }
+
+/// Readable light theme. These are the EXACT token names the editor CSS
+/// reads (`--background`, `--foreground`, `--primary`, `--muted`,
+/// `--muted-foreground`) — not the fts-ui aliases. A saturated
+/// `--primary` matters: the vim block caret paints the glyph under it in
+/// `--background` (reverse video), so a light accent makes the character
+/// vanish (white-on-light). Deep blue keeps the glyph legible.
+const THEME: &str = "
+:root {
+    --background: #ffffff;
+    --muted: #f2f4f7;
+    --foreground: #1a1c20;
+    --muted-foreground: #6b7280;
+    --primary: #1d4ed8;
+}
+body { background: #ffffff; color: #1a1c20; }
+";
 
 #[component]
 fn App() -> Element {
@@ -49,8 +72,14 @@ fn App() -> Element {
 
     rsx! {
         style { dangerous_inner_html: include_str!("../assets/editor.css") }
+        // The editor's CSS reads design-system tokens (--background,
+        // --text, --accent, …) that a host app normally injects. This
+        // standalone example has no design system, so define a readable
+        // light theme here — otherwise text is dark-on-dark and invisible.
+        style { dangerous_inner_html: THEME }
         div {
             style: "max-width: 46rem; margin: 2rem auto; padding: 0 1rem; \
+                    color: #1a1c20; background: #ffffff; \
                     font-family: system-ui, sans-serif;",
             editor_view::Editor {
                 state,

@@ -2824,6 +2824,7 @@ pub fn Editor(
     // children; web leaves it empty for the JS patcher to own. rsx can't
     // `#[cfg]` an individual child node, so the two variants are whole
     // blocks. Everything else (focus tracking, overlays) is identical.
+    //
     #[cfg(feature = "native")]
     let rendered = rsx! {
         div {
@@ -2833,11 +2834,13 @@ pub fn Editor(
             spellcheck: "false",
             tabindex: "0",
             // Native: Blitz routes key events to the focused node, so the
-            // editor must hold focus to be typable. `autofocus` requests
-            // focus-on-mount; clicking the editor also focuses it (Blitz
-            // sets focus on pointerdown). We can't call `set_focus` from
-            // `onmounted` — it borrows the doc, which is already borrowed
-            // mid-mount (RefCell panic) — so we rely on those two paths.
+            // editor must hold focus to be typable. `autofocus` claims it
+            // on mount; the FTS blitz fork focuses the nearest focussable
+            // ancestor (this div, tabindex 0) on pointerdown — upstream
+            // only click-focuses text inputs, which left the editor
+            // unfocusable by mouse. (MountedData::set_focus from a spawned
+            // task is NOT an option: it re-borrows the doc RefCell during
+            // the vdom poll and panics.)
             autofocus: "true",
             onkeydown: on_keydown,
             onfocusin: move |_| {

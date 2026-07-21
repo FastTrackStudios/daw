@@ -60,3 +60,21 @@ async fn typing_inserts_text() {
         .await
         .unwrap();
 }
+
+/// The editor must be typable with NO outside help — no synthetic
+/// `.focus()`, no click. It claims Blitz focus itself from `onmounted`
+/// (regression: the blitz_minimal demo rendered a caret but every key
+/// was dead because Blitz's autofocus/click-focus never landed on the
+/// editor root).
+#[tokio::test]
+async fn typable_from_mount_without_external_focus() {
+    let tester = render(EmptyEditor).build();
+    // Let the onmounted-spawned set_focus task run.
+    tester.pump().await.ok();
+    tester.type_text("hi");
+    tester
+        .query(".editor-root")
+        .expect(inner_html(contains_substring("hi")))
+        .await
+        .unwrap();
+}

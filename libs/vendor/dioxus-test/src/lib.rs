@@ -141,6 +141,7 @@ mod keyboard;
 pub mod matchers;
 mod pointer;
 mod result;
+mod screenshot;
 
 /// Re-exported for tests that build key events (FTS extension).
 pub use keyboard_types;

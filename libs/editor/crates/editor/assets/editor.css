@@ -164,11 +164,23 @@
 
 /* Steady (non-blinking) blocks — terminal-vim style; a blinking
    repaint over real text reads as the document flashing. Painted
-   only while the editor has focus (modal_caret_decoration). */
+   only while the editor has focus (modal_caret_decoration).
+
+   `display: inline-block` is REQUIRED for the native (Blitz) renderer:
+   Blitz doesn't paint `background` (or `outline`) on a plain inline
+   span, so an inline block caret was invisible and its reverse-video
+   glyph vanished. inline-block gives it a real painted box. The fixed
+   `height`/`line-height` + `vertical-align: text-bottom` make that box
+   hug the character cell without perturbing line height (browsers and
+   Blitz agree on these metrics). Works identically on web. */
 .ed-modal-caret-block {
+    display: inline-block;
+    height: 1em;
+    line-height: 1em;
+    vertical-align: text-bottom;
     background: var(--ed-accent);
     color: var(--ed-bg, #1e1e2e);
-    border-radius: 1px;
+    border-radius: 2px;
 }
 .ed-modal-caret-underscore {
     box-shadow: inset 0 -2px 0 var(--ed-danger);
