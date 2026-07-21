@@ -17,6 +17,7 @@ pub mod primitives;
 pub mod sections;
 pub mod services;
 pub mod time;
+pub mod transpose;
 
 pub(crate) mod ast {}
 
@@ -52,6 +53,9 @@ pub use chord::{
 };
 
 pub use key::{Key, ScaleMode, ScaleType};
+
+// Non-destructive chart display transform (transpose / re-notate / capo).
+pub use transpose::{ChartView, NotationSystem, apply_view};
 
 pub use metadata::SongMetadata;
 
