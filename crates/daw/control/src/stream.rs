@@ -11,6 +11,22 @@
 
 use core::future::Future;
 
+// Target-conditional future bound. The in-flight `events(tx)` subscribe call
+// parked below captures vox connection senders, which are `Send` on native
+// (multi-thread tokio) but `!Send` on wasm32 (single-threaded vox runtime,
+// `Rc<RefCell<…>>`). On native `MaybeSend: Send` (blanket for every `T: Send`),
+// so the bound is byte-for-byte `Send` and the spawned task stays `Send` for
+// `moire::task::spawn`; on wasm32 the bound vanishes and `moire::task::spawn`
+// maps to `spawn_local` (no `Send` required). Native codegen is unchanged.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSend: Send {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: Send> MaybeSend for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSend {}
+#[cfg(target_arch = "wasm32")]
+impl<T> MaybeSend for T {}
+
 /// A live, client-filtered event subscription. Yields events exactly
 /// like `vox::Rx::recv` (`Ok(Some(SelfRef<T>))` per event, `Ok(None)`
 /// / `Err` when the stream ends); events rejected by the filter are
@@ -30,7 +46,7 @@ where
     /// Park `call` (the in-flight `events(tx)` future) on a task and
     /// wrap `rx` with `admit`.
     pub(crate) fn spawn(
-        call: impl Future<Output = ()> + Send + 'static,
+        call: impl Future<Output = ()> + MaybeSend + 'static,
         rx: vox::Rx<T>,
         admit: Box<dyn Fn(&T) -> bool + Send + Sync>,
     ) -> Self {

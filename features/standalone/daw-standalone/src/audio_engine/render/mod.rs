@@ -149,6 +149,11 @@ pub(crate) fn mix_live_input_into_buses(
 /// MIDI event list before the FX chain runs. `offset = 0` means
 /// block-start — programmatic pushes don't carry sub-block timing (this
 /// matches how `collect_midi_events` clamps item events to the block).
+///
+/// Native-only: the live-MIDI ring is `rtrb`-backed (a `cfg(not(wasm32))`
+/// dep), mirroring [`LiveInput`]. On wasm32 the browser feeds MIDI a
+/// different way, so the whole consumer path is gated out.
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug)]
 pub(crate) struct LiveMidiEvent {
     /// Target project track guid (resolved to a snapshot index at drain).
@@ -162,6 +167,7 @@ pub(crate) struct LiveMidiEvent {
 ///
 /// SPSC + lock-free like [`LiveInput`]; only the consumer handle lives
 /// behind a `Mutex`, drained once per block alongside the scratch lock.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct LiveMidiQueue {
     /// Ring consumer of programmatic MIDI events.
     pub(crate) cons: rtrb::Consumer<LiveMidiEvent>,
@@ -174,6 +180,7 @@ pub(crate) struct LiveMidiQueue {
 /// `PluginMidiEvent` to that track's bucket. Events whose track guid
 /// doesn't resolve are dropped. Split out as a free function so the
 /// drain + per-track merge is unit-testable without a `ProjectRenderer`.
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn drain_live_midi(
     queue: &mut LiveMidiQueue,
     idx_of: impl Fn(&str) -> Option<usize>,
@@ -307,6 +314,7 @@ pub struct ProjectRenderer {
     /// `AudioEngine`; events pushed by the UI thread through `Standalone`
     /// are drained once per block (before the FX stage) and merged into
     /// the target track's per-block MIDI events. `None` until installed.
+    #[cfg(not(target_arch = "wasm32"))]
     live_midi: std::sync::Mutex<Option<LiveMidiQueue>>,
 }
 
@@ -320,6 +328,7 @@ impl ProjectRenderer {
             scratch: std::sync::Mutex::new(RenderScratch::default()),
             #[cfg(not(target_arch = "wasm32"))]
             live_input: std::sync::Mutex::new(None),
+            #[cfg(not(target_arch = "wasm32"))]
             live_midi: std::sync::Mutex::new(None),
         }
     }
@@ -349,6 +358,7 @@ impl ProjectRenderer {
     /// The producer end is fed by `Standalone::push_note_on`/`_off`/`_cc`.
     /// Mirrors `set_live_input`: stage 0.5 drains it once per block and
     /// merges events into the matching track's MIDI event list.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn set_live_midi(&self, cons: rtrb::Consumer<LiveMidiEvent>) {
         if let Ok(mut slot) = self.live_midi.lock() {
             *slot = Some(LiveMidiQueue { cons });
@@ -427,7 +437,12 @@ impl ProjectRenderer {
         // index. The buckets merge into each track's `collect_midi_events`
         // list at the FX stage below. Empty / no-op when no queue is
         // installed and when nothing was pushed this block.
+        // Native-only: the live-MIDI ring is `rtrb`-backed (native dep). On
+        // wasm32 the buckets stay empty and the merge at the FX stage is a
+        // no-op (`get_mut` returns `None`).
+        #[allow(unused_mut)]
         let mut live_midi_buckets: Vec<Vec<crate::plugin::PluginMidiEvent>> = Vec::new();
+        #[cfg(not(target_arch = "wasm32"))]
         {
             let mut midi_guard = self
                 .live_midi
@@ -1142,7 +1157,7 @@ mod live_input_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_arch = "wasm32")))]
 mod live_midi_tests {
     use super::*;
     use daw_proto::{Channel, ControllerNumber, ControllerValue, KeyNumber, MidiEvent, Velocity};
