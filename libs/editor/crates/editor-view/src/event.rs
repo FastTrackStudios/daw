@@ -133,3 +133,23 @@ pub(crate) fn apply_tx(
     state.set(next);
     cb.call(event);
 }
+
+/// Apply a transaction to `state` and notify `sink` — the public entry
+/// point for edits originating **outside** the `<Editor>` subtree (e.g.
+/// a properties panel in a side sidebar that mutates the same document).
+///
+/// Reads the current state, then runs the same [`apply_tx`] path the
+/// in-editor bridge uses, so the edit reaches the CRDT host through
+/// `sink` (the editor's `on_transaction`) identically. History
+/// integration only engages when a `Signal<History>` context is in
+/// scope (it is inside `<Editor>`, not in a sibling sidebar), so
+/// out-of-tree edits simply aren't added to the editor's undo stack —
+/// they degrade gracefully, exactly as headless callers do.
+pub fn dispatch_spec(
+    state: Signal<EditorState>,
+    spec: TransactionSpec,
+    sink: Option<Callback<TransactionEvent>>,
+) {
+    let cur = state.read().clone();
+    apply_tx(state, &cur, spec, sink);
+}
