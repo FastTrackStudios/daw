@@ -39,6 +39,12 @@ pub fn McpStrip(
     /// width instead of springing the natural-size bake.
     #[props(default)]
     size: Option<(f32, f32)>,
+    /// Horizontal-zoom multiplier on the strip width (the mixer's per-strip
+    /// "track width"). `1.0` = natural. With an imported theme + `size`, the
+    /// engine re-flows at the scaled width; otherwise it just widens the box
+    /// (WALTER-anchored elements spread per the layout).
+    #[props(default = 1.0)]
+    width_scale: f32,
 ) -> Element {
     let theme = use_theme().theme;
     let ctx_name = if tcp { "tcp" } else { "mcp" };
@@ -90,11 +96,12 @@ pub fn McpStrip(
     let strip = theme.strip(&st);
     let accent = strip.accent;
 
-    // `mcp_strip_width` param overrides the layout's natural width (0 = off).
+    // `mcp_strip_width` param overrides the layout's natural width (0 = off),
+    // then the horizontal-zoom multiplier scales it (the mixer's "track width").
     let strip_w = match mcp.param("mcp_strip_width") {
         Some(w) if w > 0.0 => w,
         _ => l.size.0,
-    };
+    } * width_scale.max(0.1);
     let show_pan = mcp.param("mcp_show_pan") != Some(0.0);
 
     let opacity = if disabled { "0.5" } else { "1.0" };
