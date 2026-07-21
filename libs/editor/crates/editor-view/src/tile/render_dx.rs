@@ -114,6 +114,18 @@ pub fn render_tile(arena: &Arena, tile: TileId, on_click: Callback<usize>) -> El
         }
         TileKind::Line => {
             let pos = crate::tile::pos::pos_at_start(arena, tile);
+            // Line-level decoration classes (md-h1, md-blockquote,
+            // md-callout, md-list-item, …) come from `Decoration::line`
+            // and live in the tile body; join them onto the base
+            // `cm-line` so heading sizes, blockquote bars, callouts, and
+            // list styling actually apply on the native renderer (the web
+            // patcher does the same).
+            let class = match &t.body {
+                crate::tile::TileBody::Line { extra_classes } if !extra_classes.is_empty() => {
+                    format!("cm-line {}", extra_classes.join(" "))
+                }
+                _ => "cm-line".to_string(),
+            };
             // Empty line: an empty div. `.cm-line { min-height: 1lh }`
             // gives it a full clickable row without any content — Blitz
             // honors `1lh`. (The web path emits a `<br>` here so the
@@ -124,7 +136,7 @@ pub fn render_tile(arena: &Arena, tile: TileId, on_click: Callback<usize>) -> El
             if t.children.is_empty() {
                 rsx! {
                     div {
-                        class: "cm-line",
+                        class: "{class}",
                         "data-tile-id": "{tid}",
                         "data-tile-pos": "{pos}",
                         onmousedown: move |_e: Event<MouseData>| on_click.call(pos),
@@ -133,7 +145,7 @@ pub fn render_tile(arena: &Arena, tile: TileId, on_click: Callback<usize>) -> El
             } else {
                 rsx! {
                     div {
-                        class: "cm-line",
+                        class: "{class}",
                         "data-tile-id": "{tid}",
                         "data-tile-pos": "{pos}",
                         onmousedown: move |_e: Event<MouseData>| on_click.call(pos),

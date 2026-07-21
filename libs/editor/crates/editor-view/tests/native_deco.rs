@@ -137,3 +137,24 @@ async fn typing_next_to_bold_keeps_it_decorated() {
         .await
         .unwrap();
 }
+
+#[tokio::test]
+async fn heading_line_gets_size_class() {
+    // Regression: line-level decoration classes (md-h1) must reach the
+    // native .cm-line so heading font-scaling / blockquote bars / callouts
+    // actually render (render_dx was dropping extra_classes).
+    let t = mount(Setup::text("# Big heading\nbody").caret(15).markdown());
+    t.query(".editor-root")
+        .expect(inner_html(contains_substring("md-h1")))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn blockquote_line_gets_class() {
+    let t = mount(Setup::text("> quoted line\nbody").caret(15).markdown());
+    t.query(".editor-root")
+        .expect(inner_html(contains_substring("md-blockquote")))
+        .await
+        .unwrap();
+}

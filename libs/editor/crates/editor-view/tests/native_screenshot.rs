@@ -27,6 +27,22 @@ async fn shot_descender() {
 }
 
 #[tokio::test]
+async fn shot_visual_line_mode() {
+    // V (line-wise) then j — whole lines must highlight.
+    let t = mount(Setup::text("first line here\nsecond line\nthird line\nfourth").caret(3).vim().theme(THEME));
+    t.press_key(Key::Character("V".into()), Modifiers::SHIFT);
+    press(&t, &["j"]);
+    t.pump().await.ok();
+    t.render_png(out("editor_visual_line.png"));
+}
+
+#[tokio::test]
+async fn shot_headings() {
+    let t = mount(Setup::text("# H1 heading\n## H2 heading\n### H3 heading\nnormal body text").caret(60).markdown().theme(THEME));
+    t.render_png(out("editor_headings.png"));
+}
+
+#[tokio::test]
 async fn shot_full_styles() {
     // A rich doc exercising the live-preview styles, to eyeball native
     // rendering of headings/bold/lists/callouts/table/code.

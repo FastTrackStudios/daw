@@ -200,6 +200,13 @@
    caret (on the glyph-owning inner span), so it never shifts text. A
    translucent accent reads as a selection without hiding the glyphs.
    Web uses the browser's own selection, so this is native-scoped. */
+/* Line-wise (vim V) selection: the whole row highlights, filled edge to
+   edge by the .cm-line block background (a block bg DOES paint in Blitz,
+   unlike inline). Translucent so text and line styling read through. */
+.ed-render-native .cm-line.ed-selection-line {
+    background: color-mix(in srgb, var(--ed-accent) 26%, transparent);
+}
+
 .ed-render-native .ed-selection,
 .ed-render-native .ed-selection span {
     /* Cover EVERY descendant span, not just the direct child: inside a

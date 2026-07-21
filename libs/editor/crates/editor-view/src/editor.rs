@@ -2795,7 +2795,7 @@ pub fn Editor(
             .map(|src| src.run(&s))
             .unwrap_or_default();
         // Selection highlight FIRST so the caret decoration paints on top.
-        decos.extend(crate::native::native_selection_decoration(&s, editor_focused));
+        decos.extend(crate::native::native_selection_decoration(&s, vim, editor_focused));
         decos.extend(modal_caret_decoration(&s, vim, editor_focused));
         decos.extend(crate::native::native_caret_decoration(&s, vim, editor_focused));
         decos.sort_by_key(|d| d.from);

@@ -77,18 +77,38 @@ pub fn native_caret_decoration(
 #[must_use]
 pub fn native_selection_decoration(
     s: &EditorState,
+    vim: Option<dioxus::prelude::Signal<editor_vim::VimState>>,
     focused: dioxus::prelude::Signal<bool>,
 ) -> Vec<DecoratedRange> {
     use dioxus::prelude::*;
     if !focused() {
         return Vec::new();
     }
-    s.selection
-        .ranges()
-        .iter()
-        .filter(|r| r.from() != r.to())
-        .map(|r| DecoratedRange::mark(r.from()..r.to(), "ed-selection"))
-        .collect()
+    // In vim VISUAL LINE mode the selection covers WHOLE lines, not just
+    // the caret-to-anchor char range — expand each range to its line
+    // bounds so the highlight fills every touched line.
+    let line_wise = matches!(
+        vim.map(|v| v.read().mode),
+        Some(editor_vim::Mode::VisualLine)
+    );
+    let rope = s.doc.rope();
+    let mut out = Vec::new();
+    for r in s.selection.ranges().iter().filter(|r| r.from() != r.to()) {
+        if line_wise {
+            // Whole-row highlight: a LINE decoration per touched line sets
+            // the `.cm-line` block background, which Blitz paints edge to
+            // edge (an inline mark would stop at the last glyph, leaving a
+            // ragged right edge on short lines).
+            let start_line = rope.byte_to_line(r.from().min(rope.len_bytes()));
+            let end_line = rope.byte_to_line(r.to().min(rope.len_bytes()));
+            for line in start_line..=end_line {
+                out.push(DecoratedRange::line(rope.line_to_byte(line), "ed-selection-line"));
+            }
+        } else {
+            out.push(DecoratedRange::mark(r.from()..r.to(), "ed-selection"));
+        }
+    }
+    out
 }
 
 /// Default text-input action for the native keydown handler — the work the

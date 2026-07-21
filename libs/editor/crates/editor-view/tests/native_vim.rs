@@ -324,3 +324,17 @@ async fn no_selection_highlight_without_visual() {
     let html = t.query(".editor-root").immediately().unwrap().outer_html();
     assert!(!html.contains("ed-selection"), "no selection in Normal mode");
 }
+
+#[tokio::test]
+async fn visual_line_mode_highlights_whole_rows() {
+    // V (line-wise) marks whole lines via .ed-selection-line (block bg),
+    // not the char-range .ed-selection mark.
+    let t = mount(Setup::text("one\ntwo\nthree").caret(0).vim());
+    t.press_key(parse_key("V"), Modifiers::SHIFT);
+    press(&t, &["j"]);
+    expect_probe(&t, "mode", "VisualLine").await;
+    t.query(".editor-root")
+        .expect(inner_html(contains_substring("ed-selection-line")))
+        .await
+        .unwrap();
+}
