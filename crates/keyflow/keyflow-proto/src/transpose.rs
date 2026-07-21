@@ -30,6 +30,8 @@ use crate::chart::types::{KeyChange, RhythmElement};
 use crate::chart::{Chart, ChordInstance};
 use crate::key::{Key, KeySpelling, ScaleMode, SpellingMode};
 use crate::primitives::{Accidental, MusicalNote, RomanCase, RootNotation};
+use crate::sections::SectionType;
+use keyflow_syntax::parsing::Lexer;
 
 /// How chord roots are spelled for display.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -120,6 +122,18 @@ pub fn capo_to_play(sounding: Key, shape: Key) -> Option<u8> {
     (n <= 11).then_some(n)
 }
 
+/// The key the letters/shapes are drawn in for `view`, relative to a chart's own
+/// `song_key`. With a capo this is the shape key (what the hands finger);
+/// otherwise the sounding target (or the song key when the view sets none). This
+/// is the single source of truth shared by [`apply_view`] and [`transpose_source`].
+fn display_key_for(song_key: &Key, view: &ChartView) -> Key {
+    match (&view.target_key, view.capo) {
+        (Some(t), capo) if capo > 0 => shape_key_for_capo(t.clone(), capo),
+        (Some(t), _) => t.clone(),
+        (None, _) => song_key.clone(),
+    }
+}
+
 // ===========================================================================
 // apply_view
 // ===========================================================================
@@ -146,11 +160,7 @@ pub fn apply_view(chart: &Chart, view: &ChartView) -> Chart {
 
     // The key the letters are drawn in. With a capo this is the shape key
     // (what the hands finger); otherwise the sounding target (or the song key).
-    let display_key = match (&view.target_key, view.capo) {
-        (Some(t), capo) if capo > 0 => shape_key_for_capo(t.clone(), capo),
-        (Some(t), _) => t.clone(),
-        (None, _) => song_key.clone(),
-    };
+    let display_key = display_key_for(&song_key, view);
 
     // Semitone shift from the song key to the displayed (letters) key.
     let letters_delta = (display_key.root.semitone + 12 - song_key.root.semitone) % 12;
@@ -204,13 +214,27 @@ struct Ctx<'a> {
 /// Rewrite a single chord in place to the view's notation. Placeholder /
 /// rootless entries (rests, spaces, floating rhythm) are left untouched.
 fn rewrite_chord(chord: &mut ChordInstance, ctx: &Ctx) {
-    // Nothing to transpose for empty-root placeholders.
-    let Some(root_note) = chord.parsed.root.resolve(Some(ctx.song_key)) else {
+    let Some((parsed, symbol)) = renotate_chord(&chord.parsed, ctx) else {
         return;
     };
+    chord.root = parsed.root.clone();
+    chord.full_symbol = symbol;
+    chord.parsed = parsed;
+    chord.display_override = None;
+}
 
-    let bass_note = chord
-        .parsed
+/// The core per-chord transform shared by every entry point: given a parsed
+/// chord and a [`Ctx`], produce the transposed / re-notated `Chord` (structured)
+/// and its rendered symbol string. Returns `None` for rootless placeholders
+/// (rests, spaces, floating rhythm) which carry no transposable root.
+///
+/// This is the ONE place chord transposition + notation lives, so
+/// [`apply_view`] (structured charts) and [`transpose_source`] (raw source)
+/// can never diverge.
+fn renotate_chord(parsed_in: &Chord, ctx: &Ctx) -> Option<(Chord, String)> {
+    let root_note = parsed_in.root.resolve(Some(ctx.song_key))?;
+
+    let bass_note = parsed_in
         .bass
         .as_ref()
         .and_then(|b| b.resolve(Some(ctx.song_key)));
@@ -220,41 +244,58 @@ fn rewrite_chord(chord: &mut ChordInstance, ctx: &Ctx) {
             let new_root = notate_root(&root_note, ctx);
             let new_bass = bass_note.as_ref().map(|b| notate_root(b, ctx));
 
-            let mut parsed = chord.parsed.clone();
-            parsed.root = new_root.clone();
+            let mut parsed = parsed_in.clone();
+            parsed.root = new_root;
             parsed.bass = new_bass;
 
-            chord.full_symbol = parsed.to_string();
-            chord.root = new_root;
-            chord.parsed = parsed;
-            chord.display_override = None;
+            let symbol = parsed.to_string();
+            Some((parsed, symbol))
         }
         NotationSystem::Roman => {
             let (deg, acc) = degree_of(ctx.song_key, &root_note);
-            let case = roman_case(chord.parsed.quality);
+            let case = roman_case(parsed_in.quality);
             let numeral = RootNotation::from_roman_numeral_with_accidental(deg, case, acc);
 
-            let mut sym = numeral.to_string();
-            sym.push_str(&roman_tail(&chord.parsed));
+            let mut symbol = numeral.to_string();
+            symbol.push_str(&roman_tail(parsed_in));
             if let Some(b) = &bass_note {
                 let (bdeg, bacc) = degree_of(ctx.song_key, b);
-                sym.push('/');
-                sym.push_str(&RootNotation::from_scale_degree(bdeg, bacc).to_string());
+                symbol.push('/');
+                symbol.push_str(&RootNotation::from_scale_degree(bdeg, bacc).to_string());
             }
 
-            let mut parsed = chord.parsed.clone();
-            parsed.root = numeral.clone();
+            let mut parsed = parsed_in.clone();
+            parsed.root = numeral;
             if let Some(b) = &bass_note {
                 let (bdeg, bacc) = degree_of(ctx.song_key, b);
                 parsed.bass = Some(RootNotation::from_scale_degree(bdeg, bacc));
             }
 
-            chord.full_symbol = sym;
-            chord.root = numeral;
-            chord.parsed = parsed;
-            chord.display_override = None;
+            Some((parsed, symbol))
         }
     }
+}
+
+/// Parse a single chord SYMBOL (e.g. `"F#m"`, `"Bm7/A"`) and re-spell it under
+/// `view`, treating `from_key` as the song's own functional key. Returns the
+/// rendered symbol, or `None` when the token is not a chord (unparseable, or a
+/// rootless placeholder). This is the source-string counterpart to
+/// [`rewrite_chord`]; both flow through [`renotate_chord`].
+fn transpose_chord_symbol(symbol: &str, from_key: &Key, view: &ChartView) -> Option<String> {
+    let mut lexer = Lexer::new(symbol.to_string());
+    let parsed = Chord::parse(&lexer.tokenize()).ok()?;
+    // Require a resolvable root so bare rhythm / non-chord words are rejected.
+    parsed.root.resolve(Some(from_key))?;
+
+    let display_key = display_key_for(from_key, view);
+    let letters_delta = (display_key.root.semitone + 12 - from_key.root.semitone) % 12;
+    let ctx = Ctx {
+        song_key: from_key,
+        display_key: &display_key,
+        letters_delta,
+        notation: view.notation,
+    };
+    renotate_chord(&parsed, &ctx).map(|(_, symbol)| symbol)
 }
 
 /// Build the root notation for a resolved note under Letters or Nashville.
@@ -281,6 +322,200 @@ fn notate_root(note: &MusicalNote, ctx: &Ctx) -> RootNotation {
             let (deg, acc) = degree_of(ctx.song_key, note);
             RootNotation::from_scale_degree(deg, acc)
         }
+    }
+}
+
+// ===========================================================================
+// transpose_source — the SOURCE-level transform
+// ===========================================================================
+
+/// Re-spell a keyflow SOURCE string for display under `view` — transpose chord
+/// tokens to the target / shape key, render them as letters / Nashville numbers
+/// / Roman numerals, and update the `#<key>` metadata line — while preserving
+/// EVERYTHING else byte-for-byte: the title, tempo/meter, section headers,
+/// rhythm marks, repeat markers, comments, blank lines and original spacing.
+///
+/// The input is never mutated. The identity view (`target_key` `None`, Letters,
+/// capo `0`) returns the source unchanged.
+///
+/// Only chord tokens on chord lines change. A line is treated as a header (and
+/// passed through untouched) when it is blank, is the `#<key>` metadata line, or
+/// parses as a section marker ([`SectionType::parse_with_measure_count`], which
+/// only matches known multi-letter section keywords — never a chord line). Of
+/// the remaining lines, a line is rewritten only when *every* token on it is a
+/// chord, a rhythm mark (`////`, `//`, `|`), or a repeat marker (`x2`) AND at
+/// least one is a real chord; the title and comment lines fail that test and
+/// pass through. Chord tokens are transposed via [`transpose_chord_symbol`], the
+/// same code path [`apply_view`] uses.
+pub fn transpose_source(source: &str, view: &ChartView) -> String {
+    // Fast path: the pure default view is the identity — byte-for-byte input.
+    if view.target_key.is_none() && view.capo == 0 && view.notation == NotationSystem::Letters {
+        return source.to_string();
+    }
+
+    // The song's own functional key — the reference for scale-degree math and
+    // the transposition interval — read from the `#<key>` metadata line. Fall
+    // back to C major so key-less source still renders.
+    let song_key = find_meta_key(source).unwrap_or_else(|| Key::major(MusicalNote::c()));
+    let display_key = display_key_for(&song_key, view);
+
+    // Rebuild line by line, preserving every line ending (`\n`, `\r\n`, and the
+    // possibly-missing final newline) exactly.
+    let mut out = String::with_capacity(source.len());
+    for piece in source.split_inclusive('\n') {
+        let (content, newline) = match piece.strip_suffix('\n') {
+            Some(rest) => (rest, "\n"),
+            None => (piece, ""),
+        };
+        out.push_str(&transform_source_line(content, &song_key, &display_key, view));
+        out.push_str(newline);
+    }
+    out
+}
+
+/// The song key declared on the first `#<key>` metadata line, if any.
+fn find_meta_key(source: &str) -> Option<Key> {
+    for line in source.lines() {
+        if let Some(rest) = line.trim_start().strip_prefix('#') {
+            let token = rest.split_whitespace().next().unwrap_or("");
+            return Key::parse(token).ok();
+        }
+    }
+    None
+}
+
+/// Transform a single source line (without its trailing newline).
+fn transform_source_line(
+    content: &str,
+    song_key: &Key,
+    display_key: &Key,
+    view: &ChartView,
+) -> String {
+    let trimmed = content.trim();
+
+    // Blank line — nothing to do.
+    if trimmed.is_empty() {
+        return content.to_string();
+    }
+
+    // `#<key>` metadata line — rewrite the key token to the displayed key.
+    if trimmed.starts_with('#') {
+        return rewrite_meta_line(content, display_key, view);
+    }
+
+    // Section header (`VS 8`, `Interlude "Breakdown" 8`, `INST "Guitar" 8`, …).
+    // `parse_with_measure_count` only matches known multi-letter section
+    // keywords, so no chord line is ever misclassified here.
+    if SectionType::parse_with_measure_count(trimmed).is_some() {
+        return content.to_string();
+    }
+
+    // Otherwise: a chord line (or a title / comment that passes through).
+    rewrite_chord_line(content, song_key, view)
+}
+
+/// Rewrite the `#<key>` metadata line's key token to `display_key`, preserving
+/// the `#`, the tempo/meter, and all spacing. When the view sets no target key,
+/// the line is a byte-for-byte pass-through (the key stays the reference key the
+/// numbers / letters are relative to).
+fn rewrite_meta_line(content: &str, display_key: &Key, view: &ChartView) -> String {
+    if view.target_key.is_none() {
+        return content.to_string();
+    }
+
+    // Locate the `#` and the end of the key token (`#A` / `#Bbm`).
+    let Some(hash) = content.find('#') else {
+        return content.to_string();
+    };
+    let after = &content[hash + 1..];
+    let key_len = after
+        .find(|c: char| c.is_whitespace())
+        .unwrap_or(after.len());
+    let token_end = hash + 1 + key_len;
+
+    let mut out = String::with_capacity(content.len());
+    out.push_str(&content[..hash]);
+    out.push('#');
+    out.push_str(&display_key.short_name());
+    out.push_str(&content[token_end..]);
+    out
+}
+
+/// Rewrite the chord tokens on a chord line, leaving rhythm marks, repeat
+/// markers and all original whitespace untouched. If the line is not a pure
+/// chord/rhythm line (i.e. any token is neither a chord nor a rhythm/repeat
+/// mark, or it has no chord at all), the line is returned unchanged — this is
+/// what keeps titles and comment lines safe.
+fn rewrite_chord_line(content: &str, song_key: &Key, view: &ChartView) -> String {
+    let spans = token_spans(content);
+    if spans.is_empty() {
+        return content.to_string();
+    }
+
+    // Classify every token; bail out (pass through) at the first token that is
+    // neither a chord nor a rhythm/repeat mark.
+    let mut replacements: Vec<Option<String>> = Vec::with_capacity(spans.len());
+    let mut has_chord = false;
+    for &(start, end) in &spans {
+        let token = &content[start..end];
+        if is_rhythm_mark(token) || is_repeat_mark(token) {
+            replacements.push(None);
+        } else if let Some(new) = transpose_chord_symbol(token, song_key, view) {
+            replacements.push(Some(new));
+            has_chord = true;
+        } else {
+            return content.to_string();
+        }
+    }
+    if !has_chord {
+        return content.to_string();
+    }
+
+    // Rebuild, copying inter-token whitespace verbatim.
+    let mut out = String::with_capacity(content.len());
+    let mut cursor = 0;
+    for (i, &(start, end)) in spans.iter().enumerate() {
+        out.push_str(&content[cursor..start]);
+        match &replacements[i] {
+            Some(new) => out.push_str(new),
+            None => out.push_str(&content[start..end]),
+        }
+        cursor = end;
+    }
+    out.push_str(&content[cursor..]);
+    out
+}
+
+/// Byte spans of each whitespace-delimited token in `line`.
+fn token_spans(line: &str) -> Vec<(usize, usize)> {
+    let mut spans = Vec::new();
+    let mut start: Option<usize> = None;
+    for (i, c) in line.char_indices() {
+        if c.is_whitespace() {
+            if let Some(s) = start.take() {
+                spans.push((s, i));
+            }
+        } else if start.is_none() {
+            start = Some(i);
+        }
+    }
+    if let Some(s) = start {
+        spans.push((s, line.len()));
+    }
+    spans
+}
+
+/// A rhythm mark: a run of slashes / bar-lines (`////`, `//`, `|`, `|/`).
+fn is_rhythm_mark(token: &str) -> bool {
+    !token.is_empty() && token.chars().all(|c| c == '/' || c == '|')
+}
+
+/// A repeat marker: `x2`, `x3`, `X4`, … (an `x` followed by digits).
+fn is_repeat_mark(token: &str) -> bool {
+    let mut chars = token.chars();
+    matches!(chars.next(), Some('x' | 'X')) && {
+        let rest = chars.as_str();
+        !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit())
     }
 }
 
@@ -601,5 +836,154 @@ mod tests {
             },
         );
         assert_eq!(symbols(&roman), vec!["I", "bVII"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // transpose_source — the SOURCE-level transform
+    // -----------------------------------------------------------------------
+
+    /// The task's sample song, in A.
+    const SAMPLE: &str = "Praise - Elevation Worship\n\
+#A 127bpm 4/4\n\
+Count 2\n\
+In 4\n\
+Refrain 8\n\
+VS 8\n\
+A //// A // D // A // A A\n\
+E D A A\n\
+PRE 2\n\
+E D\n\
+CH 8\n\
+F#m D A E x2\n\
+Interlude \"Breakdown\" 8\n\
+BR \"Down\" 8\n\
+A Bm7/A C#m/A D/A x2\n";
+
+    #[test]
+    fn source_identity_is_byte_for_byte() {
+        let out = transpose_source(SAMPLE, &ChartView::default());
+        assert_eq!(out, SAMPLE);
+
+        // Missing trailing newline is preserved too.
+        let no_nl = "#A 127bpm 4/4\nA D E";
+        assert_eq!(transpose_source(no_nl, &ChartView::default()), no_nl);
+    }
+
+    #[test]
+    fn source_letters_a_to_g() {
+        let view = ChartView {
+            target_key: Some(key("G")),
+            notation: NotationSystem::Letters,
+            capo: 0,
+        };
+        let out = transpose_source(SAMPLE, &view);
+
+        let expected = "Praise - Elevation Worship\n\
+#G 127bpm 4/4\n\
+Count 2\n\
+In 4\n\
+Refrain 8\n\
+VS 8\n\
+G //// G // C // G // G G\n\
+D C G G\n\
+PRE 2\n\
+D C\n\
+CH 8\n\
+Em C G D x2\n\
+Interlude \"Breakdown\" 8\n\
+BR \"Down\" 8\n\
+G Am7/G Bm/G C/G x2\n";
+
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn source_nashville_in_own_key() {
+        // target None → numbers relative to the song's own key (A); `#A` unchanged.
+        let view = ChartView {
+            target_key: None,
+            notation: NotationSystem::Nashville,
+            capo: 0,
+        };
+        let out = transpose_source(SAMPLE, &view);
+
+        // `#A` line is untouched, headers/rhythm untouched.
+        assert!(out.contains("#A 127bpm 4/4"));
+        assert!(out.contains("VS 8"));
+        assert!(out.contains("Interlude \"Breakdown\" 8"));
+        // A D E → 1 4 5, F#m → 6m, rhythm + x2 preserved.
+        assert!(out.contains("1 //// 1 // 4 // 1 // 1 1"));
+        assert!(out.contains("5 4 1 1"));
+        assert!(out.contains("6m 4 1 5 x2"));
+        // A Bm7/A C#m/A D/A → in A: B=2, C#=3, D=4, bass A=1.
+        assert!(out.contains("1 2m7/1 3m/1 4/1 x2"));
+    }
+
+    #[test]
+    fn source_roman_in_own_key() {
+        let view = ChartView {
+            target_key: None,
+            notation: NotationSystem::Roman,
+            capo: 0,
+        };
+        let out = transpose_source(SAMPLE, &view);
+
+        assert!(out.contains("#A 127bpm 4/4"));
+        // A D E → I IV V, F#m → vi.
+        assert!(out.contains("I //// I // IV // I // I I"));
+        assert!(out.contains("V IV I I"));
+        assert!(out.contains("vi IV I V x2"));
+    }
+
+    #[test]
+    fn source_capo_renders_shape_key() {
+        // Sound B with a capo 4 → finger G shapes; `#` line reads `#G`.
+        let view = ChartView {
+            target_key: Some(key("B")),
+            notation: NotationSystem::Letters,
+            capo: 4,
+        };
+        let out = transpose_source(SAMPLE, &view);
+
+        assert!(out.contains("#G 127bpm 4/4"));
+        // Same G-shape chords as the direct A→G case.
+        assert!(out.contains("G //// G // C // G // G G"));
+        assert!(out.contains("Em C G D x2"));
+        assert!(out.contains("G Am7/G Bm/G C/G x2"));
+    }
+
+    #[test]
+    fn source_section_header_with_chord_like_label_untouched() {
+        // An INST label whose text contains bare `A`/`E` tokens must not be
+        // transposed — the section keyword guards the whole line.
+        let src = "#A 127bpm 4/4\n\
+INST \"A E Lead\" 8\n\
+A D E\n";
+        let view = ChartView {
+            target_key: Some(key("G")),
+            notation: NotationSystem::Letters,
+            capo: 0,
+        };
+        let out = transpose_source(src, &view);
+
+        // Header line is byte-for-byte; only the chord line moved A D E → G C D.
+        assert!(out.contains("INST \"A E Lead\" 8"));
+        assert!(out.contains("G C D"));
+        assert!(!out.contains("A D E"));
+    }
+
+    #[test]
+    fn source_title_line_untouched() {
+        // A title containing a bare chord-like token still passes through: it is
+        // not an all-chord line.
+        let src = "A Mighty Fortress\n#A 127bpm 4/4\nA D\n";
+        let view = ChartView {
+            target_key: Some(key("G")),
+            notation: NotationSystem::Letters,
+            capo: 0,
+        };
+        let out = transpose_source(src, &view);
+        assert!(out.starts_with("A Mighty Fortress\n"));
+        assert!(out.contains("G C\n"));
     }
 }

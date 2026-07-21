@@ -55,7 +55,7 @@ pub use chord::{
 pub use key::{Key, ScaleMode, ScaleType};
 
 // Non-destructive chart display transform (transpose / re-notate / capo).
-pub use transpose::{ChartView, NotationSystem, apply_view};
+pub use transpose::{ChartView, NotationSystem, apply_view, transpose_source};
 
 pub use metadata::SongMetadata;
 
