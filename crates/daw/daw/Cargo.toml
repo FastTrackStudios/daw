@@ -67,7 +67,6 @@ serde_json = { workspace = true, optional = true }
 facet-json = { workspace = true, optional = true }
 libc = { version = "0.2", optional = true }
 tracing-subscriber = { workspace = true, optional = true }
-moire = { workspace = true, optional = true }
 eyre = { workspace = true, optional = true }
 daw-test-macro = { workspace = true, optional = true }
 reaper-launcher = { workspace = true, optional = true }
@@ -157,7 +156,6 @@ test-harness = [
     "reaper",
     "dep:reaper-launcher",
     "dep:vox-stream",
-    "dep:moire",
     "dep:eyre",
     "dep:daw-test-macro",
     # geteuid() for the socket owner check in find_fts_daw_socket

@@ -31,7 +31,7 @@
 //!
 //! ```ignore
 //! let daw: daw_control::Daw = /* in-process or RPC connection */;
-//! moire::task::spawn(daw_csi::run(daw, daw_csi::CsiConfig::default()));
+//! architect::platform::spawn(daw_csi::run(daw, daw_csi::CsiConfig::default()));
 //! ```
 //!
 //! Customizing: copy `config/xtouch.zones.styx` somewhere, edit, set

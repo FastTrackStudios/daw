@@ -48,10 +48,6 @@ fake = ["dep:fake"]
 # `full` enables every architect optional — vox, SeaORM bridge, axum
 # adapter, fake. Matches tokio's `full` convention: when you just want
 # everything turned on for development or a single-binary build.
-# `diagnostics` is deliberately NOT in `full`: moire's trace capture
-# validates frame pointers at runtime and aborts unless the whole graph
-# is built with `-C force-frame-pointers=yes` — enable it explicitly in
-# binaries whose build sets that flag (see the `diagnostics` feature).
 full = ["vox", "server-seaorm", "server-axum", "fake", "platform", "schedule", "rt"]
 
 # Platform layer (`architect::platform`): a `Clock` (async `sleep` + `now`)
@@ -123,14 +119,7 @@ server-axum = [
     "dep:tracing",
     "dep:vox-core",
     "dep:vox-types",
-    "dep:moire",
 ]
-
-# Enables moiré's instrumentation — named mpsc/oneshot/spawn primitives
-# in axum_ws light up the moire-web dashboard at MOIRE_DASHBOARD.
-# Without this, the same primitives compile to plain tokio passthroughs
-# with zero runtime cost. Off by default.
-diagnostics = ["moire/diagnostics"]
 
 # ── Umbrella features — the two common consumer profiles ─────────────
 #
@@ -250,7 +239,6 @@ tower-http = { workspace = true, optional = true }
 include_dir = { workspace = true, optional = true }
 vox-core = { workspace = true, optional = true }
 vox-types = { workspace = true, optional = true }
-moire = { workspace = true, optional = true }
 
 # iroh p2p bundle. Only pulled by the `iroh` feature. Target-split
 # because iroh's defaults (portmapper etc.) don't build on wasm32: the
