@@ -346,7 +346,14 @@ pub fn Editor(
     // True while the editor root (or a descendant) holds DOM focus.
     // Gates the painted modal caret — like the native caret, it must
     // not render on an unfocused editor.
-    let editor_focused = use_signal(|| false);
+    //
+    // Native starts TRUE: the root requests `autofocus`, and Blitz's
+    // autofocus path calls `set_focus_to` directly WITHOUT dispatching
+    // a focusin event — waiting for `onfocusin` would leave the signal
+    // false forever and no caret would ever paint (Blitz also only
+    // moves focus on click for text INPUTS, so clicking the editor
+    // fires no focusin either). Web keeps the event-driven default.
+    let editor_focused = use_signal(|| cfg!(feature = "native"));
     // Trigger-autocomplete open state (`[[` / `#`). Owned by the
     // editor (unlike `slash`, which the host threads in) because the
     // host's only contract is the candidate source prop.
@@ -2800,6 +2807,12 @@ pub fn Editor(
             let click_sink = on_transaction;
             let mut click_state = state;
             Callback::new(move |pos: usize| {
+                // A click in the content is user intent to edit here —
+                // count it as focus (Blitz won't fire focusin for it).
+                let mut focused = editor_focused;
+                if !*focused.peek() {
+                    focused.set(true);
+                }
                 let cur = click_state.read().clone();
                 push_selection(&mut click_state, &cur, click_deco.as_ref(), click_sink, pos, pos);
             })

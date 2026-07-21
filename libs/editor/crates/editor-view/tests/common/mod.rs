@@ -76,6 +76,12 @@ pub fn Harness() -> Element {
     }
 }
 
+/// Render WITHOUT focusing — for tests that exercise the real focus
+/// path (click / autofocus) instead of the synthetic `.focus()`.
+pub fn mount_unfocused(setup: Setup) -> DocumentTester {
+    render(Harness).with_root_context(setup).build()
+}
+
 /// Render + focus the editor. Returns the tester.
 pub fn mount(setup: Setup) -> DocumentTester {
     let tester = render(Harness).with_root_context(setup).build();
