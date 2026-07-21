@@ -13,6 +13,16 @@ use input::{
 
 use crate::convert::{convert_keyboard_event, convert_mouse_event, convert_wheel_event};
 
+/// Platform sleep for the chord-sequence timeout: tokio on native, the
+/// browser timer on wasm (tokio's `full` features pull mio's net stack, which
+/// wasm doesn't support).
+async fn sleep(duration: std::time::Duration) {
+    #[cfg(not(target_arch = "wasm32"))]
+    tokio::time::sleep(duration).await;
+    #[cfg(target_arch = "wasm32")]
+    gloo_timers::future::TimeoutFuture::new(duration.as_millis() as u32).await;
+}
+
 /// Global action context consumed by `use_input_processor`.
 pub static ACTION_CONTEXT: GlobalSignal<ActionContext> = Signal::global(ActionContext::new);
 
@@ -123,7 +133,7 @@ impl InputHandle {
         let timeout_epoch = self.timeout_epoch;
 
         spawn(async move {
-            tokio::time::sleep(timeout).await;
+            sleep(timeout).await;
 
             if timeout_epoch() != next_epoch {
                 return;
