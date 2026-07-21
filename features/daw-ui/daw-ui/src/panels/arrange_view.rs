@@ -189,23 +189,48 @@ struct GridSteps {
     musical: bool,
 }
 
+/// Adaptive musical grid (the technique the Reaper-Tools "gridbox" uses): the
+/// visible subdivision tracks the zoom so lines stay at a comfortable on-screen
+/// density — finer divisions (1/8, 1/16, 1/32…) fade in as you zoom in, coarser
+/// (2, 4, 8… bars) as you zoom out — always snapped to real musical divisions
+/// (halving/doubling the beat), never arbitrary pixel steps. Three weighted
+/// tiers: `sub` (finest, faint), `beat` (mid), `major` (labeled bars).
+///
+/// Density targets (px between lines): the finest tier keeps ≥ `FINE_PX`, beats
+/// only draw while ≥ `BEAT_PX` (else fold into the bar), bar labels get
+/// ≥ `LABEL_PX` (else label every 2ⁿ bars).
 fn grid_steps(pps: f64, bpm: Option<f64>, beats_per_measure: u32) -> GridSteps {
+    const FINE_PX: f64 = 9.0;
+    const BEAT_PX: f64 = 12.0;
+    const LABEL_PX: f64 = 54.0;
     match bpm {
         Some(bpm) if bpm > 1.0 => {
             let beat = 60.0 / bpm;
-            let mut major = beat * beats_per_measure.max(1) as f64;
-            // Zoomed far out: label every 2^n measures.
-            while major * pps < 60.0 {
+            let measure = beat * beats_per_measure.max(1) as f64;
+
+            // Finest subdivision: start at the beat and halve while the next
+            // finer line would still clear `FINE_PX`; if even the beat is too
+            // dense, climb by doubling until it clears. Pure ×½ / ×2 keeps every
+            // line on a real division.
+            let mut sub = beat;
+            while sub * 0.5 * pps >= FINE_PX {
+                sub *= 0.5;
+            }
+            while sub * pps < FINE_PX {
+                sub *= 2.0;
+            }
+
+            // Bar labels: one bar, doubled to 2/4/8… bars until a label fits.
+            let mut major = measure;
+            while major * pps < LABEL_PX {
                 major *= 2.0;
             }
-            // Beat lines drop out below ~10px spacing (REAPER stops drawing
-            // in-between lines once they crowd).
-            let beat = if beat * pps >= 10.0 { beat } else { major };
-            // Sub-beat: halve while the spacing stays readable.
-            let mut sub = beat;
-            while sub / 2.0 * pps >= 8.0 {
-                sub /= 2.0;
-            }
+
+            // Beat tier: the true beat while readable, else fold up to the bar
+            // line. Kept within [sub, major] so the tiers stay ordered.
+            let beat = if beat * pps >= BEAT_PX { beat } else { major };
+            let beat = beat.clamp(sub, major);
+
             GridSteps {
                 major,
                 beat,
@@ -604,8 +629,14 @@ pub fn ArrangeView(
                     });
                 },
                 div {
+                    // `min-height:100%` + `align-items:stretch` make the row (and
+                    // its lanes scroller) fill the whole arrange viewport even
+                    // when the tracks are shorter — so the empty area below the
+                    // last track is still live arrange (wheel-zoom / click-seek
+                    // work there) and the grid runs all the way down to the mixer.
                     style: format!(
-                        "display:flex; align-items:flex-start; position:relative; top:{ty:.1}px;",
+                        "display:flex; align-items:stretch; position:relative; \
+                         min-height:100%; top:{ty:.1}px;",
                         ty = -scroll_y(),
                     ),
 
