@@ -53,11 +53,27 @@ reaper-test-panels = [
     "dep:daw-reaper-dioxus",
     "dep:fts-ui",
 ]
+# The `playground` example: the vector-themeable panels driven by fake
+# sample data (no DAW backend), served in the browser via `dx serve`.
+# Pulls the dioxus WEB RENDERER (the base `web` feature only enables the
+# dioxus dep for rsx, not a renderer).
+playground = ["web", "dioxus/web", "dioxus/launch"]
 
 # Web-build helpers for the widgets (e.g. knob pointer-lock / coords).
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
-web-sys = { version = "0.3", features = ["Window", "Document", "MouseEvent", "EventTarget"] }
+# `Location` is needed by the dioxus-web renderer's history module (its own
+# fork Cargo declares `History` but not `Location`, and relies on the
+# downstream crate to enable it — the fasttrackstudio app does the same).
+# web-sys features are additive across the graph, so this is harmless for
+# non-web-renderer builds.
+web-sys = { version = "0.3", features = ["Window", "Document", "MouseEvent", "EventTarget", "Location"] }
+
+# The browser playground for the DAW panels — `dx serve --example
+# playground --platform web --features playground`.
+[[example]]
+name = "playground"
+required-features = ["playground"]
 
 [lints]
 workspace = true
