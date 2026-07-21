@@ -200,7 +200,12 @@
    caret (on the glyph-owning inner span), so it never shifts text. A
    translucent accent reads as a selection without hiding the glyphs.
    Web uses the browser's own selection, so this is native-scoped. */
-.ed-render-native .ed-selection > span {
+.ed-render-native .ed-selection,
+.ed-render-native .ed-selection span {
+    /* Cover EVERY descendant span, not just the direct child: inside a
+       selection a glyph run may be owned by a nested decoration span
+       (bold, italic, link…), and `draw_inline_backgrounds` paints the
+       background of whichever span owns the run — so all of them need it. */
     background: color-mix(in srgb, var(--ed-accent) 32%, transparent);
 }
 .ed-modal-caret-underscore {

@@ -40,6 +40,11 @@ and more").caret(0).vim().theme(THEME));
     press(&m, &["v", "j", "l", "l"]);
     m.pump().await.ok();
     m.render_png(out("editor_selection_multi.png"));
+    // selection over BOLD text (markdown live-preview must be on)
+    let b = mount(Setup::text("a **bold** word").caret(0).vim().markdown().theme(THEME));
+    press(&b, &["v", "l", "l", "l", "l", "l", "l", "l", "l"]);
+    b.pump().await.ok();
+    b.render_png(out("editor_selection_bold.png"));
 }
 
 #[tokio::test]
