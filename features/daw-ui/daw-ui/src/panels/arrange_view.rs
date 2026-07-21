@@ -559,8 +559,17 @@ pub fn ArrangeView(
                     // percentage against an indefinite scroll height and
                     // culls the *in-flow* children (the lanes) entirely.
                     div {
+                        // `min-width:100%` makes the arrange body (and every
+                        // track-row lane inside it) fill the scroller's width
+                        // even when the timeline content (`content_w`) is
+                        // narrower, so empty arrange fills the panel instead of
+                        // showing bare background; `width:content_w` still wins
+                        // (→ horizontal scroll) once the timeline is longer.
+                        // (min-*width* is safe — the blitz culling note above is
+                        // specific to min-*height* against indefinite scroll.)
                         style: format!(
-                            "position:relative; width:{content_w}px; background:{arrange_bg};"
+                            "position:relative; width:{content_w}px; min-width:100%; \
+                             background:{arrange_bg};"
                         ),
                         // Empty-timeline click: move the edit cursor and drop
                         // the clip selection. Clips stop propagation, so this

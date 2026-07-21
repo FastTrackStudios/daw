@@ -80,6 +80,18 @@ pub struct ImageCatalog {
 }
 
 impl ImageCatalog {
+    /// An empty catalog with no images and no backing directory. For
+    /// in-memory themes on platforms without a filesystem (wasm): every
+    /// [`load`](Self::load) misses, so image skins resolve to `None` and the
+    /// UI falls back to vector rendering. Palette + rtconfig + WALTER layout
+    /// still work (they don't touch images).
+    pub fn empty() -> Self {
+        Self {
+            dir: PathBuf::new(),
+            names: HashMap::new(),
+        }
+    }
+
     /// Scan a theme image folder (non-recursive; per-DPI subfolders are a
     /// later phase).
     pub fn scan(dir: &Path) -> Result<Self, ThemeError> {

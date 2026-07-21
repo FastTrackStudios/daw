@@ -72,6 +72,22 @@ pub struct ReaperTheme {
 }
 
 impl ReaperTheme {
+    /// Build a theme from raw sources — the `.ReaperTheme` ini text and the
+    /// `rtconfig.txt` text — with **no image catalog**. For embedding a theme
+    /// into a binary on platforms without a filesystem (wasm): palette,
+    /// rtconfig globals/params, and the WALTER program all parse and evaluate
+    /// from the strings; image skins fall back to vector (see
+    /// [`ImageCatalog::empty`]).
+    pub fn from_sources(reaper_theme_ini: &str, rtconfig: &str) -> Self {
+        Self {
+            root: PathBuf::new(),
+            palette: Palette::parse(reaper_theme_ini),
+            rtconfig: RtConfig::parse(rtconfig),
+            rtconfig_src: rtconfig.to_string(),
+            images: ImageCatalog::empty(),
+        }
+    }
+
     /// Load from a directory containing `X.ReaperTheme` + `X/` (or the image
     /// folder itself if the ini sits next to it under any name).
     pub fn load_dir(dir: impl AsRef<Path>) -> Result<Self, ThemeError> {
