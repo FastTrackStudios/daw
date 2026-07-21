@@ -429,6 +429,10 @@ pub fn refresh() {
     OVERLAY.with(|cell| {
         let mut borrow = cell.borrow_mut();
 
+        #[allow(
+            clippy::absurd_extreme_comparisons,
+            reason = "SHOW_DELAY_MS is a tunable delay currently set to 0 by design (see its doc comment); the comparison stays here so raising the constant later just works"
+        )]
         let should_promote = matches!(
             borrow.as_ref(),
             Some(OverlayState::Pending(p)) if p.requested_at.elapsed().as_millis() as u64 >= SHOW_DELAY_MS

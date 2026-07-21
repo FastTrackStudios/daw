@@ -34,8 +34,6 @@ pub use dock::{
     DockablePanelConfig, hide_panel, is_panel_visible, register_panel, restore_dock_state,
     save_dock_state, show_panel, toggle_panel, unregister_all_panels, update_panels,
 };
-#[cfg(feature = "desktop-renderer")]
-pub use dock::{DockablePanelRenderer, set_panel_renderer};
 pub use embedded::EmbeddedView;
 pub use overlay::{DioxusOverlay, DioxusOverlayBuilder, OverlayConfig};
 

@@ -37,9 +37,9 @@ pub struct Bindings {
     pub crossfade_editor: HashMap<ActionType, HashMap<String, BindingEntry>>,
 }
 
-impl Bindings {
+impl Default for Bindings {
     /// Create default bindings (similar to reaper-keys defaults)
-    pub fn default() -> Self {
+    fn default() -> Self {
         let mut bindings = Bindings {
             global: HashMap::new(),
             main: HashMap::new(),
@@ -138,7 +138,9 @@ impl Bindings {
 
         bindings
     }
+}
 
+impl Bindings {
     /// Get bindings for a specific action type and context
     pub fn get_bindings(
         &self,

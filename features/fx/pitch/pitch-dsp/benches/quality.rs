@@ -310,9 +310,9 @@ fn detect_pitch_yin(frame: &[f64], sample_rate: f64) -> Option<f64> {
     let best_tau = best_tau.or_else(|| {
         let mut min_val = f64::MAX;
         let mut min_t = min_period;
-        for tau in min_period..max_period {
-            if d[tau] < min_val {
-                min_val = d[tau];
+        for (tau, &val) in d.iter().enumerate().take(max_period).skip(min_period) {
+            if val < min_val {
+                min_val = val;
                 min_t = tau;
             }
         }
