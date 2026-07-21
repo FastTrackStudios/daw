@@ -332,8 +332,10 @@ pub fn ArrangeView(
                     style: "flex:1 1 0; position:relative; overflow:hidden;",
                     div {
                         // Mirrors the lane scroller's horizontal offset.
+                        // `min-width:100%` extends the ruler lanes + ticks to
+                        // fill the full arrange width (matching the lanes body).
                         style: format!(
-                            "position:relative; width:{content_w}px; height:100%; \
+                            "position:relative; width:{content_w}px; min-width:100%; height:100%; \
                              left:{x:.1}px; cursor:text;",
                             x = -scroll_x(),
                         ),
@@ -567,9 +569,12 @@ pub fn ArrangeView(
                         // (→ horizontal scroll) once the timeline is longer.
                         // (min-*width* is safe — the blitz culling note above is
                         // specific to min-*height* against indefinite scroll.)
+                        // `min-height:100%` fills the scroller vertically so the
+                        // grid lines (top:0→bottom:0) continue past the last
+                        // track into the empty area, REAPER-style.
                         style: format!(
                             "position:relative; width:{content_w}px; min-width:100%; \
-                             background:{arrange_bg};"
+                             min-height:100%; background:{arrange_bg};"
                         ),
                         // Empty-timeline click: move the edit cursor and drop
                         // the clip selection. Clips stop propagation, so this
@@ -590,7 +595,7 @@ pub fn ArrangeView(
                                     div {
                                         key: "s{i}",
                                         style: format!(
-                                            "position:absolute; top:0; height:{lanes_h}px; left:{x:.1}px; \
+                                            "position:absolute; top:0; bottom:0; left:{x:.1}px; \
                                              width:1px; background:{grid_sub}; pointer-events:none;",
                                             x = i as f64 * g.sub * pps,
                                         ),
@@ -604,7 +609,7 @@ pub fn ArrangeView(
                                     div {
                                         key: "b{i}",
                                         style: format!(
-                                            "position:absolute; top:0; height:{lanes_h}px; left:{x:.1}px; \
+                                            "position:absolute; top:0; bottom:0; left:{x:.1}px; \
                                              width:1px; background:{grid_beat}; pointer-events:none;",
                                             x = i as f64 * g.beat * pps,
                                         ),
@@ -616,7 +621,7 @@ pub fn ArrangeView(
                             div {
                                 key: "g{i}",
                                 style: format!(
-                                    "position:absolute; top:0; height:{lanes_h}px; left:{x:.1}px; \
+                                    "position:absolute; top:0; bottom:0; left:{x:.1}px; \
                                      width:1px; background:{grid_measure}; pointer-events:none;",
                                     x = i as f64 * g.major * pps,
                                 ),
