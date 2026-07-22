@@ -45,6 +45,11 @@ pub fn McpStrip(
     /// (WALTER-anchored elements spread per the layout).
     #[props(default = 1.0)]
     width_scale: f32,
+    /// When set (mixer mode), render a right-edge drag handle; the callback
+    /// gets `(client_x, base_width_px)` on mousedown so the mixer can begin a
+    /// per-strip width resize.
+    #[props(default)]
+    on_resize_start: Option<EventHandler<(f64, u32)>>,
 ) -> Element {
     let theme = use_theme().theme;
     let ctx_name = if tcp { "tcp" } else { "mcp" };
@@ -97,11 +102,14 @@ pub fn McpStrip(
     let accent = strip.accent;
 
     // `mcp_strip_width` param overrides the layout's natural width (0 = off),
-    // then the horizontal-zoom multiplier scales it (the mixer's "track width").
-    let strip_w = match mcp.param("mcp_strip_width") {
+    // then a per-track width override (drag-resize) and the horizontal-zoom
+    // multiplier apply (the mixer's "track width").
+    let natural_w = match mcp.param("mcp_strip_width") {
         Some(w) if w > 0.0 => w,
         _ => l.size.0,
-    } * width_scale.max(0.1);
+    };
+    let base_w = (track.strip_width)().map(|w| w as f32).unwrap_or(natural_w);
+    let strip_w = base_w * width_scale.max(0.1);
     let show_pan = mcp.param("mcp_show_pan") != Some(0.0);
 
     let opacity = if disabled { "0.5" } else { "1.0" };
@@ -189,6 +197,25 @@ pub fn McpStrip(
     rsx! {
         div {
             style: container,
+
+            // Right-edge width handle (mixer only): drag to resize this strip.
+            // `fts-rz` brightens it on hover (see arrange_view::RESIZE_CSS,
+            // rendered alongside in the workspace).
+            if let Some(cb) = on_resize_start {
+                div {
+                    class: "fts-rz",
+                    style: "position:absolute; top:0; bottom:0; right:0; width:9px; \
+                            cursor:ew-resize; z-index:6; background:rgba(255,255,255,0.05);",
+                    onmousedown: move |evt: MouseEvent| {
+                        if evt.trigger_button()
+                            == Some(dioxus_elements::input_data::MouseButton::Primary)
+                        {
+                            evt.stop_propagation();
+                            cb.call((evt.client_coordinates().x, base_w.round() as u32));
+                        }
+                    },
+                }
+            }
 
             // Theme-drawn chrome: `mcp.custom.*` boxes, painted first in
             // WALTER z-order. Only the `.color` *background* (second four

@@ -166,6 +166,10 @@ pub struct TrackView {
     /// align). A `Signal` so drag-to-resize updates every panel at once; the
     /// view's global vertical zoom multiplies it at render.
     pub height: Signal<u32>,
+    /// Per-strip mixer width override in px (`None` = the theme's natural
+    /// width). A `Signal` for drag-to-resize; the mixer's global horizontal
+    /// zoom multiplies it at render. The MCP deviation from REAPER.
+    pub strip_width: Signal<Option<u32>>,
 
     // ── fixed item lanes (REAPER 7 comping) ──
     /// Number of fixed lanes (0/1 = no lane subdivision).
@@ -209,6 +213,7 @@ impl TrackView {
             depth: 0,
             is_folder: false,
             height: Signal::new(DEFAULT_LANE_HEIGHT),
+            strip_width: Signal::new(None),
             lane_count: 0,
             lane_play_mask: 0,
             lane_names: Vec::new(),

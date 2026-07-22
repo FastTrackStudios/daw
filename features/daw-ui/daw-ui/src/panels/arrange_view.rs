@@ -31,6 +31,12 @@
 use input::{InputCommand, KeymapConfig};
 use input_dioxus::use_input_processor;
 
+/// Hover affordance for the track-height / strip-width resize grips: subtle by
+/// default, brighter on hover so they're discoverable (embedded so it applies
+/// in every render context — plugin, standalone, browser).
+const RESIZE_CSS: &str = ".fts-rz{transition:background .08s ease;}\
+.fts-rz:hover{background:rgba(120,170,255,0.45)!important;}";
+
 use crate::panels::model::{
     EnvelopeView, LaneDisplay, MarkerView, RegionView, TempoMarkerView, TrackView,
 };
@@ -156,14 +162,29 @@ struct ArrangeCtx {
 /// Snapshot the base height + pointer y on mousedown; each move sets the
 /// track's height Signal to `start_h + (dy / row_scale)` (the drag is in
 /// screen px, the base is pre-zoom), clamped to a sane range. Ports the
-/// `slip_drag` begin/move/end shape from reaper-input.
+/// `slip_drag` begin/move/end shape from reaper-input. `pub(crate)` so the
+/// TCP-side handle ([`TrackControlPanel`]) can start one too.
 #[derive(Clone, Copy)]
-struct ResizeState {
+pub struct ResizeState {
     /// The track's base-height signal being resized.
     height: Signal<u32>,
     start_y: f64,
     start_h: u32,
     scale: f32,
+}
+
+impl ResizeState {
+    /// Begin a resize: `height` is the track's base-height signal, `start_y`
+    /// the pointer y, `start_h` the base height, `scale` the current vertical
+    /// zoom. For the TCP-side handle in another module.
+    pub fn new(height: Signal<u32>, start_y: f64, start_h: u32, scale: f32) -> Self {
+        Self {
+            height,
+            start_y,
+            start_h,
+            scale,
+        }
+    }
 }
 
 /// Adaptive tick spacing: the smallest "nice" step whose px spacing at this
@@ -429,6 +450,9 @@ pub fn ArrangeView(
     };
 
     rsx! {
+        // Resize-handle affordance: brighten on hover so track/strip resize
+        // grips are discoverable (blitz honours `:hover` in an embedded sheet).
+        document::Style { {RESIZE_CSS} }
         div {
             style: format!(
                 "display:flex; flex-direction:column; height:100%; min-height:0; background:{empty_bg};"
@@ -644,6 +668,24 @@ pub fn ArrangeView(
                         }
                     });
                 },
+                // Apply / release a track-height resize here (wraps both TCP and
+                // lanes), so a drag started from EITHER the TCP row edge or the
+                // lane bottom edge keeps tracking.
+                onmousemove: move |evt: MouseEvent| {
+                    if let Some(r) = *resize.peek() {
+                        let mut h = r.height;
+                        let dy = (evt.client_coordinates().y - r.start_y) / r.scale as f64;
+                        h.set(((r.start_h as f64 + dy).round() as i64).clamp(16, 800) as u32);
+                    }
+                },
+                onmouseup: move |_| {
+                    let mut resize = resize;
+                    resize.set(None);
+                },
+                onmouseleave: move |_| {
+                    let mut resize = resize;
+                    resize.set(None);
+                },
                 div {
                     // `min-height:100%` + `align-items:stretch` make the row (and
                     // its lanes scroller) fill the whole arrange viewport even
@@ -656,7 +698,7 @@ pub fn ArrangeView(
                         ty = -scroll_y(),
                     ),
 
-                    TrackControlPanel { tracks: tracks.clone(), width: tcp_width, scroll: false, height_scale: rs }
+                    TrackControlPanel { tracks: tracks.clone(), width: tcp_width, scroll: false, height_scale: rs, resize }
 
                 // Timeline lanes. Horizontal position is driven by `scroll_x`
                 // (single source of truth, shared with the ruler): the inner
@@ -962,10 +1004,12 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
             ),
             // Bottom-edge resize handle: drag to set this track's height. Begins
             // the resize (snapshot base height + pointer y + zoom); the scroller's
-            // shared onmousemove/up apply + release it (slip_drag shape).
+            // shared onmousemove/up apply + release it (slip_drag shape). The
+            // `fts-rz` class brightens it on hover so it's discoverable.
             div {
-                style: "position:absolute; left:0; right:0; bottom:0; height:5px; \
-                        cursor:ns-resize; z-index:5;",
+                class: "fts-rz",
+                style: "position:absolute; left:0; right:0; bottom:0; height:7px; \
+                        cursor:ns-resize; z-index:5; background:rgba(255,255,255,0.05);",
                 onmousedown: move |evt: MouseEvent| {
                     if evt.trigger_button()
                         == Some(dioxus_elements::input_data::MouseButton::Primary)

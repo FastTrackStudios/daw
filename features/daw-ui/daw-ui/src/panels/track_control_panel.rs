@@ -30,6 +30,10 @@ pub fn TrackControlPanel(
     /// rows stay aligned). `1.0` = base height.
     #[props(default = 1.0)]
     height_scale: f32,
+    /// When set, each row gets a bottom-edge height-resize handle that begins a
+    /// resize on this shared state (the arrange body applies + releases it).
+    #[props(default)]
+    resize: Option<Signal<Option<super::arrange_view::ResizeState>>>,
 ) -> Element {
     let overflow = if scroll { "auto" } else { "visible" };
     let surface = use_theme().theme.panel().surface.css();
@@ -48,6 +52,7 @@ pub fn TrackControlPanel(
                     track: track.clone(),
                     panel_w: width,
                     height_scale,
+                    resize,
                     on_select: {
                         let selections = selections.clone();
                         move |id: usize| {
@@ -70,6 +75,7 @@ fn TcpRow(
     track: TrackView,
     panel_w: u32,
     #[props(default = 1.0)] height_scale: f32,
+    #[props(default)] resize: Option<Signal<Option<super::arrange_view::ResizeState>>>,
     on_select: EventHandler<usize>,
 ) -> Element {
     let indent = track.depth * INDENT;
@@ -78,6 +84,7 @@ fn TcpRow(
     let h = (((track.height)() as f32 * height_scale).round() as u32).max(8);
     let total = ((track.total_height() as f32 * height_scale).round() as u32).max(8);
     let id = track.id;
+    let height_sig = track.height;
     // The strip's actual px box — lets an imported REAPER theme re-run
     // WALTER at this exact size (flow themes rewrap/cull per width).
     let size = (panel_w.saturating_sub(indent) as f32, h as f32);
@@ -101,6 +108,29 @@ fn TcpRow(
                 div {
                     style: format!("flex:0 0 {h}px; height:{h}px; position:relative;"),
                     McpStrip { track: track.clone(), tcp: true, size }
+                    // Bottom-edge height-resize handle (REAPER grabs here). Sets
+                    // the shared resize state; the arrange body applies + releases.
+                    if let Some(resize) = resize {
+                        div {
+                            class: "fts-rz",
+                            style: "position:absolute; left:0; right:0; bottom:0; height:7px; \
+                                    cursor:ns-resize; z-index:5; background:rgba(255,255,255,0.05);",
+                            onmousedown: move |evt: MouseEvent| {
+                                if evt.trigger_button()
+                                    == Some(dioxus_elements::input_data::MouseButton::Primary)
+                                {
+                                    evt.stop_propagation();
+                                    let mut resize = resize;
+                                    resize.set(Some(super::arrange_view::ResizeState::new(
+                                        height_sig,
+                                        evt.client_coordinates().y,
+                                        (height_sig)(),
+                                        height_scale.max(0.05),
+                                    )));
+                                }
+                            },
+                        }
+                    }
                 }
                 // ECP rows under the track, one per visible envelope.
                 for (i, env) in envelopes.into_iter().enumerate() {
