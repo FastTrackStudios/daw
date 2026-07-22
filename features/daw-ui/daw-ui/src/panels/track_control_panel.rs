@@ -81,13 +81,22 @@ fn TcpRow(
     let indent = track.depth * INDENT;
     // Displayed row height = base-height Signal × vertical zoom (aligns with
     // the arrange lanes; drag-to-resize sets the base Signal).
-    let h = (((track.height)() as f32 * height_scale).round() as u32).max(8);
-    let total = ((track.total_height() as f32 * height_scale).round() as u32).max(8);
+    let h = (((track.height)() as f32 * height_scale).round() as u32).max(2);
+    let total = ((track.total_height() as f32 * height_scale).round() as u32).max(2);
     let id = track.id;
     let height_sig = track.height;
-    // The strip's actual px box — lets an imported REAPER theme re-run
-    // WALTER at this exact size (flow themes rewrap/cull per width).
-    let size = (panel_w.saturating_sub(indent) as f32, h as f32);
+    // Below `STRIP_REF_H` the row is too short for full-size chrome, so we
+    // render the strip at the reference height and CSS-scale it down — the
+    // name font, mute/solo/pan buttons etc. shrink together (REAPER's
+    // supercollapsed/collapsed feel). At/above it, `s == 1.0` (no scaling).
+    let box_w = panel_w.saturating_sub(indent) as f32;
+    const STRIP_REF_H: f32 = 46.0;
+    let s = (h as f32 / STRIP_REF_H).clamp(0.12, 1.0);
+    let render_h = (h as f32 / s).round();
+    let render_w = (box_w / s).round();
+    // The strip's pre-scale px box — an imported REAPER theme re-runs WALTER at
+    // this size (flow themes rewrap/cull per width); the vector theme anchors.
+    let size = (render_w, render_h);
     let envelopes: Vec<_> = track
         .envelopes
         .iter()
@@ -106,8 +115,16 @@ fn TcpRow(
             div {
                 style: "flex:1 1 0; min-width:0; display:flex; flex-direction:column;",
                 div {
-                    style: format!("flex:0 0 {h}px; height:{h}px; position:relative;"),
-                    McpStrip { track: track.clone(), tcp: true, size }
+                    style: format!("flex:0 0 {h}px; height:{h}px; position:relative; overflow:hidden;"),
+                    // Strip rendered at the reference size, scaled to fit the row
+                    // so all chrome shrinks proportionally at small heights.
+                    div {
+                        style: format!(
+                            "position:absolute; top:0; left:0; width:{render_w}px; \
+                             height:{render_h}px; transform:scale({s}); transform-origin:top left;"
+                        ),
+                        McpStrip { track: track.clone(), tcp: true, size }
+                    }
                     // Bottom-edge height-resize handle (REAPER grabs here). Sets
                     // the shared resize state; the arrange body applies + releases.
                     if let Some(resize) = resize {

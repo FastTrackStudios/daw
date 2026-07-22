@@ -719,7 +719,7 @@ pub fn ArrangeView(
                     if let Some(r) = *resize.peek() {
                         let mut h = r.height;
                         let dy = (evt.client_coordinates().y - r.start_y) / r.scale as f64;
-                        h.set(((r.start_h as f64 + dy).round() as i64).clamp(16, 800) as u32);
+                        h.set(((r.start_h as f64 + dy).round() as i64).clamp(8, 800) as u32);
                     }
                 },
                 onmouseup: move |_| {
@@ -786,7 +786,7 @@ pub fn ArrangeView(
                         if let Some(r) = *resize.peek() {
                             let mut h = r.height;
                             let dy = (c.y - r.start_y) / r.scale as f64;
-                            h.set(((r.start_h as f64 + dy).round() as i64).clamp(16, 800) as u32);
+                            h.set(((r.start_h as f64 + dy).round() as i64).clamp(8, 800) as u32);
                             return;
                         }
                         if let Some((sx0, sy0, scx, scy)) = *pan.peek() {
@@ -992,7 +992,7 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
     // vertical zoom. The bottom-edge handle resizes the base Signal.
     let rs = (ctx.row_scale)();
     let height_sig = track.height;
-    let row_h = ((height_sig)() as f32 * rs).round().max(8.0) as u32;
+    let row_h = ((height_sig)() as f32 * rs).round().max(2.0) as u32;
     let lane_area_h = row_h.saturating_sub(4) as f64;
     let lane_h = lane_area_h / lane_count as f64;
     let item_h = if lane_count > 1 {
