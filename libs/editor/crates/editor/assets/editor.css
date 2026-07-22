@@ -1938,3 +1938,23 @@
     border-bottom-color: var(--ed-accent);
 }
 .editor-root .md-event-date { color: var(--ed-text); font-weight: 600; }
+
+/* ── Role chip colors (the FTS instrument scheme) + icons ───────────── */
+.editor-root .md-roster-role {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 6px;
+}
+.editor-root .md-role-icon { font-size: 0.9rem; }
+.editor-root .md-role--red    { color: #ef4444; background: color-mix(in srgb, #ef4444 12%, transparent); }
+.editor-root .md-role--yellow { color: #eab308; background: color-mix(in srgb, #eab308 12%, transparent); }
+.editor-root .md-role--blue   { color: #3b82f6; background: color-mix(in srgb, #3b82f6 12%, transparent); }
+.editor-root .md-role--cyan   { color: #14b8a6; background: color-mix(in srgb, #14b8a6 12%, transparent); }
+.editor-root .md-role--green  { color: #22c55e; background: color-mix(in srgb, #22c55e 12%, transparent); }
+.editor-root .md-role--purple { color: #a855f7; background: color-mix(in srgb, #a855f7 12%, transparent); }
+.editor-root .md-role--pink   { color: #ec4899; background: color-mix(in srgb, #ec4899 12%, transparent); }
+.editor-root .md-role--orange { color: #f97316; background: color-mix(in srgb, #f97316 12%, transparent); }
+.editor-root .md-role--amber  { color: #f59e0b; background: color-mix(in srgb, #f59e0b 12%, transparent); }
+.editor-root .md-role--slate  { color: #94a3b8; background: color-mix(in srgb, #94a3b8 12%, transparent); }

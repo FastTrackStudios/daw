@@ -722,6 +722,40 @@ fn song_strip_runs(
     out
 }
 
+/// The FTS instrument color scheme + an icon per role — reflected on the
+/// roster's role chips (Drums red, Bass yellow, Electric blue, Acoustic
+/// cyan, Keys green, Synth purple, vocals pink, tech slate…).
+fn role_style(role: &str) -> (&'static str, &'static str) {
+    let r = role.to_ascii_lowercase();
+    if r.contains("drum") || r.contains("perc") {
+        ("md-role--red", "🥁")
+    } else if r.contains("bass") {
+        ("md-role--yellow", "🎸")
+    } else if r.contains("electric") {
+        ("md-role--blue", "🎸")
+    } else if r.contains("acoustic") {
+        ("md-role--cyan", "🎸")
+    } else if r.contains("key") || r.contains("piano") {
+        ("md-role--green", "🎹")
+    } else if r.contains("synth") || r.contains("organ") {
+        ("md-role--purple", "🎹")
+    } else if r.contains("vocal") || r.contains("worship leader") || r.contains("singer") {
+        ("md-role--pink", "🎤")
+    } else if r.contains("music director") || r.contains("md") && r.len() <= 3 {
+        ("md-role--orange", "🎼")
+    } else if r.contains("foh") || r.contains("audio") || r.contains("sound") {
+        ("md-role--slate", "🎚️")
+    } else if r.contains("light") {
+        ("md-role--amber", "💡")
+    } else if r.contains("graphic") || r.contains("lyric") || r.contains("screen") {
+        ("md-role--slate", "🖥️")
+    } else if r.contains("production") || r.contains("director") {
+        ("md-role--orange", "🎬")
+    } else {
+        ("md-role--slate", "•")
+    }
+}
+
 /// Roster rows: `Role - [[Name]] (Status)[, [[Name]] (Status)…]` where
 /// every target is a `type: contact` note renders as a TEAM row widget —
 /// role chip + one CONTACT CARD per person: initials avatar with a
@@ -799,11 +833,12 @@ fn emit_roster_rows(
                 )
             })
             .collect();
+        let (role_cls, role_icon) = role_style(role);
         out.push(Decoration::replace(line_from..line_to));
         out.push(Decoration::widget(
             line_from,
             format!(
-                r#"<span class="md-roster-row"><span class="md-roster-role">{role}</span>{cards}</span>"#,
+                r#"<span class="md-roster-row"><span class="md-roster-role {role_cls}"><span class="md-role-icon">{role_icon}</span>{role}</span>{cards}</span>"#,
                 role = html_escape(role),
             ),
         ));
