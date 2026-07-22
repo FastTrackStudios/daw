@@ -3,6 +3,12 @@ name = "daw-standalone"
 version = "0.1.0"
 edition = "2024"
 
+# `cdylib` is for the wasm worklet bundle (wasm-bindgen consumes a cdylib
+# .wasm; see examples/web_worklet + `just task-worklet-wasm`); `rlib` keeps
+# every in-tree consumer linking exactly as before.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [package.metadata]
 
 [package.metadata."docs.rs"]

@@ -59,8 +59,13 @@ impl WebRenderer {
     #[wasm_bindgen(constructor)]
     pub fn new(sample_rate: u32) -> WebRenderer {
         let daw = Standalone::new();
+        // Fixed guid, NOT uuid::new_v4(): each `WebRenderer` owns exactly one
+        // project, and `AudioWorkletGlobalScope` has no `crypto` — getrandom
+        // would panic when the renderer is constructed on the audio thread
+        // (the intended home; see examples/web_worklet). Guid collisions are
+        // impossible within an instance and instances don't share state.
         let project_guid = daw.seed_project(daw_proto::ProjectInfo {
-            guid: uuid::Uuid::new_v4().to_string(),
+            guid: "web-project".to_string(),
             name: "web".into(),
             path: String::new(),
         });
@@ -115,6 +120,75 @@ impl WebRenderer {
                 sample_rate: sample_rate.max(1),
             },
         );
+    }
+
+    /// Seed one stem: a track + an audio item/take whose source points at
+    /// `source_path`, keyed by the stable `take_guid` the caller will later
+    /// pass to [`attach_audio_source_pcm`] once the browser has decoded the
+    /// file. Mirrors the native `media_seed` layout (track → MIDI item → flip
+    /// the active take to audio) but *pins* the take's guid to `take_guid` so
+    /// the async decode can attach its PCM by that stable key
+    /// (`ProjectState.audio_sources` is keyed by the active take's guid).
+    ///
+    /// The item is placed at 0s with a generously long length; the decoded
+    /// source itself bounds the audible region (past its end reads silence),
+    /// so no per-song length is needed here.
+    #[wasm_bindgen(js_name = addStemTrack)]
+    pub fn add_stem_track(&self, display_name: &str, take_guid: &str, source_path: &str) {
+        use daw_proto::midi::Midi;
+        use daw_proto::{ItemRef, ProjectContext, Takes, TrackRef, Tracks};
+
+        // A generous item length so the whole song plays; the decoded source
+        // (however long) is what actually bounds playback.
+        const ITEM_LEN_SECONDS: f64 = 3600.0;
+
+        let ctx = ProjectContext::Project(self.project_guid.clone());
+        let Ok(track) = Tracks::add(&self.daw, ctx.clone(), display_name, None) else {
+            return;
+        };
+        let Some(loc) = Midi::create_midi_item(
+            &self.daw,
+            ctx.clone(),
+            TrackRef::Guid(track),
+            0.0,
+            ITEM_LEN_SECONDS,
+        ) else {
+            return;
+        };
+        let ItemRef::Guid(item_guid) = &loc.item else {
+            return;
+        };
+        let Some(active) =
+            Takes::get_active_take(&self.daw, ctx, ItemRef::Guid(item_guid.clone()))
+        else {
+            return;
+        };
+        // Pin the freshly created take's guid to `take_guid` and flip it from
+        // MIDI to an audio source pointing at `source_path`.
+        self.daw.write_project(&self.project_guid, |p| {
+            for tl in p.takes.values_mut() {
+                for t in tl.takes.iter_mut() {
+                    if t.guid == active.guid {
+                        t.guid = take_guid.to_string();
+                        t.is_midi = false;
+                        t.source_type = daw_proto::item::SourceType::Audio;
+                        t.source_file_path = Some(source_path.to_string());
+                    }
+                }
+            }
+        });
+
+        // (Re)size the meter bank to the track count so `render_block` has a
+        // cell per track to write peaks into ([`Self::track_peaks`] reads them
+        // for UI VU meters). Natively the mixer attach does this; the web path
+        // has no mixer, so size it here. Tracks are only added pre-playback,
+        // so resetting the cells on each add is harmless.
+        let count = daw_proto::Tracks::count(
+            &self.daw,
+            daw_proto::ProjectContext::Project(self.project_guid.clone()),
+        ) as usize;
+        self.daw
+            .set_meters(crate::metering::Meters::new(count));
     }
 
     /// Drop a previously-attached source.
@@ -236,5 +310,21 @@ impl WebRenderer {
     #[wasm_bindgen(js_name = audioSourceCount)]
     pub fn audio_source_count(&self) -> u32 {
         self.daw.audio_source_count(&self.project_guid) as u32
+    }
+
+    /// Per-track peak levels (0.0..=1.0, max of L/R), indexed by track order —
+    /// the render path writes these into the `Meters` cells every block, so
+    /// this is a lock-free read for UI VU meters.
+    #[wasm_bindgen(js_name = trackPeaks)]
+    pub fn track_peaks(&self) -> Vec<f32> {
+        let meters = self.daw.meters();
+        (0..meters.len())
+            .map(|i| {
+                meters
+                    .cell(i)
+                    .map(|c| c.peak(0).max(c.peak(1)))
+                    .unwrap_or(0.0)
+            })
+            .collect()
     }
 }
