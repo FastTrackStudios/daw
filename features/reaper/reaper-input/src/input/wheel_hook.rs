@@ -802,7 +802,7 @@ pub fn restore_all_hooks() {
         unsafe {
             if let Some(set_window_long) = swell.pointers().SetWindowLong {
                 for (hwnd, orig_fn) in map.drain() {
-                    set_window_long(hwnd, GWL_WNDPROC, orig_fn as isize);
+                    set_window_long(hwnd, GWL_WNDPROC, orig_fn as usize as isize);
                 }
             }
         }

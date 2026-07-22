@@ -189,8 +189,8 @@ impl SceneOverlay for SpectrographPainter {
             let col_x = frame_idx as f64 * col_w;
 
             // Render each freq row as a colored rect segment
-            for bin in 0..n_bins.min(frame.len()) {
-                let db_val = frame[bin] as f64;
+            for (bin, &val) in frame.iter().enumerate().take(n_bins.min(frame.len())) {
+                let db_val = val as f64;
                 let t = ((db_val - cfg.min_db) / db_range).clamp(0.0, 1.0);
                 let color = viridis(t);
 

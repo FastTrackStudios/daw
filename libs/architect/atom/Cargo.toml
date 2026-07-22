@@ -21,7 +21,7 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 # entity — consumers implement `StoreEntity` for their own types.
 
 [dependencies]
-dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
+dioxus = { workspace = true }
 
 [lib]
 doctest = false

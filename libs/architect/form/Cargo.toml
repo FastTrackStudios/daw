@@ -20,7 +20,7 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 # wasm-safe: Dioxus core + architect-atom only.
 
 [dependencies]
-dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
+dioxus = { workspace = true }
 architect-atom = { workspace = true }
 
 [lib]

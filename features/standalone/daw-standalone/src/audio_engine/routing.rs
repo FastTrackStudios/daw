@@ -225,12 +225,12 @@ mod tests {
         let s = snap((4, 5), (0, 1), (2, 3), false, false);
         stage_main(&mut stage, channels, frames, &block, s);
         // Frame 0: main pair 4/5 = 1,2; everything else zero.
-        assert_eq!(stage[0 * channels + 4], 1.0);
-        assert_eq!(stage[0 * channels + 5], 2.0);
-        assert_eq!(stage[0 * channels + 0], 0.0);
+        assert_eq!(stage[4], 1.0);
+        assert_eq!(stage[5], 2.0);
+        assert_eq!(stage[0], 0.0);
         // Frame 1: 3,4 on 4/5.
-        assert_eq!(stage[1 * channels + 4], 3.0);
-        assert_eq!(stage[1 * channels + 5], 4.0);
+        assert_eq!(stage[channels + 4], 3.0);
+        assert_eq!(stage[channels + 5], 4.0);
     }
 
     #[test]

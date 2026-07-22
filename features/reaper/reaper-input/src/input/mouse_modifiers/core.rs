@@ -100,10 +100,13 @@ impl MouseModifierFlag {
         flag
     }
 
+}
+
+impl std::fmt::Display for MouseModifierFlag {
     /// Get human-readable description of modifier combination
-    pub fn to_string(self) -> String {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if !self.shift && !self.control && !self.alt && !self.win {
-            "Default action".to_string()
+            write!(f, "Default action")
         } else {
             let mut parts = Vec::new();
             if self.shift {
@@ -118,7 +121,7 @@ impl MouseModifierFlag {
             if self.win {
                 parts.push("Ctrl");
             } // Ctrl on macOS, Win on Windows
-            parts.join("+")
+            write!(f, "{}", parts.join("+"))
         }
     }
 }

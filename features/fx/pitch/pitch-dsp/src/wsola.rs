@@ -592,9 +592,14 @@ mod tests {
         }
         let mut best_lag = min_period;
         let mut best_val = f64::MAX;
-        for lag in min_period..=max_lag {
-            if cmnd[lag] < best_val {
-                best_val = cmnd[lag];
+        for (lag, &val) in cmnd
+            .iter()
+            .enumerate()
+            .take(max_lag + 1)
+            .skip(min_period)
+        {
+            if val < best_val {
+                best_val = val;
                 best_lag = lag;
             }
         }

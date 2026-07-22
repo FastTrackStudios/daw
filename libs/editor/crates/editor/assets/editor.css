@@ -162,13 +162,77 @@
     caret-color: var(--ed-warn);
 }
 
-/* Steady (non-blinking) blocks — terminal-vim style; a blinking
-   repaint over real text reads as the document flashing. Painted
-   only while the editor has focus (modal_caret_decoration). */
+/* Steady (non-blinking) reverse-video block over the glyph — terminal-vim
+   style; a blinking repaint over real text reads as the document
+   flashing. Painted only while the editor has focus.
+
+   WEB: a plain inline mark; the browser paints the inline background and
+   the glyph keeps its exact advance, so nothing shifts. */
 .ed-modal-caret-block {
     background: var(--ed-accent);
     color: var(--ed-bg, #1e1e2e);
     border-radius: 1px;
+}
+.ed-modal-caret-block > span {
+    color: var(--ed-bg, #1e1e2e);
+}
+
+/* NATIVE (Blitz) block caret. Blitz's `draw_inline_backgrounds` paints a
+   background behind a glyph run EXACTLY at its position (offset + advance,
+   ascent→descent) with ZERO layout change — but only for the element that
+   OWNS the glyph run. Our caret mark is
+   `<span.ed-modal-caret-block><span>glyph</span></span>`, so the
+   background must sit on the INNER span (which owns the text), NOT the
+   outer one (whose child owns it) — that's why a background on the outer
+   span never painted, and why `inline-block` (which DID paint but nudged
+   the glyph) was a dead end. As a plain inline this cannot move or resize
+   the glyph, and covers descenders for free. Scoped to `.ed-render-native`
+   so the web block rule above is untouched. */
+.ed-render-native .ed-modal-caret-block > span {
+    background: var(--ed-accent);
+    color: var(--ed-bg, #1e1e2e);
+    border-radius: 2px;
+}
+
+/* NATIVE selection highlight. Blitz has no contenteditable selection, so
+   `native_selection_decoration` marks the selected range and we paint its
+   inline background — same `draw_inline_backgrounds` path as the block
+   caret (on the glyph-owning inner span), so it never shifts text. A
+   translucent accent reads as a selection without hiding the glyphs.
+   Web uses the browser's own selection, so this is native-scoped. */
+/* Line-wise (vim V) selection: the whole row highlights, filled edge to
+   edge by the .cm-line block background (a block bg DOES paint in Blitz,
+   unlike inline). Translucent so text and line styling read through. */
+.ed-render-native .cm-line.ed-selection-line {
+    background: color-mix(in srgb, var(--ed-accent) 26%, transparent);
+}
+
+.ed-render-native .ed-selection,
+.ed-render-native .ed-selection span {
+    /* Cover EVERY descendant span, not just the direct child: inside a
+       selection a glyph run may be owned by a nested decoration span
+       (bold, italic, link…), and `draw_inline_backgrounds` paints the
+       background of whichever span owns the run — so all of them need it. */
+    background: color-mix(in srgb, var(--ed-accent) 32%, transparent);
+}
+/* NATIVE inline-mark backgrounds (code, highlight). Same Blitz
+   limitation as the caret/selection: `draw_inline_backgrounds` paints
+   the background of the span that DIRECTLY owns the glyph run, and the
+   live-preview marks put their background on the OUTER mark span while
+   the glyphs live in an inner tile <span> — so the fill never reaches
+   the text. Push the background onto every descendant span (the glyph
+   owner may itself be nested: code inside a link, etc.). Web keeps the
+   outer-span rule (`.md-code` / `.md-highlight` above); the browser
+   paints an inline background on any ancestor, so this is native-only.
+   Use an OPAQUE highlight mix (blend toward --ed-bg, not transparent)
+   so the fork's `draw_inline_backgrounds` gives it a tight glyph box
+   like a marker, rather than the full-line-height box it reserves for
+   translucent selection fills. */
+.ed-render-native .md-code span {
+    background: var(--ed-bg-elev);
+}
+.ed-render-native .md-highlight span {
+    background: color-mix(in oklab, var(--ed-warn) 30%, var(--ed-bg));
 }
 .ed-modal-caret-underscore {
     box-shadow: inset 0 -2px 0 var(--ed-danger);
@@ -192,10 +256,13 @@
 .ed-native-caret {
     display: inline-block;
     width: 0;
-    height: 1.1em;
+    /* Match the glyph's own extent and CENTER it in the line box so the
+       bar never exceeds the natural line height — otherwise switching
+       Normal↔Insert (block↔bar) nudges the line vertically. */
+    height: 1em;
     margin: 0 -0.75px;
     border-left: 1.5px solid var(--ed-accent);
-    vertical-align: text-bottom;
+    vertical-align: middle;
 }
 
 /* Reading mode: dim the editor frame so it's clearly distinct

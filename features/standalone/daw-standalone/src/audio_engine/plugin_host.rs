@@ -30,7 +30,7 @@ use std::time::Duration;
 
 use clack_extensions::audio_ports::{AudioPortInfoBuffer, PluginAudioPorts};
 use clack_extensions::gui::{
-    GuiApiType, GuiConfiguration, GuiSize, HostGui, HostGuiImpl, PluginGui,
+    GuiApiType, GuiConfiguration, GuiSize, HostGui, HostGuiImpl, PluginGui, Window as ClapWindow,
 };
 use clack_extensions::latency::*;
 use clack_extensions::log::{HostLog, HostLogImpl, LogSeverity};
@@ -628,6 +628,100 @@ impl LoadedClapPlugin {
             .map_err(|_| ClapHostError::GuiCreate)?;
         gui.show(&mut handle).map_err(|_| ClapHostError::GuiShow)?;
         Ok(())
+    }
+
+    /// Embed the plugin GUI into a host-supplied parent window and show
+    /// it. Returns the plugin's reported initial size in physical pixels
+    /// (falls back to 800x500 when the plugin doesn't report one).
+    ///
+    /// This is the path every FTS nice-plug plugin needs — they reject
+    /// floating windows (`is_floating: false` only), exactly like when
+    /// REAPER embeds them. The caller owns the parent window and its
+    /// event loop, and should pump
+    /// [`pump_main_thread`][Self::pump_main_thread] at UI rate.
+    pub fn open_gui_embedded(
+        &mut self,
+        parent: raw_window_handle_06::RawWindowHandle,
+    ) -> Result<(u32, u32), ClapHostError> {
+        let mut handle = self.instance.plugin_handle();
+        let gui = handle
+            .get_extension::<PluginGui>()
+            .ok_or(ClapHostError::NoGuiExtension)?;
+        let api_type = GuiApiType::default_for_current_platform()
+            .ok_or(ClapHostError::GuiUnsupportedPlatform)?;
+        let config = GuiConfiguration {
+            api_type,
+            is_floating: false,
+        };
+        if !gui.is_api_supported(&mut handle, config) {
+            return Err(ClapHostError::GuiUnsupportedPlatform);
+        }
+        gui.create(&mut handle, config)
+            .map_err(|_| ClapHostError::GuiCreate)?;
+        let size = gui
+            .get_size(&mut handle)
+            .map(|s| (s.width, s.height))
+            .unwrap_or((800, 500));
+        let window = ClapWindow::from_window_handle(parent)
+            .ok_or(ClapHostError::GuiUnsupportedPlatform)?;
+        // SAFETY: the caller keeps the parent window alive for the GUI's
+        // lifetime (until `close_gui`), per set_parent's contract.
+        unsafe { gui.set_parent(&mut handle, window) }
+            .map_err(|_| ClapHostError::GuiCreate)?;
+        let _ = gui.show(&mut handle);
+        Ok(size)
+    }
+
+    /// Current GUI size in physical pixels, if the plugin reports one.
+    pub fn gui_size(&mut self) -> Option<(u32, u32)> {
+        let mut handle = self.instance.plugin_handle();
+        let gui = handle.get_extension::<PluginGui>()?;
+        gui.get_size(&mut handle).map(|s| (s.width, s.height))
+    }
+
+    /// Ask the plugin to adopt a new GUI size (host-side resize). Returns
+    /// `false` when the plugin refuses or has no GUI.
+    pub fn gui_set_size(&mut self, width: u32, height: u32) -> bool {
+        let mut handle = self.instance.plugin_handle();
+        let Some(gui) = handle.get_extension::<PluginGui>() else {
+            return false;
+        };
+        gui.set_size(&mut handle, GuiSize { width, height }).is_ok()
+    }
+
+    /// Run the plugin's deferred main-thread work
+    /// (`clap_plugin.on_main_thread`). Hosts embedding a GUI must call
+    /// this at UI rate — it's what REAPER's timer does; nice-plug routes
+    /// param/GUI tasks through it.
+    pub fn pump_main_thread(&mut self) {
+        self.instance.call_on_main_thread_callback();
+    }
+
+    /// Main-thread `clap_plugin_params.flush` for GUI-only hosts (plugin
+    /// NOT activated): without a process loop, GUI-issued parameter
+    /// gestures sit in the wrapper's output queue forever — the editor
+    /// looks frozen (drags snap back, added bands never appear). A DAW's
+    /// process() drains this implicitly; a GUI-only host must flush at
+    /// UI rate. No-op while activated (process handles it then).
+    pub fn flush_params(&mut self) {
+        let params = match self
+            .instance
+            .plugin_handle()
+            .get_extension::<PluginParams>()
+        {
+            Some(params) => params,
+            None => return,
+        };
+        let Some(mut inactive) = self.instance.inactive_plugin_handle() else {
+            return;
+        };
+        let input_events = EventBuffer::new();
+        let mut output_events = EventBuffer::new();
+        params.flush(
+            &mut inactive,
+            &input_events.as_input(),
+            &mut output_events.as_output(),
+        );
     }
 
     /// Close the floating window if one was opened via

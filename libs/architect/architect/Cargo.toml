@@ -263,7 +263,7 @@ futures-lite = "2"
 # The reconnect-supervisor integration test mounts a headless VirtualDom
 # over the in-process vox transport (LocalServer) and kills/recreates the
 # server side. Same minimal dioxus profile as architect-atom.
-dioxus = { version = "0.7.9", default-features = false, features = ["lib"] }
+dioxus = { workspace = true }
 vox-core = { workspace = true }
 vox-types = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

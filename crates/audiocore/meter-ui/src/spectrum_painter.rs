@@ -141,7 +141,7 @@ fn build_display_cols(
 
     let mut cols = vec![f64::NEG_INFINITY; n_cols];
 
-    for i in 0..n_cols {
+    for (i, col) in cols.iter_mut().enumerate().take(n_cols) {
         let t = i as f64 / n_cols as f64;
         let freq = cfg.min_freq * (cfg.max_freq / cfg.min_freq).powf(t);
 
@@ -159,8 +159,8 @@ fn build_display_cols(
 
         // Take max across the smoothing window.
         let mut raw_db = f64::NEG_INFINITY;
-        for b in bin_lo..=bin_hi {
-            let v = bins[b] as f64;
+        for &v in &bins[bin_lo..=bin_hi] {
+            let v = v as f64;
             if v > raw_db {
                 raw_db = v;
             }
@@ -168,7 +168,7 @@ fn build_display_cols(
 
         // Apply visual slope.
         let slope_db = cfg.slope * (freq.max(1.0).log2() - log_min);
-        cols[i] = raw_db + slope_db;
+        *col = raw_db + slope_db;
     }
 
     cols
@@ -246,9 +246,8 @@ fn build_path(cols: &[f64], cfg: &SpectrumConfig, w: f64, h: f64) -> Option<BezP
     let mut path = BezPath::new();
     let mut started = false;
 
-    for i in 0..n_cols {
+    for (i, &display_db) in cols.iter().enumerate().take(n_cols) {
         let x = (i as f64 / (n_cols - 1).max(1) as f64) * w;
-        let display_db = cols[i];
         if display_db.is_infinite() && display_db < 0.0 {
             // Below range — pin to bottom.
             let y = h;
@@ -308,7 +307,7 @@ impl SceneOverlay for SpectrumPainter {
         }
 
         // ── Compute display columns ───────────────────────────────────────────
-        let n_cols = (w as usize).min(2048).max(2);
+        let n_cols = (w as usize).clamp(2, 2048);
 
         let cols = {
             let bins = self.state.bins_db.read();
@@ -341,9 +340,8 @@ impl SceneOverlay for SpectrumPainter {
         // ── Draw main spectrum ────────────────────────────────────────────────
         match cfg.style {
             SpectrumStyle::Bars => {
-                for i in 0..n_cols {
+                for (i, &display_db) in cols.iter().enumerate().take(n_cols) {
                     let x = (i as f64 / (n_cols - 1).max(1) as f64) * w;
-                    let display_db = cols[i];
                     let y = if display_db.is_infinite() && display_db < 0.0 {
                         h
                     } else {

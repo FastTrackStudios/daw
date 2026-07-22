@@ -38,5 +38,11 @@ native = []
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3", features = ["Window", "Performance", "Document", "Element", "HtmlElement", "DomStringMap", "MediaQueryList"] }
 
+[dev-dependencies]
+# Headless component tests on blitz-dom — native-feature builds only
+# (`cargo test -p editor-view --no-default-features --features native`).
+dioxus-test = { workspace = true }
+tokio = { workspace = true }
+
 [lints]
 workspace = true
