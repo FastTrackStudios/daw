@@ -1568,3 +1568,405 @@
     color: var(--ed-text-dim, var(--ed-text));
     opacity: 0.75;
 }
+
+/* ── Song strip (standalone [[Song]] wikilink → playable row) ───────── */
+.editor-root .md-song-strip {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin: 0;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid var(--ed-border);
+    border-radius: 8px;
+    background: var(--ed-bg-elev);
+    cursor: pointer;
+    user-select: none;
+}
+.editor-root .md-song-strip:hover {
+    border-color: var(--ed-accent);
+}
+.editor-root .md-song-strip-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    flex: none;
+    color: var(--ed-text-dim);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+}
+.editor-root .md-ss-play {
+    display: none;
+    width: 1rem;
+    height: 1rem;
+    color: var(--ed-accent);
+}
+.editor-root .md-song-strip:hover .md-ss-idx { display: none; }
+.editor-root .md-song-strip:hover .md-ss-play { display: inline; }
+.editor-root .md-song-strip-title {
+    color: var(--ed-text);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.editor-root .md-song-strip-artist {
+    color: var(--ed-text-dim);
+    white-space: nowrap;
+    flex: none;
+}
+.editor-root .md-song-strip-badge {
+    margin-left: auto;
+    flex: none;
+    border: 1px solid var(--ed-border);
+    border-radius: 999px;
+    padding: 0.05rem 0.5rem;
+    font-size: 0.68rem;
+    color: var(--ed-text-dim);
+}
+.editor-root .md-song-strip-time {
+    flex: none;
+    color: var(--ed-text-dim);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.8rem;
+}
+.editor-root .md-song-strip-badge:first-of-type {
+    margin-left: auto;
+}
+.editor-root .md-song-strip-time:last-child {
+    margin-left: 0;
+}
+.editor-root .md-song-strip > .md-song-strip-time:only-of-type {
+    margin-left: auto;
+}
+
+/* Joined strip runs: adjacent [[Song]] lines fuse into one striped list. */
+.editor-root .md-song-strip--ja {
+    margin-top: -1px;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+.editor-root .md-song-strip--jb {
+    margin-bottom: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+.editor-root .md-song-strip--alt {
+    background: color-mix(in srgb, var(--ed-bg-elev) 55%, var(--ed-bg));
+}
+/* Kill the editor line's own spacing around strip lines so runs sit flush. */
+.editor-root .cm-line:has(.md-song-strip) {
+    margin: 0;
+    padding: 0;
+    line-height: 1;
+}
+
+
+/* ── Setlist header (type: setlist first H1 → player header widget) ── */
+.editor-root .md-setlist-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 0.25rem 0 1rem;
+    user-select: none;
+}
+.editor-root .md-setlist-art {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 4rem;
+    height: 4rem;
+    flex: none;
+    border-radius: 12px;
+    font-size: 1.6rem;
+    background: linear-gradient(135deg,
+        color-mix(in srgb, var(--ed-accent) 75%, transparent),
+        color-mix(in srgb, var(--ed-accent) 25%, transparent));
+}
+.editor-root .md-setlist-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+    flex: 1;
+}
+.editor-root .md-setlist-title {
+    color: var(--ed-text);
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.editor-root .md-setlist-kind {
+    color: var(--ed-text-dim);
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+.editor-root .md-setlist-playbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.9rem;
+    height: 2.9rem;
+    flex: none;
+    border-radius: 999px;
+    background: var(--ed-accent);
+    color: var(--ed-bg);
+    font-size: 1rem;
+    cursor: pointer;
+}
+.editor-root .md-setlist-playbtn:hover {
+    filter: brightness(1.1);
+}
+
+/* Strip lines: kill the text line box's own leading so fused runs are
+   actually flush (the strip span carries all visual height itself). */
+.editor-root .cm-line:has(.md-song-strip) {
+    margin: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    line-height: 0;
+}
+.editor-root .cm-line:has(.md-song-strip) .md-song-strip {
+    line-height: 1.45;
+}
+/* Standalone card (not fused above) gets breathing room. */
+.editor-root .md-song-strip:not(.md-song-strip--ja) {
+    margin-top: 0.4rem;
+}
+.editor-root .md-song-strip:not(.md-song-strip--jb) {
+    margin-bottom: 0.4rem;
+}
+.editor-root .md-song-strip--ja {
+    margin-top: -1px;
+}
+
+/* Widget-only lines (song strips / setlist header): the caret widget
+   buffers + trailing <br> otherwise wrap onto their own ~27px inline row
+   under the block-level flex widget — the "phantom gap" between fused
+   strips. These lines are atomic anyway; the widget IS the line. */
+.editor-root .cm-line:has(.md-song-strip) .cm-widgetBuffer,
+.editor-root .cm-line:has(.md-song-strip) br,
+.editor-root .cm-line:has(.md-setlist-header) .cm-widgetBuffer,
+.editor-root .cm-line:has(.md-setlist-header) br {
+    display: none;
+}
+.editor-root .cm-line:has(.md-song-strip) .editor-widget,
+.editor-root .cm-line:has(.md-setlist-header) .editor-widget {
+    display: block;
+}
+
+/* ── Setlist card ([[Setlist]] standalone line → compact embed) ─────── */
+.editor-root .md-setlist-card {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.4rem 0;
+    padding: 0.65rem 0.85rem;
+    border: 1px solid var(--ed-border);
+    border-radius: 10px;
+    background: var(--ed-bg-elev);
+    cursor: pointer;
+    user-select: none;
+}
+.editor-root .md-setlist-card:hover { border-color: var(--ed-accent); }
+.editor-root .md-setlist-card-art {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2.6rem; height: 2.6rem; flex: none; border-radius: 8px;
+    background: linear-gradient(135deg,
+        color-mix(in srgb, var(--ed-accent) 70%, transparent),
+        color-mix(in srgb, var(--ed-accent) 20%, transparent));
+}
+.editor-root .md-setlist-card-titles { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.editor-root .md-setlist-card-title { color: var(--ed-text); font-weight: 600; }
+.editor-root .md-setlist-card-sub { color: var(--ed-text-dim); font-size: 0.75rem; }
+.editor-root .md-setlist-card-time { color: var(--ed-text-dim); font-size: 0.8rem; flex: none; }
+.editor-root .md-setlist-card-open { color: var(--ed-accent); font-size: 0.85rem; flex: none; }
+.editor-root .cm-line:has(.md-setlist-card) .cm-widgetBuffer,
+.editor-root .cm-line:has(.md-setlist-card) br { display: none; }
+.editor-root .cm-line:has(.md-setlist-card) .editor-widget { display: block; }
+.editor-root .cm-line:has(.md-setlist-card) { line-height: 0; }
+.editor-root .cm-line:has(.md-setlist-card) .md-setlist-card { line-height: 1.4; }
+
+/* ── Contact chip ([[Person]] where target is type: contact) ────────── */
+.editor-root .md-contact-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.05rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid var(--ed-border);
+    background: color-mix(in srgb, var(--ed-wikilink) 12%, transparent);
+    color: var(--ed-text);
+    text-decoration: none;
+}
+.editor-root .md-contact-chip::before {
+    content: "";
+    width: 0.5rem; height: 0.5rem; border-radius: 999px;
+    background: var(--ed-wikilink);
+}
+
+/* ── Assignment status pills — (Confirmed) / (Pending) / (Declined) ── */
+.editor-root .md-status-pill {
+    padding: 0.05rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+}
+.editor-root .md-status--confirmed {
+    color: var(--ed-tag);
+    background: color-mix(in srgb, var(--ed-tag) 15%, transparent);
+}
+.editor-root .md-status--pending {
+    color: var(--ed-warn);
+    background: color-mix(in srgb, var(--ed-warn) 15%, transparent);
+}
+.editor-root .md-status--declined {
+    color: var(--ed-danger);
+    background: color-mix(in srgb, var(--ed-danger) 15%, transparent);
+}
+
+/* ── Setlist embed: full reference player (header + song rows) ──────── */
+.editor-root .md-setlist-embed {
+    display: flex;
+    flex-direction: column;
+    margin: 0.4rem 0;
+}
+.editor-root .md-setlist-embed .md-setlist-card { margin: 0 0 0.35rem; }
+.editor-root .md-setlist-embed .md-song-strip { margin: 0; }
+.editor-root .md-setlist-embed .md-song-strip--ja { margin-top: -1px; }
+.editor-root .cm-line:has(.md-setlist-embed) .cm-widgetBuffer,
+.editor-root .cm-line:has(.md-setlist-embed) br { display: none; }
+.editor-root .cm-line:has(.md-setlist-embed) .editor-widget { display: block; }
+.editor-root .cm-line:has(.md-setlist-embed) { line-height: 0; }
+.editor-root .cm-line:has(.md-setlist-embed) .md-setlist-embed { line-height: 1.45; }
+
+/* ── Roster row: role + contact cards with status-ringed avatars ────── */
+.editor-root .md-roster-row {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+    margin: 0.15rem 0 0.55rem;
+    padding: 0.5rem 0.65rem;
+    border-radius: 8px;
+}
+.editor-root .md-roster-people {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    padding-left: 0.15rem;
+}
+.editor-root .md-roster-row:hover { background: color-mix(in srgb, var(--ed-bg-elev) 60%, transparent); }
+.editor-root .md-roster-role {
+    flex: none;
+    color: var(--ed-text-dim);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    font-weight: 700;
+}
+.editor-root .md-contact-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.2rem 0.7rem 0.2rem 0.25rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--ed-bg-elev) 80%, transparent);
+    border: 1px solid var(--ed-border);
+    cursor: pointer;
+    user-select: none;
+}
+.editor-root .md-contact-card:hover { border-color: var(--ed-accent); }
+.editor-root .md-contact-name { color: var(--ed-text); font-size: 0.88rem; }
+.editor-root .md-avatar {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    flex: none;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--ed-accent) 30%, var(--ed-bg-elev));
+    color: var(--ed-text);
+    font-size: 0.72rem;
+    font-weight: 700;
+    border: 2px solid transparent;
+}
+.editor-root .md-av--confirmed { border-color: var(--ed-tag); }
+.editor-root .md-av--pending   { border-color: var(--ed-warn); }
+.editor-root .md-av--declined  { border-color: var(--ed-danger); }
+.editor-root .md-av-badge {
+    position: absolute;
+    right: -0.3rem;
+    bottom: -0.3rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 0.95rem;
+    height: 0.95rem;
+    border-radius: 999px;
+    font-size: 0.55rem;
+    font-weight: 800;
+    color: var(--ed-bg);
+    border: 2px solid var(--ed-bg);
+}
+.editor-root .md-av-badge--confirmed { background: var(--ed-tag); }
+.editor-root .md-av-badge--pending   { background: var(--ed-warn); }
+.editor-root .md-av-badge--declined  { background: var(--ed-danger); }
+.editor-root .cm-line:has(.md-roster-row) .cm-widgetBuffer,
+.editor-root .cm-line:has(.md-roster-row) br { display: none; }
+.editor-root .cm-line:has(.md-roster-row) .editor-widget { display: block; }
+.editor-root .cm-line:has(.md-roster-row) { line-height: 0; }
+.editor-root .cm-line:has(.md-roster-row) .md-roster-row { line-height: 1.4; }
+
+/* ── In-note section tabs (event Order | Teams | Times) ─────────────── */
+.editor-root .md-note-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin: 0.75rem 0 1rem;
+    border-bottom: 1px solid var(--ed-border);
+    padding-bottom: 0;
+}
+.editor-root .md-note-tab {
+    padding: 0.35rem 0.9rem;
+    color: var(--ed-text-dim);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    user-select: none;
+}
+.editor-root .md-note-tab:hover { color: var(--ed-text); }
+.editor-root .md-note-tab--active {
+    color: var(--ed-text);
+    border-bottom-color: var(--ed-accent);
+}
+.editor-root .md-event-date { color: var(--ed-text); font-weight: 600; }
+
+/* ── Role chip colors (the FTS instrument scheme) + icons ───────────── */
+.editor-root .md-roster-role {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.15rem 0.6rem;
+    border-radius: 6px;
+}
+.editor-root svg.md-role-icon { width: 0.95rem; height: 0.95rem; flex: none; }
+.editor-root .md-role--red    { color: #ef4444; background: color-mix(in srgb, #ef4444 12%, transparent); }
+.editor-root .md-role--yellow { color: #eab308; background: color-mix(in srgb, #eab308 12%, transparent); }
+.editor-root .md-role--blue   { color: #3b82f6; background: color-mix(in srgb, #3b82f6 12%, transparent); }
+.editor-root .md-role--cyan   { color: #14b8a6; background: color-mix(in srgb, #14b8a6 12%, transparent); }
+.editor-root .md-role--green  { color: #22c55e; background: color-mix(in srgb, #22c55e 12%, transparent); }
+.editor-root .md-role--purple { color: #a855f7; background: color-mix(in srgb, #a855f7 12%, transparent); }
+.editor-root .md-role--pink   { color: #ec4899; background: color-mix(in srgb, #ec4899 12%, transparent); }
+.editor-root .md-role--orange { color: #f97316; background: color-mix(in srgb, #f97316 12%, transparent); }
+.editor-root .md-role--amber  { color: #f59e0b; background: color-mix(in srgb, #f59e0b 12%, transparent); }
+.editor-root .md-role--slate  { color: #94a3b8; background: color-mix(in srgb, #94a3b8 12%, transparent); }

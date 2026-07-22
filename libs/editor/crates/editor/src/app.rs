@@ -105,3 +105,5 @@ pub fn standard_markdown_keymap() -> Keymap {
 }
 
 const WELCOME: &str = "# Welcome to Task\n\nStart typing. Markdown live-preview, vim, and `/` slash commands are wired in.\n";
+
+// (asset cache-bust: song-strip line CSS, 2026-07-22)

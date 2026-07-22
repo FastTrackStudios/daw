@@ -318,6 +318,9 @@ pub mod rig;
 // a unit via `.provide(backend)`. See [`layer`] module docs.
 #[cfg(feature = "vox")]
 pub mod layer;
+/// Router-level permission gate — see `apps/task/plans/architect-permissions.md`.
+#[cfg(all(feature = "vox", not(target_arch = "wasm32")))]
+pub mod permissions_gate;
 #[cfg(feature = "vox")]
 pub use layer::{
     Append, Bind, BindAny, Cons, Descriptors, Empty, Layer, LayerRouter, LayerSink, Mounted,

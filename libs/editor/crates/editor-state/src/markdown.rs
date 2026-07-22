@@ -42,6 +42,21 @@ pub trait VaultLookup {
     /// higher heading), or None when the page or heading is
     /// missing.
     fn lookup_section(&self, page: &str, heading: &str) -> Option<String>;
+    /// Song metadata when `name` resolves to a `type: song` note —
+    /// `None` (default) renders the wikilink normally.
+    fn lookup_song(&self, _name: &str) -> Option<VaultSongHit> {
+        None
+    }
+    /// The target note's frontmatter `type:` ("song", "setlist",
+    /// "contact", "event", …) — drives kind-specific wikilink rendering
+    /// (setlist cards, contact chips). `None` (default) = plain link.
+    fn lookup_note_kind(&self, _name: &str) -> Option<String> {
+        None
+    }
+    /// Setlist metadata when `name` resolves to a `type: setlist` note.
+    fn lookup_setlist(&self, _name: &str) -> Option<VaultSetlistHit> {
+        None
+    }
     /// Find a block by Obsidian short-id `Page#^id`.
     fn lookup_block_short(&self, page: &str, short_id: &str) -> Option<String>;
 }
@@ -55,6 +70,40 @@ pub struct VaultBlockHit {
 #[derive(Clone, Debug)]
 pub struct VaultPageHit {
     pub preview: String,
+}
+
+/// Setlist metadata for a wikilink that targets a `type: setlist` note —
+/// drives the inline SETLIST CARD (a standalone `[[Setlist]]` line embeds
+/// the set as a compact card).
+#[derive(Clone, Debug, PartialEq)]
+pub struct VaultSetlistHit {
+    pub title: String,
+    pub song_count: usize,
+    pub total_seconds: f64,
+    /// The set's songs, in order — the embed renders the full reference
+    /// player (header + one row per song).
+    pub songs: Vec<VaultSetlistSongRow>,
+}
+
+/// One song row inside a setlist embed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VaultSetlistSongRow {
+    /// The wikilink target (note name) — drives navigation + play.
+    pub link: String,
+    pub artist: Option<String>,
+    pub duration_sec: f64,
+    pub stem_count: usize,
+}
+
+/// Song metadata for a wikilink that targets a `type: song` note —
+/// drives the inline SONG STRIP widget (a standalone `[[Song]]` line
+/// renders as a playable row instead of a plain link).
+#[derive(Clone, Debug, PartialEq)]
+pub struct VaultSongHit {
+    pub title: String,
+    pub artist: Option<String>,
+    pub duration_sec: f64,
+    pub stem_count: usize,
 }
 
 /// Host-supplied resolver for `kbd:@action` inline shortcuts — maps an
@@ -215,6 +264,11 @@ pub fn live_preview_with_lookups(
 
     let t_inline = now_ms_native();
     let inline_decs_before = out.len();
+    emit_status_pills(&text, primary, &mut out);
+    emit_roster_rows(&text, primary, vault, &mut out);
+    // Lazily computed on the first song strip (resolver scans are cheap
+    // and cached, but most documents have no strips at all).
+    let mut strip_runs: Option<std::collections::HashMap<usize, StripRunCtx>> = None;
     for span in find_spans(&text) {
         if in_fenced_code(&fenced_ranges, span.outer.start) {
             continue;
@@ -434,6 +488,52 @@ pub fn live_preview_with_lookups(
             } else {
                 span.body.clone()
             };
+            // SONG STRIP: a wikilink ALONE on its line whose target is a
+            // `type: song` note renders as a playable song row (title ·
+            // artist · stems · duration, with a play control the host
+            // wires via `data-href="song-play:<target>"`). Caret on the
+            // line falls through to the normal editable link.
+            if span.class == "md-wikilink" && !cursor_touches(primary, span.outer.clone()) {
+                if let Some(h2) = href.as_deref() {
+                    let page_part = h2.split(['#', '|']).next().unwrap_or(h2).trim();
+                    let line_start =
+                        text[..span.outer.start].rfind('\n').map_or(0, |i| i + 1);
+                    let line_end = text[span.outer.end..]
+                        .find('\n')
+                        .map_or(text.len(), |i| span.outer.end + i);
+                    let standalone = text[line_start..span.outer.start].trim().is_empty()
+                        && text[span.outer.end..line_end].trim().is_empty();
+                    if standalone {
+                        if let Some(setlist) =
+                            vault.and_then(|v| v.lookup_setlist(page_part))
+                        {
+                            out.push(Decoration::replace(span.outer.clone()));
+                            out.push(Decoration::widget(
+                                span.outer.start,
+                                setlist_card_html(page_part, &setlist),
+                            ));
+                            out.push(Decoration::atomic(span.outer.clone()));
+                            continue;
+                        }
+                        if let Some(song) =
+                            vault.and_then(|v| v.lookup_song(page_part))
+                        {
+                            let ctx = strip_runs
+                                .get_or_insert_with(|| song_strip_runs(&text, vault))
+                                .get(&line_start)
+                                .copied()
+                                .unwrap_or_default();
+                            out.push(Decoration::replace(span.outer.clone()));
+                            out.push(Decoration::widget(
+                                span.outer.start,
+                                song_strip_html(page_part, &song, ctx),
+                            ));
+                            out.push(Decoration::atomic(span.outer.clone()));
+                            continue;
+                        }
+                    }
+                }
+            }
             if let Some(h) = href {
                 // Wikilinks: consult the vault to decide
                 // resolved (purple, default) vs unresolved
@@ -445,7 +545,15 @@ pub fn live_preview_with_lookups(
                     let page_part = h.split(['#', '|']).next().unwrap_or(&h).trim();
                     let resolved = vault.is_some_and(|v| v.lookup_page(page_part).is_some());
                     if resolved {
-                        "md-wikilink"
+                        // Kind-specific styling: contact links render as
+                        // person chips wherever they appear (inline too).
+                        match vault
+                            .and_then(|v| v.lookup_note_kind(page_part))
+                            .as_deref()
+                        {
+                            Some("contact") => "md-wikilink md-contact-chip",
+                            _ => "md-wikilink",
+                        }
                     } else {
                         "md-wikilink md-wikilink-unresolved"
                     }
@@ -555,6 +663,341 @@ pub(crate) fn escape_html(s: &str) -> String {
 
 fn in_fenced_code(ranges: &[std::ops::Range<usize>], pos: usize) -> bool {
     ranges.iter().any(|r| pos >= r.start && pos < r.end)
+}
+
+/// Layout context for one song-strip line: joined to a strip directly
+/// above/below (no blank line between) + alternating parity within its
+/// run — lets adjacent strips render as one flush, striped list.
+#[derive(Clone, Copy, Default)]
+struct StripRunCtx {
+    joined_above: bool,
+    joined_below: bool,
+    odd: bool,
+    /// 1-based position within the run — the setlist order number shown
+    /// where the play control appears on hover.
+    index: usize,
+}
+
+/// Scan the document for standalone `[[Song]]` lines (resolver-confirmed
+/// songs) and compute each one's run context, keyed by line start.
+fn song_strip_runs(
+    text: &str,
+    vault: Option<&dyn VaultLookup>,
+) -> std::collections::HashMap<usize, StripRunCtx> {
+    let Some(vault) = vault else {
+        return Default::default();
+    };
+    // Collect candidate lines: (line_start, line_end).
+    let mut candidates: Vec<(usize, usize)> = Vec::new();
+    let mut pos = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let t = content.trim();
+        if let Some(inner) = t.strip_prefix("[[").and_then(|r| r.strip_suffix("]]")) {
+            let page = inner.split(['#', '|']).next().unwrap_or(inner).trim();
+            if vault.lookup_song(page).is_some() {
+                candidates.push((pos, pos + content.len()));
+            }
+        }
+        pos += line.len();
+    }
+    // Group into runs: consecutive candidates whose lines are ADJACENT
+    // (exactly one newline between them).
+    let mut out = std::collections::HashMap::new();
+    let mut i = 0;
+    while i < candidates.len() {
+        let mut j = i;
+        while j + 1 < candidates.len() && candidates[j + 1].0 == candidates[j].1 + 1 {
+            j += 1;
+        }
+        for (k, &(start, _)) in candidates[i..=j].iter().enumerate() {
+            out.insert(
+                start,
+                StripRunCtx {
+                    joined_above: k > 0,
+                    joined_below: i + k < j,
+                    odd: k % 2 == 1,
+                    index: k + 1,
+                },
+            );
+        }
+        i = j + 1;
+    }
+    out
+}
+
+/// A small stroke-icon (Lucide-shaped, `currentColor`) for widget HTML —
+/// inherits the role chip's color.
+fn role_icon_svg(kind: &str) -> String {
+    let body = match kind {
+        "drum" => r#"<path d="m2 2 8 8"/><path d="m22 2-8 8"/><ellipse cx="12" cy="9" rx="10" ry="5"/><path d="M7 13.4v7.9"/><path d="M12 14v8"/><path d="M17 13.4v7.9"/><path d="M2 9v8a10 5 0 0 0 20 0V9"/>"#,
+        "guitar" => r#"<circle cx="8" cy="16" r="5"/><path d="m11.8 12.2 7.2-7.2"/><path d="m18 3 3 3"/><path d="m19 4-2.5 2.5"/>"#,
+        "keys" => r#"<rect x="2" y="6" width="20" height="12" rx="1"/><path d="M7 6v7"/><path d="M12 6v7"/><path d="M17 6v7"/>"#,
+        "mic" => r#"<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>"#,
+        "sliders" => r#"<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>"#,
+        "bulb" => r#"<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>"#,
+        "monitor" => r#"<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>"#,
+        "video" => r#"<path d="m16 13 5.2 3.5a.5.5 0 0 0 .8-.4V7.9a.5.5 0 0 0-.8-.4L16 11"/><rect x="2" y="6" width="14" height="12" rx="2"/>"#,
+        "music" | _ => r#"<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>"#,
+    };
+    format!(
+        r#"<svg class="md-role-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{body}</svg>"#
+    )
+}
+
+/// The FTS instrument color scheme + an icon per role — reflected on the
+/// roster's role chips (Drums red, Bass yellow, Electric blue, Acoustic
+/// cyan, Keys green, Synth purple, vocals pink, tech slate…).
+fn role_style(role: &str) -> (&'static str, &'static str) {
+    let r = role.to_ascii_lowercase();
+    if r.contains("drum") || r.contains("perc") {
+        ("md-role--red", "drum")
+    } else if r.contains("bass") {
+        ("md-role--yellow", "guitar")
+    } else if r.contains("electric") {
+        ("md-role--blue", "guitar")
+    } else if r.contains("acoustic") {
+        ("md-role--cyan", "guitar")
+    } else if r.contains("key") || r.contains("piano") {
+        ("md-role--green", "keys")
+    } else if r.contains("synth") || r.contains("organ") {
+        ("md-role--purple", "keys")
+    } else if r.contains("vocal") || r.contains("worship leader") || r.contains("singer") {
+        ("md-role--pink", "mic")
+    } else if r.contains("music director") {
+        ("md-role--orange", "music")
+    } else if r.contains("foh") || r.contains("audio") || r.contains("sound") {
+        ("md-role--slate", "sliders")
+    } else if r.contains("light") {
+        ("md-role--amber", "bulb")
+    } else if r.contains("graphic") || r.contains("lyric") || r.contains("screen") {
+        ("md-role--slate", "monitor")
+    } else if r.contains("production") || r.contains("director") {
+        ("md-role--orange", "video")
+    } else {
+        ("md-role--slate", "music")
+    }
+}
+
+/// Roster rows: `Role - [[Name]] (Status)[, [[Name]] (Status)…]` where
+/// every target is a `type: contact` note renders as a TEAM row widget —
+/// role chip + one CONTACT CARD per person: initials avatar with a
+/// status ring + badge (green ✓ confirmed / amber ? pending / red ✕
+/// declined) and the name. Caret on the line = raw editable text.
+fn emit_roster_rows(
+    text: &str,
+    primary: Range,
+    vault: Option<&dyn VaultLookup>,
+    out: &mut Vec<DecoratedRange>,
+) {
+    let Some(vault) = vault else { return };
+    let mut pos = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let line_from = pos;
+        pos += line.len();
+        let line_to = line_from + content.len();
+        let t = content.trim();
+        let Some(dash) = t.find(" - [[") else { continue };
+        let role = t[..dash].trim();
+        if role.is_empty() || role.starts_with('#') || role.starts_with('[') {
+            continue;
+        }
+        // Parse the people list: repeated `[[Name]]` + optional `(status)`.
+        let mut rest = &t[dash + 3..];
+        let mut people: Vec<(String, &'static str, &'static str, &'static str)> = Vec::new();
+        loop {
+            let Some(open) = rest.find("[[") else { break };
+            let Some(close_rel) = rest[open..].find("]]") else { break };
+            let name = rest[open + 2..open + close_rel].trim();
+            let name = name.split(['#', '|']).next().unwrap_or(name).trim();
+            rest = &rest[open + close_rel + 2..];
+            let (st_cls, badge, ring) = {
+                let after = rest.trim_start().trim_start_matches(',').trim_start();
+                if let Some(inner) = after
+                    .strip_prefix('(')
+                    .and_then(|r| r.split_once(')').map(|(a, _)| a))
+                {
+                    match inner.trim().to_ascii_lowercase().as_str() {
+                        "confirmed" => ("md-av--confirmed", "✓", "confirmed"),
+                        "declined" => ("md-av--declined", "✕", "declined"),
+                        _ => ("md-av--pending", "?", "pending"),
+                    }
+                } else {
+                    ("md-av--none", "", "")
+                }
+            };
+            if vault.lookup_note_kind(name).as_deref() != Some("contact") {
+                people.clear();
+                break;
+            }
+            people.push((name.to_owned(), st_cls, badge, ring));
+        }
+        if people.is_empty() || cursor_touches(primary, line_from..line_to) {
+            continue;
+        }
+        let cards: String = people
+            .iter()
+            .map(|(name, st, badge, ring)| {
+                let initials: String = name
+                    .split_whitespace()
+                    .take(2)
+                    .filter_map(|w| w.chars().next())
+                    .collect::<String>()
+                    .to_uppercase();
+                let badge_html = if badge.is_empty() {
+                    String::new()
+                } else {
+                    format!(r#"<span class="md-av-badge md-av-badge--{ring}">{badge}</span>"#)
+                };
+                format!(
+                    r#"<span class="md-contact-card" data-href="{n}"><span class="md-avatar {st}">{initials}{badge_html}</span><span class="md-contact-name">{n}</span></span>"#,
+                    n = html_escape(name),
+                )
+            })
+            .collect();
+        let (role_cls, icon_kind) = role_style(role);
+        let icon = role_icon_svg(icon_kind);
+        out.push(Decoration::replace(line_from..line_to));
+        out.push(Decoration::widget(
+            line_from,
+            format!(
+                r#"<span class="md-roster-row"><span class="md-roster-role {role_cls}">{icon}{role}</span><span class="md-roster-people">{cards}</span></span>"#,
+                role = html_escape(role),
+            ),
+        ));
+        out.push(Decoration::atomic(line_from..line_to));
+    }
+}
+
+/// Assignment-status pills: a line ending in `(Confirmed)` / `(Pending)`
+/// / `(Declined)` (the event-planner roster convention:
+/// `Drums - [[Name]] (Pending)`) renders the token as a colored pill and
+/// hides the parens. Caret on the line keeps the raw text editable.
+fn emit_status_pills(text: &str, primary: Range, out: &mut Vec<DecoratedRange>) {
+    let mut pos = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let line_from = pos;
+        pos += line.len();
+        let trimmed_end = content.trim_end();
+        let Some(open_rel) = trimmed_end.rfind('(') else { continue };
+        let Some(inner) = trimmed_end[open_rel..]
+            .strip_prefix('(')
+            .and_then(|r| r.strip_suffix(')'))
+        else {
+            continue;
+        };
+        let status = match inner.trim().to_ascii_lowercase().as_str() {
+            "confirmed" => "md-status--confirmed",
+            "pending" => "md-status--pending",
+            "declined" => "md-status--declined",
+            _ => continue,
+        };
+        let line_to = line_from + content.len();
+        if cursor_touches(primary, line_from..line_to) {
+            continue;
+        }
+        let open_abs = line_from + open_rel;
+        let close_abs = line_from + trimmed_end.len() - 1;
+        let word_from = open_abs + 1;
+        let word_to = close_abs;
+        out.push(Decoration::replace(open_abs..word_from));
+        out.push(Decoration::mark(
+            word_from..word_to,
+            match status {
+                "md-status--confirmed" => "md-status-pill md-status--confirmed",
+                "md-status--pending" => "md-status-pill md-status--pending",
+                _ => "md-status-pill md-status--declined",
+            },
+        ));
+        out.push(Decoration::replace(word_to..close_abs + 1));
+    }
+}
+
+/// The inline setlist-card widget for a standalone `[[Setlist]]` wikilink
+/// — a compact embed: art tile · title · song count · duration. Clicking
+/// navigates to the setlist note (`data-href`).
+fn setlist_card_html(target: &str, setlist: &VaultSetlistHit) -> String {
+    let safe = html_escape(target);
+    let title = html_escape(&setlist.title);
+    let n = setlist.song_count;
+    let rows: String = setlist
+        .songs
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let link = html_escape(&row.link);
+            let artist = row
+                .artist
+                .as_deref()
+                .map(|a| format!(r#"<span class="md-song-strip-artist">{}</span>"#, html_escape(a)))
+                .unwrap_or_default();
+            let stems = if row.stem_count > 0 {
+                format!(r#"<span class="md-song-strip-badge">{} stems</span>"#, row.stem_count)
+            } else {
+                String::new()
+            };
+            let secs = row.duration_sec.max(0.0) as u64;
+            let mut cls = String::from("md-song-strip");
+            if i > 0 {
+                cls.push_str(" md-song-strip--ja");
+            }
+            if i + 1 < setlist.songs.len() {
+                cls.push_str(" md-song-strip--jb");
+            }
+            if i % 2 == 1 {
+                cls.push_str(" md-song-strip--alt");
+            }
+            format!(
+                r#"<span class="{cls}" data-href="{link}"><span class="md-song-strip-num" data-href="song-play:{link}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-song-strip-title">{link}</span>{artist}{stems}<span class="md-song-strip-time">{m}:{s:02}</span></span>"#,
+                idx = i + 1,
+                m = secs / 60,
+                s = secs % 60,
+            )
+        })
+        .collect();
+    format!(
+        r#"<span class="md-setlist-embed"><span class="md-setlist-card" data-href="{safe}"><span class="md-setlist-card-art">🎵</span><span class="md-setlist-card-titles"><span class="md-setlist-card-title">{title}</span><span class="md-setlist-card-sub">Setlist · {n} songs</span></span><span class="md-setlist-card-open">Open ›</span></span>{rows}</span>"#
+    )
+}
+
+/// The inline song-strip widget for a standalone `[[Song]]` wikilink.
+/// The whole strip navigates (`data-href` = the link target); the play
+/// control carries `data-href="song-play:<target>"` — the host's
+/// `on_link_click` intercepts the scheme and drives playback.
+fn song_strip_html(target: &str, song: &VaultSongHit, ctx: StripRunCtx) -> String {
+    let safe = html_escape(target);
+    let title = html_escape(&song.title);
+    let artist = song
+        .artist
+        .as_deref()
+        .map(|a| format!(r#"<span class="md-song-strip-artist">{}</span>"#, html_escape(a)))
+        .unwrap_or_default();
+    let stems = if song.stem_count > 0 {
+        format!(
+            r#"<span class="md-song-strip-badge">{} stems</span>"#,
+            song.stem_count
+        )
+    } else {
+        String::new()
+    };
+    let secs = song.duration_sec.max(0.0) as u64;
+    let time = format!("{}:{:02}", secs / 60, secs % 60);
+    let mut cls = String::from("md-song-strip");
+    if ctx.joined_above {
+        cls.push_str(" md-song-strip--ja");
+    }
+    if ctx.joined_below {
+        cls.push_str(" md-song-strip--jb");
+    }
+    if ctx.odd {
+        cls.push_str(" md-song-strip--alt");
+    }
+    let idx = ctx.index.max(1);
+    format!(
+        r#"<span class="{cls}" data-href="{safe}"><span class="md-song-strip-num" data-href="song-play:{safe}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-song-strip-title">{title}</span>{artist}{stems}<span class="md-song-strip-time">{time}</span></span>"#
+    )
 }
 
 /// Render the HTML for an `![[file|opts]]` embed when the
@@ -804,6 +1247,18 @@ fn scan_blocks(
     primary: Range,
     out: &mut Vec<DecoratedRange>,
 ) -> Vec<std::ops::Range<usize>> {
+    // `type: setlist` notes render their FIRST `# ` heading as the
+    // setlist header widget (art tile · title · SETLIST · play) — the
+    // note's own title IS the player header. Editable when the caret is
+    // on the line; plain text in raw views (it is only a decoration).
+    let doc_is_setlist = frontmatter_declares_setlist(text);
+    // `type: event` notes: the first H1 renders as the EVENT header
+    // (title · date · recurrence) — weekly events are distinguished by
+    // their date, so it leads.
+    let doc_is_event = frontmatter_scalar(text, "type").as_deref() == Some("event");
+    let event_date = frontmatter_scalar(text, "date").unwrap_or_default();
+    let mut setlist_h1_done = false;
+
     let mut fenced_ranges = Vec::new();
     // ── YAML frontmatter ───────────────────────────────────
     //
@@ -1205,6 +1660,52 @@ fn scan_blocks(
         // ── Headings ───────────────────────────────────────
         if let Some((level, marker_end)) = parse_heading(line) {
             let abs_marker_end = line_from + marker_end;
+            if doc_is_setlist
+                && level == 1
+                && !setlist_h1_done
+                && !cursor_touches(primary, line_from..line_to)
+            {
+                setlist_h1_done = true;
+                let title = html_escape(line[marker_end..].trim());
+                out.push(Decoration::replace(line_from..line_to));
+                out.push(Decoration::widget(
+                    line_from,
+                    format!(
+                        r#"<span class="md-setlist-header"><span class="md-setlist-art">🎵</span><span class="md-setlist-titles"><span class="md-setlist-title">{title}</span><span class="md-setlist-kind">Setlist</span></span><span class="md-setlist-playbtn" data-href="setlist-play:">▶</span></span>"#
+                    ),
+                ));
+                out.push(Decoration::atomic(line_from..line_to));
+                continue;
+            }
+            if doc_is_event
+                && level == 1
+                && !setlist_h1_done
+                && !cursor_touches(primary, line_from..line_to)
+            {
+                setlist_h1_done = true;
+                let title = html_escape(line[marker_end..].trim());
+                let date = html_escape(&event_date);
+                let date_html = if date.is_empty() {
+                    String::new()
+                } else {
+                    format!(r#"<span class="md-event-date">{date}</span>"#)
+                };
+                out.push(Decoration::replace(line_from..line_to));
+                out.push(Decoration::widget(
+                    line_from,
+                    format!(
+                        r#"<span class="md-setlist-header md-event-header"><span class="md-setlist-art">📅</span><span class="md-setlist-titles"><span class="md-setlist-title">{title}</span><span class="md-setlist-kind">Event{date_sep}{date_html}</span></span></span>"#,
+                        date_sep = if date.is_empty() { "" } else { " · " },
+                    ),
+                ));
+                out.push(Decoration::atomic(line_from..line_to));
+                continue;
+            }
+            if (doc_is_setlist || doc_is_event) && level == 1 && !setlist_h1_done {
+                // Caret on the title: keep it editable, but mark it
+                // consumed so a SECOND h1 renders normally.
+                setlist_h1_done = true;
+            }
             let class = HEADING_CLASS[level - 1];
             out.push(Decoration::line(line_from, class));
             // Marker stays visible (muted) any time the caret
@@ -1376,6 +1877,23 @@ fn scan_blocks(
     }
 
     fenced_ranges
+}
+
+/// A frontmatter scalar (`key: value`) from the document's YAML fence.
+fn frontmatter_scalar(text: &str, key: &str) -> Option<String> {
+    let rest = text.strip_prefix("---")?;
+    let (front, _) = rest.split_once("\n---")?;
+    front.lines().find_map(|l| {
+        l.trim_start()
+            .strip_prefix(key)
+            .and_then(|r| r.strip_prefix(':'))
+            .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned())
+    })
+}
+
+/// Does the document's YAML frontmatter declare `type: setlist`?
+fn frontmatter_declares_setlist(text: &str) -> bool {
+    frontmatter_scalar(text, "type").as_deref() == Some("setlist")
 }
 
 const HEADING_CLASS: [&str; 6] = ["md-h1", "md-h2", "md-h3", "md-h4", "md-h5", "md-h6"];

@@ -176,6 +176,7 @@ sync-client = ["vox", "tokio/rt"]
 
 [dependencies]
 architect-derive.workspace = true
+architect-permissions.workspace = true
 architect-rpc-derive.workspace = true
 architect-action-derive.workspace = true
 facet.workspace = true
