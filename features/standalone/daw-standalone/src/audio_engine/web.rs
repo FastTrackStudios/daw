@@ -197,6 +197,46 @@ impl WebRenderer {
         detach_audio_source(&self.daw, &self.project_guid, take_guid);
     }
 
+    // ── Mixer (track order == the order stems were added) ────────────
+    //
+    // These go through the same `Tracks` trait ops native GUIs use, so the
+    // render snapshot picks them up on the next block — mute/solo routing
+    // (incl. solo-passthrough) and fader gain are the graph's own logic.
+
+    #[wasm_bindgen(js_name = setTrackMute)]
+    pub fn set_track_mute(&self, index: u32, muted: bool) {
+        use daw_proto::{ProjectContext, TrackRef, Tracks};
+        let _ = Tracks::set_muted(
+            &self.daw,
+            ProjectContext::Project(self.project_guid.clone()),
+            TrackRef::Index(index),
+            muted,
+        );
+    }
+
+    #[wasm_bindgen(js_name = setTrackSolo)]
+    pub fn set_track_solo(&self, index: u32, soloed: bool) {
+        use daw_proto::{ProjectContext, TrackRef, Tracks};
+        let _ = Tracks::set_soloed(
+            &self.daw,
+            ProjectContext::Project(self.project_guid.clone()),
+            TrackRef::Index(index),
+            soloed,
+        );
+    }
+
+    /// Fader gain, linear (1.0 = unity).
+    #[wasm_bindgen(js_name = setTrackVolume)]
+    pub fn set_track_volume(&self, index: u32, volume: f64) {
+        use daw_proto::{ProjectContext, TrackRef, Tracks};
+        let _ = Tracks::set_volume(
+            &self.daw,
+            ProjectContext::Project(self.project_guid.clone()),
+            TrackRef::Index(index),
+            volume,
+        );
+    }
+
     /// Every distinct source path referenced by takes in the loaded
     /// project, sorted. Browsers fetch each one (e.g. via `fetch()`
     /// to a Nextcloud / S3 / static host base URL), decode via
