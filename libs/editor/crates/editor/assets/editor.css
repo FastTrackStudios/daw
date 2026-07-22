@@ -1737,3 +1737,18 @@
 .editor-root .md-song-strip--ja {
     margin-top: -1px;
 }
+
+/* Widget-only lines (song strips / setlist header): the caret widget
+   buffers + trailing <br> otherwise wrap onto their own ~27px inline row
+   under the block-level flex widget — the "phantom gap" between fused
+   strips. These lines are atomic anyway; the widget IS the line. */
+.editor-root .cm-line:has(.md-song-strip) .cm-widgetBuffer,
+.editor-root .cm-line:has(.md-song-strip) br,
+.editor-root .cm-line:has(.md-setlist-header) .cm-widgetBuffer,
+.editor-root .cm-line:has(.md-setlist-header) br {
+    display: none;
+}
+.editor-root .cm-line:has(.md-song-strip) .editor-widget,
+.editor-root .cm-line:has(.md-setlist-header) .editor-widget {
+    display: block;
+}
