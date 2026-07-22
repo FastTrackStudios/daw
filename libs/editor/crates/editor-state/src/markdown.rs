@@ -80,6 +80,19 @@ pub struct VaultSetlistHit {
     pub title: String,
     pub song_count: usize,
     pub total_seconds: f64,
+    /// The set's songs, in order — the embed renders the full reference
+    /// player (header + one row per song).
+    pub songs: Vec<VaultSetlistSongRow>,
+}
+
+/// One song row inside a setlist embed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VaultSetlistSongRow {
+    /// The wikilink target (note name) — drives navigation + play.
+    pub link: String,
+    pub artist: Option<String>,
+    pub duration_sec: f64,
+    pub stem_count: usize,
 }
 
 /// Song metadata for a wikilink that targets a `type: song` note —
@@ -252,6 +265,7 @@ pub fn live_preview_with_lookups(
     let t_inline = now_ms_native();
     let inline_decs_before = out.len();
     emit_status_pills(&text, primary, &mut out);
+    emit_roster_rows(&text, primary, vault, &mut out);
     // Lazily computed on the first song strip (resolver scans are cheap
     // and cached, but most documents have no strips at all).
     let mut strip_runs: Option<std::collections::HashMap<usize, StripRunCtx>> = None;
@@ -708,6 +722,95 @@ fn song_strip_runs(
     out
 }
 
+/// Roster rows: `Role - [[Name]] (Status)[, [[Name]] (Status)…]` where
+/// every target is a `type: contact` note renders as a TEAM row widget —
+/// role chip + one CONTACT CARD per person: initials avatar with a
+/// status ring + badge (green ✓ confirmed / amber ? pending / red ✕
+/// declined) and the name. Caret on the line = raw editable text.
+fn emit_roster_rows(
+    text: &str,
+    primary: Range,
+    vault: Option<&dyn VaultLookup>,
+    out: &mut Vec<DecoratedRange>,
+) {
+    let Some(vault) = vault else { return };
+    let mut pos = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let line_from = pos;
+        pos += line.len();
+        let line_to = line_from + content.len();
+        let t = content.trim();
+        let Some(dash) = t.find(" - [[") else { continue };
+        let role = t[..dash].trim();
+        if role.is_empty() || role.starts_with('#') || role.starts_with('[') {
+            continue;
+        }
+        // Parse the people list: repeated `[[Name]]` + optional `(status)`.
+        let mut rest = &t[dash + 3..];
+        let mut people: Vec<(String, &'static str, &'static str, &'static str)> = Vec::new();
+        loop {
+            let Some(open) = rest.find("[[") else { break };
+            let Some(close_rel) = rest[open..].find("]]") else { break };
+            let name = rest[open + 2..open + close_rel].trim();
+            let name = name.split(['#', '|']).next().unwrap_or(name).trim();
+            rest = &rest[open + close_rel + 2..];
+            let (st_cls, badge, ring) = {
+                let after = rest.trim_start().trim_start_matches(',').trim_start();
+                if let Some(inner) = after
+                    .strip_prefix('(')
+                    .and_then(|r| r.split_once(')').map(|(a, _)| a))
+                {
+                    match inner.trim().to_ascii_lowercase().as_str() {
+                        "confirmed" => ("md-av--confirmed", "✓", "confirmed"),
+                        "declined" => ("md-av--declined", "✕", "declined"),
+                        _ => ("md-av--pending", "?", "pending"),
+                    }
+                } else {
+                    ("md-av--none", "", "")
+                }
+            };
+            if vault.lookup_note_kind(name).as_deref() != Some("contact") {
+                people.clear();
+                break;
+            }
+            people.push((name.to_owned(), st_cls, badge, ring));
+        }
+        if people.is_empty() || cursor_touches(primary, line_from..line_to) {
+            continue;
+        }
+        let cards: String = people
+            .iter()
+            .map(|(name, st, badge, ring)| {
+                let initials: String = name
+                    .split_whitespace()
+                    .take(2)
+                    .filter_map(|w| w.chars().next())
+                    .collect::<String>()
+                    .to_uppercase();
+                let badge_html = if badge.is_empty() {
+                    String::new()
+                } else {
+                    format!(r#"<span class="md-av-badge md-av-badge--{ring}">{badge}</span>"#)
+                };
+                format!(
+                    r#"<span class="md-contact-card" data-href="{n}"><span class="md-avatar {st}">{initials}{badge_html}</span><span class="md-contact-name">{n}</span></span>"#,
+                    n = html_escape(name),
+                )
+            })
+            .collect();
+        out.push(Decoration::replace(line_from..line_to));
+        out.push(Decoration::widget(
+            line_from,
+            format!(
+                r#"<span class="md-roster-row"><span class="md-roster-role">{role}</span>{cards}</span>"#,
+                role = html_escape(role),
+            ),
+        ));
+        out.push(Decoration::atomic(line_from..line_to));
+    }
+}
+
 /// Assignment-status pills: a line ending in `(Confirmed)` / `(Pending)`
 /// / `(Declined)` (the event-planner roster convention:
 /// `Drums - [[Name]] (Pending)`) renders the token as a colored pill and
@@ -759,15 +862,43 @@ fn emit_status_pills(text: &str, primary: Range, out: &mut Vec<DecoratedRange>) 
 fn setlist_card_html(target: &str, setlist: &VaultSetlistHit) -> String {
     let safe = html_escape(target);
     let title = html_escape(&setlist.title);
-    let songs = setlist.song_count;
-    let mins = (setlist.total_seconds / 60.0).round() as u64;
-    let time = if mins > 0 {
-        format!(r#"<span class="md-setlist-card-time">{mins} min</span>"#)
-    } else {
-        String::new()
-    };
+    let n = setlist.song_count;
+    let rows: String = setlist
+        .songs
+        .iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let link = html_escape(&row.link);
+            let artist = row
+                .artist
+                .as_deref()
+                .map(|a| format!(r#"<span class="md-song-strip-artist">{}</span>"#, html_escape(a)))
+                .unwrap_or_default();
+            let stems = if row.stem_count > 0 {
+                format!(r#"<span class="md-song-strip-badge">{} stems</span>"#, row.stem_count)
+            } else {
+                String::new()
+            };
+            let secs = row.duration_sec.max(0.0) as u64;
+            let mut cls = String::from("md-song-strip");
+            if i > 0 {
+                cls.push_str(" md-song-strip--ja");
+            }
+            if i + 1 < setlist.songs.len() {
+                cls.push_str(" md-song-strip--jb");
+            }
+            if i % 2 == 1 {
+                cls.push_str(" md-song-strip--alt");
+            }
+            format!(
+                r#"<span class="{cls}" data-href="{link}"><span class="md-song-strip-play" data-href="song-play:{link}">▶</span><span class="md-song-strip-title">{link}</span>{artist}{stems}<span class="md-song-strip-time">{m}:{s:02}</span></span>"#,
+                m = secs / 60,
+                s = secs % 60,
+            )
+        })
+        .collect();
     format!(
-        r#"<span class="md-setlist-card" data-href="{safe}"><span class="md-setlist-card-art">🎵</span><span class="md-setlist-card-titles"><span class="md-setlist-card-title">{title}</span><span class="md-setlist-card-sub">Setlist · {songs} songs</span></span>{time}<span class="md-setlist-card-open">Open ›</span></span>"#
+        r#"<span class="md-setlist-embed"><span class="md-setlist-card" data-href="{safe}"><span class="md-setlist-card-art">🎵</span><span class="md-setlist-card-titles"><span class="md-setlist-card-title">{title}</span><span class="md-setlist-card-sub">Setlist · {n} songs</span></span><span class="md-setlist-card-open">Open ›</span></span>{rows}</span>"#
     )
 }
 
@@ -1060,6 +1191,11 @@ fn scan_blocks(
     // note's own title IS the player header. Editable when the caret is
     // on the line; plain text in raw views (it is only a decoration).
     let doc_is_setlist = frontmatter_declares_setlist(text);
+    // `type: event` notes: the first H1 renders as the EVENT header
+    // (title · date · recurrence) — weekly events are distinguished by
+    // their date, so it leads.
+    let doc_is_event = frontmatter_scalar(text, "type").as_deref() == Some("event");
+    let event_date = frontmatter_scalar(text, "date").unwrap_or_default();
     let mut setlist_h1_done = false;
 
     let mut fenced_ranges = Vec::new();
@@ -1480,9 +1616,33 @@ fn scan_blocks(
                 out.push(Decoration::atomic(line_from..line_to));
                 continue;
             }
-            if doc_is_setlist && level == 1 && !setlist_h1_done {
-                // Caret on the setlist title: keep it editable, but mark
-                // it consumed so a SECOND h1 renders normally.
+            if doc_is_event
+                && level == 1
+                && !setlist_h1_done
+                && !cursor_touches(primary, line_from..line_to)
+            {
+                setlist_h1_done = true;
+                let title = html_escape(line[marker_end..].trim());
+                let date = html_escape(&event_date);
+                let date_html = if date.is_empty() {
+                    String::new()
+                } else {
+                    format!(r#"<span class="md-event-date">{date}</span>"#)
+                };
+                out.push(Decoration::replace(line_from..line_to));
+                out.push(Decoration::widget(
+                    line_from,
+                    format!(
+                        r#"<span class="md-setlist-header md-event-header"><span class="md-setlist-art">📅</span><span class="md-setlist-titles"><span class="md-setlist-title">{title}</span><span class="md-setlist-kind">Event{date_sep}{date_html}</span></span></span>"#,
+                        date_sep = if date.is_empty() { "" } else { " · " },
+                    ),
+                ));
+                out.push(Decoration::atomic(line_from..line_to));
+                continue;
+            }
+            if (doc_is_setlist || doc_is_event) && level == 1 && !setlist_h1_done {
+                // Caret on the title: keep it editable, but mark it
+                // consumed so a SECOND h1 renders normally.
                 setlist_h1_done = true;
             }
             let class = HEADING_CLASS[level - 1];
@@ -1658,19 +1818,21 @@ fn scan_blocks(
     fenced_ranges
 }
 
+/// A frontmatter scalar (`key: value`) from the document's YAML fence.
+fn frontmatter_scalar(text: &str, key: &str) -> Option<String> {
+    let rest = text.strip_prefix("---")?;
+    let (front, _) = rest.split_once("\n---")?;
+    front.lines().find_map(|l| {
+        l.trim_start()
+            .strip_prefix(key)
+            .and_then(|r| r.strip_prefix(':'))
+            .map(|v| v.trim().trim_matches(['"', '\'']).trim().to_owned())
+    })
+}
+
 /// Does the document's YAML frontmatter declare `type: setlist`?
 fn frontmatter_declares_setlist(text: &str) -> bool {
-    let Some(rest) = text.strip_prefix("---") else {
-        return false;
-    };
-    let Some((front, _)) = rest.split_once("\n---") else {
-        return false;
-    };
-    front.lines().any(|l| {
-        l.trim_start()
-            .strip_prefix("type:")
-            .is_some_and(|v| v.trim().trim_matches(['"', '\'']) == "setlist")
-    })
+    frontmatter_scalar(text, "type").as_deref() == Some("setlist")
 }
 
 const HEADING_CLASS: [&str; 6] = ["md-h1", "md-h2", "md-h3", "md-h4", "md-h5", "md-h6"];

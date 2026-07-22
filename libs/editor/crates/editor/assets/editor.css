@@ -1824,3 +1824,117 @@
     color: var(--ed-danger);
     background: color-mix(in srgb, var(--ed-danger) 15%, transparent);
 }
+
+/* ── Setlist embed: full reference player (header + song rows) ──────── */
+.editor-root .md-setlist-embed {
+    display: flex;
+    flex-direction: column;
+    margin: 0.4rem 0;
+}
+.editor-root .md-setlist-embed .md-setlist-card { margin: 0 0 0.35rem; }
+.editor-root .md-setlist-embed .md-song-strip { margin: 0; }
+.editor-root .md-setlist-embed .md-song-strip--ja { margin-top: -1px; }
+.editor-root .cm-line:has(.md-setlist-embed) .cm-widgetBuffer,
+.editor-root .cm-line:has(.md-setlist-embed) br { display: none; }
+.editor-root .cm-line:has(.md-setlist-embed) .editor-widget { display: block; }
+.editor-root .cm-line:has(.md-setlist-embed) { line-height: 0; }
+.editor-root .cm-line:has(.md-setlist-embed) .md-setlist-embed { line-height: 1.45; }
+
+/* ── Roster row: role + contact cards with status-ringed avatars ────── */
+.editor-root .md-roster-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin: 0.2rem 0;
+    padding: 0.45rem 0.6rem;
+    border-radius: 8px;
+}
+.editor-root .md-roster-row:hover { background: color-mix(in srgb, var(--ed-bg-elev) 60%, transparent); }
+.editor-root .md-roster-role {
+    flex: none;
+    min-width: 9rem;
+    color: var(--ed-text-dim);
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+}
+.editor-root .md-contact-card {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.2rem 0.7rem 0.2rem 0.25rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--ed-bg-elev) 80%, transparent);
+    border: 1px solid var(--ed-border);
+    cursor: pointer;
+    user-select: none;
+}
+.editor-root .md-contact-card:hover { border-color: var(--ed-accent); }
+.editor-root .md-contact-name { color: var(--ed-text); font-size: 0.88rem; }
+.editor-root .md-avatar {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    flex: none;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--ed-accent) 30%, var(--ed-bg-elev));
+    color: var(--ed-text);
+    font-size: 0.72rem;
+    font-weight: 700;
+    border: 2px solid transparent;
+}
+.editor-root .md-av--confirmed { border-color: var(--ed-tag); }
+.editor-root .md-av--pending   { border-color: var(--ed-warn); }
+.editor-root .md-av--declined  { border-color: var(--ed-danger); }
+.editor-root .md-av-badge {
+    position: absolute;
+    right: -0.3rem;
+    bottom: -0.3rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 0.95rem;
+    height: 0.95rem;
+    border-radius: 999px;
+    font-size: 0.55rem;
+    font-weight: 800;
+    color: var(--ed-bg);
+    border: 2px solid var(--ed-bg);
+}
+.editor-root .md-av-badge--confirmed { background: var(--ed-tag); }
+.editor-root .md-av-badge--pending   { background: var(--ed-warn); }
+.editor-root .md-av-badge--declined  { background: var(--ed-danger); }
+.editor-root .cm-line:has(.md-roster-row) .cm-widgetBuffer,
+.editor-root .cm-line:has(.md-roster-row) br { display: none; }
+.editor-root .cm-line:has(.md-roster-row) .editor-widget { display: block; }
+.editor-root .cm-line:has(.md-roster-row) { line-height: 0; }
+.editor-root .cm-line:has(.md-roster-row) .md-roster-row { line-height: 1.4; }
+
+/* ── In-note section tabs (event Order | Teams | Times) ─────────────── */
+.editor-root .md-note-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin: 0.75rem 0 1rem;
+    border-bottom: 1px solid var(--ed-border);
+    padding-bottom: 0;
+}
+.editor-root .md-note-tab {
+    padding: 0.35rem 0.9rem;
+    color: var(--ed-text-dim);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    user-select: none;
+}
+.editor-root .md-note-tab:hover { color: var(--ed-text); }
+.editor-root .md-note-tab--active {
+    color: var(--ed-text);
+    border-bottom-color: var(--ed-accent);
+}
+.editor-root .md-event-date { color: var(--ed-text); font-weight: 600; }
