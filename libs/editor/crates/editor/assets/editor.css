@@ -1574,7 +1574,7 @@
     display: flex;
     align-items: center;
     gap: 0.65rem;
-    margin: 0.15rem 0;
+    margin: 0;
     padding: 0.55rem 0.75rem;
     border: 1px solid var(--ed-border);
     border-radius: 8px;
@@ -1653,4 +1653,87 @@
     margin: 0;
     padding: 0;
     line-height: 1;
+}
+
+
+/* ── Setlist header (type: setlist first H1 → player header widget) ── */
+.editor-root .md-setlist-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 0.25rem 0 1rem;
+    user-select: none;
+}
+.editor-root .md-setlist-art {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 4rem;
+    height: 4rem;
+    flex: none;
+    border-radius: 12px;
+    font-size: 1.6rem;
+    background: linear-gradient(135deg,
+        color-mix(in srgb, var(--ed-accent) 75%, transparent),
+        color-mix(in srgb, var(--ed-accent) 25%, transparent));
+}
+.editor-root .md-setlist-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+    flex: 1;
+}
+.editor-root .md-setlist-title {
+    color: var(--ed-text);
+    font-size: 1.35rem;
+    font-weight: 700;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.editor-root .md-setlist-kind {
+    color: var(--ed-text-dim);
+    font-size: 0.7rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+.editor-root .md-setlist-playbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.9rem;
+    height: 2.9rem;
+    flex: none;
+    border-radius: 999px;
+    background: var(--ed-accent);
+    color: var(--ed-bg);
+    font-size: 1rem;
+    cursor: pointer;
+}
+.editor-root .md-setlist-playbtn:hover {
+    filter: brightness(1.1);
+}
+
+/* Strip lines: kill the text line box's own leading so fused runs are
+   actually flush (the strip span carries all visual height itself). */
+.editor-root .cm-line:has(.md-song-strip) {
+    margin: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    line-height: 0;
+}
+.editor-root .cm-line:has(.md-song-strip) .md-song-strip {
+    line-height: 1.45;
+}
+/* Standalone card (not fused above) gets breathing room. */
+.editor-root .md-song-strip:not(.md-song-strip--ja) {
+    margin-top: 0.4rem;
+}
+.editor-root .md-song-strip:not(.md-song-strip--jb) {
+    margin-bottom: 0.4rem;
+}
+.editor-root .md-song-strip--ja {
+    margin-top: -1px;
 }

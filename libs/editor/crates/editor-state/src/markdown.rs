@@ -952,6 +952,13 @@ fn scan_blocks(
     primary: Range,
     out: &mut Vec<DecoratedRange>,
 ) -> Vec<std::ops::Range<usize>> {
+    // `type: setlist` notes render their FIRST `# ` heading as the
+    // setlist header widget (art tile · title · SETLIST · play) — the
+    // note's own title IS the player header. Editable when the caret is
+    // on the line; plain text in raw views (it is only a decoration).
+    let doc_is_setlist = frontmatter_declares_setlist(text);
+    let mut setlist_h1_done = false;
+
     let mut fenced_ranges = Vec::new();
     // ── YAML frontmatter ───────────────────────────────────
     //
@@ -1353,6 +1360,28 @@ fn scan_blocks(
         // ── Headings ───────────────────────────────────────
         if let Some((level, marker_end)) = parse_heading(line) {
             let abs_marker_end = line_from + marker_end;
+            if doc_is_setlist
+                && level == 1
+                && !setlist_h1_done
+                && !cursor_touches(primary, line_from..line_to)
+            {
+                setlist_h1_done = true;
+                let title = html_escape(line[marker_end..].trim());
+                out.push(Decoration::replace(line_from..line_to));
+                out.push(Decoration::widget(
+                    line_from,
+                    format!(
+                        r#"<span class="md-setlist-header"><span class="md-setlist-art">🎵</span><span class="md-setlist-titles"><span class="md-setlist-title">{title}</span><span class="md-setlist-kind">Setlist</span></span><span class="md-setlist-playbtn" data-href="setlist-play:">▶</span></span>"#
+                    ),
+                ));
+                out.push(Decoration::atomic(line_from..line_to));
+                continue;
+            }
+            if doc_is_setlist && level == 1 && !setlist_h1_done {
+                // Caret on the setlist title: keep it editable, but mark
+                // it consumed so a SECOND h1 renders normally.
+                setlist_h1_done = true;
+            }
             let class = HEADING_CLASS[level - 1];
             out.push(Decoration::line(line_from, class));
             // Marker stays visible (muted) any time the caret
@@ -1524,6 +1553,21 @@ fn scan_blocks(
     }
 
     fenced_ranges
+}
+
+/// Does the document's YAML frontmatter declare `type: setlist`?
+fn frontmatter_declares_setlist(text: &str) -> bool {
+    let Some(rest) = text.strip_prefix("---") else {
+        return false;
+    };
+    let Some((front, _)) = rest.split_once("\n---") else {
+        return false;
+    };
+    front.lines().any(|l| {
+        l.trim_start()
+            .strip_prefix("type:")
+            .is_some_and(|v| v.trim().trim_matches(['"', '\'']) == "setlist")
+    })
 }
 
 const HEADING_CLASS: [&str; 6] = ["md-h1", "md-h2", "md-h3", "md-h4", "md-h5", "md-h6"];
