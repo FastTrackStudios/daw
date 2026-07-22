@@ -1,6 +1,9 @@
 /// In-memory SQLite `ArchitectAuth` — the storage every vox round-trip
 /// test mounts behind the service.
 #[cfg(test)]
+#[cfg(test)]
+mod permissions_gate_tests;
+
 async fn open_auth() -> auth::ArchitectAuth<auth::backend_db::AuthSeaOrmStorage> {
     use auth::backend_db::{AuthSeaOrmStorage, Migrator};
     use sea_orm::Database;

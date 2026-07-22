@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 architect = { workspace = true, features = ["vox", "local"] }
+architect-permissions.workspace = true
 auth = { workspace = true, features = ["backend-db", "vox"] }
 auth-client.workspace = true
 chrono.workspace = true
