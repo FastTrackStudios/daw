@@ -46,9 +46,20 @@ use crate::transport_engine::{InstantSeconds, PlayStateRepr, SampleClock, Transp
 #[wasm_bindgen]
 pub struct WebRenderer {
     daw: Standalone,
-    project_guid: String,
+    /// The SELECTED project — the one [`render`] renders and every transport
+    /// / mixer op targets. ONE renderer hosts the whole setlist as separate
+    /// projects (exactly the native engine's layout); a song switch is
+    /// [`select_project`](Self::select_project), never a rebuild. `RefCell`
+    /// is fine: the worklet global scope is single-threaded.
+    project_guid: std::cell::RefCell<String>,
     sample_rate: u32,
-    shared: Arc<TransportShared>,
+    /// The selected project's transport (swapped by `select_project`).
+    shared: std::cell::RefCell<Arc<TransportShared>>,
+    /// Quantized seek queued by [`seek_seconds_at`](Self::seek_seconds_at):
+    /// `(execute_at_sample, target_sample)`. Executed by [`render`] on the
+    /// block where the playhead reaches `execute_at` — the audio thread jumps
+    /// on the boundary itself (block-accurate), no port round-trip.
+    pending_seek: std::cell::Cell<Option<(u64, u64)>>,
 }
 
 #[wasm_bindgen]
@@ -59,8 +70,14 @@ impl WebRenderer {
     #[wasm_bindgen(constructor)]
     pub fn new(sample_rate: u32) -> WebRenderer {
         let daw = Standalone::new();
+        // Fixed guid, NOT uuid::new_v4(): `AudioWorkletGlobalScope` has no
+        // `crypto` — getrandom would panic when the renderer is constructed
+        // on the audio thread (the intended home; see examples/web_worklet).
+        // "web-project" is the DEFAULT selected project (single-song
+        // callers); setlists add one project per song via [`add_project`]
+        // and switch with [`select_project`].
         let project_guid = daw.seed_project(daw_proto::ProjectInfo {
-            guid: uuid::Uuid::new_v4().to_string(),
+            guid: "web-project".to_string(),
             name: "web".into(),
             path: String::new(),
         });
@@ -72,10 +89,64 @@ impl WebRenderer {
         let shared = bundle.shared.clone();
         WebRenderer {
             daw,
-            project_guid,
+            project_guid: std::cell::RefCell::new(project_guid),
             sample_rate,
-            shared,
+            shared: std::cell::RefCell::new(shared),
+            pending_seek: std::cell::Cell::new(None),
         }
+    }
+
+    /// The selected project's guid (owned clone — internal state is a cell).
+    fn current(&self) -> String {
+        self.project_guid.borrow().clone()
+    }
+
+    /// The selected project's transport.
+    fn transport(&self) -> Arc<TransportShared> {
+        self.shared.borrow().clone()
+    }
+
+    /// Seed one MORE project (a setlist song). Idempotent per guid. The new
+    /// project's transport is configured like the default one (no soft clock,
+    /// worklet sample rate) but it is NOT selected — call
+    /// [`select_project`](Self::select_project).
+    #[wasm_bindgen(js_name = addProject)]
+    pub fn add_project(&self, guid: &str, name: &str) {
+        if self.daw.read_project(guid, |_| ()).is_some() {
+            return;
+        }
+        let guid = self.daw.seed_project(daw_proto::ProjectInfo {
+            guid: guid.to_string(),
+            name: name.to_string(),
+            path: String::new(),
+        });
+        let bundle = self.daw.transport_engine_for(&guid);
+        bundle.disable_soft_clock();
+        bundle.shared.set_sample_rate(self.sample_rate);
+    }
+
+    /// Select which project [`render`] renders (a setlist song switch). The
+    /// graph, tracks, and any attached PCM persist across switches — this
+    /// swaps the transport + meter bank only. No-op for the already-selected
+    /// project or an unknown guid.
+    #[wasm_bindgen(js_name = selectProject)]
+    pub fn select_project(&self, guid: &str) {
+        if *self.project_guid.borrow() == guid {
+            return;
+        }
+        if self.daw.read_project(guid, |_| ()).is_none() {
+            return;
+        }
+        self.pending_seek.set(None);
+        let bundle = self.daw.transport_engine_for(guid);
+        *self.shared.borrow_mut() = bundle.shared.clone();
+        *self.project_guid.borrow_mut() = guid.to_string();
+        // Meter bank per selected project (track order == stem order).
+        let count = daw_proto::Tracks::count(
+            &self.daw,
+            daw_proto::ProjectContext::Project(guid.to_string()),
+        ) as usize;
+        self.daw.set_meters(crate::metering::Meters::new(count));
     }
 
     /// Parse RPP text into the renderer's project. Audio sources are
@@ -107,7 +178,7 @@ impl WebRenderer {
     ) {
         attach_audio_source(
             &self.daw,
-            &self.project_guid,
+            &self.current(),
             take_guid,
             DecodedAudio {
                 samples: interleaved_pcm.to_vec(),
@@ -117,10 +188,163 @@ impl WebRenderer {
         );
     }
 
-    /// Drop a previously-attached source.
+    /// [`attach_audio_source_pcm`] targeting an EXPLICIT project — the
+    /// setlist path, where decodes race song switches and must land on the
+    /// song they were started for.
+    #[wasm_bindgen(js_name = attachAudioSourceIn)]
+    pub fn attach_audio_source_pcm_in(
+        &self,
+        project: &str,
+        take_guid: &str,
+        interleaved_pcm: &[f32],
+        channels: u32,
+    ) {
+        attach_audio_source(
+            &self.daw,
+            project,
+            take_guid,
+            DecodedAudio {
+                samples: interleaved_pcm.to_vec(),
+                channels: channels.max(1) as u16,
+                sample_rate: self.sample_rate.max(1),
+            },
+        );
+    }
+
+    /// Seed one stem: a track + an audio item/take whose source points at
+    /// `source_path`, keyed by the stable `take_guid` the caller will later
+    /// pass to [`attach_audio_source_pcm`] once the browser has decoded the
+    /// file. Mirrors the native `media_seed` layout (track → MIDI item → flip
+    /// the active take to audio) but *pins* the take's guid to `take_guid` so
+    /// the async decode can attach its PCM by that stable key
+    /// (`ProjectState.audio_sources` is keyed by the active take's guid).
+    ///
+    /// The item is placed at 0s with a generously long length; the decoded
+    /// source itself bounds the audible region (past its end reads silence),
+    /// so no per-song length is needed here.
+    #[wasm_bindgen(js_name = addStemTrack)]
+    pub fn add_stem_track(&self, display_name: &str, take_guid: &str, source_path: &str) {
+        let project = self.current();
+        self.add_stem_track_in(&project, display_name, take_guid, source_path);
+    }
+
+    /// [`add_stem_track`] targeting an EXPLICIT project (a setlist song).
+    #[wasm_bindgen(js_name = addStemTrackIn)]
+    pub fn add_stem_track_in(
+        &self,
+        project: &str,
+        display_name: &str,
+        take_guid: &str,
+        source_path: &str,
+    ) {
+        use daw_proto::midi::Midi;
+        use daw_proto::{ItemRef, ProjectContext, Takes, TrackRef, Tracks};
+
+        // A generous item length so the whole song plays; the decoded source
+        // (however long) is what actually bounds playback.
+        const ITEM_LEN_SECONDS: f64 = 3600.0;
+
+        let ctx = ProjectContext::Project(project.to_string());
+        let Ok(track) = Tracks::add(&self.daw, ctx.clone(), display_name, None) else {
+            return;
+        };
+        let Some(loc) = Midi::create_midi_item(
+            &self.daw,
+            ctx.clone(),
+            TrackRef::Guid(track),
+            0.0,
+            ITEM_LEN_SECONDS,
+        ) else {
+            return;
+        };
+        let ItemRef::Guid(item_guid) = &loc.item else {
+            return;
+        };
+        let Some(active) =
+            Takes::get_active_take(&self.daw, ctx, ItemRef::Guid(item_guid.clone()))
+        else {
+            return;
+        };
+        // Pin the freshly created take's guid to `take_guid` and flip it from
+        // MIDI to an audio source pointing at `source_path`.
+        self.daw.write_project(project, |p| {
+            for tl in p.takes.values_mut() {
+                for t in tl.takes.iter_mut() {
+                    if t.guid == active.guid {
+                        t.guid = take_guid.to_string();
+                        t.is_midi = false;
+                        t.source_type = daw_proto::item::SourceType::Audio;
+                        t.source_file_path = Some(source_path.to_string());
+                    }
+                }
+            }
+        });
+
+        // (Re)size the meter bank to the SELECTED project's track count so
+        // `render_block` has a cell per track to write peaks into
+        // ([`Self::track_peaks`] reads them for UI VU meters). Natively the
+        // mixer attach does this; the web path has no mixer, so size it here.
+        // Tracks are only added pre-playback, so resetting is harmless.
+        if project == self.current() {
+            let count = daw_proto::Tracks::count(
+                &self.daw,
+                daw_proto::ProjectContext::Project(project.to_string()),
+            ) as usize;
+            self.daw.set_meters(crate::metering::Meters::new(count));
+        }
+    }
+
+    /// Drop a previously-attached source (searched in the SELECTED project).
     #[wasm_bindgen(js_name = detachAudioSource)]
     pub fn detach_audio_source(&self, take_guid: &str) {
-        detach_audio_source(&self.daw, &self.project_guid, take_guid);
+        detach_audio_source(&self.daw, &self.current(), take_guid);
+    }
+
+    /// Drop a previously-attached source from an EXPLICIT project — used by
+    /// the setlist path to free the outgoing song's PCM on a song switch.
+    #[wasm_bindgen(js_name = detachAudioSourceIn)]
+    pub fn detach_audio_source_in(&self, project: &str, take_guid: &str) {
+        detach_audio_source(&self.daw, project, take_guid);
+    }
+
+    // ── Mixer (track order == the order stems were added) ────────────
+    //
+    // These go through the same `Tracks` trait ops native GUIs use, so the
+    // render snapshot picks them up on the next block — mute/solo routing
+    // (incl. solo-passthrough) and fader gain are the graph's own logic.
+
+    #[wasm_bindgen(js_name = setTrackMute)]
+    pub fn set_track_mute(&self, index: u32, muted: bool) {
+        use daw_proto::{ProjectContext, TrackRef, Tracks};
+        let _ = Tracks::set_muted(
+            &self.daw,
+            ProjectContext::Project(self.current()),
+            TrackRef::Index(index),
+            muted,
+        );
+    }
+
+    #[wasm_bindgen(js_name = setTrackSolo)]
+    pub fn set_track_solo(&self, index: u32, soloed: bool) {
+        use daw_proto::{ProjectContext, TrackRef, Tracks};
+        let _ = Tracks::set_soloed(
+            &self.daw,
+            ProjectContext::Project(self.current()),
+            TrackRef::Index(index),
+            soloed,
+        );
+    }
+
+    /// Fader gain, linear (1.0 = unity).
+    #[wasm_bindgen(js_name = setTrackVolume)]
+    pub fn set_track_volume(&self, index: u32, volume: f64) {
+        use daw_proto::{ProjectContext, TrackRef, Tracks};
+        let _ = Tracks::set_volume(
+            &self.daw,
+            ProjectContext::Project(self.current()),
+            TrackRef::Index(index),
+            volume,
+        );
     }
 
     /// Every distinct source path referenced by takes in the loaded
@@ -133,9 +357,7 @@ impl WebRenderer {
     pub fn paths_to_resolve(&self) -> Vec<JsValue> {
         self.daw
             .media_bay()
-            .paths_to_resolve(daw_proto::ProjectContext::Project(
-                self.project_guid.clone(),
-            ))
+            .paths_to_resolve(daw_proto::ProjectContext::Project(self.current()))
             .into_iter()
             .map(|s| JsValue::from_str(&s))
             .collect()
@@ -148,7 +370,7 @@ impl WebRenderer {
     #[wasm_bindgen(js_name = takeSources)]
     pub fn take_sources(&self) -> Vec<JsValue> {
         let mut out = Vec::new();
-        let _ = self.daw.read_project(&self.project_guid, |p| {
+        let _ = self.daw.read_project(&self.current(), |p| {
             for tl in p.takes.values() {
                 for take in &tl.takes {
                     let Some(path) = take.source_file_path.as_ref() else {
@@ -170,7 +392,8 @@ impl WebRenderer {
     /// provides each `process()` invocation.
     pub fn render(&self, out_left: &mut [f32], out_right: &mut [f32]) {
         let frames = out_left.len().min(out_right.len());
-        let playing = self.shared.play_state().is_advancing();
+        let shared = self.transport();
+        let playing = shared.play_state().is_advancing();
         if !playing {
             for s in out_left.iter_mut() {
                 *s = 0.0;
@@ -180,61 +403,103 @@ impl WebRenderer {
             }
             return;
         }
-        let start = self.shared.playhead_samples().0.max(0) as u64;
-        let block = ProjectRenderer::new(&self.daw, &self.project_guid, self.sample_rate)
+        // Execute a queued quantized seek on the block that reaches its
+        // boundary — the jump lands ON the measure line (± one 128-frame
+        // block, ~3 ms), so section changes splice seamlessly.
+        if let Some((at, target)) = self.pending_seek.get() {
+            let cur = shared.playhead_samples().0.max(0) as u64;
+            if cur + frames as u64 >= at {
+                shared.set_playhead(crate::transport_engine::InstantSamples(target as i64));
+                self.pending_seek.set(None);
+            }
+        }
+        let start = shared.playhead_samples().0.max(0) as u64;
+        let block = ProjectRenderer::new(&self.daw, &self.current(), self.sample_rate)
             .render_block(start, frames);
         for i in 0..frames {
             out_left[i] = block.samples[i * 2];
             out_right[i] = block.samples[i * 2 + 1];
         }
-        self.shared.advance(frames as u32);
+        shared.advance(frames as u32);
     }
 
     // ── Transport ────────────────────────────────────────────────
 
     pub fn play(&self) {
-        self.shared.set_play_state(PlayStateRepr::Playing);
+        self.transport().set_play_state(PlayStateRepr::Playing);
     }
     pub fn pause(&self) {
-        self.shared.set_play_state(PlayStateRepr::Paused);
+        self.transport().set_play_state(PlayStateRepr::Paused);
     }
     pub fn stop(&self) {
-        self.shared.set_play_state(PlayStateRepr::Stopped);
-        self.shared
-            .set_playhead(crate::transport_engine::InstantSamples(0));
+        self.pending_seek.set(None);
+        let shared = self.transport();
+        shared.set_play_state(PlayStateRepr::Stopped);
+        shared.set_playhead(crate::transport_engine::InstantSamples(0));
     }
     #[wasm_bindgen(js_name = isPlaying)]
     pub fn is_playing(&self) -> bool {
-        self.shared.play_state().is_advancing()
+        self.transport().play_state().is_advancing()
     }
     #[wasm_bindgen(js_name = positionSeconds)]
     pub fn position_seconds(&self) -> f64 {
-        let clock = SampleClock::new(self.shared.sample_rate());
-        clock.samples_to_seconds(self.shared.playhead_samples()).0
+        let shared = self.transport();
+        let clock = SampleClock::new(shared.sample_rate());
+        clock.samples_to_seconds(shared.playhead_samples()).0
     }
     #[wasm_bindgen(js_name = seekSeconds)]
     pub fn seek_seconds(&self, seconds: f64) {
-        let clock = SampleClock::new(self.shared.sample_rate());
-        self.shared
-            .set_playhead(clock.seconds_to_samples(InstantSeconds(seconds)));
+        // An immediate seek supersedes any queued quantized jump.
+        self.pending_seek.set(None);
+        let shared = self.transport();
+        let clock = SampleClock::new(shared.sample_rate());
+        shared.set_playhead(clock.seconds_to_samples(InstantSeconds(seconds)));
+    }
+
+    /// Queue a QUANTIZED seek: when the transport reaches `at` seconds the
+    /// render callback jumps to `target` seconds (see [`render`]). A later
+    /// call replaces the queued jump; an immediate [`seek_seconds`] cancels
+    /// it.
+    #[wasm_bindgen(js_name = seekSecondsAt)]
+    pub fn seek_seconds_at(&self, target: f64, at: f64) {
+        let clock = SampleClock::new(self.transport().sample_rate());
+        let at_s = clock.seconds_to_samples(InstantSeconds(at)).0.max(0) as u64;
+        let target_s = clock.seconds_to_samples(InstantSeconds(target)).0.max(0) as u64;
+        self.pending_seek.set(Some((at_s, target_s)));
     }
 
     // ── Introspection ────────────────────────────────────────────
 
     #[wasm_bindgen(js_name = projectGuid)]
     pub fn project_guid(&self) -> String {
-        self.project_guid.clone()
+        self.current()
     }
     #[wasm_bindgen(js_name = trackCount)]
     pub fn track_count(&self) -> u32 {
         use daw_proto::Tracks;
         Tracks::count(
             &self.daw,
-            daw_proto::ProjectContext::Project(self.project_guid.clone()),
+            daw_proto::ProjectContext::Project(self.current()),
         )
     }
     #[wasm_bindgen(js_name = audioSourceCount)]
     pub fn audio_source_count(&self) -> u32 {
-        self.daw.audio_source_count(&self.project_guid) as u32
+        self.daw.audio_source_count(&self.current()) as u32
+    }
+
+    /// Per-track peak levels (0.0..=1.0, max of L/R), indexed by track order —
+    /// the render path writes these into the `Meters` cells every block, so
+    /// this is a lock-free read for UI VU meters.
+    #[wasm_bindgen(js_name = trackPeaks)]
+    pub fn track_peaks(&self) -> Vec<f32> {
+        let meters = self.daw.meters();
+        (0..meters.len())
+            .map(|i| {
+                meters
+                    .cell(i)
+                    .map(|c| c.peak(0).max(c.peak(1)))
+                    .unwrap_or(0.0)
+            })
+            .collect()
     }
 }

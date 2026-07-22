@@ -17,6 +17,6 @@ pub mod tile;
 pub mod trigger;
 
 pub use editor::{DecorationSource, Editor, coarse_pointer};
-pub use event::TransactionEvent;
+pub use event::{TransactionEvent, dispatch_spec};
 pub use hover::{HoverPopup, HoverTooltipView};
 pub use trigger::{Candidate, CompletionKind, CompletionSource, CompletionState};

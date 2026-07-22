@@ -1903,7 +1903,7 @@ fn now_ms(epoch: std::time::Instant) -> u64 {
 }
 
 /// Run the surface driver until the event stream closes or the
-/// surface disconnects. Spawn with `moire::task::spawn`.
+/// surface disconnects. Spawn with `architect::platform::spawn`.
 pub async fn run(daw: Daw, config: CsiConfig) -> eyre::Result<()> {
     let mut port = SurfacePort::open(&config.device_match)?;
     let zones = ZoneSet::load()?;

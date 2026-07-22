@@ -52,7 +52,7 @@ pub fn socket_path() -> PathBuf {
 
 /// Spawn the Unix-socket listener and start accepting Vox connections
 /// against `router`. Returns nothing — the listener task is detached
-/// onto the moire runtime and lives for the rest of the process. Any
+/// onto the tokio runtime and lives for the rest of the process. Any
 /// failure to bind logs a warning but does not panic; the in-process
 /// service surface remains usable.
 ///
@@ -77,13 +77,13 @@ pub fn publish_extension_socket(router: LayerRouter) {
     info!(path = %path.display(), "Extension Unix socket listening");
 
     let acceptor = ExtensionConnectionAcceptor::new(router);
-    moire::task::spawn(async move {
+    tokio::task::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
                     debug!("Client connected via Unix socket");
                     let acceptor = acceptor.clone();
-                    moire::task::spawn(async move {
+                    tokio::task::spawn(async move {
                         let link = vox_stream::StreamLink::unix(stream);
                         // vox 0.10 lane model: hand every inbound lane to the
                         // shared LayerRouter (it dispatches by method id).

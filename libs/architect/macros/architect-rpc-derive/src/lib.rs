@@ -951,7 +951,7 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
         Shape::Empty => return quote! {},
         Shape::AllAsync => (
             quote! {
-                S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
+                S: #trait_name + ::architect::MaybeSendSync + 'static,
             },
             "Async-native trait — no `HasDispatcher` requirement.",
         ),
@@ -959,8 +959,7 @@ fn emit_layer_fn(trait_name: &syn::Ident, vis: &syn::Visibility, shape: Shape) -
             quote! {
                 S: #trait_name
                     + ::architect::HasDispatcher
-                    + ::core::marker::Send
-                    + ::core::marker::Sync
+                    + ::architect::MaybeSendSync
                     + 'static,
             },
             "Sync/mixed trait — backend must implement `HasDispatcher`.",
@@ -1065,7 +1064,7 @@ fn emit_serve_fn(
             #[cfg(feature = "vox")]
             #vis fn serve<S>(backend: S) -> #rpc_dispatcher_name<#host_name<S>>
             where
-                S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
+                S: #trait_name + ::architect::MaybeSendSync + 'static,
             {
                 #rpc_dispatcher_name::new(#host_name::new(backend))
             }
@@ -1083,8 +1082,7 @@ fn emit_serve_fn(
             where
                 S: #trait_name
                     + ::architect::HasDispatcher
-                    + ::core::marker::Send
-                    + ::core::marker::Sync
+                    + ::architect::MaybeSendSync
                     + 'static,
             {
                 let dispatcher = ::architect::HasDispatcher::dispatcher(&backend);
@@ -1357,7 +1355,7 @@ fn emit_stream_block(
         #[cfg(feature = "vox")]
         #vis struct #stream_host<S>
         where
-            S: #source_trait + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #source_trait + ::architect::MaybeSendSync + 'static,
         {
             inner: ::std::sync::Arc<S>,
         }
@@ -1365,7 +1363,7 @@ fn emit_stream_block(
         #[cfg(feature = "vox")]
         impl<S> #stream_host<S>
         where
-            S: #source_trait + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #source_trait + ::architect::MaybeSendSync + 'static,
         {
             pub fn new(inner: S) -> Self {
                 Self { inner: ::std::sync::Arc::new(inner) }
@@ -1375,7 +1373,7 @@ fn emit_stream_block(
         #[cfg(feature = "vox")]
         impl<S> ::core::clone::Clone for #stream_host<S>
         where
-            S: #source_trait + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #source_trait + ::architect::MaybeSendSync + 'static,
         {
             fn clone(&self) -> Self {
                 Self { inner: ::std::sync::Arc::clone(&self.inner) }
@@ -1385,7 +1383,7 @@ fn emit_stream_block(
         #[cfg(feature = "vox")]
         impl<S> #stream_trait for #stream_host<S>
         where
-            S: #source_trait + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #source_trait + ::architect::MaybeSendSync + 'static,
         {
             #(#host_methods)*
         }
@@ -1395,7 +1393,7 @@ fn emit_stream_block(
         #[cfg(feature = "vox")]
         #vis fn stream_serve<S>(backend: S) -> #stream_dispatcher<#stream_host<S>>
         where
-            S: #source_trait + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #source_trait + ::architect::MaybeSendSync + 'static,
         {
             #stream_dispatcher::new(#stream_host::new(backend))
         }
@@ -1405,7 +1403,7 @@ fn emit_stream_block(
         #[cfg(feature = "vox")]
         #vis fn stream_layer<S>(backend: S) -> ::architect::Mounted
         where
-            S: #source_trait + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #source_trait + ::architect::MaybeSendSync + 'static,
         {
             ::architect::Mounted::new(#stream_descriptor_fn(), stream_serve(backend))
         }
@@ -1428,8 +1426,7 @@ fn emit_stream_block(
         where
             S: ::core::clone::Clone
                 + #source_trait
-                + ::core::marker::Send
-                + ::core::marker::Sync
+                + ::architect::MaybeSendSync
                 + 'static,
         {
             fn bind_into(
@@ -1774,7 +1771,7 @@ fn emit_user_trait(trait_item: &ItemTrait, shape: Shape, ctx: Option<&Type>) -> 
                     ReturnType::Type(_, ty) => (**ty).clone(),
                 };
                 f.sig.output = parse_quote! {
-                    -> impl ::core::future::Future<Output = #ret_ty> + ::core::marker::Send
+                    -> impl ::core::future::Future<Output = #ret_ty> + ::architect::MaybeSend
                 };
             }
         }
@@ -1840,7 +1837,7 @@ fn emit_bridge_host(
         #[doc(hidden)]
         #vis struct #host_name<S, D>
         where
-            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #trait_name + ::architect::MaybeSendSync + 'static,
             D: ::architect::dispatch::Dispatcher,
         {
             inner: ::std::sync::Arc<S>,
@@ -1849,7 +1846,7 @@ fn emit_bridge_host(
 
         impl<S, D> #host_name<S, D>
         where
-            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #trait_name + ::architect::MaybeSendSync + 'static,
             D: ::architect::dispatch::Dispatcher,
         {
             /// Wrap a backend impl with a dispatcher. Both are kept
@@ -1873,7 +1870,7 @@ fn emit_bridge_host(
 
         impl<S, D> ::core::clone::Clone for #host_name<S, D>
         where
-            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #trait_name + ::architect::MaybeSendSync + 'static,
             D: ::architect::dispatch::Dispatcher,
         {
             fn clone(&self) -> Self {
@@ -1954,7 +1951,7 @@ fn emit_bridge_impl(
     quote! {
         impl<S, D> #rpc_trait_name for #host_name<S, D>
         where
-            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #trait_name + ::architect::MaybeSendSync + 'static,
             D: ::architect::dispatch::Dispatcher,
         {
             #(#method_impls)*
@@ -1976,14 +1973,14 @@ fn emit_passthrough_host(
         #[doc(hidden)]
         #vis struct #host_name<S>
         where
-            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #trait_name + ::architect::MaybeSendSync + 'static,
         {
             inner: ::std::sync::Arc<S>,
         }
 
         impl<S> #host_name<S>
         where
-            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #trait_name + ::architect::MaybeSendSync + 'static,
         {
             pub fn new(inner: S) -> Self {
                 Self { inner: ::std::sync::Arc::new(inner) }
@@ -1996,7 +1993,7 @@ fn emit_passthrough_host(
 
         impl<S> ::core::clone::Clone for #host_name<S>
         where
-            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #trait_name + ::architect::MaybeSendSync + 'static,
         {
             fn clone(&self) -> Self {
                 Self { inner: ::std::sync::Arc::clone(&self.inner) }
@@ -2045,7 +2042,7 @@ fn emit_passthrough_impl(
     quote! {
         impl<S> #trait_name for #host_name<S>
         where
-            S: #trait_name + ::core::marker::Send + ::core::marker::Sync + 'static,
+            S: #trait_name + ::architect::MaybeSendSync + 'static,
         {
             #(#method_impls)*
         }

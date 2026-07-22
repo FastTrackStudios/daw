@@ -260,7 +260,7 @@ pub async fn build_extension_daw() -> eyre::Result<Daw> {
 pub async fn build_extension_daw_with(handler: architect::LayerRouter) -> eyre::Result<Daw> {
     let local = LocalCaller::new(handler).await?;
     let caller = local.caller();
-    // Leak LocalCaller to keep the server-side moire task alive for the
+    // Leak LocalCaller to keep the server-side tokio task alive for the
     // process lifetime. The extension owns the process — this is intentional.
     let _ = Box::leak(Box::new(local));
     Ok(Daw::new(caller))

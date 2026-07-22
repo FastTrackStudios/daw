@@ -22,8 +22,8 @@ architect = { workspace = true, features = ["vox", "local"] }
 vox.workspace = true
 vox-stream.workspace = true
 tracing.workspace = true
-tokio = { workspace = true, features = ["net"] }
-moire.workspace = true
+# `rt` for `tokio::task::spawn` in socket_publisher (was `moire::task::spawn`).
+tokio = { workspace = true, features = ["net", "rt"] }
 
 # RPP chunk parsing/serialization for chunk-based FX manipulation. This is
 # the RPP *output* serializer — mandatory, used by every importer.
@@ -69,7 +69,6 @@ daw = { workspace = true, features = ["test-harness"] }
 eyre.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
 vox.workspace = true
-moire.workspace = true
 
 [features]
 default = ["all-formats"]

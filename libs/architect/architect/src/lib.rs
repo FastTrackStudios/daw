@@ -231,6 +231,39 @@ pub fn use_interval(period: Duration) -> architect_atom::dioxus::prelude::Signal
 #[cfg(feature = "form")]
 pub use architect_form as form;
 
+// Target-conditional marker relaxing backend `Send + Sync` bounds on wasm.
+//
+// On native it is `Send + Sync` (blanket-implemented for every `T: Send +
+// Sync`), so a bound `S: MaybeSendSync` is byte-for-byte equivalent to
+// `S: Send + Sync` — supertrait elaboration still provides `Send`/`Sync`
+// facts in the impl body, and only `Send + Sync` types satisfy it. On
+// wasm32 (single-threaded vox runtime, whose channel/`Tx` types are
+// `!Send`) it carries no bound. The `#[architect::rpc]` derive emits its
+// generated backend bounds as `S: … + ::architect::MaybeSendSync + 'static`
+// so the same service code serves both targets. Native codegen is
+// unchanged; wasm relaxes.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSendSync: Send + Sync {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: ?Sized + Send + Sync> MaybeSendSync for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSendSync {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> MaybeSendSync for T {}
+
+/// `Send`-only companion of [`MaybeSendSync`] — `Send` on native, empty on
+/// wasm32. Used for `impl Future` return/argument bounds the derive emits
+/// (a marker trait is legal in impl-Trait bound position, unlike in a `dyn`
+/// auto-trait slot). Native codegen is unchanged.
+#[cfg(not(target_arch = "wasm32"))]
+pub trait MaybeSend: Send {}
+#[cfg(not(target_arch = "wasm32"))]
+impl<T: ?Sized + Send> MaybeSend for T {}
+#[cfg(target_arch = "wasm32")]
+pub trait MaybeSend {}
+#[cfg(target_arch = "wasm32")]
+impl<T: ?Sized> MaybeSend for T {}
+
 // Server-side stream fan-out (`PubSub<T>`, modelled on effect's PubSub +
 // SubscriptionRef): attach vox `Tx` sinks, publish events to all of them,
 // with overflow strategies, replay, and snapshot-then-changes attach. The
@@ -320,12 +353,21 @@ pub use ops::{LiteralResolver, OpResolver, ResolveArg};
 pub mod clients;
 
 // In-process transport — serve a `LayerRouter` over a vox in-memory link
-// so a typed client consumes a local backend with no server. Native only
-// (vox's `MemoryLink` isn't compiled for wasm).
-#[cfg(all(feature = "local", not(target_arch = "wasm32")))]
+// so a typed client consumes a local backend with no server. Available on
+// both native (over `vox_core::memory_link_pair`) and wasm (over
+// architect's own `memory_link`, since vox's `MemoryLink` isn't compiled
+// for wasm — see below).
+#[cfg(feature = "local")]
 pub mod local;
-#[cfg(all(feature = "local", not(target_arch = "wasm32")))]
+#[cfg(feature = "local")]
 pub use local::{LocalServer, serve_local};
+
+// Architect's own in-memory `Link` — only compiled on wasm, where
+// vox-core's `memory_link` module is `#[cfg(not(wasm32))]` and thus
+// absent. `local` uses vox's on native and this on wasm. Additive: native
+// never sees this module.
+#[cfg(all(feature = "local", target_arch = "wasm32"))]
+pub mod memory_link;
 
 // Platform layer — a portable `Clock` (async `sleep` + monotonic `now`) and
 // task `spawn`, abstracted native (tokio) <-> wasm (browser timers), plus a
@@ -664,6 +706,13 @@ pub mod dispatch {
     /// dispatcher choice is composable at runtime. The boxed-future
     /// return is one allocation per call, dwarfed by the dispatcher's
     /// own thread-hop cost.
+    // Send / Sync gated on target_arch: native marshals the closure onto
+    // other threads (`spawn_blocking`), so the closure, its result, and the
+    // dispatcher must be `Send`/`Sync`. wasm32 is single-threaded — the only
+    // dispatcher is `CurrentThreadDispatcher` (inline, no hop) — so the
+    // bounds relax. `dyn` auto-trait slots can't take a marker trait, so the
+    // two shapes are written out per target. Native shape is unchanged.
+    #[cfg(not(target_arch = "wasm32"))]
     pub trait Dispatcher: Send + Sync + 'static {
         /// Run `f` on the dispatcher's execution context. The returned
         /// future resolves to the closure's value (wrapped in `Ok`) or
@@ -675,16 +724,29 @@ pub mod dispatch {
         ) -> Pin<Box<dyn Future<Output = Result<BoxedAny, DispatchError>> + Send + 'static>>;
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub trait Dispatcher: 'static {
+        /// Run `f` on the dispatcher's execution context (inline on wasm).
+        fn dispatch(
+            &self,
+            f: Box<dyn FnOnce() -> BoxedAny + 'static>,
+        ) -> Pin<Box<dyn Future<Output = Result<BoxedAny, DispatchError>> + 'static>>;
+    }
+
     /// Opaque type carrying the closure's return value across the
     /// dispatcher boundary. Bridges downcast back to the concrete type
     /// they sent in; the type-erasure keeps `Dispatcher` object-safe
     /// without making it generic.
+    #[cfg(not(target_arch = "wasm32"))]
     pub type BoxedAny = Box<dyn core::any::Any + Send + 'static>;
+    #[cfg(target_arch = "wasm32")]
+    pub type BoxedAny = Box<dyn core::any::Any + 'static>;
 
     /// Convenience: run a typed closure through any `Dispatcher` and
     /// recover the typed result. This is the API bridge code generated
     /// by `#[architect::rpc]` actually calls — the trait method's
     /// `BoxedAny` shape stays a framework-internal detail.
+    #[cfg(not(target_arch = "wasm32"))]
     pub async fn run<D, F, T>(dispatcher: &D, f: F) -> Result<T, DispatchError>
     where
         D: Dispatcher + ?Sized,
@@ -692,6 +754,22 @@ pub mod dispatch {
         T: Send + 'static,
     {
         let boxed: Box<dyn FnOnce() -> BoxedAny + Send + 'static> =
+            Box::new(move || Box::new(f()) as BoxedAny);
+        let any = dispatcher.dispatch(boxed).await?;
+        Ok(*any
+            .downcast::<T>()
+            .expect("dispatcher must not alter the closure's return type"))
+    }
+
+    // wasm32: single-threaded, closure runs inline — no `Send` needed.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn run<D, F, T>(dispatcher: &D, f: F) -> Result<T, DispatchError>
+    where
+        D: Dispatcher + ?Sized,
+        F: FnOnce() -> T + 'static,
+        T: 'static,
+    {
+        let boxed: Box<dyn FnOnce() -> BoxedAny + 'static> =
             Box::new(move || Box::new(f()) as BoxedAny);
         let any = dispatcher.dispatch(boxed).await?;
         Ok(*any
@@ -708,12 +786,24 @@ pub mod dispatch {
     #[derive(Debug, Default, Clone, Copy)]
     pub struct CurrentThreadDispatcher;
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl Dispatcher for CurrentThreadDispatcher {
         fn dispatch(
             &self,
             f: Box<dyn FnOnce() -> BoxedAny + Send + 'static>,
         ) -> Pin<Box<dyn Future<Output = Result<BoxedAny, DispatchError>> + Send + 'static>>
         {
+            let result = f();
+            Box::pin(async move { Ok(result) })
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    impl Dispatcher for CurrentThreadDispatcher {
+        fn dispatch(
+            &self,
+            f: Box<dyn FnOnce() -> BoxedAny + 'static>,
+        ) -> Pin<Box<dyn Future<Output = Result<BoxedAny, DispatchError>> + 'static>> {
             let result = f();
             Box::pin(async move { Ok(result) })
         }
@@ -773,6 +863,11 @@ pub mod dispatch {
     /// A boxed, type-erased "run this on the target execution context"
     /// callback — factored out purely to satisfy clippy's
     /// `type_complexity` lint on [`SpawnDispatcher`]'s field.
+    ///
+    /// Native-only: this marshals closures across threads (main-thread
+    /// queues, REAPER defer). wasm32 is single-threaded and uses only
+    /// [`CurrentThreadDispatcher`], so the whole spawn-dispatcher is gated out.
+    #[cfg(not(target_arch = "wasm32"))]
     type SpawnFn = dyn Fn(Box<dyn FnOnce() + Send + 'static>) + Send + Sync;
 
     /// Marshals each closure through a caller-supplied spawn function
@@ -797,16 +892,19 @@ pub mod dispatch {
     /// Backends holding one of these implement `HasDispatcher`
     /// manually (the dispatcher carries runtime state, so the derive's
     /// `Default` path doesn't apply).
+    #[cfg(not(target_arch = "wasm32"))]
     #[derive(Clone)]
     pub struct SpawnDispatcher {
         spawn: std::sync::Arc<SpawnFn>,
     }
+    #[cfg(not(target_arch = "wasm32"))]
     impl core::fmt::Debug for SpawnDispatcher {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             f.debug_struct("SpawnDispatcher").finish_non_exhaustive()
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl SpawnDispatcher {
         /// Wrap a spawn function that enqueues a task onto the target
         /// execution context.
@@ -820,6 +918,7 @@ pub mod dispatch {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     impl Dispatcher for SpawnDispatcher {
         fn dispatch(
             &self,

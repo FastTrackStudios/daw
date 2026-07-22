@@ -94,8 +94,9 @@ in all three environments. Only I/O adapter crates are platform-specific.
 ## Key Rules
 
 ### Async & Concurrency
-- Use `moire::task::spawn` instead of `tokio::spawn`
-- Use `moire::sync::Mutex` / `moire::sync::RwLock` instead of tokio/std equivalents
+- Use `architect::platform::spawn` instead of `tokio::spawn` (wasm-cfg-split:
+  tokio on native, `spawn_local` on wasm)
+- Use `tokio::sync::{Mutex, RwLock}` for locks/channels (moire is retired — Jul 2026)
 - Never hold std sync primitives across `.await`
 - Processing-core crates (`daw-audio-graph`, `daw-builtin-fx`) must never use async
 

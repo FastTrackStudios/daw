@@ -20,9 +20,6 @@ daw-module = { workspace = true }
 # feature is enabled — keeps audio-graph / WASM / embedded targets clean.
 daw-reaper-dioxus = { workspace = true, optional = true }
 
-# Runtime (needed for block_on in plugin context)
-tokio.workspace = true
-
 # Streaming primitives — Rx<T> ergonomic wrapper lives at daw::RxExt
 vox.workspace = true
 facet.workspace = true
@@ -70,7 +67,6 @@ serde_json = { workspace = true, optional = true }
 facet-json = { workspace = true, optional = true }
 libc = { version = "0.2", optional = true }
 tracing-subscriber = { workspace = true, optional = true }
-moire = { workspace = true, optional = true }
 eyre = { workspace = true, optional = true }
 daw-test-macro = { workspace = true, optional = true }
 reaper-launcher = { workspace = true, optional = true }
@@ -87,6 +83,14 @@ reaper-launcher = { workspace = true, optional = true }
 # Extension authors depend on both `daw` and `daw-extension-runtime`
 # at the workspace level — that's a documented exception to the
 # "apps depend only on `daw`" rule.
+
+# Runtime for the facade's `block_on` (plugin/extension context). Native-only:
+# `tokio` pulls `tokio[full]` → `net` → `mio`, which does not build for wasm32,
+# and blocking has no meaning on the browser's single-threaded runtime. The
+# wasm build gets `daw::get()`/`service`/`Mounted`/`LayerRouter` (all runtime-
+# free); `block_on` / `init_from_parts` are `#[cfg(not(wasm32))]` in lib.rs.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio.workspace = true
 
 [features]
 reaper = ["dep:daw-reaper"]
@@ -152,7 +156,6 @@ test-harness = [
     "reaper",
     "dep:reaper-launcher",
     "dep:vox-stream",
-    "dep:moire",
     "dep:eyre",
     "dep:daw-test-macro",
     # geteuid() for the socket owner check in find_fts_daw_socket

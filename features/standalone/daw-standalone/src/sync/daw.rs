@@ -551,9 +551,9 @@ impl Standalone {
             return;
         }
         let this = self.clone();
-        moire::task::spawn(async move {
+        architect::platform::spawn(async move {
             loop {
-                moire::time::sleep(std::time::Duration::from_millis(33)).await;
+                architect::platform::sleep(std::time::Duration::from_millis(33)).await;
                 let bank = this.meters();
                 if bank.is_empty() {
                     continue;
@@ -644,7 +644,7 @@ impl Standalone {
         let bus = self.bus_events.clone();
         let transport = self.transport_events.clone();
 
-        moire::task::spawn(async move {
+        architect::platform::spawn(async move {
             // Publish to BOTH the dedicated transport stream
             // (`TransportStreamSource`) and the cross-domain event bus.
             let emit = |ev: TransportStreamEvent| {
@@ -671,7 +671,7 @@ impl Standalone {
             // so the UI sees play/stop without a separate discrete event
             // (consumers that need the full state query `Transport::get_state`).
             loop {
-                moire::time::sleep(std::time::Duration::from_millis(33)).await;
+                architect::platform::sleep(std::time::Duration::from_millis(33)).await;
                 let snap = bundle.snapshot();
                 let pos = Position::from_time(PositionInSeconds::from_seconds(snap.seconds.0));
                 emit(TransportStreamEvent::Position(PositionTick {

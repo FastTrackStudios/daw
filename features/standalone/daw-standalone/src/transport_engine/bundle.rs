@@ -17,7 +17,7 @@ use core::time::Duration;
 use std::sync::{Arc, Mutex};
 
 use crate::platform;
-use moire::task::{JoinHandle, spawn};
+use architect::platform::{JoinHandle, spawn};
 
 use super::clock::SampleClock;
 use super::engine::{PlayStateRepr, TransportShared, TransportSnapshot};

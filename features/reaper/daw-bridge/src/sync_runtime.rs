@@ -83,14 +83,14 @@ pub async fn start(daw: Daw) -> eyre::Result<()> {
     info!("[sync:{pid}] health beacons written");
 
     // Background loops — keep them detached on the daw-bridge runtime.
-    moire::task::spawn(handle_incoming(Arc::clone(&engine), incoming_rx));
-    moire::task::spawn(handle_peer_events(Arc::clone(&engine), peer_events_rx));
-    moire::task::spawn(poll_connect_peers(
+    tokio::task::spawn(handle_incoming(Arc::clone(&engine), incoming_rx));
+    tokio::task::spawn(handle_peer_events(Arc::clone(&engine), peer_events_rx));
+    tokio::task::spawn(poll_connect_peers(
         daw.clone(),
         Arc::clone(&mesh),
         session.peer_id.clone(),
     ));
-    moire::task::spawn(report_peer_count(daw.clone(), Arc::clone(&mesh)));
+    tokio::task::spawn(report_peer_count(daw.clone(), Arc::clone(&mesh)));
 
     // Master position heartbeat — drives the drift corrector on followers.
     heartbeat::spawn(

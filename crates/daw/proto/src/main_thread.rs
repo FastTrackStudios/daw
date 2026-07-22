@@ -46,6 +46,7 @@ pub fn is_installed() -> bool {
     EXECUTOR.get().is_some()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn executor() -> Option<&'static dyn MainThreadExecutor> {
     EXECUTOR.get().map(|b| b.as_ref())
 }
@@ -56,6 +57,7 @@ fn executor() -> Option<&'static dyn MainThreadExecutor> {
 /// the result is awaited back over a oneshot. With none installed
 /// (standalone/tests), `f` runs inline on the calling thread. Returns `None`
 /// only if an installed executor dropped the task without running it.
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn query<F, R>(f: F) -> Option<R>
 where
     F: FnOnce() -> R + Send + 'static,
@@ -73,10 +75,25 @@ where
     }
 }
 
+/// Wasm build of [`query`]: the browser runtime is single-threaded and no
+/// backend installs a [`MainThreadExecutor`] there (only REAPER does, and
+/// that's native-only), so `f` always runs inline. The `Send` bounds the
+/// native cross-thread bounce needs are dropped — the closure captures the
+/// browser's `!Send` in-process backend.
+#[cfg(target_arch = "wasm32")]
+pub async fn query<F, R>(f: F) -> Option<R>
+where
+    F: FnOnce() -> R + 'static,
+    R: 'static,
+{
+    Some(f())
+}
+
 /// Run `f` under the backend's required affinity, fire-and-forget.
 ///
 /// With an executor installed, `f` is scheduled under the required affinity.
 /// With none installed, `f` runs inline immediately.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run<F>(f: F)
 where
     F: FnOnce() + Send + 'static,
@@ -85,4 +102,13 @@ where
         Some(exec) => exec.spawn(Box::new(f)),
         None => f(),
     }
+}
+
+/// Wasm build of [`run`]: always inline (see [`query`]); no `Send` bound.
+#[cfg(target_arch = "wasm32")]
+pub fn run<F>(f: F)
+where
+    F: FnOnce() + 'static,
+{
+    f()
 }

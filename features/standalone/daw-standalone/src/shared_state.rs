@@ -22,7 +22,7 @@ impl SharedProjectState {
     pub fn new(project_guids: Vec<String>) -> Self {
         Self {
             project_guids: Arc::new(project_guids),
-            current_index: Arc::new(RwLock::new("shared-project-current-index", 0)),
+            current_index: Arc::new(RwLock::new(0)),
         }
     }
 

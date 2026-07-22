@@ -32,8 +32,6 @@ vox-stream.workspace = true
 architect = { workspace = true, features = ["vox"] }
 
 # Async runtime
-
-moire.workspace = true
 tokio = { workspace = true, features = ["net", "rt-multi-thread"] }
 
 # REAPER bindings

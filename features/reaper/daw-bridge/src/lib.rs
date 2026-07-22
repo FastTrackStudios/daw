@@ -199,13 +199,13 @@ fn start_unix_socket_server(acceptor: DawConnectionAcceptor) {
 
     info!("Unix socket server listening on {}", path.display());
 
-    moire::task::spawn(async move {
+    tokio::task::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
                     info!("Client connected via Unix socket");
                     let acceptor = acceptor.clone();
-                    moire::task::spawn(async move {
+                    tokio::task::spawn(async move {
                         use vox::MetadataExt as _;
                         let link = vox_stream::StreamLink::unix(stream);
                         // vox 0.10 lane model: hand every inbound lane to the

@@ -28,6 +28,21 @@ use std::sync::Arc;
 use crate::layer::{LayerRouter, Services};
 use crate::resource::Scope;
 
+// In-memory link pair + task spawn, split native <-> wasm. Native is
+// byte-for-byte the original (`vox_core::memory_link_pair` +
+// `tokio::task::spawn`); wasm uses architect's own in-memory `Link` (vox's
+// `MemoryLink` isn't compiled for wasm) and `platform::spawn`
+// (`spawn_local`, no tokio runtime). Both spawn handles expose `.abort()`.
+#[cfg(not(target_arch = "wasm32"))]
+use tokio::task::spawn;
+#[cfg(not(target_arch = "wasm32"))]
+use vox_core::memory_link_pair;
+
+#[cfg(target_arch = "wasm32")]
+use crate::memory_link::memory_link_pair;
+#[cfg(target_arch = "wasm32")]
+use crate::platform::spawn;
+
 /// A `LayerRouter` served in-process. Each [`establish`](LocalServer::establish)
 /// opens a fresh in-memory link + acceptor task (one client per session,
 /// mirroring the remote per-service connection shape); the task is
@@ -50,13 +65,13 @@ impl LocalServer {
     where
         C: vox_core::FromVoxLane,
     {
-        let (client_link, server_link) = vox_core::memory_link_pair(16);
+        let (client_link, server_link) = memory_link_pair(16);
         let router = self.router.clone();
 
         // Server side: accept on one end and serve the router for any
         // requested lane (it dispatches by method id). Hold the
         // connection alive until the task is aborted on scope close.
-        let task = tokio::task::spawn(async move {
+        let server = async move {
             match vox_core::acceptor_on(server_link)
                 .on_lane(router.acceptor())
                 .establish_connection()
@@ -68,7 +83,8 @@ impl LocalServer {
                 }
                 Err(e) => tracing::warn!(error = %e, "local vox acceptor failed"),
             }
-        });
+        };
+        let task = spawn(server);
         self.scope.defer(move || async move {
             task.abort();
         });
@@ -86,7 +102,10 @@ impl LocalServer {
 /// `.establish::<SomeClient>()`.
 pub fn serve_local<B>(backend: B, scope: &Arc<Scope>) -> LocalServer
 where
-    B: Services + Clone + Send + Sync + 'static,
+    // `MaybeSendSync` = `Send + Sync` on native (unchanged), empty on wasm
+    // (the in-process browser engine's `!Send` backend). Mirrors the
+    // relaxed `Services::into_router` bound.
+    B: Services + Clone + crate::MaybeSendSync + 'static,
 {
     LocalServer::serve(backend.into_router(), Arc::clone(scope))
 }
@@ -128,10 +147,10 @@ impl LocalServer {
     /// the server's [`Scope`] — server→client streams (`Tx`
     /// subscriptions) stay alive until the scope closes.
     pub async fn caller(&self) -> eyre::Result<vox_core::Caller> {
-        let (client_link, server_link) = vox_core::memory_link_pair(256);
+        let (client_link, server_link) = memory_link_pair(256);
         let router = self.router.clone();
 
-        let task = tokio::task::spawn(async move {
+        let server = async move {
             match vox_core::acceptor_on(server_link)
                 .on_lane(router.acceptor())
                 .establish_connection()
@@ -143,7 +162,8 @@ impl LocalServer {
                 }
                 Err(e) => tracing::warn!(error = %e, "local vox acceptor failed"),
             }
-        });
+        };
+        let task = spawn(server);
 
         let connection = vox_core::initiator_on(client_link)
             .establish_connection()

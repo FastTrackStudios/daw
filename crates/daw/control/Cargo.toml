@@ -10,7 +10,9 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
 daw-proto = { workspace = true }
-architect = { workspace = true, features = ["vox"] }
+# `platform` gives the portable async-runtime seam (`architect::platform::spawn`
+# — tokio on native, `spawn_local` on wasm), replacing the retired moire.
+architect = { workspace = true, features = ["vox", "platform"] }
 vox = { workspace = true }
 eyre = { workspace = true }
 serde = { workspace = true }
@@ -19,11 +21,10 @@ facet-json = { workspace = true }
 # Used by the lock-poisoning recovery helpers in `lock.rs` so callers
 # get a structured warning when a Mutex/RwLock is recovered.
 tracing = { workspace = true }
-# Stream subscriptions: `moire::task::spawn` drives each in-flight
-# `#[subscribe]` call + client-side filter pump (wasm-compatible —
-# moire maps to moire-wasm on wasm32). `futures` supplies the
-# `select` that ties the call's lifetime to the consumer's Rx.
-moire = { workspace = true }
+# Stream subscriptions: `architect::platform::spawn` drives each in-flight
+# `#[subscribe]` call + client-side filter pump (tokio on native,
+# `spawn_local` on wasm32). `futures` supplies the `select` that ties the
+# call's lifetime to the consumer's Rx.
 futures = { workspace = true }
 facet = { workspace = true }
 vox-types = { workspace = true }
