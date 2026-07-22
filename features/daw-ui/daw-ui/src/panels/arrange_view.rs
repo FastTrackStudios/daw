@@ -464,7 +464,7 @@ pub fn ArrangeView(
                     "flex:0 0 {ruler_h}px; height:{ruler_h}px; display:flex; \
                      border-bottom:1px solid {border}; background:{ruler_bg};"
                 ),
-                div { style: format!("flex:0 0 {tcp_width}px; border-right:1px solid {border};") }
+                div { style: format!("flex:0 0 {tcp_width}px; box-sizing:border-box; border-right:1px solid {border};") }
                 div {
                     style: "flex:1 1 0; position:relative; overflow:hidden;",
                     div {
@@ -668,6 +668,50 @@ pub fn ArrangeView(
                         }
                     });
                 },
+                // Wheel gestures live here (wraps both TCP and lanes) so scrolling
+                // over the TCP sidebar scrolls the arrange too — not just over the
+                // timeline lanes. Routed through the input keymap; the handler
+                // reads the raw delta (the processor drops it).
+                onwheel: move |evt: WheelEvent| {
+                    let d = evt.data().delta().strip_units();
+                    let max_sy = (lanes_h as f64 - view_h()).max(0.0);
+                    for cmd in input.handle_wheel(&evt) {
+                        let action = match &cmd {
+                            InputCommand::Action(a) => Some(a.as_str()),
+                            InputCommand::ActionWithArgs { action, .. } => Some(action.as_str()),
+                            _ => None,
+                        };
+                        match action {
+                            Some("view.vscroll") => {
+                                scroll_y.set((scroll_y() + d.y).clamp(0.0, max_sy));
+                            }
+                            Some("view.hscroll") => {
+                                scroll_x.set((scroll_x() + d.y + d.x).max(0.0));
+                            }
+                            Some("view.zoom_v") => {
+                                let f = if d.y < 0.0 { 1.1 } else { 1.0 / 1.1 };
+                                // Wide range so even a tiny track can be zoomed
+                                // until it fills the whole vertical space (and
+                                // out far enough to see the whole session).
+                                row_scale.set((row_scale() * f).clamp(0.1, 60.0));
+                            }
+                            Some("view.zoom_h") => {
+                                // Zoom about the pointer: keep the time under the
+                                // cursor fixed as `pps` changes.
+                                let cx = evt.data().client_coordinates().x;
+                                let t = ((cx - origin + scroll_x()) / pps).max(0.0);
+                                let factor = if d.y < 0.0 { 1.15 } else { 1.0 / 1.15 };
+                                let new_pps = (pps * factor).clamp(2.0, 400.0);
+                                zoom.set(new_pps);
+                                scroll_x.set((t * new_pps - (cx - origin)).max(0.0));
+                            }
+                            _ => {}
+                        }
+                    }
+                    if d.x.abs() > d.y.abs() {
+                        scroll_x.set((scroll_x() + d.x).max(0.0));
+                    }
+                },
                 // Apply / release a track-height resize here (wraps both TCP and
                 // lanes), so a drag started from EITHER the TCP row edge or the
                 // lane bottom edge keeps tracking.
@@ -723,44 +767,6 @@ pub fn ArrangeView(
                     // raw delta since the processor drops it). Horizontal scroll
                     // is unbounded (scroll right forever); vertical scroll is
                     // clamped to the content height (`lanes_h - view_h`).
-                    onwheel: move |evt: WheelEvent| {
-                        let d = evt.data().delta().strip_units();
-                        let max_sy = (lanes_h as f64 - view_h()).max(0.0);
-                        for cmd in input.handle_wheel(&evt) {
-                            let action = match &cmd {
-                                InputCommand::Action(a) => Some(a.as_str()),
-                                InputCommand::ActionWithArgs { action, .. } => Some(action.as_str()),
-                                _ => None,
-                            };
-                            match action {
-                                Some("view.vscroll") => {
-                                    scroll_y.set((scroll_y() + d.y).clamp(0.0, max_sy));
-                                }
-                                Some("view.hscroll") => {
-                                    scroll_x.set((scroll_x() + d.y + d.x).max(0.0));
-                                }
-                                Some("view.zoom_v") => {
-                                    let f = if d.y < 0.0 { 1.1 } else { 1.0 / 1.1 };
-                                    row_scale.set((row_scale() * f).clamp(0.3, 4.0));
-                                }
-                                Some("view.zoom_h") => {
-                                    // Zoom about the pointer: keep the time under
-                                    // the cursor fixed as `pps` changes.
-                                    let cx = evt.data().client_coordinates().x;
-                                    let t = ((cx - origin + scroll_x()) / pps).max(0.0);
-                                    let factor = if d.y < 0.0 { 1.15 } else { 1.0 / 1.15 };
-                                    let new_pps = (pps * factor).clamp(2.0, 400.0);
-                                    zoom.set(new_pps);
-                                    scroll_x.set((t * new_pps - (cx - origin)).max(0.0));
-                                }
-                                _ => {}
-                            }
-                        }
-                        // Trackpad horizontal swipe (no modifier) → hscroll.
-                        if d.x.abs() > d.y.abs() {
-                            scroll_x.set((scroll_x() + d.x).max(0.0));
-                        }
-                    },
                     // Middle-mouse-button drag pans both axes (REAPER's pan).
                     onmousedown: move |evt: MouseEvent| {
                         if evt.trigger_button()
@@ -1002,29 +1008,8 @@ fn Lane(track: TrackView, pps: f64, alt: bool) -> Element {
                 "position:relative; height:{row_h}px; background:{row_bg}; \
                  border-bottom:1px solid {divider}; box-sizing:border-box;",
             ),
-            // Bottom-edge resize handle: drag to set this track's height. Begins
-            // the resize (snapshot base height + pointer y + zoom); the scroller's
-            // shared onmousemove/up apply + release it (slip_drag shape). The
-            // `fts-rz` class brightens it on hover so it's discoverable.
-            div {
-                class: "fts-rz",
-                style: "position:absolute; left:0; right:0; bottom:0; height:7px; \
-                        cursor:ns-resize; z-index:5; background:rgba(255,255,255,0.05);",
-                onmousedown: move |evt: MouseEvent| {
-                    if evt.trigger_button()
-                        == Some(dioxus_elements::input_data::MouseButton::Primary)
-                    {
-                        evt.stop_propagation();
-                        let mut resize = ctx.resize;
-                        resize.set(Some(ResizeState {
-                            height: height_sig,
-                            start_y: evt.client_coordinates().y,
-                            start_h: (height_sig)(),
-                            scale: rs.max(0.05),
-                        }));
-                    }
-                },
-            }
+            // (Track-height resize is grabbed from the TCP row edge, not here —
+            // the arrange lane has no resize handle, REAPER-style.)
             for (ci, clip) in track.clips.iter().enumerate() {
                 {
                     // Item body: the item/track colour tinted over the parity

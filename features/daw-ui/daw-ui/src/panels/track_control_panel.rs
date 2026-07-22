@@ -114,7 +114,7 @@ fn TcpRow(
                         div {
                             class: "fts-rz",
                             style: "position:absolute; left:0; right:0; bottom:0; height:7px; \
-                                    cursor:ns-resize; z-index:5; background:rgba(255,255,255,0.05);",
+                                    cursor:ns-resize; z-index:5;",
                             onmousedown: move |evt: MouseEvent| {
                                 if evt.trigger_button()
                                     == Some(dioxus_elements::input_data::MouseButton::Primary)

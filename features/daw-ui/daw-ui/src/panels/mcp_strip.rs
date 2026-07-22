@@ -205,7 +205,7 @@ pub fn McpStrip(
                 div {
                     class: "fts-rz",
                     style: "position:absolute; top:0; bottom:0; right:0; width:9px; \
-                            cursor:ew-resize; z-index:6; background:rgba(255,255,255,0.05);",
+                            cursor:ew-resize; z-index:6;",
                     onmousedown: move |evt: MouseEvent| {
                         if evt.trigger_button()
                             == Some(dioxus_elements::input_data::MouseButton::Primary)
