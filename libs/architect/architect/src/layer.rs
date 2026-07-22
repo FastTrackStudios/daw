@@ -591,7 +591,13 @@ pub trait Services: Sized {
     /// terminal router. One-call mount when no overrides are needed.
     fn into_router(self) -> LayerRouter
     where
-        Self: Clone + Send + Sync + 'static,
+        // `MaybeSendSync` is exactly `Send + Sync` on native (byte-for-byte
+        // the old bound) and empty on wasm — so a `!Send/!Sync` backend
+        // (single-threaded wasm vox, `Rc<RefCell<..>>` sinks) can mount its
+        // own router in-process. The generated per-service `Bind<B>` impls
+        // already carry `MaybeSendSync`, so this is the last native-only
+        // gate on the wasm in-process path.
+        Self: Clone + crate::MaybeSendSync + 'static,
     {
         Self::layers().provide(self)
     }
@@ -622,9 +628,24 @@ impl LayerRouter {
     }
 
     /// Lower-level entry — prefer [`Layer::provide`] for bundles.
+    ///
+    /// The handler bound tracks [`DynHandler`]: `Send + Sync` on native,
+    /// dropped on wasm (single-threaded vox), so an in-process
+    /// [`crate::local::LocalServer`] router can be hand-assembled in the
+    /// browser from `!Send` service handlers.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn with<H>(mut self, descriptor: &'static ServiceDescriptor, handler: H) -> Self
     where
         H: Handler<DriverReplySink> + Send + Sync + 'static,
+    {
+        self.register(descriptor, Arc::new(handler));
+        self
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn with<H>(mut self, descriptor: &'static ServiceDescriptor, handler: H) -> Self
+    where
+        H: Handler<DriverReplySink> + 'static,
     {
         self.register(descriptor, Arc::new(handler));
         self
@@ -678,10 +699,10 @@ impl LayerRouter {
     /// the `lane_acceptor_fn(|_, conn| conn.handle_with(router.clone()))`
     /// boilerplate that engine binaries otherwise repeat per transport; see
     /// [`crate::axum_ws::serve_router`] / [`crate::iroh_link::serve_router`],
-    /// which wrap this directly. Native-only: serving a router is a
-    /// server-side concern (the wasm build is a vox *client*), and the
-    /// acceptor's thread bounds don't hold on single-threaded wasm.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// which wrap this directly. Available on wasm too now that the
+    /// in-process [`crate::local::LocalServer`] serves a router in the
+    /// browser — [`handler_acceptor`] has a wasm arm that drops the thread
+    /// bounds (single-threaded wasm vox).
     pub fn acceptor(&self) -> impl vox::LaneAcceptor {
         handler_acceptor(self.clone())
     }
@@ -694,12 +715,27 @@ impl LayerRouter {
 /// every transport consumer otherwise repeats; [`crate::axum_ws::serve_router`]
 /// and [`crate::iroh_link::serve_router`] wrap it.
 ///
-/// Native-only: the acceptor is moved onto a serving task, so it needs the
-/// `Send + Sync` bounds that only hold off wasm (wasm vox is single-threaded).
+/// On native the acceptor is moved onto a serving task, so it needs the
+/// `Send + Sync` bounds that only hold off wasm; the wasm arm below drops
+/// them (single-threaded wasm vox, where `vox::lane_acceptor_fn`'s bounds
+/// are already `MaybeSend + MaybeSync` = empty). Both arms are otherwise
+/// identical — the in-process [`crate::local::LocalServer`] uses this on
+/// both targets.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn handler_acceptor<H>(handler: H) -> impl vox::LaneAcceptor
 where
     H: Handler<DriverReplySink> + Clone + Send + Sync + 'static,
+{
+    vox::lane_acceptor_fn(move |_req, connection| {
+        connection.handle_with(handler.clone());
+        Ok(())
+    })
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn handler_acceptor<H>(handler: H) -> impl vox::LaneAcceptor
+where
+    H: Handler<DriverReplySink> + Clone + 'static,
 {
     vox::lane_acceptor_fn(move |_req, connection| {
         connection.handle_with(handler.clone());

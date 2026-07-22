@@ -353,12 +353,21 @@ pub use ops::{LiteralResolver, OpResolver, ResolveArg};
 pub mod clients;
 
 // In-process transport — serve a `LayerRouter` over a vox in-memory link
-// so a typed client consumes a local backend with no server. Native only
-// (vox's `MemoryLink` isn't compiled for wasm).
-#[cfg(all(feature = "local", not(target_arch = "wasm32")))]
+// so a typed client consumes a local backend with no server. Available on
+// both native (over `vox_core::memory_link_pair`) and wasm (over
+// architect's own `memory_link`, since vox's `MemoryLink` isn't compiled
+// for wasm — see below).
+#[cfg(feature = "local")]
 pub mod local;
-#[cfg(all(feature = "local", not(target_arch = "wasm32")))]
+#[cfg(feature = "local")]
 pub use local::{LocalServer, serve_local};
+
+// Architect's own in-memory `Link` — only compiled on wasm, where
+// vox-core's `memory_link` module is `#[cfg(not(wasm32))]` and thus
+// absent. `local` uses vox's on native and this on wasm. Additive: native
+// never sees this module.
+#[cfg(all(feature = "local", target_arch = "wasm32"))]
+pub mod memory_link;
 
 // Platform layer — a portable `Clock` (async `sleep` + monotonic `now`) and
 // task `spawn`, abstracted native (tokio) <-> wasm (browser timers), plus a

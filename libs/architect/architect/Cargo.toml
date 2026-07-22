@@ -90,8 +90,11 @@ rig = ["vox", "dep:tracing"]
 
 # In-process transport (`architect::local`): serve a `LayerRouter` over a
 # vox in-memory link so a typed client consumes a local backend with no
-# server/socket. Native only — vox's `MemoryLink` is `#[cfg(not(wasm))]`.
-local = ["vox", "dep:vox-core", "dep:tracing", "tokio/rt"]
+# server/socket. Native serves over `vox_core::memory_link_pair`; wasm over
+# architect's own `memory_link` (vox's `MemoryLink` is `#[cfg(not(wasm))]`),
+# with the server task on `platform::spawn` (spawn_local). Pulls `platform`
+# + vox-types (for the wasm `Link` impl).
+local = ["vox", "dep:vox-core", "dep:vox-types", "dep:tracing", "tokio/rt", "platform"]
 
 # iroh p2p transport (`architect::iroh_link`): serve/consume a vox
 # router over an iroh QUIC endpoint — same acceptor dance as `server-axum`,
