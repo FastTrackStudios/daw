@@ -49,6 +49,12 @@ pub struct WebRenderer {
     project_guid: String,
     sample_rate: u32,
     shared: Arc<TransportShared>,
+    /// Quantized seek queued by [`seek_seconds_at`](Self::seek_seconds_at):
+    /// `(execute_at_sample, target_sample)`. Executed by [`render`] on the
+    /// block where the playhead reaches `execute_at` — the audio thread jumps
+    /// on the boundary itself (block-accurate), no port round-trip. `Cell` is
+    /// fine: the worklet global scope is single-threaded.
+    pending_seek: std::cell::Cell<Option<(u64, u64)>>,
 }
 
 #[wasm_bindgen]
@@ -80,6 +86,7 @@ impl WebRenderer {
             project_guid,
             sample_rate,
             shared,
+            pending_seek: std::cell::Cell::new(None),
         }
     }
 
@@ -294,6 +301,17 @@ impl WebRenderer {
             }
             return;
         }
+        // Execute a queued quantized seek on the block that reaches its
+        // boundary — the jump lands ON the measure line (± one 128-frame
+        // block, ~3 ms), so section changes splice seamlessly.
+        if let Some((at, target)) = self.pending_seek.get() {
+            let cur = self.shared.playhead_samples().0.max(0) as u64;
+            if cur + frames as u64 >= at {
+                self.shared
+                    .set_playhead(crate::transport_engine::InstantSamples(target as i64));
+                self.pending_seek.set(None);
+            }
+        }
         let start = self.shared.playhead_samples().0.max(0) as u64;
         let block = ProjectRenderer::new(&self.daw, &self.project_guid, self.sample_rate)
             .render_block(start, frames);
@@ -313,6 +331,7 @@ impl WebRenderer {
         self.shared.set_play_state(PlayStateRepr::Paused);
     }
     pub fn stop(&self) {
+        self.pending_seek.set(None);
         self.shared.set_play_state(PlayStateRepr::Stopped);
         self.shared
             .set_playhead(crate::transport_engine::InstantSamples(0));
@@ -328,9 +347,23 @@ impl WebRenderer {
     }
     #[wasm_bindgen(js_name = seekSeconds)]
     pub fn seek_seconds(&self, seconds: f64) {
+        // An immediate seek supersedes any queued quantized jump.
+        self.pending_seek.set(None);
         let clock = SampleClock::new(self.shared.sample_rate());
         self.shared
             .set_playhead(clock.seconds_to_samples(InstantSeconds(seconds)));
+    }
+
+    /// Queue a QUANTIZED seek: when the transport reaches `at` seconds the
+    /// render callback jumps to `target` seconds (see [`render`]). A later
+    /// call replaces the queued jump; an immediate [`seek_seconds`] cancels
+    /// it.
+    #[wasm_bindgen(js_name = seekSecondsAt)]
+    pub fn seek_seconds_at(&self, target: f64, at: f64) {
+        let clock = SampleClock::new(self.shared.sample_rate());
+        let at_s = clock.seconds_to_samples(InstantSeconds(at)).0.max(0) as u64;
+        let target_s = clock.seconds_to_samples(InstantSeconds(target)).0.max(0) as u64;
+        self.pending_seek.set(Some((at_s, target_s)));
     }
 
     // ── Introspection ────────────────────────────────────────────
