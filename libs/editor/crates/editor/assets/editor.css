@@ -1843,22 +1843,27 @@
 /* ── Roster row: role + contact cards with status-ringed avatars ────── */
 .editor-root .md-roster-row {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-    margin: 0.2rem 0;
-    padding: 0.45rem 0.6rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.4rem;
+    margin: 0.15rem 0 0.55rem;
+    padding: 0.5rem 0.65rem;
     border-radius: 8px;
+}
+.editor-root .md-roster-people {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    padding-left: 0.15rem;
 }
 .editor-root .md-roster-row:hover { background: color-mix(in srgb, var(--ed-bg-elev) 60%, transparent); }
 .editor-root .md-roster-role {
     flex: none;
-    min-width: 9rem;
     color: var(--ed-text-dim);
-    font-size: 0.82rem;
+    font-size: 0.78rem;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-weight: 600;
+    letter-spacing: 0.07em;
+    font-weight: 700;
 }
 .editor-root .md-contact-card {
     display: inline-flex;
@@ -1947,7 +1952,7 @@
     padding: 0.15rem 0.6rem;
     border-radius: 6px;
 }
-.editor-root .md-role-icon { font-size: 0.9rem; }
+.editor-root svg.md-role-icon { width: 0.95rem; height: 0.95rem; flex: none; }
 .editor-root .md-role--red    { color: #ef4444; background: color-mix(in srgb, #ef4444 12%, transparent); }
 .editor-root .md-role--yellow { color: #eab308; background: color-mix(in srgb, #eab308 12%, transparent); }
 .editor-root .md-role--blue   { color: #3b82f6; background: color-mix(in srgb, #3b82f6 12%, transparent); }

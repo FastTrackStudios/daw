@@ -722,37 +722,56 @@ fn song_strip_runs(
     out
 }
 
+/// A small stroke-icon (Lucide-shaped, `currentColor`) for widget HTML —
+/// inherits the role chip's color.
+fn role_icon_svg(kind: &str) -> String {
+    let body = match kind {
+        "drum" => r#"<path d="m2 2 8 8"/><path d="m22 2-8 8"/><ellipse cx="12" cy="9" rx="10" ry="5"/><path d="M7 13.4v7.9"/><path d="M12 14v8"/><path d="M17 13.4v7.9"/><path d="M2 9v8a10 5 0 0 0 20 0V9"/>"#,
+        "guitar" => r#"<circle cx="8" cy="16" r="5"/><path d="m11.8 12.2 7.2-7.2"/><path d="m18 3 3 3"/><path d="m19 4-2.5 2.5"/>"#,
+        "keys" => r#"<rect x="2" y="6" width="20" height="12" rx="1"/><path d="M7 6v7"/><path d="M12 6v7"/><path d="M17 6v7"/>"#,
+        "mic" => r#"<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>"#,
+        "sliders" => r#"<line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/>"#,
+        "bulb" => r#"<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>"#,
+        "monitor" => r#"<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>"#,
+        "video" => r#"<path d="m16 13 5.2 3.5a.5.5 0 0 0 .8-.4V7.9a.5.5 0 0 0-.8-.4L16 11"/><rect x="2" y="6" width="14" height="12" rx="2"/>"#,
+        "music" | _ => r#"<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>"#,
+    };
+    format!(
+        r#"<svg class="md-role-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{body}</svg>"#
+    )
+}
+
 /// The FTS instrument color scheme + an icon per role — reflected on the
 /// roster's role chips (Drums red, Bass yellow, Electric blue, Acoustic
 /// cyan, Keys green, Synth purple, vocals pink, tech slate…).
 fn role_style(role: &str) -> (&'static str, &'static str) {
     let r = role.to_ascii_lowercase();
     if r.contains("drum") || r.contains("perc") {
-        ("md-role--red", "🥁")
+        ("md-role--red", "drum")
     } else if r.contains("bass") {
-        ("md-role--yellow", "🎸")
+        ("md-role--yellow", "guitar")
     } else if r.contains("electric") {
-        ("md-role--blue", "🎸")
+        ("md-role--blue", "guitar")
     } else if r.contains("acoustic") {
-        ("md-role--cyan", "🎸")
+        ("md-role--cyan", "guitar")
     } else if r.contains("key") || r.contains("piano") {
-        ("md-role--green", "🎹")
+        ("md-role--green", "keys")
     } else if r.contains("synth") || r.contains("organ") {
-        ("md-role--purple", "🎹")
+        ("md-role--purple", "keys")
     } else if r.contains("vocal") || r.contains("worship leader") || r.contains("singer") {
-        ("md-role--pink", "🎤")
-    } else if r.contains("music director") || r.contains("md") && r.len() <= 3 {
-        ("md-role--orange", "🎼")
+        ("md-role--pink", "mic")
+    } else if r.contains("music director") {
+        ("md-role--orange", "music")
     } else if r.contains("foh") || r.contains("audio") || r.contains("sound") {
-        ("md-role--slate", "🎚️")
+        ("md-role--slate", "sliders")
     } else if r.contains("light") {
-        ("md-role--amber", "💡")
+        ("md-role--amber", "bulb")
     } else if r.contains("graphic") || r.contains("lyric") || r.contains("screen") {
-        ("md-role--slate", "🖥️")
+        ("md-role--slate", "monitor")
     } else if r.contains("production") || r.contains("director") {
-        ("md-role--orange", "🎬")
+        ("md-role--orange", "video")
     } else {
-        ("md-role--slate", "•")
+        ("md-role--slate", "music")
     }
 }
 
@@ -833,12 +852,13 @@ fn emit_roster_rows(
                 )
             })
             .collect();
-        let (role_cls, role_icon) = role_style(role);
+        let (role_cls, icon_kind) = role_style(role);
+        let icon = role_icon_svg(icon_kind);
         out.push(Decoration::replace(line_from..line_to));
         out.push(Decoration::widget(
             line_from,
             format!(
-                r#"<span class="md-roster-row"><span class="md-roster-role {role_cls}"><span class="md-role-icon">{role_icon}</span>{role}</span>{cards}</span>"#,
+                r#"<span class="md-roster-row"><span class="md-roster-role {role_cls}">{icon}{role}</span><span class="md-roster-people">{cards}</span></span>"#,
                 role = html_escape(role),
             ),
         ));
