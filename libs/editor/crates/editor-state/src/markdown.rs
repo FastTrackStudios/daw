@@ -42,6 +42,11 @@ pub trait VaultLookup {
     /// higher heading), or None when the page or heading is
     /// missing.
     fn lookup_section(&self, page: &str, heading: &str) -> Option<String>;
+    /// Song metadata when `name` resolves to a `type: song` note —
+    /// `None` (default) renders the wikilink normally.
+    fn lookup_song(&self, _name: &str) -> Option<VaultSongHit> {
+        None
+    }
     /// Find a block by Obsidian short-id `Page#^id`.
     fn lookup_block_short(&self, page: &str, short_id: &str) -> Option<String>;
 }
@@ -55,6 +60,17 @@ pub struct VaultBlockHit {
 #[derive(Clone, Debug)]
 pub struct VaultPageHit {
     pub preview: String,
+}
+
+/// Song metadata for a wikilink that targets a `type: song` note —
+/// drives the inline SONG STRIP widget (a standalone `[[Song]]` line
+/// renders as a playable row instead of a plain link).
+#[derive(Clone, Debug, PartialEq)]
+pub struct VaultSongHit {
+    pub title: String,
+    pub artist: Option<String>,
+    pub duration_sec: f64,
+    pub stem_count: usize,
 }
 
 /// Host-supplied resolver for `kbd:@action` inline shortcuts — maps an
@@ -215,6 +231,9 @@ pub fn live_preview_with_lookups(
 
     let t_inline = now_ms_native();
     let inline_decs_before = out.len();
+    // Lazily computed on the first song strip (resolver scans are cheap
+    // and cached, but most documents have no strips at all).
+    let mut strip_runs: Option<std::collections::HashMap<usize, StripRunCtx>> = None;
     for span in find_spans(&text) {
         if in_fenced_code(&fenced_ranges, span.outer.start) {
             continue;
@@ -434,6 +453,41 @@ pub fn live_preview_with_lookups(
             } else {
                 span.body.clone()
             };
+            // SONG STRIP: a wikilink ALONE on its line whose target is a
+            // `type: song` note renders as a playable song row (title ·
+            // artist · stems · duration, with a play control the host
+            // wires via `data-href="song-play:<target>"`). Caret on the
+            // line falls through to the normal editable link.
+            if span.class == "md-wikilink" && !cursor_touches(primary, span.outer.clone()) {
+                if let Some(h2) = href.as_deref() {
+                    let page_part = h2.split(['#', '|']).next().unwrap_or(h2).trim();
+                    let line_start =
+                        text[..span.outer.start].rfind('\n').map_or(0, |i| i + 1);
+                    let line_end = text[span.outer.end..]
+                        .find('\n')
+                        .map_or(text.len(), |i| span.outer.end + i);
+                    let standalone = text[line_start..span.outer.start].trim().is_empty()
+                        && text[span.outer.end..line_end].trim().is_empty();
+                    if standalone {
+                        if let Some(song) =
+                            vault.and_then(|v| v.lookup_song(page_part))
+                        {
+                            let ctx = strip_runs
+                                .get_or_insert_with(|| song_strip_runs(&text, vault))
+                                .get(&line_start)
+                                .copied()
+                                .unwrap_or_default();
+                            out.push(Decoration::replace(span.outer.clone()));
+                            out.push(Decoration::widget(
+                                span.outer.start,
+                                song_strip_html(page_part, &song, ctx),
+                            ));
+                            out.push(Decoration::atomic(span.outer.clone()));
+                            continue;
+                        }
+                    }
+                }
+            }
             if let Some(h) = href {
                 // Wikilinks: consult the vault to decide
                 // resolved (purple, default) vs unresolved
@@ -555,6 +609,100 @@ pub(crate) fn escape_html(s: &str) -> String {
 
 fn in_fenced_code(ranges: &[std::ops::Range<usize>], pos: usize) -> bool {
     ranges.iter().any(|r| pos >= r.start && pos < r.end)
+}
+
+/// Layout context for one song-strip line: joined to a strip directly
+/// above/below (no blank line between) + alternating parity within its
+/// run — lets adjacent strips render as one flush, striped list.
+#[derive(Clone, Copy, Default)]
+struct StripRunCtx {
+    joined_above: bool,
+    joined_below: bool,
+    odd: bool,
+}
+
+/// Scan the document for standalone `[[Song]]` lines (resolver-confirmed
+/// songs) and compute each one's run context, keyed by line start.
+fn song_strip_runs(
+    text: &str,
+    vault: Option<&dyn VaultLookup>,
+) -> std::collections::HashMap<usize, StripRunCtx> {
+    let Some(vault) = vault else {
+        return Default::default();
+    };
+    // Collect candidate lines: (line_start, line_end).
+    let mut candidates: Vec<(usize, usize)> = Vec::new();
+    let mut pos = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let t = content.trim();
+        if let Some(inner) = t.strip_prefix("[[").and_then(|r| r.strip_suffix("]]")) {
+            let page = inner.split(['#', '|']).next().unwrap_or(inner).trim();
+            if vault.lookup_song(page).is_some() {
+                candidates.push((pos, pos + content.len()));
+            }
+        }
+        pos += line.len();
+    }
+    // Group into runs: consecutive candidates whose lines are ADJACENT
+    // (exactly one newline between them).
+    let mut out = std::collections::HashMap::new();
+    let mut i = 0;
+    while i < candidates.len() {
+        let mut j = i;
+        while j + 1 < candidates.len() && candidates[j + 1].0 == candidates[j].1 + 1 {
+            j += 1;
+        }
+        for (k, &(start, _)) in candidates[i..=j].iter().enumerate() {
+            out.insert(
+                start,
+                StripRunCtx {
+                    joined_above: k > 0,
+                    joined_below: i + k < j,
+                    odd: k % 2 == 1,
+                },
+            );
+        }
+        i = j + 1;
+    }
+    out
+}
+
+/// The inline song-strip widget for a standalone `[[Song]]` wikilink.
+/// The whole strip navigates (`data-href` = the link target); the play
+/// control carries `data-href="song-play:<target>"` — the host's
+/// `on_link_click` intercepts the scheme and drives playback.
+fn song_strip_html(target: &str, song: &VaultSongHit, ctx: StripRunCtx) -> String {
+    let safe = html_escape(target);
+    let title = html_escape(&song.title);
+    let artist = song
+        .artist
+        .as_deref()
+        .map(|a| format!(r#"<span class="md-song-strip-artist">{}</span>"#, html_escape(a)))
+        .unwrap_or_default();
+    let stems = if song.stem_count > 0 {
+        format!(
+            r#"<span class="md-song-strip-badge">{} stems</span>"#,
+            song.stem_count
+        )
+    } else {
+        String::new()
+    };
+    let secs = song.duration_sec.max(0.0) as u64;
+    let time = format!("{}:{:02}", secs / 60, secs % 60);
+    let mut cls = String::from("md-song-strip");
+    if ctx.joined_above {
+        cls.push_str(" md-song-strip--ja");
+    }
+    if ctx.joined_below {
+        cls.push_str(" md-song-strip--jb");
+    }
+    if ctx.odd {
+        cls.push_str(" md-song-strip--alt");
+    }
+    format!(
+        r#"<span class="{cls}" data-href="{safe}"><span class="md-song-strip-play" data-href="song-play:{safe}">▶</span><span class="md-song-strip-title">{title}</span>{artist}{stems}<span class="md-song-strip-time">{time}</span></span>"#
+    )
 }
 
 /// Render the HTML for an `![[file|opts]]` embed when the

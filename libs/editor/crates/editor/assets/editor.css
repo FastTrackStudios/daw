@@ -1568,3 +1568,89 @@
     color: var(--ed-text-dim, var(--ed-text));
     opacity: 0.75;
 }
+
+/* ── Song strip (standalone [[Song]] wikilink → playable row) ───────── */
+.editor-root .md-song-strip {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    margin: 0.15rem 0;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid var(--ed-border);
+    border-radius: 8px;
+    background: var(--ed-bg-elev);
+    cursor: pointer;
+    user-select: none;
+}
+.editor-root .md-song-strip:hover {
+    border-color: var(--ed-accent);
+}
+.editor-root .md-song-strip-play {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.7rem;
+    height: 1.7rem;
+    flex: none;
+    border-radius: 999px;
+    background: var(--ed-accent);
+    color: var(--ed-bg);
+    font-size: 0.7rem;
+}
+.editor-root .md-song-strip-title {
+    color: var(--ed-text);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.editor-root .md-song-strip-artist {
+    color: var(--ed-text-dim);
+    white-space: nowrap;
+    flex: none;
+}
+.editor-root .md-song-strip-badge {
+    margin-left: auto;
+    flex: none;
+    border: 1px solid var(--ed-border);
+    border-radius: 999px;
+    padding: 0.05rem 0.5rem;
+    font-size: 0.68rem;
+    color: var(--ed-text-dim);
+}
+.editor-root .md-song-strip-time {
+    flex: none;
+    color: var(--ed-text-dim);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.8rem;
+}
+.editor-root .md-song-strip-badge:first-of-type {
+    margin-left: auto;
+}
+.editor-root .md-song-strip-time:last-child {
+    margin-left: 0;
+}
+.editor-root .md-song-strip > .md-song-strip-time:only-of-type {
+    margin-left: auto;
+}
+
+/* Joined strip runs: adjacent [[Song]] lines fuse into one striped list. */
+.editor-root .md-song-strip--ja {
+    margin-top: -1px;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+.editor-root .md-song-strip--jb {
+    margin-bottom: 0;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+.editor-root .md-song-strip--alt {
+    background: color-mix(in srgb, var(--ed-bg-elev) 55%, var(--ed-bg));
+}
+/* Kill the editor line's own spacing around strip lines so runs sit flush. */
+.editor-root .cm-line:has(.md-song-strip) {
+    margin: 0;
+    padding: 0;
+    line-height: 1;
+}
