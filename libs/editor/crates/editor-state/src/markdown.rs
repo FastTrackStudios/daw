@@ -47,6 +47,16 @@ pub trait VaultLookup {
     fn lookup_song(&self, _name: &str) -> Option<VaultSongHit> {
         None
     }
+    /// The target note's frontmatter `type:` ("song", "setlist",
+    /// "contact", "event", …) — drives kind-specific wikilink rendering
+    /// (setlist cards, contact chips). `None` (default) = plain link.
+    fn lookup_note_kind(&self, _name: &str) -> Option<String> {
+        None
+    }
+    /// Setlist metadata when `name` resolves to a `type: setlist` note.
+    fn lookup_setlist(&self, _name: &str) -> Option<VaultSetlistHit> {
+        None
+    }
     /// Find a block by Obsidian short-id `Page#^id`.
     fn lookup_block_short(&self, page: &str, short_id: &str) -> Option<String>;
 }
@@ -60,6 +70,16 @@ pub struct VaultBlockHit {
 #[derive(Clone, Debug)]
 pub struct VaultPageHit {
     pub preview: String,
+}
+
+/// Setlist metadata for a wikilink that targets a `type: setlist` note —
+/// drives the inline SETLIST CARD (a standalone `[[Setlist]]` line embeds
+/// the set as a compact card).
+#[derive(Clone, Debug, PartialEq)]
+pub struct VaultSetlistHit {
+    pub title: String,
+    pub song_count: usize,
+    pub total_seconds: f64,
 }
 
 /// Song metadata for a wikilink that targets a `type: song` note —
@@ -231,6 +251,7 @@ pub fn live_preview_with_lookups(
 
     let t_inline = now_ms_native();
     let inline_decs_before = out.len();
+    emit_status_pills(&text, primary, &mut out);
     // Lazily computed on the first song strip (resolver scans are cheap
     // and cached, but most documents have no strips at all).
     let mut strip_runs: Option<std::collections::HashMap<usize, StripRunCtx>> = None;
@@ -469,6 +490,17 @@ pub fn live_preview_with_lookups(
                     let standalone = text[line_start..span.outer.start].trim().is_empty()
                         && text[span.outer.end..line_end].trim().is_empty();
                     if standalone {
+                        if let Some(setlist) =
+                            vault.and_then(|v| v.lookup_setlist(page_part))
+                        {
+                            out.push(Decoration::replace(span.outer.clone()));
+                            out.push(Decoration::widget(
+                                span.outer.start,
+                                setlist_card_html(page_part, &setlist),
+                            ));
+                            out.push(Decoration::atomic(span.outer.clone()));
+                            continue;
+                        }
                         if let Some(song) =
                             vault.and_then(|v| v.lookup_song(page_part))
                         {
@@ -499,7 +531,15 @@ pub fn live_preview_with_lookups(
                     let page_part = h.split(['#', '|']).next().unwrap_or(&h).trim();
                     let resolved = vault.is_some_and(|v| v.lookup_page(page_part).is_some());
                     if resolved {
-                        "md-wikilink"
+                        // Kind-specific styling: contact links render as
+                        // person chips wherever they appear (inline too).
+                        match vault
+                            .and_then(|v| v.lookup_note_kind(page_part))
+                            .as_deref()
+                        {
+                            Some("contact") => "md-wikilink md-contact-chip",
+                            _ => "md-wikilink",
+                        }
                     } else {
                         "md-wikilink md-wikilink-unresolved"
                     }
@@ -666,6 +706,69 @@ fn song_strip_runs(
         i = j + 1;
     }
     out
+}
+
+/// Assignment-status pills: a line ending in `(Confirmed)` / `(Pending)`
+/// / `(Declined)` (the event-planner roster convention:
+/// `Drums - [[Name]] (Pending)`) renders the token as a colored pill and
+/// hides the parens. Caret on the line keeps the raw text editable.
+fn emit_status_pills(text: &str, primary: Range, out: &mut Vec<DecoratedRange>) {
+    let mut pos = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let line_from = pos;
+        pos += line.len();
+        let trimmed_end = content.trim_end();
+        let Some(open_rel) = trimmed_end.rfind('(') else { continue };
+        let Some(inner) = trimmed_end[open_rel..]
+            .strip_prefix('(')
+            .and_then(|r| r.strip_suffix(')'))
+        else {
+            continue;
+        };
+        let status = match inner.trim().to_ascii_lowercase().as_str() {
+            "confirmed" => "md-status--confirmed",
+            "pending" => "md-status--pending",
+            "declined" => "md-status--declined",
+            _ => continue,
+        };
+        let line_to = line_from + content.len();
+        if cursor_touches(primary, line_from..line_to) {
+            continue;
+        }
+        let open_abs = line_from + open_rel;
+        let close_abs = line_from + trimmed_end.len() - 1;
+        let word_from = open_abs + 1;
+        let word_to = close_abs;
+        out.push(Decoration::replace(open_abs..word_from));
+        out.push(Decoration::mark(
+            word_from..word_to,
+            match status {
+                "md-status--confirmed" => "md-status-pill md-status--confirmed",
+                "md-status--pending" => "md-status-pill md-status--pending",
+                _ => "md-status-pill md-status--declined",
+            },
+        ));
+        out.push(Decoration::replace(word_to..close_abs + 1));
+    }
+}
+
+/// The inline setlist-card widget for a standalone `[[Setlist]]` wikilink
+/// — a compact embed: art tile · title · song count · duration. Clicking
+/// navigates to the setlist note (`data-href`).
+fn setlist_card_html(target: &str, setlist: &VaultSetlistHit) -> String {
+    let safe = html_escape(target);
+    let title = html_escape(&setlist.title);
+    let songs = setlist.song_count;
+    let mins = (setlist.total_seconds / 60.0).round() as u64;
+    let time = if mins > 0 {
+        format!(r#"<span class="md-setlist-card-time">{mins} min</span>"#)
+    } else {
+        String::new()
+    };
+    format!(
+        r#"<span class="md-setlist-card" data-href="{safe}"><span class="md-setlist-card-art">🎵</span><span class="md-setlist-card-titles"><span class="md-setlist-card-title">{title}</span><span class="md-setlist-card-sub">Setlist · {songs} songs</span></span>{time}<span class="md-setlist-card-open">Open ›</span></span>"#
+    )
 }
 
 /// The inline song-strip widget for a standalone `[[Song]]` wikilink.

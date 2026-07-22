@@ -1752,3 +1752,75 @@
 .editor-root .cm-line:has(.md-setlist-header) .editor-widget {
     display: block;
 }
+
+/* ── Setlist card ([[Setlist]] standalone line → compact embed) ─────── */
+.editor-root .md-setlist-card {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.4rem 0;
+    padding: 0.65rem 0.85rem;
+    border: 1px solid var(--ed-border);
+    border-radius: 10px;
+    background: var(--ed-bg-elev);
+    cursor: pointer;
+    user-select: none;
+}
+.editor-root .md-setlist-card:hover { border-color: var(--ed-accent); }
+.editor-root .md-setlist-card-art {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2.6rem; height: 2.6rem; flex: none; border-radius: 8px;
+    background: linear-gradient(135deg,
+        color-mix(in srgb, var(--ed-accent) 70%, transparent),
+        color-mix(in srgb, var(--ed-accent) 20%, transparent));
+}
+.editor-root .md-setlist-card-titles { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.editor-root .md-setlist-card-title { color: var(--ed-text); font-weight: 600; }
+.editor-root .md-setlist-card-sub { color: var(--ed-text-dim); font-size: 0.75rem; }
+.editor-root .md-setlist-card-time { color: var(--ed-text-dim); font-size: 0.8rem; flex: none; }
+.editor-root .md-setlist-card-open { color: var(--ed-accent); font-size: 0.85rem; flex: none; }
+.editor-root .cm-line:has(.md-setlist-card) .cm-widgetBuffer,
+.editor-root .cm-line:has(.md-setlist-card) br { display: none; }
+.editor-root .cm-line:has(.md-setlist-card) .editor-widget { display: block; }
+.editor-root .cm-line:has(.md-setlist-card) { line-height: 0; }
+.editor-root .cm-line:has(.md-setlist-card) .md-setlist-card { line-height: 1.4; }
+
+/* ── Contact chip ([[Person]] where target is type: contact) ────────── */
+.editor-root .md-contact-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.05rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid var(--ed-border);
+    background: color-mix(in srgb, var(--ed-wikilink) 12%, transparent);
+    color: var(--ed-text);
+    text-decoration: none;
+}
+.editor-root .md-contact-chip::before {
+    content: "";
+    width: 0.5rem; height: 0.5rem; border-radius: 999px;
+    background: var(--ed-wikilink);
+}
+
+/* ── Assignment status pills — (Confirmed) / (Pending) / (Declined) ── */
+.editor-root .md-status-pill {
+    padding: 0.05rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+}
+.editor-root .md-status--confirmed {
+    color: var(--ed-tag);
+    background: color-mix(in srgb, var(--ed-tag) 15%, transparent);
+}
+.editor-root .md-status--pending {
+    color: var(--ed-warn);
+    background: color-mix(in srgb, var(--ed-warn) 15%, transparent);
+}
+.editor-root .md-status--declined {
+    color: var(--ed-danger);
+    background: color-mix(in srgb, var(--ed-danger) 15%, transparent);
+}
