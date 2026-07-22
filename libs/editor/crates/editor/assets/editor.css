@@ -1585,18 +1585,25 @@
 .editor-root .md-song-strip:hover {
     border-color: var(--ed-accent);
 }
-.editor-root .md-song-strip-play {
+.editor-root .md-song-strip-num {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.7rem;
-    height: 1.7rem;
+    width: 1.6rem;
+    height: 1.6rem;
     flex: none;
-    border-radius: 999px;
-    background: var(--ed-accent);
-    color: var(--ed-bg);
-    font-size: 0.7rem;
+    color: var(--ed-text-dim);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
 }
+.editor-root .md-ss-play {
+    display: none;
+    width: 1rem;
+    height: 1rem;
+    color: var(--ed-accent);
+}
+.editor-root .md-song-strip:hover .md-ss-idx { display: none; }
+.editor-root .md-song-strip:hover .md-ss-play { display: inline; }
 .editor-root .md-song-strip-title {
     color: var(--ed-text);
     font-weight: 600;
