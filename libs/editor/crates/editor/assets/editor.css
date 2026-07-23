@@ -1722,6 +1722,23 @@
 .editor-root .md-setlist-playbtn:hover {
     filter: brightness(1.1);
 }
+.editor-root .md-setlist-openbtn {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    padding: 0.4rem 0.75rem;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--ed-text) 20%, transparent);
+    background: transparent;
+    color: var(--ed-text-dim);
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.editor-root .md-setlist-openbtn:hover {
+    background: color-mix(in srgb, var(--ed-text) 8%, transparent);
+    color: var(--ed-text);
+}
 
 /* Strip lines: kill the text line box's own leading so fused runs are
    actually flush (the strip span carries all visual height itself). */

@@ -1671,7 +1671,7 @@ fn scan_blocks(
                 out.push(Decoration::widget(
                     line_from,
                     format!(
-                        r#"<span class="md-setlist-header"><span class="md-setlist-art">🎵</span><span class="md-setlist-titles"><span class="md-setlist-title">{title}</span><span class="md-setlist-kind">Setlist</span></span><span class="md-setlist-playbtn" data-href="setlist-play:">▶</span></span>"#
+                        r#"<span class="md-setlist-header"><span class="md-setlist-art">🎵</span><span class="md-setlist-titles"><span class="md-setlist-title">{title}</span><span class="md-setlist-kind">Setlist</span></span><span class="md-setlist-playbtn" data-href="setlist-play:">▶</span><span class="md-setlist-openbtn" data-href="setlist-open:">Open</span></span>"#
                     ),
                 ));
                 out.push(Decoration::atomic(line_from..line_to));
