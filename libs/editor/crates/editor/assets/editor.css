@@ -1573,16 +1573,29 @@
 /* Streaming-player track row: [# / play] [art] [title / artist] [badge] [time].
    Borderless, hover-highlighted — the run of rows reads as one track list. */
 .editor-root .md-song-strip {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 0.75rem;
     margin: 0;
-    padding: 0.35rem 0.6rem;
+    padding: 0.4rem 0.55rem;
     border-radius: 7px;
     cursor: pointer;
     user-select: none;
     transition: background 0.12s ease;
 }
+/* Apple-Music-style inset divider between rows (not full-width — starts at
+   the text, past the art). Only on rows that have a row below them. */
+.editor-root .md-song-strip--jb::after {
+    content: "";
+    position: absolute;
+    left: 4.6rem;
+    right: 0.55rem;
+    bottom: 0;
+    height: 1px;
+    background: color-mix(in srgb, var(--ed-text) 12%, transparent);
+}
+.editor-root .md-song-strip:hover::after { opacity: 0; }
 .editor-root .md-song-strip:hover {
     background: color-mix(in srgb, var(--ed-text) 7%, transparent);
 }
@@ -1644,23 +1657,24 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
-.editor-root .md-song-strip-badge {
+/* "…" more-actions button, revealed on row hover (Apple-Music style). */
+.editor-root .md-ss-more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.8rem;
+    height: 1.8rem;
     flex: none;
-    border-radius: 999px;
-    padding: 0.05rem 0.5rem;
-    font-size: 0.62rem;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
+    border-radius: 6px;
     color: var(--ed-text-dim);
-    background: color-mix(in srgb, var(--ed-text) 8%, transparent);
+    opacity: 0;
+    transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
-.editor-root .md-song-strip-time {
-    flex: none;
-    width: 2.6rem;
-    text-align: right;
-    color: var(--ed-text-dim);
-    font-variant-numeric: tabular-nums;
-    font-size: 0.78rem;
+.editor-root .md-ss-more svg { width: 1.05rem; height: 1.05rem; }
+.editor-root .md-song-strip:hover .md-ss-more { opacity: 1; }
+.editor-root .md-ss-more:hover {
+    background: color-mix(in srgb, var(--ed-text) 12%, transparent);
+    color: var(--ed-text);
 }
 
 /* Joined strip runs sit flush (no borders now — the hover highlight carries

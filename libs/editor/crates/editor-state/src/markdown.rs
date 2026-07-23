@@ -928,19 +928,13 @@ fn setlist_card_html(target: &str, setlist: &VaultSetlistHit) -> String {
         .enumerate()
         .map(|(i, row)| {
             let link = html_escape(&row.link);
-            let artist = row
-                .artist
-                .as_deref()
-                .map(|a| format!(r#"<span class="md-song-strip-artist">{}</span>"#, html_escape(a)))
+            let (disp_title, disp_artist) = split_title_artist(&row.link, row.artist.as_deref());
+            let title = html_escape(&disp_title);
+            let artist = disp_artist
+                .map(|a| format!(r#"<span class="md-song-strip-artist">{}</span>"#, html_escape(&a)))
                 .unwrap_or_default();
-            let stems = if row.stem_count > 0 {
-                format!(r#"<span class="md-song-strip-badge">{} stems</span>"#, row.stem_count)
-            } else {
-                String::new()
-            };
-            let secs = row.duration_sec.max(0.0) as u64;
             let initial = html_escape(
-                &row.link.chars().next().unwrap_or('♪').to_uppercase().to_string(),
+                &disp_title.chars().next().unwrap_or('♪').to_uppercase().to_string(),
             );
             let mut cls = String::from("md-song-strip");
             if i > 0 {
@@ -953,10 +947,8 @@ fn setlist_card_html(target: &str, setlist: &VaultSetlistHit) -> String {
                 cls.push_str(" md-song-strip--alt");
             }
             format!(
-                r#"<span class="{cls}" data-href="{link}"><span class="md-song-strip-num" data-href="song-play:{link}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-ss-art">{initial}</span><span class="md-ss-titles"><span class="md-song-strip-title">{link}</span>{artist}</span>{stems}<span class="md-song-strip-time">{m}:{s:02}</span></span>"#,
+                r#"<span class="{cls}" data-href="{link}"><span class="md-song-strip-num" data-href="song-play:{link}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-ss-art">{initial}</span><span class="md-ss-titles"><span class="md-song-strip-title">{title}</span>{artist}</span><span class="md-ss-more" data-href="song-more:{link}"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg></span></span>"#,
                 idx = i + 1,
-                m = secs / 60,
-                s = secs % 60,
             )
         })
         .collect();
@@ -965,28 +957,33 @@ fn setlist_card_html(target: &str, setlist: &VaultSetlistHit) -> String {
     )
 }
 
+/// Split a `"Title - Artist"` display string into (title, artist). Falls back
+/// to `fallback` for the artist when there's no ` - ` separator, so the strip
+/// shows a clean title with the artist as a subtitle rather than repeating
+/// `"Song - Artist"` on the title line.
+fn split_title_artist(raw: &str, fallback: Option<&str>) -> (String, Option<String>) {
+    if let Some((t, a)) = raw.split_once(" - ") {
+        let a = a.trim();
+        (
+            t.trim().to_string(),
+            (!a.is_empty()).then(|| a.to_string()),
+        )
+    } else {
+        (raw.trim().to_string(), fallback.map(|s| s.to_string()))
+    }
+}
+
 /// The inline song-strip widget for a standalone `[[Song]]` wikilink.
 /// The whole strip navigates (`data-href` = the link target); the play
 /// control carries `data-href="song-play:<target>"` — the host's
 /// `on_link_click` intercepts the scheme and drives playback.
 fn song_strip_html(target: &str, song: &VaultSongHit, ctx: StripRunCtx) -> String {
     let safe = html_escape(target);
-    let title = html_escape(&song.title);
-    let artist = song
-        .artist
-        .as_deref()
-        .map(|a| format!(r#"<span class="md-song-strip-artist">{}</span>"#, html_escape(a)))
+    let (disp_title, disp_artist) = split_title_artist(&song.title, song.artist.as_deref());
+    let title = html_escape(&disp_title);
+    let artist = disp_artist
+        .map(|a| format!(r#"<span class="md-song-strip-artist">{}</span>"#, html_escape(&a)))
         .unwrap_or_default();
-    let stems = if song.stem_count > 0 {
-        format!(
-            r#"<span class="md-song-strip-badge">{} stems</span>"#,
-            song.stem_count
-        )
-    } else {
-        String::new()
-    };
-    let secs = song.duration_sec.max(0.0) as u64;
-    let time = format!("{}:{:02}", secs / 60, secs % 60);
     let mut cls = String::from("md-song-strip");
     if ctx.joined_above {
         cls.push_str(" md-song-strip--ja");
@@ -998,17 +995,10 @@ fn song_strip_html(target: &str, song: &VaultSongHit, ctx: StripRunCtx) -> Strin
         cls.push_str(" md-song-strip--alt");
     }
     let idx = ctx.index.max(1);
-    let initial = html_escape(
-        &song
-            .title
-            .chars()
-            .next()
-            .unwrap_or('♪')
-            .to_uppercase()
-            .to_string(),
-    );
+    let initial =
+        html_escape(&disp_title.chars().next().unwrap_or('♪').to_uppercase().to_string());
     format!(
-        r#"<span class="{cls}" data-href="{safe}"><span class="md-song-strip-num" data-href="song-play:{safe}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-ss-art">{initial}</span><span class="md-ss-titles"><span class="md-song-strip-title">{title}</span>{artist}</span>{stems}<span class="md-song-strip-time">{time}</span></span>"#
+        r#"<span class="{cls}" data-href="{safe}"><span class="md-song-strip-num" data-href="song-play:{safe}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-ss-art">{initial}</span><span class="md-ss-titles"><span class="md-song-strip-title">{title}</span>{artist}</span><span class="md-ss-more" data-href="song-more:{safe}"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg></span></span>"#
     )
 }
 
