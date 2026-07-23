@@ -1570,91 +1570,103 @@
 }
 
 /* ── Song strip (standalone [[Song]] wikilink → playable row) ───────── */
+/* Streaming-player track row: [# / play] [art] [title / artist] [badge] [time].
+   Borderless, hover-highlighted — the run of rows reads as one track list. */
 .editor-root .md-song-strip {
     display: flex;
     align-items: center;
-    gap: 0.65rem;
+    gap: 0.75rem;
     margin: 0;
-    padding: 0.55rem 0.75rem;
-    border: 1px solid var(--ed-border);
-    border-radius: 8px;
-    background: var(--ed-bg-elev);
+    padding: 0.35rem 0.6rem;
+    border-radius: 7px;
     cursor: pointer;
     user-select: none;
+    transition: background 0.12s ease;
 }
 .editor-root .md-song-strip:hover {
-    border-color: var(--ed-accent);
+    background: color-mix(in srgb, var(--ed-text) 7%, transparent);
 }
 .editor-root .md-song-strip-num {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 1.6rem;
-    height: 1.6rem;
+    width: 1.4rem;
     flex: none;
     color: var(--ed-text-dim);
     font-variant-numeric: tabular-nums;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
 }
 .editor-root .md-ss-play {
     display: none;
-    width: 1rem;
-    height: 1rem;
-    color: var(--ed-accent);
+    width: 0.9rem;
+    height: 0.9rem;
+    color: var(--ed-text);
 }
 .editor-root .md-song-strip:hover .md-ss-idx { display: none; }
 .editor-root .md-song-strip:hover .md-ss-play { display: inline; }
+.editor-root .md-ss-art {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.1rem;
+    height: 2.1rem;
+    flex: none;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--ed-bg);
+    background: linear-gradient(135deg,
+        color-mix(in srgb, var(--ed-accent) 80%, transparent),
+        color-mix(in srgb, var(--ed-accent) 35%, transparent));
+}
+.editor-root .md-ss-titles {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    flex: 1;
+    gap: 0.05rem;
+}
 .editor-root .md-song-strip-title {
     color: var(--ed-text);
     font-weight: 600;
+    font-size: 0.9rem;
+    line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 .editor-root .md-song-strip-artist {
     color: var(--ed-text-dim);
+    font-size: 0.72rem;
+    line-height: 1.2;
     white-space: nowrap;
-    flex: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .editor-root .md-song-strip-badge {
-    margin-left: auto;
     flex: none;
-    border: 1px solid var(--ed-border);
     border-radius: 999px;
     padding: 0.05rem 0.5rem;
-    font-size: 0.68rem;
+    font-size: 0.62rem;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
     color: var(--ed-text-dim);
+    background: color-mix(in srgb, var(--ed-text) 8%, transparent);
 }
 .editor-root .md-song-strip-time {
     flex: none;
+    width: 2.6rem;
+    text-align: right;
     color: var(--ed-text-dim);
     font-variant-numeric: tabular-nums;
-    font-size: 0.8rem;
-}
-.editor-root .md-song-strip-badge:first-of-type {
-    margin-left: auto;
-}
-.editor-root .md-song-strip-time:last-child {
-    margin-left: 0;
-}
-.editor-root .md-song-strip > .md-song-strip-time:only-of-type {
-    margin-left: auto;
+    font-size: 0.78rem;
 }
 
-/* Joined strip runs: adjacent [[Song]] lines fuse into one striped list. */
-.editor-root .md-song-strip--ja {
-    margin-top: -1px;
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
-}
-.editor-root .md-song-strip--jb {
-    margin-bottom: 0;
-    border-bottom-left-radius: 0;
-    border-bottom-right-radius: 0;
-}
-.editor-root .md-song-strip--alt {
-    background: color-mix(in srgb, var(--ed-bg-elev) 55%, var(--ed-bg));
-}
+/* Joined strip runs sit flush (no borders now — the hover highlight carries
+   the row). Kept as no-ops so the markup classes don't need changing. */
+.editor-root .md-song-strip--ja { margin-top: 0; }
+.editor-root .md-song-strip--jb { margin-bottom: 0; }
 /* Kill the editor line's own spacing around strip lines so runs sit flush. */
 .editor-root .cm-line:has(.md-song-strip) {
     margin: 0;
