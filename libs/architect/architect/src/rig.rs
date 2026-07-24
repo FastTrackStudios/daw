@@ -143,7 +143,16 @@ pub fn spawn_meter_pump<S: RigBackend>(name: &'static str, source: S) {
                     tick_no = tick_no.wrapping_add(1);
                     if tick_no.is_multiple_of(PORT_SCAN_TICKS) {
                         let now = sorted(source.midi_ports());
-                        if now != known_ports {
+                        // An EMPTY scan is a transient enumeration failure,
+                        // not "every keyboard was unplugged": with several
+                        // rigs in one process each opening a client to
+                        // enumerate, JACK/ALSA refuses one now and then.
+                        // Tearing down a live attachment on that reads as
+                        // "MIDI just stopped working". A real unplug still
+                        // resolves — the dead stream re-attaches on the next
+                        // non-empty scan.
+                        let transient = now.is_empty() && !known_ports.is_empty();
+                        if !transient && now != known_ports {
                             known_ports = now;
                             if running {
                                 source.on_midi_ports_changed(&known_ports);
