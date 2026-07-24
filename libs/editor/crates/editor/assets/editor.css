@@ -1578,7 +1578,7 @@
     align-items: center;
     gap: 0.75rem;
     margin: 0;
-    padding: 0.4rem 0.55rem;
+    padding: 0.55rem 0.55rem;
     border-radius: 7px;
     cursor: pointer;
     user-select: none;
@@ -1618,19 +1618,55 @@
 .editor-root .md-song-strip:hover .md-ss-idx { display: none; }
 .editor-root .md-song-strip:hover .md-ss-play { display: inline; }
 .editor-root .md-ss-art {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 2.1rem;
     height: 2.1rem;
     flex: none;
-    border-radius: 6px;
+    overflow: hidden;
+    border-radius: 4px;
     font-size: 0.85rem;
     font-weight: 700;
     color: var(--ed-bg);
     background: linear-gradient(135deg,
         color-mix(in srgb, var(--ed-accent) 80%, transparent),
         color-mix(in srgb, var(--ed-accent) 35%, transparent));
+}
+.editor-root .md-ss-art-i { line-height: 1; transition: opacity 0.15s ease; }
+/* Now-playing waveform over the artwork: a slight dark overlay + amplitude-
+   reactive bars. Shown only on the current (playing) row. */
+.editor-root .md-ss-eq {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 2px;
+    padding: 5px 4px;
+    background: rgba(0, 0, 0, 0.4);
+}
+.editor-root .md-song-strip--playing .md-ss-eq { display: flex; }
+.editor-root .md-song-strip--playing .md-ss-art-i { opacity: 0; }
+.editor-root .md-ss-eq i {
+    display: block;
+    width: 2.5px;
+    flex: none;
+    border-radius: 1px;
+    background: #fff;
+    /* base height tracks the total amplitude; the keyframe adds per-bar life */
+    height: calc(14% + var(--amp, 0) * 78%);
+    transform-origin: bottom;
+    animation: md-ss-eq-bounce 0.85s ease-in-out infinite;
+}
+.editor-root .md-ss-eq i:nth-child(1) { animation-delay: -0.05s; }
+.editor-root .md-ss-eq i:nth-child(2) { animation-delay: -0.48s; }
+.editor-root .md-ss-eq i:nth-child(3) { animation-delay: -0.22s; }
+.editor-root .md-ss-eq i:nth-child(4) { animation-delay: -0.66s; }
+@keyframes md-ss-eq-bounce {
+    0%, 100% { transform: scaleY(0.45); }
+    50% { transform: scaleY(1); }
 }
 .editor-root .md-ss-titles {
     display: flex;
@@ -1657,8 +1693,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
-/* "…" more-actions button, revealed on row hover (Apple-Music style). */
-.editor-root .md-ss-more {
+/* Trailing row actions: the "…" is always visible; the "open" (↗) is
+   revealed on row hover. */
+.editor-root .md-ss-more,
+.editor-root .md-ss-open {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1667,12 +1705,14 @@
     flex: none;
     border-radius: 6px;
     color: var(--ed-text-dim);
-    opacity: 0;
     transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
 }
 .editor-root .md-ss-more svg { width: 1.05rem; height: 1.05rem; }
-.editor-root .md-song-strip:hover .md-ss-more { opacity: 1; }
-.editor-root .md-ss-more:hover {
+.editor-root .md-ss-open svg { width: 0.95rem; height: 0.95rem; }
+.editor-root .md-ss-open { opacity: 0; }
+.editor-root .md-song-strip:hover .md-ss-open { opacity: 1; }
+.editor-root .md-ss-more:hover,
+.editor-root .md-ss-open:hover {
     background: color-mix(in srgb, var(--ed-text) 12%, transparent);
     color: var(--ed-text);
 }

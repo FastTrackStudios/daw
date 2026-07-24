@@ -947,7 +947,7 @@ fn setlist_card_html(target: &str, setlist: &VaultSetlistHit) -> String {
                 cls.push_str(" md-song-strip--alt");
             }
             format!(
-                r#"<span class="{cls}" data-href="{link}"><span class="md-song-strip-num" data-href="song-play:{link}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-ss-art">{initial}</span><span class="md-ss-titles"><span class="md-song-strip-title">{title}</span>{artist}</span><span class="md-ss-more" data-href="song-more:{link}"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg></span></span>"#,
+                r#"<span class="{cls}" data-href="song-play:{link}"><span class="md-song-strip-num" data-href="song-play:{link}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-ss-art"><span class="md-ss-art-i">{initial}</span><span class="md-ss-eq"><i></i><i></i><i></i><i></i></span></span><span class="md-ss-titles"><span class="md-song-strip-title">{title}</span>{artist}</span><span class="md-ss-open" data-href="{link}" title="Open song"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M9 7h8v8"/></svg></span><span class="md-ss-more" data-href="song-more:{link}"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg></span></span>"#,
                 idx = i + 1,
             )
         })
@@ -998,7 +998,7 @@ fn song_strip_html(target: &str, song: &VaultSongHit, ctx: StripRunCtx) -> Strin
     let initial =
         html_escape(&disp_title.chars().next().unwrap_or('♪').to_uppercase().to_string());
     format!(
-        r#"<span class="{cls}" data-href="{safe}"><span class="md-song-strip-num" data-href="song-play:{safe}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-ss-art">{initial}</span><span class="md-ss-titles"><span class="md-song-strip-title">{title}</span>{artist}</span><span class="md-ss-more" data-href="song-more:{safe}"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg></span></span>"#
+        r#"<span class="{cls}" data-href="song-play:{safe}"><span class="md-song-strip-num" data-href="song-play:{safe}"><span class="md-ss-idx">{idx}</span><svg class="md-ss-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></span><span class="md-ss-art"><span class="md-ss-art-i">{initial}</span><span class="md-ss-eq"><i></i><i></i><i></i><i></i></span></span><span class="md-ss-titles"><span class="md-song-strip-title">{title}</span>{artist}</span><span class="md-ss-open" data-href="{safe}" title="Open song"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M9 7h8v8"/></svg></span><span class="md-ss-more" data-href="song-more:{safe}"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg></span></span>"#
     )
 }
 
