@@ -1734,7 +1734,7 @@
     display: flex;
     align-items: center;
     gap: 1rem;
-    margin: 0.25rem 0 1rem;
+    margin: 1.25rem 0 1rem;
     user-select: none;
 }
 .editor-root .md-setlist-art {
