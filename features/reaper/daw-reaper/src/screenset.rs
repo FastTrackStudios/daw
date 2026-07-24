@@ -8,6 +8,7 @@ use daw_proto::{
     ScreensetRect, ScreensetResult, ScreensetScope, ScreensetSelection, ScreensetSummary,
     ScreensetTrackVisibility, ScreensetWindow, Screensets,
 };
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 use display_info::DisplayInfo;
 use reaper_high::Reaper;
 use reaper_low::raw;
@@ -157,6 +158,7 @@ fn save_screenset_immediate(
 /// events. We can't trust the OS-assigned monitor index because adding /
 /// removing displays renumbers them. Combining the panel name with its
 /// resolution is good enough for the laptop ↔ multi-monitor switch case.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn monitor_id(name: &str, width: u32, height: u32) -> String {
     let trimmed = name.trim();
     let safe = if trimmed.is_empty() {
@@ -172,6 +174,7 @@ fn monitor_id(name: &str, width: u32, height: u32) -> String {
 /// `display-info` is cross-platform (Windows / macOS / Linux X11+Wayland).
 /// On a host with no displays — e.g. headless CI — we return an empty
 /// vec rather than failing, so the screenset itself still saves.
+#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
 fn capture_monitors() -> Vec<ScreensetMonitor> {
     let displays = match DisplayInfo::all() {
         Ok(displays) => displays,
@@ -193,6 +196,13 @@ fn capture_monitors() -> Vec<ScreensetMonitor> {
             primary: d.is_primary,
         })
         .collect()
+}
+
+/// Mobile targets have no display-info backend (its wayland stack does
+/// not even build there); an empty topology keeps screenset saves working.
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+fn capture_monitors() -> Vec<ScreensetMonitor> {
+    Vec::new()
 }
 
 /// Read the bounds of an HWND via REAPER's SWELL-compatible `GetWindowRect`.

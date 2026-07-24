@@ -51,13 +51,17 @@ daw-control = { workspace = true }
 eyre.workspace = true
 facet-json.workspace = true
 
-# Cross-platform monitor topology enumeration for screenset capture.
-display-info = "0.5"
-
 # Typed SWELL Window/Hwnd wrappers from FTS reaper-lib. Used by the
 # window-geometry helpers (nudge / resize / center) so our action set
 # rides on the same primitives the rest of FTS's reaper-side UIs use.
 swell-ui.workspace = true
+
+# Cross-platform monitor topology enumeration for screenset capture.
+# Desktop-only: display-info 0.5 declares its smithay/wayland stack
+# without target gating, which drags (and breaks) wayland on iOS
+# builds — and screensets are a desktop-REAPER concern anyway.
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+display-info = "0.5"
 
 [dev-dependencies]
 daw-control = { workspace = true }
