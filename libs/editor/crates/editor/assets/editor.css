@@ -1893,6 +1893,63 @@
     background: var(--ed-wikilink);
 }
 
+/* ── Scripture chip + verse card ([[John 3:16]]) ───────────────────── */
+.editor-root .md-scripture-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.05rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid var(--ed-border);
+    background: color-mix(in srgb, var(--ed-tag) 12%, transparent);
+    color: var(--ed-text);
+    text-decoration: none;
+}
+.editor-root .md-scripture-chip::before {
+    content: "📖";
+    font-size: 0.72em;
+    line-height: 1;
+}
+.editor-root .md-scripture-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0.25rem 0;
+    padding: 0.65rem 0.9rem;
+    border-left: 3px solid var(--ed-tag);
+    border-radius: 0.4rem;
+    background: color-mix(in srgb, var(--ed-tag) 7%, transparent);
+    cursor: pointer;
+}
+.editor-root .md-scripture-card-text {
+    font-style: italic;
+    line-height: 1.55;
+}
+.editor-root .md-scripture-card-ref {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 0.78rem;
+}
+.editor-root .md-scripture-card-display {
+    font-weight: 600;
+    color: var(--ed-tag);
+}
+.editor-root .md-scripture-card-tx {
+    color: var(--ed-muted, var(--ed-text));
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.7rem;
+}
+.editor-root .md-scripture-card-open {
+    margin-left: auto;
+    opacity: 0.6;
+}
+.editor-root .md-scripture-card:hover .md-scripture-card-open { opacity: 1; }
+.editor-root .cm-line:has(.md-scripture-card) { line-height: 0; }
+.editor-root .cm-line:has(.md-scripture-card) .md-scripture-card { line-height: 1.4; }
+
 /* ── Assignment status pills — (Confirmed) / (Pending) / (Declined) ── */
 .editor-root .md-status-pill {
     padding: 0.05rem 0.55rem;
