@@ -39,6 +39,17 @@ use architect_atom::{Store, StoreEntity};
 /// Subscribe to a server stream for the lifetime of the calling
 /// component, handing each received event to `on_event`.
 ///
+/// **The subscription heals itself.** A stream ends for reasons that are not
+/// the caller's fault and are not permanent: the server restarts, a hub drops
+/// a subscriber that fell behind a burst, a socket blips. Without a retry the
+/// component keeps rendering its last-known state — a UI that looks alive and
+/// is deaf, which is the worst way for a live rig to fail, because you find
+/// out when a control does nothing mid-song. So an ended subscription is
+/// re-established after a backoff: ~400 ms when the stream had been running
+/// (a restart, most likely) and 1s doubling to 8s when it never established
+/// (nothing is listening yet), so a dead engine is waited for rather than
+/// hammered, and the moment it comes back the UI is live again.
+///
 /// `subscribe` is given the fresh [`vox::Tx`] to pass into the service's
 /// subscribe method. vox scopes channels to their request, so subscribe
 /// hosts hold the call **in flight** for the life of the subscription —
@@ -56,7 +67,13 @@ where
     Fut: Future<Output = bool> + 'static,
     A: Fn(Ev) + Clone + 'static,
 {
+    // Bumped when a subscription ends: the resource reads it, so writing it
+    // re-runs this hook and subscribes again.
+    let mut generation = use_signal(|| 0u32);
+    // Consecutive failures to establish — the backoff's only state.
+    let mut misses = use_signal(|| 0u32);
     use_resource(move || {
+        let _ = generation();
         let (tx, mut rx) = vox::channel::<Ev>();
         let call = subscribe(tx);
         let on_event = on_event.clone();
@@ -82,15 +99,32 @@ where
             // server error, or server-side stream end) — stop either way.
             let mut call = core::pin::pin!(call);
             let mut pump = core::pin::pin!(pump);
-            core::future::poll_fn(move |cx| {
+            // `Some(established)` when the call resolved, `None` when the pump
+            // ended first — either way the subscription is over, and whether
+            // it ever established decides how long to wait before retrying.
+            let outcome = core::future::poll_fn(move |cx| {
                 use core::future::Future;
                 use core::task::Poll;
-                if call.as_mut().poll(cx).is_ready() {
-                    return Poll::Ready(());
+                if let Poll::Ready(established) = call.as_mut().poll(cx) {
+                    return Poll::Ready(Some(established));
                 }
-                pump.as_mut().poll(cx)
+                pump.as_mut().poll(cx).map(|()| None)
             })
             .await;
+
+            // A pump that ended had events flowing, so treat it as a live
+            // stream that stopped rather than one that never started.
+            let was_live = !matches!(outcome, Some(false));
+            let wait_ms = if was_live {
+                misses.set(0);
+                400
+            } else {
+                let n = *misses.peek();
+                misses.set((n + 1).min(4));
+                1000u64 << n.min(3)
+            };
+            crate::platform::sleep(core::time::Duration::from_millis(wait_ms)).await;
+            generation += 1;
         }
     });
 }
