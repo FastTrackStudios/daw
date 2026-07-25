@@ -34,20 +34,15 @@ use crate::sections::SectionType;
 use keyflow_syntax::parsing::Lexer;
 
 /// How chord roots are spelled for display.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum NotationSystem {
     /// Letter chords spelled for the effective key (`G C D Em`).
+    #[default]
     Letters,
     /// Nashville numbers — scale degree in the effective key (`1 4 5 6m`).
     Nashville,
     /// Roman numerals — degree, case by quality (`I IV V vi`, `vii°`).
     Roman,
-}
-
-impl Default for NotationSystem {
-    fn default() -> Self {
-        Self::Letters
-    }
 }
 
 /// A non-destructive display transform over a chart.

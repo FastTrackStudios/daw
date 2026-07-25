@@ -791,7 +791,8 @@ fn role_icon_svg(kind: &str) -> String {
         "bulb" => r#"<path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/>"#,
         "monitor" => r#"<rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/>"#,
         "video" => r#"<path d="m16 13 5.2 3.5a.5.5 0 0 0 .8-.4V7.9a.5.5 0 0 0-.8-.4L16 11"/><rect x="2" y="6" width="14" height="12" rx="2"/>"#,
-        "music" | _ => r#"<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>"#,
+        // "music" and anything unrecognized.
+        _ => r#"<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>"#,
     };
     format!(
         r#"<svg class="md-role-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{body}</svg>"#
@@ -859,8 +860,7 @@ fn emit_roster_rows(
         // Parse the people list: repeated `[[Name]]` + optional `(status)`.
         let mut rest = &t[dash + 3..];
         let mut people: Vec<(String, &'static str, &'static str, &'static str)> = Vec::new();
-        loop {
-            let Some(open) = rest.find("[[") else { break };
+        while let Some(open) = rest.find("[[") {
             let Some(close_rel) = rest[open..].find("]]") else { break };
             let name = rest[open + 2..open + close_rel].trim();
             let name = name.split(['#', '|']).next().unwrap_or(name).trim();
