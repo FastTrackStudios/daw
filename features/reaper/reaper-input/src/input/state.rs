@@ -40,7 +40,7 @@ pub enum Context {
 /// A single keypress in a sequence
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyPress {
-    /// The key character (e.g., 't', 'L', '<ESC>')
+    /// The key character (e.g. `t`, `L`, `<ESC>`)
     pub key: String,
 
     /// Current context

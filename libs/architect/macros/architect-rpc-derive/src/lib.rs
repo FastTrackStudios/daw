@@ -14,7 +14,7 @@
 //!   `#[vox::service]` directly; `<T>Host` is a thin newtype.
 //! - **Mixed**    → sync methods bridged, async methods pass through.
 //!
-//! See `docs/content/reference/_index.md` ("#[architect::rpc] mechanics")
+//! See `docs/content/reference/_index.md` (the "`#[architect::rpc]` mechanics" section)
 //! for the object-safety rules and argument-rewriting table.
 
 use proc_macro::TokenStream;

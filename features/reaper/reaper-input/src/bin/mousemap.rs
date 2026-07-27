@@ -12,7 +12,7 @@
 //!   --all              Include Win/Super combos (mm_8-15). Default: mm_0-7 only.
 //!   --table            Print a human-readable table instead of styx.
 //!   --settings-only    Emit just the `settings (...)` block (no name/description header).
-//!   -o, --out <FILE>   Write to <FILE> instead of stdout.
+//!   -o, --out `<FILE>`   Write to `<FILE>` instead of stdout.
 //!   -h, --help         Show this help.
 //!
 //! REAPER modifier index → mods: bit0=Shift bit1=Ctrl/Cmd bit2=Alt/Opt bit3=Win/Super.

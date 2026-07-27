@@ -1,7 +1,7 @@
 //! Dynamic and intensity markings
 //!
 //! Provides a system for adding dynamic/intensity cues to the chart
-//! using angle bracket notation (e.g., <Build>, <Down>, <Go Crazy>, <Soft>)
+//! using angle bracket notation (e.g., `<Build>`, `<Down>`, `<Go Crazy>`, `<Soft>`)
 //!
 //! Unlike traditional dynamics (pp, mp, mf, ff), these are free-form
 //! text descriptions that communicate energy and intensity to performers.

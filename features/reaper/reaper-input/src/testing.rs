@@ -114,7 +114,7 @@ pub fn inject_event(event: InputEvent) -> Vec<InputCommand> {
     proc.process_event(event)
 }
 
-/// Inject a key sequence string (e.g., "gg", "<C-s>", "<S-Tab>").
+/// Inject a key sequence string (e.g. `gg`, `<C-s>`, `<S-Tab>`).
 ///
 /// Parses the sequence into individual key events and injects them one at a time.
 /// Returns the commands from the LAST key in the sequence (which is typically

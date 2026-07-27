@@ -9,7 +9,7 @@
 //! Unlike the offline path there is no look-ahead: a block's gain applies to the
 //! *following* block, i.e. one block (~10 ms) of latency in the ride envelope,
 //! which is inaudible for level moves. The rider allocates only in
-//! [`VocalRider::new`]/[`VocalRider::set_sample_rate`]; `process` is alloc-free.
+//! [`VocalRider::new`]; `process` is alloc-free.
 
 use audiocore_dsp::db::{db_to_linear, linear_to_db};
 

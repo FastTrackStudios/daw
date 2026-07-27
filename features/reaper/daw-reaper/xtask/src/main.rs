@@ -9,7 +9,7 @@
 //!
 //! Usage:
 //!   cargo run -p daw-reaper-xtask                 # full suite, headless
-//!   cargo run -p daw-reaper-xtask <filter>        # tests matching filter
+//!   cargo run -p daw-reaper-xtask `<filter>`        # tests matching filter
 //!   FTS_KEEP_OPEN=1 cargo run -p daw-reaper-xtask # keep REAPER open after
 //!
 //! Invoked via `just daw-reaper-test` (sets FTS_REAPER_EXECUTABLE to the

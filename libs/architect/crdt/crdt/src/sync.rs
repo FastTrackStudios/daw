@@ -286,7 +286,7 @@ fn should_compact(count: &std::sync::atomic::AtomicU32, every: u32) -> bool {
 
 /// One attached sync session, produced by [`DocSyncHost::attach`] and
 /// driven to completion by [`SyncSession::pump`]. Owns the session's
-/// [`SessionGuard`], so the session is counted from the attach (inside
+/// `SessionGuard`, so the session is counted from the attach (inside
 /// whatever lock the caller holds — see
 /// [`DocRegistry`](crate::registry::DocRegistry)) until the pump ends.
 #[cfg(not(target_arch = "wasm32"))]

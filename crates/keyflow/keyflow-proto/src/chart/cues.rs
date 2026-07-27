@@ -121,7 +121,7 @@ impl TextCue {
 
     /// Parse a text cue from a line starting with @
     ///
-    /// Format: @<group> "<text>" or @<group>:<beat> "<text>"
+    /// Format: @`<group>` "`<text>`" or @`<group>`:`<beat>` "`<text>`"
     /// Examples:
     /// - @keys "synth here"
     /// - @keys:2 "hit on beat 2"

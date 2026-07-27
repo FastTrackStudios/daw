@@ -57,7 +57,7 @@ impl ChordFamily {
     }
 
     /// Parse a chord family (seventh type) from tokens
-    /// Returns (Option<family>, tokens_consumed)
+    /// Returns (Option`<family>`, tokens_consumed)
     ///
     /// Handles: maj7, M7, Maj7, ma7, 7, m7, mM7, mMaj7, ø7, dim7, o7, etc.
     ///

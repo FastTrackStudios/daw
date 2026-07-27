@@ -376,7 +376,7 @@ pub struct BindingEntry {
     pub modifiers: Modifiers,
     /// Which .styx file this binding comes from (for editing).
     pub source_file: Option<String>,
-    /// The raw keys string from the styx file (e.g., "<C-s>", "h").
+    /// The raw keys string from the styx file (e.g. `<C-s>`, `h`).
     pub raw_keys: Option<String>,
 }
 
@@ -672,7 +672,7 @@ fn parse_first_key(keys: &str) -> Option<KeyCode> {
     }
 }
 
-/// Build a map from key label → Vec<KeyBindingInfo> for key cap coloring.
+/// Build a map from key label → `Vec<KeyBindingInfo>` for key cap coloring.
 pub fn bindings_by_key(bindings: &[KeyBindingInfo]) -> HashMap<String, Vec<KeyBindingInfo>> {
     let mut map: HashMap<String, Vec<KeyBindingInfo>> = HashMap::new();
     for binding in bindings {

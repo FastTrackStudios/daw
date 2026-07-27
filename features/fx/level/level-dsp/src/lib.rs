@@ -4,7 +4,7 @@
 //! it *rides* and *cleans* a vocal rather than tuning it. The crate is built
 //! from one shared analysis core reused two ways, per the "both models" design:
 //!
-//! - **Offline** ([`analyze`], [`render_gain_envelope`]) — Melodyne/macro-style:
+//! - **Offline** ([`fn@analyze`], [`render_gain_envelope`]) — Melodyne/macro-style:
 //!   analyse a whole take, classify + segment it, and render a smoothed volume
 //!   envelope the DAW can drop onto an automation lane or clip-gain. Sees the
 //!   whole signal, so it can pick an adaptive silence floor and auto-target.
@@ -126,7 +126,7 @@ impl VocalLeveler {
     }
 
     /// Refine the adaptive silence floor for the spectrum-aware stages (e.g.
-    /// after an offline [`analyze`] pass over the same source).
+    /// after an offline [`fn@analyze`] pass over the same source).
     pub fn set_silence_db(&mut self, db: f64) {
         if let Some(r) = &mut self.rider {
             r.set_silence_db(db);

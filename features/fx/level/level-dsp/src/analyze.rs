@@ -3,7 +3,7 @@
 //! This is the Melodyne/macro-style path: hand it the entire mono buffer of a
 //! take, and it returns a per-block analysis plus a smoothed gain envelope that
 //! rides tonal material toward a target level. Callers turn the envelope into a
-//! DAW volume automation lane or clip-gain (the [`daw`] layer owns that
+//! DAW volume automation lane or clip-gain (the `daw` layer owns that
 //! mapping). Because it sees the whole signal it can compute an adaptive silence
 //! floor and an auto-target — things the realtime [`crate::VocalRider`] must
 //! approximate.

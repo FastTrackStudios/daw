@@ -23,7 +23,7 @@ impl SectionNumberer {
 
     /// Process a section and assign appropriate numbering
     ///
-    /// Returns a tuple: (Section, Option<Section>) where the second element is
+    /// Returns a tuple: (Section, Option`<Section>`) where the second element is
     /// a retroactively updated previous section (if needed for split letter assignment)
     pub fn process_section(
         &mut self,

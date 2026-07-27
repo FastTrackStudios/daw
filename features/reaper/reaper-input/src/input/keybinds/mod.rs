@@ -57,7 +57,7 @@ pub use input_config_proto::KeybindContext;
 /// A single keybinding definition
 #[derive(Debug, Clone, Facet)]
 pub struct Keybind {
-    /// Key sequence (e.g., "g", "gg", "<C-s>", "<S-Tab>")
+    /// Key sequence (e.g. `g`, `gg`, `<C-s>`, `<S-Tab>`)
     pub keys: String,
 
     /// Action command ID to execute (e.g., "FTS_TEMPO_MOVE_MEASURE_GRID_TO_MOUSE" or "40044")
@@ -119,7 +119,7 @@ pub struct MouseModifier {
     /// The context where this modifier applies
     pub context: MouseModifierContext,
 
-    /// Modifiers required (e.g., "<C->" for Ctrl+click, "" for no modifiers)
+    /// Modifiers required (e.g. `<C->` for Ctrl+click, empty for none)
     pub modifiers: String,
 
     /// Action command ID or behavior to execute
@@ -167,7 +167,7 @@ pub enum WheelDirection {
 /// A mouse wheel binding
 #[derive(Debug, Clone, Facet)]
 pub struct WheelBind {
-    /// Modifiers required (e.g., "<C->" for Ctrl+wheel, "" for no modifiers)
+    /// Modifiers required (e.g. `<C->` for Ctrl+wheel, empty for none)
     pub modifiers: String,
 
     /// Action command ID to execute

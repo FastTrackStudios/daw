@@ -84,7 +84,7 @@ impl Alteration {
     }
 
     /// Parse alterations from tokens (inside parentheses or standalone)
-    /// Returns (Vec<Alteration>, tokens_consumed)
+    /// Returns (Vec`<Alteration>`, tokens_consumed)
     ///
     /// Handles: b5, #5, b9, #9, #11, b13
     /// Alterations modify the expected interval for a degree

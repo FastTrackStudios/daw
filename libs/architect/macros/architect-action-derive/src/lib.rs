@@ -6,7 +6,7 @@
 //! needs a stable id, a human description, and a place in a menu/CLI tree
 //! (category + group). REAPER's named-command registry is the motivating
 //! backend, but this crate has no REAPER awareness at all — that's the
-//! whole point of the [`architect::action::ActionBackend`] seam.
+//! whole point of the `architect::action::ActionBackend` seam.
 //!
 //! ```ignore
 //! #[architect::actions(namespace = "SESSION")]
@@ -24,7 +24,7 @@
 //! - one `pub const <METHOD_SCREAMING>: ActionMeta` per `#[action(...)]` method
 //! - `pub struct <Trait>Actions;` with `<Trait>Actions::all() -> &'static [ActionMeta]`
 //! - `pub fn register_<trait_snake>_actions(backend, imp: Arc<dyn Trait + Send + Sync>)`
-//!   — wires every action's handler through the given [`architect::action::ActionBackend`]
+//!   — wires every action's handler through the given `architect::action::ActionBackend`
 //!
 //! Deliberately narrower than `#[architect::rpc]` for v1: action methods
 //! must be `fn name(&self)` — no other params, no return value. REAPER
