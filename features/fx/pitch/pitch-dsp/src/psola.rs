@@ -367,6 +367,7 @@ mod tests {
     }
 
     /// Measure pitch using YIN CMND over a large window.
+    #[allow(dead_code)]
     fn measure_pitch(signal: &[f64], sample_rate: f64) -> f64 {
         let min_period = (sample_rate / 2000.0) as usize;
         let max_period = (sample_rate / 30.0) as usize;

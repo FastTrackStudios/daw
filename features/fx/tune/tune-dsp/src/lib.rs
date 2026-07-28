@@ -19,6 +19,8 @@ pub mod correct;
 pub mod detect;
 pub mod dna;
 pub mod model;
+#[cfg(feature = "world")]
+pub mod render;
 pub mod note;
 pub mod tracker;
 
