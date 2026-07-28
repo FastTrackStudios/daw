@@ -33,7 +33,7 @@ use daw_module::{ActionDef, DockPosition, PanelComponent, PanelDef, PanelRendere
 use daw_reaper_dioxus::prelude::*;
 
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
-const FTS_THEME_CSS: &str = include_str!("../assets/fts-theme.css");
+const FTS_THEME_CSS: &str = include_str!("../../../../libs/fts-ui/fts-ui/assets/fts-theme.css");
 
 const BLITZ_FIXES: &str = r#"
 input, textarea, select, button { cursor: auto !important; }

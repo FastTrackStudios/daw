@@ -18,7 +18,7 @@ use peniko::{Color as PColor, Fill};
 pub mod scenes;
 
 const TAILWIND_CSS: &str = include_str!("../../../../apps/extensions/reaper-fts-extensions/assets/tailwind.css");
-const FTS_THEME_CSS: &str = include_str!("../../../../apps/extensions/reaper-fts-extensions/assets/fts-theme.css");
+const FTS_THEME_CSS: &str = include_str!("../../fts-ui/assets/fts-theme.css");
 const COLOR_SCHEME_LIGHT: &str = ":root { color-scheme: light; }";
 
 /// Scene descriptor — pairs a scene id with the component that paints it.
