@@ -20,6 +20,9 @@ pub struct Point {
     pub tension: f64,
     /// Curve type for the segment starting at this point.
     pub curve_type: CurveType,
+    /// Crossing this point hard-clears the modulated target's tail
+    /// (the REEV-R reverb trick: rhythmic wash kills).
+    pub clear_tails: bool,
 }
 
 impl Point {
@@ -30,6 +33,7 @@ impl Point {
             y,
             tension: 0.0,
             curve_type: CurveType::Curve,
+            clear_tails: false,
         }
     }
 }
@@ -49,6 +53,7 @@ struct Segment {
 ///
 /// Points are stored sorted by x. Segments are rebuilt when points change.
 /// Evaluation uses binary search for O(log n) lookup.
+#[derive(Debug, Clone)]
 pub struct Pattern {
     points: Vec<Point>,
     segments: Vec<Segment>,
@@ -86,6 +91,7 @@ impl Pattern {
             y: 1.0,
             tension: 0.0,
             curve_type: CurveType::Curve,
+            clear_tails: false,
         });
         p.add_point(Point {
             id: 0,
@@ -93,6 +99,7 @@ impl Pattern {
             y: 0.0,
             tension: 0.0,
             curve_type: CurveType::Curve,
+            clear_tails: false,
         });
         p
     }
@@ -106,6 +113,7 @@ impl Pattern {
             y: 0.0,
             tension: 0.0,
             curve_type: CurveType::HalfSine,
+            clear_tails: false,
         });
         p.add_point(Point {
             id: 0,
@@ -113,6 +121,7 @@ impl Pattern {
             y: 1.0,
             tension: 0.0,
             curve_type: CurveType::HalfSine,
+            clear_tails: false,
         });
         p.add_point(Point {
             id: 0,
@@ -120,6 +129,7 @@ impl Pattern {
             y: 0.0,
             tension: 0.0,
             curve_type: CurveType::HalfSine,
+            clear_tails: false,
         });
         p
     }
@@ -310,6 +320,23 @@ impl Pattern {
     /// Transform all points so the average Y matches `target_y`.
     ///
     /// Used by filtr/reevr to link a knob (e.g., cutoff) to the pattern center.
+    /// Whether a `clear_tails` point lies in the phase interval
+    /// (prev, now] (wrap-aware — patterns cycle).
+    pub fn clear_crossed(&self, prev_phase: f64, now_phase: f64) -> bool {
+        let p0 = prev_phase.rem_euclid(1.0);
+        let p1 = now_phase.rem_euclid(1.0);
+        self.points.iter().any(|p| {
+            if !p.clear_tails {
+                return false;
+            }
+            if p0 <= p1 {
+                p.x > p0 && p.x <= p1
+            } else {
+                p.x > p0 || p.x <= p1
+            }
+        })
+    }
+
     pub fn transform(&mut self, target_y: f64) {
         if self.points.is_empty() {
             return;
@@ -349,6 +376,7 @@ impl Pattern {
                 y: p.y,
                 tension: p.tension,
                 curve_type: p.curve_type,
+                clear_tails: false,
             });
             self.next_id += 1;
         }
@@ -359,6 +387,7 @@ impl Pattern {
                 y: p.y,
                 tension: p.tension,
                 curve_type: p.curve_type,
+                clear_tails: false,
             });
             self.next_id += 1;
         }
@@ -497,6 +526,7 @@ mod tests {
             y: 0.3,
             tension: 0.0,
             curve_type: CurveType::Curve,
+            clear_tails: false,
         });
         p.add_point(Point {
             id: 0,
@@ -504,6 +534,7 @@ mod tests {
             y: 0.7,
             tension: 0.0,
             curve_type: CurveType::Curve,
+            clear_tails: false,
         });
         // Shift center from 0.5 to 0.6
         p.transform(0.6);

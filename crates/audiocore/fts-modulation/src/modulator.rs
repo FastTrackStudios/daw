@@ -267,6 +267,7 @@ mod tests {
             y: 1.0,
             tension: 0.0,
             curve_type: CurveType::Curve,
+            clear_tails: false,
         });
         m.patterns.get_mut(0).add_point(Point {
             id: 0,
@@ -274,6 +275,7 @@ mod tests {
             y: 0.0,
             tension: 0.0,
             curve_type: CurveType::Curve,
+            clear_tails: false,
         });
         m.patterns.set_active(0);
 
@@ -298,6 +300,7 @@ mod tests {
             y: 0.0,
             tension: 0.0,
             curve_type: CurveType::Hold,
+            clear_tails: false,
         });
         m.patterns.get_mut(0).add_point(Point {
             id: 0,
@@ -305,6 +308,7 @@ mod tests {
             y: 0.0,
             tension: 0.0,
             curve_type: CurveType::Hold,
+            clear_tails: false,
         });
         m.patterns.set_active(0);
         m.smoother.set_params(0.0, 0.0, SR);
@@ -329,6 +333,7 @@ mod tests {
             y: 1.0,
             tension: 0.0,
             curve_type: CurveType::Hold,
+            clear_tails: false,
         });
         m.patterns.get_mut(0).add_point(Point {
             id: 0,
@@ -336,6 +341,7 @@ mod tests {
             y: 1.0,
             tension: 0.0,
             curve_type: CurveType::Hold,
+            clear_tails: false,
         });
         m.patterns.set_active(0);
         m.smoother.set_params(0.0, 0.0, SR);
@@ -382,6 +388,7 @@ mod tests {
             y: 0.0,
             tension: 0.0,
             curve_type: CurveType::Curve,
+            clear_tails: false,
         });
         m.patterns.get_mut(0).add_point(Point {
             id: 0,
@@ -389,6 +396,7 @@ mod tests {
             y: 1.0,
             tension: 0.0,
             curve_type: CurveType::Curve,
+            clear_tails: false,
         });
         m.patterns.get_mut(0).add_point(Point {
             id: 0,
@@ -396,6 +404,7 @@ mod tests {
             y: 0.0,
             tension: 0.0,
             curve_type: CurveType::Curve,
+            clear_tails: false,
         });
         m.patterns.set_active(0);
 
