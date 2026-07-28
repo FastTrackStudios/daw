@@ -29,3 +29,9 @@ pub mod smoother;
 pub mod tempo;
 pub mod transient;
 pub mod trigger;
+
+pub use modulator::{DualModulator, Modulator};
+pub use pattern::{Pattern, PatternBank, Point};
+pub use tempo::TransportInfo;
+pub use curves::CurveType;
+pub use trigger::{TriggerEngine, TriggerMode};
