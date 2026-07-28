@@ -53,6 +53,7 @@ struct Segment {
 ///
 /// Points are stored sorted by x. Segments are rebuilt when points change.
 /// Evaluation uses binary search for O(log n) lookup.
+#[derive(Debug, Clone)]
 pub struct Pattern {
     points: Vec<Point>,
     segments: Vec<Segment>,
