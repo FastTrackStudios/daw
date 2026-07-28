@@ -17,6 +17,7 @@ pub mod envelope;
 pub mod gain_curve;
 pub mod grain_pitch;
 pub mod lfo;
+pub mod mseg;
 pub mod loudness;
 pub mod note_sync;
 pub mod one_pole;
