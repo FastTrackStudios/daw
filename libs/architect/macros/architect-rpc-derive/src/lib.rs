@@ -412,6 +412,8 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         }
     };
 
+    let direct_view = emit_direct_view(&trait_item, vis, trait_name, ctx);
+
     Ok(quote! {
         #user_trait
         #mirror_trait
@@ -423,10 +425,108 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         #stream_block
         #sync_client
         #scoped_client
+        #direct_view
         #ops_block
         #bare_aliases
         #prelude
     })
+}
+
+/// The **direct view** — the local/in-process twin of the generated client:
+/// a zero-cost wrapper over `&B` where every trait method is an *inherent*
+/// method, so a backend implementing many services never needs UFCS to
+/// disambiguate colliding names (`Tracks::set_volume` vs
+/// `Routing::set_volume`), and callers don't need the trait in scope.
+///
+/// ```text
+/// use daw_proto::TracksDirectExt as _;
+/// daw.tracks_direct().set_volume(ctx, track, 0.9)?;   // no UFCS, ever
+/// ```
+///
+/// Sync methods only (the in-process face); async methods keep their trait
+/// form. With an ambient `context = T`, the view's methods take `ctx: &T`
+/// exactly like the trait's sync face.
+fn emit_direct_view(
+    trait_item: &ItemTrait,
+    vis: &syn::Visibility,
+    trait_name: &syn::Ident,
+    ctx: Option<&Type>,
+) -> TokenStream2 {
+    let direct_name = format_ident!("{}Direct", trait_name);
+    let ext_name = format_ident!("{}DirectExt", trait_name);
+    let accessor = format_ident!("{}_direct", to_snake_case(&trait_name.to_string()));
+
+    let mut methods = Vec::new();
+    for item in &trait_item.items {
+        let TraitItem::Fn(f) = item else { continue };
+        if has_subscribe_attr(f) || f.sig.asyncness.is_some() {
+            continue;
+        }
+        let mut sig = f.sig.clone();
+        // Mirror the emitted user trait's sync face: the ambient context
+        // rides as a borrowed second parameter.
+        if let Some(ctx_ty) = ctx {
+            sig.inputs.insert(1, parse_quote! { ctx: &#ctx_ty });
+        }
+        let name = &sig.ident;
+        let docs: Vec<_> = f
+            .attrs
+            .iter()
+            .filter(|a| a.path().is_ident("doc"))
+            .collect();
+        let arg_idents: Vec<syn::Ident> = sig
+            .inputs
+            .iter()
+            .filter_map(|arg| match arg {
+                FnArg::Typed(t) => match &*t.pat {
+                    syn::Pat::Ident(p) => Some(p.ident.clone()),
+                    _ => None,
+                },
+                FnArg::Receiver(_) => None,
+            })
+            .collect();
+        methods.push(quote! {
+            #(#docs)*
+            #[inline]
+            #vis #sig {
+                <B as #trait_name>::#name(self.0, #(#arg_idents),*)
+            }
+        });
+    }
+
+    if methods.is_empty() {
+        return quote! {};
+    }
+
+    let direct_doc = format!(
+        "Collision-free inherent-method view over a local `{trait_name}`          backend — the in-process twin of the generated client. Obtain via          [`{ext_name}::{accessor}`]."
+    );
+    let ext_doc = format!(
+        "Blanket accessor: `backend.{accessor}()` → [`{direct_name}`]."
+    );
+    quote! {
+        #[doc = #direct_doc]
+        #vis struct #direct_name<'a, B: #trait_name + ?Sized>(#vis &'a B);
+
+        impl<'a, B: #trait_name + ?Sized> ::core::clone::Clone for #direct_name<'a, B> {
+            fn clone(&self) -> Self {
+                Self(self.0)
+            }
+        }
+        impl<'a, B: #trait_name + ?Sized> ::core::marker::Copy for #direct_name<'a, B> {}
+
+        impl<'a, B: #trait_name + ?Sized> #direct_name<'a, B> {
+            #(#methods)*
+        }
+
+        #[doc = #ext_doc]
+        #vis trait #ext_name: #trait_name {
+            fn #accessor(&self) -> #direct_name<'_, Self> {
+                #direct_name(self)
+            }
+        }
+        impl<B: #trait_name + ?Sized> #ext_name for B {}
+    }
 }
 
 /// Split a syntactically-literal `Result<O, E>` into its parts. This

@@ -83,3 +83,19 @@ async fn scoped_only_router_serves_scoped_calls() {
     let keys = architect::scope_client!(keys, "keys");
     assert_eq!(keys.whoami().await.expect("call"), "keys");
 }
+
+/// The generated **direct view**: inherent methods over a local backend —
+/// no trait import at the call site, no UFCS even when method names collide
+/// across services.
+#[test]
+fn direct_view_calls_without_ufcs() {
+    use echo_proto::EchoDirectExt as _;
+    let backend = EchoBackend { name: "direct" };
+    // `echo_direct()` comes from the generated blanket ext trait; `whoami`
+    // is an inherent method on the view, so no `Echo` import is needed.
+    assert_eq!(backend.echo_direct().whoami(), "direct");
+    // The view is Copy — cheap to pass around.
+    let view = backend.echo_direct();
+    let (a, b) = (view, view);
+    assert_eq!(a.whoami(), b.whoami());
+}
