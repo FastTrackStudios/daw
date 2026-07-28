@@ -6,7 +6,7 @@
 //! implementing the same trait collide on a merged router (last-merge wins).
 //! Scoping disambiguates at dispatch time instead of in the id: the client
 //! stamps every call with a `svc-scope` metadata entry
-//! ([`ScopeMiddleware`]); the router keeps a `(scope, method)` map consulted
+//! ([`ScopeMiddleware`](crate::scoped::ScopeMiddleware)); the router keeps a `(scope, method)` map consulted
 //! before the flat one ([`LayerRouter::merge_router_scoped`]). Unscoped
 //! services and unscoped calls are untouched — the flat map still serves
 //! them — so scoping is purely additive.
