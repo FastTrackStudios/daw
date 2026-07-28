@@ -98,7 +98,8 @@ standalone = ["dep:daw-standalone"]
 standalone-audio = ["standalone", "daw-standalone/audio"]
 # Native PipeWire duplex engine (`daw::standalone::audio_engine::DuplexAudioEngine`)
 # — one low-latency realtime callback (input+output, no ring). Linux-only.
-pipewire = ["standalone-audio", "daw-standalone/pipewire"]
+# PipeWire is DEFAULT on Linux; alias still pulls the audio engine.
+pipewire = ["standalone-audio"]
 # Reusable UI components (`daw::ui` — widgets / theming / panels). `web` brings
 # in dioxus (the components render under any dioxus renderer, incl. native Blitz).
 ui = ["dep:daw-ui", "daw-ui/web"]

@@ -7,13 +7,13 @@ use cpal::traits::HostTrait;
 
 /// The audio host.
 ///
-/// Prefers cpal's **native PipeWire** backend (`feature = "pipewire"`) — it
+/// Prefers cpal's **native PipeWire** backend (`target_os = "linux"`) — it
 /// talks to PipeWire directly (no JACK shim), enumerates real device names +
 /// channel counts, targets a specific device via `target.object`, and requests
 /// per-node latency natively. Falls back to JACK (pipewire-jack) where the
 /// PipeWire backend isn't built, then to the raw ALSA/CoreAudio default host.
 pub fn audio_host() -> cpal::Host {
-    #[cfg(all(feature = "pipewire", target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     {
         if let Ok(h) = cpal::host_from_id(cpal::HostId::PipeWire) {
             tracing::info!("daw-audio-io: using native PipeWire host");
@@ -53,14 +53,14 @@ pub fn host_is_jack(_host: &cpal::Host) -> bool {
 /// requested sample rate and a fixed buffer size (as a per-node latency hint)
 /// and targets a specific device, so the channel-count handling matches JACK
 /// (open just enough channels) but the rate/buffer come from prefs.
-#[cfg(all(feature = "pipewire", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 pub fn host_is_pipewire(host: &cpal::Host) -> bool {
     host.id() == cpal::HostId::PipeWire
 }
 
 /// Whether `host` is the native PipeWire backend (always false when the
 /// `pipewire` feature is off or off-Linux).
-#[cfg(not(all(feature = "pipewire", target_os = "linux")))]
+#[cfg(not(target_os = "linux"))]
 pub fn host_is_pipewire(_host: &cpal::Host) -> bool {
     false
 }

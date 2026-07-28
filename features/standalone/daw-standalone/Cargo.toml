@@ -94,7 +94,9 @@ decode = ["dep:symphonia"]
 audio = ["decode", "dep:cpal", "daw-audio-io", "dep:rtrb"]
 # Native PipeWire duplex engine (`DuplexAudioEngine`) — one realtime callback
 # (input+output, no ring) via daw-audio-io's `pw_filter` backend. Linux-only.
-pipewire = ["audio", "daw-audio-io/pipewire"]
+# PipeWire is DEFAULT on Linux (daw-audio-io target-gates it); alias kept
+# for existing `daw-standalone/pipewire` references. Still pulls `audio`.
+pipewire = ["audio"]
 # Parse `.rpp` files into `Standalone::ProjectState` (tracks, items,
 # takes, markers, regions, tempo, routing). Native default pulls
 # rayon via `dawfile-reaper/parallel`. For WASM, enable

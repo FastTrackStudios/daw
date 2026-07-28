@@ -106,5 +106,5 @@ pub trait DuplexBackend: Send + Sized {
 
 // The platform backend. Linux = native PipeWire `pw_filter`; other platforms
 // land here as they're implemented.
-#[cfg(all(feature = "pipewire", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 pub use crate::duplex_pw::PipewireBackend as Backend;

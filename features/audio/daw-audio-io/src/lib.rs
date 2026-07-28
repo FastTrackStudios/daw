@@ -34,7 +34,7 @@ pub mod prefs;
 pub mod pw;
 
 /// Native PipeWire `pw_filter` duplex backend (Linux, `pipewire` feature).
-#[cfg(all(feature = "pipewire", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 pub mod duplex_pw;
 
 #[cfg(feature = "monitor")]
