@@ -27,7 +27,7 @@ pub struct TrackExtStateRequest {
     pub value: String,
 }
 
-#[architect::rpc(ops(ProjectContext as ProjectArg, TrackRef as TrackArg))]
+#[architect::rpc(ops(ProjectContext as ProjectArg, TrackRef as TrackArg), scopes(project: ProjectContext, track: TrackRef))]
 pub trait Tracks {
     // ── Queries ─────────────────────────────────────────────────────
 

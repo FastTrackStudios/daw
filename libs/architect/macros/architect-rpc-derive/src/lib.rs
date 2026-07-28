@@ -101,6 +101,13 @@ struct RpcArgs {
     /// surfaces get owned `T`), and the client gains a `.scoped(ctx)`
     /// wrapper so call sites set it once per scope.
     context: Option<Type>,
+    /// `scopes(name: Type, ...)` — the trait's leveled call scopes, in
+    /// nesting order (e.g. `scopes(project: ProjectContext, track:
+    /// TrackRef)`). Emits one scope view per level over the local direct
+    /// view: methods whose leading parameters match the first N scope
+    /// types are callable from level N with those parameters elided —
+    /// `daw.tracks_direct().project(ctx).track(tr).set_volume(0.9)`.
+    scopes: Vec<ScopeDecl>,
     /// `ops` / `ops(Src as Dst, ...)` — additionally emit the
     /// `<Trait>Op` / `<Trait>OpOutput` reified-call enums plus an
     /// `apply` that replays an op against any backend. Substitution
@@ -108,6 +115,21 @@ struct RpcArgs {
     /// for a deferred wire representation resolved at apply time via
     /// `architect::ops::ResolveArg`.
     ops: Option<Vec<OpsSubst>>,
+}
+
+/// One `name: Type` scope declaration inside `scopes(...)`.
+struct ScopeDecl {
+    name: syn::Ident,
+    ty: Type,
+}
+
+impl syn::parse::Parse for ScopeDecl {
+    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        let name: syn::Ident = input.parse()?;
+        input.parse::<syn::Token![:]>()?;
+        let ty: Type = input.parse()?;
+        Ok(ScopeDecl { name, ty })
+    }
 }
 
 /// One `Src as Dst` substitution inside `ops(...)`: parameters of
@@ -137,6 +159,21 @@ impl RpcArgs {
             self.context = Some(meta.value()?.parse()?);
             return Ok(());
         }
+        if meta.path.is_ident("scopes") {
+            if !self.scopes.is_empty() {
+                return Err(meta.error("duplicate `scopes` argument"));
+            }
+            let content;
+            syn::parenthesized!(content in meta.input);
+            self.scopes = content
+                .parse_terminated(<ScopeDecl as syn::parse::Parse>::parse, syn::Token![,])?
+                .into_iter()
+                .collect();
+            if self.scopes.is_empty() {
+                return Err(meta.error("`scopes(...)` needs at least one `name: Type`"));
+            }
+            return Ok(());
+        }
         if meta.path.is_ident("ops") {
             if self.ops.is_some() {
                 return Err(meta.error("duplicate `ops` argument"));
@@ -158,9 +195,10 @@ impl RpcArgs {
             "unknown #[architect::rpc] argument — supported: `sync_client` \
              (emit the blocking <Trait>SyncClient facade), `context = Type` \
              (ambient per-call context threaded through every method), \
-             `ops` / `ops(Src as Dst, ...)` (emit the <Trait>Op reified-call \
-             enum + apply). Backend requirements are declared per backend \
-             at the bundle site, not on the trait.",
+             `scopes(name: Type, ...)` (leveled local scope views over the \
+             direct view), `ops` / `ops(Src as Dst, ...)` (emit the \
+             <Trait>Op reified-call enum + apply). Backend requirements are \
+             declared per backend at the bundle site, not on the trait.",
         ))
     }
 }
@@ -412,7 +450,16 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         }
     };
 
+    if !args.scopes.is_empty() && ctx.is_some() {
+        return Err(syn::Error::new_spanned(
+            &trait_item.ident,
+            "#[architect::rpc]: `scopes(...)` and `context = ...` cannot be \
+             combined yet — scopes elide leading parameters the trait \
+             declares, while context injects one the trait doesn't.",
+        ));
+    }
     let direct_view = emit_direct_view(&trait_item, vis, trait_name, ctx);
+    let scope_views = emit_scope_views(&trait_item, vis, trait_name, &args.scopes)?;
 
     Ok(quote! {
         #user_trait
@@ -426,6 +473,7 @@ fn expand(trait_item: ItemTrait, args: RpcArgs) -> syn::Result<TokenStream2> {
         #sync_client
         #scoped_client
         #direct_view
+        #scope_views
         #ops_block
         #bare_aliases
         #prelude
@@ -527,6 +575,207 @@ fn emit_direct_view(
         }
         impl<B: #trait_name + ?Sized> #ext_name for B {}
     }
+}
+
+/// Leveled **scope views** over the direct view (`scopes(project:
+/// ProjectContext, track: TrackRef)`): one wrapper per level holding the
+/// backend ref plus the scope values bound so far. A method belongs to
+/// level N when its leading parameter types equal the first N scope types
+/// (matched structurally, by token equality); it is emitted on that level's
+/// view with those parameters elided — the view passes its stored values.
+///
+/// ```text
+/// let track = daw.tracks_direct().project(ctx).track(TrackRef::guid(g));
+/// track.set_volume(0.9)?;          // project + track ride along
+/// track.set_muted(true)?;
+/// ```
+fn emit_scope_views(
+    trait_item: &ItemTrait,
+    vis: &syn::Visibility,
+    trait_name: &syn::Ident,
+    scopes: &[ScopeDecl],
+) -> syn::Result<TokenStream2> {
+    if scopes.is_empty() {
+        return Ok(quote! {});
+    }
+    let direct_name = format_ident!("{}Direct", trait_name);
+    let ty_key = |ty: &Type| quote!(#ty).to_string();
+    let scope_keys: Vec<String> = scopes.iter().map(|s| ty_key(&s.ty)).collect();
+
+    // CamelCase view name per level from the scope's declared name.
+    let camel = |ident: &syn::Ident| -> String {
+        let s = ident.to_string();
+        let mut out = String::new();
+        let mut up = true;
+        for c in s.chars() {
+            if c == '_' {
+                up = true;
+            } else if up {
+                out.extend(c.to_uppercase());
+                up = false;
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    };
+    let view_names: Vec<syn::Ident> = scopes
+        .iter()
+        .map(|s| format_ident!("{}{}Scope", trait_name, camel(&s.name)))
+        .collect();
+
+    // Assign every sync method its scope depth (0 = direct-view only).
+    let mut per_level: Vec<Vec<TokenStream2>> = vec![Vec::new(); scopes.len()];
+    for item in &trait_item.items {
+        let TraitItem::Fn(f) = item else { continue };
+        if has_subscribe_attr(f) || f.sig.asyncness.is_some() {
+            continue;
+        }
+        let typed: Vec<&syn::PatType> = f
+            .sig
+            .inputs
+            .iter()
+            .filter_map(|a| match a {
+                FnArg::Typed(t) => Some(t),
+                FnArg::Receiver(_) => None,
+            })
+            .collect();
+        let mut depth = 0usize;
+        while depth < scopes.len()
+            && depth < typed.len()
+            && ty_key(&typed[depth].ty) == scope_keys[depth]
+        {
+            depth += 1;
+        }
+        if depth == 0 {
+            continue;
+        }
+        let level = depth - 1;
+        let name = &f.sig.ident;
+        let docs: Vec<_> = f
+            .attrs
+            .iter()
+            .filter(|a| a.path().is_ident("doc"))
+            .collect();
+        // Remaining (unelided) parameters + their idents.
+        let rest: Vec<&syn::PatType> = typed[depth..].to_vec();
+        let rest_idents: Vec<syn::Ident> = rest
+            .iter()
+            .filter_map(|t| match &*t.pat {
+                syn::Pat::Ident(p) => Some(p.ident.clone()),
+                _ => None,
+            })
+            .collect();
+        if rest_idents.len() != rest.len() {
+            return Err(syn::Error::new_spanned(
+                &f.sig,
+                "#[architect::rpc(scopes)]: method parameters must be plain \
+                 identifiers",
+            ));
+        }
+        let scope_field_names: Vec<&syn::Ident> =
+            scopes[..depth].iter().map(|s| &s.name).collect();
+        let ret = &f.sig.output;
+        per_level[level].push(quote! {
+            #(#docs)*
+            #[inline]
+            #vis fn #name(&self, #(#rest),*) #ret {
+                <B as #trait_name>::#name(
+                    self.backend,
+                    #(::core::clone::Clone::clone(&self.#scope_field_names),)*
+                    #(#rest_idents),*
+                )
+            }
+        });
+    }
+
+    // Emit each level's view + the constructor from the level below.
+    let mut out = TokenStream2::new();
+    for (level, view_name) in view_names.iter().enumerate() {
+        let held = &scopes[..=level];
+        let field_names: Vec<&syn::Ident> = held.iter().map(|s| &s.name).collect();
+        let field_tys: Vec<&Type> = held.iter().map(|s| &s.ty).collect();
+        let methods = &per_level[level];
+        let deeper = scopes.get(level + 1).map(|next| {
+            let next_view = &view_names[level + 1];
+            let next_name = &next.name;
+            let next_ty = &next.ty;
+            let doc = format!("Narrow to a specific `{next_name}` scope.");
+            quote! {
+                #[doc = #doc]
+                #vis fn #next_name(&self, #next_name: #next_ty) -> #next_view<'a, B> {
+                    #next_view {
+                        backend: self.backend,
+                        #(#field_names: ::core::clone::Clone::clone(&self.#field_names),)*
+                        #next_name,
+                    }
+                }
+            }
+        });
+        let accessors = held.iter().map(|s| {
+            let name = &s.name;
+            let ty = &s.ty;
+            quote! {
+                #[inline]
+                #vis fn #name(&self) -> &#ty {
+                    &self.#name
+                }
+            }
+        });
+        let doc = format!(
+            "`{trait_name}` scoped to a bound `{}` — the elided leading \
+             parameters ride along on every call. Obtained via the scope \
+             chain starting at `{}Direct`.",
+            field_names
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join("` + `"),
+            trait_name,
+        );
+        out.extend(quote! {
+            #[doc = #doc]
+            #vis struct #view_name<'a, B: #trait_name + ?Sized> {
+                backend: &'a B,
+                #(#field_names: #field_tys,)*
+            }
+
+            impl<'a, B: #trait_name + ?Sized> ::core::clone::Clone for #view_name<'a, B> {
+                fn clone(&self) -> Self {
+                    Self {
+                        backend: self.backend,
+                        #(#field_names: ::core::clone::Clone::clone(&self.#field_names),)*
+                    }
+                }
+            }
+
+            impl<'a, B: #trait_name + ?Sized> #view_name<'a, B> {
+                /// The scoped backend.
+                #vis fn backend(&self) -> &'a B {
+                    self.backend
+                }
+                #(#accessors)*
+                #deeper
+                #(#methods)*
+            }
+        });
+    }
+
+    // Entry: the first scope's constructor hangs off the direct view.
+    let first = &scopes[0];
+    let first_name = &first.name;
+    let first_ty = &first.ty;
+    let first_view = &view_names[0];
+    let doc = format!("Bind a `{first_name}` scope — the entry to the scope chain.");
+    out.extend(quote! {
+        impl<'a, B: #trait_name + ?Sized> #direct_name<'a, B> {
+            #[doc = #doc]
+            #vis fn #first_name(&self, #first_name: #first_ty) -> #first_view<'a, B> {
+                #first_view { backend: self.0, #first_name }
+            }
+        }
+    });
+    Ok(out)
 }
 
 /// Split a syntactically-literal `Result<O, E>` into its parts. This

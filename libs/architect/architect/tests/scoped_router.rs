@@ -99,3 +99,67 @@ fn direct_view_calls_without_ufcs() {
     let (a, b) = (view, view);
     assert_eq!(a.whoami(), b.whoami());
 }
+
+/// `scopes(...)` — leveled local scope views: leading parameters matching
+/// the declared scope types are elided level by level.
+mod scoped_views {
+    mod store_proto {
+        #[architect::rpc(scopes(region: String, key: u32))]
+        pub trait Store {
+            /// Level 1: leading `String` matches the `region` scope.
+            fn count(&self, region: String) -> u32;
+            /// Level 2: leading `String, u32` matches `region` + `key`.
+            fn read(&self, region: String, key: u32) -> String;
+            fn write(&self, region: String, key: u32, value: String);
+            /// Level 0: no leading scope match — direct view only.
+            fn ping(&self) -> bool;
+        }
+    }
+
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use store_proto::{Store, StoreDirectExt as _};
+
+    #[derive(Default)]
+    struct MemStore {
+        data: Mutex<HashMap<(String, u32), String>>,
+    }
+
+    impl Store for MemStore {
+        fn count(&self, region: String) -> u32 {
+            self.data.lock().unwrap().keys().filter(|(r, _)| *r == region).count() as u32
+        }
+        fn read(&self, region: String, key: u32) -> String {
+            self.data.lock().unwrap().get(&(region, key)).cloned().unwrap_or_default()
+        }
+        fn write(&self, region: String, key: u32, value: String) {
+            self.data.lock().unwrap().insert((region, key), value);
+        }
+        fn ping(&self) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn scope_chain_elides_leading_params() {
+        let store = MemStore::default();
+        assert!(store.store_direct().ping());
+
+        // Level 1: region bound once.
+        let region = store.store_direct().region("us".to_string());
+        assert_eq!(region.count(), 0);
+
+        // Level 2: region + key bound; read/write drop both parameters.
+        let slot = region.key(7);
+        slot.write("hello".to_string());
+        assert_eq!(slot.read(), "hello");
+        assert_eq!(region.count(), 1);
+
+        // Scope accessors + re-narrowing from a clone.
+        assert_eq!(slot.region(), "us");
+        assert_eq!(*slot.key(), 7);
+        let other = region.clone().key(8);
+        other.write("world".to_string());
+        assert_eq!(store.store_direct().region("us".into()).count(), 2);
+    }
+}

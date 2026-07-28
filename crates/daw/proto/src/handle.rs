@@ -38,21 +38,22 @@
 
 use crate::error::{DawError, DawResult};
 use crate::routing::Routing;
+use crate::track::{TracksDirectExt as _, TracksProjectScope, TracksTrackScope};
 use crate::track::Tracks;
 use crate::{
     Fx, FxChainContext, ProjectContext, RecordInput, RouteLocation, RouteRef, SendMode, Track,
     TrackRef,
 };
 
-impl<D> Clone for ProjectHandle<'_, D> {
+impl<D: Tracks + ?Sized> Clone for ProjectHandle<'_, D> {
     fn clone(&self) -> Self {
-        Self { daw: self.daw, ctx: self.ctx.clone() }
+        Self { daw: self.daw, scope: self.scope.clone() }
     }
 }
 
-impl<D> Clone for TrackHandle<'_, D> {
+impl<D: Tracks + ?Sized> Clone for TrackHandle<'_, D> {
     fn clone(&self) -> Self {
-        Self { daw: self.daw, ctx: self.ctx.clone(), guid: self.guid.clone() }
+        Self { scope: self.scope.clone(), guid: self.guid.clone() }
     }
 }
 
@@ -61,12 +62,16 @@ impl<D> Clone for TrackHandle<'_, D> {
 pub trait DawHandle: Tracks + Sized {
     /// A handle on the current project.
     fn current(&self) -> ProjectHandle<'_, Self> {
-        ProjectHandle { daw: self, ctx: ProjectContext::Current }
+        ProjectHandle {
+            daw: self,
+            scope: self.tracks_direct().project(ProjectContext::Current),
+        }
     }
 
     /// A handle on a specific project.
     fn project(&self, guid: impl Into<String>) -> ProjectHandle<'_, Self> {
-        ProjectHandle { daw: self, ctx: ProjectContext::Project(guid.into()) }
+        let ctx = ProjectContext::Project(guid.into());
+        ProjectHandle { daw: self, scope: self.tracks_direct().project(ctx) }
     }
 }
 
@@ -74,139 +79,129 @@ impl<D: Tracks + Sized> DawHandle for D {}
 
 /// A project, bound to its backend — makes tracks and scopes every child
 /// handle to this project's context.
-pub struct ProjectHandle<'d, D> {
+pub struct ProjectHandle<'d, D: Tracks + ?Sized> {
     daw: &'d D,
-    ctx: ProjectContext,
+    /// The generated `Tracks` project scope — [`std::ops::Deref`] target, so
+    /// every `Tracks` method with a leading `ProjectContext` is available
+    /// here directly (`add`, `all`, `remove_all`, …).
+    scope: TracksProjectScope<'d, D>,
 }
 
-impl<'d, D: Tracks> ProjectHandle<'d, D> {
+impl<'d, D: Tracks + ?Sized> std::ops::Deref for ProjectHandle<'d, D> {
+    type Target = TracksProjectScope<'d, D>;
+    fn deref(&self) -> &Self::Target {
+        &self.scope
+    }
+}
+
+impl<'d, D: Tracks + ?Sized> ProjectHandle<'d, D> {
     pub fn context(&self) -> ProjectContext {
-        self.ctx.clone()
+        self.scope.project().clone()
     }
 
-    /// Add a track (appended); returns its handle.
+    /// Add a track (appended); returns its handle. (The bare `Tracks::add`
+    /// with an explicit index is available through deref.)
     pub fn add_track(&self, name: &str) -> DawResult<TrackHandle<'d, D>> {
-        let guid = self.daw.add(self.ctx.clone(), name, None)?;
+        let guid = self.scope.add(name, None)?;
         Ok(self.track(guid))
     }
 
     /// A handle on an existing track by guid.
     pub fn track(&self, guid: impl Into<String>) -> TrackHandle<'d, D> {
-        TrackHandle { daw: self.daw, ctx: self.ctx.clone(), guid: guid.into() }
+        let guid = guid.into();
+        TrackHandle {
+            scope: self.scope.track(TrackRef::Guid(guid.clone())),
+            guid,
+        }
     }
 
-    /// Every track, in mixer order.
+    /// Every track, in mixer order (alias for the scope's `all`).
     pub fn tracks(&self) -> Vec<Track> {
-        self.daw.all(self.ctx.clone())
+        self.scope.all()
     }
 
     /// The master track's handle, if the backend exposes one.
     pub fn master(&self) -> Option<TrackHandle<'d, D>> {
-        self.daw.master(self.ctx.clone()).map(|t| self.track(t.guid))
-    }
-
-    /// Remove every track.
-    pub fn remove_all_tracks(&self) -> DawResult<()> {
-        self.daw.remove_all(self.ctx.clone())
+        self.scope.master().map(|t| self.track(t.guid))
     }
 
     /// A [`TrackTree`] builder over this project — folder hierarchies with
     /// the REAPER depth convention handled for you.
     pub fn tree(&self) -> TrackTree<'d, D> {
-        TrackTree { project: ProjectHandle { daw: self.daw, ctx: self.ctx.clone() }, open: 0, last: None }
+        TrackTree { project: self.clone(), open: 0, last: None }
     }
 }
 
 /// One track, bound to its backend + project. Every mixer/routing/FX op is a
 /// single unambiguous method — no UFCS, no context/ref wrapping.
-pub struct TrackHandle<'d, D> {
-    daw: &'d D,
-    ctx: ProjectContext,
+pub struct TrackHandle<'d, D: Tracks + ?Sized> {
+    /// The generated `Tracks` track scope — [`std::ops::Deref`] target, so
+    /// every `Tracks` method with a leading `(ProjectContext, TrackRef)` is
+    /// available here directly: `set_volume`, `set_pan`, `set_muted`,
+    /// `set_soloed`, `rename`, `set_folder_depth`, `remove`, `get`, ….
+    scope: TracksTrackScope<'d, D>,
     guid: String,
 }
 
-impl<'d, D> TrackHandle<'d, D> {
+impl<'d, D: Tracks + ?Sized> std::ops::Deref for TrackHandle<'d, D> {
+    type Target = TracksTrackScope<'d, D>;
+    fn deref(&self) -> &Self::Target {
+        &self.scope
+    }
+}
+
+impl<'d, D: Tracks + ?Sized> TrackHandle<'d, D> {
     pub fn guid(&self) -> &str {
         &self.guid
     }
 
-    fn track_ref(&self) -> TrackRef {
-        TrackRef::Guid(self.guid.clone())
+    fn ctx(&self) -> ProjectContext {
+        self.scope.project().clone()
     }
-}
 
-impl<'d, D: Tracks> TrackHandle<'d, D> {
-    /// Full track state, if the track still exists.
+    /// Full track state, if the track still exists (alias for `get`).
     pub fn info(&self) -> Option<Track> {
-        self.daw.get(self.ctx.clone(), self.track_ref())
-    }
-
-    /// Post-FX fader gain (linear; 1.0 = unity).
-    pub fn set_volume(&self, volume: f64) -> DawResult<()> {
-        self.daw.set_volume(self.ctx.clone(), self.track_ref(), volume)
-    }
-
-    /// Pan (−1..1).
-    pub fn set_pan(&self, pan: f64) -> DawResult<()> {
-        self.daw.set_pan(self.ctx.clone(), self.track_ref(), pan)
-    }
-
-    pub fn mute(&self, muted: bool) -> DawResult<()> {
-        self.daw.set_muted(self.ctx.clone(), self.track_ref(), muted)
-    }
-
-    pub fn solo(&self, soloed: bool) -> DawResult<()> {
-        self.daw.set_soloed(self.ctx.clone(), self.track_ref(), soloed)
-    }
-
-    pub fn rename(&self, name: &str) -> DawResult<()> {
-        self.daw.rename(self.ctx.clone(), self.track_ref(), name)
+        self.scope.get()
     }
 
     /// Arm the track to record/monitor hardware audio input `channel` — what
     /// makes a live engine open an input stream and feed this track's bus.
     pub fn arm_audio_input(&self, channel: u32) -> DawResult<()> {
-        self.daw
-            .set_record_input(self.ctx.clone(), self.track_ref(), RecordInput::Audio { channel })
-    }
-
-    /// REAPER folder-depth change (positive opens a folder, a negative depth
-    /// on the last child closes levels). Prefer [`ProjectHandle::tree`],
-    /// which does this bookkeeping for you.
-    pub fn set_folder_depth(&self, depth: i32) -> DawResult<()> {
-        self.daw.set_folder_depth(self.ctx.clone(), self.track_ref(), depth)
-    }
-
-    /// Remove the track.
-    pub fn remove(&self) -> DawResult<()> {
-        self.daw.remove(self.ctx.clone(), self.track_ref())
+        self.scope.set_record_input(RecordInput::Audio { channel })
     }
 }
 
-impl<'d, D: crate::FxChains> TrackHandle<'d, D> {
-    fn fx_ctx(&self) -> FxChainContext {
-        FxChainContext::track(self.guid.clone())
+impl<'d, D: crate::FxChains + Tracks + ?Sized> TrackHandle<'d, D> {
+    /// The generated `FxChains` scope over this track's playback chain —
+    /// `add`, `get`, `set_enabled`, `move_to`, … with the chain context
+    /// elided.
+    pub fn fx(&self) -> crate::fx_chains::FxChainsChainScope<'d, D> {
+        use crate::fx_chains::FxChainsDirectExt as _;
+        self.scope
+            .backend()
+            .fx_chains_direct()
+            .chain(FxChainContext::track(self.guid.clone()))
     }
 
     /// Reserve one FX slot (the add + guid-fetch dance, fused). The returned
     /// handle's guid is constant for the project's life — swapping the
     /// instance behind it never rebuilds a renderer snapshot.
     pub fn add_fx_slot(&self, label: &str) -> DawResult<FxSlotHandle<'d, D>> {
-        let index = self.daw.add(self.fx_ctx(), label)?;
-        let fx = self
-            .daw
-            .get(self.fx_ctx(), index)
+        let fx_scope = self.fx();
+        let index = fx_scope.add(label)?;
+        let fx = fx_scope
+            .get(index)
             .ok_or_else(|| DawError::Internal(format!("fx slot {label:?} vanished after add")))?;
-        Ok(FxSlotHandle { daw: self.daw, track_guid: self.guid.clone(), index, fx })
+        Ok(FxSlotHandle { daw: self.scope.backend(), track_guid: self.guid.clone(), index, fx })
     }
 
     /// Enable/bypass the FX at `index` (bypass = `enabled(false)`).
     pub fn set_fx_enabled(&self, index: u32, enabled: bool) -> DawResult<()> {
-        self.daw.set_enabled(self.fx_ctx(), index, enabled)
+        self.fx().set_enabled(index, enabled)
     }
 }
 
-impl<'d, D: Routing + Tracks> TrackHandle<'d, D> {
+impl<'d, D: Routing + Tracks + ?Sized> TrackHandle<'d, D> {
     /// Start a send from this track — finish with
     /// [`SendBuilder::apply`]. `dest` is the destination track's guid.
     pub fn send_to(&self, dest: impl Into<String>) -> SendBuilder<'d, '_, D> {
@@ -221,14 +216,14 @@ impl<'d, D: Routing + Tracks> TrackHandle<'d, D> {
 }
 
 /// A reserved FX slot on a track.
-pub struct FxSlotHandle<'d, D> {
+pub struct FxSlotHandle<'d, D: ?Sized> {
     daw: &'d D,
     track_guid: String,
     index: u32,
     fx: Fx,
 }
 
-impl<'d, D> FxSlotHandle<'d, D> {
+impl<'d, D: ?Sized> FxSlotHandle<'d, D> {
     /// The slot's guid (constant for the project's life).
     pub fn guid(&self) -> &str {
         &self.fx.guid
@@ -247,7 +242,7 @@ impl<'d, D> FxSlotHandle<'d, D> {
     }
 }
 
-impl<'d, D: crate::FxChains> FxSlotHandle<'d, D> {
+impl<'d, D: crate::FxChains + ?Sized> FxSlotHandle<'d, D> {
     /// Enable/bypass this slot.
     pub fn set_enabled(&self, enabled: bool) -> DawResult<()> {
         self.daw
@@ -262,7 +257,7 @@ impl<'d, D: crate::FxChains> FxSlotHandle<'d, D> {
 /// mic.send_to(bus.guid()).post_fx().replace_master_send().apply()?;
 /// ```
 #[must_use = "call .apply() to create the send"]
-pub struct SendBuilder<'d, 't, D> {
+pub struct SendBuilder<'d, 't, D: Tracks + ?Sized> {
     track: &'t TrackHandle<'d, D>,
     dest: String,
     mode: Option<SendMode>,
@@ -270,7 +265,7 @@ pub struct SendBuilder<'d, 't, D> {
     replace_master: bool,
 }
 
-impl<'d, 't, D: Routing + Tracks> SendBuilder<'d, 't, D> {
+impl<'d, 't, D: Routing + Tracks + ?Sized> SendBuilder<'d, 't, D> {
     /// Tap post-FX, post-fader (the bus-mic convention).
     pub fn post_fx(mut self) -> Self {
         self.mode = Some(SendMode::PostFx);
@@ -298,9 +293,9 @@ impl<'d, 't, D: Routing + Tracks> SendBuilder<'d, 't, D> {
 
     /// Create the send; returns its route index on the source track.
     pub fn apply(self) -> DawResult<u32> {
-        let ctx = self.track.ctx.clone();
-        let src = self.track.track_ref();
-        let daw = self.track.daw;
+        let ctx = self.track.ctx();
+        let src = TrackRef::Guid(self.track.guid.clone());
+        let daw = self.track.scope.backend();
         let idx = daw
             .add_send(ctx.clone(), src.clone(), TrackRef::Guid(self.dest.clone()))
             .ok_or_else(|| {
@@ -343,7 +338,7 @@ impl<'d, 't, D: Routing + Tracks> SendBuilder<'d, 't, D> {
 /// tree.track("Organ")?;
 /// tree.finish()?;                          // closes everything still open
 /// ```
-pub struct TrackTree<'d, D> {
+pub struct TrackTree<'d, D: Tracks + ?Sized> {
     project: ProjectHandle<'d, D>,
     /// Folders currently open (unclosed positive depths).
     open: u32,
@@ -351,7 +346,7 @@ pub struct TrackTree<'d, D> {
     last: Option<(TrackHandle<'d, D>, i32)>,
 }
 
-impl<'d, D: Tracks> TrackTree<'d, D> {
+impl<'d, D: Tracks + ?Sized> TrackTree<'d, D> {
     /// Flush the pending depth adjustment on the previous track.
     fn flush(&mut self) -> DawResult<()> {
         if let Some((track, depth)) = self.last.take() {
