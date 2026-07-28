@@ -276,25 +276,30 @@ impl PsolaShifter {
             self.grain_size / 4
         };
 
-        // At grain boundary for A: cross-correlate with pitch-adaptive tolerance.
+        // At grain boundary for A: cross-correlate with pitch-adaptive
+        // tolerance. The tail buffer is taken and reused in place —
+        // resize only allocates while growing past its high-water
+        // capacity, so steady-state grain boundaries are allocation-free.
         if self.grain_phase >= 1.0 {
             self.grain_phase -= 1.0;
             let target = self.grain_size as f64;
-            self.prev_tail_a.resize(tail_len, 0.0);
-            let best = self.best_offset(target, &self.prev_tail_a);
+            let mut tail = core::mem::take(&mut self.prev_tail_a);
+            tail.resize(tail_len, 0.0);
+            let best = self.best_offset(target, &tail);
             self.offset_a = best.clamp(1.0, max_offset);
-            let mut tail = vec![0.0; tail_len];
+            tail.fill(0.0);
             self.save_tail(self.offset_a, &mut tail);
             self.prev_tail_a = tail;
         }
 
-        // At grain boundary for B: cross-correlate with pitch-adaptive tolerance.
+        // At grain boundary for B: same, half a grain later.
         if prev_phase < 0.5 && self.grain_phase >= 0.5 {
             let target = self.grain_size as f64;
-            self.prev_tail_b.resize(tail_len, 0.0);
-            let best = self.best_offset(target, &self.prev_tail_b);
+            let mut tail = core::mem::take(&mut self.prev_tail_b);
+            tail.resize(tail_len, 0.0);
+            let best = self.best_offset(target, &tail);
             self.offset_b = best.clamp(1.0, max_offset);
-            let mut tail = vec![0.0; tail_len];
+            tail.fill(0.0);
             self.save_tail(self.offset_b, &mut tail);
             self.prev_tail_b = tail;
         }

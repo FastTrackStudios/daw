@@ -401,6 +401,9 @@ pub use reconnect::use_connect_supervised;
 // `platform::Clock`.
 #[cfg(feature = "schedule")]
 pub mod schedule;
+/// Instance-scoped service mounting — see [`scoped`] module docs.
+#[cfg(feature = "vox")]
+pub mod scoped;
 #[cfg(feature = "schedule")]
 pub use schedule::{Schedule, repeat, retry};
 
