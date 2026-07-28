@@ -31,12 +31,34 @@ use std::path::PathBuf;
 /// `document::Stylesheet { href: TAILWIND_CSS }` in
 /// `apps/desktop/src/main.rs`; the Blitz snapshot path doesn't go
 /// through dx so we load the same compiled file here.
-const TAILWIND_CSS: &str = include_str!("../../../../apps/task/desktop/assets/tailwind.css");
+///
+/// Read at RUNTIME, not `include_str!`: the sheet is generated,
+/// gitignored build output (`just css` in apps/task/), and a
+/// compile-time include made this whole test binary — and with it
+/// `cargo test -p fts-ui` on a fresh checkout — fail to build until an
+/// unrelated app had been compiled once.
+fn tailwind_css() -> &'static str {
+    static SHEET: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    SHEET.get_or_init(|| {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../apps/task/desktop/assets/tailwind.css"
+        );
+        std::fs::read_to_string(path).unwrap_or_else(|e| {
+            panic!(
+                "{path}: {e}\n\
+                 The sheet is generated build output. Produce it with:\n  \
+                 cd apps/task && just css"
+            )
+        })
+    })
+}
 
 fn theme_wrap(child: Element) -> Element {
     let state = use_signal(|| ThemeState::new(default_theme_preset(), ThemeMode::Dark));
+    let sheet = tailwind_css();
     rsx! {
-        style { {TAILWIND_CSS} }
+        style { {sheet} }
         ThemeProvider { state, {child} }
     }
 }
