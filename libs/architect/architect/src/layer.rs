@@ -619,6 +619,11 @@ pub trait LayerSink {
 #[derive(Default, Clone)]
 pub struct LayerRouter {
     method_map: HashMap<MethodId, usize>,
+    /// Instance-scoped routes — `(scope, method)` → handler, consulted
+    /// before [`method_map`](Self::method_map) when the call carries
+    /// `svc-scope` metadata (see [`crate::scoped`]). Lets the same service
+    /// trait mount once per instance (one per rig) on one merged router.
+    scoped_map: HashMap<(String, MethodId), usize>,
     handlers: Vec<Arc<dyn DynHandler>>,
 }
 
@@ -674,6 +679,26 @@ impl LayerRouter {
         self.handlers.extend(other.handlers);
         for (id, idx) in other.method_map {
             self.method_map.insert(id, base + idx);
+        }
+        for ((scope, id), idx) in other.scoped_map {
+            self.scoped_map.insert((scope, id), base + idx);
+        }
+        self
+    }
+
+    /// Absorb every handler from `other` under an instance `scope`: its
+    /// methods only match calls carrying `svc-scope = scope` metadata
+    /// ([`crate::scoped::ScopeMiddleware`]), so the same service trait can
+    /// mount once per instance on one merged router without method-id
+    /// collisions. `other`'s already-scoped entries keep their own scopes.
+    pub fn merge_router_scoped(mut self, scope: &str, other: LayerRouter) -> Self {
+        let base = self.handlers.len();
+        self.handlers.extend(other.handlers);
+        for (id, idx) in other.method_map {
+            self.scoped_map.insert((scope.to_string(), id), base + idx);
+        }
+        for ((inner, id), idx) in other.scoped_map {
+            self.scoped_map.insert((inner, id), base + idx);
         }
         self
     }
@@ -750,18 +775,31 @@ impl LayerSink for LayerRouter {
     }
 }
 
+impl LayerRouter {
+    /// Any handler index that can answer shape queries for `method_id` —
+    /// the flat map first, else any scoped mount of the same method (scoped
+    /// instances share the trait, hence the shapes).
+    fn shape_handler(&self, method_id: MethodId) -> Option<usize> {
+        if let Some(&idx) = self.method_map.get(&method_id) {
+            return Some(idx);
+        }
+        self.scoped_map
+            .iter()
+            .find(|((_, id), _)| *id == method_id)
+            .map(|(_, &idx)| idx)
+    }
+}
+
 impl Handler<DriverReplySink> for LayerRouter {
     fn args_have_channels(&self, method_id: MethodId) -> bool {
-        self.method_map
-            .get(&method_id)
-            .map(|&idx| self.handlers[idx].args_have_channels(method_id))
+        self.shape_handler(method_id)
+            .map(|idx| self.handlers[idx].args_have_channels(method_id))
             .unwrap_or(false)
     }
 
     fn response_wire_shape(&self, method_id: MethodId) -> Option<&'static facet::Shape> {
-        self.method_map
-            .get(&method_id)
-            .and_then(|&idx| self.handlers[idx].response_wire_shape(method_id))
+        self.shape_handler(method_id)
+            .and_then(|idx| self.handlers[idx].response_wire_shape(method_id))
     }
 
     async fn handle(
@@ -771,7 +809,12 @@ impl Handler<DriverReplySink> for LayerRouter {
         schemas: Arc<SchemaRecvTracker>,
     ) {
         let method_id = call.get().method_id;
-        if let Some(&idx) = self.method_map.get(&method_id) {
+        // Scoped dispatch first: a call stamped `svc-scope` prefers the
+        // matching instance; the flat map serves everything else.
+        let scoped = crate::scoped::scope_of(&call.get().metadata)
+            .and_then(|scope| self.scoped_map.get(&(scope.to_string(), method_id)))
+            .copied();
+        if let Some(idx) = scoped.or_else(|| self.method_map.get(&method_id).copied()) {
             self.handlers[idx].handle(call, reply, schemas).await;
         } else {
             use vox::ReplySink as _;
