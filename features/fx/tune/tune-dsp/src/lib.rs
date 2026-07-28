@@ -18,6 +18,7 @@
 pub mod correct;
 pub mod detect;
 pub mod dna;
+pub mod model;
 pub mod note;
 pub mod tracker;
 
