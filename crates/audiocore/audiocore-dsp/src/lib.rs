@@ -16,6 +16,7 @@ pub mod dither;
 pub mod envelope;
 pub mod gain_curve;
 pub mod grain_pitch;
+pub mod lfo;
 pub mod loudness;
 pub mod note_sync;
 pub mod one_pole;
@@ -24,6 +25,8 @@ pub mod prng;
 pub mod slew;
 pub mod smoothing;
 pub mod soft_clip;
+pub mod stereo;
+pub mod window;
 
 /// Sample rate and buffer context passed to processors.
 #[derive(Debug, Clone, Copy)]

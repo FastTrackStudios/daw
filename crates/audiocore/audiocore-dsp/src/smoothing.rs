@@ -37,6 +37,16 @@ impl ParamSmoother {
         self.set_time(time_ms * 0.001, sample_rate);
     }
 
+    /// Set smoothing time and seed a fresh smoother: while the value is
+    /// still the zero it was constructed with, jump straight to `target`
+    /// instead of audibly sweeping up from zero on the first buffer.
+    pub fn set_time_seeded(&mut self, time_s: f64, sample_rate: f64, target: f64) {
+        self.set_time(time_s, sample_rate);
+        if self.value() == 0.0 {
+            self.set_immediate(target);
+        }
+    }
+
     /// Set the snap-to-target threshold. When `|value - target| < epsilon`,
     /// the smoother jumps to the target. Default: 0.1.
     pub fn set_epsilon(&mut self, eps: f64) {
