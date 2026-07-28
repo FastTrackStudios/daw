@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import "./assets/fts-theme.css";
+@import "../fts-ui/assets/fts-theme.css";
 
 @source "./src/**/*.{rs,html,css}";
 @source "../fts-ui/src/**/*.rs";

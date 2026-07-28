@@ -1,8 +1,30 @@
 /*
- * FTS Design Tokens — canonical source of truth
+ * FTS Design Tokens — THE canonical source of truth.
  * Based on MIT-licensed code from shadcn: https://github.com/shadcn-ui/ui
  *
- * Consumers should @import this file in their tailwind.css.
+ * `libs/fts-ui` owns the design system, so this file owns the tokens.
+ * There is exactly ONE copy of this sheet in the tree. Do not vendor it
+ * again — the pre-monorepo "the two checkouts may not be siblings"
+ * rationale died when fts-ui came in-tree; relative paths that climb to
+ * `libs/fts-ui/fts-ui/assets/` resolve from anywhere in the workspace
+ * (the Task tailwind inputs already `@source` this crate the same way).
+ *
+ * Consumers, and how each one reaches this file:
+ *   - Tailwind inputs `@import` it by relative path:
+ *       libs/fts-ui/showcase/tailwind.css
+ *       features/fx/{comp,eq,trigger}-ui/tailwind.css
+ *       features/fx/eq/apps/eq-standalone/tailwind.css
+ *       apps/task/tailwind.css      (via apps/task/fts-theme.css)
+ *       apps/fasttrackstudio/input.css (via ./fts-theme.css)
+ *   - Blitz/Vello renderers `include_str!` it (they cannot fetch an
+ *     external stylesheet — see the signal-UI rule in CLAUDE.md):
+ *       features/daw-ui/daw-ui/src/test_panels.rs
+ *       apps/extensions/reaper-fts-extensions/src/ui_test_panel.rs
+ *       libs/fts-ui/ui-snapshot/src/lib.rs
+ *
+ * Product-level palette overrides layer ON TOP of this file rather than
+ * forking it (see apps/task/fts-theme.css and
+ * apps/fasttrackstudio/fts-theme.css).
  */
 
 :root {
