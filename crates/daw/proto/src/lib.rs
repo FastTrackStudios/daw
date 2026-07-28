@@ -38,6 +38,7 @@ pub mod error;
 pub mod event_bus;
 pub mod ext_state;
 pub mod fx;
+pub mod handle;
 pub mod fx_chains;
 pub mod fx_params;
 pub mod health;
