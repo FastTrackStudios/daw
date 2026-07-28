@@ -276,31 +276,50 @@ impl PsolaShifter {
             self.grain_size / 4
         };
 
-        // At grain boundary for A: cross-correlate with pitch-adaptive
-        // tolerance. The tail buffer is taken and reused in place —
-        // resize only allocates while growing past its high-water
-        // capacity, so steady-state grain boundaries are allocation-free.
+        // At each grain boundary, RECENTER the head: the per-sample
+        // drift IS the pitch shift, so the boundary jump must move by
+        // a whole number of pitch periods (phase-neutral) back toward
+        // the nominal offset — otherwise the head saturates at the
+        // buffer edge and the shift collapses (the pre-fix bug:
+        // correlating a stale tail against a constant nominal never
+        // recentered; 452 Hz at −0.47 st came out at 469 Hz).
+        // Phase reference = a tail saved from the CURRENT drifted
+        // position; the correlation then fine-aligns around the
+        // period-multiple recenter target. Tail buffers are reused in
+        // place — steady-state boundaries are allocation-free.
         if self.grain_phase >= 1.0 {
             self.grain_phase -= 1.0;
-            let target = self.grain_size as f64;
             let mut tail = core::mem::take(&mut self.prev_tail_a);
             tail.resize(tail_len, 0.0);
+            self.save_tail(self.offset_a, &mut tail);
+            let nominal = self.grain_size as f64;
+            let period = if self.detected_period > 0 {
+                self.detected_period as f64
+            } else {
+                tail_len.max(1) as f64
+            };
+            let jump = ((self.offset_a - nominal) / period).round() * period;
+            let target = (self.offset_a - jump).clamp(1.0, max_offset);
             let best = self.best_offset(target, &tail);
             self.offset_a = best.clamp(1.0, max_offset);
-            tail.fill(0.0);
-            self.save_tail(self.offset_a, &mut tail);
             self.prev_tail_a = tail;
         }
 
-        // At grain boundary for B: same, half a grain later.
+        // Head B: same, half a grain later.
         if prev_phase < 0.5 && self.grain_phase >= 0.5 {
-            let target = self.grain_size as f64;
             let mut tail = core::mem::take(&mut self.prev_tail_b);
             tail.resize(tail_len, 0.0);
+            self.save_tail(self.offset_b, &mut tail);
+            let nominal = self.grain_size as f64;
+            let period = if self.detected_period > 0 {
+                self.detected_period as f64
+            } else {
+                tail_len.max(1) as f64
+            };
+            let jump = ((self.offset_b - nominal) / period).round() * period;
+            let target = (self.offset_b - jump).clamp(1.0, max_offset);
             let best = self.best_offset(target, &tail);
             self.offset_b = best.clamp(1.0, max_offset);
-            tail.fill(0.0);
-            self.save_tail(self.offset_b, &mut tail);
             self.prev_tail_b = tail;
         }
 
@@ -511,7 +530,17 @@ mod tests {
         }
 
         let start = n / 2;
-        let measured_freq = measure_pitch(&output[start..], SR);
+        // Zero-crossing measure: the CMND autocorrelation is fooled by
+        // faint grain-rate AM into a subharmonic lag (reported 44 Hz on
+        // audio whose actual fundamental measures a clean 220 Hz).
+        let late = &output[start..];
+        let mut crossings = 0;
+        for i in 1..late.len() {
+            if late[i - 1] < 0.0 && late[i] >= 0.0 {
+                crossings += 1;
+            }
+        }
+        let measured_freq = crossings as f64 * SR / late.len() as f64;
         let expected = freq * 0.5;
         let error_cents = 1200.0 * (measured_freq / expected).log2().abs();
         assert!(
