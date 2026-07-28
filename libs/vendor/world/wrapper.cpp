@@ -79,3 +79,4 @@ void fts_world_synthesis(const double* f0, int f0_length,
 }
 
 }  // extern "C"
+
