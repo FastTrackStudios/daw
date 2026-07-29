@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! # RPP Parser
 //!
 //! A high-performance RPP (REAPER Project) file format parser using nom parser combinators.

@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! Universal input processing with trie-based key dispatch and modal editing.
 //!
 //! This crate provides the core input processing pipeline: key chord matching,

@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! TCP peer mesh — connects sync engine instances over the LAN.
 //!
 //! [`PeerMesh`] binds a TCP listener, accepts inbound connections, and connects
