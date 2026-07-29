@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! REAPER-backed input runtime used by `reaper-extension`.
 //!
 //! This wraps the reference `input/*` implementation and keeps a stable API

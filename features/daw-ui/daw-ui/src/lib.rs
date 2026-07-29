@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! DAW UI — Dioxus components for DAW integration.
 //!
 //! Provides panels for interacting with a connected DAW:

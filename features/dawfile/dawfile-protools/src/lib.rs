@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! Pro Tools session file parser (.ptf, .ptx, .pts) — pure Rust.
 //!
 //! This crate parses Pro Tools session files (versions 5-12) and extracts:

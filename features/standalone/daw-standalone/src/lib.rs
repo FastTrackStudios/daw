@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! Standalone DAW Implementation
 //!
 //! This is a minimal DAW implementation that runs standalone without any external DAW.

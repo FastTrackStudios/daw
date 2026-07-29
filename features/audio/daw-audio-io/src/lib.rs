@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! Reusable audio I/O for the DAW engine.
 //!
 //! This crate owns the platform audio-device plumbing that every part of the

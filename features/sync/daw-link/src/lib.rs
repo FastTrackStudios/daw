@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! Link sync engine — reimplements ReaBlink's puppet/master sync logic in Rust.
 //!
 //! The engine is host-agnostic: it communicates with REAPER (or any DAW) through

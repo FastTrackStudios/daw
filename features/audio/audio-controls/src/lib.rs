@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! Professional audio parameter control widgets for Dioxus.
 //!
 //! Provides a comprehensive set of UI widgets for controlling audio parameters

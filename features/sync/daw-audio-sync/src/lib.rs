@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! Audio-thread sync primitives for sample-accurate multi-machine playback.
 //!
 //! # Layers

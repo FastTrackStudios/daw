@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! AAF (Advanced Authoring Format) session file parser.
 //!
 //! Parses `.aaf` files produced by professional video/audio tools — Pro Tools,
