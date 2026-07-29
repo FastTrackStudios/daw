@@ -116,8 +116,8 @@ impl YinDetector {
         // c(τ) = Σ_{j<H} x_j·x_{j+τ} via FFT cross-correlation of the
         // first half against the whole window.
         self.cumsq[0] = 0.0;
-        for j in 0..w {
-            self.cumsq[j + 1] = self.cumsq[j] + frame[j] * frame[j];
+        for (j, &x) in frame.iter().enumerate().take(w) {
+            self.cumsq[j + 1] = self.cumsq[j] + x * x;
         }
         let e0 = self.cumsq[half];
         self.pad_a[..w].copy_from_slice(&frame[..w]);

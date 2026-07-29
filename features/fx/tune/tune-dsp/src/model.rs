@@ -58,6 +58,7 @@ pub struct NoteBlob {
 
 impl NoteBlob {
     /// Frame count.
+    #[allow(clippy::len_without_is_empty)] // a blob is never empty
     pub fn len(&self) -> usize {
         self.end_frame - self.start_frame + 1
     }
@@ -208,11 +209,15 @@ impl PitchDoc {
     pub fn target_curve(&self, n_frames: usize) -> Vec<Option<f64>> {
         let mut out = vec![None; n_frames];
         for blob in &self.blobs {
-            for frame in blob.start_frame..=blob.end_frame.min(n_frames.saturating_sub(1)) {
+            let end = blob.end_frame.min(n_frames.saturating_sub(1));
+            for (frame, slot) in out
+                .iter_mut()
+                .enumerate()
+                .take(end + 1)
+                .skip(blob.start_frame)
+            {
                 let sample = frame as f64 * self.hop as f64;
-                out[frame] = blob
-                    .target_midi(frame)
-                    .map(|m| m + self.bend_at(sample));
+                *slot = blob.target_midi(frame).map(|m| m + self.bend_at(sample));
             }
         }
         out
@@ -363,7 +368,7 @@ mod tests {
     fn markers_interpolate_and_shift_ratios_apply() {
         let note = synth_note(69.0, 100, FRAME_RATE); // A4 region
         let doc = {
-            let mut d = PitchDoc::from_notes(&[note.clone()], 512, 48_000.0);
+            let mut d = PitchDoc::from_notes(core::slice::from_ref(&note), 512, 48_000.0);
             d.add_marker(WarpMarker { sample: 0.0, d_time: 0.0, pitch_bend: 0.0 });
             d.add_marker(WarpMarker {
                 sample: 100.0 * 512.0,
