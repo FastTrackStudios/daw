@@ -1,3 +1,7 @@
+// Lint debt: workspace flipped dead_code/unused to warn (task cleanup);
+// this crate predates that — burn down separately.
+#![allow(dead_code, unused)]
+
 //! Ableton Live set file parser and writer (.als, .adg) — pure Rust, cross-platform.
 //!
 //! This crate reads and writes Ableton Live set files (gzipped XML):
