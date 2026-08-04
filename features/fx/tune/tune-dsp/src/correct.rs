@@ -44,6 +44,52 @@ impl Scale {
         }
     }
 
+    /// Build from a keyflow-style STEP interval pattern (e.g. major =
+    /// [2,2,1,2,2,2,1]) — the bridge to `keyflow_proto::ScaleMode::
+    /// interval_pattern()` without a keyflow dependency here.
+    pub fn from_intervals(root_pc: u8, steps: &[u8]) -> Self {
+        let mut mask: u16 = 1; // degree 1
+        let mut pc = 0u16;
+        for &step in steps {
+            pc = (pc + step as u16) % 12;
+            mask |= 1 << pc;
+        }
+        Self {
+            root_pc: root_pc % 12,
+            mask,
+        }
+    }
+
+    /// Whether a pitch class (relative to C) is in the scale.
+    pub fn contains_pc(&self, pc: u8) -> bool {
+        let rel = (((pc as i32 - self.root_pc as i32) % 12) + 12) % 12;
+        self.mask & (1 << rel) != 0
+    }
+
+    /// Snap with note-boundary hysteresis: while the input stays
+    /// within `0.5 + hysteresis_cents/100` semitones of the PREVIOUS
+    /// target, keep it — stops chatter between two targets at the
+    /// boundary. `bypass_mask` (absolute pitch classes, bit 0 = C)
+    /// marks classes to leave UNCORRECTED (blue notes): returns None.
+    pub fn snap_hysteresis(
+        &self,
+        midi: f64,
+        prev_target: Option<f64>,
+        hysteresis_cents: f64,
+        bypass_mask: u16,
+    ) -> Option<f64> {
+        let nearest_pc = ((midi.round() as i32 % 12) + 12) % 12;
+        if bypass_mask & (1 << nearest_pc) != 0 {
+            return None;
+        }
+        if let Some(prev) = prev_target {
+            if (midi - prev).abs() <= 0.5 + hysteresis_cents / 100.0 {
+                return Some(prev);
+            }
+        }
+        Some(self.snap(midi))
+    }
+
     /// Nearest in-scale MIDI note to a (float) MIDI pitch.
     pub fn snap(&self, midi: f64) -> f64 {
         let nearest = midi.round() as i32;

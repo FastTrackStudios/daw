@@ -13,8 +13,12 @@ realfft = { workspace = true }
 # Optional: Basic Pitch (Spotify) polyphonic note transcription via pure-Rust
 # ONNX inference. Off by default so the core stays light and dependency-free.
 tract-onnx = { workspace = true, optional = true }
+# Optional: vendored WORLD vocoder for the formant-preserving committed
+# render of the offline pitch editor (spec/autotune-plan.md).
+world-sys = { workspace = true, optional = true }
 
 [features]
+world = ["dep:world-sys"]
 default = []
 # Enables the `basic_pitch` module (bundled ~230 KB Apache-2 model + tract).
 basic-pitch = ["dep:tract-onnx"]

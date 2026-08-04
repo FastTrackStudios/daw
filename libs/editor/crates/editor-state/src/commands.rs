@@ -461,19 +461,173 @@ pub fn delete_word_forward(state: &EditorState) -> Option<TransactionSpec> {
 }
 
 /// The Tab default action on a markdown list/task line: indent the item
-/// (`dedent` = Shift-Tab, outdent). Returns `None` when the caret line
-/// isn't a list item — the caller inserts a literal tab (or nothing on
-/// Shift-Tab), matching Obsidian's behavior.
+/// (`dedent` = Shift-Tab, outdent) and renumber the surrounding ordered
+/// sequences — the level the item left closes its gap, the level it
+/// joined counts it in (an item opening a fresh sublevel restarts at
+/// `1.`). Returns `None` when the caret line isn't a list item — the
+/// caller inserts a literal tab (or nothing on Shift-Tab), matching
+/// Obsidian's behavior.
 #[must_use]
 pub fn tab_list_indent(state: &EditorState, dedent: bool) -> Option<TransactionSpec> {
     let doc = state.doc.to_string();
     let (line_from, line_to) = line_bounds(&doc, state.selection.primary().head);
     parse_list_continuation(&doc[line_from..line_to])?;
-    if dedent {
-        indent_less(state)
-    } else {
-        indent_more(state)
+    let lines = selected_line_starts(state, &doc);
+    if lines.is_empty() {
+        return None;
     }
+    let unit = INDENT_UNIT.len();
+    let bytes = doc.as_bytes();
+    let mut changes: Vec<crate::change::Change> = Vec::new();
+    // line start → signed byte delta its indentation receives; the
+    // renumber walk below sees post-edit indent widths while emitting
+    // original-doc ranges.
+    let mut deltas: std::collections::HashMap<usize, isize> = std::collections::HashMap::new();
+    for &lf in &lines {
+        if dedent {
+            let mut leading = 0;
+            while leading < unit && bytes.get(lf + leading) == Some(&b' ') {
+                leading += 1;
+            }
+            if leading > 0 {
+                changes.push(crate::change::Change {
+                    from: lf,
+                    to: lf + leading,
+                    inserted: String::new(),
+                });
+                deltas.insert(lf, -(leading as isize));
+            }
+        } else {
+            changes.push(crate::change::Change {
+                from: lf,
+                to: lf,
+                inserted: INDENT_UNIT.to_string(),
+            });
+            deltas.insert(lf, unit as isize);
+        }
+    }
+    if changes.is_empty() {
+        // Shift-Tab with nothing left to remove.
+        return None;
+    }
+    changes.extend(renumber_block_with_deltas(&doc, &deltas));
+    changes.sort_by_key(|c| (c.from, c.to));
+    Some(TransactionSpec::new().changes(Changes::from_sorted(changes)))
+}
+
+/// Is `line` a plain (non-blockquote) list item — the lines the
+/// block-renumber walk covers?
+fn is_renumberable_list_line(line: &str) -> bool {
+    parse_list_continuation(line).is_some_and(|c| {
+        c.bq_prefix.is_empty() && matches!(c.kind, ListKind::Bullet(_) | ListKind::Ordered(_))
+    })
+}
+
+/// Renumber the contiguous list block around the lines in `deltas`
+/// (line start → pending indentation byte delta), emitting digit fixes
+/// for every ordered item whose number no longer matches its
+/// sequence. Levels are tracked by effective (post-edit) indent width:
+/// a moved item opening a fresh sublevel restarts at `1.`; everything
+/// else continues its level's count. Untouched items that OPEN a level
+/// keep their number, so lists that deliberately start at `7.` stay
+/// put. Emitted ranges are original-doc coordinates, disjoint from the
+/// indent edits (digits sit after the leading whitespace).
+fn renumber_block_with_deltas(
+    doc: &str,
+    deltas: &std::collections::HashMap<usize, isize>,
+) -> Vec<crate::change::Change> {
+    let Some(&first_changed) = deltas.keys().min() else {
+        return Vec::new();
+    };
+    // Walk up to the top of the contiguous list block.
+    let mut block_start = {
+        let (lf, _) = line_bounds(doc, first_changed.min(doc.len()));
+        lf
+    };
+    while block_start > 0 {
+        let newline = block_start - 1;
+        let (prev_from, _) = line_bounds(doc, newline);
+        if is_renumberable_list_line(&doc[prev_from..newline]) {
+            block_start = prev_from;
+        } else {
+            break;
+        }
+    }
+
+    /// One open indentation level in the walk.
+    struct Level {
+        indent: usize,
+        ordered: bool,
+        counter: u32,
+        started: bool,
+    }
+    let mut stack: Vec<Level> = Vec::new();
+    let mut out = Vec::new();
+    let bytes = doc.as_bytes();
+    let mut i = block_start;
+    loop {
+        let (lf, lt) = line_bounds(doc, i);
+        let line = &doc[lf..lt];
+        if !is_renumberable_list_line(line) {
+            break;
+        }
+        let cont = parse_list_continuation(line).expect("checked renumberable");
+        let moved = deltas.get(&lf).copied().unwrap_or(0);
+        let eff_indent = usize::try_from(cont.indent.len() as isize + moved).unwrap_or(0);
+        let ordered = matches!(cont.kind, ListKind::Ordered(_));
+
+        while stack.last().is_some_and(|l| l.indent > eff_indent) {
+            stack.pop();
+        }
+        match stack.last_mut() {
+            Some(l) if l.indent == eff_indent => {
+                // A marker-kind flip at the same depth starts a new
+                // markdown list — restart the count.
+                if l.ordered != ordered {
+                    l.ordered = ordered;
+                    l.counter = 0;
+                    l.started = false;
+                }
+            }
+            _ => stack.push(Level {
+                indent: eff_indent,
+                ordered,
+                counter: 0,
+                started: false,
+            }),
+        }
+        let level = stack.last_mut().expect("level pushed above");
+        if let ListKind::Ordered(n) = cont.kind {
+            let expected = if !level.started && moved == 0 {
+                n
+            } else if !level.started {
+                1
+            } else {
+                level.counter + 1
+            };
+            level.started = true;
+            level.counter = expected;
+            if n != expected {
+                let digit_start = lf + cont.indent.len();
+                let mut digit_end = digit_start;
+                while digit_end < lt && bytes[digit_end].is_ascii_digit() {
+                    digit_end += 1;
+                }
+                out.push(crate::change::Change {
+                    from: digit_start,
+                    to: digit_end,
+                    inserted: expected.to_string(),
+                });
+            }
+        } else {
+            level.started = true;
+        }
+        if lt >= doc.len() {
+            break;
+        }
+        i = lt + 1;
+    }
+    out
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -1244,6 +1398,56 @@ mod tests {
         s.selection = Selection::single(Range::new(0, 5));
         let next = s.update(indent_more(&s).unwrap());
         assert_eq!(next.doc.to_string(), "  a\n  b\n  c");
+    }
+
+    #[test]
+    fn tab_indents_ordered_item_restarts_sublevel_and_closes_gap() {
+        // Tab on `2. b`: it becomes a fresh sublevel (`1.`) and the
+        // top level closes the gap (`3. c` → `2.`).
+        let s = at("1. a\n2. b\n3. c", 8); // caret inside "2. b"
+        let next = s.update(tab_list_indent(&s, false).unwrap());
+        assert_eq!(next.doc.to_string(), "1. a\n  1. b\n2. c");
+    }
+
+    #[test]
+    fn shift_tab_outdents_into_parent_sequence() {
+        // Shift-Tab on the nested `1. x`: it joins the parent
+        // sequence as `2.` and the old `2. b` becomes `3.`.
+        let s = at("1. a\n  1. x\n2. b", 10); // caret inside "  1. x"
+        let next = s.update(tab_list_indent(&s, true).unwrap());
+        assert_eq!(next.doc.to_string(), "1. a\n2. x\n3. b");
+    }
+
+    #[test]
+    fn tab_indent_renumbers_following_siblings_of_new_level() {
+        // Indenting `3. c` under an existing sublevel appends to that
+        // sublevel's sequence instead of restarting it.
+        let s = at("1. a\n2. b\n  1. x\n3. c", 20); // caret inside "3. c"
+        let next = s.update(tab_list_indent(&s, false).unwrap());
+        assert_eq!(next.doc.to_string(), "1. a\n2. b\n  1. x\n  2. c");
+    }
+
+    #[test]
+    fn tab_bullet_item_indents_without_touching_numbers() {
+        let s = at("1. a\n- b\n2. c", 6); // caret inside "- b"
+        let next = s.update(tab_list_indent(&s, false).unwrap());
+        assert_eq!(next.doc.to_string(), "1. a\n  - b\n2. c");
+    }
+
+    #[test]
+    fn tab_outside_list_returns_none() {
+        let s = at("plain text", 3);
+        assert!(tab_list_indent(&s, false).is_none());
+        assert!(tab_list_indent(&s, true).is_none());
+    }
+
+    #[test]
+    fn untouched_list_start_number_is_preserved() {
+        // A list deliberately starting at 7 keeps its base when a
+        // later item is indented.
+        let s = at("7. a\n8. b\n9. c", 8); // caret inside "8. b"
+        let next = s.update(tab_list_indent(&s, false).unwrap());
+        assert_eq!(next.doc.to_string(), "7. a\n  1. b\n8. c");
     }
 
     #[test]

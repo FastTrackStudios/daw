@@ -442,8 +442,12 @@ fn App() -> Element {
         .with("Mod-6", |s: &_| commands::set_heading(s, 6))
         .with("Mod-0", |s: &_| commands::set_heading(s, 0))
         .with("Mod-e", commands::toggle_reading_mode as _)
-        .with("Tab", commands::indent_more as _)
-        .with("Shift-Tab", commands::indent_less as _)
+        .with("Tab", |s: &_| {
+            commands::tab_list_indent(s, false).or_else(|| commands::indent_more(s))
+        })
+        .with("Shift-Tab", |s: &_| {
+            commands::tab_list_indent(s, true).or_else(|| commands::indent_less(s))
+        })
         .with("Backspace", commands::delete_backward as _)
         .with("Delete", commands::delete_forward as _)
         // Word-wise deletes — same shared commands the native path

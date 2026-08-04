@@ -53,6 +53,18 @@ pub struct YinDetector {
     cmnd: Vec<f64>,
     min_lag: usize,
     max_lag: usize,
+    // FFT-accelerated difference function: d(τ) = E0 + E(τ) − 2·c(τ)
+    // with the cross term via one forward/inverse FFT pair — O(W log W)
+    // instead of the naive O(W²/4). All buffers preallocated.
+    fft_fwd: std::sync::Arc<dyn realfft::RealToComplex<f64>>,
+    fft_inv: std::sync::Arc<dyn realfft::ComplexToReal<f64>>,
+    fft_len: usize,
+    pad_a: Vec<f64>,
+    pad_b: Vec<f64>,
+    spec_a: Vec<realfft::num_complex::Complex<f64>>,
+    spec_b: Vec<realfft::num_complex::Complex<f64>>,
+    xcorr: Vec<f64>,
+    cumsq: Vec<f64>,
 }
 
 impl YinDetector {
@@ -62,6 +74,11 @@ impl YinDetector {
         let half = cfg.window / 2;
         let min_lag = ((sr / cfg.max_hz) as usize).max(2);
         let max_lag = ((sr / cfg.min_hz) as usize).min(half.saturating_sub(1)).max(min_lag + 1);
+        let fft_len = (cfg.window + half).next_power_of_two();
+        let mut planner = realfft::RealFftPlanner::<f64>::new();
+        let fft_fwd = planner.plan_fft_forward(fft_len);
+        let fft_inv = planner.plan_fft_inverse(fft_len);
+        let bins = fft_len / 2 + 1;
         Self {
             cfg,
             sample_rate: sr,
@@ -69,6 +86,15 @@ impl YinDetector {
             cmnd: vec![0.0; half],
             min_lag,
             max_lag,
+            fft_fwd,
+            fft_inv,
+            fft_len,
+            pad_a: vec![0.0; fft_len],
+            pad_b: vec![0.0; fft_len],
+            spec_a: vec![realfft::num_complex::Complex::new(0.0, 0.0); bins],
+            spec_b: vec![realfft::num_complex::Complex::new(0.0, 0.0); bins],
+            xcorr: vec![0.0; fft_len],
+            cumsq: vec![0.0; cfg.window + 1],
         }
     }
 
@@ -85,15 +111,32 @@ impl YinDetector {
         let half = w / 2;
         let rms = (frame[..w].iter().map(|s| s * s).sum::<f64>() / w as f64).sqrt();
 
-        // Difference function d(tau).
+        // Difference function d(τ) = Σ_{j<H}(x_j − x_{j+τ})²
+        //                          = E[0..H] + E[τ..τ+H] − 2·c(τ),
+        // c(τ) = Σ_{j<H} x_j·x_{j+τ} via FFT cross-correlation of the
+        // first half against the whole window.
+        self.cumsq[0] = 0.0;
+        for (j, &x) in frame.iter().enumerate().take(w) {
+            self.cumsq[j + 1] = self.cumsq[j] + x * x;
+        }
+        let e0 = self.cumsq[half];
+        self.pad_a[..w].copy_from_slice(&frame[..w]);
+        self.pad_a[w..].fill(0.0);
+        self.pad_b[..half].copy_from_slice(&frame[..half]);
+        self.pad_b[half..].fill(0.0);
+        let _ = self.fft_fwd.process(&mut self.pad_a, &mut self.spec_a);
+        let _ = self.fft_fwd.process(&mut self.pad_b, &mut self.spec_b);
+        // conj(B)·A → correlation c(τ) at non-negative lags.
+        for (a, b) in self.spec_a.iter_mut().zip(&self.spec_b) {
+            *a *= b.conj();
+        }
+        let _ = self.fft_inv.process(&mut self.spec_a, &mut self.xcorr);
+        let norm = 1.0 / self.fft_len as f64;
         self.diff[0] = 0.0;
         for tau in 1..half.min(self.max_lag + 1) {
-            let mut sum = 0.0;
-            for j in 0..half {
-                let d = frame[j] - frame[j + tau];
-                sum += d * d;
-            }
-            self.diff[tau] = sum;
+            let e_tau = self.cumsq[tau + half] - self.cumsq[tau];
+            let c = self.xcorr[tau] * norm;
+            self.diff[tau] = (e0 + e_tau - 2.0 * c).max(0.0);
         }
 
         // Cumulative mean normalised difference.

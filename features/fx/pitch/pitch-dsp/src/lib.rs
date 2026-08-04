@@ -21,6 +21,7 @@ pub mod granular;
 pub mod pll;
 pub mod pog;
 pub mod psola;
+pub mod unison;
 #[cfg(feature = "rubberband")]
 pub mod rubberband;
 pub mod wsola;
