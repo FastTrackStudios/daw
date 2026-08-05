@@ -18,6 +18,7 @@ pub mod axis;
 pub mod color;
 pub mod controls;
 pub mod drag;
+pub mod hardware;
 pub mod marks;
 pub mod meters;
 pub mod param;
