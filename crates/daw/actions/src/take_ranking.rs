@@ -403,3 +403,48 @@ where
 {
     register_take_ranking_actions(backend, std::sync::Arc::new(TakeRankingActionsImpl));
 }
+
+// ─── RPC service ───────────────────────────────────────────────────────
+
+/// [`daw::service::TakeRankingService`] over the same handlers the
+/// keyboard actions use. Every call bounces to REAPER's main thread —
+/// the handlers below touch main-thread-only FFI, while the async RPC
+/// dispatcher runs on the tokio runtime.
+#[derive(Clone, Default)]
+pub struct TakeRankingServiceImpl;
+
+impl daw::service::TakeRankingService for TakeRankingServiceImpl {
+    async fn apply_rank(
+        &self,
+        scope: daw::service::TakeRankScope,
+        level: daw::service::TakeRankLevel,
+    ) -> Result<(), daw::service::DawError> {
+        let action = rank_action_for(scope, level);
+        daw::main_thread::query(move || dispatch(action))
+            .await
+            .ok_or(daw::service::DawError::MainThreadUnavailable)?;
+        Ok(())
+    }
+}
+
+fn rank_action_for(
+    scope: daw::service::TakeRankScope,
+    level: daw::service::TakeRankLevel,
+) -> RankAction {
+    use daw::service::TakeRankLevel::*;
+    use daw::service::TakeRankScope::*;
+    match (scope, level) {
+        (PlayPosMinus2s, One) => RankAction::PlayPos1,
+        (PlayPosMinus2s, Two) => RankAction::PlayPos2,
+        (PlayPosMinus2s, Three) => RankAction::PlayPos3,
+        (PlayPosMinus2s, Down) => RankAction::PlayPosDown,
+        (ItemWide, One) => RankAction::Item1,
+        (ItemWide, Two) => RankAction::Item2,
+        (ItemWide, Three) => RankAction::Item3,
+        (ItemWide, Down) => RankAction::ItemDown,
+        (MouseCursor, One) => RankAction::Mouse1,
+        (MouseCursor, Two) => RankAction::Mouse2,
+        (MouseCursor, Three) => RankAction::Mouse3,
+        (MouseCursor, Down) => RankAction::MouseDown,
+    }
+}

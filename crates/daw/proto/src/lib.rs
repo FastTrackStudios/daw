@@ -54,11 +54,13 @@ pub mod plugin_loader;
 pub mod position_conversion;
 pub mod primitives;
 pub mod project;
+pub mod record_control;
 pub mod region;
 pub mod resource;
 pub mod routing;
 pub mod screenset;
 pub mod take;
+pub mod take_ranking;
 pub mod tempo_map;
 pub mod toolbar;
 pub mod track;
@@ -129,6 +131,18 @@ pub use fx_params::{FxParams, FxParamsRpc};
 #[cfg(feature = "vox")]
 pub use take::TakesClient;
 pub use take::{Takes, TakesRpc};
+#[cfg(feature = "vox")]
+pub use record_control::RecordControlServiceClient;
+pub use record_control::{
+    RecordControlService, RecordControlServiceDispatcher, record_control_service_service_descriptor,
+    serve_record_control_service,
+};
+#[cfg(feature = "vox")]
+pub use take_ranking::TakeRankingServiceClient;
+pub use take_ranking::{
+    TakeRankLevel, TakeRankScope, TakeRankingService, TakeRankingServiceDispatcher,
+    serve_take_ranking_service, take_ranking_service_service_descriptor,
+};
 #[cfg(feature = "vox")]
 pub use tempo_map::TempoMapClient;
 pub use tempo_map::{TempoMap, TempoMapError, TempoMapEvent, TempoMapRpc, TempoPoint};

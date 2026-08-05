@@ -280,3 +280,31 @@ where
 {
     register_record_actions(backend, std::sync::Arc::new(RecordActionsImpl));
 }
+
+// ─── RPC service ───────────────────────────────────────────────────────
+
+/// [`daw::service::RecordControlService`] over the same handlers the
+/// keyboard actions use; each call bounces to REAPER's main thread.
+#[derive(Clone, Default)]
+pub struct RecordControlServiceImpl;
+
+impl daw::service::RecordControlService for RecordControlServiceImpl {
+    async fn restart_recording(&self) -> Result<(), daw::service::DawError> {
+        dispatch_on_main(RecordAction::RestartRecording).await
+    }
+
+    async fn toggle_monitor_on_off(&self) -> Result<(), daw::service::DawError> {
+        dispatch_on_main(RecordAction::ToggleMonitorOnOff).await
+    }
+
+    async fn toggle_monitor_tape_off(&self) -> Result<(), daw::service::DawError> {
+        dispatch_on_main(RecordAction::ToggleMonitorTapeOff).await
+    }
+}
+
+async fn dispatch_on_main(action: RecordAction) -> Result<(), daw::service::DawError> {
+    daw::main_thread::query(move || dispatch(action))
+        .await
+        .ok_or(daw::service::DawError::MainThreadUnavailable)?;
+    Ok(())
+}
