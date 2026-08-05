@@ -3,7 +3,8 @@
 //! `#[architect::actions]` traits plus the logic behind them, for
 //! capabilities that are plain DAW operations rather than any one
 //! product's domain: pre-roll, record control, track grouping, take
-//! ranking, auto-colouring. These used to live in `session`, which meant
+//! ranking. (Auto-colouring moved on to `session::color` — colour stopped
+//! being generic once it needed song structure.) These used to live in `session`, which meant
 //! reaching into a *session* crate for things with nothing to do with
 //! setlists or songs.
 //!
@@ -19,7 +20,6 @@
 //! composes any namespace nesting by wrapping its `ActionBackend` in
 //! `architect::action::ScopedActionBackend`.
 
-pub mod auto_color;
 pub mod group_manager;
 pub mod groups;
 pub mod preroll;
@@ -37,7 +37,6 @@ where
     D: daw::service::Projects + daw::service::ActionRegistration + Send + Sync + 'static,
     B: ::architect::action::ActionBackend + ?Sized,
 {
-    auto_color::register_actions(backend);
     groups::register_actions(backend);
     preroll::register_actions(backend, daw);
     record::register_actions(backend);
