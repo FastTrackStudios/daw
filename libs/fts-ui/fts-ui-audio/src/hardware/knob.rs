@@ -52,6 +52,21 @@ impl KnobStyle {
             Self::Skirted => "radial-gradient(circle at 38% 24%, #4c4c50 0%, #232326 38%, #101012 72%, #0a0a0c 100%)",
         }
     }
+    /// The same finish in a given colour — the gradient's shape is what makes
+    /// it read as moulded plastic or brushed metal, so only the hue moves.
+    fn tinted(self, color: &str) -> String {
+        match self {
+            Self::Metal => format!(
+                "radial-gradient(circle at 34% 26%, color-mix(in oklab, {color} 55%, white) 0%, \
+                 {color} 58%, color-mix(in oklab, {color} 70%, black) 100%)"
+            ),
+            _ => format!(
+                "radial-gradient(circle at 36% 24%, color-mix(in oklab, {color} 72%, white) 0%, \
+                 {color} 42%, color-mix(in oklab, {color} 62%, black) 100%)"
+            ),
+        }
+    }
+
     fn pointer(self) -> &'static str {
         match self {
             Self::Bakelite | Self::Skirted => "#f2f2f0",
@@ -87,6 +102,13 @@ pub fn HardwareKnob(
     /// Draw tick marks, or numerals alone.
     #[props(default = true)]
     ticks: bool,
+    /// Override the knob body's colour.
+    ///
+    /// A console colour-codes its bands — the SSL's blue LMF, green HMF,
+    /// magenta HF — and that colour is how you find the band you want without
+    /// reading anything. The [`KnobStyle`] still decides the finish.
+    #[props(default)]
+    tint: Option<String>,
 ) -> Element {
     let mut drag: Signal<DragState> = use_context();
     // Re-render while a drag is in flight so the pointer tracks the cursor.
@@ -183,7 +205,7 @@ pub fn HardwareKnob(
                     diameter * scale,
                     -(diameter * scale) / 2.0,
                     -(diameter * scale) / 2.0,
-                    style.body(),
+                    tint.as_deref().map(|c| style.tinted(c)).unwrap_or_else(|| style.body().to_string()),
                     1.5 * scale,
                     4.0 * scale,
                     diameter * 0.22 * scale,

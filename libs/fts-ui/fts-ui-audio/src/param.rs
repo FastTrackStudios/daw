@@ -75,6 +75,28 @@ impl ParamHandle {
         }
     }
 
+    /// A handle bound to nothing: reads a fixed position, ignores writes.
+    ///
+    /// For a control that is on the panel because the unit has it, but has no
+    /// parameter behind it yet. Drawing those is deliberate — a faceplate is
+    /// the specification for what the DSP still owes — and this is what lets a
+    /// widget draw one without a special case for "no handle".
+    pub fn inert(name: impl Into<String>, position: f32) -> Self {
+        let name = name.into();
+        let shown = name.clone();
+        let position = position.clamp(0.0, 1.0);
+        Self::new(
+            move || position,
+            || {},
+            |_| {},
+            || {},
+            move || shown.clone(),
+            move || name.clone(),
+            |_| None,
+        )
+        .with_default(position)
+    }
+
     /// Set the default normalized value (used for alt-click reset etc.).
     pub fn with_default(mut self, default_normalized: f32) -> Self {
         self.default_normalized = default_normalized.clamp(0.0, 1.0);

@@ -33,6 +33,10 @@ pub enum Ring {
     /// Pultec look, where the panel prints 0–10 hugging the skirt and nothing
     /// else.
     Numerals(&'static [&'static str]),
+    /// Dots rather than tick marks, with a numeral at each entry that has
+    /// one — the SSL's printed ring, where the dots mark the detent-less
+    /// travel of a sweepable band.
+    Dots(&'static [&'static str]),
     /// No printed ring at all.
     None,
 }
@@ -46,7 +50,7 @@ impl Ring {
             }
             Ring::Detents(labels) => detent_ring(labels),
             Ring::Plain { majors } => scale_ring(majors, 1, |_| None),
-            Ring::Numerals(labels) => detent_ring(labels),
+            Ring::Numerals(labels) | Ring::Dots(labels) => detent_ring(labels),
             Ring::None => Vec::new(),
         }
     }
@@ -59,6 +63,8 @@ impl Ring {
     pub fn geometry(self) -> (f64, f64, bool) {
         match self {
             Ring::Numerals(_) => (31.0, 37.0, false),
+            // Dots print where ticks would, and the numerals just outside.
+            Ring::Dots(_) => (38.0, 48.0, false),
             // Nothing printed at all — not even the faint band the ticks sit
             // on, which is what "None" has to mean for a bypass knob.
             Ring::None => (41.0, 50.0, false),
@@ -87,6 +93,9 @@ pub enum RackItem {
         y: f64,
         d: f64,
         ring: Ring,
+        /// Body colour, when the unit colour-codes its controls. `None` takes
+        /// the design's [`KnobStyle`].
+        tint: Option<&'static str>,
     },
     /// A vertical bank of radio-like buttons (the 1176's ratios).
     Buttons {
@@ -123,6 +132,35 @@ pub enum RackItem {
     Readout { id: &'static str, x: f64, y: f64 },
     /// A panel indicator lamp.
     Lamp { x: f64, y: f64, color: &'static str },
+    /// A latching panel button — the console's FLTR IN, EQ IN, the phase
+    /// invert, the ÷3 and ×3 range switches.
+    ///
+    /// `id` may be empty, which means "this control exists on the panel but
+    /// has no parameter behind it yet": it draws, it does not move. Better
+    /// than omitting it, because the panel is the specification for what the
+    /// DSP still owes.
+    Button {
+        id: &'static str,
+        label: &'static str,
+        x: f64,
+        y: f64,
+        /// Face colour — cream for a function switch, red for phase.
+        color: &'static str,
+        /// Text colour.
+        ink: &'static str,
+        /// Colour of the indicator below it, if it has one.
+        led: &'static str,
+    },
+    /// A segmented LED level meter, as the console's output metering.
+    LedMeter {
+        x: f64,
+        y: f64,
+        h: f64,
+        /// Which channel, so a pair reads left and right.
+        right: bool,
+    },
+    /// A hairline dividing two sections of a panel.
+    Divider { x: f64, y: f64, h: f64 },
     /// Silkscreened panel text.
     Text {
         x: f64,

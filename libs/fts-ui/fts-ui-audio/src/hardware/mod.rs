@@ -14,6 +14,7 @@
 //! unit-testable; the components on top of them need the editor's Dioxus
 //! stack.
 
+pub mod button;
 pub mod knob;
 pub mod knob_svg;
 pub mod lever;
