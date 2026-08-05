@@ -8,16 +8,27 @@
 /// Design-space width of the meter face.
 pub const VU_W: f64 = 100.0;
 /// Design-space height of the meter face.
-pub const VU_H: f64 = 62.0;
+pub const VU_H: f64 = 58.0;
 
-/// Needle pivot, below the visible face so the arc sweeps naturally.
+/// Needle pivot, well below the visible face, and a long needle from it.
+///
+/// This is what sets how much of the card the scale occupies, and it is the
+/// whole character of the movement: a real VU's scale runs nearly the full
+/// width of its card, in a shallow arc, with the needle emerging from a slot
+/// at the bottom. A short needle on a close pivot draws a steep little arc
+/// down the middle and crowds every number into it — which is what this was
+/// doing.
 pub const PIVOT_X: f64 = VU_W * 0.5;
-pub const PIVOT_Y: f64 = VU_H * 1.28;
+pub const PIVOT_Y: f64 = VU_H * 1.52;
 /// Needle length from the pivot.
-pub const NEEDLE_LEN: f64 = VU_H * 1.06;
+pub const NEEDLE_LEN: f64 = VU_H * 1.40;
 
 /// Half-angle of the sweep, in degrees either side of vertical.
-pub const SWEEP_DEG: f64 = 27.0;
+///
+/// With the pivot and length above, ±34° puts the stops within about 5% of
+/// each edge — the scale uses the card, rather than sitting in the middle of
+/// it. [`the_scale_uses_the_width_of_the_card`] is the guard.
+pub const SWEEP_DEG: f64 = 34.0;
 
 /// The labelled ticks on a VU face, as (VU value, label, is_major).
 pub const VU_TICKS: &[(f64, &str, bool)] = &[
@@ -60,6 +71,13 @@ pub fn needle_tip(vu: f64) -> (f64, f64) {
         PIVOT_X + NEEDLE_LEN * rad.sin(),
         PIVOT_Y - NEEDLE_LEN * rad.cos(),
     )
+}
+
+/// Horizontal extent of the printed scale, as a fraction of the card's width.
+pub fn scale_width_fraction() -> f64 {
+    let (left, _) = tick_point(-20.0, 0.0);
+    let (right, _) = tick_point(3.0, 0.0);
+    (right - left) / VU_W
 }
 
 /// A point on the tick arc for a VU value, at `inset` from the needle length.
@@ -118,6 +136,36 @@ mod tests {
     fn out_of_range_values_pin_to_the_stops() {
         assert_eq!(vu_to_fraction(-99.0), 0.0);
         assert_eq!(vu_to_fraction(99.0), 1.0);
+    }
+
+    #[test]
+    fn the_scale_uses_the_width_of_the_card() {
+        // A VU's scale runs nearly edge to edge. Anything much less and the
+        // numbers crowd into the middle, which is what a short needle on a
+        // close pivot produces.
+        let fraction = scale_width_fraction();
+        assert!(
+            fraction > 0.85,
+            "the scale spans only {:.0}% of the card",
+            fraction * 100.0
+        );
+        assert!(fraction < 1.0, "the scale must stay on the card");
+    }
+
+    #[test]
+    fn the_arc_is_shallow_rather_than_steep() {
+        // The stops sit lower than the centre, but by a fifth of the card at
+        // most — a VU is a wide shallow sweep, not a rainbow.
+        let (_, mid) = tick_point(-4.0, 0.0);
+        let (_, edge) = tick_point(-20.0, 0.0);
+        let drop = (edge - mid) / VU_H;
+        assert!(drop > 0.1 && drop < 0.35, "arc depth is {drop:.2} of the card");
+    }
+
+    #[test]
+    fn the_needle_reaches_the_top_of_the_card() {
+        let (_, tip) = needle_tip(-4.0);
+        assert!(tip > 0.0 && tip < VU_H * 0.2, "needle tip at y={tip}");
     }
 
     #[test]

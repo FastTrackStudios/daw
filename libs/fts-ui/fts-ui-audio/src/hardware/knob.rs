@@ -67,6 +67,15 @@ pub enum KnobStyle {
     Collet,
     /// UREI 1176: black body, brushed silver top, clear collar.
     SilverTop,
+    /// Teletronix LA-2A and its contemporaries: a plain black round knob with
+    /// a moulded *nose* that points at a scale printed on the panel. No skirt,
+    /// no flutes — you read the nose.
+    Pointer,
+    /// Empirical Labs Distressor: a wide brushed dial whose *numerals are
+    /// printed on the skirt* and turn with it, around a dark centre cap. The
+    /// scale moving rather than a pointer moving is the whole look, and it is
+    /// why the panel around a Distressor knob is bare.
+    Dial,
 }
 
 impl KnobStyle {
@@ -79,13 +88,32 @@ impl KnobStyle {
             // The clear collar is a visible ring around the body, not a hair
             // of trim: on the unit it is most of what you see of the knob.
             Self::SilverTop => 0.72,
+            // The dark cap inside the numbered skirt.
+            Self::Dial => 0.58,
             _ => 1.0,
         }
     }
 
     /// Whether a wider skirt is drawn under the body.
     fn has_skirt(self) -> bool {
-        matches!(self, Self::Daka | Self::Marconi | Self::SilverTop)
+        matches!(self, Self::Daka | Self::Marconi | Self::SilverTop | Self::Dial)
+    }
+
+    /// How far out the panel's printed scale has to sit for this knob, in the
+    /// knob's viewBox units.
+    ///
+    /// A pointer knob's nose reaches past its body by design — that is how it
+    /// points — so a ring drawn for a flush knob lands underneath it.
+    pub fn ring_offset(self) -> f64 {
+        match self {
+            Self::Pointer => 13.0,
+            _ => 0.0,
+        }
+    }
+
+    /// Whether the printed scale belongs to the knob rather than the panel.
+    pub fn numerals_on_knob(self) -> bool {
+        matches!(self, Self::Dial)
     }
 
     /// How the flutes catch the light. Phenolic is dark, so its ridges read as
@@ -94,6 +122,7 @@ impl KnobStyle {
         match self {
             Self::Collet => "rgba(0,0,0,0.42)",
             Self::SilverTop => "rgba(0,0,0,0.34)",
+            Self::Dial => "rgba(0,0,0,0.30)",
             _ => "rgba(255,255,255,0.30)",
         }
     }
@@ -104,7 +133,8 @@ impl KnobStyle {
             Self::Daka => 44,
             Self::Collet => 28,
             Self::SilverTop => 30,
-            Self::Marconi => 0,
+            Self::Dial => 72,
+            Self::Marconi | Self::Pointer => 0,
             _ => 0,
         }
     }
@@ -126,6 +156,9 @@ impl KnobStyle {
             Self::Marconi => {
                 "radial-gradient(circle at 36% 22%, #3c3c40 0%, #1e1e21 46%, #121214 100%)"
             }
+            Self::Pointer => {
+                "radial-gradient(circle at 34% 24%, #48484d 0%, #232327 44%, #0f0f12 100%)"
+            }
             // A collet cap is flat-topped, so it is lit as a face rather than
             // as a sphere.
             Self::Collet => {
@@ -134,6 +167,10 @@ impl KnobStyle {
             // Brushed aluminium: a sweep across the top, not a point highlight.
             Self::SilverTop => {
                 "linear-gradient(148deg, #e2e2e0 0%, #b4b4b2 34%, #8e8e8c 62%, #cfcfcd 100%)"
+            }
+            // The cap in the middle of the dial.
+            Self::Dial => {
+                "radial-gradient(circle at 38% 28%, #55575c 0%, #303236 46%, #1c1e21 100%)"
             }
         }
     }
@@ -159,11 +196,34 @@ impl KnobStyle {
 
     fn pointer(self) -> &'static str {
         match self {
-            Self::Bakelite | Self::Skirted | Self::Daka | Self::Marconi | Self::Collet => "#f2f2f0",
+            Self::Bakelite
+            | Self::Skirted
+            | Self::Daka
+            | Self::Marconi
+            | Self::Collet
+            | Self::Pointer => "#f2f2f0",
             // A dark line on a silver top, which is how you read one.
             Self::Metal | Self::SilverTop => "#1c1c1e",
+            Self::Dial => "#f2f2f0",
         }
     }
+}
+
+/// The pointer knob's nose: a teardrop reaching past the body, which is what
+/// the panel's numbers are read against.
+fn nose_points(body_r: f64) -> String {
+    let w = body_r * 0.30;
+    format!(
+        "{:.2},{:.2} {:.2},{:.2} {:.2},{:.2} {:.2},{:.2}",
+        -w,
+        -(body_r * 0.55),
+        w,
+        -(body_r * 0.55),
+        w * 0.34,
+        -(body_r + 9.0),
+        -w * 0.34,
+        -(body_r + 9.0),
+    )
 }
 
 /// The Marconi wing, as an SVG polygon in the knob's viewBox: a raised grip
@@ -267,7 +327,9 @@ pub fn HardwareKnob(
                         opacity: "0.35",
                     }
                 }
-                for mark in marks.iter() {
+                // A dial's scale is printed on its own skirt, so it is drawn
+                // with the rotating parts below rather than here on the panel.
+                for mark in marks.iter().filter(|_| !style.numerals_on_knob()) {
                     {
                         let (x1, y1) = ring_point(mark.normalized, ring_r - 1.0);
                         let (x2, y2) = ring_point(
@@ -324,6 +386,9 @@ pub fn HardwareKnob(
                             // than absorbing it.
                             "radial-gradient(circle at 44% 34%, rgba(226,232,238,0.34) 0%, \
                              rgba(150,164,176,0.20) 56%, rgba(20,22,26,0.55) 100%)"
+                        } else if style == KnobStyle::Dial {
+                            "radial-gradient(circle at 40% 26%, #e8e8e6 0%, #c2c2c0 44%, \
+                             #9a9a98 78%, #cbcbc9 100%)"
                         } else {
                             "radial-gradient(circle at 44% 36%, #202024 0%, #101013 58%, #08080a 100%)"
                         },
@@ -363,6 +428,27 @@ pub fn HardwareKnob(
                 view_box: "-55 -55 110 110",
                 g {
                     transform: "rotate({angle:.2})",
+
+                    // A dial's numerals: printed around the skirt, turning
+                    // with it. The reading is where they line up with the
+                    // panel's index, not where a pointer lands.
+                    if style.numerals_on_knob() {
+                        for mark in marks.iter() {
+                            {
+                                let (lx, ly) = ring_point(mark.normalized, BODY_R - 6.0);
+                                rsx! {
+                                    if let Some(label) = &mark.label {
+                                        text {
+                                            x: "{lx:.2}", y: "{ly + 2.2:.2}",
+                                            fill: "#1a1c1f", font_size: "6.5",
+                                            font_weight: "700", text_anchor: "middle",
+                                            "{label}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     // Moulded flutes around the grip. They turn with the knob,
                     // which is most of what tells you it moved at a glance.
@@ -405,6 +491,25 @@ pub fn HardwareKnob(
                     // Daka-Ware's index is engraved into the body and filled
                     // white — it runs from the hub out to the body's edge, not
                     // a mark perched on the rim.
+                    // The moulded nose: it *is* the pointer, so it reaches past
+                    // the body toward the panel's printed scale.
+                    if style == KnobStyle::Pointer {
+                        polygon {
+                            points: "{nose_points(BODY_R)}",
+                            fill: "{style.body()}",
+                            stroke: "rgba(0,0,0,0.55)",
+                            stroke_width: "0.8",
+                        }
+                        rect {
+                            x: "-1.2",
+                            y: "{-(BODY_R + 7.0):.1}",
+                            width: "2.4",
+                            height: "{BODY_R * 0.55:.1}",
+                            rx: "1.0",
+                            fill: "rgba(255,255,255,0.85)",
+                        }
+                    }
+
                     if style == KnobStyle::SilverTop {
                         rect {
                             x: "-1.3",
@@ -468,6 +573,20 @@ pub fn HardwareKnob(
                     }
                 } else {
                     circle { cx: "0", cy: "0", r: "4.5", fill: "rgba(0,0,0,0.35)" }
+                }
+            }
+
+            // The panel's index, which a dial's moving numerals are read
+            // against. Fixed, unlike everything else on the knob.
+            if style.numerals_on_knob() {
+                svg {
+                    style: "position:absolute; inset:0; width:100%; height:100%; \
+                            display:block; pointer-events:none;",
+                    view_box: "-55 -55 110 110",
+                    polygon {
+                        points: "0,{-(BODY_R + 6.0):.1} -3.2,{-(BODY_R + 12.0):.1} 3.2,{-(BODY_R + 12.0):.1}",
+                        fill: "#e8eaec",
+                    }
                 }
             }
 

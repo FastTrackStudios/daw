@@ -97,7 +97,7 @@ pub fn VuMeter(
         VuMode::Level => db_to_vu(value_db as f64),
     };
     let (nx, ny) = needle_tip(vu);
-    let arc = scale_arc_path(7.0);
+    let arc = scale_arc_path(6.0);
 
     let w = width * scale;
     let h = width * (VU_H / VU_W) * scale;
@@ -150,9 +150,9 @@ pub fn VuMeter(
                 // Scale ticks. Majors are longer and numbered.
                 for (v , label , major) in VU_TICKS.iter().copied() {
                     {
-                        let (x1, y1) = tick_point(v, 7.0);
-                        let (x2, y2) = tick_point(v, if major { 13.0 } else { 10.5 });
-                        let (lx, ly) = tick_point(v, 19.0);
+                        let (x1, y1) = tick_point(v, 6.0);
+                        let (x2, y2) = tick_point(v, if major { 13.0 } else { 10.0 });
+                        let (lx, ly) = tick_point(v, 22.0);
                         let color = if v > 0.0 { face.hot() } else { face.ink() };
                         rsx! {
                             line {
@@ -162,8 +162,8 @@ pub fn VuMeter(
                             }
                             if major {
                                 text {
-                                    x: "{lx:.2}", y: "{ly + 2.0:.2}",
-                                    fill: "{color}", font_size: "5.5",
+                                    x: "{lx:.2}", y: "{ly + 2.2:.2}",
+                                    fill: "{color}", font_size: "6",
                                     text_anchor: "middle", font_weight: "600",
                                     "{label}"
                                 }
@@ -174,7 +174,7 @@ pub fn VuMeter(
 
                 // Legend under the scale — "VU", "GAIN REDUCTION".
                 text {
-                    x: "{VU_W * 0.5:.2}", y: "{VU_H * 0.86:.2}",
+                    x: "{VU_W * 0.5:.2}", y: "{VU_H * 0.93:.2}",
                     fill: "{face.ink()}", font_size: "5.0",
                     text_anchor: "middle", letter_spacing: "0.6",
                     "{legend}"
@@ -190,7 +190,7 @@ pub fn VuMeter(
                     stroke_linecap: "round",
                 }
                 circle {
-                    cx: "{PIVOT_X:.2}", cy: "{VU_H:.2}", r: "3.2",
+                    cx: "{PIVOT_X:.2}", cy: "{VU_H:.2}", r: "4.0",
                     fill: "{face.needle()}", opacity: "0.9",
                 }
             }
@@ -207,8 +207,8 @@ pub fn VuMeter(
 
 /// The red stretch of the scale, from 0 VU to the right stop.
 fn hot_arc_path() -> String {
-    let (x0, y0) = tick_point(0.0, 7.0);
-    let (x1, y1) = tick_point(3.0, 7.0);
-    let r = crate::hardware::vu_svg::NEEDLE_LEN - 7.0;
+    let (x0, y0) = tick_point(0.0, 6.0);
+    let (x1, y1) = tick_point(3.0, 6.0);
+    let r = crate::hardware::vu_svg::NEEDLE_LEN - 6.0;
     format!("M {x0:.2} {y0:.2} A {r:.2} {r:.2} 0 0 1 {x1:.2} {y1:.2}")
 }

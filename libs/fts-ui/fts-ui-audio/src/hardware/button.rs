@@ -241,3 +241,135 @@ mod tests {
         assert!(METER_STEPS_DB.windows(2).all(|w| w[0] > w[1]));
     }
 }
+
+/// A horizontal LED ladder with its scale printed above it — the Distressor's
+/// gain-reduction display.
+///
+/// Reads right to left: 1 dB at the right end, the deepest reduction at the
+/// left, so the row fills leftward as the compressor works. Green through
+/// yellow to red, and the numbers are the dB each lamp stands for.
+#[component]
+pub fn LedBar(
+    scale: f64,
+    /// dB the row is showing (positive = reduction).
+    value_db: f32,
+    /// The printed scale, left (deepest) to right (least).
+    steps: Vec<f64>,
+    #[props(default = 9.0)] led_d: f64,
+    #[props(default = 20.0)] pitch: f64,
+    #[props(default = "#cfd4d8".to_string())] ink: String,
+) -> Element {
+    rsx! {
+        div {
+            "data-testid": "hw-led-bar",
+            // Fixed-width cells rather than gaps: a row has to be exactly as
+            // wide as `labels * pitch`, or the panel cannot place it.
+            style: "display:flex; align-items:flex-end;",
+            for step in steps.iter().copied() {
+                {
+                    // A lamp lights once the reduction reaches the number
+                    // printed above it.
+                    let lit = (value_db as f64) >= step;
+                    let hue = if step >= 12.0 {
+                        "#e0483a"
+                    } else if step >= 6.0 {
+                        "#e8c53a"
+                    } else {
+                        "#5ad24a"
+                    };
+                    rsx! {
+                        div {
+                            style: format!(
+                                "width:{:.1}px; display:flex; flex-direction:column; \
+                                 align-items:center; gap:{:.1}px;",
+                                pitch * scale,
+                                3.0 * scale,
+                            ),
+                            div {
+                                style: format!(
+                                    "font-size:{:.1}px; font-weight:700; color:{ink};",
+                                    7.0 * scale,
+                                ),
+                                "{step:.0}"
+                            }
+                            Lamp { scale, color: hue.to_string(), lit, d: led_d }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A row of labelled LEDs that selects a stepped parameter — the Distressor's
+/// ratio row, where the lamp *is* the readout and the button beside it steps
+/// through them.
+#[component]
+pub fn LedSelect(
+    handle: ParamHandle,
+    testid: String,
+    scale: f64,
+    labels: Vec<String>,
+    #[props(default = 9.0)] led_d: f64,
+    #[props(default = 44.0)] pitch: f64,
+    #[props(default = "#cfd4d8".to_string())] ink: String,
+    /// Colour of the lit lamp, per position. Falls back to green.
+    #[props(default)]
+    colors: Vec<String>,
+) -> Element {
+    let count = labels.len().max(1);
+    let selected = if count > 1 {
+        (handle.normalized().clamp(0.0, 1.0) * (count - 1) as f32).round() as usize
+    } else {
+        0
+    };
+
+    rsx! {
+        div {
+            "data-testid": "hw-led-select-{testid}",
+            "data-index": "{selected}",
+            style: "display:flex; align-items:flex-end;",
+            for (index , label) in labels.iter().enumerate() {
+                {
+                    let active = index == selected;
+                    let color = colors
+                        .get(index)
+                        .cloned()
+                        .unwrap_or_else(|| "#5ad24a".to_string());
+                    let handle = handle.clone();
+                    let step = if count > 1 {
+                        index as f32 / (count - 1) as f32
+                    } else {
+                        0.0
+                    };
+                    rsx! {
+                        div {
+                            "data-testid": "hw-led-select-{testid}-{index}",
+                            style: format!(
+                                "width:{:.1}px; display:flex; flex-direction:column; \
+                                 align-items:center; gap:{:.1}px; cursor:pointer;",
+                                pitch * scale,
+                                3.0 * scale,
+                            ),
+                            onclick: move |_| {
+                                handle.begin_edit();
+                                handle.set_normalized(step);
+                                handle.end_edit();
+                            },
+                            div {
+                                style: format!(
+                                    "font-size:{:.1}px; font-weight:700; color:{ink}; \
+                                     opacity:{};",
+                                    7.5 * scale,
+                                    if active { "1" } else { "0.66" },
+                                ),
+                                "{label}"
+                            }
+                            Lamp { scale, color, lit: active, d: led_d }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

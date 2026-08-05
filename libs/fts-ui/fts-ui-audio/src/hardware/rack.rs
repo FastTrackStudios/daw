@@ -161,6 +161,24 @@ pub enum RackItem {
     },
     /// A hairline dividing two sections of a panel.
     Divider { x: f64, y: f64, h: f64 },
+    /// A rounded outline around a section — the Distressor's two boxes.
+    Frame { x: f64, y: f64, w: f64, h: f64 },
+    /// A horizontal LED ladder with its dB scale printed above it.
+    LedBar {
+        x: f64,
+        y: f64,
+        /// The printed scale, left (deepest reduction) to right.
+        steps: &'static [f64],
+        pitch: f64,
+    },
+    /// A row of labelled LEDs that selects a stepped control.
+    LedSelect {
+        id: &'static str,
+        x: f64,
+        y: f64,
+        labels: &'static [&'static str],
+        pitch: f64,
+    },
     /// Silkscreened panel text.
     Text {
         x: f64,
