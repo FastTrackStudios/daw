@@ -19,6 +19,7 @@
 //! repeated keystrokes at the same spot idempotent while still allowing
 //! a take to carry multiple rank regions for comping workflows.
 
+use daw::service::take_ranking::{TakeRankingActions, register_take_ranking_actions};
 use daw::service::transport::service::Transport as _;
 use daw::service::{
     Items as _, ItemRef, PlayState, Projects as _, ProjectContext, TakeMarkerCreate,
@@ -256,82 +257,6 @@ fn targets_mouse_cursor() -> Option<Target> {
 /// Every method forwards to the existing synchronous `dispatch` — no
 /// behavior change, just a declarative front door with real metadata.
 pub struct TakeRankingActionsImpl;
-
-#[architect::actions(namespace = "FTS_SESSION")]
-pub trait TakeRankingActions {
-    #[action(
-        description = "Set the active take's rank marker to :) at (play-pos - 2s) on every selected item, or at edit cursor if not playing",
-        category = "Project",
-        group = "Take Ranking"
-    )]
-    fn take_rank_playpos_1(&self);
-    #[action(
-        description = "Set the active take's rank marker to :)) at (play-pos - 2s) on every selected item, or at edit cursor if not playing",
-        category = "Project",
-        group = "Take Ranking"
-    )]
-    fn take_rank_playpos_2(&self);
-    #[action(
-        description = "Set the active take's rank marker to :))) at (play-pos - 2s) on every selected item, or at edit cursor if not playing",
-        category = "Project",
-        group = "Take Ranking"
-    )]
-    fn take_rank_playpos_3(&self);
-    #[action(
-        description = "Set the active take's rank marker to :( at (play-pos - 2s) on every selected item, or at edit cursor if not playing",
-        category = "Project",
-        group = "Take Ranking"
-    )]
-    fn take_rank_playpos_down(&self);
-    #[action(
-        description = "Set the active take's rank marker to :) at item start for every selected item",
-        category = "Project",
-        group = "Take Ranking"
-    )]
-    fn take_rank_item_1(&self);
-    #[action(
-        description = "Set the active take's rank marker to :)) at item start for every selected item",
-        category = "Project",
-        group = "Take Ranking"
-    )]
-    fn take_rank_item_2(&self);
-    #[action(
-        description = "Set the active take's rank marker to :))) at item start for every selected item",
-        category = "Project",
-        group = "Take Ranking"
-    )]
-    fn take_rank_item_3(&self);
-    #[action(
-        description = "Set the active take's rank marker to :( at item start for every selected item",
-        category = "Project",
-        group = "Take Ranking"
-    )]
-    fn take_rank_item_down(&self);
-    #[action(
-        description = "Set the rank marker to :) on the take under the mouse at the mouse's project-time position",
-        category = "Project",
-        group = "Take Ranking"
-    )]
-    fn take_rank_mouse_1(&self);
-    #[action(
-        description = "Set the rank marker to :)) on the take under the mouse at the mouse's project-time position",
-        category = "Project",
-        group = "Take Ranking"
-    )]
-    fn take_rank_mouse_2(&self);
-    #[action(
-        description = "Set the rank marker to :))) on the take under the mouse at the mouse's project-time position",
-        category = "Project",
-        group = "Take Ranking"
-    )]
-    fn take_rank_mouse_3(&self);
-    #[action(
-        description = "Set the rank marker to :( on the take under the mouse at the mouse's project-time position",
-        category = "Project",
-        group = "Take Ranking"
-    )]
-    fn take_rank_mouse_down(&self);
-}
 
 impl TakeRankingActions for TakeRankingActionsImpl {
     fn take_rank_playpos_1(&self) {

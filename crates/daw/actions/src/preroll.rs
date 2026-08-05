@@ -1,3 +1,4 @@
+use daw::service::preroll::{PreRollActions, register_pre_roll_actions};
 use daw::service::{ActionRegistration, ProjectContext, Projects};
 
 const PROJECT_PRE_ROLL_MEASURES_KEY: &str = "prerollmeas";
@@ -124,43 +125,6 @@ where
 /// change, just a declarative front door with real metadata.
 pub struct PreRollActionsImpl<D> {
     daw: D,
-}
-
-#[architect::actions(namespace = "FTS_SESSION")]
-pub trait PreRollActions {
-    #[action(
-        description = "Double the project pre-roll/count-in duration",
-        category = "Transport",
-        group = "Pre-Roll"
-    )]
-    fn pre_roll_double_duration(&self);
-    #[action(
-        description = "Halve the project pre-roll/count-in duration",
-        category = "Transport",
-        group = "Pre-Roll"
-    )]
-    fn pre_roll_half_duration(&self);
-    #[action(
-        description = "Set the project pre-roll/count-in duration to half a measure",
-        category = "Transport",
-        group = "Pre-Roll",
-        toggleable
-    )]
-    fn pre_roll_set_half_measure(&self);
-    #[action(
-        description = "Set the project pre-roll/count-in duration to one measure",
-        category = "Transport",
-        group = "Pre-Roll",
-        toggleable
-    )]
-    fn pre_roll_set_1_measure(&self);
-    #[action(
-        description = "Set the project pre-roll/count-in duration to two measures",
-        category = "Transport",
-        group = "Pre-Roll",
-        toggleable
-    )]
-    fn pre_roll_set_2_measures(&self);
 }
 
 impl<D> PreRollActions for PreRollActionsImpl<D>

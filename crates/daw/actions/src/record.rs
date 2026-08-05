@@ -4,6 +4,7 @@
 //! registered under the `fts.session.*` action namespace via the
 //! `session_actions` `define_actions!` block in `crate::lib`.
 
+use daw::service::record_control::{RecordActions, register_record_actions};
 use daw::service::transport::service::Transport;
 use daw::service::{InputMonitoringMode, ProjectContext, TrackRef};
 use tracing::info;
@@ -175,58 +176,6 @@ fn restart_recording() {
 /// synchronous `dispatch` — no behavior change, just a declarative front
 /// door with real metadata.
 pub struct RecordActionsImpl;
-
-#[architect::actions(namespace = "FTS_SESSION")]
-pub trait RecordActions {
-    #[action(
-        description = "Start a recording pass in the focused project — the current song's tab. Uses the existing arm / monitor / input settings.",
-        category = "Transport",
-        group = "Recording"
-    )]
-    fn record(&self);
-    #[action(
-        description = "Stop the transport in the focused project, keeping the media captured this pass.",
-        category = "Transport",
-        group = "Recording"
-    )]
-    fn record_stop(&self);
-    #[action(
-        description = "Toggle recording in the focused project — the current song's tab.",
-        category = "Transport",
-        group = "Recording"
-    )]
-    fn record_toggle(&self);
-    #[action(
-        description = "Arm every selected track (I_RECARM = 1) in the focused project so it captures input on the next recording pass.",
-        category = "Tracks",
-        group = "Recording"
-    )]
-    fn arm_selected(&self);
-    #[action(
-        description = "Disarm every selected track (I_RECARM = 0) in the focused project.",
-        category = "Tracks",
-        group = "Recording"
-    )]
-    fn disarm_selected(&self);
-    #[action(
-        description = "Stop the current recording (DELETE all recorded media this pass) and immediately start a fresh recording pass. For aborting a bad take without leaving stray media behind.",
-        category = "Transport",
-        group = "Recording"
-    )]
-    fn record_restart(&self);
-    #[action(
-        description = "Toggle the record-monitor state of every selected track between 'on' and 'off' only, skipping the auto/tape state that REAPER's native cycle action walks through. If any selected track is currently 'on', all go to off; otherwise all go to on.",
-        category = "Tracks",
-        group = "Recording"
-    )]
-    fn monitor_toggle_on_off(&self);
-    #[action(
-        description = "Toggle the record-monitor state of every selected track between 'auto/tape' (monitor input only while recording) and 'off'. If any selected track is currently 'auto/tape', all go to off; otherwise all go to auto/tape.",
-        category = "Tracks",
-        group = "Recording"
-    )]
-    fn monitor_toggle_tape_off(&self);
-}
 
 impl RecordActions for RecordActionsImpl {
     fn record(&self) {

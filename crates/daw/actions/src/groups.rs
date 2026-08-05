@@ -5,6 +5,7 @@
 //! `daw_module`'s `action_for_id` chain. All work runs on REAPER's main
 //! thread (the action-callback context), delegating to [`crate::group_manager`].
 
+use daw::service::groups::{GroupActions, register_group_actions};
 use crate::group_manager;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,64 +40,6 @@ pub fn dispatch(action: GroupAction) {
 /// synchronous `dispatch` — no behavior change, just a declarative front
 /// door with real metadata.
 pub struct GroupActionsImpl;
-
-#[architect::actions(namespace = "FTS_SESSION")]
-pub trait GroupActions {
-    #[action(
-        description = "Name the project's 128 track groups by the FTS instrument partition (Drums 1-10, Bass 11-20, Electric Gtr 21-40, Acoustic Gtr 41-60, Keys 61-70, Synths 71-80, Lead Vocal 81-100, Background Vox 101-120, Spare 121-128).",
-        category = "Tracks",
-        group = "Track Groups"
-    )]
-    fn group_apply_naming(&self);
-    #[action(
-        description = "Add the selected tracks to the next free Drums group slot as a mutual group (all flag families).",
-        category = "Tracks",
-        group = "Track Groups"
-    )]
-    fn group_assign_drums(&self);
-    #[action(
-        description = "Add the selected tracks to the next free Bass group slot as a mutual group.",
-        category = "Tracks",
-        group = "Track Groups"
-    )]
-    fn group_assign_bass(&self);
-    #[action(
-        description = "Add the selected tracks to the next free Electric Gtr group slot as a mutual group.",
-        category = "Tracks",
-        group = "Track Groups"
-    )]
-    fn group_assign_electric_gtr(&self);
-    #[action(
-        description = "Add the selected tracks to the next free Acoustic Gtr group slot as a mutual group.",
-        category = "Tracks",
-        group = "Track Groups"
-    )]
-    fn group_assign_acoustic_gtr(&self);
-    #[action(
-        description = "Add the selected tracks to the next free Keys group slot as a mutual group.",
-        category = "Tracks",
-        group = "Track Groups"
-    )]
-    fn group_assign_keys(&self);
-    #[action(
-        description = "Add the selected tracks to the next free Synths group slot as a mutual group.",
-        category = "Tracks",
-        group = "Track Groups"
-    )]
-    fn group_assign_synths(&self);
-    #[action(
-        description = "Add the selected tracks to the next free Lead Vocal group slot as a mutual group.",
-        category = "Tracks",
-        group = "Track Groups"
-    )]
-    fn group_assign_lead_vocal(&self);
-    #[action(
-        description = "Add the selected tracks to the next free Background Vox group slot as a mutual group.",
-        category = "Tracks",
-        group = "Track Groups"
-    )]
-    fn group_assign_background_vox(&self);
-}
 
 impl GroupActions for GroupActionsImpl {
     fn group_apply_naming(&self) {
