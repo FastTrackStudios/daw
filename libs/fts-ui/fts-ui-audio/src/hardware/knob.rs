@@ -47,6 +47,10 @@ const WHEEL_STEP_FINE: f64 = 0.005;
 /// - **Collet** (SSL 4000 channel): a flat-topped coloured cap with a fluted
 ///   rim and a single white bar across the top. No skirt: the panel prints the
 ///   travel as dots around it instead.
+/// - **Silver-top** (UREI 1176): a black plastic body with a *brushed silver
+///   top* and a clear plastic collar around its base — the collar catches the
+///   panel light, which is why an 1176's knobs read as rings from across a
+///   room. INPUT and OUTPUT take the large one, ATTACK and RELEASE the small.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KnobStyle {
     /// Black bakelite with a white pointer line — the LA-2A / 1176 knob.
@@ -61,6 +65,8 @@ pub enum KnobStyle {
     Marconi,
     /// SSL collet cap: flat top, fluted rim, white bar.
     Collet,
+    /// UREI 1176: black body, brushed silver top, clear collar.
+    SilverTop,
 }
 
 impl KnobStyle {
@@ -70,13 +76,16 @@ impl KnobStyle {
         match self {
             Self::Daka => 0.75,
             Self::Marconi => 0.70,
+            // The clear collar is a visible ring around the body, not a hair
+            // of trim: on the unit it is most of what you see of the knob.
+            Self::SilverTop => 0.72,
             _ => 1.0,
         }
     }
 
     /// Whether a wider skirt is drawn under the body.
     fn has_skirt(self) -> bool {
-        matches!(self, Self::Daka | Self::Marconi)
+        matches!(self, Self::Daka | Self::Marconi | Self::SilverTop)
     }
 
     /// How the flutes catch the light. Phenolic is dark, so its ridges read as
@@ -84,6 +93,7 @@ impl KnobStyle {
     fn flute_stroke(self) -> &'static str {
         match self {
             Self::Collet => "rgba(0,0,0,0.42)",
+            Self::SilverTop => "rgba(0,0,0,0.34)",
             _ => "rgba(255,255,255,0.30)",
         }
     }
@@ -93,6 +103,7 @@ impl KnobStyle {
         match self {
             Self::Daka => 44,
             Self::Collet => 28,
+            Self::SilverTop => 30,
             Self::Marconi => 0,
             _ => 0,
         }
@@ -120,6 +131,10 @@ impl KnobStyle {
             Self::Collet => {
                 "linear-gradient(162deg, #4a4a4e 0%, #303034 42%, #202024 100%)"
             }
+            // Brushed aluminium: a sweep across the top, not a point highlight.
+            Self::SilverTop => {
+                "linear-gradient(148deg, #e2e2e0 0%, #b4b4b2 34%, #8e8e8c 62%, #cfcfcd 100%)"
+            }
         }
     }
     /// The same finish in a given colour — the gradient's shape is what makes
@@ -145,7 +160,8 @@ impl KnobStyle {
     fn pointer(self) -> &'static str {
         match self {
             Self::Bakelite | Self::Skirted | Self::Daka | Self::Marconi | Self::Collet => "#f2f2f0",
-            Self::Metal => "#1c1c1e",
+            // A dark line on a silver top, which is how you read one.
+            Self::Metal | Self::SilverTop => "#1c1c1e",
         }
     }
 }
@@ -296,14 +312,21 @@ pub fn HardwareKnob(
                          width:{:.1}px; height:{:.1}px; \
                          margin-left:{:.1}px; margin-top:{:.1}px; \
                          border-radius:50%; \
-                         background:radial-gradient(circle at 44% 36%, #202024 0%, #101013 58%, \
-                           #08080a 100%); \
+                         background:{}; \
                          box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.5), \
                            inset 0 0 {:.1}px rgba(255,255,255,0.10);",
                         diameter * scale,
                         diameter * scale,
                         -(diameter * scale) / 2.0,
                         -(diameter * scale) / 2.0,
+                        if style == KnobStyle::SilverTop {
+                            // Clear plastic: it takes the panel's light rather
+                            // than absorbing it.
+                            "radial-gradient(circle at 44% 34%, rgba(226,232,238,0.34) 0%, \
+                             rgba(150,164,176,0.20) 56%, rgba(20,22,26,0.55) 100%)"
+                        } else {
+                            "radial-gradient(circle at 44% 36%, #202024 0%, #101013 58%, #08080a 100%)"
+                        },
                         1.5 * scale,
                         4.0 * scale,
                         2.0 * scale,
@@ -382,6 +405,17 @@ pub fn HardwareKnob(
                     // Daka-Ware's index is engraved into the body and filled
                     // white — it runs from the hub out to the body's edge, not
                     // a mark perched on the rim.
+                    if style == KnobStyle::SilverTop {
+                        rect {
+                            x: "-1.3",
+                            y: "{-(body_r - 1.5):.1}",
+                            width: "2.6",
+                            height: "{body_r - 4.0:.1}",
+                            rx: "1.0",
+                            fill: "{style.pointer()}",
+                        }
+                    }
+
                     if style == KnobStyle::Daka {
                         rect {
                             x: "-1.2",

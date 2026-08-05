@@ -22,12 +22,21 @@ pub enum VuMode {
     Level,
 }
 
-/// The face's colour scheme. Two units, two lamps.
+/// The face's colour scheme.
+///
+/// A period VU movement — Weston, Modutec, Sifam — has an **ivory card with a
+/// black scale and a red stretch above 0**, lit from behind by one or two
+/// bulbs. The lamp is what varies between units, not the card: the LA-2A's is
+/// warm, a rackmount's is whiter. Blue-faced meters are largely a plugin
+/// aesthetic rather than something these units wore, so the default is ivory
+/// and blue is kept only for a unit that genuinely has one.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum VuFace {
-    /// Teletronix: cream card, warm lamp, black needle.
+    /// Warm ivory under a yellow lamp — the LA-2A's, and most tube gear's.
     Amber,
-    /// UREI: blue-lit card, white printing, white needle.
+    /// Neutral ivory under a white lamp — the 1176's Modutec, a dbx, an SSL.
+    Ivory,
+    /// Blue-lit card, white printing.
     Blue,
 }
 
@@ -35,18 +44,19 @@ impl VuFace {
     fn card(self) -> &'static str {
         match self {
             Self::Amber => "linear-gradient(180deg, #f6ecd2 0%, #e8d9b4 100%)",
+            Self::Ivory => "linear-gradient(180deg, #f4f2ea 0%, #ddd9cd 100%)",
             Self::Blue => "linear-gradient(180deg, #2f5f8f 0%, #16324e 100%)",
         }
     }
     fn ink(self) -> &'static str {
         match self {
-            Self::Amber => "#2a241c",
+            Self::Amber | Self::Ivory => "#2a241c",
             Self::Blue => "#e8f2ff",
         }
     }
     fn needle(self) -> &'static str {
         match self {
-            Self::Amber => "#1d1a15",
+            Self::Amber | Self::Ivory => "#1d1a15",
             Self::Blue => "#f4f8ff",
         }
     }
@@ -54,13 +64,14 @@ impl VuFace {
     fn lamp(self) -> &'static str {
         match self {
             Self::Amber => "rgba(255,196,92,0.30)",
+            Self::Ivory => "rgba(255,246,224,0.30)",
             Self::Blue => "rgba(150,205,255,0.32)",
         }
     }
     /// Colour of the over-zero part of the scale (red on every VU ever made).
     fn hot(self) -> &'static str {
         match self {
-            Self::Amber => "#a8281c",
+            Self::Amber | Self::Ivory => "#a8281c",
             Self::Blue => "#ff6a5c",
         }
     }
