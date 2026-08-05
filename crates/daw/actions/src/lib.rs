@@ -25,3 +25,21 @@ pub mod groups;
 pub mod preroll;
 pub mod record;
 pub mod take_ranking;
+
+/// Register every action this crate declares against `backend`.
+///
+/// One call instead of five: a module added here reaches every host that
+/// already calls this, rather than silently not registering until each
+/// call site remembers to add a line. `daw` is the backend the handlers
+/// drive (`daw::reaper::Reaper` in production).
+pub fn register_all_actions<D, B>(backend: &B, daw: D)
+where
+    D: daw::service::Projects + daw::service::ActionRegistration + Send + Sync + 'static,
+    B: ::architect::action::ActionBackend + ?Sized,
+{
+    auto_color::register_actions(backend);
+    groups::register_actions(backend);
+    preroll::register_actions(backend, daw);
+    record::register_actions(backend);
+    take_ranking::register_actions(backend);
+}

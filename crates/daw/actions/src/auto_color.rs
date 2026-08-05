@@ -63,23 +63,6 @@ pub fn init(ctx: &daw::module::ModuleContext) {
     register_timer();
 }
 
-pub fn action_for_id(action_id: &str) -> Option<AutoColorAction> {
-    let normalized = action_id
-        .trim()
-        .to_lowercase()
-        .strip_prefix("fts.session.")
-        .unwrap_or(action_id.trim())
-        .to_string();
-    match normalized.as_str() {
-        "auto_color_color_all" => Some(AutoColorAction::ColorAll),
-        "auto_color_color_selected" => Some(AutoColorAction::ColorSelected),
-        "auto_color_toggle" => Some(AutoColorAction::Toggle),
-        "auto_color_clear_all" => Some(AutoColorAction::ClearAll),
-        "auto_color_clear_selected" => Some(AutoColorAction::ClearSelected),
-        _ => None,
-    }
-}
-
 pub fn dispatch(action: AutoColorAction) {
     if let Err(err) = run_action(action) {
         tracing::error!(?action, ?err, "[session] Auto-color action failed");
@@ -779,11 +762,13 @@ mod tests {
     }
 }
 
-// ── architect::actions declaration ──────────────────────────────────────
+// ── architect::actions implementation ───────────────────────────────────
 //
-// `AutoColorAction` / `action_for_id` / `dispatch` above stay put — still
-// the live path `daw_module.rs`'s dispatch chain calls into. Additive
-// declarative layer only, mirroring `setlist_actions`'s migration.
+// The action enum + `dispatch` below stay: they are the shared body every
+// action method (and, where one exists, the RPC service impl) calls into.
+// What's gone is the string-keyed `action_for_id` lookup and the
+// `session_actions` `define_actions!` entries that declared the same
+// `FTS_SESSION_*` command ids a second time.
 
 /// Bridges the five auto-color actions onto `#[architect::actions]`. Every
 /// method forwards to the existing synchronous `dispatch` — no behavior

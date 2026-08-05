@@ -15,28 +15,6 @@ pub enum GroupAction {
     AssignSelected(&'static str),
 }
 
-pub fn action_for_id(action_id: &str) -> Option<GroupAction> {
-    let slug = action_id
-        .trim()
-        .to_lowercase()
-        .strip_prefix("fts.session.")
-        .map(str::to_string)
-        .unwrap_or_else(|| action_id.to_lowercase());
-    let action = match slug.as_str() {
-        "group_apply_naming" => GroupAction::ApplyNaming,
-        "group_assign_drums" => GroupAction::AssignSelected("Drums"),
-        "group_assign_bass" => GroupAction::AssignSelected("Bass"),
-        "group_assign_electric_gtr" => GroupAction::AssignSelected("Electric Gtr"),
-        "group_assign_acoustic_gtr" => GroupAction::AssignSelected("Acoustic Gtr"),
-        "group_assign_keys" => GroupAction::AssignSelected("Keys"),
-        "group_assign_synths" => GroupAction::AssignSelected("Synths"),
-        "group_assign_lead_vocal" => GroupAction::AssignSelected("Lead Vocal"),
-        "group_assign_background_vox" => GroupAction::AssignSelected("Background Vox"),
-        _ => return None,
-    };
-    Some(action)
-}
-
 pub fn dispatch(action: GroupAction) {
     match action {
         GroupAction::ApplyNaming => {
@@ -48,11 +26,13 @@ pub fn dispatch(action: GroupAction) {
     }
 }
 
-// ── architect::actions declaration ──────────────────────────────────────
+// ── architect::actions implementation ───────────────────────────────────
 //
-// `GroupAction` / `action_for_id` / `dispatch` above stay put — still the
-// live path `daw_module.rs`'s dispatch chain calls into. Additive
-// declarative layer only, mirroring `setlist_actions`'s migration.
+// The action enum + `dispatch` below stay: they are the shared body every
+// action method (and, where one exists, the RPC service impl) calls into.
+// What's gone is the string-keyed `action_for_id` lookup and the
+// `session_actions` `define_actions!` entries that declared the same
+// `FTS_SESSION_*` command ids a second time.
 
 /// Bridges the nine track-group-manager actions onto
 /// `#[architect::actions]`. Every method forwards to the existing

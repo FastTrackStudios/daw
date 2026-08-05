@@ -83,32 +83,6 @@ impl Scope {
     }
 }
 
-/// Parse a session action id (e.g. `fts.session.take_rank_playpos_1`)
-/// into a [`RankAction`]. Returns `None` for unrelated ids.
-pub fn action_for_id(action_id: &str) -> Option<RankAction> {
-    let slug = action_id
-        .trim()
-        .to_lowercase()
-        .strip_prefix("fts.session.")
-        .map(str::to_string)
-        .unwrap_or_else(|| action_id.to_lowercase());
-    match slug.as_str() {
-        "take_rank_playpos_1" => Some(RankAction::PlayPos1),
-        "take_rank_playpos_2" => Some(RankAction::PlayPos2),
-        "take_rank_playpos_3" => Some(RankAction::PlayPos3),
-        "take_rank_playpos_down" => Some(RankAction::PlayPosDown),
-        "take_rank_item_1" => Some(RankAction::Item1),
-        "take_rank_item_2" => Some(RankAction::Item2),
-        "take_rank_item_3" => Some(RankAction::Item3),
-        "take_rank_item_down" => Some(RankAction::ItemDown),
-        "take_rank_mouse_1" => Some(RankAction::Mouse1),
-        "take_rank_mouse_2" => Some(RankAction::Mouse2),
-        "take_rank_mouse_3" => Some(RankAction::Mouse3),
-        "take_rank_mouse_down" => Some(RankAction::MouseDown),
-        _ => None,
-    }
-}
-
 pub fn dispatch(action: RankAction) {
     apply(action.scope(), action.rating());
 }
@@ -270,11 +244,13 @@ fn targets_mouse_cursor() -> Option<Target> {
     })
 }
 
-// ── architect::actions declaration ──────────────────────────────────────
+// ── architect::actions implementation ───────────────────────────────────
 //
-// `RankAction` / `action_for_id` / `dispatch` above stay put — still the
-// live path `daw_module.rs`'s dispatch chain calls into. Additive
-// declarative layer only, mirroring `setlist_actions`'s migration.
+// The action enum + `dispatch` below stay: they are the shared body every
+// action method (and, where one exists, the RPC service impl) calls into.
+// What's gone is the string-keyed `action_for_id` lookup and the
+// `session_actions` `define_actions!` entries that declared the same
+// `FTS_SESSION_*` command ids a second time.
 
 /// Bridges the twelve take-ranking actions onto `#[architect::actions]`.
 /// Every method forwards to the existing synchronous `dispatch` — no

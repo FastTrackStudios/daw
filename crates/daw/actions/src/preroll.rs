@@ -25,30 +25,6 @@ where
     }
 }
 
-pub fn is_toggle_action(action_id: &str) -> bool {
-    matches!(
-        action_for_id(action_id),
-        Some(PreRollAction::SetMeasures(_))
-    )
-}
-
-pub fn action_for_id(action_id: &str) -> Option<PreRollAction> {
-    let normalized = action_id
-        .trim()
-        .to_lowercase()
-        .strip_prefix("fts.session.")
-        .unwrap_or(action_id.trim())
-        .to_string();
-    match normalized.as_str() {
-        "pre_roll_double_duration" => Some(PreRollAction::Double),
-        "pre_roll_half_duration" => Some(PreRollAction::Half),
-        "pre_roll_set_half_measure" => Some(PreRollAction::SetMeasures(0.5)),
-        "pre_roll_set_1_measure" => Some(PreRollAction::SetMeasures(1.0)),
-        "pre_roll_set_2_measures" => Some(PreRollAction::SetMeasures(2.0)),
-        _ => None,
-    }
-}
-
 pub fn dispatch<D>(daw: &D, action: PreRollAction)
 where
     D: Projects + ActionRegistration,
@@ -135,11 +111,13 @@ where
         .unwrap_or_else(|| daw.get_project_info(project, PROJECT_PRE_ROLL_MEASURES_KEY))
 }
 
-// ── architect::actions declaration ──────────────────────────────────────
+// ── architect::actions implementation ───────────────────────────────────
 //
-// `PreRollAction` / `action_for_id` / `dispatch` above stay put — still
-// the live path `daw_module.rs`'s dispatch chain calls into. Additive
-// declarative layer only, mirroring `setlist_actions`'s migration.
+// The action enum + `dispatch` below stay: they are the shared body every
+// action method (and, where one exists, the RPC service impl) calls into.
+// What's gone is the string-keyed `action_for_id` lookup and the
+// `session_actions` `define_actions!` entries that declared the same
+// `FTS_SESSION_*` command ids a second time.
 
 /// Bridges the five pre-roll actions onto `#[architect::actions]`. Every
 /// method forwards to the existing synchronous `dispatch` — no behavior

@@ -49,26 +49,6 @@ pub enum RecordAction {
     DisarmSelected,
 }
 
-pub fn action_for_id(action_id: &str) -> Option<RecordAction> {
-    let slug = action_id
-        .trim()
-        .to_lowercase()
-        .strip_prefix("fts.session.")
-        .map(str::to_string)
-        .unwrap_or_else(|| action_id.to_lowercase());
-    match slug.as_str() {
-        "record_restart" => Some(RecordAction::RestartRecording),
-        "monitor_toggle_on_off" => Some(RecordAction::ToggleMonitorOnOff),
-        "monitor_toggle_tape_off" => Some(RecordAction::ToggleMonitorTapeOff),
-        "record" => Some(RecordAction::Record),
-        "record_stop" => Some(RecordAction::StopRecording),
-        "record_toggle" => Some(RecordAction::ToggleRecording),
-        "arm_selected" => Some(RecordAction::ArmSelected),
-        "disarm_selected" => Some(RecordAction::DisarmSelected),
-        _ => None,
-    }
-}
-
 pub fn dispatch(action: RecordAction) {
     let daw = daw::reaper::Reaper;
     match action {
@@ -182,11 +162,13 @@ fn restart_recording() {
     info!("[record] Restarted recording (stop+delete then record)");
 }
 
-// ── architect::actions declaration ──────────────────────────────────────
+// ── architect::actions implementation ───────────────────────────────────
 //
-// `RecordAction` / `action_for_id` / `dispatch` above stay put — still the
-// live path `daw_module.rs`'s dispatch chain calls into. Additive
-// declarative layer only, mirroring `setlist_actions`'s migration.
+// The action enum + `dispatch` below stay: they are the shared body every
+// action method (and, where one exists, the RPC service impl) calls into.
+// What's gone is the string-keyed `action_for_id` lookup and the
+// `session_actions` `define_actions!` entries that declared the same
+// `FTS_SESSION_*` command ids a second time.
 
 /// Bridges the eight recording-workflow actions onto
 /// `#[architect::actions]`. Every method forwards to the existing
