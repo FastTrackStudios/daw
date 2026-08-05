@@ -183,6 +183,15 @@ pub enum RackItem {
         labels: &'static [&'static str],
         pitch: f64,
     },
+    /// Silkscreened panel text in a stated colour — a channel label picked out
+    /// in red, a warning, anything the panel's two inks do not cover.
+    TintedText {
+        x: f64,
+        y: f64,
+        text: &'static str,
+        size: f64,
+        color: &'static str,
+    },
     /// Silkscreened panel text.
     Text {
         x: f64,
@@ -211,6 +220,8 @@ pub struct RackDesign {
     /// Rack ears and screws.
     pub chrome: &'static str,
     pub vu: VuFace,
+    /// Whether the movements are mounted through the panel in a bezel.
+    pub vu_bezel: bool,
     pub knob: KnobStyle,
     pub items: &'static [RackItem],
 }

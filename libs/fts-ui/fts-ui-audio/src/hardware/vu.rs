@@ -43,27 +43,29 @@ pub enum VuFace {
 impl VuFace {
     fn card(self) -> &'static str {
         match self {
-            Self::Amber => "linear-gradient(180deg, #f6ecd2 0%, #e8d9b4 100%)",
+            Self::Amber => "linear-gradient(180deg, #f6d79a 0%, #e8b45f 62%, #d99a3c 100%)",
             Self::Ivory => "linear-gradient(180deg, #f4f2ea 0%, #ddd9cd 100%)",
             Self::Blue => "linear-gradient(180deg, #2f5f8f 0%, #16324e 100%)",
         }
     }
     fn ink(self) -> &'static str {
         match self {
-            Self::Amber | Self::Ivory => "#2a241c",
+            Self::Amber => "#3a2a12",
+            Self::Ivory => "#2a241c",
             Self::Blue => "#e8f2ff",
         }
     }
     fn needle(self) -> &'static str {
         match self {
-            Self::Amber | Self::Ivory => "#1d1a15",
+            Self::Amber => "#241a0c",
+            Self::Ivory => "#1d1a15",
             Self::Blue => "#f4f8ff",
         }
     }
     /// The lamp glow across the top of the card.
     fn lamp(self) -> &'static str {
         match self {
-            Self::Amber => "rgba(255,196,92,0.30)",
+            Self::Amber => "rgba(255,214,120,0.55)",
             Self::Ivory => "rgba(255,246,224,0.30)",
             Self::Blue => "rgba(150,205,255,0.32)",
         }
@@ -71,7 +73,8 @@ impl VuFace {
     /// Colour of the over-zero part of the scale (red on every VU ever made).
     fn hot(self) -> &'static str {
         match self {
-            Self::Amber | Self::Ivory => "#a8281c",
+            Self::Amber => "#8f2010",
+            Self::Ivory => "#a8281c",
             Self::Blue => "#ff6a5c",
         }
     }
@@ -91,6 +94,10 @@ pub fn VuMeter(
     mode: VuMode,
     value_db: f32,
     #[props(default = "VU".to_string())] legend: String,
+    /// Wrap the movement in a black bezel with a vent below it, as a meter
+    /// mounted through a panel rather than printed on one.
+    #[props(default = false)]
+    bezel: bool,
 ) -> Element {
     let vu = match mode {
         VuMode::GainReduction => gr_to_vu(value_db as f64),
@@ -101,6 +108,49 @@ pub fn VuMeter(
 
     let w = width * scale;
     let h = width * (VU_H / VU_W) * scale;
+
+    if bezel {
+        return rsx! {
+            div {
+                "data-testid": "vu-bezel",
+                style: format!(
+                    "display:flex; flex-direction:column; align-items:center; \
+                     padding:{:.1}px {:.1}px {:.1}px; border-radius:{:.1}px; \
+                     background:linear-gradient(180deg, #1a1b1d, #0c0d0e); \
+                     border:{:.1}px solid rgba(0,0,0,0.7); \
+                     box-shadow:inset 0 {:.1}px {:.1}px rgba(255,255,255,0.06), \
+                       0 {:.1}px {:.1}px rgba(0,0,0,0.5);",
+                    9.0 * scale,
+                    9.0 * scale,
+                    6.0 * scale,
+                    5.0 * scale,
+                    (1.0 * scale).max(1.0),
+                    1.0 * scale,
+                    2.0 * scale,
+                    2.0 * scale,
+                    6.0 * scale,
+                ),
+                VuMeter { scale, width, face, mode, value_db, legend }
+                // The vent under the glass, which is most of what says the
+                // movement is mounted through the panel.
+                div {
+                    style: format!(
+                        "margin-top:{:.1}px; width:{:.1}px; height:{:.1}px; \
+                         border-radius:{:.1}px; \
+                         background:repeating-linear-gradient(90deg, \
+                           #000 0 {:.1}px, #2a2c2e {:.1}px {:.1}px);",
+                        5.0 * scale,
+                        width * 0.30 * scale,
+                        4.0 * scale,
+                        1.0 * scale,
+                        2.0 * scale,
+                        2.0 * scale,
+                        4.0 * scale,
+                    ),
+                }
+            }
+        };
+    }
 
     rsx! {
         div {
