@@ -21,6 +21,7 @@ pub mod drag;
 pub mod marks;
 pub mod meters;
 pub mod param;
+pub mod shell;
 pub mod theme;
 
 pub mod prelude;
