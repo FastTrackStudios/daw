@@ -401,22 +401,63 @@ pub fn HardwareKnob(
 
             // The knob body itself is a div so it can carry a CSS gradient —
             // the moulded-plastic look does not survive as flat SVG fill.
+            //
+            // Four shadows do the work of making it an object rather than a
+            // circle: a cast shadow on the panel, a dark inner rim at the
+            // bottom, a light inner rim at the top, and a hairline edge. A
+            // knob is a cylinder seen from above, and that is mostly what you
+            // read at the rim.
             div {
                 style: format!(
                     "position:absolute; left:50%; top:50%; \
                      width:{:.1}px; height:{:.1}px; \
                      margin-left:{:.1}px; margin-top:{:.1}px; \
                      border-radius:50%; background:{}; \
+                     border:{:.1}px solid rgba(0,0,0,0.45); \
                      box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.55), \
-                     inset 0 0 {:.1}px rgba(255,255,255,0.06);",
+                       0 {:.1}px {:.1}px rgba(0,0,0,0.30), \
+                       inset 0 {:.1}px {:.1}px rgba(0,0,0,0.45), \
+                       inset 0 {:.1}px {:.1}px rgba(255,255,255,0.16);",
                     body_px,
                     body_px,
                     -body_px / 2.0,
                     -body_px / 2.0,
                     tint.as_deref().map(|c| style.tinted(c)).unwrap_or_else(|| style.body().to_string()),
+                    (0.5 * scale).max(0.6),
                     1.5 * scale,
+                    3.0 * scale,
                     4.0 * scale,
-                    diameter * 0.22 * scale,
+                    10.0 * scale,
+                    -body_px * 0.10,
+                    body_px * 0.16,
+                    body_px * 0.05,
+                    body_px * 0.10,
+                ),
+            }
+
+            // Specular: the soft highlight a moulded or turned surface takes
+            // from the light every panel is lit by. Offset up and left, and
+            // small — a big one reads as gloss paint rather than plastic.
+            div {
+                style: format!(
+                    "position:absolute; left:50%; top:50%; \
+                     width:{:.1}px; height:{:.1}px; \
+                     margin-left:{:.1}px; margin-top:{:.1}px; \
+                     border-radius:50%; pointer-events:none; \
+                     background:{};",
+                    body_px * 0.62,
+                    body_px * 0.42,
+                    -body_px * 0.46,
+                    -body_px * 0.40,
+                    if style == KnobStyle::Collet {
+                        // Flat top: a sheen across it rather than a highlight
+                        // sitting on a dome.
+                        "linear-gradient(150deg, rgba(255,255,255,0.20) 0%, \
+                         rgba(255,255,255,0.04) 46%, rgba(255,255,255,0.0) 72%)"
+                    } else {
+                        "radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.15) 0%, \
+                         rgba(255,255,255,0.0) 70%)"
+                    },
                 ),
             }
 
@@ -454,16 +495,29 @@ pub fn HardwareKnob(
                     // which is most of what tells you it moved at a glance.
                     for i in 0..style.flutes() {
                         {
-                            let a = (i as f64 / style.flutes() as f64) * std::f64::consts::TAU;
+                            let count = style.flutes() as f64;
+                            let a = (i as f64 / count) * std::f64::consts::TAU;
+                            // Half a flute over, for the shadowed side.
+                            let b = a + std::f64::consts::TAU / (count * 2.0);
                             let (sx, sy) = (a.sin(), -a.cos());
+                            let (bx, by) = (b.sin(), -b.cos());
+                            let inner = body_r - 4.2;
                             rsx! {
                                 line {
-                                    x1: "{sx * (body_r - 2.6):.2}",
-                                    y1: "{sy * (body_r - 2.6):.2}",
+                                    x1: "{sx * inner:.2}",
+                                    y1: "{sy * inner:.2}",
                                     x2: "{sx * body_r:.2}",
                                     y2: "{sy * body_r:.2}",
                                     stroke: "{style.flute_stroke()}",
-                                    stroke_width: "1.3",
+                                    stroke_width: "1.2",
+                                }
+                                line {
+                                    x1: "{bx * inner:.2}",
+                                    y1: "{by * inner:.2}",
+                                    x2: "{bx * body_r:.2}",
+                                    y2: "{by * body_r:.2}",
+                                    stroke: "rgba(0,0,0,0.40)",
+                                    stroke_width: "1.2",
                                 }
                             }
                         }
