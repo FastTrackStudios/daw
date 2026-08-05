@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use architect::action::{ActionBackend, ActionMeta, DynamicActionMeta};
 
-type RegisteredAction = (&'static ActionMeta, Arc<dyn Fn() + Send + Sync>);
+type RegisteredAction = (&'static ActionMeta, Arc<dyn Fn() -> Result<(), String> + Send + Sync>);
 
 #[derive(Default)]
 struct InMemoryActionBackend {
@@ -19,7 +19,7 @@ struct InMemoryActionBackend {
 }
 
 impl ActionBackend for InMemoryActionBackend {
-    fn register(&self, meta: &'static ActionMeta, handler: Arc<dyn Fn() + Send + Sync>) {
+    fn register(&self, meta: &'static ActionMeta, handler: Arc<dyn Fn() -> Result<(), String> + Send + Sync>) {
         self.registered.lock().unwrap().push((meta, handler));
     }
 }
@@ -29,7 +29,7 @@ impl InMemoryActionBackend {
         let registered = self.registered.lock().unwrap();
         match registered.iter().find(|(meta, _)| meta.id == id) {
             Some((_, handler)) => {
-                handler();
+                handler().expect("action handler should succeed in this test");
                 true
             }
             None => false,
@@ -60,6 +60,7 @@ fn register_time_signature_family(backend: &dyn ActionBackend, hits: Arc<AtomicU
             meta,
             Arc::new(move || {
                 hits.fetch_add(1, Ordering::SeqCst);
+                Ok(())
             }),
         );
     }

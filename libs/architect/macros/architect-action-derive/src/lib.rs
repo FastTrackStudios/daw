@@ -27,9 +27,12 @@
 //!   — wires every action's handler through the given `architect::action::ActionBackend`
 //!
 //! Deliberately narrower than `#[architect::rpc]` for v1: action methods
-//! must be `fn name(&self)` — no other params, no return value. REAPER
-//! named commands take no arguments; if a richer shape is needed later
-//! (e.g. toggle actions that report state), extend then.
+//! must be `fn name(&self)` or `fn name(&self) -> Result<(), E>` (`E:
+//! std::fmt::Display`, e.g. `eyre::Result<()>`) — no other params, no other
+//! return shape. REAPER named commands take no arguments; a failed
+//! `Result`-returning action reaches the user through whatever
+//! `ActionBackend` the caller supplies (see `action::ActionBackend`'s
+//! `Result<(), String>` handler type) instead of being silently dropped.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -48,32 +51,51 @@ pub fn actions(args: TokenStream, input: TokenStream) -> TokenStream {
 
 struct ActionsArgs {
     namespace: Option<String>,
+    /// Default `category` for every `#[action(...)]` method on the trait
+    /// that doesn't specify its own. Unlike `group` (derived from the
+    /// trait name — see [`expand`]), `category` has no meaningful
+    /// per-trait default: it's *where this trait's actions live*, a fact
+    /// about the crate registering them (e.g. "Session"), not about the
+    /// trait's own name.
+    category: Option<String>,
 }
 
 impl syn::parse::Parse for ActionsArgs {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut namespace = None;
+        let mut category = None;
         let metas =
             syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated(input)?;
         for meta in metas {
             if meta.path().is_ident("namespace") {
                 namespace = Some(lit_str_value(&meta)?);
+            } else if meta.path().is_ident("category") {
+                category = Some(lit_str_value(&meta)?);
             } else {
                 return Err(syn::Error::new_spanned(
                     &meta,
-                    "unknown #[architect::actions(...)] argument (expected `namespace`)",
+                    "unknown #[architect::actions(...)] argument (expected `namespace` or `category`)",
                 ));
             }
         }
-        Ok(ActionsArgs { namespace })
+        Ok(ActionsArgs {
+            namespace,
+            category,
+        })
     }
 }
 
-/// One parsed `#[action(...)]` method attribute.
+/// One parsed `#[action(...)]` method attribute. `category`/`group` are
+/// per-method overrides — `None` means "use the trait-level default"
+/// (`ActionsArgs::category`, and the trait name for `group` — see
+/// `expand`), which is the common case: every action on a trait usually
+/// shares one category/group, so repeating them per-method is pure
+/// duplication `#[architect::actions(...)]`'s trait-level `category` and
+/// name-derived `group` exist to avoid.
 struct ActionAttr {
     description: String,
-    category: String,
-    group: String,
+    category: Option<String>,
+    group: Option<String>,
     toggleable: bool,
     display_name: Option<String>,
 }
@@ -144,8 +166,8 @@ fn parse_action_attr(attr: &Attribute) -> syn::Result<ActionAttr> {
         description: description.ok_or_else(|| {
             syn::Error::new_spanned(attr, "#[action(...)] requires `description = \"...\"`")
         })?,
-        category: category.unwrap_or_default(),
-        group: group.unwrap_or_default(),
+        category,
+        group,
         toggleable,
         display_name,
     })
@@ -159,6 +181,15 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
     let namespace = args
         .namespace
         .unwrap_or_else(|| to_screaming_snake_case(strip_actions_suffix(&trait_name_str)));
+    // `category` has no derivable default (see `ActionsArgs::category`'s
+    // doc) — falls back to "" (matches `ActionMeta::category`'s existing
+    // "empty means uncategorized" convention) when the trait declares
+    // none. `group` DOES have a natural default: the trait itself IS the
+    // group ("Track Manager" trait -> "Track Manager" group), so every
+    // `#[action]` on it groups together in a menu/CLI tree without
+    // anyone having to say so redundantly at each method.
+    let default_category = args.category.unwrap_or_default();
+    let default_group = to_title_case(strip_actions_suffix(&trait_name_str));
 
     let mut const_defs = Vec::new();
     // (const_ident, cfg_attrs) — the cfg attrs are re-emitted everywhere
@@ -212,12 +243,14 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
                 "#[action] methods must take no parameters besides `&self` (v1 constraint — REAPER named commands take no arguments)",
             ));
         }
-        if !matches!(method.sig.output, syn::ReturnType::Default) {
-            return Err(syn::Error::new_spanned(
-                &method.sig,
-                "#[action] methods must not return a value (v1 constraint)",
-            ));
-        }
+        // `fn(&self)` (always succeeds) or `fn(&self) -> Result<(), E>`
+        // where `E: std::fmt::Display` (failure reaches the user via
+        // `ActionBackend::register`'s `Result<(), String>` handler type).
+        // No other return shape is accepted — the macro doesn't inspect
+        // `E` beyond "not unit", so a non-`Result` non-unit return type
+        // surfaces as an ordinary type error at the generated `.map_err`
+        // call site below rather than here.
+        let returns_result = !matches!(method.sig.output, syn::ReturnType::Default);
 
         let method_name = &method.sig.ident;
         let method_name_str = method_name.to_string();
@@ -227,8 +260,8 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
             .display_name
             .unwrap_or_else(|| to_title_case(&method_name_str));
         let description = &parsed.description;
-        let category = &parsed.category;
-        let group = &parsed.group;
+        let category = parsed.category.as_ref().unwrap_or(&default_category);
+        let group = parsed.group.as_ref().unwrap_or(&default_group);
         let toggleable = parsed.toggleable;
 
         const_defs.push(quote! {
@@ -249,12 +282,23 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
             cfg_attrs.iter().map(|a| quote! { #a }).collect::<Vec<_>>(),
         ));
 
+        let invoke = if returns_result {
+            quote! {
+                #trait_name::#method_name(&*imp).map_err(|e| ::std::string::ToString::to_string(&e))
+            }
+        } else {
+            quote! {
+                #trait_name::#method_name(&*imp);
+                ::std::result::Result::Ok(())
+            }
+        };
+
         register_calls.push(quote! {
             #(#cfg_attrs)*
             {
                 let imp = ::std::clone::Clone::clone(&imp);
                 backend.register(&#const_ident, ::std::sync::Arc::new(move || {
-                    #trait_name::#method_name(&*imp);
+                    #invoke
                 }));
             }
         });

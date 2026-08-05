@@ -1096,8 +1096,87 @@ pub mod action {
     /// execution context (e.g. REAPER's main thread) is the backend's
     /// job, not this trait's — reuse [`super::dispatch::Dispatcher`] for
     /// that inside the backend impl if the host needs it.
+    ///
+    /// The handler returns `Result<(), String>` so a failed action can
+    /// reach the user — a REAPER backend can pop a message box, a CLI
+    /// backend can print to stderr and set an exit code. `#[action]`
+    /// methods that return `()` are wrapped as always-`Ok`; methods
+    /// returning `eyre::Result<()>` (or any `Result<(), E: Display>`)
+    /// have their error `.to_string()`'d into this string.
     pub trait ActionBackend: Send + Sync + 'static {
-        fn register(&self, meta: &'static ActionMeta, handler: Arc<dyn Fn() + Send + Sync>);
+        fn register(
+            &self,
+            meta: &'static ActionMeta,
+            handler: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
+        );
+    }
+
+    /// Nests one more level of `FTS > Session > Track Manager`-style
+    /// hierarchy onto every action passed through it, without the leaf
+    /// trait (`Track Manager`) ever declaring "Session" or "FTS" itself.
+    /// A leaf trait names only its own `namespace`/`group` (the trait
+    /// name, by default); the crate that *registers* it decides what it's
+    /// nested under by wrapping the real backend once per level:
+    ///
+    /// ```ignore
+    /// // session/src/lib.rs, registering track_manager_actions:
+    /// let session = ScopedActionBackend::new(daw_reaper::Reaper, "SESSION", "Session");
+    /// track_manager_actions::register_track_manager_actions(&session, Arc::new(daw_reaper::Reaper));
+    /// // apps/.../lib.rs, registering all of session's actions under FTS:
+    /// let fts = ScopedActionBackend::new(daw_reaper::Reaper, "FTS", "FastTrackStudio");
+    /// session::register_all_actions(&fts, ...);
+    /// ```
+    ///
+    /// `id` gets `{scope_id}_` prepended (keeping the flat, globally-unique
+    /// REAPER named-command convention); `category` becomes `scope_category`
+    /// — the leaf's own `group` (already its trait name) is left as the
+    /// menu's next level down, so two levels of wrapping plus a leaf
+    /// naturally produce `category = "FastTrackStudio"`-ish top level via a
+    /// second wrap, `group = "Track Manager"` from the leaf, and an
+    /// `id` prefixed by every scope it passed through. Metadata is
+    /// leaked once per action per wrap (see [`DynamicActionMeta::leak`]
+    /// — same one-time-at-startup justification applies here).
+    ///
+    /// Owns `inner` rather than borrowing it — `ActionBackend: 'static`
+    /// (actions register once at startup and live for the process), and
+    /// every real backend in the tree (`daw_reaper::Reaper`, `Standalone`)
+    /// is a cheap `Clone`/`Copy` handle, so owning is free and sidesteps
+    /// threading a borrow's lifetime through every wrap.
+    pub struct ScopedActionBackend<B> {
+        inner: B,
+        scope_id: &'static str,
+        scope_category: &'static str,
+    }
+
+    impl<B: ActionBackend> ScopedActionBackend<B> {
+        pub fn new(inner: B, scope_id: &'static str, scope_category: &'static str) -> Self {
+            Self {
+                inner,
+                scope_id,
+                scope_category,
+            }
+        }
+    }
+
+    impl<B: ActionBackend> ActionBackend for ScopedActionBackend<B> {
+        fn register(
+            &self,
+            meta: &'static ActionMeta,
+            handler: Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
+        ) {
+            let scoped = DynamicActionMeta {
+                id: format!("{}_{}", self.scope_id, meta.id),
+                trait_name: meta.trait_name,
+                method_name: meta.method_name.to_string(),
+                display_name: meta.display_name.to_string(),
+                description: meta.description.to_string(),
+                category: self.scope_category,
+                group: meta.group,
+                toggleable: meta.toggleable,
+            }
+            .leak();
+            self.inner.register(scoped, handler);
+        }
     }
 }
 

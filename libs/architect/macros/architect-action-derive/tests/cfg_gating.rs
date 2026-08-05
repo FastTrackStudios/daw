@@ -55,7 +55,7 @@ impl ActionBackend for NoopBackend {
     fn register(
         &self,
         _meta: &'static architect::action::ActionMeta,
-        _handler: std::sync::Arc<dyn Fn() + Send + Sync>,
+        _handler: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
     ) {
     }
 }
