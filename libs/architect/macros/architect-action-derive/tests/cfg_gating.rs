@@ -10,7 +10,7 @@
 //!   cargo test -p architect-action-derive --test cfg_gating --features test-gated
 //!
 //! If the cfg passthrough were broken, the `test-gated`-off run wouldn't
-//! even compile: `register_cfg_gated_actions_actions` would still try to
+//! even compile: `register_cfg_gated_actions` would still try to
 //! call `CfgGatedActions::gated_on`, a method rustc has already removed
 //! from the trait. So the mere fact both feature states compile is part
 //! of the proof; the two tests below additionally check `all()`'s
@@ -47,7 +47,7 @@ impl CfgGatedActions for Impl {
 }
 
 /// Stand-in `ActionBackend` — just needs to exist so
-/// `register_cfg_gated_actions_actions` can be called (proving the
+/// `register_cfg_gated_actions` can be called (proving the
 /// register call sites compile in lockstep with the const/method too,
 /// not just `all()`).
 struct NoopBackend;
@@ -66,7 +66,7 @@ fn gated_method_absent_when_feature_off() {
     let ids: Vec<_> = CfgGatedActionsActions::all().iter().map(|m| m.id).collect();
     assert_eq!(ids, ["CFGTEST_ALWAYS_ON"]);
 
-    register_cfg_gated_actions_actions(&NoopBackend, std::sync::Arc::new(Impl));
+    register_cfg_gated_actions(&NoopBackend, std::sync::Arc::new(Impl));
 }
 
 #[cfg(feature = "test-gated")]
@@ -75,5 +75,5 @@ fn gated_method_present_when_feature_on() {
     let ids: Vec<_> = CfgGatedActionsActions::all().iter().map(|m| m.id).collect();
     assert_eq!(ids, ["CFGTEST_ALWAYS_ON", "CFGTEST_GATED_ON"]);
 
-    register_cfg_gated_actions_actions(&NoopBackend, std::sync::Arc::new(Impl));
+    register_cfg_gated_actions(&NoopBackend, std::sync::Arc::new(Impl));
 }

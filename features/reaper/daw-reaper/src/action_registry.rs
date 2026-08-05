@@ -1309,12 +1309,49 @@ fn action_show_in_menu(meta: &architect::action::ActionMeta) -> bool {
     !meta.category.is_empty()
 }
 
+/// The undo-history label for an `#[action(undo)]` action, composed from
+/// the same metadata that names it in REAPER's action list — e.g.
+/// `"Session Track Manager - Add Channel"` for a Session/Track Manager
+/// action called "Add Channel". Pure translation, split out from the
+/// `ActionBackend` impl so it's unit-testable without a live REAPER.
+fn action_undo_label(meta: &architect::action::ActionMeta) -> String {
+    let scope = [meta.category, meta.group]
+        .iter()
+        .filter(|part| !part.is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if scope.is_empty() {
+        meta.display_name.to_string()
+    } else {
+        format!("{scope} - {}", meta.display_name)
+    }
+}
+
 impl architect::action::ActionBackend for crate::Reaper {
     fn register(
         &self,
         meta: &'static architect::action::ActionMeta,
         handler: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
     ) {
+        // `#[action(undo)]` actions run bracketed in a REAPER undo block
+        // labelled after the action, so every mutating action is one
+        // atomic undo point without each one hand-rolling
+        // begin/end_undo_block. Read-only actions opt out (the default)
+        // so they don't litter the undo history.
+        let handler = if meta.undo {
+            let label = action_undo_label(meta);
+            std::sync::Arc::new(move || {
+                let project = daw_proto::ProjectContext::Current;
+                daw_proto::Projects::begin_undo_block(&crate::Reaper, project.clone(), &label);
+                let result = handler();
+                daw_proto::Projects::end_undo_block(&crate::Reaper, project, &label, None);
+                result
+            }) as std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>
+        } else {
+            handler
+        };
+
         register_action_with_handler(
             meta.id,
             meta.description,
@@ -1339,6 +1376,7 @@ mod tests {
             category,
             group: "",
             toggleable: false,
+            undo: false,
         }
     }
 

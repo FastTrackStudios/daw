@@ -53,6 +53,7 @@ fn register_time_signature_family(backend: &dyn ActionBackend, hits: Arc<AtomicU
             category: "Tempo",
             group: "Time Signatures",
             toggleable: false,
+            undo: false,
         }
         .leak();
         let hits = hits.clone();

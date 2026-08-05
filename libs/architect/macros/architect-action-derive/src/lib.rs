@@ -23,7 +23,7 @@
 //!
 //! - one `pub const <METHOD_SCREAMING>: ActionMeta` per `#[action(...)]` method
 //! - `pub struct <Trait>Actions;` with `<Trait>Actions::all() -> &'static [ActionMeta]`
-//! - `pub fn register_<trait_snake>_actions(backend, imp: Arc<dyn Trait + Send + Sync>)`
+//! - `pub fn register_<trait_snake_sans_Actions_suffix>_actions(backend, imp: Arc<T>)`
 //!   — wires every action's handler through the given `architect::action::ActionBackend`
 //!
 //! Deliberately narrower than `#[architect::rpc]` for v1: action methods
@@ -97,7 +97,29 @@ struct ActionAttr {
     category: Option<String>,
     group: Option<String>,
     toggleable: bool,
+    undo: bool,
     display_name: Option<String>,
+}
+
+/// A bare-word flag (`undo`) or an explicit `undo = true/false`.
+fn flag_value(meta: &syn::Meta, name: &str) -> syn::Result<bool> {
+    match meta {
+        syn::Meta::Path(_) => Ok(true),
+        syn::Meta::NameValue(nv) => match &nv.value {
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Bool(b),
+                ..
+            }) => Ok(b.value),
+            other => Err(syn::Error::new_spanned(
+                other,
+                format!("expected `{name}` or `{name} = true/false`"),
+            )),
+        },
+        syn::Meta::List(l) => Err(syn::Error::new_spanned(
+            l,
+            format!("unexpected `{name}(...)`"),
+        )),
+    }
 }
 
 fn lit_str_value(meta: &syn::Meta) -> syn::Result<String> {
@@ -118,11 +140,12 @@ fn parse_action_attr(attr: &Attribute) -> syn::Result<ActionAttr> {
     let mut category = None;
     let mut group = None;
     let mut toggleable = false;
+    let mut undo = false;
     let mut display_name = None;
 
-    // Name-value pairs (`description = "..."`) mixed with a bare flag
-    // (`toggleable`) — parse the attribute's meta list directly rather
-    // than `parse_nested_meta`, which is awkward for that mix.
+    // Name-value pairs (`description = "..."`) mixed with bare flags
+    // (`toggleable`, `undo`) — parse the attribute's meta list directly
+    // rather than `parse_nested_meta`, which is awkward for that mix.
     let metas: syn::punctuated::Punctuated<syn::Meta, syn::Token![,]> =
         attr.parse_args_with(syn::punctuated::Punctuated::parse_terminated)?;
 
@@ -136,28 +159,13 @@ fn parse_action_attr(attr: &Attribute) -> syn::Result<ActionAttr> {
         } else if meta.path().is_ident("display_name") {
             display_name = Some(lit_str_value(meta)?);
         } else if meta.path().is_ident("toggleable") {
-            toggleable = match meta {
-                syn::Meta::Path(_) => true,
-                syn::Meta::NameValue(nv) => match &nv.value {
-                    syn::Expr::Lit(syn::ExprLit {
-                        lit: syn::Lit::Bool(b),
-                        ..
-                    }) => b.value,
-                    other => {
-                        return Err(syn::Error::new_spanned(
-                            other,
-                            "expected `toggleable` or `toggleable = true/false`",
-                        ));
-                    }
-                },
-                syn::Meta::List(l) => {
-                    return Err(syn::Error::new_spanned(l, "unexpected `toggleable(...)`"));
-                }
-            };
+            toggleable = flag_value(meta, "toggleable")?;
+        } else if meta.path().is_ident("undo") {
+            undo = flag_value(meta, "undo")?;
         } else {
             return Err(syn::Error::new_spanned(
                 meta,
-                "unknown #[action(...)] argument (expected description/category/group/display_name/toggleable)",
+                "unknown #[action(...)] argument (expected description/category/group/display_name/toggleable/undo)",
             ));
         }
     }
@@ -169,6 +177,7 @@ fn parse_action_attr(attr: &Attribute) -> syn::Result<ActionAttr> {
         category,
         group,
         toggleable,
+        undo,
         display_name,
     })
 }
@@ -263,6 +272,7 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
         let category = parsed.category.as_ref().unwrap_or(&default_category);
         let group = parsed.group.as_ref().unwrap_or(&default_group);
         let toggleable = parsed.toggleable;
+        let undo = parsed.undo;
 
         const_defs.push(quote! {
             #(#cfg_attrs)*
@@ -275,6 +285,7 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
                 category: #category,
                 group: #group,
                 toggleable: #toggleable,
+                undo: #undo,
             };
         });
         const_idents.push((
@@ -312,7 +323,13 @@ fn expand(mut trait_item: ItemTrait, args: ActionsArgs) -> syn::Result<TokenStre
     }
 
     let actions_marker = format_ident!("{}Actions", trait_name);
-    let register_fn = format_ident!("register_{}_actions", to_snake_case(&trait_name_str));
+    // `strip_actions_suffix` so a `FooActions` trait yields
+    // `register_foo_actions`, not `register_foo_actions_actions` — same
+    // suffix handling the namespace/group derivations above already use.
+    let register_fn = format_ident!(
+        "register_{}_actions",
+        to_snake_case(strip_actions_suffix(&trait_name_str))
+    );
 
     // `all()` can't be a plain `&[A, B, C]` static array literal once any
     // element is `#[cfg]`-gated — array literals don't support per-element

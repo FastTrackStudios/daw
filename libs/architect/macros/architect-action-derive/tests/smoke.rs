@@ -123,7 +123,7 @@ fn register_and_invoke_through_backend() {
     let session = Arc::new(FakeSession::default());
     let backend = InMemoryActionBackend::default();
 
-    register_setlist_actions_actions(&backend, session.clone());
+    register_setlist_actions(&backend, session.clone());
 
     assert_eq!(backend.registered.lock().unwrap().len(), 3);
 

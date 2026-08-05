@@ -1034,6 +1034,14 @@ pub mod action {
         pub category: &'static str,
         pub group: &'static str,
         pub toggleable: bool,
+        /// This action mutates project state and should run inside a
+        /// host undo block labelled after the action. Set by
+        /// `#[action(undo, ...)]`. Backends that have no undo concept
+        /// (a CLI, a test registry) ignore it; a REAPER backend brackets
+        /// the handler in `Undo_BeginBlock`/`Undo_EndBlock`. Opt-in so
+        /// read-only actions don't litter the undo history with empty
+        /// points.
+        pub undo: bool,
     }
 
     /// Owned counterpart to [`ActionMeta`], for a *family* of actions
@@ -1064,6 +1072,7 @@ pub mod action {
         pub category: &'static str,
         pub group: &'static str,
         pub toggleable: bool,
+        pub undo: bool,
     }
 
     impl DynamicActionMeta {
@@ -1080,6 +1089,7 @@ pub mod action {
                 category: self.category,
                 group: self.group,
                 toggleable: self.toggleable,
+                undo: self.undo,
             };
             Box::leak(Box::new(meta))
         }
@@ -1173,6 +1183,7 @@ pub mod action {
                 category: self.scope_category,
                 group: meta.group,
                 toggleable: meta.toggleable,
+                undo: meta.undo,
             }
             .leak();
             self.inner.register(scoped, handler);
