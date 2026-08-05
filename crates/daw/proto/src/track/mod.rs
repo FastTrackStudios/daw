@@ -11,6 +11,7 @@
 
 mod error;
 mod event;
+mod ext;
 mod hierarchy;
 mod hierarchy_builder;
 mod service;
@@ -20,6 +21,7 @@ mod track;
 
 pub use error::TrackError;
 pub use event::{TrackEvent, TrackStreamEvent};
+pub use ext::TracksExt;
 pub use hierarchy::{FolderDepthChange, TrackHierarchy, TrackNode};
 pub use hierarchy_builder::{AddChildren, TrackHierarchyBuilder};
 pub use service::*;
