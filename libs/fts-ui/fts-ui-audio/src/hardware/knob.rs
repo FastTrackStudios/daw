@@ -19,6 +19,9 @@ use crate::hardware::knob_svg::{knob_angle, pointer_polygon, ring_arc_path, ring
 
 /// Design-space radii inside the knob's own `-55 -55 110 110` viewBox.
 const BODY_R: f64 = 30.0;
+/// Default radii for the printed ring and its numerals. Panels that print
+/// their numbers close in around the skirt override them — see
+/// [`Ring::geometry`](crate::hardware::rack::Ring::geometry).
 const RING_R: f64 = 41.0;
 const LABEL_R: f64 = 50.0;
 
@@ -35,6 +38,9 @@ pub enum KnobStyle {
     Bakelite,
     /// Brushed metal with a dark pointer — the SSL-style knob.
     Metal,
+    /// A big ribbed bakelite skirt with a short index mark at its rim rather
+    /// than a pointer across the face — the Pultec/vintage-outboard knob.
+    Skirted,
 }
 
 impl KnobStyle {
@@ -42,11 +48,13 @@ impl KnobStyle {
         match self {
             Self::Bakelite => "radial-gradient(circle at 34% 26%, #4a4a4e 0%, #17171a 62%, #0b0b0d 100%)",
             Self::Metal => "radial-gradient(circle at 34% 26%, #d8d8d4 0%, #9a9a96 58%, #6d6d69 100%)",
+            // Concentric ribs, lit from the top left like the photo.
+            Self::Skirted => "radial-gradient(circle at 38% 24%, #4c4c50 0%, #232326 38%, #101012 72%, #0a0a0c 100%)",
         }
     }
     fn pointer(self) -> &'static str {
         match self {
-            Self::Bakelite => "#f2f2f0",
+            Self::Bakelite | Self::Skirted => "#f2f2f0",
             Self::Metal => "#1c1c1e",
         }
     }
@@ -70,6 +78,15 @@ pub fn HardwareKnob(
     #[props(default = "#2b2620".to_string())]
     ink: String,
     #[props(default)] marks: Vec<ScaleMark>,
+    /// Radius of the printed tick ring, in the knob's viewBox units.
+    #[props(default = RING_R)]
+    ring_r: f64,
+    /// Radius the numerals are printed at.
+    #[props(default = LABEL_R)]
+    label_r: f64,
+    /// Draw tick marks, or numerals alone.
+    #[props(default = true)]
+    ticks: bool,
 ) -> Element {
     let mut drag: Signal<DragState> = use_context();
     // Re-render while a drag is in flight so the pointer tracks the cursor.
@@ -83,8 +100,14 @@ pub fn HardwareKnob(
     // The printed ring is drawn outside the body, so the box is wider than
     // the knob — the viewBox spans -55..55 with the body at r = 30.
     let box_px = diameter * (110.0 / (BODY_R * 2.0)) * scale;
-    let pointer = pointer_polygon(BODY_R - 5.0, 3.4);
-    let ring = ring_arc_path(RING_R);
+    // A skirted knob is read by the index mark on its rim; the others by a
+    // pointer across the face.
+    let pointer = if style == KnobStyle::Skirted {
+        pointer_polygon(BODY_R - 1.0, 2.2)
+    } else {
+        pointer_polygon(BODY_R - 5.0, 3.4)
+    };
+    let ring = ring_arc_path(ring_r);
 
     rsx! {
         div {
@@ -101,27 +124,31 @@ pub fn HardwareKnob(
 
                 // The printed scale ring: a faint band with the unit's own
                 // numbers around it.
-                path {
-                    d: "{ring}",
-                    fill: "none",
-                    stroke: "{ink}",
-                    stroke_width: "0.6",
-                    opacity: "0.35",
+                if ticks {
+                    path {
+                        d: "{ring}",
+                        fill: "none",
+                        stroke: "{ink}",
+                        stroke_width: "0.6",
+                        opacity: "0.35",
+                    }
                 }
                 for mark in marks.iter() {
                     {
-                        let (x1, y1) = ring_point(mark.normalized, RING_R - 1.0);
+                        let (x1, y1) = ring_point(mark.normalized, ring_r - 1.0);
                         let (x2, y2) = ring_point(
                             mark.normalized,
-                            if mark.major { RING_R + 5.0 } else { RING_R + 3.0 },
+                            if mark.major { ring_r + 5.0 } else { ring_r + 3.0 },
                         );
-                        let (lx, ly) = ring_point(mark.normalized, LABEL_R);
+                        let (lx, ly) = ring_point(mark.normalized, label_r);
                         rsx! {
+                            if ticks {
                             line {
                                 x1: "{x1:.2}", y1: "{y1:.2}", x2: "{x2:.2}", y2: "{y2:.2}",
                                 stroke: "{ink}",
                                 stroke_width: if mark.major { "1.4" } else { "0.8" },
                                 opacity: if mark.major { "0.9" } else { "0.55" },
+                            }
                             }
                             if let Some(label) = &mark.label {
                                 text {
@@ -150,7 +177,8 @@ pub fn HardwareKnob(
                      width:{:.1}px; height:{:.1}px; \
                      margin-left:{:.1}px; margin-top:{:.1}px; \
                      border-radius:50%; background:{}; \
-                     box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.45);",
+                     box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.45), \
+                     inset 0 0 {:.1}px rgba(255,255,255,0.06);",
                     diameter * scale,
                     diameter * scale,
                     -(diameter * scale) / 2.0,
@@ -158,6 +186,7 @@ pub fn HardwareKnob(
                     style.body(),
                     1.5 * scale,
                     4.0 * scale,
+                    diameter * 0.22 * scale,
                 ),
             }
 
@@ -169,12 +198,36 @@ pub fn HardwareKnob(
                 view_box: "-55 -55 110 110",
                 g {
                     transform: "rotate({angle:.2})",
-                    polygon {
-                        points: "{pointer}",
-                        fill: "{style.pointer()}",
+                    if style == KnobStyle::Skirted {
+                        // A short bar on the skirt's rim — the vintage
+                        // outboard index, which is what the printed numerals
+                        // are read against.
+                        rect {
+                            x: "-1.9",
+                            y: "{-(BODY_R - 1.0):.1}",
+                            width: "3.8",
+                            height: "{BODY_R * 0.34:.1}",
+                            rx: "1.2",
+                            fill: "{style.pointer()}",
+                        }
+                    } else {
+                        polygon {
+                            points: "{pointer}",
+                            fill: "{style.pointer()}",
+                        }
                     }
                 }
-                circle { cx: "0", cy: "0", r: "4.5", fill: "rgba(0,0,0,0.35)" }
+                if style == KnobStyle::Skirted {
+                    // The smooth cap inside the fluted skirt.
+                    circle {
+                        cx: "0", cy: "0", r: "{BODY_R * 0.62:.1}",
+                        fill: "rgba(255,255,255,0.035)",
+                        stroke: "rgba(0,0,0,0.45)",
+                        stroke_width: "0.8",
+                    }
+                } else {
+                    circle { cx: "0", cy: "0", r: "4.5", fill: "rgba(0,0,0,0.35)" }
+                }
             }
 
             // Interaction overlay — same gestures as every FTS control.

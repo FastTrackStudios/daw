@@ -16,6 +16,7 @@
 
 pub mod knob;
 pub mod knob_svg;
+pub mod lever;
 pub mod panel;
 pub mod panel_svg;
 pub mod rack;

@@ -29,6 +29,10 @@ pub enum Ring {
     Detents(&'static [&'static str]),
     /// Tick marks with no numbers.
     Plain { majors: usize },
+    /// Numerals only, no tick marks, printed close in around the knob — the
+    /// Pultec look, where the panel prints 0–10 hugging the skirt and nothing
+    /// else.
+    Numerals(&'static [&'static str]),
     /// No printed ring at all.
     None,
 }
@@ -42,7 +46,23 @@ impl Ring {
             }
             Ring::Detents(labels) => detent_ring(labels),
             Ring::Plain { majors } => scale_ring(majors, 1, |_| None),
+            Ring::Numerals(labels) => detent_ring(labels),
             Ring::None => Vec::new(),
+        }
+    }
+
+    /// Where this ring is printed: `(tick radius, numeral radius)` in the
+    /// knob's own viewBox units, and whether tick marks are drawn at all.
+    ///
+    /// [`Ring::Numerals`] sits close in with no ticks; everything else keeps
+    /// the default ring the compressor faces are drawn against.
+    pub fn geometry(self) -> (f64, f64, bool) {
+        match self {
+            Ring::Numerals(_) => (31.0, 37.0, false),
+            // Nothing printed at all — not even the faint band the ticks sit
+            // on, which is what "None" has to mean for a bypass knob.
+            Ring::None => (41.0, 50.0, false),
+            _ => (41.0, 50.0, true),
         }
     }
 }
@@ -84,6 +104,25 @@ pub enum RackItem {
         y: f64,
         labels: [&'static str; 2],
     },
+    /// A lever switch — the Pultec's frequency selectors: a paddle that swings
+    /// between detents with the legends printed in an arc above it.
+    Lever {
+        id: &'static str,
+        legend: &'static str,
+        /// Small caption printed above the arc ("CPS", "KCS").
+        unit: &'static str,
+        x: f64,
+        y: f64,
+        labels: &'static [&'static str],
+    },
+    /// A numeric readout of a control's position on its printed 0–10 scale.
+    ///
+    /// The Pultec prints the value above each big knob; it reads the *panel's*
+    /// scale rather than the engine's units, which is what the numbers around
+    /// the knob mean too.
+    Readout { id: &'static str, x: f64, y: f64 },
+    /// A panel indicator lamp.
+    Lamp { x: f64, y: f64, color: &'static str },
     /// Silkscreened panel text.
     Text {
         x: f64,
