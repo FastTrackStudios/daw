@@ -18,11 +18,14 @@ pub mod axis;
 pub mod color;
 pub mod controls;
 pub mod drag;
+pub mod hardware;
 pub mod marks;
 pub mod meters;
 pub mod param;
+pub mod shell;
 pub mod theme;
 
 pub mod prelude;
 
 pub use param::ParamHandle;
+pub use shell::{EditorForm, EDITOR_FORMS};
