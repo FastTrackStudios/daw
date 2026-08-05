@@ -96,6 +96,10 @@ pub enum RackItem {
         /// Body colour, when the unit colour-codes its controls. `None` takes
         /// the design's [`KnobStyle`].
         tint: Option<&'static str>,
+        /// Override the design's knob for this one control. A panel is not
+        /// always one kit: the Pultec's five big boost/atten knobs and its
+        /// three small pointer knobs are different parts.
+        style: Option<KnobStyle>,
     },
     /// A vertical bank of radio-like buttons (the 1176's ratios).
     Buttons {

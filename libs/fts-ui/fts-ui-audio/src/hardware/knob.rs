@@ -99,6 +99,19 @@ impl KnobStyle {
         matches!(self, Self::Daka | Self::Marconi | Self::SilverTop | Self::Dial)
     }
 
+    /// Whether this knob draws its own index — a nose, a wing, a bar, an
+    /// engraved dash — rather than taking the generic blade across the face.
+    ///
+    /// Getting this wrong is invisible in code and obvious in a screenshot: a
+    /// Daka-Ware knob drew both its own rim dash *and* the blade, which read
+    /// as one long white wedge and was the first thing you noticed.
+    fn draws_own_index(self) -> bool {
+        matches!(
+            self,
+            Self::Daka | Self::Marconi | Self::Pointer | Self::Collet | Self::SilverTop | Self::Dial
+        )
+    }
+
     /// How far out the panel's printed scale has to sit for this knob, in the
     /// knob's viewBox units.
     ///
@@ -207,6 +220,34 @@ impl KnobStyle {
             Self::Dial => "#f2f2f0",
         }
     }
+}
+
+/// The Daka-Ware skirt's outline: a ring of coarse rounded lobes rather than a
+/// circle, which is what gives the knob its scalloped silhouette and the grip
+/// you actually turn it by.
+///
+/// Drawn as a closed path of quadratic curves — one control point per lobe,
+/// pushed out past the rim — so the lobes are round rather than sawtoothed.
+fn scallop_path(r: f64, lobes: usize, depth: f64) -> String {
+    use std::f64::consts::TAU;
+    if lobes < 3 {
+        return String::new();
+    }
+    let point = |a: f64, rr: f64| (rr * a.sin(), -rr * a.cos());
+    let inner = r - depth;
+    let (sx, sy) = point(0.0, inner);
+    let mut d = format!("M {sx:.2} {sy:.2}");
+    for i in 0..lobes {
+        let a0 = (i as f64 / lobes as f64) * TAU;
+        let a1 = ((i + 1) as f64 / lobes as f64) * TAU;
+        let mid = (a0 + a1) * 0.5;
+        // The control point rides outside the rim, which rounds the lobe.
+        let (cx, cy) = point(mid, r + depth * 0.55);
+        let (ex, ey) = point(a1, inner);
+        d.push_str(&format!(" Q {cx:.2} {cy:.2} {ex:.2} {ey:.2}"));
+    }
+    d.push_str(" Z");
+    d
 }
 
 /// The pointer knob's nose: a teardrop reaching past the body, which is what
@@ -365,9 +406,67 @@ pub fn HardwareKnob(
                 }
             }
 
-            // The skirt: the wider disc a Daka-Ware or Marconi body sits on.
+            // Daka-Ware draws itself: a lobed skirt is a path, not a border
+            // radius, and the tiers above it are concentric discs rather than
+            // one gradient. Everything here turns with the knob.
+            if style == KnobStyle::Daka {
+                svg {
+                    style: "position:absolute; inset:0; width:100%; height:100%; display:block;",
+                    view_box: "-55 -55 110 110",
+                    g {
+                        transform: "rotate({angle:.2})",
+                        // Contact shadow: the same outline, dropped.
+                        path {
+                            d: "{scallop_path(BODY_R, 26, 1.7)}",
+                            transform: "translate(0 1.6)",
+                            fill: "rgba(0,0,0,0.45)",
+                        }
+                        // The scalloped skirt.
+                        path {
+                            d: "{scallop_path(BODY_R, 26, 1.7)}",
+                            fill: "#141416",
+                            stroke: "rgba(0,0,0,0.65)",
+                            stroke_width: "0.7",
+                        }
+                        // Two tiers over it, each a shade lighter — the knob
+                        // is stepped, not domed.
+                        circle { cx: "0", cy: "0", r: "{BODY_R * 0.74:.1}", fill: "#1c1c1f" }
+                        circle {
+                            cx: "0", cy: "0", r: "{BODY_R * 0.56:.1}",
+                            fill: "#232327",
+                            stroke: "rgba(0,0,0,0.55)", stroke_width: "0.6",
+                        }
+                        circle {
+                            cx: "0", cy: "0", r: "{BODY_R * 0.34:.1}",
+                            fill: "#2a2a2f",
+                            stroke: "rgba(255,255,255,0.06)", stroke_width: "0.5",
+                        }
+                        // The light the panel is lit by, caught on the upper
+                        // left of each tier.
+                        ellipse {
+                            cx: "{-BODY_R * 0.20:.1}", cy: "{-BODY_R * 0.34:.1}",
+                            rx: "{BODY_R * 0.34:.1}", ry: "{BODY_R * 0.18:.1}",
+                            fill: "rgba(255,255,255,0.05)",
+                        }
+                        // The index: engraved into the skirt and filled white,
+                        // out at the rim where it is read against the panel.
+                        // Short, and out at the rim: on the unit it is a dash
+                        // in the skirt, not a stripe across the face.
+                        rect {
+                            x: "-1.0",
+                            y: "{-(BODY_R - 1.4):.1}",
+                            width: "2.0",
+                            height: "{BODY_R * 0.17:.1}",
+                            rx: "0.7",
+                            fill: "#eceae4",
+                        }
+                    }
+                }
+            }
+
+            // The skirt: the wider disc a Marconi or 1176 body sits on.
             // Drawn first so the body stacks over it.
-            if style.has_skirt() {
+            if style.has_skirt() && style != KnobStyle::Daka {
                 div {
                     style: format!(
                         "position:absolute; left:50%; top:50%; \
@@ -401,12 +500,14 @@ pub fn HardwareKnob(
 
             // The knob body itself is a div so it can carry a CSS gradient —
             // the moulded-plastic look does not survive as flat SVG fill.
+            // (Daka-Ware is the exception, drawn above.)
             //
             // Four shadows do the work of making it an object rather than a
             // circle: a cast shadow on the panel, a dark inner rim at the
             // bottom, a light inner rim at the top, and a hairline edge. A
             // knob is a cylinder seen from above, and that is mostly what you
             // read at the rim.
+            if style != KnobStyle::Daka {
             div {
                 style: format!(
                     "position:absolute; left:50%; top:50%; \
@@ -434,7 +535,9 @@ pub fn HardwareKnob(
                     body_px * 0.10,
                 ),
             }
+            }
 
+            if style != KnobStyle::Daka {
             // Specular: the soft highlight a moulded or turned surface takes
             // from the light every panel is lit by. Offset up and left, and
             // small — a big one reads as gloss paint rather than plastic.
@@ -459,6 +562,7 @@ pub fn HardwareKnob(
                          rgba(255,255,255,0.0) 70%)"
                     },
                 ),
+            }
             }
 
             // Pointer, rotated to the value. Kept in its own SVG layer above
@@ -493,7 +597,7 @@ pub fn HardwareKnob(
 
                     // Moulded flutes around the grip. They turn with the knob,
                     // which is most of what tells you it moved at a glance.
-                    for i in 0..style.flutes() {
+                    for i in 0..(if style == KnobStyle::Daka { 0 } else { style.flutes() }) {
                         {
                             let count = style.flutes() as f64;
                             let a = (i as f64 / count) * std::f64::consts::TAU;
@@ -575,7 +679,7 @@ pub fn HardwareKnob(
                         }
                     }
 
-                    if style == KnobStyle::Daka {
+                    if false {
                         rect {
                             x: "-1.2",
                             y: "{-(body_r - 1.5):.1}",
@@ -610,7 +714,7 @@ pub fn HardwareKnob(
                             rx: "1.2",
                             fill: "{style.pointer()}",
                         }
-                    } else {
+                    } else if !style.draws_own_index() {
                         polygon {
                             points: "{pointer}",
                             fill: "{style.pointer()}",
