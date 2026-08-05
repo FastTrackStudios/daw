@@ -140,7 +140,8 @@ pub use track::{
     AddChildren, FolderDepthChange, InputMonitoringMode, LaneDisplay, RecordInput,
     ReorderTracksBehavior, Track, TrackError, TrackEvent, TrackExtStateRequest, TrackGroup,
     TrackGrouping, TrackHierarchy, TrackHierarchyBuilder, TrackNode, TrackRef,
-    TrackStructureBuilder, Tracks, TracksExt, TracksRpc, assert_tracks_equal, display_tracklist,
+    TrackShape, TrackStructureBuilder, TrackTree, Tracks, TracksExt, TracksRpc, assert_tracks_equal,
+    display_tracklist,
     format_tracklist,
 };
 pub use transport::*;
