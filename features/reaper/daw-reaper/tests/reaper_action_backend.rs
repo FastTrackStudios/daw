@@ -38,7 +38,7 @@ impl TestActions for Counter {
 #[reaper_test(isolated)]
 async fn action_backend_handler_runs_on_trigger(ctx: &ReaperTestContext) -> eyre::Result<()> {
     let count = Arc::new(AtomicUsize::new(0));
-    register_test_actions_actions(&daw_reaper::Reaper, Arc::new(Counter(count.clone())));
+    register_test_actions(&daw_reaper::Reaper, Arc::new(Counter(count.clone())));
 
     assert_eq!(
         TestActionsActions::all().len(),
