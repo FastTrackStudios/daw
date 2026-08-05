@@ -10,10 +10,11 @@
 //! - **The redraw tick.** Editors read plugin params and meter atomics
 //!   directly, not through signals, so nothing marks the scope dirty when the
 //!   audio thread moves a value. [`use_redraw_tick`] spawns one OS thread that
-//!   calls `schedule_update` at ~30 Hz, and the returned counter must reach the
-//!   DOM (the chrome writes it to `data-frame`) — without a DOM mutation Blitz
-//!   treats the document as clean, idle redraws collapse, and the meters
-//!   freeze.
+//!   calls `schedule_update` at ~30 Hz. It must be called from the scope that
+//!   *does the reading* — `schedule_update` only dirties its own scope — and
+//!   the counter must then reach the DOM via [`PluginRoot`]'s `frame` prop:
+//!   without a DOM mutation Blitz treats the document as clean, idle redraws
+//!   collapse, and the meters freeze.
 //! - **Fitting the editor.** Blitz will not overflow-scroll a
 //!   height-constrained container: a section that does not fit is not clipped,
 //!   it is allocated 0 px and collapses to 0×0, which also makes it
@@ -39,11 +40,18 @@ const ROOT_STYLE: &str = "width:100vw; height:100vh; \
      font-family:var(--font-sans, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif); \
      font-size:13px; user-select:none; position:relative; overflow:hidden;";
 
-/// Start (once) the ~30 Hz repaint driver for this scope and return a counter
-/// that changes every render.
+/// Start (once) the ~30 Hz repaint driver **for the calling scope** and return a
+/// counter that changes every render.
 ///
-/// The caller **must** render the returned value into the DOM — see the module
-/// docs. [`PluginRoot`] does this for you.
+/// Call this from the component that reads the plugin params and meter
+/// atomics — normally the plugin's own shell — and pass the result to
+/// [`PluginRoot`]'s `frame` prop so it reaches the DOM.
+///
+/// It has to be the reading scope, not the chrome: `schedule_update` only
+/// marks the scope it was called in. If the tick lived inside `PluginRoot`,
+/// `PluginRoot` would re-render on every tick while the shell that actually
+/// loads the atomics never re-ran, and the meters would sit frozen at their
+/// initial values.
 pub fn use_redraw_tick() -> u64 {
     let mut tick: Signal<u64> = use_signal(|| 0);
     use_hook(|| {
@@ -80,10 +88,15 @@ pub fn PluginApp(tailwind_css: String, children: Element) -> Element {
     }
 }
 
-/// The editor body: base CSS, drag provider, redraw tick, and the header.
+/// The editor body: base CSS, drag provider, and the header.
 ///
 /// Render this *inside* [`PluginApp`] so the theme context is in scope.
 /// `children` become the content below the header.
+///
+/// `frame` must come from [`use_redraw_tick`] called in the caller's scope —
+/// see that function for why it cannot live here. The value is written to a
+/// `data-frame` attribute purely so the DOM changes every tick: without a
+/// mutation Blitz treats the document as clean and idle redraws collapse.
 #[component]
 pub fn PluginRoot(
     /// Plugin name, e.g. `"FTS Limiter"`.
@@ -91,6 +104,8 @@ pub fn PluginRoot(
     /// Short descriptor under the name, e.g. `"Brickwall Limiter"`.
     subtitle: String,
     skin: Skin,
+    /// Redraw counter from [`use_redraw_tick`] in the calling scope.
+    frame: u64,
     /// Optional controls pinned to the right of the header (page toggles,
     /// selectors).
     #[props(default)]
@@ -98,7 +113,6 @@ pub fn PluginRoot(
     children: Element,
 ) -> Element {
     let _theme = use_init_theme();
-    let frame = use_redraw_tick();
 
     rsx! {
         document::Style { {BASE_CSS} }
