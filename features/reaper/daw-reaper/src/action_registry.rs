@@ -753,15 +753,35 @@ pub fn register_action_with_handler(
     description: &str,
     show_in_menu: bool,
     toggleable: bool,
-    handler: std::sync::Arc<dyn Fn() + Send + Sync>,
+    handler: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
 ) -> u32 {
+    let command_for_error = command_name.to_string();
     register_action_core(
         command_name,
         description,
         show_in_menu,
         toggleable,
-        move || handler(),
+        move || {
+            if let Err(message) = handler() {
+                show_action_error(&command_for_error, &message);
+            }
+        },
     )
+}
+
+/// Pop a REAPER message box reporting a failed action — the only place a
+/// `#[architect::actions]` method's `Err` reaches the user; everything
+/// upstream of this (the macro's generated closure, `ActionBackend`) only
+/// carries the message as a `String`. REAPER action triggers always run on
+/// the main thread, so `show_message_box` (main-thread-only, blocking) is
+/// safe to call directly here.
+fn show_action_error(command_name: &str, message: &str) {
+    warn!("Action '{command_name}' failed: {message}");
+    Reaper::get().medium_reaper().show_message_box(
+        message,
+        format!("FastTrackStudio — {command_name}"),
+        reaper_medium::MessageBoxType::Okay,
+    );
 }
 
 /// Shared REAPER action-registration mechanics (dedup, gaccel, menu
@@ -1293,7 +1313,7 @@ impl architect::action::ActionBackend for crate::Reaper {
     fn register(
         &self,
         meta: &'static architect::action::ActionMeta,
-        handler: std::sync::Arc<dyn Fn() + Send + Sync>,
+        handler: std::sync::Arc<dyn Fn() -> Result<(), String> + Send + Sync>,
     ) {
         register_action_with_handler(
             meta.id,
