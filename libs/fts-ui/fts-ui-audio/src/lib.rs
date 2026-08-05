@@ -28,3 +28,4 @@ pub mod theme;
 pub mod prelude;
 
 pub use param::ParamHandle;
+pub use shell::{EditorForm, EDITOR_FORMS};

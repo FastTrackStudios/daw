@@ -11,5 +11,7 @@ pub use crate::meters::{
     GrMeter, LevelMeter, LevelMeterDb, LevelMeterOrientation, SpectrumAnalyzer,
 };
 pub use crate::param::ParamHandle;
-pub use crate::shell::{FloatingPanel, PluginShell, RailButton, ShellItem, RAIL_W};
+pub use crate::shell::{
+    EditorForm, FloatingPanel, PluginShell, RailButton, ShellItem, EDITOR_FORMS, RAIL_W,
+};
 pub use crate::theme::{use_init_theme, use_theme, Theme, ThemeProvider, ThemeVariant};

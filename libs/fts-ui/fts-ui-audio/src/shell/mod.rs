@@ -40,6 +40,10 @@
 //! rather than an ugly one. Colours come from the fts-ui theme variables the
 //! editors already set, with the plugin's accent passed in.
 
+pub mod form;
+
+pub use form::{EditorForm, EDITOR_FORMS};
+
 use dioxus::prelude::*;
 
 /// One entry in the rail.
