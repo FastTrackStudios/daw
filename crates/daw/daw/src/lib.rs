@@ -470,6 +470,15 @@ pub mod reaper_ui {
         pub use daw_reaper_dioxus::service::{init as init_service, register_panel_from_def};
     }
 
+    /// The `DockHosting` backend, for hosts that publish their own
+    /// service router.
+    ///
+    /// `daw-bridge` mounts this itself; anything else running its own
+    /// host (fts-extensions, via `host-hooks`) has to mount it too, or
+    /// `DockHost` calls arrive at a router with no such service and fail
+    /// to decode rather than failing cleanly.
+    pub use daw_reaper_dioxus::ReaperDockHost;
+
     /// Embedded Dioxus view inside an existing REAPER HWND.
     pub use daw_reaper_dioxus::EmbeddedView;
     /// Transparent floating overlay (HUDs, popups).
