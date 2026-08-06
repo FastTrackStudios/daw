@@ -10,22 +10,115 @@
 //! One const per face — see [`vu_kit`](crate::hardware::vu_kit) for how to
 //! add one, and the `vu_sheet` test for how to look at it.
 
-use super::vu_kit::{Bezel, Lamp, Needle, Vent, VuSpec};
+use super::vu_kit::{Bezel, Glow, Lamp, Needle, Vent, VuSpec};
 
-/// The frame nearly every rack meter is mounted in: matte black, with the
-/// opening chamfered inward and a vent under the glass.
-const BLACK_FRAME: Bezel = Bezel {
+// ─────────────────────────────────────────────────────────────────────────
+// Bezels
+//
+// The frame is a separate part from the movement: the same Modutec sits in a
+// pressed-steel rack frame on one unit and a chromed ring on another. So a
+// face names a default and a panel can ask for a different one, the way it
+// would order a different part.
+//
+// The chamfer is what sells it. Lit from above, a sunken opening has its top
+// face in shadow and its bottom face catching the light — the opposite of a
+// raised boss, and the whole difference between a movement set into a panel
+// and one printed on it.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// The louvre under the glass on a rack frame.
+const LOUVRE: Vent = Vent {
+    dark: "#000",
+    light: "#2a2c2e",
+    pitch: 4.0,
+};
+
+/// Pressed steel, matte black, with a vent under the glass. The frame nearly
+/// every rack meter is mounted in, and the default.
+pub const BLACK_RACK: Bezel = Bezel {
     frame: "linear-gradient(180deg, #141517, #0a0b0c)",
+    radius: 2.0,
+    glow: None,
     top: "#050506",
     left: "#0c0d0e",
     right: "#2b2d30",
     bottom: "#3b3d41",
     depth: 9.0,
-    vent: Some(Vent {
-        dark: "#000",
-        light: "#2a2c2e",
-        pitch: 4.0,
+    vent: Some(LOUVRE),
+};
+
+/// A thin dark surround and nothing else — a movement set almost flush, for
+/// a panel that does not want a frame competing with it.
+pub const SLIM: Bezel = Bezel {
+    frame: "linear-gradient(180deg, #1b1c1f, #101113)",
+    radius: 3.0,
+    glow: None,
+    top: "#0a0b0c",
+    left: "#101113",
+    right: "#26282b",
+    bottom: "#303236",
+    depth: 4.0,
+    vent: None,
+};
+
+/// A chromed ring: bright, shallow, and no vent — the look of a meter set
+/// into a polished front rather than a painted one.
+pub const CHROME: Bezel = Bezel {
+    frame: "linear-gradient(180deg, #f2f4f6 0%, #b9bec4 44%, #7e848b 72%, #d8dce0 100%)",
+    radius: 4.0,
+    glow: None,
+    top: "#6d737a",
+    left: "#878d94",
+    right: "#dfe3e7",
+    bottom: "#f4f6f8",
+    depth: 7.0,
+    vent: None,
+};
+
+/// Brass, as the era's better-dressed units wore it: warm, and a little
+/// tarnished at the shadowed faces.
+pub const BRASS: Bezel = Bezel {
+    frame: "linear-gradient(180deg, #d9b25f 0%, #a67f34 46%, #6d5220 100%)",
+    radius: 3.0,
+    glow: None,
+    top: "#4a3714",
+    left: "#6a5122",
+    right: "#c9a253",
+    bottom: "#e8c877",
+    depth: 7.0,
+    vent: None,
+};
+
+/// The rack frame with the bulb turned up: warm light spilling around the
+/// opening, which on a dark panel is most of what says the meter is *on*.
+pub const LIT_AMBER: Bezel = Bezel {
+    glow: Some(Glow {
+        color: "rgba(255,186,86,0.42)",
+        spread: 22.0,
+        core: Some("rgba(255,214,140,0.34)"),
     }),
+    ..BLACK_RACK
+};
+
+/// The same, lit cold — for a blue-carded movement.
+pub const LIT_BLUE: Bezel = Bezel {
+    glow: Some(Glow {
+        color: "rgba(110,180,255,0.40)",
+        spread: 22.0,
+        core: Some("rgba(180,220,255,0.32)"),
+    }),
+    ..BLACK_RACK
+};
+
+/// A chromed ring around a lit movement — the halo reads doubly well off
+/// polished metal.
+pub const LIT_CHROME: Bezel = Bezel {
+    glow: Some(Glow {
+        color: "rgba(255,244,214,0.38)",
+        spread: 18.0,
+        core: Some("rgba(255,255,255,0.30)"),
+    }),
+    ..CHROME
 };
 
 /// The reflection on the glass over a card.
@@ -55,7 +148,7 @@ pub static AMBER: VuSpec = VuSpec {
         reach: 68.0,
     }),
     glass: Some(GLASS),
-    bezel: BLACK_FRAME,
+    bezel: BLACK_RACK,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -76,7 +169,7 @@ pub static IVORY: VuSpec = VuSpec {
         reach: 68.0,
     }),
     glass: Some(GLASS),
-    bezel: BLACK_FRAME,
+    bezel: BLACK_RACK,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -99,7 +192,7 @@ pub static AMBER_BLUE: VuSpec = VuSpec {
         reach: 68.0,
     }),
     glass: Some(GLASS),
-    bezel: BLACK_FRAME,
+    bezel: BLACK_RACK,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -120,5 +213,5 @@ pub static BLUE: VuSpec = VuSpec {
         reach: 68.0,
     }),
     glass: Some(GLASS),
-    bezel: BLACK_FRAME,
+    bezel: BLACK_RACK,
 };

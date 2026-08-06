@@ -68,6 +68,12 @@ pub struct Lamp {
 pub struct Bezel {
     /// The frame body.
     pub frame: &'static str,
+    /// Corner rounding, in design px. A pressed-steel rack frame is nearly
+    /// square; a moulded surround is not.
+    pub radius: f64,
+    /// Light spilling out around the opening, for a movement lit from behind
+    /// brightly enough that the frame catches it. `None` for an unlit one.
+    pub glow: Option<Glow>,
     /// The chamfer's four faces, in shadow-to-light order.
     pub top: &'static str,
     pub left: &'static str,
@@ -78,6 +84,32 @@ pub struct Bezel {
     /// The vent under the glass, which is most of what says the movement is
     /// mounted through the panel. `None` for a frame without one.
     pub vent: Option<Vent>,
+}
+
+/// Light escaping around a lit movement's opening.
+///
+/// A backlit meter does not stop at the glass: the bulb spills around the
+/// frame, and on a dark panel that halo is most of what says the meter is
+/// *on*. It is drawn as light thrown outward from the opening, so it reads
+/// against the panel rather than washing out the card.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Glow {
+    pub color: &'static str,
+    /// How far the light reaches past the frame, in design px.
+    pub spread: f64,
+    /// A tighter, brighter core just at the opening's edge.
+    pub core: Option<&'static str>,
+}
+
+impl Glow {
+    /// The halo as box-shadow layers, at a panel's scale.
+    pub fn css(&self, scale: f64) -> String {
+        let outer = format!("0 0 {:.1}px {}", self.spread * scale, self.color);
+        match self.core {
+            Some(core) => format!("{outer}, 0 0 {:.1}px {core}", self.spread * 0.35 * scale),
+            None => outer,
+        }
+    }
 }
 
 /// The louvre under a meter's glass.
@@ -221,6 +253,28 @@ mod tests {
         assert!(v.css(1.0).contains("4.00px"));
         assert!(v.css(3.0).contains("6.00px"), "{}", v.css(3.0));
         assert!(v.css(3.0).contains("12.00px"));
+    }
+
+    /// A halo is thrown outward, and its bright core is tighter than its
+    /// reach — inverted, the meter looks fogged rather than lit.
+    #[test]
+    fn a_glow_throws_a_tight_core_inside_a_wider_halo() {
+        let g = Glow {
+            color: "rgba(255,190,90,0.55)",
+            spread: 20.0,
+            core: Some("rgba(255,220,150,0.40)"),
+        };
+        let css = g.css(1.0);
+        assert!(css.contains("20.0px"), "{css}");
+        assert!(css.contains("7.0px"), "the core is not tighter than the halo: {css}");
+        // And it scales with the panel like everything else.
+        assert!(g.css(2.0).contains("40.0px"));
+
+        let plain = Glow {
+            core: None,
+            ..g
+        };
+        assert_eq!(plain.css(1.0).matches("0 0").count(), 1, "a coreless glow has one layer");
     }
 
     #[test]

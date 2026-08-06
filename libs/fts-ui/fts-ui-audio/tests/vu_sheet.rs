@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use dioxus::prelude::*;
 use dioxus_test::{by_testid, render};
 
-use fts_ui_audio::hardware::vu::{VuFace, VuMeter, VuMode};
+use fts_ui_audio::hardware::vu::{BezelStyle, VuFace, VuMeter, VuMode};
 use fts_ui_audio::hardware::vu_svg::VuScale;
 
 /// Rest, working, and pinned — enough to see the needle sweep and to catch a
@@ -52,7 +52,7 @@ fn Sheet() -> Element {
                             face,
                             mode: VuMode::GainReduction,
                             value_db: *db,
-                            legend: "GAIN REDUCTION".to_string(),
+                            legend: "VU".to_string(),
                             card: VuScale::Vu,
                         }
                     }
@@ -67,6 +67,39 @@ fn Sheet() -> Element {
                         legend: "VU".to_string(),
                         bezel: true,
                         card: VuScale::Vu,
+                    }
+                }
+            }
+
+            // The frames, all on one movement, so the difference between them
+            // is the only thing changing.
+            div {
+                style: "margin-top:6px; color:#dfe3e8; font-size:12px; \
+                        font-weight:700; letter-spacing:0.04em;",
+                "BEZELS"
+            }
+            div {
+                style: "display:flex; flex-wrap:wrap; align-items:flex-start; \
+                        gap:22px; padding:8px 0 18px;",
+                for style in BezelStyle::ALL {
+                    div {
+                        key: "{style:?}",
+                        style: "display:flex; flex-direction:column; align-items:center; gap:5px;",
+                        VuMeter {
+                            scale: 1.0,
+                            width: 130.0,
+                            face: if style.is_lit() { VuFace::Amber } else { VuFace::Ivory },
+                            mode: VuMode::Level,
+                            value_db: -14.0,
+                            legend: "VU".to_string(),
+                            bezel: true,
+                            bezel_style: style,
+                            card: VuScale::Vu,
+                        }
+                        div {
+                            style: "color:#aeb4bb; font-size:10px; letter-spacing:0.03em;",
+                            "{style:?}"
+                        }
                     }
                 }
             }
@@ -87,14 +120,16 @@ fn shots_dir() -> PathBuf {
 #[tokio::test]
 async fn shot_every_vu_face_in_the_kit() {
     let tester = render(Sheet)
-        .with_window_size(760, 40 + 130 * VuFace::ALL.len() as u32)
+        .with_window_size(760, 440 + 130 * VuFace::ALL.len() as u32)
         .build();
     let _ = tester.pump().await;
     tester.relayout();
 
     // Every face drew a movement with a real box, and a needle on it.
     let meters = tester.query_all(by_testid("vu-meter")).immediately();
-    let expected = VuFace::ALL.len() * (READINGS.len() + 1);
+    // Each face row is the readings plus one framed; then the bezel row is
+    // one movement per frame in the kit.
+    let expected = VuFace::ALL.len() * (READINGS.len() + 1) + BezelStyle::ALL.len();
     assert_eq!(
         meters.len(),
         expected,
@@ -121,6 +156,25 @@ async fn shot_every_vu_face_in_the_kit() {
             "the needle did not move between two different readings: {positions:?}",
         );
     }
+
+    // Every frame in the kit drew, and the lit ones are actually marked as
+    // lit — a glow that silently went missing would look like an unlit meter
+    // and nothing else would say so.
+    let bezels = tester.query_all(by_testid("vu-bezel")).immediately();
+    assert_eq!(
+        bezels.len(),
+        VuFace::ALL.len() + BezelStyle::ALL.len(),
+        "not every frame drew",
+    );
+    let lit = bezels
+        .iter()
+        .filter(|b| b.attribute("data-lit").as_deref() == Some("true"))
+        .count();
+    assert_eq!(
+        lit,
+        BezelStyle::ALL.iter().filter(|s| s.is_lit()).count(),
+        "the lit frames did not draw as lit",
+    );
 
     let path = shots_dir().join("kit.png");
     tester.render_png(&path);

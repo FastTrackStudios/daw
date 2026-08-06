@@ -7,7 +7,7 @@
 
 use dioxus::prelude::*;
 
-use crate::hardware::vu_kit::VuSpec;
+use crate::hardware::vu_kit::{Bezel, VuSpec};
 use crate::hardware::vu_svg::{
     scale_arc_for, scale_needle_tip, scale_point, VuScale, PIVOT_X, PIVOT_Y, VU_H, VU_W,
 };
@@ -65,6 +65,60 @@ impl VuFace {
     }
 }
 
+/// Which frame the movement is mounted in.
+///
+/// A separate part from the face: the same movement sits in a pressed-steel
+/// rack frame on one unit and a chromed ring on another. A [`VuFace`] names
+/// its default, and a panel can ask for a different one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BezelStyle {
+    /// Pressed steel, matte black, vented. The rack default.
+    BlackRack,
+    /// A thin dark surround and nothing else.
+    Slim,
+    /// A bright chromed ring.
+    Chrome,
+    /// Warm brass, a little tarnished in the shadows.
+    Brass,
+    /// The rack frame with the bulb turned up — warm light around the opening.
+    LitAmber,
+    /// The same, lit cold, for a blue-carded movement.
+    LitBlue,
+    /// A chromed ring around a lit movement.
+    LitChrome,
+}
+
+impl BezelStyle {
+    /// Every frame in the kit, so a contact sheet can walk them all.
+    pub const ALL: [BezelStyle; 7] = [
+        Self::BlackRack,
+        Self::Slim,
+        Self::Chrome,
+        Self::Brass,
+        Self::LitAmber,
+        Self::LitBlue,
+        Self::LitChrome,
+    ];
+
+    pub fn spec(self) -> &'static Bezel {
+        use crate::hardware::vu_faces as kit;
+        match self {
+            Self::BlackRack => &kit::BLACK_RACK,
+            Self::Slim => &kit::SLIM,
+            Self::Chrome => &kit::CHROME,
+            Self::Brass => &kit::BRASS,
+            Self::LitAmber => &kit::LIT_AMBER,
+            Self::LitBlue => &kit::LIT_BLUE,
+            Self::LitChrome => &kit::LIT_CHROME,
+        }
+    }
+
+    /// Whether this frame throws light around its opening.
+    pub fn is_lit(self) -> bool {
+        self.spec().glow.is_some()
+    }
+}
+
 /// A VU meter drawn at panel scale.
 ///
 /// `value_db` is gain reduction in dB (positive) in
@@ -83,6 +137,9 @@ pub fn VuMeter(
     /// mounted through a panel rather than printed on one.
     #[props(default = false)]
     bezel: bool,
+    /// Which frame to mount it in. Defaults to the face's own.
+    #[props(default)]
+    bezel_style: Option<BezelStyle>,
     /// What the card is printed with — a VU standard or a plain decibel scale.
     #[props(default)]
     card: VuScale,
@@ -99,25 +156,34 @@ pub fn VuMeter(
     let spec = face.spec();
 
     if bezel {
-        let b = spec.bezel;
+        let b = match bezel_style {
+            Some(style) => *style.spec(),
+            None => spec.bezel,
+        };
         return rsx! {
             div {
                 "data-testid": "vu-bezel",
+                "data-lit": "{b.glow.is_some()}",
                 // The frame body: matte black, sitting on the panel.
                 style: format!(
                     "display:inline-flex; flex-direction:column; align-items:center; \
                      padding:{:.1}px {:.1}px {:.1}px; border-radius:{:.1}px; \
                      background:{}; \
                      box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.55), \
-                       inset 0 {:.1}px 0 rgba(255,255,255,0.07);",
+                       inset 0 {:.1}px 0 rgba(255,255,255,0.07){};",
                     5.0 * scale,
                     5.0 * scale,
                     4.0 * scale,
-                    2.0 * scale,
+                    b.radius * scale,
                     b.frame,
                     3.0 * scale,
                     7.0 * scale,
                     1.0 * scale,
+                    // A lit frame spills light onto the panel around it.
+                    match b.glow {
+                        Some(g) => format!(", {}", g.css(scale)),
+                        None => String::new(),
+                    },
                 ),
 
                 // The opening, chamfered *inward*. Four border colours, so the
@@ -240,12 +306,17 @@ pub fn VuMeter(
                     }
                 }
 
-                // Legend under the scale — "VU", "GAIN REDUCTION".
-                text {
-                    x: "{VU_W * 0.5:.2}", y: "{VU_H * 0.93:.2}",
-                    fill: "{spec.ink}", font_size: "5.0",
-                    text_anchor: "middle", letter_spacing: "0.6",
-                    "{legend}"
+                // Legend under the scale. A real card prints the *instrument*
+                // — "VU", "dB" — and leaves what it is metering to a switch
+                // on the panel, so this is short or absent. A blank legend
+                // prints nothing rather than an empty text node.
+                if !legend.trim().is_empty() {
+                    text {
+                        x: "{VU_W * 0.5:.2}", y: "{VU_H * 0.93:.2}",
+                        fill: "{spec.ink}", font_size: "5.0",
+                        text_anchor: "middle", letter_spacing: "0.6",
+                        "{legend}"
+                    }
                 }
 
                 // Needle + hub.
