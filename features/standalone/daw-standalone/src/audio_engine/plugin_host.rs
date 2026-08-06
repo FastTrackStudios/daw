@@ -685,9 +685,20 @@ impl LoadedClapPlugin {
     /// REAPER embeds them. The caller owns the parent window and its
     /// event loop, and should pump
     /// [`pump_main_thread`][Self::pump_main_thread] at UI rate.
+    /// Create the plugin's editor and embed it in `parent`.
+    ///
+    /// `size_parent` is called with the size the plugin reports *before* the
+    /// editor is parented, and is where the embedder should size its window.
+    /// The order matters: a DAW asks `gui.get_size()` first and creates its
+    /// frame at that size, so the editor is parented into a window that
+    /// already fits and never sees a resize. Parenting first and resizing
+    /// afterwards hides bugs that only show up on the first frame — a plugin
+    /// that does not paint until something invalidates it looks fine, because
+    /// the resize is that something.
     pub fn open_gui_embedded(
         &mut self,
         parent: raw_window_handle_06::RawWindowHandle,
+        size_parent: impl FnOnce(u32, u32),
     ) -> Result<(u32, u32), ClapHostError> {
         let mut handle = self.instance.plugin_handle();
         let gui = handle
@@ -708,6 +719,7 @@ impl LoadedClapPlugin {
             .get_size(&mut handle)
             .map(|s| (s.width, s.height))
             .unwrap_or((800, 500));
+        size_parent(size.0, size.1);
         let window = ClapWindow::from_window_handle(parent)
             .ok_or(ClapHostError::GuiUnsupportedPlatform)?;
         // SAFETY: the caller keeps the parent window alive for the GUI's

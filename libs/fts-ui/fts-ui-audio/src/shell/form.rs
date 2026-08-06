@@ -139,6 +139,36 @@ impl EditorForm {
         }
     }
 
+    /// The smallest, and largest, box any form asks for.
+    ///
+    /// These are what an editor should declare as its resize bounds, and
+    /// declaring anything narrower is not a stricter policy — it is a broken
+    /// size button. The host clamps a resize request to the bounds it was
+    /// given, so a 300px floor silently turned both 1U (89px) and 2U (178px)
+    /// into the same 300px window, and a 720px width floor turned a portrait
+    /// 500-series module into a landscape one. The forms are physical sizes;
+    /// if a form is offered, its size has to be reachable.
+    ///
+    /// `Responsive` is excluded — it has no size of its own, it defers to the
+    /// face, and faces are checked against these bounds separately.
+    pub fn size_bounds(rail_w: f64, face_preferred: (u32, u32)) -> ((u32, u32), (u32, u32)) {
+        let sizes = || {
+            EDITOR_FORMS
+                .iter()
+                .filter(|f| **f != Self::Responsive)
+                .map(|f| f.editor_size(rail_w, face_preferred))
+        };
+        let min = (
+            sizes().map(|(w, _)| w).min().unwrap_or(0),
+            sizes().map(|(_, h)| h).min().unwrap_or(0),
+        );
+        let max = (
+            sizes().map(|(w, _)| w).max().unwrap_or(0),
+            sizes().map(|(_, h)| h).max().unwrap_or(0),
+        );
+        (min, max)
+    }
+
     /// Whether a face should draw its panel at this form, or flow its controls
     /// into the space instead.
     ///
@@ -216,6 +246,33 @@ mod tests {
         assert!(fits(EditorForm::Rack3U), "3U is what the faces are drawn for");
         assert!(!fits(EditorForm::Series500), "a 3:1 panel does not go in a module");
         assert!(!fits(EditorForm::Mini));
+    }
+
+    #[test]
+    fn every_form_fits_inside_the_bounds_the_forms_themselves_declare() {
+        let (min, max) = EditorForm::size_bounds(RAIL, PREFERRED);
+        for form in EDITOR_FORMS {
+            if *form == EditorForm::Responsive {
+                continue;
+            }
+            let (w, h) = form.editor_size(RAIL, PREFERRED);
+            assert!(
+                w >= min.0 && w <= max.0 && h >= min.1 && h <= max.1,
+                "{} is {w}x{h}, outside {min:?}..{max:?} — the host would clamp it",
+                form.id(),
+            );
+        }
+    }
+
+    #[test]
+    fn the_bounds_are_the_extremes_and_not_one_form_s_box() {
+        let (min, max) = EditorForm::size_bounds(RAIL, PREFERRED);
+        // The shortest form is a 1U rack and the narrowest is a single module,
+        // and those are different forms — the bounds are per axis.
+        assert_eq!(min.1, EditorForm::Rack1U.editor_size(RAIL, PREFERRED).1);
+        assert_eq!(min.0, EditorForm::Mini.editor_size(RAIL, PREFERRED).0);
+        assert_eq!(max.1, EditorForm::Series500.editor_size(RAIL, PREFERRED).1);
+        assert_eq!(max.0, EditorForm::Rack3U.editor_size(RAIL, PREFERRED).0);
     }
 
     #[test]
