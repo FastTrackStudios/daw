@@ -304,6 +304,12 @@ pub struct RackDesign {
     pub vu: VuFace,
     /// Whether the movements are mounted through the panel in a bezel.
     pub vu_bezel: bool,
+    /// Which frame the meter is mounted in.
+    ///
+    /// The frame is the *unit's* part, not the movement's: the same Modutec
+    /// sits in a pressed-steel rack frame on one and a satin plate on
+    /// another. `None` takes the face's own default.
+    pub vu_frame: Option<crate::hardware::vu::BezelStyle>,
     /// What the movement's card is printed with — the VU standard, or a plain
     /// decibel scale.
     pub vu_card: crate::hardware::vu_svg::VuScale,

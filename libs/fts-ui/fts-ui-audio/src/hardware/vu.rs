@@ -103,6 +103,10 @@ pub enum BezelStyle {
     Chrome,
     /// Warm brass, a little tarnished in the shadows.
     Brass,
+    /// Satin nickel on a brushed panel — the Teletronix-era meter plate.
+    SatinPlate,
+    /// A deep rectangular recess, the movement set well back behind glass.
+    Recessed,
     /// The rack frame with the bulb turned up — warm light around the opening.
     LitAmber,
     /// The same, lit cold, for a blue-carded movement.
@@ -113,11 +117,13 @@ pub enum BezelStyle {
 
 impl BezelStyle {
     /// Every frame in the kit, so a contact sheet can walk them all.
-    pub const ALL: [BezelStyle; 7] = [
+    pub const ALL: [BezelStyle; 9] = [
         Self::BlackRack,
         Self::Slim,
         Self::Chrome,
         Self::Brass,
+        Self::SatinPlate,
+        Self::Recessed,
         Self::LitAmber,
         Self::LitBlue,
         Self::LitChrome,
@@ -130,6 +136,8 @@ impl BezelStyle {
             Self::Slim => &kit::SLIM,
             Self::Chrome => &kit::CHROME,
             Self::Brass => &kit::BRASS,
+            Self::SatinPlate => &kit::SATIN_PLATE,
+            Self::Recessed => &kit::RECESSED,
             Self::LitAmber => &kit::LIT_AMBER,
             Self::LitBlue => &kit::LIT_BLUE,
             Self::LitChrome => &kit::LIT_CHROME,
@@ -166,6 +174,13 @@ pub fn VuMeter(
     /// What the card is printed with — a VU standard or a plain decibel scale.
     #[props(default)]
     card: VuScale,
+    /// The frame's lip shadow, cast onto this card.
+    ///
+    /// Set by the bezel wrapper below rather than by a panel: the movement
+    /// draws the shadow, because the shadow falls *inside* it, but which
+    /// shadow is the frame's business.
+    #[props(default)]
+    shade: Option<String>,
     /// The colour a backlit movement is lit in.
     ///
     /// Only [`VuFace::Backlit`] takes one: on the period faces the card is
@@ -191,12 +206,9 @@ pub fn VuMeter(
         .and_then(|c| spec.wash.card(c))
         .unwrap_or_else(|| spec.card.to_string());
     let lamp_css = match wash.and_then(|c| spec.wash.lamp(c)) {
-        Some(color) => spec.lamp.map(|l| {
-            format!(
-                "radial-gradient(ellipse at {:.0}% {:.0}%, {color} 0%, rgba(0,0,0,0) {:.0}%)",
-                l.x, l.y, l.reach,
-            )
-        }),
+        Some(color) => spec
+            .lamp
+            .map(|l| crate::hardware::vu_kit::lamp_layers(l, &color)),
         None => spec.lamp_css(),
     };
     let halo_color = wash
@@ -214,7 +226,8 @@ pub fn VuMeter(
                 "data-lit": "{b.glow.is_some()}",
                 // The frame body: matte black, sitting on the panel.
                 style: format!(
-                    "display:inline-flex; flex-direction:column; align-items:center; \
+                    "position:relative; display:inline-flex; flex-direction:column; \
+                     align-items:center; \
                      padding:{:.1}px {:.1}px {:.1}px; border-radius:{:.1}px; \
                      background:{}; \
                      box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.55), \
@@ -258,7 +271,24 @@ pub fn VuMeter(
                         2.0 * scale,
                         5.0 * scale,
                     ),
-                    VuMeter { scale, width, face, mode, value_db, legend, card, tint }
+                    VuMeter {
+                        scale, width, face, mode, value_db, legend, card, tint,
+                        shade: b.shade.map(|sh| sh.css(scale)),
+                    }
+                }
+
+                // The room on the frame's own surface. Over the frame and the
+                // vent, under nothing — it is the outermost thing there is,
+                // because it is a reflection off the front of the moulding.
+                if let Some(sheen) = b.sheen {
+                    div {
+                        "data-testid": "vu-frame-sheen",
+                        style: format!(
+                            "position:absolute; inset:0; pointer-events:none; \
+                             border-radius:{:.1}px; background:{sheen};",
+                            b.radius * scale,
+                        ),
+                    }
                 }
 
                 // The vent under the glass, which is most of what says the
@@ -393,6 +423,18 @@ pub fn VuMeter(
                 circle {
                     cx: "{PIVOT_X:.2}", cy: "{VU_H:.2}", r: "{spec.needle.hub_r:.2}",
                     fill: "{spec.needle.color}", opacity: "{spec.needle.hub_opacity:.2}",
+                }
+            }
+
+            // The frame's lip, shadowing the card behind it. Over the print,
+            // because the shadow falls on the whole face — under the glass,
+            // because the glass is in front of all of it.
+            if let Some(shade) = &shade {
+                div {
+                    "data-testid": "vu-shade",
+                    style: format!(
+                        "position:absolute; inset:0; pointer-events:none; box-shadow:{shade};",
+                    ),
                 }
             }
 

@@ -126,6 +126,25 @@ pub struct Lamp {
     pub y: f64,
     /// How far the glow reaches, as a percentage of the card.
     pub reach: f64,
+    /// The bulb's *hotspot* — the tight bright patch right where the filament
+    /// is, inside the broad wash.
+    ///
+    /// A single bulb behind a card does not light it evenly: there is a spot,
+    /// and on an LA-2A you can see it plainly in the middle of the face. A
+    /// wash without one reads as an evenly backlit panel rather than a lamp
+    /// in a box.
+    pub core: Option<Core>,
+}
+
+/// The bright patch at the bulb itself, inside a [`Lamp`]'s wash.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Core {
+    pub color: &'static str,
+    /// Where the filament is, if not right where the wash is centred.
+    pub x: f64,
+    pub y: f64,
+    /// How tight the spot is, as a percentage of the card.
+    pub reach: f64,
 }
 
 /// The frame a movement mounted *through* a panel sits in.
@@ -154,6 +173,47 @@ pub struct Bezel {
     /// The vent under the glass, which is most of what says the movement is
     /// mounted through the panel. `None` for a frame without one.
     pub vent: Option<Vent>,
+    /// The room's reflection on the frame's own surface.
+    ///
+    /// A frame is a moulding in front of a lamp, and it catches light like
+    /// one. Without it a black frame is a black rectangle — which is what
+    /// makes a meter look pasted on rather than mounted.
+    pub sheen: Option<&'static str>,
+    /// The shadow the frame's lip throws *onto the card inside it*.
+    ///
+    /// A movement sits behind its frame, not flush with it, so the lip casts
+    /// across the top of the face and down one side. Leaving it out is what
+    /// makes a framed meter look like a picture pasted into a hole.
+    pub shade: Option<Shade>,
+}
+
+/// The frame lip's shadow on the card behind it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shade {
+    pub color: &'static str,
+    /// How far the shadow reaches down from the top lip, in design px.
+    pub top: f64,
+    /// How far it reaches in from the shadowed side.
+    pub side: f64,
+}
+
+impl Shade {
+    /// The shadow as inset box-shadow layers, at a panel's scale.
+    ///
+    /// Lit from above, the top lip throws the longest shadow and the left one
+    /// a shorter one; the bottom and right lips throw none worth drawing,
+    /// which is what keeps the direction of the light readable.
+    pub fn css(&self, scale: f64) -> String {
+        format!(
+            "inset 0 {:.1}px {:.1}px {}, inset {:.1}px 0 {:.1}px {}",
+            self.top * scale,
+            self.top * 1.7 * scale,
+            self.color,
+            self.side * scale,
+            self.side * 1.8 * scale,
+            self.color,
+        )
+    }
 }
 
 /// Light escaping around a lit movement's opening.
@@ -229,14 +289,28 @@ pub struct VuSpec {
 }
 
 impl VuSpec {
-    /// The lamp's CSS, ready to paint.
+    /// The lamp's CSS, ready to paint. The hotspot is layered over the wash,
+    /// so a bulb reads as a spot inside a glow rather than one or the other.
     pub fn lamp_css(&self) -> Option<String> {
-        self.lamp.map(|l| {
-            format!(
-                "radial-gradient(ellipse at {:.0}% {:.0}%, {} 0%, rgba(0,0,0,0) {:.0}%)",
-                l.x, l.y, l.color, l.reach,
-            )
-        })
+        self.lamp.map(|l| lamp_layers(l, l.color))
+    }
+}
+
+/// A lamp's wash and its hotspot as one background, in `color`.
+///
+/// The hotspot is listed first because CSS paints the first background layer
+/// on top — the spot has to sit *inside* the wash, not under it.
+pub fn lamp_layers(lamp: Lamp, color: &str) -> String {
+    let wash = format!(
+        "radial-gradient(ellipse at {:.0}% {:.0}%, {color} 0%, rgba(0,0,0,0) {:.0}%)",
+        lamp.x, lamp.y, lamp.reach,
+    );
+    match lamp.core {
+        Some(c) => format!(
+            "radial-gradient(ellipse at {:.0}% {:.0}%, {} 0%, rgba(0,0,0,0) {:.0}%), {wash}",
+            c.x, c.y, c.color, c.reach,
+        ),
+        None => wash,
     }
 }
 
@@ -356,6 +430,56 @@ mod tests {
         assert_eq!(plain.css(1.0).matches("0 0").count(), 1, "a coreless glow has one layer");
     }
 
+    /// The frame's lip shadows the card from above and from one side, never
+    /// evenly — an even inset reads as a vignette, not as a cast shadow, and
+    /// loses the direction the whole panel is lit from.
+    #[test]
+    fn a_frames_shadow_falls_from_above_and_from_one_side() {
+        let sh = Shade {
+            color: "rgba(0,0,0,0.45)",
+            top: 7.0,
+            side: 4.0,
+        };
+        let css = sh.css(1.0);
+        assert_eq!(css.matches("inset").count(), 2, "{css}");
+        assert!(css.contains("inset 0 7.0px"), "no shadow from the top lip: {css}");
+        assert!(css.contains("inset 4.0px 0"), "no shadow from the side lip: {css}");
+        // And it scales with the panel.
+        assert!(sh.css(2.0).contains("inset 0 14.0px"));
+    }
+
+    /// A bulb's hotspot sits *inside* its wash: tighter, and painted over it.
+    #[test]
+    fn a_hotspot_is_tighter_than_the_wash_it_sits_in() {
+        for face in VuFace::ALL {
+            let Some(lamp) = face.spec().lamp else { continue };
+            let Some(core) = lamp.core else { continue };
+            assert!(
+                core.reach < lamp.reach,
+                "{face:?}'s hotspot reaches further than its own wash",
+            );
+        }
+        let lit = Lamp {
+            color: "rgba(1,2,3,0.4)",
+            x: 50.0,
+            y: 8.0,
+            reach: 68.0,
+            core: Some(Core {
+                color: "rgba(9,9,9,0.5)",
+                x: 50.0,
+                y: 52.0,
+                reach: 26.0,
+            }),
+        };
+        let css = lamp_layers(lit, lit.color);
+        // CSS paints the first layer on top, so the spot must be listed first
+        // or the wash covers it.
+        assert!(
+            css.find("rgba(9,9,9,0.5)") < css.find("rgba(1,2,3,0.4)"),
+            "the hotspot is painted under its own wash: {css}",
+        );
+    }
+
     #[test]
     fn a_lamp_becomes_a_gradient_and_an_unlit_face_does_not() {
         let lit = VuSpec {
@@ -364,6 +488,7 @@ mod tests {
                 x: 50.0,
                 y: 8.0,
                 reach: 68.0,
+                core: None,
             }),
             ..*VuFace::Amber.spec()
         };

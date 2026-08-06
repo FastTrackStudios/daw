@@ -10,7 +10,7 @@
 //! One const per face — see [`vu_kit`](crate::hardware::vu_kit) for how to
 //! add one, and the `vu_sheet` test for how to look at it.
 
-use super::vu_kit::{Bezel, Glow, Halo, Lamp, Needle, Vent, VuSpec, Wash};
+use super::vu_kit::{Bezel, Core, Glow, Halo, Lamp, Needle, Shade, Vent, VuSpec, Wash};
 
 // ─────────────────────────────────────────────────────────────────────────
 // Bezels
@@ -25,6 +25,24 @@ use super::vu_kit::{Bezel, Glow, Halo, Lamp, Needle, Vent, VuSpec, Wash};
 // raised boss, and the whole difference between a movement set into a panel
 // and one printed on it.
 // ─────────────────────────────────────────────────────────────────────────
+
+/// The reflection a moulded frame catches off the room, swept from the top
+/// left the way every panel here is lit.
+const FRAME_SHEEN: &str = "linear-gradient(158deg, rgba(255,255,255,0.20) 0%, \
+                           rgba(255,255,255,0.07) 20%, rgba(255,255,255,0.015) 40%, \
+                           rgba(255,255,255,0.0) 58%, rgba(0,0,0,0.14) 100%)";
+
+/// The same on polished metal: harder, and with a second catch low down.
+const METAL_SHEEN: &str = "linear-gradient(158deg, rgba(255,255,255,0.34) 0%, \
+                           rgba(255,255,255,0.10) 16%, rgba(255,255,255,0.0) 38%, \
+                           rgba(0,0,0,0.16) 74%, rgba(255,255,255,0.14) 100%)";
+
+/// The shadow a deep rack lip throws across the card behind it.
+const RACK_SHADE: Shade = Shade {
+    color: "rgba(0,0,0,0.42)",
+    top: 7.0,
+    side: 4.0,
+};
 
 /// The louvre under the glass on a rack frame.
 const LOUVRE: Vent = Vent {
@@ -44,7 +62,9 @@ pub const BLACK_RACK: Bezel = Bezel {
     right: "#2b2d30",
     bottom: "#3b3d41",
     depth: 9.0,
+    sheen: Some(FRAME_SHEEN),
     vent: Some(LOUVRE),
+    shade: Some(RACK_SHADE),
 };
 
 /// A thin dark surround and nothing else — a movement set almost flush, for
@@ -58,7 +78,13 @@ pub const SLIM: Bezel = Bezel {
     right: "#26282b",
     bottom: "#303236",
     depth: 4.0,
+    sheen: Some(FRAME_SHEEN),
     vent: None,
+    shade: Some(Shade {
+        color: "rgba(0,0,0,0.30)",
+        top: 3.0,
+        side: 2.0,
+    }),
 };
 
 /// A chromed ring: bright, shallow, and no vent — the look of a meter set
@@ -72,7 +98,13 @@ pub const CHROME: Bezel = Bezel {
     right: "#dfe3e7",
     bottom: "#f4f6f8",
     depth: 7.0,
+    sheen: Some(METAL_SHEEN),
     vent: None,
+    shade: Some(Shade {
+        color: "rgba(0,0,0,0.34)",
+        top: 5.0,
+        side: 3.0,
+    }),
 };
 
 /// Brass, as the era's better-dressed units wore it: warm, and a little
@@ -86,7 +118,35 @@ pub const BRASS: Bezel = Bezel {
     right: "#c9a253",
     bottom: "#e8c877",
     depth: 7.0,
+    sheen: Some(METAL_SHEEN),
     vent: None,
+    shade: Some(Shade {
+        color: "rgba(0,0,0,0.36)",
+        top: 5.0,
+        side: 3.0,
+    }),
+};
+
+/// Satin nickel, as a Teletronix-era meter is framed: a light plate on a
+/// brushed grey panel, with a thin dark line inside the lip and a long shadow
+/// thrown down the card behind it. Not chrome — it is satin, so it is lit
+/// broadly rather than in a hard band.
+pub const SATIN_PLATE: Bezel = Bezel {
+    frame: "linear-gradient(180deg, #e6e7e4 0%, #cbccc8 42%, #aeafab 78%, #d6d7d3 100%)",
+    radius: 2.0,
+    glow: None,
+    top: "#7e807c",
+    left: "#8f918d",
+    right: "#dcddd9",
+    bottom: "#f0f1ee",
+    depth: 8.0,
+    sheen: Some(METAL_SHEEN),
+    vent: None,
+    shade: Some(Shade {
+        color: "rgba(0,0,0,0.38)",
+        top: 8.0,
+        side: 5.0,
+    }),
 };
 
 /// The rack frame with the bulb turned up: warm light spilling around the
@@ -122,7 +182,13 @@ pub const RECESSED: Bezel = Bezel {
     right: "#31353b",
     bottom: "#454a51",
     depth: 13.0,
+    sheen: Some(FRAME_SHEEN),
     vent: None,
+    shade: Some(Shade {
+        color: "rgba(0,0,0,0.52)",
+        top: 10.0,
+        side: 6.0,
+    }),
 };
 
 /// A chromed ring around a lit movement — the halo reads doubly well off
@@ -158,10 +224,17 @@ pub static AMBER: VuSpec = VuSpec {
     hot: "#8f2010",
     needle: DARK_NEEDLE,
     lamp: Some(Lamp {
-        color: "rgba(255,214,120,0.55)",
+        color: "rgba(255,214,120,0.50)",
         x: 50.0,
         y: 8.0,
-        reach: 68.0,
+        reach: 70.0,
+        // The spot you can see plainly in the middle of an LA-2A's face.
+        core: Some(Core {
+            color: "rgba(255,236,186,0.42)",
+            x: 50.0,
+            y: 56.0,
+            reach: 30.0,
+        }),
     }),
     glass: Some(GLASS),
     bezel: BLACK_RACK,
@@ -180,10 +253,16 @@ pub static IVORY: VuSpec = VuSpec {
         ..DARK_NEEDLE
     },
     lamp: Some(Lamp {
-        color: "rgba(255,246,224,0.30)",
+        color: "rgba(255,246,224,0.28)",
         x: 50.0,
         y: 8.0,
         reach: 68.0,
+        core: Some(Core {
+            color: "rgba(255,252,242,0.26)",
+            x: 50.0,
+            y: 54.0,
+            reach: 28.0,
+        }),
     }),
     glass: Some(GLASS),
     bezel: BLACK_RACK,
@@ -208,6 +287,12 @@ pub static AMBER_BLUE: VuSpec = VuSpec {
         x: 50.0,
         y: 8.0,
         reach: 68.0,
+        core: Some(Core {
+            color: "rgba(255,238,190,0.34)",
+            x: 50.0,
+            y: 55.0,
+            reach: 28.0,
+        }),
     }),
     glass: Some(GLASS),
     bezel: BLACK_RACK,
@@ -230,6 +315,12 @@ pub static BLUE: VuSpec = VuSpec {
         x: 50.0,
         y: 8.0,
         reach: 68.0,
+        core: Some(Core {
+            color: "rgba(206,232,255,0.26)",
+            x: 50.0,
+            y: 55.0,
+            reach: 28.0,
+        }),
     }),
     glass: Some(GLASS),
     bezel: BLACK_RACK,
@@ -273,6 +364,9 @@ pub static BACKLIT: VuSpec = VuSpec {
         x: 50.0,
         y: 102.0,
         reach: 60.0,
+        // No hotspot: the light on a backlit movement comes from an even
+        // panel behind the card, not from a bulb in a box.
+        core: None,
     }),
     // Heavier than a period meter's: this one is read through real glass, and
     // the sweep across the top-left corner is most of what says so.
