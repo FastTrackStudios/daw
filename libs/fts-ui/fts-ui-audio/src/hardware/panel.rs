@@ -70,7 +70,66 @@ pub enum PanelTexture {
     #[default]
     Painted,
     /// Brushed metal: horizontal grain under a broad diagonal sheen.
-    Brushed,
+    ///
+    /// `strength` is a percentage of the reference grain, which is tuned for
+    /// natural (light) aluminium. It exists because the same scratches are not
+    /// equally *visible* on every plate: a white striation over pale metal is
+    /// a small step in luminance, and the identical striation over black
+    /// anodising is a large one. At full strength a blackface panel turns into
+    /// a venetian blind. Dark plates want roughly half.
+    Brushed { strength: u8 },
+}
+
+/// Brushed aluminium, as background layers.
+///
+/// Zoom into a real plate and the finish is not a ruled pattern: it is a mess
+/// of scratches left by an abrasive belt. They run *along* the brush direction
+/// (horizontally, hence 0deg gradients, which vary down the panel), but they
+/// vary in width, spacing and brightness, and there are longer smears of
+/// slightly lighter and darker metal over the top of them.
+///
+/// A single repeating gradient cannot look like that — one period reads as
+/// corduroy, which is exactly what the first attempt did. So this stacks
+/// several at deliberately non-commensurate periods (2 / 3 / 5 / 9 / 23 px):
+/// having no common multiple, they never line up twice in the same way, and
+/// their interference is what sells the surface as scratched rather than
+/// printed. Each is nearly invisible alone — the effect is cumulative.
+///
+/// The last layer is not scratches at all: it is the broad off-axis sheen, the
+/// highlight that sweeps across a metal plate and is the reason it reads as
+/// metal rather than grey card.
+///
+/// Everything here is horizontal, and deliberately so. A crossing 90deg pass
+/// was tried, for the lengthwise streaking of the belt; against the horizontal
+/// layers it interferes into a visible grid and the panel turns into woven
+/// fabric. Brushing has one direction, and so does this.
+///
+/// Layer order is paint order: first listed is on top, and the raw paint
+/// passed by the design goes underneath all of it.
+fn brushed_grain(strength: u8) -> String {
+    let k = strength.min(100) as f64 / 100.0;
+    let w = |v: f64| format!("rgba(255,255,255,{:.4})", v * k);
+    let b = |v: f64| format!("rgba(0,0,0,{:.4})", v * k);
+    format!(
+        "repeating-linear-gradient(0deg, {} 0px 1px, {} 1px 2px), \
+         repeating-linear-gradient(0deg, {} 0px 1px, rgba(0,0,0,0) 1px 3px), \
+         repeating-linear-gradient(0deg, {} 0px 1px, rgba(0,0,0,0) 1px 5px), \
+         repeating-linear-gradient(0deg, {} 0px 2px, rgba(0,0,0,0) 2px 9px), \
+         repeating-linear-gradient(0deg, {} 0px 3px, {} 3px 6px, \
+           rgba(0,0,0,0) 6px 23px), \
+         linear-gradient(102deg, rgba(255,255,255,0) 0%, {} 22%, \
+           rgba(255,255,255,0) 41%, {} 63%, {} 84%, rgba(255,255,255,0) 100%)",
+        w(0.055),
+        b(0.045),
+        w(0.032),
+        b(0.040),
+        w(0.045),
+        b(0.055),
+        w(0.030),
+        w(0.10),
+        b(0.06),
+        w(0.07),
+    )
 }
 
 /// A hardware faceplate.
@@ -98,6 +157,21 @@ pub fn Panel(
 ) -> Element {
     let (w, h) = (design_w * scale, design_h * scale);
 
+    // The grain is a *background layer of the panel*, not an overlay element.
+    //
+    // As an absolutely-positioned first child it painted over the meter's blue
+    // section: blitz does not order positioned siblings by tree position the
+    // way CSS specifies, so being "earlier in the DOM" bought nothing. A
+    // background cannot be painted over its own box's children by definition,
+    // which is the property actually wanted — this is the plate, and
+    // everything the panel carries is mounted on it.
+    let paint = match texture {
+        PanelTexture::Painted => background.clone(),
+        PanelTexture::Brushed { strength } => {
+            format!("{}, {background}", brushed_grain(strength))
+        }
+    };
+
     rsx! {
         div {
             "data-testid": "panel-frame",
@@ -111,7 +185,7 @@ pub fn Panel(
                 "data-scale": "{scale:.4}",
                 style: format!(
                     "position:relative; width:{w:.1}px; height:{h:.1}px; \
-                     background:{background}; border-radius:{:.1}px; \
+                     background:{paint}; border-radius:{:.1}px; \
                      border:{:.1}px solid rgba(0,0,0,0.55); \
                      box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.5);",
                     3.0 * scale,
@@ -120,28 +194,8 @@ pub fn Panel(
                     18.0 * scale,
                 ),
 
-                // The backplate: the metal itself, and nothing but.
-                //
-                // First child, so every knob, meter, lamp and legend the panel
-                // carries is painted over it — this is the plate they are
-                // mounted *on*, not a finish laid over the top of them.
-                //
-                // Grain only. An earlier version added a broad diagonal sheen
-                // across the whole plate, and however carefully it was tuned it
-                // read as a film over the controls rather than as light on
-                // metal; the paint's own top-to-bottom gradient does that job
-                // without spanning anything. The striations stay fine and
-                // low-contrast, because grain on a real plate is at the edge of
-                // visible and anything coarser reads as corduroy.
-                if texture == PanelTexture::Brushed {
-                    div {
-                        "data-testid": "panel-backplate",
-                        style: "position:absolute; inset:0; pointer-events:none; \
-                                background:repeating-linear-gradient(0deg, \
-                                  rgba(255,255,255,0.075) 0px 1px, \
-                                  rgba(0,0,0,0.055) 1px 2px);",
-                    }
-                }
+                // (The brushed grain is a background layer of this div — see
+                // `paint` above. It was a child once, and painted over things.)
 
                 // The edges: screwed rack ears, or the walnut cheeks a
                 // desktop unit of the period was sold with.
