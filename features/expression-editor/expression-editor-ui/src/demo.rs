@@ -386,17 +386,16 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
         }
         Scene::Empty | Scene::Density | Scene::Held => {}
         Scene::Orchestral => {
+            ed.set_mode(expression_editor_core::Mode::Mpe);
             ed.selection.set_single(NoteId(2));
         }
-        Scene::Drums => {
-            ed.mouse = expression_editor_core::MouseMap::drums();
-        }
+        Scene::Drums => ed.set_mode(expression_editor_core::Mode::Drums),
         Scene::Guitar => {
-            ed.mouse = expression_editor_core::MouseMap::riffer();
+            ed.set_mode(expression_editor_core::Mode::Guitar);
             ed.selection.set_single(NoteId(6));
         }
         Scene::Lyrics => {
-            ed.mouse = expression_editor_core::MouseMap::lyrics();
+            ed.set_mode(expression_editor_core::Mode::Vocals);
             ed.selection.set_single(NoteId(3));
         }
         Scene::Phrase => {
