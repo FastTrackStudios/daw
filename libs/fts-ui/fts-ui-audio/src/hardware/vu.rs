@@ -7,6 +7,7 @@
 
 use dioxus::prelude::*;
 
+use crate::hardware::vu_kit::VuSpec;
 use crate::hardware::vu_svg::{
     scale_arc_for, scale_needle_tip, scale_point, VuScale, PIVOT_X, PIVOT_Y, VU_H, VU_W,
 };
@@ -43,46 +44,23 @@ pub enum VuFace {
 }
 
 impl VuFace {
-    fn card(self) -> &'static str {
+    /// Every face in the kit, so a test or a contact sheet can walk them all
+    /// without anyone having to remember to add the new one.
+    pub const ALL: [VuFace; 4] = [Self::Amber, Self::Ivory, Self::AmberBlue, Self::Blue];
+
+    /// How this face is printed and lit — see
+    /// [`vu_kit`](crate::hardware::vu_kit).
+    ///
+    /// The only place a face maps to an appearance. The renderer below walks
+    /// the spec, so a new face is a variant here plus one const in
+    /// [`vu_faces`](crate::hardware::vu_faces).
+    pub fn spec(self) -> &'static VuSpec {
+        use crate::hardware::vu_faces as kit;
         match self {
-            Self::Amber => "linear-gradient(180deg, #f6d79a 0%, #e8b45f 62%, #d99a3c 100%)",
-            Self::Ivory => "linear-gradient(180deg, #f4f2ea 0%, #ddd9cd 100%)",
-            Self::AmberBlue => "linear-gradient(180deg, #f7cf86 0%, #eab259 58%, #d99b3f 100%)",
-            Self::Blue => "linear-gradient(180deg, #2f5f8f 0%, #16324e 100%)",
-        }
-    }
-    fn ink(self) -> &'static str {
-        match self {
-            Self::Amber => "#3a2a12",
-            Self::Ivory => "#2a241c",
-            Self::AmberBlue => "#1c4f96",
-            Self::Blue => "#e8f2ff",
-        }
-    }
-    fn needle(self) -> &'static str {
-        match self {
-            Self::Amber => "#241a0c",
-            Self::Ivory => "#1d1a15",
-            Self::AmberBlue => "#14161a",
-            Self::Blue => "#f4f8ff",
-        }
-    }
-    /// The lamp glow across the top of the card.
-    fn lamp(self) -> &'static str {
-        match self {
-            Self::Amber => "rgba(255,214,120,0.55)",
-            Self::Ivory => "rgba(255,246,224,0.30)",
-            Self::AmberBlue => "rgba(255,216,126,0.50)",
-            Self::Blue => "rgba(150,205,255,0.32)",
-        }
-    }
-    /// Colour of the over-zero part of the scale (red on every VU ever made).
-    fn hot(self) -> &'static str {
-        match self {
-            Self::Amber => "#8f2010",
-            Self::Ivory => "#a8281c",
-            Self::AmberBlue => "#1c4f96",
-            Self::Blue => "#ff6a5c",
+            Self::Amber => &kit::AMBER,
+            Self::Ivory => &kit::IVORY,
+            Self::AmberBlue => &kit::AMBER_BLUE,
+            Self::Blue => &kit::BLUE,
         }
     }
 }
@@ -118,8 +96,10 @@ pub fn VuMeter(
 
     let w = width * scale;
     let h = width * (VU_H / VU_W) * scale;
+    let spec = face.spec();
 
     if bezel {
+        let b = spec.bezel;
         return rsx! {
             div {
                 "data-testid": "vu-bezel",
@@ -127,13 +107,14 @@ pub fn VuMeter(
                 style: format!(
                     "display:inline-flex; flex-direction:column; align-items:center; \
                      padding:{:.1}px {:.1}px {:.1}px; border-radius:{:.1}px; \
-                     background:linear-gradient(180deg, #141517, #0a0b0c); \
+                     background:{}; \
                      box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.55), \
                        inset 0 {:.1}px 0 rgba(255,255,255,0.07);",
                     5.0 * scale,
                     5.0 * scale,
                     4.0 * scale,
                     2.0 * scale,
+                    b.frame,
                     3.0 * scale,
                     7.0 * scale,
                     1.0 * scale,
@@ -150,15 +131,16 @@ pub fn VuMeter(
                 div {
                     style: format!(
                         "display:flex; line-height:0; \
-                         border-top:{:.1}px solid #050506; \
-                         border-left:{:.1}px solid #0c0d0e; \
-                         border-right:{:.1}px solid #2b2d30; \
-                         border-bottom:{:.1}px solid #3b3d41; \
-                         box-shadow:inset 0 {:.1}px {:.1}px rgba(0,0,0,0.75);",
-                        9.0 * scale,
-                        9.0 * scale,
-                        9.0 * scale,
-                        9.0 * scale,
+                         border-top:{0:.1}px solid {1}; \
+                         border-left:{0:.1}px solid {2}; \
+                         border-right:{0:.1}px solid {3}; \
+                         border-bottom:{0:.1}px solid {4}; \
+                         box-shadow:inset 0 {5:.1}px {6:.1}px rgba(0,0,0,0.75);",
+                        b.depth * scale,
+                        b.top,
+                        b.left,
+                        b.right,
+                        b.bottom,
                         2.0 * scale,
                         5.0 * scale,
                     ),
@@ -167,20 +149,18 @@ pub fn VuMeter(
 
                 // The vent under the glass, which is most of what says the
                 // movement is mounted through the panel.
-                div {
-                    style: format!(
-                        "margin-top:{:.1}px; width:{:.1}px; height:{:.1}px; \
-                         border-radius:{:.1}px; \
-                         background:repeating-linear-gradient(90deg, \
-                           #000 0 {:.1}px, #2a2c2e {:.1}px {:.1}px);",
-                        4.0 * scale,
-                        width * 0.30 * scale,
-                        4.0 * scale,
-                        1.0 * scale,
-                        2.0 * scale,
-                        2.0 * scale,
-                        4.0 * scale,
-                    ),
+                if let Some(vent) = b.vent {
+                    div {
+                        style: format!(
+                            "margin-top:{:.1}px; width:{:.1}px; height:{:.1}px; \
+                             border-radius:{:.1}px; background:{};",
+                            4.0 * scale,
+                            width * 0.30 * scale,
+                            4.0 * scale,
+                            1.0 * scale,
+                            vent.css(scale),
+                        ),
+                    }
                 }
             }
         };
@@ -195,20 +175,20 @@ pub fn VuMeter(
                  background:{}; border-radius:{:.1}px; overflow:hidden; \
                  border:{:.1}px solid rgba(0,0,0,0.55); \
                  box-shadow:inset 0 0 {:.1}px rgba(0,0,0,0.45);",
-                face.card(),
+                spec.card,
                 3.0 * scale,
                 (1.5 * scale).max(1.0),
                 10.0 * scale,
             ),
 
-            // Lamp wash — the meter is lit from behind the top of the card.
-            div {
-                style: format!(
-                    "position:absolute; inset:0; background:radial-gradient(\
-                     ellipse at 50% 8%, {} 0%, rgba(0,0,0,0) 68%); \
-                     pointer-events:none;",
-                    face.lamp(),
-                ),
+            // Lamp wash — the meter is lit from behind the card.
+            if let Some(lamp) = spec.lamp_css() {
+                div {
+                    style: format!(
+                        "position:absolute; inset:0; background:{lamp}; \
+                         pointer-events:none;",
+                    ),
+                }
             }
 
             svg {
@@ -220,7 +200,7 @@ pub fn VuMeter(
                 path {
                     d: "{arc}",
                     fill: "none",
-                    stroke: "{face.ink()}",
+                    stroke: "{spec.ink}",
                     stroke_width: "0.8",
                     opacity: "0.85",
                 }
@@ -229,7 +209,7 @@ pub fn VuMeter(
                     path {
                         d: "{hot_arc_path()}",
                         fill: "none",
-                        stroke: "{face.hot()}",
+                        stroke: "{spec.hot}",
                         stroke_width: "1.6",
                     }
                 }
@@ -241,7 +221,7 @@ pub fn VuMeter(
                         let (x2, y2) = scale_point(card, v, if major { 13.0 } else { 10.0 });
                         let (lx, ly) = scale_point(card, v, 22.0);
                         let hot = card.hot_from().map(|from| v > from).unwrap_or(false);
-                        let color = if hot { face.hot() } else { face.ink() };
+                        let color = if hot { spec.hot } else { spec.ink };
                         rsx! {
                             line {
                                 x1: "{x1:.2}", y1: "{y1:.2}", x2: "{x2:.2}", y2: "{y2:.2}",
@@ -263,7 +243,7 @@ pub fn VuMeter(
                 // Legend under the scale — "VU", "GAIN REDUCTION".
                 text {
                     x: "{VU_W * 0.5:.2}", y: "{VU_H * 0.93:.2}",
-                    fill: "{face.ink()}", font_size: "5.0",
+                    fill: "{spec.ink}", font_size: "5.0",
                     text_anchor: "middle", letter_spacing: "0.6",
                     "{legend}"
                 }
@@ -273,21 +253,23 @@ pub fn VuMeter(
                     "data-testid": "vu-needle",
                     x1: "{PIVOT_X:.2}", y1: "{PIVOT_Y:.2}",
                     x2: "{nx:.2}", y2: "{ny:.2}",
-                    stroke: "{face.needle()}",
-                    stroke_width: "1.1",
+                    stroke: "{spec.needle.color}",
+                    stroke_width: "{spec.needle.width:.2}",
                     stroke_linecap: "round",
                 }
                 circle {
-                    cx: "{PIVOT_X:.2}", cy: "{VU_H:.2}", r: "4.0",
-                    fill: "{face.needle()}", opacity: "0.9",
+                    cx: "{PIVOT_X:.2}", cy: "{VU_H:.2}", r: "{spec.needle.hub_r:.2}",
+                    fill: "{spec.needle.color}", opacity: "{spec.needle.hub_opacity:.2}",
                 }
             }
 
             // Glass: a soft highlight across the top of the bezel.
-            div {
-                style: "position:absolute; inset:0; pointer-events:none; \
-                        background:linear-gradient(160deg, rgba(255,255,255,0.22) 0%, \
-                        rgba(255,255,255,0.04) 38%, rgba(0,0,0,0.10) 100%);",
+            if let Some(glass) = spec.glass {
+                div {
+                    style: format!(
+                        "position:absolute; inset:0; pointer-events:none; background:{glass};",
+                    ),
+                }
             }
         }
     }

@@ -25,4 +25,6 @@ pub mod panel_svg;
 pub mod rack;
 pub mod switches;
 pub mod vu;
+pub mod vu_faces;
+pub mod vu_kit;
 pub mod vu_svg;
