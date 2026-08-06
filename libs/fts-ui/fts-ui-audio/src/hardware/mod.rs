@@ -15,6 +15,8 @@
 //! stack.
 
 pub mod button;
+pub mod button_kit;
+pub mod button_parts;
 pub mod knob;
 pub mod knob_kit;
 pub mod knob_parts;
