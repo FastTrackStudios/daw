@@ -47,10 +47,12 @@ const WHEEL_STEP_FINE: f64 = 0.005;
 /// - **Collet** (SSL 4000 channel): a flat-topped coloured cap with a fluted
 ///   rim and a single white bar across the top. No skirt: the panel prints the
 ///   travel as dots around it instead.
-/// - **Silver-top** (UREI 1176): a black plastic body with a *brushed silver
-///   top* and a clear plastic collar around its base — the collar catches the
-///   panel light, which is why an 1176's knobs read as rings from across a
-///   room. INPUT and OUTPUT take the large one, ATTACK and RELEASE the small.
+/// - **Silver-top** (UREI 1176): a wide matte black collar with a *brushed,
+///   knurled aluminium cap* set into the middle of it, and the index a white
+///   line on the **collar** — outside the cap, not across it. That is the
+///   arrangement that makes an 1176's knobs read as rings from across a room:
+///   a dark annulus around a bright disc. INPUT and OUTPUT take the large
+///   one, ATTACK and RELEASE the small.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KnobStyle {
     /// Black bakelite with a white pointer line — the LA-2A / 1176 knob.
@@ -88,9 +90,9 @@ impl KnobStyle {
         match self {
             Self::Daka => 0.75,
             Self::Marconi => 0.70,
-            // The clear collar is a visible ring around the body, not a hair
-            // of trim: on the unit it is most of what you see of the knob.
-            Self::SilverTop => 0.72,
+            // The silver cap is a little over half the knob; the rest is the
+            // black collar the index rides on.
+            Self::SilverTop => 0.56,
             // The dark cap inside the numbered skirt.
             Self::Dial => 0.58,
             _ => 1.0,
@@ -155,7 +157,7 @@ impl KnobStyle {
         match self {
             Self::Daka => 44,
             Self::Collet => 28,
-            Self::SilverTop => 30,
+            Self::SilverTop => 46,
             Self::MetalFluted => 40,
             Self::Dial => 72,
             Self::Marconi | Self::Pointer => 0,
@@ -495,11 +497,13 @@ pub fn HardwareKnob(
                         diameter * scale,
                         -(diameter * scale) / 2.0,
                         -(diameter * scale) / 2.0,
-                        if style == KnobStyle::SilverTop {
-                            // Clear plastic: it takes the panel's light rather
-                            // than absorbing it.
-                            "radial-gradient(circle at 44% 34%, rgba(226,232,238,0.34) 0%, \
-                             rgba(150,164,176,0.20) 56%, rgba(20,22,26,0.55) 100%)"
+                        if false {
+                            ""
+                        } else if style == KnobStyle::SilverTop {
+                            // The collar: matte black, lit from the top left,
+                            // with a dark rim.
+                            "radial-gradient(circle at 38% 28%, #35353a 0%, #1c1c20 46%, \
+                             #101013 78%, #0a0a0c 100%)"
                         } else if style == KnobStyle::Dial {
                             "radial-gradient(circle at 40% 26%, #e8e8e6 0%, #c2c2c0 44%, \
                              #9a9a98 78%, #cbcbc9 100%)"
@@ -702,13 +706,41 @@ pub fn HardwareKnob(
                     }
 
                     if style == KnobStyle::SilverTop {
+                        // Fine knurling around the cap's edge.
+                        for i in 0..54 {
+                            {
+                                let a = (i as f64 / 54.0) * std::f64::consts::TAU;
+                                let (sx, sy) = (a.sin(), -a.cos());
+                                rsx! {
+                                    line {
+                                        x1: "{sx * (body_r - 2.4):.2}",
+                                        y1: "{sy * (body_r - 2.4):.2}",
+                                        x2: "{sx * body_r:.2}",
+                                        y2: "{sy * body_r:.2}",
+                                        stroke: "rgba(0,0,0,0.34)",
+                                        stroke_width: "0.8",
+                                    }
+                                }
+                            }
+                        }
+                        // Two turned rings on the brushed face.
+                        circle {
+                            cx: "0", cy: "0", r: "{body_r * 0.62:.1}",
+                            fill: "none", stroke: "rgba(0,0,0,0.16)", stroke_width: "0.7",
+                        }
+                        circle {
+                            cx: "0", cy: "0", r: "{body_r * 0.30:.1}",
+                            fill: "none", stroke: "rgba(0,0,0,0.13)", stroke_width: "0.6",
+                        }
+                        // The index: on the collar, from just outside the cap
+                        // to just inside the rim.
                         rect {
-                            x: "-1.3",
-                            y: "{-(body_r - 1.5):.1}",
-                            width: "2.6",
-                            height: "{body_r - 4.0:.1}",
+                            x: "-1.5",
+                            y: "{-(BODY_R - 2.5):.1}",
+                            width: "3.0",
+                            height: "{BODY_R - body_r - 3.5:.1}",
                             rx: "1.0",
-                            fill: "{style.pointer()}",
+                            fill: "#f4f4f2",
                         }
                     }
 

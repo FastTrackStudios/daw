@@ -167,6 +167,16 @@ pub enum RackItem {
     Divider { x: f64, y: f64, h: f64 },
     /// A rounded outline around a section — the Distressor's two boxes.
     Frame { x: f64, y: f64, w: f64, h: f64 },
+    /// A filled area of panel in another colour, drawn behind what sits on it
+    /// — the 1176's meter section, which is a different paint from the rest of
+    /// the face.
+    Region {
+        x: f64,
+        y: f64,
+        w: f64,
+        h: f64,
+        color: &'static str,
+    },
     /// A horizontal LED ladder with its dB scale printed above it.
     LedBar {
         x: f64,
