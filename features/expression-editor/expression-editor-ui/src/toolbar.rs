@@ -11,7 +11,7 @@
 
 use dioxus::prelude::*;
 use expression_editor_core::doc::Lane;
-use expression_editor_core::{chord, Editor, Shape, StripLane, Tool};
+use expression_editor_core::{chord, Editor, Mode, Shape, StripLane, Tool};
 
 use crate::drawer::ModDrawer;
 use crate::interaction::{self, Drag};
@@ -121,6 +121,8 @@ pub fn Toolbar(
     let can_undo = ed.can_undo();
     let can_redo = ed.can_redo();
     let mod_open = drawer.read().open;
+    let mode = ed.mode;
+    let bend = ed.doc.bend_range;
     drop(ed);
 
     rsx! {
@@ -129,6 +131,23 @@ pub fn Toolbar(
                     padding: 5px 8px; background: {theme::PANEL}; \
                     border-bottom: 1px solid {theme::PANEL_BORDER}; \
                     font-family: system-ui, sans-serif; overflow: hidden;",
+
+            // The mode leads: everything after it is conditional on
+            // what the editor currently is.
+            Segment {
+                for m in Mode::ALL {
+                    Seg {
+                        key: "m{m:?}",
+                        active: mode == m,
+                        accent: true,
+                        title: format!("{} mode", m.label()),
+                        onclick: move |_| editor.write().set_mode(m),
+                        "{m.label()}"
+                    }
+                }
+            }
+
+            {divider()}
 
             Segment {
                 for t in Tool::ALL {
@@ -147,6 +166,10 @@ pub fn Toolbar(
 
             // Lane selection and overlay visibility, joined: the name
             // picks the lane to edit, the dot toggles it as an overlay.
+            // Hidden outside MPE and Audio — plain MIDI cannot carry
+            // per-note pressure, so offering the control would promise
+            // an edit the format will drop.
+            if mode.has_expression_lanes() {
             Segment {
                 for l in Lane::ALL {
                     // One wrapper per lane so the key lands on a single
@@ -176,6 +199,67 @@ pub fn Toolbar(
                     }
                     }
                 }
+            }
+            }
+
+            // MPE channel management, only where channels are the
+            // mechanism that makes per-note expression possible.
+            if mode.has_mpe_channels() {
+                Segment {
+                    Seg {
+                        active: false,
+                        title: "Spread selected notes across member channels (R)".to_string(),
+                        onclick: move |_| {
+                            let notes = editor.read().selection.notes.clone();
+                            if !notes.is_empty() {
+                                editor.write().apply(
+                                    &expression_editor_core::Edit::AssignChannels {
+                                        notes,
+                                        seed: 0x5EED,
+                                    },
+                                );
+                            }
+                        },
+                        "Spread ch"
+                    }
+                    Seg {
+                        active: false,
+                        title: "Channel down".to_string(),
+                        onclick: move |_| {
+                            let notes = editor.read().selection.notes.clone();
+                            editor.write().apply(
+                                &expression_editor_core::Edit::NudgeChannel { notes, delta: -1 },
+                            );
+                        },
+                        "ch−"
+                    }
+                    Seg {
+                        active: false,
+                        title: "Channel up".to_string(),
+                        onclick: move |_| {
+                            let notes = editor.read().selection.notes.clone();
+                            editor.write().apply(
+                                &expression_editor_core::Edit::NudgeChannel { notes, delta: 1 },
+                            );
+                        },
+                        "ch+"
+                    }
+                    Seg {
+                        active: false,
+                        title: "Pitch-bend range — must match the instrument".to_string(),
+                        onclick: move |_| {
+                            // The values instruments actually use.
+                            const RANGES: [f64; 4] = [2.0, 12.0, 24.0, 48.0];
+                            let mut ed = editor.write();
+                            let cur = ed.doc.bend_range;
+                            let i = RANGES.iter().position(|r| *r == cur).unwrap_or(3);
+                            ed.doc.bend_range = RANGES[(i + 1) % RANGES.len()];
+                        },
+                        span { style: "min-width: 42px;", "±{bend:.0}" }
+                    }
+                }
+
+                {divider()}
             }
 
             {divider()}

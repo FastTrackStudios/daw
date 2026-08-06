@@ -30,7 +30,9 @@ pub mod cc;
 pub mod chord;
 pub mod doc;
 pub mod edit;
+pub mod mode;
 pub mod modulation;
+pub mod multitool;
 pub mod mouse;
 pub mod razor;
 pub mod rows;
@@ -45,7 +47,9 @@ pub use chord::Chord;
 pub use doc::{Curve, ExpressionDoc, Lane, Marker, Note, NoteId, Point, Target, TimeBase};
 pub use edit::{Edit, History};
 pub use shape::Shape;
+pub use mode::Mode;
 pub use mouse::{Action, MouseMap};
+pub use multitool::{Bend, Steepness, Zone};
 pub use razor::{RazorArea, RazorSet};
 pub use rows::{Articulation, DrumMap, NoteShape, RowSpace, StringTuning};
 pub use tools::{Grid, Hit, Mods, Selection, Tool};
@@ -69,6 +73,9 @@ pub struct Editor {
     /// Lanes drawn behind the active one.
     pub overlays: Vec<Lane>,
     pub selection: Selection,
+    /// Which product this editor is being: MIDI, MPE, Drums, Guitar,
+    /// Vocals or Audio. Decides which controls are on screen.
+    pub mode: Mode,
     /// What the vertical axis means — pitch, drum lanes, or strings.
     pub row_space: RowSpace,
     /// Active razor areas.
@@ -113,6 +120,7 @@ impl Editor {
             lane: Lane::Pitch,
             overlays: Vec::new(),
             selection: Selection::default(),
+            mode: Mode::default(),
             row_space: RowSpace::Pitch,
             razor: RazorSet::default(),
             cc_display: CcDisplay::default(),
@@ -308,6 +316,25 @@ impl Editor {
     /// Snap a time to the local grid.
     pub fn snap_time(&self, t: f64) -> f64 {
         self.grid.snap(t, self.doc.start, self.units_per_beat())
+    }
+
+    /// Switch mode, re-applying its preset.
+    ///
+    /// A preset, not a lock: everything it sets can be changed
+    /// afterwards. Switching back re-applies.
+    pub fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
+        self.row_space = mode.default_row_space();
+        self.doc.row_space = self.row_space.clone();
+        self.mouse = mode.default_mouse();
+        self.overlays = mode.default_overlays();
+        self.strip_lane = mode.default_strip();
+        if !mode.has_expression_lanes() {
+            // Leaving the active lane on Pressure in plain MIDI would
+            // point every gesture at something the format cannot carry.
+            self.lane = Lane::Pitch;
+        }
+        self.reset_view();
     }
 
     /// Whether CC edit mode is on.

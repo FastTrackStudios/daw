@@ -22,7 +22,7 @@ use dioxus::prelude::*;
 use dioxus_test::DocumentTester;
 use expression_editor_core::{Editor, Viewport};
 use expression_editor_ui::demo::{self, Scene};
-use expression_editor_ui::{ExpressionEditor, ModDrawer};
+use expression_editor_ui::{ExpressionEditor, ModDrawer, MultiTool};
 
 const W: u32 = 1100;
 /// The roll's own height. The window has to hold this plus the top bar,
@@ -33,7 +33,7 @@ const CANVAS_H: f64 = 400.0;
 const H: u32 = 700;
 
 #[component]
-fn Harness(seed: Editor, drawer: Option<ModDrawer>) -> Element {
+fn Harness(seed: Editor, drawer: Option<ModDrawer>, multi: Option<MultiTool>) -> Element {
     let editor = use_signal(|| seed.clone());
     rsx! {
         style {
@@ -42,7 +42,11 @@ fn Harness(seed: Editor, drawer: Option<ModDrawer>) -> Element {
         }
         div {
             style: "width: 100%; height: 100%;",
-            ExpressionEditor { editor, initial_drawer: drawer.clone() }
+            ExpressionEditor {
+                editor,
+                initial_drawer: drawer.clone(),
+                initial_multi: multi.clone(),
+            }
         }
     }
 }
@@ -59,10 +63,19 @@ fn shots_dir() -> PathBuf {
 }
 
 async fn shoot(ed: Editor, name: &str) {
-    shoot_with(ed, None, name).await
+    shoot_full(ed, None, None, name).await
 }
 
 async fn shoot_with(ed: Editor, drawer: Option<ModDrawer>, name: &str) {
+    shoot_full(ed, drawer, None, name).await
+}
+
+async fn shoot_full(
+    ed: Editor,
+    drawer: Option<ModDrawer>,
+    multi: Option<MultiTool>,
+    name: &str,
+) {
     // The canvas measures itself from the mounted element; headless
     // there is no resize event, so state the viewport the shot uses.
     let mut ed = ed;
@@ -70,7 +83,11 @@ async fn shoot_with(ed: Editor, drawer: Option<ModDrawer>, name: &str) {
 
     let dom = VirtualDom::new_with_props(
         Harness,
-        HarnessProps { seed: ed, drawer },
+        HarnessProps {
+            seed: ed,
+            drawer,
+            multi,
+        },
     );
     let tester = DocumentTester::from_virtual_dom(dom)
         .with_window_size(W, H)
@@ -243,4 +260,38 @@ async fn shoot_cc_lanes() {
         );
     }
     shoot(editing, "24-cc-drawn").await;
+}
+
+/// The Multi Tool zones over a selection, and the modes they belong to.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_multitool_and_modes() {
+    use expression_editor_core::Mode;
+
+    let vp = Viewport::new(W as f64, CANVAS_H);
+
+    // MPE mode shows the lane and channel controls; MIDI hides both.
+    let mut mpe = demo::editor(Scene::Phrase, vp);
+    mpe.set_mode(Mode::Mpe);
+    mpe.selection.notes = mpe.doc.notes.iter().map(|n| n.id).collect();
+    shoot(mpe.clone(), "28-mode-mpe").await;
+
+    let mut midi = demo::editor(Scene::Phrase, vp);
+    midi.set_mode(Mode::Midi);
+    shoot(midi, "29-mode-midi").await;
+}
+
+/// The Multi Tool zones lit over a selection.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_multitool() {
+    let vp = Viewport::new(W as f64, CANVAS_H);
+    let mut ed = demo::editor(Scene::Held, vp);
+    ed.selection.notes = ed.doc.notes.iter().map(|n| n.id).collect();
+
+    let mut mt = MultiTool::default();
+    assert!(mt.arm(&ed), "a selection exists, so it must arm");
+    // Hovering a zone is what labels it — twelve labels at once would
+    // bury the material.
+    mt.hover = Some(expression_editor_core::Zone::Warp);
+    mt.steep = expression_editor_core::Steepness(1.4);
+    shoot_full(ed, None, Some(mt), "30-multitool").await;
 }

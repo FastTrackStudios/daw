@@ -23,6 +23,7 @@ pub mod canvas;
 pub mod demo;
 pub mod drawer;
 pub mod inspector;
+pub mod multitool_ui;
 pub mod interaction;
 pub mod theme;
 pub mod toolbar;
@@ -31,6 +32,7 @@ pub mod widgets;
 pub use expression_editor_core as core;
 pub use drawer::ModDrawer;
 pub use interaction::Drag;
+pub use multitool_ui::MultiTool;
 
 /// The editor: toolbar over canvas.
 ///
@@ -44,10 +46,15 @@ pub fn ExpressionEditor(
     /// alone — it exists so a caller can restore a session, and so the
     /// screenshot harness can shoot the drawer through the real path.
     #[props(default)] initial_drawer: Option<ModDrawer>,
+    /// Arm the Multi Tool on mount. Same purpose as `initial_drawer`:
+    /// restore a session, and let the screenshot harness reach a state
+    /// that is otherwise only produced by a key press.
+    #[props(default)] initial_multi: Option<MultiTool>,
 ) -> Element {
     let drag = use_signal(Drag::default);
     let drawer = use_signal(|| initial_drawer.clone().unwrap_or_default());
     let inspector_open = use_signal(|| true);
+    let multi = use_signal(|| initial_multi.clone().unwrap_or_default());
 
     rsx! {
         div {
@@ -65,7 +72,7 @@ pub fn ExpressionEditor(
                 div {
                     style: "display: flex; flex-direction: column; flex: 1 1 auto; \
                             min-width: 0; min-height: 0;",
-                    Canvas { editor, drag, drawer }
+                    Canvas { editor, drag, drawer, multi }
                     LaneStrip { editor }
                 }
                 inspector::Inspector { editor, open: inspector_open }
@@ -119,7 +126,13 @@ fn mods_of(m: Modifiers) -> Mods {
 }
 
 #[component]
-fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>) -> Element {
+fn Canvas(
+    editor: Signal<Editor>,
+    drag: Signal<Drag>,
+    drawer: Signal<ModDrawer>,
+    multi: Signal<MultiTool>,
+) -> Element {
+    let mut multi = multi;
     let mut editor = editor;
     let mut drag = drag;
     let mut drawer = drawer;
@@ -194,6 +207,43 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>)
                     }
                     e.prevent_default();
                     return;
+                }
+                // The Multi Tool arms over the selection and takes its
+                // own gestures while armed.
+                if key == "a" && !m.ctrl {
+                    let armed = multi.read().armed;
+                    if armed {
+                        multi.write().disarm();
+                    } else {
+                        let ok = multi.write().arm(&editor.read());
+                        if !ok {
+                            multi.write().disarm();
+                        }
+                    }
+                    e.prevent_default();
+                    return;
+                }
+                if multi.read().armed {
+                    match key.as_str() {
+                        "m" => {
+                            let mut t = multi.write();
+                            t.toggle_bend(&mut editor.write());
+                            e.prevent_default();
+                            return;
+                        }
+                        "s" => {
+                            let mut t = multi.write();
+                            t.toggle_symmetric(&mut editor.write());
+                            e.prevent_default();
+                            return;
+                        }
+                        "Escape" => {
+                            multi.write().disarm();
+                            e.prevent_default();
+                            return;
+                        }
+                        _ => {}
+                    }
                 }
                 if key == "Escape" && drawer.read().open {
                     drawer.write().cancel(&mut editor.write());
@@ -762,6 +812,8 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>)
                     }
                 }
             }
+
+            multitool_ui::MultiToolOverlay { editor, tool: multi }
 
             drawer::ModulationDrawer { editor, drawer }
 

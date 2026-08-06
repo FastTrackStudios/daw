@@ -227,10 +227,24 @@ hues. Drums colour by kit section for the same reason. Articulations
 draw as badges above the note, legato as a tie arc leaving its right
 edge, and a lyric replaces the note name wherever one is set.
 
-Next, in order:
+**Multi Tool zones are done** (`multitool.rs` + `multitool_ui.rs`).
+Armed on `A` over the selection; zones light up over its bounding box
+and where the drag starts picks the transform. Mid-gesture: wheel bends
+the curve (with a detent at neutral so linear is findable), `M` switches
+sine/power, `S` toggles symmetric. Transforms always run from a captured
+snapshot, never the live state — the Lua original calls this out as why
+it keeps float positions between steps.
 
-1. **Multi Tool zones** as an overlay mode, per the table above.
-2. **Remaining row-space polish** — drum diamonds, string roll with fret
+**Modes** (`mode.rs`) — MIDI / MPE / Drums / Guitar / Vocals / Audio.
+Each is a *preset*, not a lock: it sets the row space, mouse map,
+visible lanes and strip, all of which stay editable. The top bar is
+conditional on it, so MPE channel controls and the per-note expression
+lanes only appear where the format can carry them. Audio is the
+Melodyne surface — same components, notes sourced from pitch tracking.
+
+Next:
+
+1. **Remaining row-space polish** — drum diamonds, string roll with fret
    numbers, lyric labels, articulation badges.
 6. **Note context menu** (Riffer §6.2.2: cut/copy/paste/delete/select
    all/clear/copy measure + note properties).

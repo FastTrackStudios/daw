@@ -2308,3 +2308,270 @@ fn row_colour_follows_what_the_row_means() {
         kit.row_color(row_of("Kick"))
     );
 }
+
+// ── multi tool ───────────────────────────────────────────────────────
+
+use expression_editor_core::multitool::{self, Bend, Capture, Drag as MtDrag, Pt, Steepness, Zone};
+
+fn ramp(n: usize) -> Capture {
+    Capture::new(
+        (0..n)
+            .map(|i| {
+                let f = i as f64 / (n - 1) as f64;
+                Pt {
+                    t: f * 1000.0,
+                    value: f,
+                }
+            })
+            .collect(),
+    )
+    .unwrap()
+}
+
+fn plain() -> MtDrag {
+    MtDrag {
+        amount: 0.0,
+        symmetric: false,
+    }
+}
+
+#[test]
+fn a_zero_drag_changes_nothing() {
+    let cap = ramp(9);
+    for z in Zone::ALL {
+        let out = multitool::apply(z, &cap, plain(), Bend::Sine, Steepness::default());
+        for (a, b) in cap.points.iter().zip(&out) {
+            assert!(
+                (a.t - b.t).abs() < 1e-9 && (a.value - b.value).abs() < 1e-9,
+                "{z:?} moved something at rest"
+            );
+        }
+    }
+}
+
+#[test]
+fn scaling_holds_the_opposite_edge_still() {
+    let cap = ramp(9);
+    let drag = MtDrag {
+        amount: -0.5,
+        symmetric: false,
+    };
+    // Grabbing the top and pulling down must shrink toward the bottom,
+    // not slide the whole selection.
+    let out = multitool::apply(Zone::ScaleTop, &cap, drag, Bend::Sine, Steepness::default());
+    assert!(
+        (out[0].value - cap.points[0].value).abs() < 1e-6,
+        "the pivot edge must not move"
+    );
+    assert!(out[8].value < cap.points[8].value, "the far edge shrinks");
+}
+
+#[test]
+fn tilting_hinges_at_the_far_end() {
+    let cap = ramp(9);
+    let drag = MtDrag {
+        amount: 0.5,
+        symmetric: false,
+    };
+    let out = multitool::apply(Zone::TiltLeft, &cap, drag, Bend::Power, Steepness(1.0));
+    // A tilt with a fixed far end is a ramp; if both ends move it is
+    // just a move.
+    assert!(out[0].value > cap.points[0].value, "the grabbed end lifts");
+    assert!(
+        (out[8].value - cap.points[8].value).abs() < 1e-6,
+        "the hinge stays put"
+    );
+}
+
+#[test]
+fn compressing_pulls_toward_the_named_edge() {
+    let cap = ramp(9);
+    let drag = MtDrag {
+        amount: 1.0,
+        symmetric: false,
+    };
+    let top = multitool::apply(Zone::CompressTop, &cap, drag, Bend::Sine, Steepness(2.0));
+    let bottom = multitool::apply(Zone::CompressBottom, &cap, drag, Bend::Sine, Steepness(2.0));
+    // Full compression at the strong end of the envelope reaches the
+    // edge it is named for.
+    assert!(top[8].value >= cap.v_hi - 1e-6);
+    assert!(bottom[8].value <= cap.v_lo + 1e-6);
+}
+
+#[test]
+fn stretching_anchors_the_opposite_edge() {
+    let cap = ramp(5);
+    let drag = MtDrag {
+        amount: 1.0,
+        symmetric: false,
+    };
+    let right = multitool::apply(
+        Zone::StretchRight,
+        &cap,
+        drag,
+        Bend::Sine,
+        Steepness::default(),
+    );
+    assert!((right[0].t - cap.t0).abs() < 1e-6, "left edge anchored");
+    assert!(right[4].t > cap.t1, "right edge extends");
+}
+
+#[test]
+fn warping_redistributes_without_losing_or_reordering_points() {
+    let cap = ramp(11);
+    let drag = MtDrag {
+        amount: 0.9,
+        symmetric: false,
+    };
+    let out = multitool::apply(Zone::Warp, &cap, drag, Bend::Power, Steepness(2.0));
+    assert_eq!(out.len(), cap.points.len());
+    // Endpoints pinned, order preserved, values untouched.
+    assert!((out[0].t - cap.t0).abs() < 1e-6);
+    assert!((out[10].t - cap.t1).abs() < 1e-6);
+    for w in out.windows(2) {
+        assert!(w[0].t <= w[1].t + 1e-9, "warp must not reorder");
+    }
+    for (a, b) in cap.points.iter().zip(&out) {
+        assert!((a.value - b.value).abs() < 1e-9, "warp moves time only");
+    }
+}
+
+#[test]
+fn steepness_has_a_detent_at_neutral() {
+    // Sweeping across zero pauses there, so linear is easy to return
+    // to. Without this the control has no findable home.
+    let s = Steepness(0.1).nudge(-0.15);
+    assert!(s.is_neutral(), "crossing zero should stop at it, got {s:?}");
+    // And it does not stick: a decisive move continues past.
+    let s = s.nudge(-0.9);
+    assert!(!s.is_neutral());
+    assert!(s.0 < 0.0);
+    // Clamped at the extremes.
+    assert_eq!(Steepness(0.0).nudge(99.0).0, Steepness::MAX);
+}
+
+#[test]
+fn a_neutral_curve_is_the_identity() {
+    let s = Steepness::default();
+    for bend in [Bend::Sine, Bend::Power] {
+        for i in 0..=10 {
+            let x = i as f64 / 10.0;
+            assert!((s.curve(x, bend) - x).abs() < 1e-9);
+        }
+    }
+}
+
+#[test]
+fn every_curve_stays_within_the_unit_box() {
+    for bend in [Bend::Sine, Bend::Power] {
+        for k in [-4.0, -1.5, 0.0, 1.5, 4.0] {
+            let s = Steepness(k);
+            assert!(s.curve(0.0, bend).abs() < 1e-6, "{bend:?} {k} at 0");
+            assert!((s.curve(1.0, bend) - 1.0).abs() < 1e-6, "{bend:?} {k} at 1");
+            for i in 0..=20 {
+                let v = s.curve(i as f64 / 20.0, bend);
+                assert!((-1e-9..=1.0 + 1e-9).contains(&v), "{bend:?} {k} escaped: {v}");
+            }
+        }
+    }
+}
+
+#[test]
+fn wheel_alternatives_do_what_their_labels_say() {
+    let cap = ramp(5);
+    // Flip absolute mirrors about the range midpoint.
+    let flipped = multitool::apply_wheel(Zone::CompressTop, &cap);
+    assert!((flipped[0].value - 1.0).abs() < 1e-6);
+    assert!(flipped[4].value.abs() < 1e-6);
+
+    // Reverse mirrors positions.
+    let reversed = multitool::apply_wheel(Zone::StretchLeft, &cap);
+    assert_eq!(reversed.len(), 5);
+    assert!((reversed[0].t - cap.t0).abs() < 1e-6);
+
+    // Even out equalises spacing.
+    let mut uneven = cap.clone();
+    uneven.points[1].t = 10.0;
+    let even = multitool::apply_wheel(Zone::Warp, &uneven);
+    let gaps: Vec<f64> = even.windows(2).map(|w| w[1].t - w[0].t).collect();
+    for g in &gaps {
+        assert!((g - gaps[0]).abs() < 1e-6, "spacing must be uniform");
+    }
+}
+
+#[test]
+fn zones_are_hit_testable_and_corners_beat_the_field() {
+    // A corner target must not be shadowed by the large zone behind it.
+    assert_eq!(multitool::zone_at(0.02, 0.02), Some(Zone::TiltLeft));
+    assert_eq!(multitool::zone_at(0.98, 0.98), Some(Zone::Redo));
+    assert_eq!(multitool::zone_at(0.5, 0.5), Some(Zone::Warp));
+    assert_eq!(multitool::zone_at(0.5, 0.02), Some(Zone::CompressTop));
+    // Every zone's own centre resolves to itself.
+    for z in Zone::ALL {
+        let (x, y, w, h) = multitool::layout(z);
+        let hit = multitool::zone_at(x + w * 0.5, y + h * 0.5);
+        assert!(hit.is_some(), "{z:?} centre hit nothing");
+    }
+}
+
+#[test]
+fn positional_zones_are_the_ones_safe_across_lanes() {
+    // A value transform needs one lane's range to be meaningful; a
+    // positional one does not.
+    assert!(Zone::Warp.is_positional());
+    assert!(Zone::Move.is_positional());
+    assert!(!Zone::CompressTop.is_positional());
+    assert!(!Zone::TiltLeft.is_positional());
+}
+
+// ── modes ────────────────────────────────────────────────────────────
+
+use expression_editor_core::Mode;
+
+#[test]
+fn each_mode_brings_its_own_preset() {
+    let mut ed = test_editor();
+
+    ed.set_mode(Mode::Drums);
+    assert!(matches!(ed.row_space, RowSpace::Drums(_)));
+    assert_eq!(ed.doc.row_space, ed.row_space, "doc and view must agree");
+    assert_eq!(ed.mouse.name, "Drums");
+
+    ed.set_mode(Mode::Guitar);
+    assert!(matches!(ed.row_space, RowSpace::Strings(_)));
+    assert_eq!(ed.mouse.name, "Riffer (Ample)");
+
+    ed.set_mode(Mode::Midi);
+    assert!(matches!(ed.row_space, RowSpace::Pitch));
+    // Plain MIDI cannot carry per-note pressure, so the active lane
+    // must not be left pointing at it.
+    assert_eq!(ed.lane, Lane::Pitch);
+    assert!(ed.overlays.is_empty());
+}
+
+#[test]
+fn modes_declare_which_controls_apply() {
+    assert!(Mode::Mpe.has_expression_lanes());
+    assert!(!Mode::Midi.has_expression_lanes());
+    assert!(Mode::Mpe.has_mpe_channels());
+    assert!(!Mode::Drums.has_mpe_channels());
+    assert!(Mode::Guitar.has_techniques());
+    assert!(Mode::Vocals.has_lyrics());
+    // The blend controls need a contour to decompose; a plain MIDI
+    // note's is flat, so they would do nothing.
+    assert!(Mode::Audio.has_pitch_shape());
+    assert!(!Mode::Midi.has_pitch_shape());
+    // Tuning targets mean nothing on a drum kit.
+    assert!(!Mode::Drums.has_tuning());
+    assert!(Mode::Vocals.has_tuning());
+}
+
+#[test]
+fn switching_modes_is_reversible() {
+    let mut ed = test_editor();
+    ed.set_mode(Mode::Guitar);
+    ed.set_mode(Mode::Mpe);
+    assert!(matches!(ed.row_space, RowSpace::Pitch));
+    assert_eq!(ed.overlays, vec![Lane::Pitch]);
+    assert_eq!(ed.mouse.name, "REAPER-like");
+}

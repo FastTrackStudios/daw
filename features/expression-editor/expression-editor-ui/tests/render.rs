@@ -38,6 +38,9 @@ fn demo_editor(microtonal: bool, with_zones: bool) -> Editor {
     doc.mark_ambiguity();
 
     let mut ed = Editor::new(doc, Viewport::new(900.0, 480.0));
+    // MPE: the mode that has every control on screen, so the layout
+    // tests see the full bar.
+    ed.set_mode(expression_editor_core::Mode::Mpe);
     ed.selection.set_single(NoteId(2));
     if microtonal {
         ed.tuning.temperament = expression_editor_core::tuning::RAST.clone();
@@ -71,6 +74,35 @@ fn the_editor_renders_its_toolbar_canvas_and_status_bar() {
         assert!(html.contains(label), "missing lane control: {label}");
     }
     assert!(html.contains("1/16"), "the grid readout, now in the status bar");
+}
+
+#[test]
+fn the_top_bar_follows_the_mode() {
+    use expression_editor_core::Mode;
+
+    let mut mpe = demo_editor(false, false);
+    mpe.set_mode(Mode::Mpe);
+    let mpe_html = render(mpe);
+    assert!(mpe_html.contains("Spread ch"), "MPE shows channel controls");
+    assert!(mpe_html.contains("Pressure"), "and the expression lanes");
+
+    let mut midi = demo_editor(false, false);
+    midi.set_mode(Mode::Midi);
+    let midi_html = render(midi);
+    // Plain MIDI cannot carry per-note pressure, so offering the
+    // control would promise an edit the format drops.
+    assert!(
+        !midi_html.contains("Spread ch"),
+        "plain MIDI must not show MPE channel controls"
+    );
+    assert!(
+        !midi_html.contains(">Pressure<"),
+        "nor the per-note expression lanes"
+    );
+    // The mode switcher itself is always present.
+    for mode in Mode::ALL {
+        assert!(midi_html.contains(mode.label()), "missing mode: {}", mode.label());
+    }
 }
 
 #[test]
