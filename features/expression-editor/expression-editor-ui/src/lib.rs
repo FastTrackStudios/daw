@@ -22,6 +22,7 @@ use expression_editor_core::{Editor, Lane, Viewport};
 pub mod canvas;
 pub mod demo;
 pub mod drawer;
+pub mod inspector;
 pub mod interaction;
 pub mod theme;
 pub mod toolbar;
@@ -46,6 +47,7 @@ pub fn ExpressionEditor(
 ) -> Element {
     let drag = use_signal(Drag::default);
     let drawer = use_signal(|| initial_drawer.clone().unwrap_or_default());
+    let inspector_open = use_signal(|| true);
 
     rsx! {
         div {
@@ -58,8 +60,16 @@ pub fn ExpressionEditor(
                     color: {theme::TEXT}; font-family: system-ui, sans-serif;",
             toolbar::Toolbar { editor, drag, drawer }
             toolbar::ChordBox { editor }
-            Canvas { editor, drag, drawer }
-            LaneStrip { editor }
+            div {
+                style: "display: flex; flex: 1 1 auto; min-height: 0;",
+                div {
+                    style: "display: flex; flex-direction: column; flex: 1 1 auto; \
+                            min-width: 0; min-height: 0;",
+                    Canvas { editor, drag, drawer }
+                    LaneStrip { editor }
+                }
+                inspector::Inspector { editor, open: inspector_open }
+            }
             toolbar::StatusBar { editor }
         }
     }
@@ -132,6 +142,16 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>)
     let marker_flags = canvas::markers(&ed);
     let playhead = ed.playhead.map(|t| ed.camera.x(t));
     let razors = canvas::razor_rects(&ed);
+    let cc_paths = canvas::cc_paths(&ed);
+    // Notes recede while a controller is being edited: the roll is that
+    // lane's editing surface for the moment, and full-strength notes
+    // would compete with the curve for the same pixels.
+    let note_opacity = if ed.cc_editing() {
+        ed.cc_display.note_dim
+    } else {
+        1.0
+    };
+    let cc_editing = ed.cc_edit;
     let microtonal = !ed.tuning.temperament.is_equal();
     let temperament_name = ed.tuning.temperament.name;
     let lane = ed.lane;
@@ -325,6 +345,27 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>)
                     }
                 }
 
+                // Pinned controller lanes, behind the notes.
+                for (i, c) in cc_paths.iter().enumerate() {
+                    g {
+                        key: "cc{i}",
+                        polygon {
+                            points: "{c.fill}",
+                            fill: c.color,
+                            fill_opacity: "{c.opacity * 0.35:.3}",
+                            pointer_events: "none",
+                        }
+                        polyline {
+                            points: "{c.points}",
+                            fill: "none",
+                            stroke: c.color,
+                            stroke_width: if c.active { "2.5" } else { "1.5" },
+                            stroke_opacity: "{c.opacity:.2}",
+                            pointer_events: "none",
+                        }
+                    }
+                }
+
                 // Microtonal centers.
                 for (i, tg) in guides.iter().enumerate() {
                     g {
@@ -370,6 +411,7 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>)
                 for n in notes.iter() {
                     g {
                         key: "n{n.id.0}",
+                        opacity: "{note_opacity:.2}",
                         rect {
                             x: "{n.x:.1}",
                             y: "{n.y:.1}",
@@ -688,6 +730,22 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>)
             // A non-equal tuning is always visibly flagged — silently
             // editing in a temperament you forgot about is how you ship
             // a detuned take.
+            if let Some(number) = cc_editing {
+                div {
+                    style: "position: absolute; top: 6px; left: 60px; display: flex; \
+                            align-items: center; gap: 8px; background: #0b1a24; \
+                            border: 1px solid {theme::ACCENT}; border-radius: 4px; \
+                            color: {theme::ACCENT}; font-size: 10px; padding: 3px 9px;",
+                    span { "CC edit — CC{number}" }
+                    button {
+                        style: "background: none; border: none; color: {theme::ACCENT}; \
+                                cursor: pointer; font-size: 11px; padding: 0;",
+                        onclick: move |_| editor.write().exit_cc_edit(),
+                        "✕"
+                    }
+                }
+            }
+
             if microtonal {
                 div {
                     style: "position: absolute; top: 6px; right: 8px; \

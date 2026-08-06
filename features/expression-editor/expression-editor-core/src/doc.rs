@@ -127,6 +127,12 @@ impl Curve {
         &self.points
     }
 
+    /// Mutable access to values. Times must stay sorted, so callers may
+    /// change `value` freely but should not reorder `t`.
+    pub fn points_mut(&mut self) -> &mut [Point] {
+        &mut self.points
+    }
+
     pub fn is_empty(&self) -> bool {
         self.points.is_empty()
     }
@@ -492,6 +498,10 @@ pub struct ExpressionDoc {
     /// Must match, or pitch reads wrong on playback.
     pub bend_range: f64,
     pub markers: Vec<Marker>,
+    /// Document-level controller lanes. Not per-note: an orchestral
+    /// part rides CC1/CC11 across a phrase regardless of where the note
+    /// boundaries fall.
+    pub cc: crate::cc::CcSet,
     /// What the vertical axis means. Lives on the document because
     /// edits (fret, string) are meaningless without the tuning, and
     /// edits only ever see the document.
@@ -508,6 +518,7 @@ impl ExpressionDoc {
             end,
             bend_range: 48.0,
             markers: Vec::new(),
+            cc: crate::cc::CcSet::default(),
             row_space: crate::rows::RowSpace::Pitch,
             next_id: 1,
         }

@@ -92,6 +92,13 @@ pub enum Drag {
         last_cell: Option<(i64, i32)>,
         snap: bool,
     },
+    /// Freehand drawing into a pinned controller lane.
+    CcPen {
+        number: u8,
+        /// Previous sample, so a fast drag interpolates instead of
+        /// leaving a staircase.
+        last: Option<(f64, f64)>,
+    },
     /// Vertical drag over notes edits velocity.
     Velocity {
         notes: Vec<NoteId>,
@@ -158,6 +165,17 @@ pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) ->
         1 => Gesture::MiddleClick,
         _ => Gesture::Drag,
     };
+    // CC edit mode takes the roll: while it is on, the surface belongs
+    // to that controller, not to the notes behind it.
+    if let Some(number) = ed.cc_edit {
+        if gesture == Gesture::Drag && !mods.ctrl && !mods.shift {
+            ed.begin_gesture();
+            let mut drag = Drag::CcPen { number, last: None };
+            cc_draw(ed, &mut drag, x, y);
+            return drag;
+        }
+    }
+
     let context = context_at(ed, x, y);
     let action = ed.mouse.resolve(context, gesture, mods);
     if action != Action::None {
@@ -391,6 +409,47 @@ fn run_action(
             None
         }
     }
+}
+
+/// Write one controller sample at the pointer.
+///
+/// The roll's full height is 0..127, so a controller drawn here spans
+/// the whole canvas — which is the point of editing it on the roll
+/// rather than in a short strip.
+fn cc_draw(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64) {
+    let Drag::CcPen { number, last } = drag else {
+        return;
+    };
+    let t = ed.camera.t_at(x);
+    let value = expression_editor_core::cc::cc_value(y, ed.viewport.h);
+
+    // Ramp from the previous sample to this one. Holding the new value
+    // flat across the gap and jumping at the end is what turns a smooth
+    // stroke into a staircase — visible the moment the pointer moves
+    // faster than one sample per pixel.
+    let (from_t, from_v) = last.unwrap_or((t, value));
+    let (lo, hi, v_lo, v_hi) = if from_t <= t {
+        (from_t, t, from_v, value)
+    } else {
+        (t, from_t, value, from_v)
+    };
+    let steps = (((hi - lo) / ed.camera.units_per_px).abs().ceil() as usize).clamp(1, 256);
+    let points: Vec<Point> = (0..=steps)
+        .map(|i| {
+            let f = i as f64 / steps as f64;
+            Point {
+                t: lo + (hi - lo) * f,
+                value: v_lo + (v_hi - v_lo) * f,
+            }
+        })
+        .collect();
+    ed.apply_live(&Edit::DrawCc {
+        number: *number,
+        t0: lo,
+        t1: hi,
+        points,
+    });
+    *last = Some((t, value));
 }
 
 /// Fill the grid cell under the pointer, once per cell.
@@ -859,6 +918,7 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             }
         }
         Drag::Paint { .. } => paint_at(ed, drag, x, y),
+        Drag::CcPen { .. } => cc_draw(ed, drag, x, y),
         Drag::Velocity {
             notes,
             origin_y,

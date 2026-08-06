@@ -204,3 +204,43 @@ async fn shoot_chord_box() {
     }
     shoot(ed, "20-chord-box").await;
 }
+
+/// Pinned controller lanes behind the roll, and CC edit mode.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_cc_lanes() {
+    let vp = Viewport::new(W as f64, CANVAS_H);
+    let ed = demo::editor(Scene::Orchestral, vp);
+    shoot(ed.clone(), "22-cc-pinned").await;
+
+    // Editing one brings it forward and pushes the notes back.
+    let mut editing = ed;
+    editing.edit_cc(11);
+    shoot(editing.clone(), "23-cc-edit").await;
+
+    // And drawing on the roll writes into that lane.
+    let mut drag = expression_editor_ui::Drag::default();
+    let vph = editing.viewport.h;
+    let x0 = editing.camera.x(demo::PPQ * 1.0);
+    drag = expression_editor_ui::interaction::pointer_down(
+        &mut editing,
+        x0,
+        vph * 0.8,
+        Default::default(),
+        0,
+    );
+    for i in 1..=40 {
+        let f = i as f64 / 40.0;
+        let x = editing.camera.x(demo::PPQ * (1.0 + 6.0 * f));
+        // A jagged shape, so the result is obviously hand-drawn rather
+        // than the smooth curve the scene started with.
+        let y = vph * (0.15 + 0.55 * (f * 9.0).sin().abs());
+        expression_editor_ui::interaction::pointer_move(
+            &mut editing,
+            &mut drag,
+            x,
+            y,
+            Default::default(),
+        );
+    }
+    shoot(editing, "24-cc-drawn").await;
+}

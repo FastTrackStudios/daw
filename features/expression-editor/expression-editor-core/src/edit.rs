@@ -145,6 +145,32 @@ pub enum Edit {
     /// one.
     AssignChannels { notes: Vec<NoteId>, seed: u64 },
     SetBendRange(f64),
+    /// Replace a controller's values over `[t0, t1]`.
+    DrawCc {
+        number: u8,
+        t0: f64,
+        t1: f64,
+        points: Vec<Point>,
+    },
+    /// Erase a controller over `[t0, t1]`.
+    EraseCc { number: u8, t0: f64, t1: f64 },
+    /// Restyle `[t0, t1]` between its own endpoints.
+    ShapeCc {
+        number: u8,
+        t0: f64,
+        t1: f64,
+        shape: Shape,
+        samples: usize,
+    },
+    /// Scale a controller about a fixed value — the ride-the-fader
+    /// gesture, where 0.5 keeps the shape but halves the depth.
+    ScaleCc {
+        number: u8,
+        t0: f64,
+        t1: f64,
+        pivot: f64,
+        factor: f64,
+    },
 }
 
 /// How many samples a reshape or reblend writes per second of audio.
@@ -598,6 +624,58 @@ impl Edit {
             Edit::AssignChannels { notes, seed } => assign_channels(doc, notes, *seed),
             Edit::SetBendRange(r) => {
                 doc.bend_range = r.max(1.0);
+                true
+            }
+            Edit::DrawCc {
+                number,
+                t0,
+                t1,
+                points,
+            } => {
+                let i = doc.cc.ensure(*number);
+                let (lo, hi) = ordered(*t0, *t1);
+                doc.cc.lanes[i].curve.splice(lo, hi, points);
+                true
+            }
+            Edit::EraseCc { number, t0, t1 } => {
+                let Some(l) = doc.cc.get_mut(*number) else {
+                    return false;
+                };
+                let (lo, hi) = ordered(*t0, *t1);
+                l.curve.remove_range(lo, hi) > 0
+            }
+            Edit::ShapeCc {
+                number,
+                t0,
+                t1,
+                shape,
+                samples,
+            } => {
+                let Some(l) = doc.cc.get_mut(*number) else {
+                    return false;
+                };
+                let (lo, hi) = ordered(*t0, *t1);
+                let default = l.default_value();
+                l.curve.reshape(lo, hi, *shape, (*samples).max(2), default);
+                true
+            }
+            Edit::ScaleCc {
+                number,
+                t0,
+                t1,
+                pivot,
+                factor,
+            } => {
+                let Some(l) = doc.cc.get_mut(*number) else {
+                    return false;
+                };
+                let (lo, hi) = ordered(*t0, *t1);
+                l.curve.scale_about(lo, hi, *pivot, *factor);
+                // A controller is bounded; scaling must not push it
+                // past the wire range and clip on export.
+                for p in l.curve.points_mut() {
+                    p.value = p.value.clamp(0.0, 1.0);
+                }
                 true
             }
         }

@@ -26,6 +26,7 @@
 
 pub mod blob;
 pub mod camera;
+pub mod cc;
 pub mod chord;
 pub mod doc;
 pub mod edit;
@@ -39,6 +40,7 @@ pub mod tuning;
 pub mod zoom;
 
 pub use camera::{Bounds, Camera, Content, Viewport};
+pub use cc::{CcDisplay, CcLane, CcSet};
 pub use chord::Chord;
 pub use doc::{Curve, ExpressionDoc, Lane, Marker, Note, NoteId, Point, Target, TimeBase};
 pub use edit::{Edit, History};
@@ -71,6 +73,12 @@ pub struct Editor {
     pub row_space: RowSpace,
     /// Active razor areas.
     pub razor: RazorSet,
+    /// How pinned controller lanes are drawn. The lanes themselves are
+    /// document data (`doc.cc`); this is view policy.
+    pub cc_display: CcDisplay,
+    /// The controller being edited, when CC edit mode is on. The roll
+    /// becomes that lane's editing surface and the notes recede.
+    pub cc_edit: Option<u8>,
     /// Velocity / CC lane strip height in pixels, 0 when hidden.
     pub lane_strip_h: f64,
     /// Which lane the strip shows.
@@ -107,6 +115,8 @@ impl Editor {
             selection: Selection::default(),
             row_space: RowSpace::Pitch,
             razor: RazorSet::default(),
+            cc_display: CcDisplay::default(),
+            cc_edit: None,
             lane_strip_h: 96.0,
             strip_lane: StripLane::Velocity,
             mouse: MouseMap::default(),
@@ -298,6 +308,25 @@ impl Editor {
     /// Snap a time to the local grid.
     pub fn snap_time(&self, t: f64) -> f64 {
         self.grid.snap(t, self.doc.start, self.units_per_beat())
+    }
+
+    /// Whether CC edit mode is on.
+    pub fn cc_editing(&self) -> bool {
+        self.cc_edit.is_some()
+    }
+
+    /// Enter CC edit mode on a controller, pinning it if it was not
+    /// already visible — editing something invisible is a trap.
+    pub fn edit_cc(&mut self, number: u8) {
+        self.doc.cc.ensure(number);
+        if let Some(l) = self.doc.cc.get_mut(number) {
+            l.pinned = true;
+        }
+        self.cc_edit = Some(number);
+    }
+
+    pub fn exit_cc_edit(&mut self) {
+        self.cc_edit = None;
     }
 
     /// Sounding pitches of the selected notes — what the chord box

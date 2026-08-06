@@ -354,79 +354,14 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
                     }
                     span { "vib {vibrato * 100.0:.0}¢" }
                     span { "drift {drift * 100.0:+.0}¢" }
-                    Blend { editor, label: "Drift".to_string(), drift: true }
-                    Blend { editor, label: "Vib".to_string(), drift: false }
-                    button {
-                        style: "height: 22px; padding: 0 8px; background: #1c1c26; \
-                                border: 1px solid {theme::PANEL_BORDER}; \
-                                border-radius: 5px; color: {theme::TEXT}; \
-                                font-size: 10px; cursor: pointer;",
-                        title: "Flatten drift and vibrato",
-                        onclick: move |_| {
-                            let Some(id) = single else { return };
-                            let (t0, t1) = {
-                                let ed = editor.read();
-                                let Some(n) = ed.doc.note(id) else { return };
-                                (n.start, n.end)
-                            };
-                            let mut e = editor;
-                            e.write().apply(&expression_editor_core::Edit::ReblendPitch {
-                                note: id,
-                                t0,
-                                t1,
-                                drift_amount: 0.0,
-                                modulation_amount: 0.0,
-                            });
-                        },
-                        "Robot"
-                    }
+                    // The blend sliders and technique controls live
+                    // in the inspector; this row keeps the readouts.
                 } else {
                     span { style: "font-size: 9px;",
                         if from_selection { "from selection" } else { "at playhead" }
                     }
                 }
             }
-        }
-    }
-}
-
-/// One of the drift/vibrato sliders.
-///
-/// Parked at 1.0 rather than tracking a stored amount: each change
-/// re-decomposes the *current* curve, so the control is a relative
-/// scale on what is there now and never fights an earlier edit. The
-/// centre tick is therefore "leave as sung".
-#[component]
-fn Blend(editor: Signal<Editor>, label: String, drift: bool) -> Element {
-    let mut editor = editor;
-    let mut amount = use_signal(|| 1.0f64);
-    rsx! {
-        crate::widgets::CenterSlider {
-            label: label.clone(),
-            value: amount(),
-            min: 0.0,
-            max: 1.5,
-            center: 1.0,
-            width: 76.0,
-            readout: format!("{:.0}%", amount() * 100.0),
-            on_change: move |v: f64| {
-                amount.set(v);
-                let Some(id) = editor.read().selection.notes.first().copied() else {
-                    return;
-                };
-                let (t0, t1) = {
-                    let ed = editor.read();
-                    let Some(n) = ed.doc.note(id) else { return };
-                    (n.start, n.end)
-                };
-                editor.write().apply(&expression_editor_core::Edit::ReblendPitch {
-                    note: id,
-                    t0,
-                    t1,
-                    drift_amount: if drift { v } else { 1.0 },
-                    modulation_amount: if drift { 1.0 } else { v },
-                });
-            },
         }
     }
 }

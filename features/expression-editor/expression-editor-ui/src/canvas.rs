@@ -577,3 +577,82 @@ pub fn strip_guides(h: f64) -> Vec<(f64, bool)> {
         .map(|f| (h * (1.0 - f), (*f - 0.5).abs() < 1e-9))
         .collect()
 }
+
+// ── pinned controller lanes ──────────────────────────────────────────
+
+/// A controller lane ready to draw behind the roll.
+pub struct CcPath {
+    pub number: u8,
+    pub label: String,
+    pub color: &'static str,
+    /// The line.
+    pub points: String,
+    /// The same path closed to the bottom, for the fill.
+    pub fill: String,
+    pub opacity: f64,
+    pub active: bool,
+}
+
+/// Pinned lanes, spanning the full roll height.
+///
+/// The curve is sampled at the visible edges as well as at its own
+/// points, so a lane whose last authored value is off-screen still
+/// draws across the whole view instead of stopping mid-canvas.
+pub fn cc_paths(ed: &Editor) -> Vec<CcPath> {
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let h = ed.viewport.h;
+    let d = ed.cc_display;
+
+    ed.doc
+        .cc
+        .pinned()
+        .map(|lane| {
+            let active = ed.cc_edit == Some(lane.number);
+            let default = lane.default_value();
+
+            let mut ts: Vec<f64> = vec![t0];
+            ts.extend(
+                lane.curve
+                    .points()
+                    .iter()
+                    .map(|p| p.t)
+                    .filter(|t| *t > t0 && *t < t1),
+            );
+            ts.push(t1);
+
+            let mut line = String::new();
+            for &t in &ts {
+                let v = lane.curve.sample(t, default);
+                line.push_str(&format!(
+                    "{:.1},{:.1} ",
+                    ed.camera.x(t),
+                    expression_editor_core::cc::cc_y(v, h)
+                ));
+            }
+            // Close down to the baseline and back, so the fill is a
+            // shape rather than a self-intersecting ribbon.
+            let fill = format!(
+                "{:.1},{:.1} {line}{:.1},{:.1}",
+                ed.camera.x(t0),
+                h,
+                ed.camera.x(t1),
+                h
+            );
+
+            CcPath {
+                number: lane.number,
+                label: lane.label(),
+                color: expression_editor_core::cc::CC_COLORS
+                    [lane.color % expression_editor_core::cc::CC_COLORS.len()],
+                points: line,
+                fill,
+                opacity: if active {
+                    d.active_opacity
+                } else {
+                    d.background_opacity
+                },
+                active,
+            }
+        })
+        .collect()
+}

@@ -29,6 +29,8 @@ pub enum Scene {
     Ambiguous,
     /// An empty document.
     Empty,
+    /// Orchestral: held notes with CC1 and CC11 riding behind them.
+    Orchestral,
     /// Long held notes across several rows — material a razor can
     /// slice through.
     Held,
@@ -38,7 +40,7 @@ pub enum Scene {
 }
 
 impl Scene {
-    pub const ALL: [Scene; 9] = [
+    pub const ALL: [Scene; 10] = [
         Scene::Phrase,
         Scene::Zones,
         Scene::Microtonal,
@@ -48,6 +50,7 @@ impl Scene {
         Scene::Empty,
         Scene::Density,
         Scene::Held,
+        Scene::Orchestral,
     ];
 
     /// Stable file-name stem for screenshots.
@@ -62,6 +65,7 @@ impl Scene {
             Scene::Empty => "07-empty",
             Scene::Density => "16-density",
             Scene::Held => "19-held",
+            Scene::Orchestral => "21-orchestral",
         }
     }
 
@@ -76,6 +80,7 @@ impl Scene {
             Scene::Empty => "Empty",
             Scene::Density => "Mixed density",
             Scene::Held => "Held notes",
+            Scene::Orchestral => "Orchestral CC",
         }
     }
 }
@@ -168,6 +173,33 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             n.target = expression_editor_core::Target::Zone(1);
             doc.push(n);
         }
+        Scene::Orchestral => {
+            for (i, row) in [55, 62, 67, 71].iter().enumerate() {
+                doc.push(sung_note(
+                    i as u64 + 1,
+                    PPQ * 0.5,
+                    PPQ * 7.0,
+                    *row,
+                    2 + i as u8,
+                    -0.8,
+                ));
+            }
+            doc.cc = expression_editor_core::CcSet::orchestral();
+            // A swell and release on expression, with modulation
+            // arriving late — the shape an orchestral phrase actually
+            // rides.
+            for k in 0..=48 {
+                let f = k as f64 / 48.0;
+                let t = PPQ * 0.5 + PPQ * 7.0 * f;
+                let swell = (f * core::f64::consts::PI).sin();
+                if let Some(l) = doc.cc.get_mut(11) {
+                    l.curve.set(t, 0.25 + 0.7 * swell);
+                }
+                if let Some(l) = doc.cc.get_mut(1) {
+                    l.curve.set(t, (f * 1.6 - 0.35).clamp(0.0, 1.0) * 0.85);
+                }
+            }
+        }
         Scene::Held => {
             for (i, row) in [60, 62, 64, 65, 67].iter().enumerate() {
                 doc.push(sung_note(
@@ -238,6 +270,9 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             ed.selection.set_single(NoteId(1));
         }
         Scene::Empty | Scene::Density | Scene::Held => {}
+        Scene::Orchestral => {
+            ed.selection.set_single(NoteId(2));
+        }
         Scene::Phrase => {
             ed.selection.set_single(NoteId(3));
         }

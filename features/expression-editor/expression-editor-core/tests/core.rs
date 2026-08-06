@@ -2127,3 +2127,151 @@ fn a_string_roll_reports_sounding_pitches_not_string_numbers() {
     assert_eq!(ed.chord_pitches(), vec![55, 60, 64]);
     assert!(ed.current_chord().is_some());
 }
+
+// ── controller lanes ─────────────────────────────────────────────────
+
+use expression_editor_core::cc::{self, CcSet};
+
+#[test]
+fn volume_like_controllers_rest_at_full_not_silence() {
+    let set = CcSet::orchestral();
+    // A CC11 lane that defaulted to zero would mute the part the moment
+    // it was pinned.
+    assert_eq!(set.get(11).unwrap().default_value(), 1.0);
+    assert_eq!(set.get(11).unwrap().value(0.0), 127);
+    // Modulation rests at zero — no vibrato until asked for.
+    assert_eq!(set.get(1).unwrap().default_value(), 0.0);
+    assert_eq!(set.get(1).unwrap().value(0.0), 0);
+}
+
+#[test]
+fn the_orchestral_default_pins_modulation_and_expression() {
+    let set = CcSet::orchestral();
+    assert_eq!(set.pinned_count(), 2);
+    let pinned: Vec<u8> = set.pinned().map(|l| l.number).collect();
+    assert_eq!(pinned, vec![1, 11]);
+    // And they are told apart by colour.
+    assert_ne!(set.color_of(1), set.color_of(11));
+}
+
+#[test]
+fn ensuring_a_lane_is_idempotent_and_assigns_a_fresh_colour() {
+    let mut set = CcSet::default();
+    let a = set.ensure(1);
+    let b = set.ensure(1);
+    assert_eq!(a, b, "the same controller must not be added twice");
+    set.ensure(11);
+    set.ensure(2);
+    assert_eq!(set.lanes.len(), 3);
+    assert_eq!(set.get(2).unwrap().name, "Breath");
+}
+
+#[test]
+fn pinning_toggles_and_removal_works() {
+    let mut set = CcSet::orchestral();
+    assert!(!set.toggle_pin(1), "was pinned, now unpinned");
+    assert_eq!(set.pinned_count(), 1);
+    assert!(set.remove(1));
+    assert!(!set.remove(1), "removing twice is a no-op");
+}
+
+#[test]
+fn cc_edits_are_document_level_not_per_note() {
+    let mut doc = doc_with_notes(1);
+    assert!(Edit::DrawCc {
+        number: 11,
+        t0: 0.0,
+        t1: PPQ * 4.0,
+        points: vec![
+            Point { t: 0.0, value: 0.2 },
+            Point { t: PPQ * 4.0, value: 1.0 },
+        ],
+    }
+    .apply(&mut doc));
+
+    let lane = doc.cc.get(11).unwrap();
+    // The swell exists independently of where notes start and end.
+    assert_eq!(lane.value(0.0), 25);
+    assert_eq!(lane.value(PPQ * 4.0), 127);
+    assert_eq!(lane.value(PPQ * 2.0), 76, "linear between authored points");
+}
+
+#[test]
+fn scaling_a_controller_cannot_push_it_past_the_wire_range() {
+    let mut doc = doc_with_notes(1);
+    Edit::DrawCc {
+        number: 1,
+        t0: 0.0,
+        t1: PPQ * 4.0,
+        points: vec![
+            Point { t: 0.0, value: 0.9 },
+            Point { t: PPQ * 4.0, value: 0.1 },
+        ],
+    }
+    .apply(&mut doc);
+
+    Edit::ScaleCc {
+        number: 1,
+        t0: 0.0,
+        t1: PPQ * 4.0,
+        pivot: 0.5,
+        factor: 8.0,
+    }
+    .apply(&mut doc);
+
+    let lane = doc.cc.get(1).unwrap();
+    for p in lane.curve.points() {
+        assert!(
+            (0.0..=1.0).contains(&p.value),
+            "a controller must not clip on export, got {}",
+            p.value
+        );
+    }
+    assert_eq!(lane.value(0.0), 127);
+    assert_eq!(lane.value(PPQ * 4.0), 0);
+}
+
+#[test]
+fn erasing_a_controller_leaves_the_notes_alone() {
+    let mut doc = doc_with_notes(2);
+    Edit::DrawCc {
+        number: 11,
+        t0: 0.0,
+        t1: PPQ * 4.0,
+        points: vec![Point { t: PPQ, value: 0.5 }],
+    }
+    .apply(&mut doc);
+    let before = doc.notes.len();
+    assert!(Edit::EraseCc {
+        number: 11,
+        t0: 0.0,
+        t1: PPQ * 4.0,
+    }
+    .apply(&mut doc));
+    assert_eq!(doc.notes.len(), before);
+    // Erased back to its resting value, not to zero.
+    assert_eq!(doc.cc.get(11).unwrap().value(PPQ), 127);
+}
+
+#[test]
+fn entering_cc_edit_mode_pins_the_lane_it_edits() {
+    let mut ed = test_editor();
+    assert!(!ed.cc_editing());
+    // Editing a lane you cannot see is a trap, so entering must pin it.
+    ed.edit_cc(11);
+    assert!(ed.cc_editing());
+    assert!(ed.doc.cc.get(11).unwrap().pinned);
+    ed.exit_cc_edit();
+    assert!(!ed.cc_editing());
+    assert!(ed.doc.cc.get(11).unwrap().pinned, "unpinning is separate");
+}
+
+#[test]
+fn cc_maps_onto_the_full_roll_height_both_ways() {
+    for v in [0.0, 0.25, 0.5, 1.0] {
+        let y = cc::cc_y(v, 400.0);
+        assert!((cc::cc_value(y, 400.0) - v).abs() < 1e-9, "{v} round-trip");
+    }
+    assert_eq!(cc::cc_y(1.0, 400.0), 0.0, "full value is at the top");
+    assert_eq!(cc::cc_y(0.0, 400.0), 400.0);
+}
