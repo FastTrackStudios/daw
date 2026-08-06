@@ -296,9 +296,17 @@ where
         //
         // `LayerRouter`'s span nests inside this one and carries the
         // rpc.service/method detail.
+        // `tracing` is an optional dependency behind `telemetry`, so both
+        // the span and the `.instrument()` that installs it have to be
+        // cfg'd out with it — a `Span::none()` fallback still names
+        // `tracing::Span` and doesn't compile without the dep.
+        #[cfg(feature = "telemetry")]
         self.dispatch(method_id, token, call, reply, schemas)
             .instrument(gate_span())
             .await;
+
+        #[cfg(not(feature = "telemetry"))]
+        self.dispatch(method_id, token, call, reply, schemas).await;
     }
 }
 
@@ -306,11 +314,6 @@ where
 #[cfg(feature = "telemetry")]
 fn gate_span() -> tracing::Span {
     tracing::info_span!("rpc.gated", otel.name = "rpc")
-}
-
-#[cfg(not(feature = "telemetry"))]
-fn gate_span() -> tracing::Span {
-    tracing::Span::none()
 }
 
 impl<H> PermissionedRouter<H>
