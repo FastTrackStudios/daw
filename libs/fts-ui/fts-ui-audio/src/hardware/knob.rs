@@ -32,6 +32,16 @@ const DAKA_LOBE_DEPTH: f64 = 2.4;
 /// Fine ridging around the raised body's wall, above the skirt.
 const DAKA_BODY_RIDGES: usize = 40;
 
+/// How far a Marconi wing overhangs the skirt it is mounted on, as a multiple
+/// of the skirt's radius, and how far its tail runs the other way.
+///
+/// The wing is a bar laid *across* the knob and overhanging it — that overhang
+/// is the whole silhouette, and a wing contained inside its own disc reads as
+/// a stripe painted on a circle. `ring_offset` moves the printed scale out to
+/// make room for it.
+const WING_REACH: f64 = 1.26;
+const WING_TAIL: f64 = 0.66;
+
 /// Pixels of vertical drag per full sweep. Looser than the FTS knob's 150 —
 /// these are big knobs with printed scales, and a coarse feel suits them.
 const SENSITIVITY: f64 = 190.0;
@@ -153,6 +163,12 @@ impl KnobStyle {
     pub fn ring_offset(self) -> f64 {
         match self {
             Self::Pointer => 13.0,
+            // The wing overhangs the skirt by WING_REACH, so the dots and
+            // numerals move out to clear its tip. Only just, though: the
+            // knob's viewBox stops at 55, and pushing the scale the full
+            // overhang put the numerals outside it, where they were clipped
+            // and read as a lopsided ring.
+            Self::Marconi => 5.0,
             _ => 0.0,
         }
     }
@@ -342,13 +358,13 @@ fn wing_points(body_r: f64) -> String {
     format!(
         "{:.2},{:.2} {:.2},{:.2} {:.2},{:.2} {:.2},{:.2}",
         -w,
-        body_r * 0.82,
+        BODY_R * WING_TAIL,
         w,
-        body_r * 0.82,
+        BODY_R * WING_TAIL,
         w * 0.64,
-        -(body_r * 1.28),
+        -(BODY_R * WING_REACH),
         -w * 0.64,
-        -(body_r * 1.28),
+        -(BODY_R * WING_REACH),
     )
 }
 
@@ -359,13 +375,13 @@ fn wing_highlight_points(body_r: f64) -> String {
     format!(
         "{:.2},{:.2} {:.2},{:.2} {:.2},{:.2} {:.2},{:.2}",
         -w,
-        body_r * 0.82,
+        BODY_R * WING_TAIL,
         -w * 0.55,
-        body_r * 0.82,
+        BODY_R * WING_TAIL,
         -w * 0.36,
-        -(body_r * 1.28),
+        -(BODY_R * WING_REACH),
         -w * 0.64,
-        -(body_r * 1.28),
+        -(BODY_R * WING_REACH),
     )
 }
 
@@ -410,13 +426,30 @@ pub fn HardwareKnob(
     /// reading anything. The [`KnobStyle`] still decides the finish.
     #[props(default)]
     tint: Option<String>,
+    /// The *inner* control of a dual-concentric knob.
+    ///
+    /// A 1073's EQ knobs are two controls in one place: the bright collar
+    /// selects the band's frequency, and the grey cap sitting inside it sets
+    /// that band's gain. They turn independently, so this draws two indices at
+    /// two angles and hands the cap its own drag region — press the collar and
+    /// you are on `handle`, press the cap and you are on this one.
+    ///
+    /// `None` is an ordinary knob, where the whole thing turns together.
+    #[props(default)]
+    inner_handle: Option<ParamHandle>,
 ) -> Element {
     let mut drag: Signal<DragState> = use_context();
     // Re-render while a drag is in flight so the pointer tracks the cursor.
     let _ = drag.read().move_count;
 
     let normalized = handle.normalized() as f64;
+    // The collar's angle, and the cap's. They are the same knob unless an
+    // inner control was given, in which case the two halves move apart.
     let angle = knob_angle(normalized);
+    let inner_angle = match &inner_handle {
+        Some(inner) => knob_angle(inner.normalized() as f64),
+        None => angle,
+    };
     let display = handle.display_value();
     let name = handle.name();
 
@@ -734,6 +767,9 @@ pub fn HardwareKnob(
                 style: "position:absolute; inset:0; width:100%; height:100%; \
                         display:block; pointer-events:none;",
                 view_box: "-55 -55 110 110",
+                // The collar's own layer. Its knurl belongs to the outer
+                // control, so on a concentric knob it turns with the collar
+                // while the cap's index stays where the inner control put it.
                 g {
                     transform: "rotate({angle:.2})",
 
@@ -789,6 +825,13 @@ pub fn HardwareKnob(
                             }
                         }
                     }
+                }
+
+                // The cap's layer: every index this knob draws. On an
+                // ordinary knob it turns with the collar above; on a
+                // concentric one it is the inner control.
+                g {
+                    transform: "rotate({inner_angle:.2})",
 
                     // The Marconi wing: the raised coloured grip you turn,
                     // reaching past the body toward the skirt's edge. It is
@@ -1030,6 +1073,66 @@ pub fn HardwareKnob(
                         handle.end_edit();
                     }
                 },
+            }
+
+            // The cap's own drag region, on a dual-concentric knob.
+            //
+            // Laid over the collar's overlay and sized to the cap, so the two
+            // controls are hit exactly where they are drawn: press the grey
+            // middle and you have the inner control, press the bright ring
+            // around it and the press falls through to the outer one. That is
+            // how the real thing is operated, and it needs no modifier key.
+            if let Some(inner) = &inner_handle {
+                div {
+                    "data-testid": "hw-knob-{testid}-inner",
+                    style: format!(
+                        "position:absolute; left:50%; top:50%; \
+                         width:{0:.1}px; height:{0:.1}px; \
+                         margin-left:{1:.1}px; margin-top:{1:.1}px; \
+                         border-radius:50%; cursor:ns-resize; user-select:none;",
+                        body_px,
+                        -body_px / 2.0,
+                    ),
+                    onmousedown: {
+                        let inner = inner.clone();
+                        move |evt: MouseEvent| {
+                            evt.stop_propagation();
+                            if evt.modifiers().alt() {
+                                evt.prevent_default();
+                                inner.reset_to_default();
+                                return;
+                            }
+                            begin_drag(
+                                &mut drag,
+                                inner.clone(),
+                                evt.client_coordinates().y,
+                                SENSITIVITY,
+                            );
+                        }
+                    },
+                    onwheel: {
+                        let inner = inner.clone();
+                        move |evt: WheelEvent| {
+                            evt.prevent_default();
+                            evt.stop_propagation();
+                            let delta_y = evt.delta().strip_units().y;
+                            if delta_y == 0.0 {
+                                return;
+                            }
+                            let direction = if delta_y < 0.0 { 1.0 } else { -1.0 };
+                            let step = if evt.modifiers().shift() {
+                                WHEEL_STEP_FINE
+                            } else {
+                                WHEEL_STEP
+                            };
+                            let next = (inner.normalized() as f64 + direction * step)
+                                .clamp(0.0, 1.0) as f32;
+                            inner.begin_edit();
+                            inner.set_normalized(next);
+                            inner.end_edit();
+                        }
+                    },
+                }
             }
         }
     }

@@ -173,6 +173,24 @@ pub enum RackItem {
         y: f64,
         labels: &'static [&'static str],
     },
+    /// A dual-concentric knob: two controls in one place.
+    ///
+    /// A 1073's EQ bands are built this way — the bright collar picks the
+    /// band's frequency, the grey cap inside it sets that band's gain, and
+    /// they turn independently. The printed ring is the *outer* control's
+    /// scale, because that is the one with detents to read.
+    Concentric {
+        /// The collar: the control the printed ring belongs to.
+        outer_id: &'static str,
+        /// The cap sitting inside it.
+        inner_id: &'static str,
+        legend: &'static str,
+        x: f64,
+        y: f64,
+        d: f64,
+        ring: Ring,
+        tint: Option<&'static str>,
+    },
     /// A filter-shape glyph printed above a band's control — Neve's way of
     /// saying "shelf" or "high pass" without a word.
     Glyph {
