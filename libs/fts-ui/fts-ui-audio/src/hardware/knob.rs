@@ -67,6 +67,9 @@ pub enum KnobStyle {
     Collet,
     /// UREI 1176: black body, brushed silver top, clear collar.
     SilverTop,
+    /// dbx and its generation: a brushed aluminium knob with a fluted rim and
+    /// a dark centre cap, read by a line across the metal.
+    MetalFluted,
     /// Teletronix LA-2A and its contemporaries: a plain black round knob with
     /// a moulded *nose* that points at a scale printed on the panel. No skirt,
     /// no flutes — you read the nose.
@@ -108,7 +111,13 @@ impl KnobStyle {
     fn draws_own_index(self) -> bool {
         matches!(
             self,
-            Self::Daka | Self::Marconi | Self::Pointer | Self::Collet | Self::SilverTop | Self::Dial
+            Self::Daka
+                | Self::Marconi
+                | Self::Pointer
+                | Self::Collet
+                | Self::SilverTop
+                | Self::MetalFluted
+                | Self::Dial
         )
     }
 
@@ -135,6 +144,7 @@ impl KnobStyle {
         match self {
             Self::Collet => "rgba(0,0,0,0.42)",
             Self::SilverTop => "rgba(0,0,0,0.34)",
+            Self::MetalFluted => "rgba(0,0,0,0.38)",
             Self::Dial => "rgba(0,0,0,0.30)",
             _ => "rgba(255,255,255,0.30)",
         }
@@ -146,6 +156,7 @@ impl KnobStyle {
             Self::Daka => 44,
             Self::Collet => 28,
             Self::SilverTop => 30,
+            Self::MetalFluted => 40,
             Self::Dial => 72,
             Self::Marconi | Self::Pointer => 0,
             _ => 0,
@@ -158,6 +169,10 @@ impl KnobStyle {
         match self {
             Self::Bakelite => "radial-gradient(circle at 34% 26%, #4a4a4e 0%, #17171a 62%, #0b0b0d 100%)",
             Self::Metal => "radial-gradient(circle at 34% 26%, #d8d8d4 0%, #9a9a96 58%, #6d6d69 100%)",
+            // Brushed: a sweep across the face rather than a point highlight.
+            Self::MetalFluted => {
+                "linear-gradient(152deg, #e8e8e6 0%, #c0c0be 30%, #979795 62%, #d2d2d0 100%)"
+            }
             // Concentric ribs, lit from the top left like the photo.
             Self::Skirted => {
                 "radial-gradient(circle at 38% 24%, #4c4c50 0%, #232326 38%, #101012 72%, #0a0a0c 100%)"
@@ -216,7 +231,7 @@ impl KnobStyle {
             | Self::Collet
             | Self::Pointer => "#f2f2f0",
             // A dark line on a silver top, which is how you read one.
-            Self::Metal | Self::SilverTop => "#1c1c1e",
+            Self::Metal | Self::SilverTop | Self::MetalFluted => "#1c1c1e",
             Self::Dial => "#f2f2f0",
         }
     }
@@ -665,6 +680,24 @@ pub fn HardwareKnob(
                             height: "{BODY_R * 0.55:.1}",
                             rx: "1.0",
                             fill: "rgba(255,255,255,0.85)",
+                        }
+                    }
+
+                    // A dark cap in the middle of the metal, with the index
+                    // running from it out across the brushed face.
+                    if style == KnobStyle::MetalFluted {
+                        circle {
+                            cx: "0", cy: "0", r: "{BODY_R * 0.42:.1}",
+                            fill: "#3a3c40",
+                            stroke: "rgba(0,0,0,0.5)", stroke_width: "0.8",
+                        }
+                        rect {
+                            x: "-1.3",
+                            y: "{-(BODY_R - 2.0):.1}",
+                            width: "2.6",
+                            height: "{BODY_R * 0.78:.1}",
+                            rx: "1.0",
+                            fill: "#f2f2f0",
                         }
                     }
 

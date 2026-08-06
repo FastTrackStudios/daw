@@ -222,6 +222,11 @@ pub struct RackDesign {
     pub vu: VuFace,
     /// Whether the movements are mounted through the panel in a bezel.
     pub vu_bezel: bool,
+    /// What the movement's card is printed with — the VU standard, or a plain
+    /// decibel scale.
+    pub vu_card: crate::hardware::vu_svg::VuScale,
+    /// How the panel is finished at its edges.
+    pub ends: crate::hardware::panel::PanelEnds,
     pub knob: KnobStyle,
     pub items: &'static [RackItem],
 }

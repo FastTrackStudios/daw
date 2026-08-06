@@ -30,6 +30,88 @@ pub const NEEDLE_LEN: f64 = VU_H * 1.40;
 /// it. [`the_scale_uses_the_width_of_the_card`] is the guard.
 pub const SWEEP_DEG: f64 = 34.0;
 
+/// What a movement's card is printed with.
+///
+/// A VU is a *standard*: -20 to +3 with the crowding at the bottom. Plenty of
+/// meters are not VUs at all — a dbx 160 prints a plain decibel scale from -40
+/// to +20, evenly spaced — and drawing one on the other's arc is the kind of
+/// wrong that a picture makes obvious and a spec sheet never does.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum VuScale {
+    /// The VU standard.
+    #[default]
+    Vu,
+    /// A linear decibel scale, -40 to +20.
+    Decibels,
+}
+
+impl VuScale {
+    /// The ticks this card prints, as (value, label, is_major).
+    pub fn ticks(self) -> &'static [(f64, &'static str, bool)] {
+        match self {
+            Self::Vu => VU_TICKS,
+            Self::Decibels => DB_TICKS,
+        }
+    }
+
+    /// Where a value sits along the scale, 0 = left stop, 1 = right.
+    pub fn fraction(self, value: f64) -> f64 {
+        match self {
+            Self::Vu => vu_to_fraction(value),
+            Self::Decibels => ((value.clamp(-40.0, 20.0) + 40.0) / 60.0).clamp(0.0, 1.0),
+        }
+    }
+
+    /// Needle angle in degrees for a value; 0° is straight up.
+    pub fn angle(self, value: f64) -> f64 {
+        (self.fraction(value) * 2.0 - 1.0) * SWEEP_DEG
+    }
+
+    /// The value a level maps to on this card.
+    pub fn from_level_db(self, db: f64) -> f64 {
+        match self {
+            Self::Vu => db_to_vu(db),
+            Self::Decibels => db.clamp(-40.0, 20.0),
+        }
+    }
+
+    /// The value a gain reduction maps to.
+    pub fn from_gain_reduction_db(self, gr_db: f64) -> f64 {
+        match self {
+            Self::Vu => gr_to_vu(gr_db),
+            // A dbx reads reduction as the negative dB it is.
+            Self::Decibels => -gr_db.clamp(0.0, 40.0),
+        }
+    }
+
+    /// The stretch of scale printed in red, if any.
+    pub fn hot_from(self) -> Option<f64> {
+        match self {
+            Self::Vu => Some(0.0),
+            // A plain decibel card has no red: it is a readout, not a
+            // reference level you are meant to stay under.
+            Self::Decibels => None,
+        }
+    }
+}
+
+/// A plain decibel card, evenly spaced.
+pub const DB_TICKS: &[(f64, &str, bool)] = &[
+    (-40.0, "-40", true),
+    (-35.0, "", false),
+    (-30.0, "-30", true),
+    (-25.0, "", false),
+    (-20.0, "-20", true),
+    (-15.0, "", false),
+    (-10.0, "-10", true),
+    (-5.0, "", false),
+    (0.0, "0", true),
+    (5.0, "", false),
+    (10.0, "+10", true),
+    (15.0, "", false),
+    (20.0, "+20", true),
+];
+
 /// The labelled ticks on a VU face, as (VU value, label, is_major).
 pub const VU_TICKS: &[(f64, &str, bool)] = &[
     (-20.0, "20", true),
@@ -78,6 +160,32 @@ pub fn scale_width_fraction() -> f64 {
     let (left, _) = tick_point(-20.0, 0.0);
     let (right, _) = tick_point(3.0, 0.0);
     (right - left) / VU_W
+}
+
+/// A point on the tick arc for a scale position, at `inset` from the needle.
+pub fn scale_point(scale: VuScale, value: f64, inset: f64) -> (f64, f64) {
+    let rad = scale.angle(value).to_radians();
+    let r = NEEDLE_LEN - inset;
+    (PIVOT_X + r * rad.sin(), PIVOT_Y - r * rad.cos())
+}
+
+/// The needle tip for a scale position.
+pub fn scale_needle_tip(scale: VuScale, value: f64) -> (f64, f64) {
+    let rad = scale.angle(value).to_radians();
+    (
+        PIVOT_X + NEEDLE_LEN * rad.sin(),
+        PIVOT_Y - NEEDLE_LEN * rad.cos(),
+    )
+}
+
+/// The scale arc as an SVG path for a given card.
+pub fn scale_arc_for(scale: VuScale, inset: f64) -> String {
+    let ticks = scale.ticks();
+    let (first, last) = (ticks[0].0, ticks[ticks.len() - 1].0);
+    let (x0, y0) = scale_point(scale, first, inset);
+    let (x1, y1) = scale_point(scale, last, inset);
+    let r = NEEDLE_LEN - inset;
+    format!("M {x0:.2} {y0:.2} A {r:.2} {r:.2} 0 0 1 {x1:.2} {y1:.2}")
 }
 
 /// A point on the tick arc for a VU value, at `inset` from the needle length.
@@ -136,6 +244,33 @@ mod tests {
     fn out_of_range_values_pin_to_the_stops() {
         assert_eq!(vu_to_fraction(-99.0), 0.0);
         assert_eq!(vu_to_fraction(99.0), 1.0);
+    }
+
+    #[test]
+    fn a_decibel_card_is_evenly_spaced_and_a_vu_is_not() {
+        // The whole reason the two scales exist separately: a VU crowds its
+        // bottom end, a plain dB card does not.
+        let db = VuScale::Decibels;
+        let low = db.fraction(-30.0) - db.fraction(-40.0);
+        let high = db.fraction(10.0) - db.fraction(0.0);
+        assert!((low - high).abs() < 1e-9, "{low} vs {high}");
+
+        let vu = VuScale::Vu;
+        assert!(vu.fraction(-10.0) - vu.fraction(-20.0) < vu.fraction(0.0) - vu.fraction(-10.0));
+    }
+
+    #[test]
+    fn each_card_pins_its_own_stops() {
+        assert_eq!(VuScale::Decibels.fraction(-40.0), 0.0);
+        assert_eq!(VuScale::Decibels.fraction(20.0), 1.0);
+        assert_eq!(VuScale::Vu.fraction(-20.0), 0.0);
+        assert_eq!(VuScale::Vu.fraction(3.0), 1.0);
+    }
+
+    #[test]
+    fn only_a_vu_prints_a_red_stretch() {
+        assert!(VuScale::Vu.hot_from().is_some());
+        assert!(VuScale::Decibels.hot_from().is_none());
     }
 
     #[test]

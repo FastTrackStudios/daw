@@ -46,6 +46,18 @@ pub fn panel_scale(design_w: f64, design_h: f64, reserve_w: f64) -> f64 {
     fit_scale((win_w - reserve_w).max(1.0), win_h, design_w, design_h)
 }
 
+/// How a panel is finished at its left and right edges.
+///
+/// Not decoration: it says what the thing *is*. Rack ears mean a unit that
+/// lives in a rack; wooden cheeks mean one that sits on a desk, which is how
+/// the dbx 160 and its generation were sold.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum PanelEnds {
+    #[default]
+    RackEars,
+    Wood,
+}
+
 /// A hardware faceplate.
 ///
 /// `design_w` / `design_h` are the panel's drawing size in CSS px at scale 1;
@@ -60,6 +72,9 @@ pub fn Panel(
     background: String,
     /// Colour of the rack ears and screws around the panel.
     #[props(default = "#b9b4a8".to_string())] chrome: String,
+    /// How the panel is finished at its edges.
+    #[props(default)]
+    ends: PanelEnds,
     /// Rendered inside the panel, positioned absolutely in design space.
     children: Element,
 ) -> Element {
@@ -87,12 +102,47 @@ pub fn Panel(
                     18.0 * scale,
                 ),
 
-                // Rack ears: a screwed strip down each side, the detail that
-                // reads "this came out of a rack" more than anything else.
-                RackEar { scale, chrome: chrome.clone(), left: true, height: design_h }
-                RackEar { scale, chrome: chrome.clone(), left: false, height: design_h }
+                // The edges: screwed rack ears, or the walnut cheeks a
+                // desktop unit of the period was sold with.
+                match ends {
+                    PanelEnds::RackEars => rsx! {
+                        RackEar { scale, chrome: chrome.clone(), left: true, height: design_h }
+                        RackEar { scale, chrome: chrome.clone(), left: false, height: design_h }
+                    },
+                    PanelEnds::Wood => rsx! {
+                        WoodCheek { scale, left: true }
+                        WoodCheek { scale, left: false }
+                    },
+                }
 
                 {children}
+            }
+        }
+    }
+}
+
+/// A walnut side cheek.
+#[component]
+fn WoodCheek(scale: f64, left: bool) -> Element {
+    let w = 34.0 * scale;
+    let side = if left { "left:0;" } else { "right:0;" };
+    rsx! {
+        div {
+            style: format!(
+                "position:absolute; top:0; bottom:0; {side} width:{w:.1}px; \
+                 background:linear-gradient(90deg, #6b3f22 0%, #8a5530 26%, #7a4a28 58%, \
+                   #5e3419 100%); \
+                 box-shadow:inset {:.1}px 0 {:.1}px rgba(0,0,0,0.35); \
+                 border-{}:1px solid rgba(0,0,0,0.5);",
+                if left { 2.0 * scale } else { -2.0 * scale },
+                4.0 * scale,
+                if left { "right" } else { "left" },
+            ),
+            // Grain: a few darker streaks down the cheek.
+            div {
+                style: "position:absolute; inset:0; \
+                        background:repeating-linear-gradient(92deg, \
+                          rgba(0,0,0,0.16) 0 1px, rgba(0,0,0,0.0) 1px 7px);",
             }
         }
     }
