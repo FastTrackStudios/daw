@@ -160,6 +160,38 @@ fn readonly_warn(method: &str) {
     warn!("Midi::{method} is read-only in this pass; skipping mutation");
 }
 
+/// Resolve `location` and read note `index` out of it.
+fn read_note(location: &MidiTakeLocation, index: u32) -> Option<(MediaItemTake, sw::MidiNoteRaw)> {
+    let medium = reaper_high::Reaper::get().medium_reaper();
+    let take = resolve_take_for_location(medium, location)?;
+    let note = sw::get_note(medium.low(), take, index as i32)?;
+    Some((take, note))
+}
+
+/// Apply `edit` to note `index` of the take at `location`.
+///
+/// Sorts afterwards because the note setters accept position and pitch
+/// changes, either of which can reorder the take. `MIDI_SetNote` is
+/// called with `no_sort`, so without this a moved note would leave the
+/// event list unsorted and REAPER's own reads inconsistent. A pure
+/// velocity edit doesn't strictly need it, but paying one sort per edit
+/// is not worth the class of bug that skipping it invites — and callers
+/// touching many notes should use the batch helpers rather than looping
+/// here anyway.
+fn edit_note(location: &MidiTakeLocation, index: u32, edit: sw::MidiNoteEdit) {
+    let medium = reaper_high::Reaper::get().medium_reaper();
+    let Some(take) = resolve_take_for_location(medium, location) else {
+        warn!("Midi::set_note_*: could not resolve take for {location:?}");
+        return;
+    };
+    let low = medium.low();
+    if !sw::set_note(low, take, index as i32, edit) {
+        warn!("Midi::set_note_*: REAPER rejected the edit for note {index}");
+        return;
+    }
+    sw::sort(low, take);
+}
+
 // =============================================================================
 // `impl Midi for Reaper`
 // =============================================================================
@@ -234,44 +266,161 @@ impl Midi for crate::Reaper {
         (count_before..count_before + notes.len() as u32).collect()
     }
 
-    fn delete_note(&self, _location: MidiTakeLocation, _index: u32) {
-        readonly_warn("delete_note");
+    fn add_notes_ppq(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32> {
+        let medium = reaper_high::Reaper::get().medium_reaper();
+        let Some(take) = resolve_take_for_location(medium, &location) else {
+            return Vec::new();
+        };
+        let low = medium.low();
+        let count_before = read_notes(medium, take).len() as u32;
+
+        for note in &notes {
+            // The whole point of this method: positions go in as they
+            // came out of `notes()`, with no quarter-note conversion.
+            sw::insert_note(
+                low,
+                take,
+                false,
+                false,
+                note.start_ppq,
+                note.start_ppq + note.length_ppq,
+                i32::from(note.channel & 0x0F),
+                i32::from(note.pitch & 0x7F),
+                i32::from(note.velocity.clamp(1, 127)),
+            );
+        }
+        sw::sort(low, take);
+
+        (count_before..count_before + notes.len() as u32).collect()
     }
 
-    fn delete_notes(&self, _location: MidiTakeLocation, _indices: Vec<u32>) {
-        readonly_warn("delete_notes");
+    fn delete_note(&self, location: MidiTakeLocation, index: u32) {
+        self.delete_notes(location, vec![index]);
     }
 
-    fn delete_selected_notes(&self, _location: MidiTakeLocation) {
-        readonly_warn("delete_selected_notes");
+    fn delete_notes(&self, location: MidiTakeLocation, indices: Vec<u32>) {
+        let medium = reaper_high::Reaper::get().medium_reaper();
+        let Some(take) = resolve_take_for_location(medium, &location) else {
+            warn!("Midi::delete_notes: could not resolve take for {location:?}");
+            return;
+        };
+        let low = medium.low();
+
+        // Highest index first. Deleting renumbers everything above the
+        // removed note, so ascending order would delete the wrong notes
+        // from the second one onward — and silently, since every index
+        // stays in range. Dedup because a repeated index would then
+        // delete an innocent neighbour.
+        let mut indices = indices;
+        indices.sort_unstable_by(|a, b| b.cmp(a));
+        indices.dedup();
+
+        for index in indices {
+            if !sw::delete_note(low, take, index as i32) {
+                warn!("Midi::delete_notes: REAPER rejected deleting note {index}");
+            }
+        }
+        sw::sort(low, take);
     }
 
-    fn set_note_pitch(&self, _location: MidiTakeLocation, _index: u32, _pitch: u8) {
-        readonly_warn("set_note_pitch");
+    fn delete_selected_notes(&self, location: MidiTakeLocation) {
+        let selected: Vec<u32> = self
+            .selected_notes(location.clone())
+            .into_iter()
+            .map(|n| n.index)
+            .collect();
+        self.delete_notes(location, selected);
     }
 
-    fn set_note_velocity(&self, _location: MidiTakeLocation, _index: u32, _velocity: u8) {
-        readonly_warn("set_note_velocity");
+    fn set_note_pitch(&self, location: MidiTakeLocation, index: u32, pitch: u8) {
+        edit_note(
+            &location,
+            index,
+            sw::MidiNoteEdit {
+                pitch: Some(i32::from(pitch & 0x7F)),
+                ..Default::default()
+            },
+        );
     }
 
-    fn set_note_position(&self, _location: MidiTakeLocation, _index: u32, _start_ppq: f64) {
-        readonly_warn("set_note_position");
+    fn set_note_velocity(&self, location: MidiTakeLocation, index: u32, velocity: u8) {
+        edit_note(
+            &location,
+            index,
+            sw::MidiNoteEdit {
+                // Clamped off zero: a note-on with velocity 0 is a
+                // note-off, so passing it through would delete the note
+                // rather than quieten it.
+                velocity: Some(i32::from(velocity.clamp(1, 127))),
+                ..Default::default()
+            },
+        );
     }
 
-    fn set_note_length(&self, _location: MidiTakeLocation, _index: u32, _length_ppq: f64) {
-        readonly_warn("set_note_length");
+    fn set_note_position(&self, location: MidiTakeLocation, index: u32, start_ppq: f64) {
+        // Moving the start alone would stretch the note, so the end moves
+        // with it — "position" means the note slides, not resizes.
+        let Some((take, note)) = read_note(&location, index) else {
+            return;
+        };
+        let length = note.end_ppq - note.start_ppq;
+        let _ = take;
+        edit_note(
+            &location,
+            index,
+            sw::MidiNoteEdit {
+                start_ppq: Some(start_ppq),
+                end_ppq: Some(start_ppq + length),
+                ..Default::default()
+            },
+        );
     }
 
-    fn set_note_channel(&self, _location: MidiTakeLocation, _index: u32, _channel: u8) {
-        readonly_warn("set_note_channel");
+    fn set_note_length(&self, location: MidiTakeLocation, index: u32, length_ppq: f64) {
+        let Some((_, note)) = read_note(&location, index) else {
+            return;
+        };
+        edit_note(
+            &location,
+            index,
+            sw::MidiNoteEdit {
+                end_ppq: Some(note.start_ppq + length_ppq.max(1.0)),
+                ..Default::default()
+            },
+        );
     }
 
-    fn set_note_selected(&self, _location: MidiTakeLocation, _index: u32, _selected: bool) {
-        readonly_warn("set_note_selected");
+    fn set_note_channel(&self, location: MidiTakeLocation, index: u32, channel: u8) {
+        edit_note(
+            &location,
+            index,
+            sw::MidiNoteEdit {
+                channel: Some(i32::from(channel & 0x0F)),
+                ..Default::default()
+            },
+        );
     }
 
-    fn set_note_muted(&self, _location: MidiTakeLocation, _index: u32, _muted: bool) {
-        readonly_warn("set_note_muted");
+    fn set_note_selected(&self, location: MidiTakeLocation, index: u32, selected: bool) {
+        edit_note(
+            &location,
+            index,
+            sw::MidiNoteEdit {
+                selected: Some(selected),
+                ..Default::default()
+            },
+        );
+    }
+
+    fn set_note_muted(&self, location: MidiTakeLocation, index: u32, muted: bool) {
+        edit_note(
+            &location,
+            index,
+            sw::MidiNoteEdit {
+                muted: Some(muted),
+                ..Default::default()
+            },
+        );
     }
 
     fn select_all_notes(&self, _location: MidiTakeLocation, _selected: bool) {

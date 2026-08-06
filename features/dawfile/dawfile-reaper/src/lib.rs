@@ -62,6 +62,8 @@ pub mod convert;
 pub mod diff;
 pub mod guide_gen;
 pub mod index;
+pub mod keysig;
+pub mod notation;
 pub mod io;
 pub mod primitives;
 /// REAPER `.reapeaks` peak-cache files (waveform mipmaps).

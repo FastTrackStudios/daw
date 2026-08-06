@@ -22,6 +22,12 @@ use std::path::{Path, PathBuf};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let filter = args.iter().skip(1).find(|a| !a.starts_with("--")).cloned();
+    // `--gui` shows REAPER's window instead of running it with DISPLAY=""
+    // — the only way to actually watch a test drive the DAW. Pair it with
+    // `--keep-open` (or FTS_KEEP_OPEN=1) to inspect the result afterwards,
+    // otherwise REAPER is killed the moment the run ends.
+    let gui = args.iter().any(|a| a == "--gui");
+    let keep_open = args.iter().any(|a| a == "--keep-open");
 
     // xtask lives at features/reaper/daw-reaper/xtask — repo root is
     // three levels up.
@@ -50,7 +56,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(600);
-    let runner = TestRunner::new(&resources_dir).with_timeout(timeout_secs);
+    let mut runner = TestRunner::new(&resources_dir).with_timeout(timeout_secs);
+    if gui {
+        runner = runner.with_headless(false);
+        println!("  Mode:      GUI (visible REAPER window)");
+    }
+    if keep_open {
+        runner.keep_open = true;
+        println!("  Keep open: REAPER stays up after the run");
+    }
 
     let packages = vec![TestPackage {
         package: "daw-reaper".into(),
@@ -101,6 +115,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Headless: no WM to round-trip the main-window geometry.
             "nudge_round_trips_main_window".into(),
         ],
+        test_binary: None,
+    },
+    // chord-tool's insert path. Everything about it up to the DAW seam is
+    // unit-tested; these are the only tests that prove the pitches keyflow
+    // computes are the pitches REAPER ends up holding.
+    // session's Key-track tests: proof that a key stored as an item label
+    // survives a real project.
+    TestPackage {
+        package: "session".into(),
+        features: vec![],
+        test_threads: 1,
+        default_skips: vec![],
+        test_binary: Some("reaper_key_track".into()),
+    },
+    TestPackage {
+        package: "chord-tool-daw".into(),
+        features: vec![],
+        test_threads: 1,
+        default_skips: vec![],
+        test_binary: None,
+    },
+    // midi-tools' velocity write path. The engines are unit-tested against
+    // `&[Note]`; these are the only tests that prove a resolved session
+    // lands on the right REAPER notes with the right values.
+    TestPackage {
+        package: "midi-tools-daw".into(),
+        features: vec![],
+        test_threads: 1,
+        default_skips: vec![],
         test_binary: None,
     }];
 
