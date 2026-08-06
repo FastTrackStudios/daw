@@ -345,3 +345,162 @@ mod tests {
         );
     }
 }
+
+// ── The degree × variation grid ─────────────────────────────────────────
+//
+// The shape ChordGun puts on screen, and the reason it's quick to use:
+// seven columns, one per scale degree, and down each column the chord
+// types that actually *fit* the scale there. No dead options — if a type
+// would need a note outside the key it simply isn't offered, which is
+// what makes scanning a column a musical choice rather than a filter
+// exercise.
+
+/// A chord type as a display suffix plus semitones above the root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChordType {
+    /// Suffix appended to the root name — `""` for a plain major triad.
+    pub display: &'static str,
+    pub semitones: &'static [u8],
+}
+
+/// The chord vocabulary offered per degree, in the order it should be
+/// listed. Ported from ChordGun's `chords.lua`, whose binary patterns
+/// (`"10001001"` = root, major third, fifth) are just semitone sets.
+pub const CHORD_TYPES: &[ChordType] = &[
+    ChordType { display: "", semitones: &[0, 4, 7] },
+    ChordType { display: "m", semitones: &[0, 3, 7] },
+    ChordType { display: "5", semitones: &[0, 7] },
+    ChordType { display: "sus2", semitones: &[0, 2, 7] },
+    ChordType { display: "sus4", semitones: &[0, 5, 7] },
+    ChordType { display: "dim", semitones: &[0, 3, 6] },
+    ChordType { display: "aug", semitones: &[0, 4, 8] },
+    ChordType { display: "6", semitones: &[0, 4, 7, 9] },
+    ChordType { display: "m6", semitones: &[0, 3, 7, 9] },
+    ChordType { display: "7", semitones: &[0, 4, 7, 10] },
+    ChordType { display: "maj7", semitones: &[0, 4, 7, 11] },
+    ChordType { display: "m7", semitones: &[0, 3, 7, 10] },
+    ChordType { display: "b5", semitones: &[0, 4, 6] },
+];
+
+/// Pitch classes of `key`'s scale.
+fn scale_pcs(key: &Key) -> Vec<u8> {
+    key.mode
+        .interval_pattern()
+        .into_iter()
+        .map(|offset| (key.root.semitone + offset) % 12)
+        .collect()
+}
+
+/// Every chord type that fits the scale at `degree` (1-7).
+///
+/// "Fits" means every note lands on a scale tone. That's the filter that
+/// makes a column worth scanning — an out-of-key option would just be
+/// noise next to six that work.
+pub fn variations(key: &Key, degree: u8) -> Vec<ChordCandidate> {
+    if !(1..=7).contains(&degree) {
+        return Vec::new();
+    }
+    let scale = key.mode.interval_pattern();
+    let Some(offset) = scale.get(usize::from(degree - 1)).copied() else {
+        return Vec::new();
+    };
+    let pcs = scale_pcs(key);
+    let root_pc = (key.root.semitone + offset) % 12;
+    let sharp = prefers_sharps(key);
+
+    CHORD_TYPES
+        .iter()
+        .filter(|ty| {
+            ty.semitones
+                .iter()
+                .all(|s| pcs.contains(&((root_pc + s) % 12)))
+        })
+        .map(|ty| ChordCandidate {
+            label: format!("{}{}", pc_name(root_pc, sharp), ty.display),
+            role: ChordRole::Diatonic,
+            root_pc,
+            semitones: ty.semitones.to_vec(),
+        })
+        .collect()
+}
+
+/// The whole grid: seven columns of in-scale variations, degree 1 first.
+pub fn grid(key: &Key) -> Vec<Vec<ChordCandidate>> {
+    (1..=7).map(|degree| variations(key, degree)).collect()
+}
+
+#[cfg(test)]
+mod grid_tests {
+    use super::*;
+
+    fn c_major() -> Key {
+        Key::major(MusicalNote::from_string("C").expect("C"))
+    }
+
+    #[test]
+    fn the_grid_has_a_column_per_degree() {
+        let g = grid(&c_major());
+        assert_eq!(g.len(), 7);
+        assert!(g.iter().all(|col| !col.is_empty()), "every degree offers something");
+    }
+
+    /// Degree 1 of C major: C, Csus2, Csus4, C6, Cmaj7 all sit in the
+    /// key. Cm and Caug do not, and must not be offered.
+    #[test]
+    fn first_degree_offers_only_in_key_types() {
+        let labels: Vec<String> = variations(&c_major(), 1)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        for expected in ["C", "Csus2", "Csus4", "C6", "Cmaj7"] {
+            assert!(labels.iter().any(|l| l == expected), "missing {expected} in {labels:?}");
+        }
+        for absent in ["Cm", "Caug", "Cdim", "C7"] {
+            assert!(!labels.iter().any(|l| l == absent), "{absent} is out of key");
+        }
+    }
+
+    /// The fifth degree is where the dominant seventh lives, and nowhere
+    /// else in a major key.
+    #[test]
+    fn only_the_fifth_degree_offers_a_dominant_seventh() {
+        let with_dom7: Vec<u8> = (1..=7)
+            .filter(|d| {
+                variations(&c_major(), *d)
+                    .iter()
+                    .any(|c| c.semitones == vec![0, 4, 7, 10])
+            })
+            .collect();
+        assert_eq!(with_dom7, vec![5], "G7 only");
+    }
+
+    /// Every offered chord must be playable entirely within the scale —
+    /// the property the column filter exists to guarantee.
+    #[test]
+    fn every_offered_chord_is_in_the_scale() {
+        let key = c_major();
+        let pcs = scale_pcs(&key);
+        for column in grid(&key) {
+            for chord in column {
+                for note in chord.notes(4) {
+                    assert!(
+                        pcs.contains(&(note % 12)),
+                        "{} plays {} which is outside the key",
+                        chord.label,
+                        note
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_seventh_degree_is_diminished_not_major() {
+        let labels: Vec<String> = variations(&c_major(), 7)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(labels.iter().any(|l| l == "Bdim"), "got {labels:?}");
+        assert!(!labels.iter().any(|l| l == "B"), "B major is out of key");
+    }
+}

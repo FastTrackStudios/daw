@@ -45,7 +45,10 @@ pub use detail_level::{DetailLevel, UpperStructure};
 pub use duration::{ChordRhythm, LilySyntax, PushPullAmount, PushPullBase};
 pub use error::{ChordParseError, ChordParseErrors};
 pub use extensions::{ExtensionQuality, Extensions};
-pub use palette::{ApproachKind, ChordCandidate, ChordRole, approach, diatonic, palette, parallel_key};
+pub use palette::{
+    ApproachKind, CHORD_TYPES, ChordCandidate, ChordRole, ChordType, approach, diatonic, grid,
+    palette, parallel_key, variations,
+};
 pub use realize::{ChordSize, chord_notes, scale_chords, scale_note};
 pub use family::ChordFamily;
 pub use midi::{
