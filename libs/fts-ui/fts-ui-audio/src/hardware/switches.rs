@@ -107,11 +107,17 @@ pub fn ToggleSwitch(
     }
 }
 
-/// A bank of radio-like panel buttons — the 1176's ratios, the Distressor's.
+/// A bank of push-in selector buttons — the 1176's ratios, the Distressor's.
 ///
-/// Exactly one is in at a time, and the one that is in stays in. (The real
-/// 1176 lets you push several at once — "all buttons" — which the profile
-/// models as one more detent rather than as real multi-select.)
+/// These are latching mechanical buttons, and the way you read one is that it
+/// is *lower than its neighbours*. So every cap is the same light plastic and
+/// the engaged one sits down in its housing with the shadow falling on it,
+/// rather than changing colour: a bank where the selected button is a
+/// different colour is a row of lamps, not a row of buttons.
+///
+/// Exactly one is in at a time. (The real 1176 lets you push several at once —
+/// "all buttons" — which the profile models as one more detent rather than as
+/// real multi-select.)
 ///
 /// Banks longer than [`MAX_BUTTON_ROWS`] run into a second column rather than
 /// off the bottom of the panel: the Distressor has eight ratios and a rack
@@ -135,11 +141,30 @@ pub fn RatioButtons(
         div {
             "data-testid": "hw-buttons-{testid}",
             "data-index": "{selected}",
+            // The housing the caps sit down into.
             style: format!(
                 "display:flex; flex-direction:column; flex-wrap:wrap; \
-                 align-content:center; gap:{:.1}px; max-height:{:.1}px;",
+                 align-content:center; gap:{:.1}px; max-height:{:.1}px; \
+                 padding:{:.1}px; border-radius:{:.1}px; \
+                 background:linear-gradient(180deg, #131315, #0a0a0c); \
+                 border:{:.1}px solid rgba(0,0,0,0.6); \
+                 box-shadow:inset 0 {:.1}px {:.1}px rgba(0,0,0,0.55);",
                 4.0 * scale,
-                rows as f64 * (bh + 4.0 * scale) + 1.0,
+                // The wrap limit is a border-box height, so it has to cover
+                // the caps, the gaps between them, the housing's padding and
+                // border, and the pressed cap's offset. Forgetting any of it
+                // splits a five-button bank into two columns, which is what a
+                // screenshot showed and arithmetic should have.
+                rows as f64 * bh
+                    + (rows.saturating_sub(1)) as f64 * 4.0 * scale
+                    + 7.0 * scale
+                    + 2.0 * scale
+                    + 2.0,
+                3.5 * scale,
+                3.0 * scale,
+                (1.0 * scale).max(1.0),
+                1.0 * scale,
+                3.0 * scale,
             ),
 
             for (i , label) in labels.iter().enumerate() {
@@ -149,23 +174,35 @@ pub fn RatioButtons(
                         "width:{bw:.1}px; height:{bh:.1}px; border-radius:{:.1}px; \
                          display:flex; align-items:center; justify-content:center; \
                          font-size:{:.1}px; font-weight:700; cursor:pointer; \
-                         color:{}; background:{}; \
+                         color:#1b1a18; background:{}; \
                          border:{:.1}px solid rgba(0,0,0,0.55); \
-                         box-shadow:{};",
-                        3.0 * scale,
+                         margin-top:{:.1}px; box-shadow:{};",
+                        2.5 * scale,
                         10.0 * scale,
-                        if i == selected { "#1b1a18" } else { ink.as_str() },
+                        // Same cap either way — only the light on it changes.
                         if i == selected {
-                            "linear-gradient(180deg, #d9d4c8, #b0aa9c)"
+                            "linear-gradient(180deg, #b9b5aa, #cdc9be)"
                         } else {
-                            "linear-gradient(180deg, #3a3a3e, #202024)"
+                            "linear-gradient(180deg, #efece3, #cbc7bc)"
                         },
                         (1.0 * scale).max(1.0),
-                        // A pressed button sits *in* the panel.
+                        // Pushed in: it sits lower and takes the housing's
+                        // shadow across its top.
+                        if i == selected { 1.5 * scale } else { 0.0 },
                         if i == selected {
-                            format!("inset 0 {:.1}px {:.1}px rgba(0,0,0,0.45)", 1.5 * scale, 3.0 * scale)
+                            format!(
+                                "inset 0 {:.1}px {:.1}px rgba(0,0,0,0.55)",
+                                2.0 * scale,
+                                3.5 * scale,
+                            )
                         } else {
-                            format!("0 {:.1}px {:.1}px rgba(0,0,0,0.40)", 1.5 * scale, 3.0 * scale)
+                            format!(
+                                "0 {:.1}px {:.1}px rgba(0,0,0,0.45), \
+                                 inset 0 {:.1}px 0 rgba(255,255,255,0.55)",
+                                2.0 * scale,
+                                3.0 * scale,
+                                1.0 * scale,
+                            )
                         },
                     ),
                     onclick: {
