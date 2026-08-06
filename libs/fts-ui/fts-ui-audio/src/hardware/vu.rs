@@ -123,33 +123,48 @@ pub fn VuMeter(
         return rsx! {
             div {
                 "data-testid": "vu-bezel",
-                // The frame is a *border*, not padding: giving the four sides
-                // different colours makes the browser mitre the corners at
-                // 45°, which is exactly how a moulded bezel joins and the
-                // detail that says the movement is set into something.
+                // The frame body: matte black, sitting on the panel.
                 style: format!(
-                    "display:flex; flex-direction:column; align-items:center; \
-                     background:#0d0e0f; border-radius:{:.1}px; \
-                     border-top:{:.1}px solid #3c3d40; \
-                     border-left:{:.1}px solid #303134; \
-                     border-right:{:.1}px solid #161719; \
-                     border-bottom:{:.1}px solid #101113; \
-                     padding:{:.1}px {:.1}px {:.1}px; \
+                    "display:inline-flex; flex-direction:column; align-items:center; \
+                     padding:{:.1}px {:.1}px {:.1}px; border-radius:{:.1}px; \
+                     background:linear-gradient(180deg, #141517, #0a0b0c); \
                      box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.55), \
-                       inset 0 0 {:.1}px rgba(0,0,0,0.8);",
-                    2.0 * scale,
-                    9.0 * scale,
-                    9.0 * scale,
-                    9.0 * scale,
-                    9.0 * scale,
-                    4.0 * scale,
-                    4.0 * scale,
-                    3.0 * scale,
-                    2.0 * scale,
-                    6.0 * scale,
+                       inset 0 {:.1}px 0 rgba(255,255,255,0.07);",
                     5.0 * scale,
+                    5.0 * scale,
+                    4.0 * scale,
+                    2.0 * scale,
+                    3.0 * scale,
+                    7.0 * scale,
+                    1.0 * scale,
                 ),
-                VuMeter { scale, width, face, mode, value_db, legend, card }
+
+                // The opening, chamfered *inward*. Four border colours, so the
+                // browser mitres the corners at 45° and the faces read as
+                // angles rather than as a flat outline.
+                //
+                // Lit from above, a sunken opening has its **top** face in
+                // shadow and its **bottom** face catching the light — the
+                // opposite of a raised boss, and the whole difference between
+                // a movement set into a panel and one printed on it.
+                div {
+                    style: format!(
+                        "display:flex; line-height:0; \
+                         border-top:{:.1}px solid #050506; \
+                         border-left:{:.1}px solid #0c0d0e; \
+                         border-right:{:.1}px solid #2b2d30; \
+                         border-bottom:{:.1}px solid #3b3d41; \
+                         box-shadow:inset 0 {:.1}px {:.1}px rgba(0,0,0,0.75);",
+                        9.0 * scale,
+                        9.0 * scale,
+                        9.0 * scale,
+                        9.0 * scale,
+                        2.0 * scale,
+                        5.0 * scale,
+                    ),
+                    VuMeter { scale, width, face, mode, value_db, legend, card }
+                }
+
                 // The vent under the glass, which is most of what says the
                 // movement is mounted through the panel.
                 div {
@@ -158,7 +173,7 @@ pub fn VuMeter(
                          border-radius:{:.1}px; \
                          background:repeating-linear-gradient(90deg, \
                            #000 0 {:.1}px, #2a2c2e {:.1}px {:.1}px);",
-                        5.0 * scale,
+                        4.0 * scale,
                         width * 0.30 * scale,
                         4.0 * scale,
                         1.0 * scale,
