@@ -34,6 +34,7 @@ use clack_extensions::gui::{
 };
 use clack_extensions::latency::*;
 use clack_extensions::log::{HostLog, HostLogImpl, LogSeverity};
+use clack_extensions::note_name::{NoteNameBuffer, PluginNoteName};
 use clack_extensions::note_ports::{NotePortInfoBuffer, PluginNotePorts};
 use clack_extensions::params::*;
 use clack_extensions::state::PluginState as PluginStateExt;
@@ -375,6 +376,18 @@ pub struct ClapPortInfo {
     pub channel_count: u32,
 }
 
+/// One piano-roll key label from the `note-name` extension.
+///
+/// `key`, `channel` and `port` are `-1` when the label applies to all of
+/// them, which is the usual case — CLAP's wildcard.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClapNoteName {
+    pub name: String,
+    pub key: i32,
+    pub channel: i32,
+    pub port: i32,
+}
+
 /// One CLAP parameter as the host sees it.
 #[derive(Clone, Debug)]
 pub struct ClapParamInfo {
@@ -591,6 +604,33 @@ impl LoadedClapPlugin {
             name: String::from_utf8_lossy(info.name).into_owned(),
             channel_count: 0, // note ports don't carry channels
         })
+    }
+
+    /// The plugin's piano-roll key labels, via the `note-name` extension.
+    ///
+    /// Empty when the plugin doesn't implement it. A DAW shows these in
+    /// place of `C6`-style names, which is what makes a drum map or a cue
+    /// track readable.
+    pub fn note_names(&mut self) -> Vec<ClapNoteName> {
+        let mut handle = self.instance.plugin_handle();
+        let Some(ext) = handle.get_extension::<PluginNoteName>() else {
+            return Vec::new();
+        };
+        let count = ext.count(&mut handle);
+        let mut out = Vec::with_capacity(count);
+        let mut buf = NoteNameBuffer::default();
+        for index in 0..count {
+            let Some(name) = ext.get(&mut handle, index as u32, &mut buf) else {
+                continue;
+            };
+            out.push(ClapNoteName {
+                name: String::from_utf8_lossy(name.name).into_owned(),
+                key: name.key.into_specific().map(|k| k as i32).unwrap_or(-1),
+                channel: name.channel.into_specific().map(|c| c as i32).unwrap_or(-1),
+                port: name.port.into_specific().map(|p| p as i32).unwrap_or(-1),
+            });
+        }
+        out
     }
 
     /// Whether the plugin exposes a GUI via the `gui` extension.
