@@ -17,6 +17,9 @@
 //! - [`connect_daw`] — connection + polling logic
 //! - Re-exports `#[daw_test]` / `#[reaper_test]` from `daw-test-macro`
 
+pub mod display;
+pub use display::{Recording, VirtualDisplay};
+
 pub mod runner;
 
 use crate::rpc::{Daw, Project, TrackHandle};
