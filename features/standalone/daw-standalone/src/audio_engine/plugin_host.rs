@@ -26,6 +26,8 @@
 
 use std::ffi::CString;
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use clack_extensions::audio_ports::{AudioPortInfoBuffer, PluginAudioPorts};
@@ -51,7 +53,37 @@ use crate::plugin::PluginEvents;
 
 // ── Host handlers (minimal stubs) ────────────────────────────────────
 
-struct DawHostShared;
+/// A resize the plugin has asked the host for, waiting to be applied.
+///
+/// The GUI extension's `request_resize` arrives on the plugin's own thread and
+/// has nowhere to go on its own — the host window belongs to whoever opened
+/// the editor. So it is parked here and the embedder drains it (see
+/// [`LoadedClapPlugin::take_requested_resize`]), which is the whole reason a
+/// plugin can change its own editor size at all.
+///
+/// Packed into one atomic — width in the high half, height in the low — so the
+/// pair is always read as it was written. Zero means nothing pending.
+#[derive(Default)]
+pub struct PendingGuiResize(AtomicU64);
+
+impl PendingGuiResize {
+    fn store(&self, width: u32, height: u32) {
+        self.0
+            .store(((width as u64) << 32) | height as u64, Ordering::Release);
+    }
+
+    fn take(&self) -> Option<(u32, u32)> {
+        match self.0.swap(0, Ordering::AcqRel) {
+            0 => None,
+            packed => Some(((packed >> 32) as u32, packed as u32)),
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+struct DawHostShared {
+    gui_resize: Arc<PendingGuiResize>,
+}
 
 impl<'a> SharedHandler<'a> for DawHostShared {
     fn request_restart(&self) {}
@@ -102,7 +134,14 @@ impl HostThreadCheckImpl for DawHostShared {
 impl HostGuiImpl for DawHostShared {
     fn resize_hints_changed(&self) {}
 
-    fn request_resize(&self, _new_size: GuiSize) -> Result<(), HostError> {
+    /// The plugin wants its editor to be a different size.
+    ///
+    /// Acknowledging and discarding this — which is what this did — is why a
+    /// plugin that changes its own size (FTS Comp swapping between the tall
+    /// control surface and a 4:1 rack face) redrew inside a window that never
+    /// moved. Park it for the embedder instead.
+    fn request_resize(&self, new_size: GuiSize) -> Result<(), HostError> {
+        self.gui_resize.store(new_size.width, new_size.height);
         Ok(())
     }
 
@@ -299,8 +338,12 @@ impl ClapHost {
         let id = descriptor.id().ok_or(ClapHostError::MissingId)?;
         let host_info = self.host_info()?;
 
+        let gui_resize = Arc::<PendingGuiResize>::default();
+        let shared = DawHostShared {
+            gui_resize: gui_resize.clone(),
+        };
         let instance = PluginInstance::<DawHost>::new(
-            |_| DawHostShared,
+            |_| shared.clone(),
             |_| DawHostMainThread,
             &entry,
             id,
@@ -310,6 +353,7 @@ impl ClapHost {
 
         Ok(LoadedClapPlugin {
             instance,
+            gui_resize,
             activation: None,
             descriptor: ClapPluginDescriptor {
                 id: id.to_string_lossy().into_owned(),
@@ -460,6 +504,8 @@ pub struct ClapGuiSmokeResult {
 /// the audio thread.
 pub struct LoadedClapPlugin {
     instance: PluginInstance<DawHost>,
+    /// Shared with the instance's host handler — see [`PendingGuiResize`].
+    gui_resize: Arc<PendingGuiResize>,
     /// Persists the active processor + scratch buffers across
     /// `process_block` calls when prepared.
     activation: Option<ActivationGuard>,
@@ -677,6 +723,16 @@ impl LoadedClapPlugin {
         let mut handle = self.instance.plugin_handle();
         let gui = handle.get_extension::<PluginGui>()?;
         gui.get_size(&mut handle).map(|s| (s.width, s.height))
+    }
+
+    /// A resize the plugin has asked for since this was last called, if any.
+    ///
+    /// Logical pixels, as the plugin reported them. The embedder is expected to
+    /// resize its window to match and then tell the plugin the new size with
+    /// [`Self::gui_set_size`] — a host that only does the first half leaves the
+    /// editor rendering at the old size inside a new frame.
+    pub fn take_requested_resize(&self) -> Option<(u32, u32)> {
+        self.gui_resize.take()
     }
 
     /// Ask the plugin to adopt a new GUI size (host-side resize). Returns
