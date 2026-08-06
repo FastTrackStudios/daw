@@ -29,6 +29,12 @@ pub struct TestRunner {
     /// If set, only these guest extensions will be loaded by daw-bridge.
     /// Passed to REAPER as `FTS_EXTENSION_WHITELIST` env var.
     pub extension_whitelist: Vec<String>,
+    /// A private Xvfb + window manager to run REAPER on.
+    ///
+    /// Held here so it outlives every spawned REAPER: dropping it tears
+    /// the display down, and a display that disappears mid-run takes
+    /// REAPER with it.
+    pub display: Option<std::sync::Arc<crate::test::VirtualDisplay>>,
 }
 
 /// A test package to run inside the spawned REAPER session.
@@ -93,6 +99,7 @@ impl TestRunner {
             headless: true,
             ci: std::env::var("CI").is_ok(),
             extension_whitelist: vec![],
+            display: None,
         }
     }
 
@@ -106,6 +113,27 @@ impl TestRunner {
     pub fn with_timeout(mut self, secs: u64) -> Self {
         self.timeout_secs = secs;
         self
+    }
+
+    /// Run REAPER on a private, screenshottable X display.
+    ///
+    /// Use this for anything that opens a GUI: headless cannot create a
+    /// Dioxus window at all — it aborts REAPER inside GDK and takes the
+    /// daw socket with it, so every later test fails on a socket
+    /// timeout.
+    pub fn with_virtual_display(mut self) -> Result<Self, Box<dyn std::error::Error>> {
+        crate::test::VirtualDisplay::tooling_available()?;
+        let vd = crate::test::VirtualDisplay::start_default()?;
+        println!("  Virtual display: {}", vd.display());
+        // The display supplies DISPLAY, so REAPER must not be headless.
+        self.headless = false;
+        self.display = Some(std::sync::Arc::new(vd));
+        Ok(self)
+    }
+
+    /// The virtual display, when one is running — for screenshots.
+    pub fn virtual_display(&self) -> Option<&crate::test::VirtualDisplay> {
+        self.display.as_deref()
     }
 
     /// Set whether to run headless (DISPLAY="").
@@ -541,9 +569,12 @@ impl TestRunner {
         //   with multi-instance tests which manage their own mDNS discovery
         // - FTS_SYNC_NO_LINK=1 prevents Ableton Link cross-talk
         let headless = self.headless;
+        let virtual_display = self.display.as_ref().map(|d| d.display().to_string());
         let reaper_log_for_nih = reaper_log.clone();
         let apply_env = |cmd: &mut Command| {
-            if headless {
+            if let Some(d) = &virtual_display {
+                cmd.env("DISPLAY", d);
+            } else if headless {
                 cmd.env("DISPLAY", "");
             }
             // When not headless, inherit DISPLAY from the environment so GUI tests
