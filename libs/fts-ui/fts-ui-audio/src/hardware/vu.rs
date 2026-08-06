@@ -7,9 +7,9 @@
 
 use dioxus::prelude::*;
 
+use crate::hardware::vu_kit::{Bezel, VuSpec, Wash};
 use crate::hardware::vu_svg::{
-    db_to_vu, gr_to_vu, needle_tip, scale_arc_path, tick_point, PIVOT_X, PIVOT_Y, VU_H, VU_TICKS,
-    VU_W,
+    scale_arc_for, scale_needle_tip, scale_point, VuScale, PIVOT_X, PIVOT_Y, VU_H, VU_W,
 };
 
 /// What the needle is reading.
@@ -34,49 +34,119 @@ pub enum VuMode {
 pub enum VuFace {
     /// Warm ivory under a yellow lamp — the LA-2A's, and most tube gear's.
     Amber,
-    /// Neutral ivory under a white lamp — the 1176's Modutec, a dbx, an SSL.
+    /// Neutral ivory under a white lamp — the 1176's Modutec, an SSL.
     Ivory,
+    /// Amber card printed in *blue* — the dbx's, which is not a VU at all but
+    /// a decibel readout, and prints like one.
+    AmberBlue,
     /// Blue-lit card, white printing.
     Blue,
+    /// The modern console movement: a near-black card behind glass with the
+    /// lamp *behind the needle*, so the light pools at the pivot and falls
+    /// off upward, and the scale printed white over it.
+    ///
+    /// The one face that takes `tint` — the glow, the pool in the card and
+    /// the bloom off the needle all follow the colour a panel asks for.
+    Backlit,
 }
 
 impl VuFace {
-    fn card(self) -> &'static str {
+    /// Every face in the kit, so a test or a contact sheet can walk them all
+    /// without anyone having to remember to add the new one.
+    pub const ALL: [VuFace; 5] = [
+        Self::Amber,
+        Self::Ivory,
+        Self::AmberBlue,
+        Self::Blue,
+        Self::Backlit,
+    ];
+
+    /// How this face is printed and lit — see
+    /// [`vu_kit`](crate::hardware::vu_kit).
+    ///
+    /// The only place a face maps to an appearance. The renderer below walks
+    /// the spec, so a new face is a variant here plus one const in
+    /// [`vu_faces`](crate::hardware::vu_faces).
+    pub fn spec(self) -> &'static VuSpec {
+        use crate::hardware::vu_faces as kit;
         match self {
-            Self::Amber => "linear-gradient(180deg, #f6d79a 0%, #e8b45f 62%, #d99a3c 100%)",
-            Self::Ivory => "linear-gradient(180deg, #f4f2ea 0%, #ddd9cd 100%)",
-            Self::Blue => "linear-gradient(180deg, #2f5f8f 0%, #16324e 100%)",
+            Self::Amber => &kit::AMBER,
+            Self::Ivory => &kit::IVORY,
+            Self::AmberBlue => &kit::AMBER_BLUE,
+            Self::Blue => &kit::BLUE,
+            Self::Backlit => &kit::BACKLIT,
         }
     }
-    fn ink(self) -> &'static str {
+
+    /// Whether this face takes a colour from the call site.
+    ///
+    /// Almost none do. A period card is the colour it is, and recolouring one
+    /// would be a different unit rather than the same one under a different
+    /// lamp — which is exactly what a backlit movement *is*.
+    pub fn is_tintable(self) -> bool {
+        self.spec().wash != Wash::None
+    }
+}
+
+/// Which frame the movement is mounted in.
+///
+/// A separate part from the face: the same movement sits in a pressed-steel
+/// rack frame on one unit and a chromed ring on another. A [`VuFace`] names
+/// its default, and a panel can ask for a different one.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum BezelStyle {
+    /// Pressed steel, matte black, vented. The rack default.
+    BlackRack,
+    /// A thin dark surround and nothing else.
+    Slim,
+    /// A bright chromed ring.
+    Chrome,
+    /// Warm brass, a little tarnished in the shadows.
+    Brass,
+    /// Satin nickel on a brushed panel — the Teletronix-era meter plate.
+    SatinPlate,
+    /// A deep rectangular recess, the movement set well back behind glass.
+    Recessed,
+    /// The rack frame with the bulb turned up — warm light around the opening.
+    LitAmber,
+    /// The same, lit cold, for a blue-carded movement.
+    LitBlue,
+    /// A chromed ring around a lit movement.
+    LitChrome,
+}
+
+impl BezelStyle {
+    /// Every frame in the kit, so a contact sheet can walk them all.
+    pub const ALL: [BezelStyle; 9] = [
+        Self::BlackRack,
+        Self::Slim,
+        Self::Chrome,
+        Self::Brass,
+        Self::SatinPlate,
+        Self::Recessed,
+        Self::LitAmber,
+        Self::LitBlue,
+        Self::LitChrome,
+    ];
+
+    pub fn spec(self) -> &'static Bezel {
+        use crate::hardware::vu_faces as kit;
         match self {
-            Self::Amber => "#3a2a12",
-            Self::Ivory => "#2a241c",
-            Self::Blue => "#e8f2ff",
+            Self::BlackRack => &kit::BLACK_RACK,
+            Self::Slim => &kit::SLIM,
+            Self::Chrome => &kit::CHROME,
+            Self::Brass => &kit::BRASS,
+            Self::SatinPlate => &kit::SATIN_PLATE,
+            Self::Recessed => &kit::RECESSED,
+            Self::LitAmber => &kit::LIT_AMBER,
+            Self::LitBlue => &kit::LIT_BLUE,
+            Self::LitChrome => &kit::LIT_CHROME,
         }
     }
-    fn needle(self) -> &'static str {
-        match self {
-            Self::Amber => "#241a0c",
-            Self::Ivory => "#1d1a15",
-            Self::Blue => "#f4f8ff",
-        }
-    }
-    /// The lamp glow across the top of the card.
-    fn lamp(self) -> &'static str {
-        match self {
-            Self::Amber => "rgba(255,214,120,0.55)",
-            Self::Ivory => "rgba(255,246,224,0.30)",
-            Self::Blue => "rgba(150,205,255,0.32)",
-        }
-    }
-    /// Colour of the over-zero part of the scale (red on every VU ever made).
-    fn hot(self) -> &'static str {
-        match self {
-            Self::Amber => "#8f2010",
-            Self::Ivory => "#a8281c",
-            Self::Blue => "#ff6a5c",
-        }
+
+    /// Whether this frame throws light around its opening.
+    pub fn is_lit(self) -> bool {
+        self.spec().glow.is_some()
     }
 }
 
@@ -98,55 +168,143 @@ pub fn VuMeter(
     /// mounted through a panel rather than printed on one.
     #[props(default = false)]
     bezel: bool,
+    /// Which frame to mount it in. Defaults to the face's own.
+    #[props(default)]
+    bezel_style: Option<BezelStyle>,
+    /// What the card is printed with — a VU standard or a plain decibel scale.
+    #[props(default)]
+    card: VuScale,
+    /// The frame's lip shadow, cast onto this card.
+    ///
+    /// Set by the bezel wrapper below rather than by a panel: the movement
+    /// draws the shadow, because the shadow falls *inside* it, but which
+    /// shadow is the frame's business.
+    #[props(default)]
+    shade: Option<String>,
+    /// The colour a backlit movement is lit in.
+    ///
+    /// Only [`VuFace::Backlit`] takes one: on the period faces the card is
+    /// the colour it is, and a tint would be a recolour of a real part. Here
+    /// the glow, the pool in the card and the bloom off the needle all follow
+    /// it, and the printed scale stays white.
+    #[props(default)]
+    tint: Option<String>,
 ) -> Element {
-    let vu = match mode {
-        VuMode::GainReduction => gr_to_vu(value_db as f64),
-        VuMode::Level => db_to_vu(value_db as f64),
+    let value = match mode {
+        VuMode::GainReduction => card.from_gain_reduction_db(value_db as f64),
+        VuMode::Level => card.from_level_db(value_db as f64),
     };
-    let (nx, ny) = needle_tip(vu);
-    let arc = scale_arc_path(6.0);
+    let (nx, ny) = scale_needle_tip(card, value);
+    let arc = scale_arc_for(card, 6.0);
 
     let w = width * scale;
     let h = width * (VU_H / VU_W) * scale;
+    let spec = face.spec();
+    // A tint only reaches a face that says it takes one.
+    let wash = tint.as_deref().filter(|_| spec.wash != Wash::None);
+    let card_css = wash
+        .and_then(|c| spec.wash.card(c))
+        .unwrap_or_else(|| spec.card.to_string());
+    let lamp_css = match wash.and_then(|c| spec.wash.lamp(c)) {
+        Some(color) => spec
+            .lamp
+            .map(|l| crate::hardware::vu_kit::lamp_layers(l, &color)),
+        None => spec.lamp_css(),
+    };
+    let halo_color = wash
+        .and_then(|c| spec.wash.halo(c))
+        .or_else(|| spec.needle.halo.map(|h| h.color.to_string()));
 
     if bezel {
+        let b = match bezel_style {
+            Some(style) => *style.spec(),
+            None => spec.bezel,
+        };
         return rsx! {
             div {
                 "data-testid": "vu-bezel",
+                "data-lit": "{b.glow.is_some()}",
+                // The frame body: matte black, sitting on the panel.
                 style: format!(
-                    "display:flex; flex-direction:column; align-items:center; \
+                    "position:relative; display:inline-flex; flex-direction:column; \
+                     align-items:center; \
                      padding:{:.1}px {:.1}px {:.1}px; border-radius:{:.1}px; \
-                     background:linear-gradient(180deg, #1a1b1d, #0c0d0e); \
-                     border:{:.1}px solid rgba(0,0,0,0.7); \
-                     box-shadow:inset 0 {:.1}px {:.1}px rgba(255,255,255,0.06), \
-                       0 {:.1}px {:.1}px rgba(0,0,0,0.5);",
-                    9.0 * scale,
-                    9.0 * scale,
-                    6.0 * scale,
+                     background:{}; \
+                     box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.55), \
+                       inset 0 {:.1}px 0 rgba(255,255,255,0.07){};",
                     5.0 * scale,
-                    (1.0 * scale).max(1.0),
+                    5.0 * scale,
+                    4.0 * scale,
+                    b.radius * scale,
+                    b.frame,
+                    3.0 * scale,
+                    7.0 * scale,
                     1.0 * scale,
-                    2.0 * scale,
-                    2.0 * scale,
-                    6.0 * scale,
+                    // A lit frame spills light onto the panel around it.
+                    match b.glow {
+                        Some(g) => format!(", {}", g.css(scale)),
+                        None => String::new(),
+                    },
                 ),
-                VuMeter { scale, width, face, mode, value_db, legend }
-                // The vent under the glass, which is most of what says the
-                // movement is mounted through the panel.
+
+                // The opening, chamfered *inward*. Four border colours, so the
+                // browser mitres the corners at 45° and the faces read as
+                // angles rather than as a flat outline.
+                //
+                // Lit from above, a sunken opening has its **top** face in
+                // shadow and its **bottom** face catching the light — the
+                // opposite of a raised boss, and the whole difference between
+                // a movement set into a panel and one printed on it.
                 div {
                     style: format!(
-                        "margin-top:{:.1}px; width:{:.1}px; height:{:.1}px; \
-                         border-radius:{:.1}px; \
-                         background:repeating-linear-gradient(90deg, \
-                           #000 0 {:.1}px, #2a2c2e {:.1}px {:.1}px);",
+                        "display:flex; line-height:0; \
+                         border-top:{0:.1}px solid {1}; \
+                         border-left:{0:.1}px solid {2}; \
+                         border-right:{0:.1}px solid {3}; \
+                         border-bottom:{0:.1}px solid {4}; \
+                         box-shadow:inset 0 {5:.1}px {6:.1}px rgba(0,0,0,0.75);",
+                        b.depth * scale,
+                        b.top,
+                        b.left,
+                        b.right,
+                        b.bottom,
+                        2.0 * scale,
                         5.0 * scale,
-                        width * 0.30 * scale,
-                        4.0 * scale,
-                        1.0 * scale,
-                        2.0 * scale,
-                        2.0 * scale,
-                        4.0 * scale,
                     ),
+                    VuMeter {
+                        scale, width, face, mode, value_db, legend, card, tint,
+                        shade: b.shade.map(|sh| sh.css(scale)),
+                    }
+                }
+
+                // The room on the frame's own surface. Over the frame and the
+                // vent, under nothing — it is the outermost thing there is,
+                // because it is a reflection off the front of the moulding.
+                if let Some(sheen) = b.sheen {
+                    div {
+                        "data-testid": "vu-frame-sheen",
+                        style: format!(
+                            "position:absolute; inset:0; pointer-events:none; \
+                             border-radius:{:.1}px; background:{sheen};",
+                            b.radius * scale,
+                        ),
+                    }
+                }
+
+                // The vent under the glass, which is most of what says the
+                // movement is mounted through the panel.
+                if let Some(vent) = b.vent {
+                    div {
+                        style: format!(
+                            "margin-top:{:.1}px; width:{:.1}px; height:{:.1}px; \
+                             border-radius:{:.1}px; background:{};",
+                            4.0 * scale,
+                            width * 0.30 * scale,
+                            4.0 * scale,
+                            1.0 * scale,
+                            vent.css(scale),
+                        ),
+                    }
                 }
             }
         };
@@ -155,26 +313,26 @@ pub fn VuMeter(
     rsx! {
         div {
             "data-testid": "vu-meter",
-            "data-vu": "{vu:.2}",
+            "data-vu": "{value:.2}",
             style: format!(
                 "position:relative; width:{w:.1}px; height:{h:.1}px; \
                  background:{}; border-radius:{:.1}px; overflow:hidden; \
                  border:{:.1}px solid rgba(0,0,0,0.55); \
                  box-shadow:inset 0 0 {:.1}px rgba(0,0,0,0.45);",
-                face.card(),
+                card_css,
                 3.0 * scale,
                 (1.5 * scale).max(1.0),
                 10.0 * scale,
             ),
 
-            // Lamp wash — the meter is lit from behind the top of the card.
-            div {
-                style: format!(
-                    "position:absolute; inset:0; background:radial-gradient(\
-                     ellipse at 50% 8%, {} 0%, rgba(0,0,0,0) 68%); \
-                     pointer-events:none;",
-                    face.lamp(),
-                ),
+            // Lamp wash — the meter is lit from behind the card.
+            if let Some(lamp) = lamp_css {
+                div {
+                    style: format!(
+                        "position:absolute; inset:0; background:{lamp}; \
+                         pointer-events:none;",
+                    ),
+                }
             }
 
             svg {
@@ -186,24 +344,28 @@ pub fn VuMeter(
                 path {
                     d: "{arc}",
                     fill: "none",
-                    stroke: "{face.ink()}",
+                    stroke: "{spec.ink}",
                     stroke_width: "0.8",
                     opacity: "0.85",
                 }
-                path {
-                    d: "{hot_arc_path()}",
-                    fill: "none",
-                    stroke: "{face.hot()}",
-                    stroke_width: "1.6",
+                // Only a VU prints a red stretch; a decibel readout does not.
+                if card.hot_from().is_some() {
+                    path {
+                        d: "{hot_arc_path()}",
+                        fill: "none",
+                        stroke: "{spec.hot}",
+                        stroke_width: "1.6",
+                    }
                 }
 
                 // Scale ticks. Majors are longer and numbered.
-                for (v , label , major) in VU_TICKS.iter().copied() {
+                for (v , label , major) in card.ticks().iter().copied() {
                     {
-                        let (x1, y1) = tick_point(v, 6.0);
-                        let (x2, y2) = tick_point(v, if major { 13.0 } else { 10.0 });
-                        let (lx, ly) = tick_point(v, 22.0);
-                        let color = if v > 0.0 { face.hot() } else { face.ink() };
+                        let (x1, y1) = scale_point(card, v, 6.0);
+                        let (x2, y2) = scale_point(card, v, if major { 13.0 } else { 10.0 });
+                        let (lx, ly) = scale_point(card, v, 22.0);
+                        let hot = card.hot_from().map(|from| v > from).unwrap_or(false);
+                        let color = if hot { spec.hot } else { spec.ink };
                         rsx! {
                             line {
                                 x1: "{x1:.2}", y1: "{y1:.2}", x2: "{x2:.2}", y2: "{y2:.2}",
@@ -222,34 +384,67 @@ pub fn VuMeter(
                     }
                 }
 
-                // Legend under the scale — "VU", "GAIN REDUCTION".
-                text {
-                    x: "{VU_W * 0.5:.2}", y: "{VU_H * 0.93:.2}",
-                    fill: "{face.ink()}", font_size: "5.0",
-                    text_anchor: "middle", letter_spacing: "0.6",
-                    "{legend}"
+                // Legend under the scale. A real card prints the *instrument*
+                // — "VU", "dB" — and leaves what it is metering to a switch
+                // on the panel, so this is short or absent. A blank legend
+                // prints nothing rather than an empty text node.
+                if !legend.trim().is_empty() {
+                    text {
+                        x: "{VU_W * 0.5:.2}", y: "{VU_H * 0.93:.2}",
+                        fill: "{spec.ink}", font_size: "5.0",
+                        text_anchor: "middle", letter_spacing: "0.6",
+                        "{legend}"
+                    }
                 }
 
                 // Needle + hub.
+                // The bloom off a lit needle: wide faint strokes under the
+                // crisp one. A needle in front of a lamp is not a line.
+                if let (Some(halo), Some(color)) = (spec.needle.halo, halo_color.as_deref()) {
+                    for (i , w) in halo.widths(spec.needle.width).into_iter().enumerate() {
+                        line {
+                            key: "halo{i}",
+                            x1: "{PIVOT_X:.2}", y1: "{PIVOT_Y:.2}",
+                            x2: "{nx:.2}", y2: "{ny:.2}",
+                            stroke: "{color}",
+                            stroke_width: "{w:.2}",
+                            stroke_linecap: "round",
+                        }
+                    }
+                }
                 line {
                     "data-testid": "vu-needle",
                     x1: "{PIVOT_X:.2}", y1: "{PIVOT_Y:.2}",
                     x2: "{nx:.2}", y2: "{ny:.2}",
-                    stroke: "{face.needle()}",
-                    stroke_width: "1.1",
+                    stroke: "{spec.needle.color}",
+                    stroke_width: "{spec.needle.width:.2}",
                     stroke_linecap: "round",
                 }
                 circle {
-                    cx: "{PIVOT_X:.2}", cy: "{VU_H:.2}", r: "4.0",
-                    fill: "{face.needle()}", opacity: "0.9",
+                    cx: "{PIVOT_X:.2}", cy: "{VU_H:.2}", r: "{spec.needle.hub_r:.2}",
+                    fill: "{spec.needle.color}", opacity: "{spec.needle.hub_opacity:.2}",
+                }
+            }
+
+            // The frame's lip, shadowing the card behind it. Over the print,
+            // because the shadow falls on the whole face — under the glass,
+            // because the glass is in front of all of it.
+            if let Some(shade) = &shade {
+                div {
+                    "data-testid": "vu-shade",
+                    style: format!(
+                        "position:absolute; inset:0; pointer-events:none; box-shadow:{shade};",
+                    ),
                 }
             }
 
             // Glass: a soft highlight across the top of the bezel.
-            div {
-                style: "position:absolute; inset:0; pointer-events:none; \
-                        background:linear-gradient(160deg, rgba(255,255,255,0.22) 0%, \
-                        rgba(255,255,255,0.04) 38%, rgba(0,0,0,0.10) 100%);",
+            if let Some(glass) = spec.glass {
+                div {
+                    style: format!(
+                        "position:absolute; inset:0; pointer-events:none; background:{glass};",
+                    ),
+                }
             }
         }
     }
@@ -257,8 +452,8 @@ pub fn VuMeter(
 
 /// The red stretch of the scale, from 0 VU to the right stop.
 fn hot_arc_path() -> String {
-    let (x0, y0) = tick_point(0.0, 6.0);
-    let (x1, y1) = tick_point(3.0, 6.0);
+    let (x0, y0) = scale_point(VuScale::Vu, 0.0, 6.0);
+    let (x1, y1) = scale_point(VuScale::Vu, 3.0, 6.0);
     let r = crate::hardware::vu_svg::NEEDLE_LEN - 6.0;
     format!("M {x0:.2} {y0:.2} A {r:.2} {r:.2} 0 0 1 {x1:.2} {y1:.2}")
 }

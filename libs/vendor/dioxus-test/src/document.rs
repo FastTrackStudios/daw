@@ -140,6 +140,24 @@ impl DocumentTester {
         Ok(())
     }
 
+    /// Recompute styles and layout for the document as it currently stands.
+    ///
+    /// FTS extension. [`Self::pump`] invokes event handlers and applies the
+    /// DOM mutations they produce, but it does *not* lay the document out
+    /// again — only [`Self::build`] and [`Self::advance_time`] do. So a node
+    /// that a handler just created has no layout box (`size()` reports 0×0,
+    /// `document_origin()` reports the origin) and, more importantly, is
+    /// invisible to the hit-testing pointer helpers.
+    ///
+    /// Call this after pumping whenever a test measures or clicks something
+    /// that appeared in response to an event — a popup, a menu, a panel.
+    /// Unlike [`Self::advance_time`] it takes `&self` and does not move the
+    /// clock, so it can be used freely between events.
+    pub fn relayout(&self) {
+        let mut document = self.document.borrow_mut();
+        document.inner_mut().resolve(self.now);
+    }
+
     /// Advance the internal clock by the given [Duration].
     ///
     /// This advances any CSS animations which may be in progress and recalculates the layout.

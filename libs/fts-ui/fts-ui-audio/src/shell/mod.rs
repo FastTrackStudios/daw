@@ -57,6 +57,16 @@ pub struct ShellItem {
     /// own front panel ("2A", "76", "SSL"). Derived from the label when not
     /// given, which is fine for one-word names and rarely right otherwise.
     pub badge: String,
+    /// How many units this entry cycles through, and which one is showing.
+    ///
+    /// Clicking an active entry advances to the next unit inside it, and
+    /// nothing on the rail said so: a family of three looked exactly like a
+    /// family of one until you clicked it and something changed. The dots are
+    /// the smallest honest answer — how many there are, and where you are.
+    ///
+    /// `None` (or a count of one) draws nothing, because a single-unit family
+    /// has nothing to cycle.
+    pub cycle: Option<(usize, usize)>,
 }
 
 impl ShellItem {
@@ -67,12 +77,19 @@ impl ShellItem {
             id: id.into(),
             label,
             badge,
+            cycle: None,
         }
     }
 
     /// Set the badge explicitly — the usual case for hardware names.
     pub fn with_badge(mut self, badge: impl Into<String>) -> Self {
         self.badge = badge.into();
+        self
+    }
+
+    /// Say how many units this entry cycles through, and which is active.
+    pub fn with_cycle(mut self, count: usize, index: usize) -> Self {
+        self.cycle = (count > 1).then_some((count, index.min(count.saturating_sub(1))));
         self
     }
 
@@ -180,23 +197,60 @@ pub fn PluginShell(
                                     div {
                                         "data-testid": "rail-item-{item.id}",
                                         "data-active": "{active}",
-                                        title: "{item.label}",
-                                        style: format!(
-                                            "width:32px; height:32px; border-radius:9px; flex:none; \
-                                             display:flex; align-items:center; justify-content:center; \
-                                             cursor:pointer; font-size:10px; letter-spacing:0.02em; \
-                                             font-weight:{}; color:{}; background:{}; border:1px solid {};",
-                                            if active { 800 } else { 600 },
-                                            if active { "#0b0b0d" } else { "var(--muted-foreground, #8a8a92)" },
-                                            if active { accent.as_str() } else { "transparent" },
-                                            if active { accent.as_str() } else { "transparent" },
-                                        ),
+                                        title: match item.cycle {
+                                            Some((count, at)) => {
+                                                format!("{} — {} of {count} (click to cycle)", item.label, at + 1)
+                                            }
+                                            None => item.label.clone(),
+                                        },
+                                        style: "display:flex; flex-direction:column; \
+                                                align-items:center; gap:2px; flex:none; \
+                                                cursor:pointer;",
                                         onclick: move |_| {
                                             if let Some(cb) = on_select {
                                                 cb.call(index);
                                             }
                                         },
-                                        "{item.badge}"
+                                        div {
+                                            style: format!(
+                                                "width:32px; height:32px; border-radius:9px; \
+                                                 display:flex; align-items:center; justify-content:center; \
+                                                 font-size:10px; letter-spacing:0.02em; \
+                                                 font-weight:{}; color:{}; background:{}; border:1px solid {};",
+                                                if active { 800 } else { 600 },
+                                                if active { "#0b0b0d" } else { "var(--muted-foreground, #8a8a92)" },
+                                                if active { accent.as_str() } else { "transparent" },
+                                                if active { accent.as_str() } else { "transparent" },
+                                            ),
+                                            "{item.badge}"
+                                        }
+                                        // How many units are stacked behind this
+                                        // entry, and which one you are on.
+                                        if let Some((count, at)) = item.cycle {
+                                            div {
+                                                "data-testid": "rail-dots-{item.id}",
+                                                style: "display:flex; flex-direction:row; \
+                                                        align-items:center; gap:2px; height:4px;",
+                                                for dot in 0..count {
+                                                    div {
+                                                        key: "{dot}",
+                                                        style: format!(
+                                                            "width:3px; height:3px; border-radius:50%; \
+                                                             background:{}; opacity:{};",
+                                                            // Only the family you are in has a "you are
+                                                            // here"; a lit dot on one you are not in
+                                                            // would claim a position you do not hold.
+                                                            if active && dot == at {
+                                                                accent.as_str()
+                                                            } else {
+                                                                "var(--muted-foreground, #8a8a92)"
+                                                            },
+                                                            if active && dot == at { "1" } else { "0.40" },
+                                                        ),
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -313,5 +367,33 @@ pub fn FloatingPanel(
             ),
             {children}
         }
+    }
+}
+
+#[cfg(test)]
+mod cycle_tests {
+    use super::*;
+
+    /// A family with one unit has nothing to cycle, so it draws no dots —
+    /// otherwise every single-entry rail would grow a dot that means nothing.
+    #[test]
+    fn one_unit_draws_no_dots() {
+        assert_eq!(ShellItem::new("main", "Main").with_cycle(1, 0).cycle, None);
+        assert_eq!(ShellItem::new("main", "Main").with_cycle(0, 0).cycle, None);
+    }
+
+    /// …and a family of several says how many and where you are.
+    #[test]
+    fn several_units_say_how_many_and_which() {
+        let item = ShellItem::new("opto", "Opto").with_cycle(3, 1);
+        assert_eq!(item.cycle, Some((3, 1)));
+    }
+
+    /// An index past the end is clamped rather than dropped: the caller is
+    /// reporting a position, and a position that cannot be drawn is worse
+    /// than one that is drawn at the end.
+    #[test]
+    fn an_out_of_range_position_lands_on_the_last_dot() {
+        assert_eq!(ShellItem::new("x", "X").with_cycle(3, 9).cycle, Some((3, 2)));
     }
 }
