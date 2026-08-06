@@ -40,6 +40,9 @@ use vox::{
 
 use crate::layer::LayerRouter;
 
+#[cfg(feature = "telemetry")]
+use tracing::Instrument as _;
+
 /// Metadata key carrying `Bearer <token>` (mirrors auth-proto's
 /// `AUTHORIZATION_METADATA_KEY`; duplicated here so architect does not
 /// depend on auth-proto).
@@ -281,6 +284,47 @@ where
             let c = call.get();
             (c.method_id, PermissionsGate::bearer_from(&c.metadata))
         };
+        // Everything below runs inside ONE span, which is the call's wide
+        // event. This matters for ordering: `decide` resolves the identity
+        // and audits the permission decision BEFORE dispatching, so it runs
+        // before `LayerRouter` opens its own `rpc` span. Without a span
+        // opened here, anything the gate records lands on whatever span
+        // happens to be current — in a WebSocket driver task, none — and
+        // is silently dropped. That is not hypothetical: the auth/perm
+        // fields were added, compiled, deployed, and recorded nothing,
+        // and only a query against the exported spans caught it.
+        //
+        // `LayerRouter`'s span nests inside this one and carries the
+        // rpc.service/method detail.
+        self.dispatch(method_id, token, call, reply, schemas)
+            .instrument(gate_span())
+            .await;
+    }
+}
+
+/// The span that owns one gated call — see the ordering note in `handle`.
+#[cfg(feature = "telemetry")]
+fn gate_span() -> tracing::Span {
+    tracing::info_span!("rpc.gated", otel.name = "rpc")
+}
+
+#[cfg(not(feature = "telemetry"))]
+fn gate_span() -> tracing::Span {
+    tracing::Span::none()
+}
+
+impl<H> PermissionedRouter<H>
+where
+    H: Handler<DriverReplySink> + Send + Sync,
+{
+    async fn dispatch(
+        &self,
+        method_id: MethodId,
+        token: Option<String>,
+        call: SelfRef<RequestCall<'static>>,
+        reply: DriverReplySink,
+        schemas: Arc<SchemaRecvTracker>,
+    ) {
         let outcome = self.gate.decide(method_id, token).await;
         match outcome {
             GateOutcome::Pass => self.inner.handle(call, reply, schemas).await,
