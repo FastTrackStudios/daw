@@ -226,6 +226,9 @@ pub enum RackItem {
         ink: &'static str,
         /// Colour of the indicator below it, if it has one.
         led: &'static str,
+        /// Which part this is — the shape, not just the colour. `None`
+        /// takes the desk idiom.
+        style: Option<crate::hardware::button::ButtonStyle>,
     },
     /// A segmented LED level meter, as the console's output metering.
     LedMeter {
