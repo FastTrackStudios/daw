@@ -124,9 +124,41 @@ Two design points to carry over:
   values *and* positions; over a lane divider or the ruler edits all
   selected events' positions only.
 
+## Source 4 — FeedTheCat's MIDI Editor Magic
+
+`FTC_MeMagic.lua` v1.4.0, **MIT** (Ilias-Timon Poulakis),
+[forum thread](https://forum.cockos.com/showthread.php?t=238851),
+cloned from
+[iliaspoulakis/Reaper-Tools](https://github.com/iliaspoulakis/Reaper-Tools).
+MIT means this one we can port properly rather than only read.
+
+Two ideas, both now in `zoom.rs`:
+
+**1. Zoom to a note count, not a bar count.** Four bars is the wrong
+amount of screen for a whole note and for a 32nd-note run, so a fixed
+zoom is always wrong somewhere in the part. The span comes from a
+locally-weighted average note length using **Shepard's inverse distance
+weighting** — each note contributes its length plus the following gap,
+weighted `1 / distance^smoothing`, so the view adapts to the density of
+the passage under the pointer rather than the item average. Gaps are
+folded in (a sparse passage should zoom out) but capped, or one long
+rest blows the view open. An empty stretch widens until the nearest note
+is visible rather than showing nothing.
+
+**2. One key, contextual behaviour.** Horizontal and vertical modes are
+chosen independently by *where the pointer is*: note area → density-aware
++ fit notes in view; piano keys → whole item + all notes; ruler → time
+only, pitch untouched; CC lane → time only. One shortcut covers what
+would otherwise be a dozen.
+
+Also carried over: `cursor_alignment` (where the anchor lands, 0..1),
+row-count floor and row-height ceiling, and — importantly — clamping to
+the item **slides** the view rather than narrowing it, so the zoom level
+does not change as you approach an item edge.
+
 ## Status
 
-Landed (89 core tests):
+Landed (100 core tests):
 
 - `RowSpace` — pitch / drums / strings, with GM drum map, guitar and
   bass tunings, capo, nearest-hand fingering
@@ -141,6 +173,9 @@ Landed (89 core tests):
   scale length, stretch positions (arpeggiate), copy notes, partial
   quantize, legato, set text, set articulation, set string (re-fingers),
   set fret
+- `zoom` — the MeMagic port: density-aware smart zoom, seven horizontal
+  and ten vertical modes, contextual mode pairs, bound to `F` /
+  `Shift+F` in the UI
 
 Next, in order:
 

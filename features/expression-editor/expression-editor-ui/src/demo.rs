@@ -29,10 +29,13 @@ pub enum Scene {
     Ambiguous,
     /// An empty document.
     Empty,
+    /// A part whose note density changes across it — sixteenths at the
+    /// start, held notes at the end. What contextual zoom is for.
+    Density,
 }
 
 impl Scene {
-    pub const ALL: [Scene; 7] = [
+    pub const ALL: [Scene; 8] = [
         Scene::Phrase,
         Scene::Zones,
         Scene::Microtonal,
@@ -40,6 +43,7 @@ impl Scene {
         Scene::AllLanes,
         Scene::Ambiguous,
         Scene::Empty,
+        Scene::Density,
     ];
 
     /// Stable file-name stem for screenshots.
@@ -52,6 +56,7 @@ impl Scene {
             Scene::AllLanes => "05-all-lanes",
             Scene::Ambiguous => "06-ambiguous",
             Scene::Empty => "07-empty",
+            Scene::Density => "16-density",
         }
     }
 
@@ -64,6 +69,7 @@ impl Scene {
             Scene::AllLanes => "All lanes",
             Scene::Ambiguous => "Channel conflict",
             Scene::Empty => "Empty",
+            Scene::Density => "Mixed density",
         }
     }
 }
@@ -92,10 +98,39 @@ fn sung_note(id: u64, start: f64, len: f64, row: i32, channel: u8, scoop: f64) -
 
 /// Build the editor for a scene, sized to `viewport`.
 pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
-    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let end = if scene == Scene::Density { PPQ * 40.0 } else { PPQ * 8.0 };
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, end);
 
     match scene {
         Scene::Empty => {}
+        Scene::Density => {
+            // A sixteenth-note run, then held notes: one fixed zoom
+            // cannot serve both, which is the whole argument for
+            // density-aware zoom.
+            let mut id = 1u64;
+            for i in 0..32 {
+                doc.push(sung_note(
+                    id,
+                    PPQ * 0.25 * i as f64,
+                    PPQ * 0.2,
+                    60 + (i % 7) as i32,
+                    2 + (i % 14) as u8,
+                    -0.5,
+                ));
+                id += 1;
+            }
+            for i in 0..5 {
+                doc.push(sung_note(
+                    id,
+                    PPQ * (16.0 + 4.0 * i as f64),
+                    PPQ * 3.5,
+                    62 + (i * 2) as i32,
+                    2 + (i % 14) as u8,
+                    -1.5,
+                ));
+                id += 1;
+            }
+        }
         Scene::Zones => {
             // One long note that moves through three pitch centers —
             // the case zone scaling exists for.
@@ -184,7 +219,7 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
         Scene::Ambiguous => {
             ed.selection.set_single(NoteId(1));
         }
-        Scene::Empty => {}
+        Scene::Empty | Scene::Density => {}
         Scene::Phrase => {
             ed.selection.set_single(NoteId(3));
         }

@@ -7,6 +7,7 @@
 use expression_editor_core::doc::{Lane, NoteId, Point, Target};
 use expression_editor_core::edit::Edit;
 use expression_editor_core::tools::{self, Hit, Mods};
+use expression_editor_core::zoom::ZoomModes;
 use expression_editor_core::{Editor, Shape, Tool};
 
 /// What the pointer is currently doing. `None` between gestures.
@@ -736,6 +737,21 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
         }
         ("v", false, _) => {
             ed.reset_view();
+            true
+        }
+        // Contextual zoom. One key, and the pointer region picks the
+        // behaviour — the MeMagic idea.
+        // Contextual zoom. Shift widens the intent: plain F hugs the
+        // local passage, Shift+F frames the whole part.
+        ("f", false, shift) => {
+            let anchor = ed.playhead.unwrap_or(mouse_t);
+            let row = ed.camera.pitch_center;
+            let modes = if shift {
+                ZoomModes::KEYS
+            } else {
+                ZoomModes::NOTE_AREA
+            };
+            ed.smart_zoom(modes, anchor, row);
             true
         }
         ("s", false, _) => set_tool(ed, Tool::Select),

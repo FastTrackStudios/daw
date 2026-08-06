@@ -1525,3 +1525,238 @@ fn edits_are_distinguished_from_navigation_for_undo_grouping() {
     assert!(Action::MoveNoteNoSnap.ignores_snap());
     assert!(!Action::MoveNote.ignores_snap());
 }
+
+// ── contextual zoom (MeMagic) ────────────────────────────────────────
+
+use expression_editor_core::zoom::{self, HorizontalMode, SmartZoom, Span, VerticalMode, ZoomModes};
+
+fn spans_at(starts: &[f64], len: f64, row: i32) -> Vec<Span> {
+    starts
+        .iter()
+        .map(|&s| Span {
+            start: s,
+            end: s + len,
+            row,
+        })
+        .collect()
+}
+
+#[test]
+fn smart_zoom_follows_local_density_not_the_item_average() {
+    // Sixteenths on the left, whole notes on the right.
+    let mut spans = spans_at(&[0.0, 240.0, 480.0, 720.0, 960.0, 1200.0], 240.0, 60);
+    spans.extend(spans_at(&[10000.0, 14000.0, 18000.0], 3840.0, 60));
+    let cfg = SmartZoom::default();
+
+    let dense = zoom::weighted_note_length(&spans, 600.0, cfg).unwrap();
+    let sparse = zoom::weighted_note_length(&spans, 14000.0, cfg).unwrap();
+    assert!(
+        sparse > dense * 3.0,
+        "the sparse passage must zoom out much further: {dense} vs {sparse}"
+    );
+}
+
+#[test]
+fn zero_smoothing_ignores_distance_entirely() {
+    let mut spans = spans_at(&[0.0, 240.0, 480.0], 240.0, 60);
+    spans.extend(spans_at(&[10000.0, 14000.0], 3840.0, 60));
+    let cfg = SmartZoom {
+        smoothing: 0.0,
+        ..Default::default()
+    };
+    let a = zoom::weighted_note_length(&spans, 200.0, cfg).unwrap();
+    let b = zoom::weighted_note_length(&spans, 14000.0, cfg).unwrap();
+    assert!(
+        (a - b).abs() < 1e-6,
+        "with no smoothing every position sees the same average"
+    );
+}
+
+#[test]
+fn smart_zoom_scales_with_the_requested_note_count() {
+    let spans = spans_at(&[0.0, 240.0, 480.0, 720.0], 240.0, 60);
+    let ten = zoom::weighted_note_length(
+        &spans,
+        360.0,
+        SmartZoom {
+            notes_visible: 10.0,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let twenty = zoom::weighted_note_length(
+        &spans,
+        360.0,
+        SmartZoom {
+            notes_visible: 20.0,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(twenty > ten, "more notes means a wider span");
+}
+
+#[test]
+fn an_empty_stretch_still_reveals_the_nearest_note() {
+    let spans = spans_at(&[0.0], 240.0, 60);
+    let cfg = SmartZoom::default();
+    // Far away from the only note.
+    let span = zoom::weighted_note_length(&spans, 100_000.0, cfg).unwrap();
+    assert!(
+        span >= 100_000.0 * 2.0,
+        "the view must widen enough to show something, got {span}"
+    );
+}
+
+#[test]
+fn no_notes_gives_no_smart_span() {
+    assert!(zoom::weighted_note_length(&[], 0.0, SmartZoom::default()).is_none());
+}
+
+#[test]
+fn cursor_alignment_places_the_anchor_in_the_view() {
+    assert_eq!(zoom::align(100.0, 40.0, 0.0), (100.0, 140.0), "left edge");
+    assert_eq!(zoom::align(100.0, 40.0, 0.5), (80.0, 120.0), "centred");
+    assert_eq!(zoom::align(100.0, 40.0, 1.0), (60.0, 100.0), "right edge");
+}
+
+#[test]
+fn restricting_to_the_item_slides_the_view_rather_than_squashing_it() {
+    let vp = Viewport::new(800.0, 480.0);
+    let content = Content {
+        t_start: 0.0,
+        t_end: 10000.0,
+        pitch_lo: 55.0,
+        pitch_hi: 67.0,
+    };
+    let cam = camera::reset_view(content, vp, 0.03, 0.35);
+    let spans = spans_at(&[0.0, 240.0, 480.0], 240.0, 60);
+
+    let free = zoom::apply_horizontal(
+        cam,
+        HorizontalMode::SmartNotes,
+        &spans,
+        0.0,
+        content,
+        vp,
+        3840.0,
+        SmartZoom::default(),
+    );
+    let clamped = zoom::apply_horizontal(
+        cam,
+        HorizontalMode::SmartNotesInItem,
+        &spans,
+        0.0,
+        content,
+        vp,
+        3840.0,
+        SmartZoom::default(),
+    );
+    assert!(free.t0 < content.t_start, "unclamped runs off the item start");
+    assert_eq!(clamped.t0, content.t_start, "clamped starts at the item");
+    assert!(
+        (free.units_per_px - clamped.units_per_px).abs() < 1e-9,
+        "clamping must slide the view, not change the zoom level"
+    );
+}
+
+#[test]
+fn vertical_fit_respects_the_row_floor_and_ceiling() {
+    let vp = Viewport::new(800.0, 480.0);
+    let cam = Camera {
+        t0: 0.0,
+        units_per_px: 10.0,
+        pitch_center: 60.0,
+        px_per_semitone: 10.0,
+    };
+    // One note: without a floor this would fill the screen with a
+    // single row.
+    let one = spans_at(&[0.0], 240.0, 60);
+    let cfg = SmartZoom::default();
+    let out = zoom::apply_vertical(
+        cam,
+        VerticalMode::AllNotes,
+        &one,
+        60.0,
+        vp,
+        (0.0, 8000.0),
+        cfg,
+    );
+    assert!(out.px_per_semitone <= cfg.max_px_per_row);
+    assert!(
+        vp.h / out.px_per_semitone >= cfg.min_rows - 1e-6,
+        "at least min_rows must stay visible"
+    );
+}
+
+#[test]
+fn notes_in_view_ignores_notes_outside_the_horizontal_span() {
+    let vp = Viewport::new(800.0, 480.0);
+    let cam = Camera {
+        t0: 0.0,
+        units_per_px: 1.0,
+        pitch_center: 60.0,
+        px_per_semitone: 10.0,
+    };
+    let mut spans = spans_at(&[0.0], 240.0, 60);
+    spans.extend(spans_at(&[50_000.0], 240.0, 100)); // far away, high
+    let out = zoom::apply_vertical(
+        cam,
+        VerticalMode::CenterOfNotesInView,
+        &spans,
+        60.0,
+        vp,
+        (0.0, 800.0),
+        SmartZoom::default(),
+    );
+    assert!(
+        (out.pitch_center - 60.0).abs() < 1e-6,
+        "the offscreen note must not drag the view up"
+    );
+}
+
+#[test]
+fn contextual_modes_zoom_differently_per_pointer_region() {
+    // Needs a part longer than the smart span wants, or both modes
+    // clamp to the item and there is nothing to tell apart.
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 64.0);
+    for i in 0..64 {
+        doc.push(Note::new(
+            NoteId(i + 1),
+            PPQ * i as f64 * 0.5,
+            PPQ * (i as f64 * 0.5 + 0.4),
+            60 + (i % 5) as i32,
+        ));
+    }
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
+    let anchor = PPQ * 8.0;
+
+    let mut keys = ed.clone();
+    keys.smart_zoom(ZoomModes::KEYS, anchor, 62.0);
+    let mut notes = ed.clone();
+    notes.smart_zoom(ZoomModes::NOTE_AREA, anchor, 62.0);
+
+    // Over the keys the whole item is framed; over the notes the view
+    // hugs the local passage.
+    assert!(
+        notes.camera.units_per_px < keys.camera.units_per_px,
+        "note-area zoom should be tighter than item zoom"
+    );
+
+    // The ruler leaves pitch alone entirely.
+    let before = ed.camera.px_per_semitone;
+    ed.smart_zoom(ZoomModes::RULER, anchor, 62.0);
+    assert_eq!(ed.camera.px_per_semitone, before);
+}
+
+#[test]
+fn smart_zoom_keeps_the_anchor_in_view() {
+    let mut ed = test_editor();
+    let anchor = PPQ * 2.5;
+    ed.smart_zoom(ZoomModes::NOTE_AREA, anchor, 62.0);
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    assert!(
+        anchor >= t0 && anchor <= t1,
+        "anchor {anchor} fell outside {t0}..{t1}"
+    );
+}

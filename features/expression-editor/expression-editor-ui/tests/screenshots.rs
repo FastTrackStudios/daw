@@ -145,3 +145,25 @@ async fn shoot_modulation_drawer() {
     drawer.preview(&mut ed);
     shoot_with(ed, Some(drawer), "12-modulation").await;
 }
+
+/// Contextual zoom on a part whose density changes: the same gesture at
+/// two positions must produce two different zoom levels.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_smart_zoom() {
+    use expression_editor_core::zoom::ZoomModes;
+
+    let vp = Viewport::new(W as f64, CANVAS_H);
+    let ed = demo::editor(Scene::Density, vp);
+
+    let mut dense = ed.clone();
+    dense.smart_zoom(ZoomModes::NOTE_AREA, demo::PPQ * 1.0, 62.0);
+    shoot(dense, "13-smart-zoom-dense").await;
+
+    let mut sparse = ed.clone();
+    sparse.smart_zoom(ZoomModes::NOTE_AREA, demo::PPQ * 22.0, 62.0);
+    shoot(sparse, "14-smart-zoom-sparse").await;
+
+    let mut whole = ed;
+    whole.smart_zoom(ZoomModes::KEYS, demo::PPQ * 1.0, 62.0);
+    shoot(whole, "15-smart-zoom-item").await;
+}

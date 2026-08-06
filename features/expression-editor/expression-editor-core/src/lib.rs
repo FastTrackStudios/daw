@@ -34,6 +34,7 @@ pub mod rows;
 pub mod shape;
 pub mod tools;
 pub mod tuning;
+pub mod zoom;
 
 pub use camera::{Bounds, Camera, Content, Viewport};
 pub use doc::{Curve, ExpressionDoc, Lane, Marker, Note, NoteId, Point, Target, TimeBase};
@@ -43,6 +44,7 @@ pub use mouse::{Action, MouseMap};
 pub use rows::{Articulation, DrumMap, RowSpace, StringTuning};
 pub use tools::{Grid, Hit, Mods, Selection, Tool};
 pub use tuning::{Temperament, Tuning};
+pub use zoom::{HorizontalMode, SmartZoom, VerticalMode, ZoomModes};
 
 /// Everything the canvas needs to render and interact, in one place.
 ///
@@ -72,6 +74,8 @@ pub struct Editor {
     /// Tempo used to place the grid; a real tempo map lives in the
     /// host adapter.
     pub bpm: f64,
+    /// Contextual-zoom tuning.
+    pub smart_zoom: SmartZoom,
     /// Beats per bar, for the ruler's bar numbering.
     pub beats_per_bar: f64,
     /// Transport position, when the host supplies one.
@@ -97,6 +101,7 @@ impl Editor {
             grid: Grid::default(),
             shape: Shape::Linear,
             bpm: 120.0,
+            smart_zoom: SmartZoom::default(),
             beats_per_bar: 4.0,
             playhead: None,
             history: History::new(10),
@@ -280,6 +285,51 @@ impl Editor {
     /// Snap a time to the local grid.
     pub fn snap_time(&self, t: f64) -> f64 {
         self.grid.snap(t, self.doc.start, self.units_per_beat())
+    }
+
+    /// Notes reduced to what zoom cares about.
+    pub fn zoom_spans(&self) -> Vec<zoom::Span> {
+        self.doc
+            .notes
+            .iter()
+            .map(|n| zoom::Span {
+                start: n.start,
+                end: n.end,
+                row: n.row,
+            })
+            .collect()
+    }
+
+    /// Contextual zoom: one gesture, and where the pointer is decides
+    /// what "zoom" means. See [`zoom`].
+    pub fn smart_zoom(&mut self, modes: ZoomModes, anchor_t: f64, anchor_row: f64) {
+        let spans = self.zoom_spans();
+        let content = self.content();
+        let bar = self.units_per_bar();
+        self.camera = zoom::apply_horizontal(
+            self.camera,
+            modes.horizontal,
+            &spans,
+            anchor_t,
+            content,
+            self.viewport,
+            bar,
+            self.smart_zoom,
+        );
+        // Vertical runs against the *new* horizontal span, so
+        // "notes in view" means notes in the view we just produced —
+        // not the one we started from.
+        let view = self.camera.time_span(self.viewport);
+        self.camera = zoom::apply_vertical(
+            self.camera,
+            modes.vertical,
+            &spans,
+            anchor_row,
+            self.viewport,
+            view,
+            self.smart_zoom,
+        );
+        self.camera.constrain(self.bounds(), self.viewport);
     }
 
     pub fn hit_test(&self, x: f64, y: f64) -> Hit {
