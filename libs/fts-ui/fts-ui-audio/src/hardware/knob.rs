@@ -32,6 +32,12 @@ const DAKA_LOBE_DEPTH: f64 = 2.4;
 /// Fine ridging around the raised body's wall, above the skirt.
 const DAKA_BODY_RIDGES: usize = 40;
 
+/// The 1073 collar's teeth. Not a knurl — the ring is *geared*, with bumps
+/// coarse enough to count, and that toothed silhouette is what the knob reads
+/// as before any shading does.
+const NEVE_TEETH: usize = 18;
+const NEVE_TOOTH_DEPTH: f64 = 3.4;
+
 /// How far a Marconi wing overhangs the skirt it is mounted on, as a multiple
 /// of the skirt's radius, and how far its tail runs the other way.
 ///
@@ -93,12 +99,21 @@ pub enum KnobStyle {
     /// a moulded *nose* that points at a scale printed on the panel. No skirt,
     /// no flutes — you read the nose.
     Pointer,
-    /// Neve 1073 and its module family: a moulded cap with a finely fluted
-    /// rim and a **dark** index line across a light top, sitting inside a ring
-    /// of white dots printed on the panel. The dots are the panel's, not the
-    /// knob's — see [`Ring::Dots`](crate::hardware::rack::Ring::Dots) — but the
-    /// dark-on-light index is what tells this apart from an SSL collet, whose
-    /// bar is white on a saturated cap.
+    /// Neve 1073 and its module family: a **geared** collar — bumps coarse
+    /// enough to count around the outside, not a knurl — in matte grey, with a
+    /// painted white index out at the teeth, around a matte cap carrying a
+    /// shorter white line of its own. It sits inside a ring of white dots
+    /// printed on the panel (see
+    /// [`Ring::Dots`](crate::hardware::rack::Ring::Dots)).
+    ///
+    /// The teeth are the whole silhouette, so they are a path rather than a
+    /// circle with knurl lines drawn over it, and the metal is deliberately
+    /// flat: a brushed gradient here reads as chrome and makes a row of these
+    /// look plated rather than painted.
+    ///
+    /// Pairs with `inner_handle` on
+    /// [`HardwareKnob`] — on the module the collar and the cap are two
+    /// different controls.
     Neve,
     /// Empirical Labs Distressor: a wide brushed dial whose *numerals are
     /// printed on the skirt* and turn with it, around a dark centre cap. The
@@ -129,9 +144,11 @@ impl KnobStyle {
 
     /// Whether a wider skirt is drawn under the body.
     fn has_skirt(self) -> bool {
+        // Neve's collar is a toothed outline, so it is a path rather than a
+        // border-radius disc — drawn in its own layer below.
         matches!(
             self,
-            Self::Daka | Self::Marconi | Self::Neve | Self::SilverTop | Self::Dial
+            Self::Daka | Self::Marconi | Self::SilverTop | Self::Dial
         )
     }
 
@@ -213,7 +230,9 @@ impl KnobStyle {
             Self::Collet => 28,
             Self::SilverTop => 46,
             Self::MetalFluted => 40,
-            Self::Neve => 56,
+            // The gear's teeth are the texture. Knurl lines over them read as
+            // dirt at panel size.
+            Self::Neve => 0,
             Self::Dial => 72,
             Self::Marconi | Self::Pointer => 0,
             _ => 0,
@@ -253,9 +272,10 @@ impl KnobStyle {
             Self::SilverTop => {
                 "linear-gradient(148deg, #e2e2e0 0%, #b4b4b2 34%, #8e8e8c 62%, #cfcfcd 100%)"
             }
-            // A moulded light-grey cap, lit as a slightly domed face.
+            // A matte light-grey cap. Barely any falloff: the module's knobs
+            // are painted metal under studio light, not chrome.
             Self::Neve => {
-                "radial-gradient(circle at 36% 24%, #cfd2d6 0%, #a8acb2 46%, #83878d 100%)"
+                "linear-gradient(162deg, #b9bdc2 0%, #a5a9af 52%, #8f939a 100%)"
             }
             // The cap in the middle of the dial.
             Self::Dial => {
@@ -299,8 +319,10 @@ impl KnobStyle {
             | Self::Pointer => "#f2f2f0",
             // A dark line on a silver top, which is how you read one.
             Self::Metal | Self::SilverTop | Self::MetalFluted => "#1c1c1e",
-            // Dark on a light cap — the 1073's line is a groove, not a stripe.
-            Self::Neve => "#17181b",
+            // White, and out at the edge: the module's index is a painted
+            // line on the metal, not a groove cut into the face. A dark line
+            // on a grey cap disappeared at panel size.
+            Self::Neve => "#f4f4f2",
             Self::Dial => "#f2f2f0",
         }
     }
@@ -651,6 +673,54 @@ pub fn HardwareKnob(
                 }
             }
 
+            // The 1073's collar: a geared ring, not a disc.
+            //
+            // The teeth are the silhouette — bumps coarse enough to count
+            // around the outside — so the collar is a path rather than a
+            // border-radius circle with knurl lines drawn over it. Flat fills
+            // in a mid grey, because these are painted metal on a console
+            // under studio light: a bright brushed gradient here read as
+            // chrome and made the whole row look plated.
+            //
+            // Everything in the rotating group belongs to the *outer*
+            // control, which on a concentric band is the frequency.
+            if style == KnobStyle::Neve {
+                svg {
+                    style: "position:absolute; inset:0; width:100%; height:100%; display:block;",
+                    view_box: "-55 -55 110 110",
+                    g {
+                        transform: "rotate({angle:.2})",
+                        path {
+                            d: "{scallop_path(BODY_R, NEVE_TEETH, NEVE_TOOTH_DEPTH)}",
+                            transform: "translate(0 1.6)",
+                            fill: "rgba(0,0,0,0.45)",
+                        }
+                        path {
+                            d: "{scallop_path(BODY_R, NEVE_TEETH, NEVE_TOOTH_DEPTH)}",
+                            fill: "#b4b9be",
+                            stroke: "rgba(0,0,0,0.45)",
+                            stroke_width: "0.7",
+                        }
+                        // The flat of the ring inside the teeth.
+                        circle {
+                            cx: "0", cy: "0", r: "{BODY_R - NEVE_TOOTH_DEPTH - 0.8:.1}",
+                            fill: "#c2c7cc",
+                        }
+                        // The index: a painted white line out at the teeth,
+                        // which is where the module's is and what the ring of
+                        // dots is read against.
+                        rect {
+                            x: "-1.6",
+                            y: "{-(BODY_R + 0.6):.1}",
+                            width: "3.2",
+                            height: "{BODY_R * 0.34:.1}",
+                            rx: "1.0",
+                            fill: "#f4f4f2",
+                        }
+                    }
+                }
+            }
+
             // The skirt: the wider disc a Marconi or 1176 body sits on.
             // Drawn first so the body stacks over it.
             if style.has_skirt() && style != KnobStyle::Daka {
@@ -968,11 +1038,14 @@ pub fn HardwareKnob(
                             stroke: "rgba(0,0,0,0.45)",
                             stroke_width: "1.0",
                         }
+                        // The cap's own index, for the inner control. Kept
+                        // shorter than the collar's so the two readings do
+                        // not compete — the gear's line is the loud one.
                         rect {
-                            x: "-1.4",
-                            y: "{-(body_r - 1.5):.1}",
-                            width: "2.8",
-                            height: "{body_r * 0.72:.1}",
+                            x: "-1.3",
+                            y: "{-(body_r - 2.0):.1}",
+                            width: "2.6",
+                            height: "{body_r * 0.52:.1}",
                             rx: "1.1",
                             fill: "{style.pointer()}",
                         }
