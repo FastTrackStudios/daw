@@ -102,6 +102,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "nudge_round_trips_main_window".into(),
         ],
         test_binary: None,
+    },
+    // chord-tool's insert path. Everything about it up to the DAW seam is
+    // unit-tested; these are the only tests that prove the pitches keyflow
+    // computes are the pitches REAPER ends up holding.
+    TestPackage {
+        package: "chord-tool-daw".into(),
+        features: vec![],
+        test_threads: 1,
+        default_skips: vec![],
+        test_binary: None,
     }];
 
     runner.install_daw_bridge(&repo_root)?;
