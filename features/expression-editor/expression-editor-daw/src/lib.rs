@@ -25,6 +25,10 @@
 //!   core already models, so bends are attributed to the note sounding
 //!   on that channel and flagged ambiguous when two are.
 
+pub mod session;
+
+pub use session::Session;
+
 use daw::service::midi::{
     MidiCCCreate, MidiNoteCreate, MidiPitchBendCreate, MidiTakeContent, MidiTakeSnapshot,
 };
