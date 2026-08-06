@@ -412,6 +412,15 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>)
                     g {
                         key: "n{n.id.0}",
                         opacity: "{note_opacity:.2}",
+                        if let Some(head) = n.head.as_ref() {
+                            polygon {
+                                points: "{head}",
+                                fill: n.fill,
+                                fill_opacity: "{n.opacity + 0.15:.2}",
+                                stroke: if n.selected { theme::SELECTED } else { n.fill },
+                                stroke_width: if n.selected { "2" } else { "1" },
+                            }
+                        } else {
                         rect {
                             x: "{n.x:.1}",
                             y: "{n.y:.1}",
@@ -431,6 +440,7 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>)
                                 n.fill
                             },
                             stroke_width: if n.ambiguous || n.selected { "2" } else { "1" },
+                        }
                         }
                         // Q-zone structure: red anchors, active zones
                         // tinted.
@@ -491,11 +501,39 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>)
                             text {
                                 x: "{n.x + 5.0:.1}",
                                 y: "{n.y + n.h * 0.5 + 3.5:.1}",
+                                // Dark on the body: these labels sit on
+                                // a saturated fill, and light text on a
+                                // yellow string is unreadable.
                                 fill: "#0b0b10",
-                                fill_opacity: "0.75",
+                                fill_opacity: "0.85",
                                 font_size: "10",
+                                font_weight: "600",
                                 pointer_events: "none",
                                 "{label}"
+                            }
+                        }
+                        if let Some(badge) = n.badge {
+                            text {
+                                x: "{n.x + 2.0:.1}",
+                                y: "{n.y - 3.0:.1}",
+                                fill: theme::ACCENT,
+                                font_size: "9",
+                                font_weight: "600",
+                                pointer_events: "none",
+                                "{badge}"
+                            }
+                        }
+                        if n.legato {
+                            // A tie arc off the right edge: legato is a
+                            // relationship to the NEXT note, so it has
+                            // to be drawn leaving the note.
+                            path {
+                                d: "M {n.x + n.w - 2.0:.1} {n.y + 1.0:.1} \
+                                    q {n.h * 0.5:.1} {-n.h * 0.45:.1} {n.h:.1} 0",
+                                fill: "none",
+                                stroke: theme::ACCENT,
+                                stroke_width: "1.5",
+                                pointer_events: "none",
                             }
                         }
                         if let Some(cents) = n.cents {

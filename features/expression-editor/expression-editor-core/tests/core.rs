@@ -1090,7 +1090,9 @@ fn restore_puts_a_captured_curve_back_exactly() {
 // ── full MIDI editing ────────────────────────────────────────────────
 
 use expression_editor_core::mouse::{Action, Context, Gesture, ModKey, MouseMap};
-use expression_editor_core::rows::{Articulation, DrumMap, RowSpace, StringTuning};
+use expression_editor_core::rows::{
+    Articulation, DrumMap, NoteShape, RowSpace, StringTuning,
+};
 
 fn doc_with_notes(n: usize) -> ExpressionDoc {
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 16.0);
@@ -1412,7 +1414,10 @@ fn drum_rows_map_to_their_pitches_both_ways() {
     assert_eq!(space.row_label(kick_row as i32), "Kick");
     assert_eq!(space.row_of_pitch(38), map.row_of_pitch(38).map(|r| r as i32));
     n.row = 0;
-    assert!(space.draws_diamonds(), "a drum hit has no meaningful length");
+    // A drum hit has no meaningful length, so it gets a fixed head
+    // whose flat edge marks the attack.
+    assert_eq!(space.note_shape(), NoteShape::Triangle);
+    assert_eq!(RowSpace::Pitch.note_shape(), NoteShape::Bar);
 }
 
 #[test]
@@ -2274,4 +2279,32 @@ fn cc_maps_onto_the_full_roll_height_both_ways() {
     }
     assert_eq!(cc::cc_y(1.0, 400.0), 0.0, "full value is at the top");
     assert_eq!(cc::cc_y(0.0, 400.0), 400.0);
+}
+
+#[test]
+fn row_colour_follows_what_the_row_means() {
+    // Pitch space keeps pitch-class colour; the others colour by row,
+    // because that is the thing being tracked.
+    assert!(RowSpace::Pitch.row_color(60).is_none());
+
+    let strings = RowSpace::Strings(StringTuning::guitar_standard());
+    let low = strings.row_color(0).unwrap();
+    let high = strings.row_color(5).unwrap();
+    assert_ne!(low, high, "strings must be told apart by colour");
+
+    let kit = RowSpace::Drums(DrumMap::general_midi());
+    let map = DrumMap::general_midi();
+    let row_of = |name: &str| {
+        map.lanes.iter().position(|l| l.name == name).unwrap() as i32
+    };
+    // Kit sections, not individual lanes: both snares read as snare.
+    assert_eq!(
+        kit.row_color(row_of("Snare")),
+        kit.row_color(row_of("Snare 2"))
+    );
+    assert_ne!(kit.row_color(row_of("Kick")), kit.row_color(row_of("Snare")));
+    assert_ne!(
+        kit.row_color(row_of("HH Closed")),
+        kit.row_color(row_of("Kick"))
+    );
 }

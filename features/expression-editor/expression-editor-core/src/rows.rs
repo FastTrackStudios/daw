@@ -278,11 +278,78 @@ impl RowSpace {
         }
     }
 
-    /// Drums are drawn as fixed-size diamonds: a drum hit has no
-    /// meaningful length, and drawing one as a bar invites editing a
-    /// duration that nothing will hear.
-    pub fn draws_diamonds(&self) -> bool {
-        matches!(self, RowSpace::Drums(_))
+    /// How a note body is drawn in this space.
+    pub fn note_shape(&self) -> NoteShape {
+        match self {
+            RowSpace::Drums(_) => NoteShape::Triangle,
+            _ => NoteShape::Bar,
+        }
+    }
+
+    /// Per-row colour, when the row itself carries meaning.
+    ///
+    /// A string roll colours by *string*, not by pitch class: on a
+    /// guitar the string a note is played on is the thing you are
+    /// tracking, and pitch-class colour would scatter one string's part
+    /// across six hues. Drums colour by kit section for the same
+    /// reason. Pitch space returns `None` and keeps pitch-class colour.
+    pub fn row_color(&self, row: i32) -> Option<&'static str> {
+        match self {
+            RowSpace::Pitch => None,
+            RowSpace::Strings(_) => {
+                Some(STRING_COLORS[row.max(0) as usize % STRING_COLORS.len()])
+            }
+            RowSpace::Drums(m) => {
+                let name = m.lanes.get(row.max(0) as usize)?.name.as_str();
+                Some(drum_color(name))
+            }
+        }
+    }
+}
+
+/// How a note body is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoteShape {
+    /// A rectangle spanning the note's length.
+    Bar,
+    /// A right-pointing triangle with its flat edge on the onset.
+    ///
+    /// A drum hit has no meaningful length, so it needs a fixed-size
+    /// head rather than a bar — a bar invites editing a duration
+    /// nothing will hear. A triangle beats a diamond because its flat
+    /// edge sits exactly on the attack, where a diamond's widest point
+    /// is its middle and the onset has to be inferred.
+    Triangle,
+}
+
+/// String colours, low to high. Warm at the bottom, cool at the top,
+/// so the register reads without counting rows.
+pub const STRING_COLORS: [&str; 8] = [
+    "#f97316", // low — orange
+    "#f59e0b",
+    "#eab308",
+    "#84cc16",
+    "#22d3ee",
+    "#60a5fa", // high — blue
+    "#a78bfa",
+    "#f472b6",
+];
+
+/// Kit-section colour, so a groove reads at a glance.
+fn drum_color(name: &str) -> &'static str {
+    let n = name.to_ascii_lowercase();
+    if n.contains("kick") {
+        "#ef4444"
+    } else if n.contains("snare") || n.contains("stick") || n.contains("clap") {
+        "#f59e0b"
+    } else if n.contains("hh") || n.contains("hat") {
+        "#22d3ee"
+    } else if n.contains("tom") {
+        "#a3e635"
+    } else if n.contains("ride") {
+        "#60a5fa"
+    } else {
+        "#c084fc"
     }
 }
 

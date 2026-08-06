@@ -47,7 +47,7 @@ pub use edit::{Edit, History};
 pub use shape::Shape;
 pub use mouse::{Action, MouseMap};
 pub use razor::{RazorArea, RazorSet};
-pub use rows::{Articulation, DrumMap, RowSpace, StringTuning};
+pub use rows::{Articulation, DrumMap, NoteShape, RowSpace, StringTuning};
 pub use tools::{Grid, Hit, Mods, Selection, Tool};
 pub use tuning::{Temperament, Tuning};
 pub use zoom::{HorizontalMode, SmartZoom, VerticalMode, ZoomModes};

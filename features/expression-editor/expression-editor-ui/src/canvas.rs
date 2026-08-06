@@ -92,8 +92,14 @@ pub struct NoteRect {
     pub cents: Option<f64>,
     /// Amplitude ribbon polygon, when Pressure has been authored.
     pub ribbon: Option<String>,
-    /// Note name, when the body is big enough to hold it.
+    /// What the body prints — note name, fret number, or lyric.
     pub label: Option<String>,
+    /// Articulation badge, drawn above the note.
+    pub badge: Option<&'static str>,
+    /// Triangle points, when this space draws heads instead of bars.
+    pub head: Option<String>,
+    /// Joined to the next note on its row.
+    pub legato: bool,
 }
 
 pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
@@ -122,8 +128,42 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
                 })
                 .collect();
             let cents = sounding_cents(ed, n);
-            let name = expression_editor_core::tuning::note_name(n.row);
-            let label = (w > name.len() as f64 * 7.5 + 10.0 && h >= 13.0).then_some(name);
+            // The label comes from the row space: a note name in pitch
+            // space, a fret number on a string roll, and a lyric
+            // whenever the note carries one.
+            let label = ed.row_space.note_label(n).filter(|l| {
+                // A fret number always fits; a word may not, and a
+                // clipped lyric is worse than none.
+                l.len() <= 2 || (w > l.len() as f64 * 6.5 + 8.0 && h >= 12.0)
+            });
+            let badge = n
+                .articulation
+                .map(|a| a.glyph())
+                .filter(|g| !g.is_empty());
+            let head = matches!(
+                ed.row_space.note_shape(),
+                expression_editor_core::NoteShape::Triangle
+            )
+            .then(|| {
+                // Flat edge on the onset, apex to the right: the attack
+                // is a straight vertical line you can align to the grid
+                // by eye, which is the whole reason for a head over a
+                // diamond.
+                let size = h.min(18.0).max(5.0);
+                let top = ed.camera.y(n.row as f64 + 0.5, ed.viewport) + (h - size) * 0.5;
+                format!(
+                    "{x:.1},{top:.1} {x:.1},{:.1} {:.1},{:.1}",
+                    top + size,
+                    x + size * 0.9,
+                    top + size * 0.5,
+                )
+            });
+            // A string roll colours by string, a kit by section; pitch
+            // space keeps its pitch-class hue.
+            let fill = ed
+                .row_space
+                .row_color(n.row)
+                .unwrap_or_else(|| theme::pitch_class_color(n.row));
             NoteRect {
                 id: n.id,
                 row: n.row,
@@ -131,7 +171,7 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
                 y: ed.camera.y(n.row as f64 + 0.5, ed.viewport),
                 w,
                 h,
-                fill: theme::pitch_class_color(n.row),
+                fill,
                 opacity: 0.35 + 0.45 * n.weight.clamp(0.0, 1.0),
                 selected: ed.selection.contains(n.id),
                 ambiguous: n.ambiguous,
@@ -139,6 +179,9 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
                 cents,
                 ribbon: note_ribbon(ed, n),
                 label,
+                badge,
+                head,
+                legato: n.legato,
             }
         })
         .collect()
@@ -371,18 +414,19 @@ pub struct Key {
 pub fn keyboard(ed: &Editor) -> Vec<Key> {
     let (lo, hi) = ed.camera.pitch_span(ed.viewport);
     let h = ed.camera.px_per_semitone;
-    let label_rows = h >= 9.0;
-    ((lo.floor() as i32).max(0)..=(hi.ceil() as i32).min(127))
-        .map(|row| {
-            let black = theme::is_black_key(row);
-            Key {
-                row,
-                y: ed.camera.y(row as f64 + 0.5, ed.viewport),
-                h,
-                black,
-                label: (label_rows && (row.rem_euclid(12) == 0 || h >= 18.0))
-                    .then(|| expression_editor_core::tuning::note_name(row)),
-            }
+    let (rlo, rhi) = ed.row_space.bounds();
+    // Named rows always carry their label — a drum lane called nothing
+    // is unusable, where an unlabelled piano key can still be counted.
+    let named = !matches!(ed.row_space, expression_editor_core::RowSpace::Pitch);
+    let label_rows = h >= 8.0;
+    ((lo.floor() as i32).max(rlo)..=(hi.ceil() as i32).min(rhi))
+        .map(|row| Key {
+            row,
+            y: ed.camera.y(row as f64 + 0.5, ed.viewport),
+            h,
+            black: ed.row_space.is_accidental(row),
+            label: (label_rows && (named || row.rem_euclid(12) == 0 || h >= 18.0))
+                .then(|| ed.row_space.row_label(row)),
         })
         .collect()
 }

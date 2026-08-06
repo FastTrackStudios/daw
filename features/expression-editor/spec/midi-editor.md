@@ -216,10 +216,21 @@ Landed (122 core tests):
   and ten vertical modes, contextual mode pairs, bound to `F` /
   `Shift+F` in the UI
 
+**Row-space rendering is done.** Drums draw right-pointing triangle
+heads with the flat edge on the onset — a triangle beats a diamond
+because the attack is a straight vertical line you can align to the grid
+by eye, where a diamond's widest point is its middle and the onset has
+to be inferred. String rolls print fret numbers on the body and colour
+by *string*, not pitch class, because the string is what a player
+tracks and pitch-class colour would scatter one string's part across six
+hues. Drums colour by kit section for the same reason. Articulations
+draw as badges above the note, legato as a tie arc leaving its right
+edge, and a lyric replaces the note name wherever one is set.
+
 Next, in order:
 
 1. **Multi Tool zones** as an overlay mode, per the table above.
-2. **Row-space rendering** — drum diamonds, string roll with fret
+2. **Remaining row-space polish** — drum diamonds, string roll with fret
    numbers, lyric labels, articulation badges.
 6. **Note context menu** (Riffer §6.2.2: cut/copy/paste/delete/select
    all/clear/copy measure + note properties).

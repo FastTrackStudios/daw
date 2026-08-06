@@ -29,6 +29,13 @@ pub enum Scene {
     Ambiguous,
     /// An empty document.
     Empty,
+    /// A drum groove — triangle heads on named kit lanes.
+    Drums,
+    /// A guitar riff on a string roll: fret numbers, per-string colour,
+    /// articulation badges and legato ties.
+    Guitar,
+    /// A sung line carrying lyric syllables.
+    Lyrics,
     /// Orchestral: held notes with CC1 and CC11 riding behind them.
     Orchestral,
     /// Long held notes across several rows — material a razor can
@@ -40,7 +47,7 @@ pub enum Scene {
 }
 
 impl Scene {
-    pub const ALL: [Scene; 10] = [
+    pub const ALL: [Scene; 13] = [
         Scene::Phrase,
         Scene::Zones,
         Scene::Microtonal,
@@ -51,6 +58,9 @@ impl Scene {
         Scene::Density,
         Scene::Held,
         Scene::Orchestral,
+        Scene::Drums,
+        Scene::Guitar,
+        Scene::Lyrics,
     ];
 
     /// Stable file-name stem for screenshots.
@@ -66,6 +76,9 @@ impl Scene {
             Scene::Density => "16-density",
             Scene::Held => "19-held",
             Scene::Orchestral => "21-orchestral",
+            Scene::Drums => "25-drums",
+            Scene::Guitar => "26-guitar",
+            Scene::Lyrics => "27-lyrics",
         }
     }
 
@@ -81,6 +94,9 @@ impl Scene {
             Scene::Density => "Mixed density",
             Scene::Held => "Held notes",
             Scene::Orchestral => "Orchestral CC",
+            Scene::Drums => "Drum groove",
+            Scene::Guitar => "Guitar riff",
+            Scene::Lyrics => "Vocal lyrics",
         }
     }
 }
@@ -109,7 +125,11 @@ fn sung_note(id: u64, start: f64, len: f64, row: i32, channel: u8, scoop: f64) -
 
 /// Build the editor for a scene, sized to `viewport`.
 pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
-    let end = if scene == Scene::Density { PPQ * 40.0 } else { PPQ * 8.0 };
+    let end = match scene {
+        Scene::Density => PPQ * 40.0,
+        Scene::Drums => PPQ * 8.0,
+        _ => PPQ * 8.0,
+    };
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, end);
 
     match scene {
@@ -172,6 +192,96 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             n.add_split(PPQ * 4.9);
             n.target = expression_editor_core::Target::Zone(1);
             doc.push(n);
+        }
+        Scene::Drums => {
+            use expression_editor_core::{DrumMap, RowSpace};
+            let map = DrumMap::general_midi();
+            let row = |name: &str| {
+                map.lanes.iter().position(|l| l.name == name).unwrap_or(0) as i32
+            };
+            let mut id = 1u64;
+            let mut hit = |doc: &mut ExpressionDoc, r: i32, beat: f64, vel: f64| {
+                let t = PPQ * beat;
+                let mut n = Note::new(NoteId(id), t, t + PPQ * 0.1, r);
+                n.velocity = vel;
+                doc.push(n);
+                id += 1;
+            };
+            // Two bars of a plain backbeat, with ghost notes so the
+            // velocity strip has something to show.
+            for bar in 0..2 {
+                let b = bar as f64 * 4.0;
+                for eighth in 0..8 {
+                    let t = b + eighth as f64 * 0.5;
+                    hit(&mut doc, row("HH Closed"), t, if eighth % 2 == 0 { 0.8 } else { 0.5 });
+                }
+                hit(&mut doc, row("Kick"), b, 0.95);
+                hit(&mut doc, row("Kick"), b + 2.5, 0.9);
+                hit(&mut doc, row("Snare"), b + 1.0, 0.92);
+                hit(&mut doc, row("Snare"), b + 1.75, 0.35);
+                hit(&mut doc, row("Snare"), b + 3.0, 0.92);
+                if bar == 1 {
+                    hit(&mut doc, row("Crash"), b, 0.85);
+                    hit(&mut doc, row("Tom Low"), b + 3.5, 0.7);
+                    hit(&mut doc, row("Tom High"), b + 3.75, 0.75);
+                }
+            }
+            doc.row_space = RowSpace::Drums(map);
+        }
+        Scene::Guitar => {
+            use expression_editor_core::{Articulation, RowSpace, StringTuning};
+            let tuning = StringTuning::guitar_standard();
+            // A riff on the low strings: fret numbers, techniques, and
+            // a hammer-on/pull-off pair.
+            let riff: [(usize, u8, f64, f64, Option<Articulation>); 9] = [
+                (0, 0, 0.0, 0.45, Some(Articulation::PalmMute)),
+                (0, 0, 0.5, 0.45, Some(Articulation::PalmMute)),
+                (0, 3, 1.0, 0.5, Some(Articulation::HammerOn)),
+                (0, 5, 1.5, 0.5, None),
+                (1, 5, 2.0, 0.9, None),
+                (2, 7, 3.0, 0.9, Some(Articulation::Vibrato)),
+                (2, 5, 4.0, 0.5, Some(Articulation::PullOff)),
+                (2, 3, 4.5, 0.5, None),
+                (5, 12, 5.0, 1.6, Some(Articulation::NaturalHarmonic)),
+            ];
+            for (i, &(string, fret, start, len, art)) in riff.iter().enumerate() {
+                let mut n = Note::new(
+                    NoteId(i as u64 + 1),
+                    PPQ * start,
+                    PPQ * (start + len),
+                    string as i32,
+                );
+                n.fret = Some(fret);
+                n.velocity = 0.8;
+                n.articulation = art;
+                n.legato = art.is_some_and(|a| a.is_legato());
+                doc.push(n);
+            }
+            doc.row_space = RowSpace::Strings(tuning);
+        }
+        Scene::Lyrics => {
+            let words = [
+                ("A", 62, 0.0, 0.75),
+                ("ma", 64, 0.75, 0.75),
+                ("zing", 67, 1.5, 1.5),
+                ("grace", 64, 3.0, 1.5),
+                ("how", 62, 4.5, 0.75),
+                ("sweet", 59, 5.25, 0.75),
+                ("the", 60, 6.0, 0.5),
+                ("sound", 62, 6.5, 1.5),
+            ];
+            for (i, &(text, row, start, len)) in words.iter().enumerate() {
+                let mut n = sung_note(
+                    i as u64 + 1,
+                    PPQ * start,
+                    PPQ * len,
+                    row,
+                    2 + (i % 14) as u8,
+                    -0.8,
+                );
+                n.text = Some(text.to_string());
+                doc.push(n);
+            }
         }
         Scene::Orchestral => {
             for (i, row) in [55, 62, 67, 71].iter().enumerate() {
@@ -248,6 +358,11 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
     doc.mark_ambiguity();
 
     let mut ed = Editor::new(doc, viewport);
+    // The editor renders in the document's row space; keeping two
+    // copies in sync by hand is how a drum roll ends up drawing piano
+    // keys.
+    ed.row_space = ed.doc.row_space.clone();
+    ed.reset_view();
     ed.playhead = (scene != Scene::Empty).then_some(PPQ * 2.35);
     match scene {
         Scene::Zones => {
@@ -272,6 +387,17 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
         Scene::Empty | Scene::Density | Scene::Held => {}
         Scene::Orchestral => {
             ed.selection.set_single(NoteId(2));
+        }
+        Scene::Drums => {
+            ed.mouse = expression_editor_core::MouseMap::drums();
+        }
+        Scene::Guitar => {
+            ed.mouse = expression_editor_core::MouseMap::riffer();
+            ed.selection.set_single(NoteId(6));
+        }
+        Scene::Lyrics => {
+            ed.mouse = expression_editor_core::MouseMap::lyrics();
+            ed.selection.set_single(NoteId(3));
         }
         Scene::Phrase => {
             ed.selection.set_single(NoteId(3));
