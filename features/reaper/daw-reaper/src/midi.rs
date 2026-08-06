@@ -266,16 +266,70 @@ impl Midi for crate::Reaper {
         (count_before..count_before + notes.len() as u32).collect()
     }
 
-    fn delete_note(&self, _location: MidiTakeLocation, _index: u32) {
-        readonly_warn("delete_note");
+    fn add_notes_ppq(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32> {
+        let medium = reaper_high::Reaper::get().medium_reaper();
+        let Some(take) = resolve_take_for_location(medium, &location) else {
+            return Vec::new();
+        };
+        let low = medium.low();
+        let count_before = read_notes(medium, take).len() as u32;
+
+        for note in &notes {
+            // The whole point of this method: positions go in as they
+            // came out of `notes()`, with no quarter-note conversion.
+            sw::insert_note(
+                low,
+                take,
+                false,
+                false,
+                note.start_ppq,
+                note.start_ppq + note.length_ppq,
+                i32::from(note.channel & 0x0F),
+                i32::from(note.pitch & 0x7F),
+                i32::from(note.velocity.clamp(1, 127)),
+            );
+        }
+        sw::sort(low, take);
+
+        (count_before..count_before + notes.len() as u32).collect()
     }
 
-    fn delete_notes(&self, _location: MidiTakeLocation, _indices: Vec<u32>) {
-        readonly_warn("delete_notes");
+    fn delete_note(&self, location: MidiTakeLocation, index: u32) {
+        self.delete_notes(location, vec![index]);
     }
 
-    fn delete_selected_notes(&self, _location: MidiTakeLocation) {
-        readonly_warn("delete_selected_notes");
+    fn delete_notes(&self, location: MidiTakeLocation, indices: Vec<u32>) {
+        let medium = reaper_high::Reaper::get().medium_reaper();
+        let Some(take) = resolve_take_for_location(medium, &location) else {
+            warn!("Midi::delete_notes: could not resolve take for {location:?}");
+            return;
+        };
+        let low = medium.low();
+
+        // Highest index first. Deleting renumbers everything above the
+        // removed note, so ascending order would delete the wrong notes
+        // from the second one onward — and silently, since every index
+        // stays in range. Dedup because a repeated index would then
+        // delete an innocent neighbour.
+        let mut indices = indices;
+        indices.sort_unstable_by(|a, b| b.cmp(a));
+        indices.dedup();
+
+        for index in indices {
+            if !sw::delete_note(low, take, index as i32) {
+                warn!("Midi::delete_notes: REAPER rejected deleting note {index}");
+            }
+        }
+        sw::sort(low, take);
+    }
+
+    fn delete_selected_notes(&self, location: MidiTakeLocation) {
+        let selected: Vec<u32> = self
+            .selected_notes(location.clone())
+            .into_iter()
+            .map(|n| n.index)
+            .collect();
+        self.delete_notes(location, selected);
     }
 
     fn set_note_pitch(&self, location: MidiTakeLocation, index: u32, pitch: u8) {

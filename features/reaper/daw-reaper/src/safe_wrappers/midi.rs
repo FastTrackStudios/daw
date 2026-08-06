@@ -157,6 +157,15 @@ pub fn set_note(
     }
 }
 
+/// Delete a note by index. Returns whether REAPER accepted it.
+///
+/// Deleting renumbers every note above `index`, so callers removing more
+/// than one must work from the highest index down — see
+/// `Midi::delete_notes`.
+pub fn delete_note(low: &ReaperLow, take: MediaItemTake, index: i32) -> bool {
+    unsafe { low.MIDI_DeleteNote(take.as_ptr(), index) }
+}
+
 /// Sort MIDI events in a take.
 pub fn sort(low: &ReaperLow, take: MediaItemTake) {
     unsafe { low.MIDI_Sort(take.as_ptr()) };

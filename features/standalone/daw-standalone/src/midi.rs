@@ -236,6 +236,17 @@ impl Midi for Standalone {
             .collect()
     }
 
+    /// Identical to [`Midi::add_notes`] here.
+    ///
+    /// The two differ only for backends that reinterpret `start_ppq` —
+    /// the REAPER one treats it as project quarter-notes. Standalone
+    /// stores what it is given and hands the same numbers back from
+    /// `notes()`, so it already round-trips and there is nothing to
+    /// convert.
+    fn add_notes_ppq(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32> {
+        Midi::add_notes(self, location, notes)
+    }
+
     fn delete_note(&self, location: MidiTakeLocation, index: u32) {
         let Some(take_guid) = resolve_take_guid(self, &location) else {
             return;
