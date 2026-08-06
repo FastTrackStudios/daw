@@ -103,7 +103,11 @@ impl KnobStyle {
     fn body_fraction(self) -> f64 {
         match self {
             Self::Daka => 0.75,
-            Self::Marconi => 0.70,
+            // The wing knob's coloured body over its darker skirt.
+            Self::Marconi => 0.72,
+            // The grey cap inside the bright collar. Just under two thirds —
+            // the collar is a wide, obvious ring, not a bezel.
+            Self::Neve => 0.62,
             // The silver cap is a little over half the knob; the rest is the
             // black collar the index rides on.
             Self::SilverTop => 0.56,
@@ -115,7 +119,10 @@ impl KnobStyle {
 
     /// Whether a wider skirt is drawn under the body.
     fn has_skirt(self) -> bool {
-        matches!(self, Self::Daka | Self::Marconi | Self::SilverTop | Self::Dial)
+        matches!(
+            self,
+            Self::Daka | Self::Marconi | Self::Neve | Self::SilverTop | Self::Dial
+        )
     }
 
     /// Whether this knob draws its own index — a nose, a wing, a bar, an
@@ -169,6 +176,20 @@ impl KnobStyle {
         }
     }
 
+    /// Which band of the knob the flutes are cut into, as radii in the knob's
+    /// own viewBox: `(inner, outer)`.
+    ///
+    /// Most knobs are knurled around the edge of the part you grip, so the
+    /// band hangs off the body's rim. The 1073's is not: its knurl is on the
+    /// bright *collar* outside the grey cap, which is why a band drawn at the
+    /// cap's edge left the collar looking like plain metal.
+    fn flute_band(self, body_r: f64) -> (f64, f64) {
+        match self {
+            Self::Neve => (BODY_R * 0.68, BODY_R * 0.97),
+            _ => (body_r - 4.2, body_r),
+        }
+    }
+
     /// How many flutes are moulded around the grip, if any.
     fn flutes(self) -> usize {
         match self {
@@ -176,7 +197,7 @@ impl KnobStyle {
             Self::Collet => 28,
             Self::SilverTop => 46,
             Self::MetalFluted => 40,
-            Self::Neve => 52,
+            Self::Neve => 56,
             Self::Dial => 72,
             Self::Marconi | Self::Pointer => 0,
             _ => 0,
@@ -233,6 +254,12 @@ impl KnobStyle {
             Self::Metal => format!(
                 "radial-gradient(circle at 34% 26%, color-mix(in oklab, {color} 55%, white) 0%, \
                  {color} 58%, color-mix(in oklab, {color} 70%, black) 100%)"
+            ),
+            // Matte moulding: an even face with the light only at the very
+            // top, so the bright collar around it stays the brighter thing.
+            Self::Neve => format!(
+                "linear-gradient(160deg, color-mix(in oklab, {color} 88%, white) 0%, \
+                 {color} 38%, color-mix(in oklab, {color} 82%, black) 100%)"
             ),
             // Flat-topped: a sheen across the face, not a highlight on a dome.
             Self::Collet => format!(
@@ -311,16 +338,33 @@ fn nose_points(body_r: f64) -> String {
 /// The Marconi wing, as an SVG polygon in the knob's viewBox: a raised grip
 /// that runs across the body and tapers to the indicator end.
 fn wing_points(body_r: f64) -> String {
-    let w = body_r * 0.34;
+    let w = body_r * 0.46;
     format!(
         "{:.2},{:.2} {:.2},{:.2} {:.2},{:.2} {:.2},{:.2}",
         -w,
         body_r * 0.82,
         w,
         body_r * 0.82,
-        w * 0.42,
+        w * 0.64,
         -(body_r * 1.28),
-        -w * 0.42,
+        -w * 0.64,
+        -(body_r * 1.28),
+    )
+}
+
+/// The lit flank of a [`wing_points`] moulding: a narrow sliver down its left
+/// side, so the wing reads as a raised bar rather than a painted stripe.
+fn wing_highlight_points(body_r: f64) -> String {
+    let w = body_r * 0.46;
+    format!(
+        "{:.2},{:.2} {:.2},{:.2} {:.2},{:.2} {:.2},{:.2}",
+        -w,
+        body_r * 0.82,
+        -w * 0.55,
+        body_r * 0.82,
+        -w * 0.36,
+        -(body_r * 1.28),
+        -w * 0.64,
         -(body_r * 1.28),
     )
 }
@@ -597,6 +641,13 @@ pub fn HardwareKnob(
                             // with a dark rim.
                             "radial-gradient(circle at 38% 28%, #35353a 0%, #1c1c20 46%, \
                              #101013 78%, #0a0a0c 100%)"
+                        } else if style == KnobStyle::Neve {
+                            // The bright turned-aluminium collar. On the unit
+                            // this is the concentric outer knob; here it is
+                            // the ring that makes a 1073 knob recognisable
+                            // before any colour or number does.
+                            "linear-gradient(150deg, #f6f7f8 0%, #d6dade 30%, \
+                             #aeb3b8 60%, #eceef0 86%, #c2c6ca 100%)"
                         } else if style == KnobStyle::Dial {
                             "radial-gradient(circle at 40% 26%, #e8e8e6 0%, #c2c2c0 44%, \
                              #9a9a98 78%, #cbcbc9 100%)"
@@ -717,21 +768,21 @@ pub fn HardwareKnob(
                             let b = a + std::f64::consts::TAU / (count * 2.0);
                             let (sx, sy) = (a.sin(), -a.cos());
                             let (bx, by) = (b.sin(), -b.cos());
-                            let inner = body_r - 4.2;
+                            let (inner, outer) = style.flute_band(body_r);
                             rsx! {
                                 line {
                                     x1: "{sx * inner:.2}",
                                     y1: "{sy * inner:.2}",
-                                    x2: "{sx * body_r:.2}",
-                                    y2: "{sy * body_r:.2}",
+                                    x2: "{sx * outer:.2}",
+                                    y2: "{sy * outer:.2}",
                                     stroke: "{style.flute_stroke()}",
                                     stroke_width: "1.2",
                                 }
                                 line {
                                     x1: "{bx * inner:.2}",
                                     y1: "{by * inner:.2}",
-                                    x2: "{bx * body_r:.2}",
-                                    y2: "{by * body_r:.2}",
+                                    x2: "{bx * outer:.2}",
+                                    y2: "{by * outer:.2}",
                                     stroke: "rgba(0,0,0,0.40)",
                                     stroke_width: "1.2",
                                 }
@@ -739,14 +790,28 @@ pub fn HardwareKnob(
                         }
                     }
 
-                    // The Marconi wing: the raised grip you actually turn,
-                    // reaching past the body toward the skirt's edge.
+                    // The Marconi wing: the raised coloured grip you turn,
+                    // reaching past the body toward the skirt's edge. It is
+                    // the *silhouette* of a 1073's gain and filter knobs —
+                    // a bar of colour standing off a dark disc, not a line
+                    // drawn on a coloured face — so it is filled in the
+                    // knob's own colour and lit down one side.
                     if style == KnobStyle::Marconi {
                         polygon {
                             points: "{wing_points(body_r)}",
-                            fill: "rgba(255,255,255,0.09)",
-                            stroke: "rgba(0,0,0,0.55)",
+                            transform: "translate(0.8 1.6)",
+                            fill: "rgba(0,0,0,0.45)",
+                        }
+                        polygon {
+                            points: "{wing_points(body_r)}",
+                            fill: "{tint.as_deref().unwrap_or(\"#3a3a40\")}",
+                            stroke: "rgba(0,0,0,0.6)",
                             stroke_width: "0.9",
+                        }
+                        // The lit face of the moulding, down its left flank.
+                        polygon {
+                            points: "{wing_highlight_points(body_r)}",
+                            fill: "rgba(255,255,255,0.20)",
                         }
                         rect {
                             x: "-1.3",
@@ -848,15 +913,24 @@ pub fn HardwareKnob(
                         }
                     }
 
-                    // The 1073's line: a dark groove from the hub out to the
-                    // rim, read against the ring of dots printed around it.
+                    // The 1073's band knob: a dark groove cut across the grey
+                    // cap, read against the collar and the printed dots. It
+                    // stays inside the cap — a line that ran onto the bright
+                    // collar would vanish into it.
                     if style == KnobStyle::Neve {
+                        // The seam where the cap meets the collar.
+                        circle {
+                            cx: "0", cy: "0", r: "{body_r:.1}",
+                            fill: "none",
+                            stroke: "rgba(0,0,0,0.45)",
+                            stroke_width: "1.0",
+                        }
                         rect {
-                            x: "-1.5",
-                            y: "{-(body_r - 2.0):.1}",
-                            width: "3.0",
-                            height: "{body_r - 3.0:.1}",
-                            rx: "1.2",
+                            x: "-1.4",
+                            y: "{-(body_r - 1.5):.1}",
+                            width: "2.8",
+                            height: "{body_r * 0.72:.1}",
+                            rx: "1.1",
                             fill: "{style.pointer()}",
                         }
                     }
