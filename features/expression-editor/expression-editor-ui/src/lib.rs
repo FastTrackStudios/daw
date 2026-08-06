@@ -129,6 +129,7 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>)
     let ticks = canvas::ruler(&ed);
     let marker_flags = canvas::markers(&ed);
     let playhead = ed.playhead.map(|t| ed.camera.x(t));
+    let razors = canvas::razor_rects(&ed);
     let microtonal = !ed.tuning.temperament.is_equal();
     let temperament_name = ed.tuning.temperament.name;
     let lane = ed.lane;
@@ -510,6 +511,39 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>)
                     }
                 }
 
+                // Razor areas sit above the notes: they are a
+                // statement about a region, and the region has to be
+                // legible even where it is dense with material.
+                for (i, r) in razors.iter().enumerate() {
+                    g {
+                        key: "rz{i}",
+                        rect {
+                            x: "{r.x:.1}",
+                            y: "{r.y:.1}",
+                            width: "{r.w:.1}",
+                            height: "{r.h:.1}",
+                            fill: theme::RAZOR,
+                            fill_opacity: "0.20",
+                            stroke: theme::RAZOR,
+                            stroke_width: "1",
+                            pointer_events: "none",
+                        }
+                        // Hard edges — this is where notes get sliced.
+                        line {
+                            x1: "{r.x:.1}", y1: "{r.y:.1}",
+                            x2: "{r.x:.1}", y2: "{r.y + r.h:.1}",
+                            stroke: theme::RAZOR, stroke_width: "2",
+                            pointer_events: "none",
+                        }
+                        line {
+                            x1: "{r.x + r.w:.1}", y1: "{r.y:.1}",
+                            x2: "{r.x + r.w:.1}", y2: "{r.y + r.h:.1}",
+                            stroke: theme::RAZOR, stroke_width: "2",
+                            pointer_events: "none",
+                        }
+                    }
+                }
+
                 if let Some(t) = playhead {
                     line {
                         x1: "{t:.1}", y1: "0",
@@ -693,6 +727,7 @@ fn StatusBar(editor: Signal<Editor>) -> Element {
     let count = ed.selection.notes.len();
     let tool = ed.tool;
     let ambiguous = ed.doc.notes.iter().filter(|n| n.ambiguous).count();
+    let razor_areas = ed.razor.areas.len();
     drop(ed);
 
     rsx! {
@@ -704,6 +739,9 @@ fn StatusBar(editor: Signal<Editor>) -> Element {
                     font-family: ui-monospace, monospace;",
             span { "{tool.label()}" }
             span { "{count} selected" }
+            if razor_areas > 0 {
+                span { style: "color: {theme::RAZOR};", "razor: {razor_areas}" }
+            }
             if ambiguous > 0 {
                 span {
                     style: "color: {theme::ZONE};",

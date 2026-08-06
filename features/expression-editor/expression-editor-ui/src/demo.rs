@@ -29,13 +29,16 @@ pub enum Scene {
     Ambiguous,
     /// An empty document.
     Empty,
+    /// Long held notes across several rows — material a razor can
+    /// slice through.
+    Held,
     /// A part whose note density changes across it — sixteenths at the
     /// start, held notes at the end. What contextual zoom is for.
     Density,
 }
 
 impl Scene {
-    pub const ALL: [Scene; 8] = [
+    pub const ALL: [Scene; 9] = [
         Scene::Phrase,
         Scene::Zones,
         Scene::Microtonal,
@@ -44,6 +47,7 @@ impl Scene {
         Scene::Ambiguous,
         Scene::Empty,
         Scene::Density,
+        Scene::Held,
     ];
 
     /// Stable file-name stem for screenshots.
@@ -57,6 +61,7 @@ impl Scene {
             Scene::Ambiguous => "06-ambiguous",
             Scene::Empty => "07-empty",
             Scene::Density => "16-density",
+            Scene::Held => "19-held",
         }
     }
 
@@ -70,6 +75,7 @@ impl Scene {
             Scene::Ambiguous => "Channel conflict",
             Scene::Empty => "Empty",
             Scene::Density => "Mixed density",
+            Scene::Held => "Held notes",
         }
     }
 }
@@ -162,6 +168,18 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             n.target = expression_editor_core::Target::Zone(1);
             doc.push(n);
         }
+        Scene::Held => {
+            for (i, row) in [60, 62, 64, 65, 67].iter().enumerate() {
+                doc.push(sung_note(
+                    i as u64 + 1,
+                    PPQ * 0.5,
+                    PPQ * 7.0,
+                    *row,
+                    2 + i as u8,
+                    -1.0,
+                ));
+            }
+        }
         Scene::Ambiguous => {
             // Deliberately both on channel 2 while sounding together.
             doc.push(sung_note(1, PPQ * 0.5, PPQ * 3.0, 60, 2, -2.0));
@@ -219,7 +237,7 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
         Scene::Ambiguous => {
             ed.selection.set_single(NoteId(1));
         }
-        Scene::Empty | Scene::Density => {}
+        Scene::Empty | Scene::Density | Scene::Held => {}
         Scene::Phrase => {
             ed.selection.set_single(NoteId(3));
         }

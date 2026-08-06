@@ -37,6 +37,25 @@ a Melodyne editor wants marquee.
 
 Razor-edit behaviours are decoded in-tree too
 (`behaviors/razor_edit.rs`) — 17 drag, 9 click, plus edge behaviours.
+Modelled in `razor.rs`.
+
+The property that makes a razor different from a marquee: an area
+**slices** notes at its edges rather than selecting whole ones.
+Dragging a razor over the middle of a held note takes the middle of that
+note with it. So every razor operation carves first — slice both edges,
+then act — which makes "the notes in the area" a well-defined set with
+no partial overlaps left to reason about.
+
+Two cases worth naming, both tested:
+
+- A destination is cleared before contents land on it, so comping
+  replaces rather than piling up — **except** when the destination
+  overlaps the source, where clearing would delete the material out from
+  under a nudge.
+- Clearing a lane across an area splices the default in at both edges
+  rather than only deleting points inside. A held note whose curve is
+  defined by endpoints *outside* the razor has no points to delete, but
+  the region still has to read as cleared.
 
 ## Source 2 — Ample Sound Riffer (guitar/bass)
 
@@ -158,7 +177,7 @@ does not change as you approach an item edge.
 
 ## Status
 
-Landed (100 core tests):
+Landed (116 core tests):
 
 - `RowSpace` — pitch / drums / strings, with GM drum map, guitar and
   bass tunings, capo, nearest-hand fingering
@@ -179,11 +198,13 @@ Landed (100 core tests):
 
 Next, in order:
 
-1. **Wire the mouse map into the interaction layer** — it is built and
-   tested but the handlers still branch on tool, so nothing uses it yet.
+1. **Wire the mouse map into the interaction layer** — the razor
+   contexts are bound and the table is tested, but the pointer handlers
+   still branch on tool rather than resolving through `MouseMap`.
 2. **Velocity / CC lane strip** below the roll.
 3. **Multi Tool zones** as an overlay mode, per the table above.
-4. **Razor edits** — decoded in-tree, not yet modelled here.
+4. **Razor drag gestures in the UI** — the operations and rendering
+   exist; creating and dragging areas by mouse does not.
 5. **Row-space rendering** — drum diamonds, string roll with fret
    numbers, lyric labels, articulation badges.
 6. **Note context menu** (Riffer §6.2.2: cut/copy/paste/delete/select

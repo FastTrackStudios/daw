@@ -30,6 +30,7 @@ pub mod doc;
 pub mod edit;
 pub mod modulation;
 pub mod mouse;
+pub mod razor;
 pub mod rows;
 pub mod shape;
 pub mod tools;
@@ -41,6 +42,7 @@ pub use doc::{Curve, ExpressionDoc, Lane, Marker, Note, NoteId, Point, Target, T
 pub use edit::{Edit, History};
 pub use shape::Shape;
 pub use mouse::{Action, MouseMap};
+pub use razor::{RazorArea, RazorSet};
 pub use rows::{Articulation, DrumMap, RowSpace, StringTuning};
 pub use tools::{Grid, Hit, Mods, Selection, Tool};
 pub use tuning::{Temperament, Tuning};
@@ -65,6 +67,8 @@ pub struct Editor {
     pub selection: Selection,
     /// What the vertical axis means — pitch, drum lanes, or strings.
     pub row_space: RowSpace,
+    /// Active razor areas.
+    pub razor: RazorSet,
     /// Context × modifier → action. Editable, so a host can ship a
     /// REAPER-matching profile or its own.
     pub mouse: MouseMap,
@@ -96,6 +100,7 @@ impl Editor {
             overlays: Vec::new(),
             selection: Selection::default(),
             row_space: RowSpace::Pitch,
+            razor: RazorSet::default(),
             mouse: MouseMap::default(),
             tuning: Tuning::default(),
             grid: Grid::default(),

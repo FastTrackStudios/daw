@@ -34,6 +34,10 @@ pub enum Context {
     Keys,
     /// The timeline ruler.
     Ruler,
+    /// Inside an existing razor area.
+    RazorArea,
+    /// The left/right edge of a razor area.
+    RazorEdge,
 }
 
 /// How the press arrived.
@@ -134,6 +138,26 @@ pub enum Action {
     /// Guitar/bass: same pitch, next playable string.
     CycleString,
 
+    // ── razor edits ──────────────────────────────────────────────────
+    /// Drag out a new rectangular area.
+    RazorCreate,
+    RazorAddArea,
+    /// Move the area and everything in it.
+    RazorMoveContents,
+    RazorMoveContentsNoSnap,
+    RazorCopyContents,
+    /// Move the rectangle, leaving the notes where they are.
+    RazorMoveAreaOnly,
+    RazorMoveVertically,
+    RazorMoveHorizontally,
+    /// Drag an edge; contents stretch with it.
+    RazorStretchContents,
+    /// Drag an edge without touching the contents.
+    RazorResizeArea,
+    RazorDeleteContents,
+    RazorRemoveArea,
+    RazorClearAll,
+
     // ── navigation ───────────────────────────────────────────────────
     Pan,
     ZoomAnchored,
@@ -164,6 +188,10 @@ impl Action {
                 | Action::MarqueeToggle
                 | Action::SelectTouched
                 | Action::ToggleSelectTouched
+                | Action::RazorCreate
+                | Action::RazorAddArea
+                | Action::RazorRemoveArea
+                | Action::RazorClearAll
                 | Action::Pan
                 | Action::ZoomAnchored
                 | Action::MovePlayhead
@@ -185,6 +213,7 @@ impl Action {
                 | Action::MoveNoteEdgeNoSnap
                 | Action::PaintNotesNoSnap
                 | Action::MovePlayheadNoSnap
+                | Action::RazorMoveContentsNoSnap
         )
     }
 }
@@ -321,6 +350,7 @@ impl MouseMap {
         const SC: ModKey = ModKey(3);
         const CA: ModKey = ModKey(6);
         const SA: ModKey = ModKey(5);
+        const ALL3: ModKey = ModKey(7);
 
         let b = |context, gesture, mods, action| Binding {
             context,
@@ -337,7 +367,9 @@ impl MouseMap {
                 b(C::PianoRoll, G::Drag, S, A::MarqueeAdd),
                 b(C::PianoRoll, G::Drag, CT, A::PenOverride),
                 b(C::PianoRoll, G::Drag, AL, A::PaintNotes),
-                b(C::PianoRoll, G::Drag, SA, A::PaintNotesNoSnap),
+                // Shift+Alt belongs to razor creation; the no-snap
+                // paint variant takes the remaining combination.
+                b(C::PianoRoll, G::Drag, ALL3, A::PaintNotesNoSnap),
                 b(C::PianoRoll, G::Drag, SC, A::Pan),
                 b(C::PianoRoll, G::Drag, CA, A::ZoomAnchored),
                 b(C::PianoRoll, G::Click, N, A::DeselectAll),
@@ -387,6 +419,20 @@ impl MouseMap {
                 b(C::Ruler, G::Click, N, A::MovePlayhead),
                 b(C::Ruler, G::Click, AL, A::MovePlayheadNoSnap),
                 b(C::Ruler, G::Drag, N, A::MovePlayhead),
+                // ── razor ────────────────────────────────────────────
+                // Creating a razor is a deliberate modifier gesture, so
+                // it never steals a plain drag from marquee select.
+                b(C::PianoRoll, G::Drag, SA, A::RazorCreate),
+                b(C::RazorArea, G::Drag, N, A::RazorMoveContents),
+                b(C::RazorArea, G::Drag, CT, A::RazorMoveContentsNoSnap),
+                b(C::RazorArea, G::Drag, AL, A::RazorCopyContents),
+                b(C::RazorArea, G::Drag, S, A::RazorMoveAreaOnly),
+                b(C::RazorArea, G::Click, N, A::RazorRemoveArea),
+                b(C::RazorArea, G::Click, S, A::RazorAddArea),
+                b(C::RazorArea, G::DoubleClick, N, A::RazorDeleteContents),
+                b(C::RazorArea, G::RightClick, N, A::ContextMenu),
+                b(C::RazorEdge, G::Drag, N, A::RazorResizeArea),
+                b(C::RazorEdge, G::Drag, S, A::RazorStretchContents),
             ],
         }
     }

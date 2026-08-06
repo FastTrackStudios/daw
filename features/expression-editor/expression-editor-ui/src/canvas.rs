@@ -443,3 +443,35 @@ pub fn markers(ed: &Editor) -> Vec<MarkerFlag> {
         })
         .collect()
 }
+
+
+/// A razor area in pixels.
+pub struct RazorRect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// Razor areas, clipped to the visible span.
+///
+/// Drawn as a filled rectangle with hard vertical edges: the edges are
+/// where notes get sliced, so they have to read as exact boundaries
+/// rather than as a soft highlight.
+pub fn razor_rects(ed: &Editor) -> Vec<RazorRect> {
+    let h = ed.camera.px_per_semitone;
+    ed.razor
+        .areas
+        .iter()
+        .map(|a| {
+            let x = ed.camera.x(a.t0);
+            let top = ed.camera.y(a.row_hi as f64 + 0.5, ed.viewport);
+            RazorRect {
+                x,
+                y: top,
+                w: (ed.camera.x(a.t1) - x).max(1.0),
+                h: h * a.rows() as f64,
+            }
+        })
+        .collect()
+}

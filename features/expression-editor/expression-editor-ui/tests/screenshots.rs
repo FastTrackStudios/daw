@@ -167,3 +167,23 @@ async fn shoot_smart_zoom() {
     whole.smart_zoom(ZoomModes::KEYS, demo::PPQ * 1.0, 62.0);
     shoot(whole, "15-smart-zoom-item").await;
 }
+
+/// Razor edits: an area over held notes, and the result of moving it.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_razor() {
+    use expression_editor_core::razor::{self, RazorArea};
+
+    let vp = Viewport::new(W as f64, CANVAS_H);
+    let mut ed = demo::editor(Scene::Held, vp);
+    let area = RazorArea::new(demo::PPQ * 2.0, demo::PPQ * 4.0, 60, 67);
+
+    ed.razor.add(area);
+    shoot(ed.clone(), "17-razor-area").await;
+
+    // Moving it slices the held notes at both edges and carries the
+    // middle — the thing a marquee cannot do.
+    razor::move_contents(&mut ed.doc, area, demo::PPQ * 4.0, 0, false);
+    ed.razor.clear();
+    ed.razor.add(area.translated(demo::PPQ * 4.0, 0));
+    shoot(ed, "18-razor-moved").await;
+}

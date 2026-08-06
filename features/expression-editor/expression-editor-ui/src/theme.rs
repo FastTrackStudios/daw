@@ -37,6 +37,9 @@ pub const PLAYHEAD: &str = "#f8fafc";
 pub const KEY_WHITE: &str = "#d8dce6";
 pub const KEY_BLACK: &str = "#26262f";
 pub const GUTTER_BG: &str = "#101016";
+/// Razor areas. Distinct from ZONE red — a razor is a region you are
+/// about to operate on, not a warning.
+pub const RAZOR: &str = "#22d3ee";
 
 /// Twelve pitch-class hues. Notes are colored by pitch class so a
 /// melodic shape is readable at a glance without reading the piano

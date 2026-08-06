@@ -1760,3 +1760,283 @@ fn smart_zoom_keeps_the_anchor_in_view() {
         "anchor {anchor} fell outside {t0}..{t1}"
     );
 }
+
+// ── razor edits ──────────────────────────────────────────────────────
+
+use expression_editor_core::razor::{self, RazorArea, RazorSet};
+
+/// One held note per row, spanning the whole bar — so every test can
+/// razor a rectangle out of the middle of real material.
+fn held_doc() -> ExpressionDoc {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 16.0);
+    for (i, row) in [60, 64, 67].iter().enumerate() {
+        let mut n = Note::new(NoteId(i as u64 + 1), 0.0, PPQ * 8.0, *row);
+        n.pitch.set(0.0, 0.0);
+        n.pitch.set(PPQ * 8.0, 2.0);
+        doc.push(n);
+    }
+    doc
+}
+
+#[test]
+fn a_razor_slices_notes_at_its_edges_rather_than_selecting_whole_ones() {
+    let mut doc = held_doc();
+    let area = RazorArea::new(PPQ * 2.0, PPQ * 4.0, 60, 60);
+    let inside = razor::carve(&mut doc, area);
+
+    assert_eq!(inside.len(), 1, "exactly the middle piece");
+    let piece = doc.note(inside[0]).unwrap();
+    assert!((piece.start - PPQ * 2.0).abs() < 1e-6);
+    assert!((piece.end - PPQ * 4.0).abs() < 1e-6);
+    // The held note became three: before, inside, after.
+    let row60: Vec<_> = doc.notes.iter().filter(|n| n.row == 60).collect();
+    assert_eq!(row60.len(), 3);
+    // Rows the razor did not cover are untouched.
+    assert_eq!(doc.notes.iter().filter(|n| n.row == 64).count(), 1);
+}
+
+#[test]
+fn slicing_preserves_the_expression_at_the_cut() {
+    let mut doc = held_doc();
+    let area = RazorArea::new(PPQ * 2.0, PPQ * 4.0, 60, 60);
+    let inside = razor::carve(&mut doc, area);
+    let piece = doc.note(inside[0]).unwrap();
+    // The pitch curve ramps 0→2 across 8 beats, so at beat 2 it is 0.5.
+    assert!(
+        (piece.pitch.sample(PPQ * 2.0, 0.0) - 0.5).abs() < 1e-6,
+        "the cut must inherit the curve value, not reset to centre"
+    );
+}
+
+#[test]
+fn deleting_an_area_leaves_a_hole_and_keeps_the_rest() {
+    let mut doc = held_doc();
+    let area = RazorArea::new(PPQ * 2.0, PPQ * 4.0, 60, 60);
+    assert!(razor::delete_contents(&mut doc, area));
+
+    let row60: Vec<_> = doc.notes.iter().filter(|n| n.row == 60).collect();
+    assert_eq!(row60.len(), 2, "before and after survive");
+    assert!(
+        !row60.iter().any(|n| n.start < PPQ * 4.0 && n.end > PPQ * 2.0),
+        "nothing is left inside the hole"
+    );
+}
+
+#[test]
+fn moving_an_area_carries_its_contents_and_clears_the_destination() {
+    let mut doc = held_doc();
+    let area = RazorArea::new(PPQ * 2.0, PPQ * 3.0, 60, 60);
+    assert!(razor::move_contents(&mut doc, area, PPQ * 4.0, 0, false));
+
+    // The moved piece landed at 6..7.
+    assert!(
+        doc.notes
+            .iter()
+            .any(|n| n.row == 60 && (n.start - PPQ * 6.0).abs() < 1e-6),
+        "the piece moved"
+    );
+    // And it replaced what was there rather than overlapping it.
+    let overlapping = doc
+        .notes
+        .iter()
+        .filter(|n| n.row == 60 && n.start < PPQ * 7.0 && n.end > PPQ * 6.0)
+        .count();
+    assert_eq!(overlapping, 1, "destination was cleared, not stacked on");
+}
+
+#[test]
+fn copying_an_area_leaves_the_original_in_place() {
+    let mut doc = held_doc();
+    let area = RazorArea::new(PPQ * 2.0, PPQ * 3.0, 60, 60);
+    assert!(razor::move_contents(&mut doc, area, PPQ * 4.0, 0, true));
+
+    assert!(
+        doc.notes
+            .iter()
+            .any(|n| n.row == 60 && (n.start - PPQ * 2.0).abs() < 1e-6),
+        "original still there"
+    );
+    assert!(
+        doc.notes
+            .iter()
+            .any(|n| n.row == 60 && (n.start - PPQ * 6.0).abs() < 1e-6),
+        "and a copy landed"
+    );
+}
+
+#[test]
+fn a_nudge_does_not_delete_its_own_source() {
+    let mut doc = held_doc();
+    let area = RazorArea::new(PPQ * 2.0, PPQ * 4.0, 60, 60);
+    // Destination overlaps the source — the classic way to lose data.
+    assert!(razor::move_contents(&mut doc, area, PPQ * 0.5, 0, false));
+    assert!(
+        doc.notes
+            .iter()
+            .any(|n| n.row == 60 && (n.start - PPQ * 2.5).abs() < 1e-6),
+        "the nudged piece survives"
+    );
+}
+
+#[test]
+fn moving_an_area_vertically_transposes_its_contents() {
+    let mut doc = held_doc();
+    let area = RazorArea::new(PPQ * 2.0, PPQ * 3.0, 60, 60);
+    razor::move_contents(&mut doc, area, 0.0, 5, false);
+    assert!(doc.notes.iter().any(|n| n.row == 65));
+}
+
+#[test]
+fn stretching_an_area_scales_positions_and_lengths_together() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 16.0);
+    for i in 0..4 {
+        doc.push(Note::new(
+            NoteId(i + 1),
+            PPQ * i as f64 * 0.25,
+            PPQ * (i as f64 * 0.25 + 0.25),
+            60,
+        ));
+    }
+    let area = RazorArea::new(0.0, PPQ, 60, 60);
+    assert!(razor::stretch_contents(&mut doc, area, 0.0, PPQ * 2.0));
+
+    let mut starts: Vec<f64> = doc.notes.iter().map(|n| n.start).collect();
+    starts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    // Sixteenths became eighths.
+    assert!((starts[1] - PPQ * 0.5).abs() < 1e-6, "got {starts:?}");
+    let n = doc.notes.iter().find(|n| n.start == 0.0).unwrap();
+    assert!((n.len() - PPQ * 0.5).abs() < 1e-6, "lengths scaled too");
+}
+
+#[test]
+fn reversing_an_area_mirrors_it_about_its_own_centre() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 16.0);
+    doc.push(Note::new(NoteId(1), 0.0, PPQ * 0.25, 60));
+    doc.push(Note::new(NoteId(2), PPQ * 0.75, PPQ, 60));
+    let area = RazorArea::new(0.0, PPQ, 60, 60);
+    assert!(razor::reverse_contents(&mut doc, area));
+
+    let mut starts: Vec<f64> = doc.notes.iter().map(|n| n.start).collect();
+    starts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    // The note at 0..0.25 mirrors to 0.75..1, and vice versa.
+    assert!((starts[0] - 0.0).abs() < 1e-6, "got {starts:?}");
+    assert!((starts[1] - PPQ * 0.75).abs() < 1e-6, "got {starts:?}");
+}
+
+#[test]
+fn razor_velocity_applies_only_inside_the_rectangle() {
+    let mut doc = held_doc();
+    let area = RazorArea::new(PPQ * 2.0, PPQ * 4.0, 60, 60);
+    assert!(razor::set_velocity(&mut doc, area, 0.25));
+
+    let inside = doc
+        .notes
+        .iter()
+        .find(|n| n.row == 60 && n.start >= PPQ * 2.0 && n.end <= PPQ * 4.0)
+        .unwrap();
+    assert_eq!(inside.velocity, 0.25);
+    // Another row is untouched.
+    let other = doc.notes.iter().find(|n| n.row == 64).unwrap();
+    assert_ne!(other.velocity, 0.25);
+}
+
+#[test]
+fn clearing_a_lane_across_an_area_keeps_the_notes() {
+    let mut doc = held_doc();
+    let before = doc.notes.len();
+    let area = RazorArea::new(PPQ * 2.0, PPQ * 4.0, 60, 60);
+    assert!(razor::clear_lane(&mut doc, area, Lane::Pitch));
+    assert_eq!(doc.notes.len(), before, "notes survive a lane clear");
+}
+
+#[test]
+fn overlapping_areas_on_the_same_rows_merge() {
+    let mut set = RazorSet::default();
+    set.add(RazorArea::new(0.0, 100.0, 60, 60));
+    set.add(RazorArea::new(50.0, 200.0, 60, 60));
+    assert_eq!(set.areas.len(), 1, "merged");
+    assert_eq!(set.areas[0].t0, 0.0);
+    assert_eq!(set.areas[0].t1, 200.0);
+
+    // Different rows stay separate.
+    set.add(RazorArea::new(0.0, 100.0, 64, 64));
+    assert_eq!(set.areas.len(), 2);
+}
+
+#[test]
+fn an_empty_area_is_never_added() {
+    let mut set = RazorSet::default();
+    set.add(RazorArea::new(100.0, 100.0, 60, 60));
+    assert!(set.is_empty(), "a zero-width drag is not a razor");
+}
+
+#[test]
+fn hit_testing_a_razor_set_finds_the_topmost_area() {
+    let mut set = RazorSet::default();
+    set.add(RazorArea::new(0.0, 100.0, 60, 62));
+    assert!(set.at(50.0, 61).is_some());
+    assert!(set.at(50.0, 70).is_none(), "outside the row range");
+    assert!(set.at(150.0, 61).is_none(), "outside the time range");
+    assert!(set.remove_at(50.0, 61));
+    assert!(set.is_empty());
+}
+
+#[test]
+fn razor_bindings_do_not_steal_the_plain_marquee_drag() {
+    let m = MouseMap::reaper_like();
+    // Creating a razor is a deliberate modifier gesture.
+    assert_eq!(
+        m.resolve(Context::PianoRoll, Gesture::Drag, Mods::default()),
+        Action::MarqueeSelect
+    );
+    assert_eq!(
+        m.resolve(
+            Context::PianoRoll,
+            Gesture::Drag,
+            Mods {
+                shift: true,
+                alt: true,
+                ..Default::default()
+            }
+        ),
+        Action::RazorCreate
+    );
+    // And once an area exists, dragging inside it moves its contents.
+    assert_eq!(
+        m.resolve(Context::RazorArea, Gesture::Drag, Mods::default()),
+        Action::RazorMoveContents
+    );
+    assert_eq!(
+        m.resolve(
+            Context::RazorArea,
+            Gesture::Drag,
+            Mods {
+                alt: true,
+                ..Default::default()
+            }
+        ),
+        Action::RazorCopyContents
+    );
+}
+
+#[test]
+fn no_preset_binds_the_same_gesture_twice() {
+    // A duplicate binding is silently unreachable: `resolve` finds the
+    // first and the second never fires. The literal tables are hand
+    // written, so this invariant needs guarding.
+    for name in MouseMap::PRESETS {
+        let m = MouseMap::preset(name);
+        let mut seen: Vec<(Context, Gesture, ModKey)> = Vec::new();
+        for b in m.bindings() {
+            let key = (b.context, b.gesture, b.mods);
+            assert!(
+                !seen.contains(&key),
+                "{name}: duplicate binding for {:?} {:?} {}",
+                b.context,
+                b.gesture,
+                b.mods.notation()
+            );
+            seen.push(key);
+        }
+    }
+}
