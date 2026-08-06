@@ -124,3 +124,34 @@ pub fn select_style() -> String {
          border-radius: 5px; color: {TEXT}; font-size: 11px; padding: 0 6px;"
     )
 }
+
+/// Mode icons, as inline SVG path data on a 16×16 grid.
+///
+/// Drawn rather than typed: the glyphs a font would give us
+/// (🎸 🥁 🎤) render inconsistently across Blitz, wasm and a plugin
+/// window, and emoji colour fights the bar's palette. These inherit
+/// `currentColor`, so an active mode's icon lights with its label.
+pub fn mode_icon(mode: expression_editor_core::Mode) -> &'static str {
+    use expression_editor_core::Mode;
+    match mode {
+        // Piano keys.
+        Mode::Midi => "M1 4h14v8H1z M4.5 4v5 M7 4v5 M10.5 4v5 M13 4v5",
+        // Keys with a bend arrow over them — per-note expression.
+        Mode::Mpe => "M1 7h14v5H1z M4.5 7v3 M7 7v3 M10.5 7v3 M13 7v3 \
+                      M2 4.5c3-3 5 1 7-1s3-1 4 0",
+        // Kick drum: a circle with lugs and a beater line.
+        Mode::Drums => "M8 2.5a5.5 5.5 0 100 11 5.5 5.5 0 100-11z \
+                        M8 5.5a2.5 2.5 0 100 5 2.5 2.5 0 100-5z \
+                        M2.6 5.3l2.2 1 M13.4 5.3l-2.2 1 \
+                        M4.8 12.6l1-2.2 M11.2 12.6l-1-2.2",
+        // Guitar: body, neck, and strings.
+        Mode::Guitar => "M5 14a3 3 0 100-6 3 3 0 100 6z M6.6 9.6l6-6 \
+                         M11.4 2.2l2.4 2.4 M12.2 5.4l-1.6-1.6",
+        // Microphone.
+        Mode::Vocals => "M8 2a2 2 0 012 2v4a2 2 0 01-4 0V4a2 2 0 012-2z \
+                         M4.5 7.5a3.5 3.5 0 007 0 M8 11v3 M6 14h4",
+        // Waveform.
+        Mode::Audio => "M1 8h1.5 M2.5 8v0 M3.5 5v6 M5.5 3v10 M7.5 6v4 \
+                        M9.5 2v12 M11.5 5v6 M13.5 7v2 M15 8h0",
+    }
+}

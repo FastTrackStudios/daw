@@ -5,8 +5,8 @@ use crate::safe_wrappers::item as item_sw;
 use crate::safe_wrappers::midi as sw;
 use daw_proto::{
     HumanizeParams, ItemRef, Midi, MidiCC, MidiCCCreate, MidiNote, MidiNoteCreate, MidiPitchBend,
-    MidiPitchBendCreate, MidiProgramChange, MidiSysEx, MidiTakeLocation, PpqRange, ProjectContext,
-    QuantizeParams, TakeRef, TrackRef,
+    MidiPitchBendCreate, MidiProgramChange, MidiSysEx, MidiTakeContent, MidiTakeLocation,
+    MidiTakeSnapshot, PpqRange, ProjectContext, QuantizeParams, TakeRef, TrackRef, WriteMode,
 };
 use reaper_medium::{MediaItem, MediaItemTake, ProjectContext as ReaperProjectContext};
 use tracing::warn;
@@ -165,6 +165,75 @@ fn readonly_warn(method: &str) {
 // =============================================================================
 
 impl Midi for crate::Reaper {
+    // ── Bulk take access ───────────────────────────────────────────
+
+    fn read_take(&self, location: MidiTakeLocation) -> MidiTakeSnapshot {
+        let notes = Midi::notes(self, location.clone());
+        MidiTakeSnapshot {
+            length_ppq: notes.iter().map(|n| n.end_ppq()).fold(0.0, f64::max),
+            notes,
+            ccs: Midi::ccs(self, location.clone(), None),
+            pitch_bends: Midi::pitch_bends(self, location.clone()),
+            channel_pressures: Midi::channel_pressures(self, location.clone()),
+            poly_pressures: Midi::poly_pressures(self, location.clone()),
+            note_expressions: Midi::note_expressions(self, location),
+            // REAPER's MIDI API is quarter-note based; 960 is the
+            // resolution its own editor reports.
+            ppq: 960.0,
+        }
+    }
+
+    fn write_take(
+        &self,
+        location: MidiTakeLocation,
+        content: MidiTakeContent,
+        mode: WriteMode,
+    ) -> Vec<u32> {
+        if mode == WriteMode::Replace {
+            let existing: Vec<u32> = (0..Midi::note_count(self, location.clone())).collect();
+            Midi::delete_notes(self, location.clone(), existing);
+        }
+        let indices = Midi::add_notes(self, location.clone(), content.notes);
+        for cc in content.ccs {
+            Midi::add_cc(self, location.clone(), cc);
+        }
+        for pb in content.pitch_bends {
+            Midi::add_pitch_bend(self, location.clone(), pb);
+        }
+        for ne in content.note_expressions {
+            Midi::add_note_expression(self, location.clone(), ne);
+        }
+        indices
+    }
+
+    fn replace_range(
+        &self,
+        location: MidiTakeLocation,
+        range: PpqRange,
+        content: MidiTakeContent,
+    ) -> Vec<u32> {
+        // Descending, because each delete renumbers everything above it.
+        let mut doomed: Vec<u32> = Midi::notes(self, location.clone())
+            .iter()
+            .filter(|n| n.overlaps(range.start, range.end))
+            .map(|n| n.index)
+            .collect();
+        doomed.sort_unstable_by(|a, b| b.cmp(a));
+        Midi::delete_notes(self, location.clone(), doomed);
+        Midi::write_take(self, location, content, WriteMode::Merge)
+    }
+
+    fn read_midi_file(&self, path: String, track_index: u32) -> Option<MidiTakeSnapshot> {
+        // The same pure-Rust reader the standalone backend uses. Going
+        // through REAPER would mean importing the file into a project
+        // first, which is a side effect a read should not have.
+        daw_proto::midi::smf::read(&path, track_index as usize)
+    }
+
+    fn write_midi_file(&self, path: String, content: MidiTakeContent, ppq: f64) -> bool {
+        daw_proto::midi::smf::write(&path, &content, ppq).is_ok()
+    }
+
     fn notes(&self, location: MidiTakeLocation) -> Vec<MidiNote> {
         let medium = reaper_high::Reaper::get().medium_reaper();
         let Some(take) = resolve_take_for_location(medium, &location) else {

@@ -142,7 +142,22 @@ pub fn Toolbar(
                         accent: true,
                         title: format!("{} mode", m.label()),
                         onclick: move |_| editor.write().set_mode(m),
-                        "{m.label()}"
+                        span {
+                            style: "display: flex; align-items: center; gap: 5px;",
+                            svg {
+                                view_box: "0 0 16 16",
+                                style: "width: 13px; height: 13px; flex: 0 0 auto;",
+                                path {
+                                    d: theme::mode_icon(m),
+                                    fill: "none",
+                                    stroke: "currentColor",
+                                    stroke_width: "1.3",
+                                    stroke_linecap: "round",
+                                    stroke_linejoin: "round",
+                                }
+                            }
+                            "{m.label()}"
+                        }
                     }
                 }
             }
