@@ -21,6 +21,12 @@
 //! The fixture this module is tested against was built to demonstrate
 //! exactly that, pairing 4/8 (C♯/D♭) and 16/20 (D♯/E♭).
 //!
+//! `accidental` takes `0` as well as ±1 — `0` means spell it naturally.
+//! That matters at the edges of the circle: root `11` with `0` is B
+//! major, and the same root with `-1` is C♭ major. Those two cases come
+//! from a Cockos forum thread (t=287164) rather than the fixture, which
+//! never uses root 11.
+//!
 //! `scale_mask` is a 12-bit set with the root at bit 0, so `0xAB5` —
 //! bits 0,2,4,5,7,9,11 — is the major scale.
 //!
@@ -33,7 +39,8 @@ pub struct KeySig {
     pub measure: u32,
     /// Root pitch class, 0-11.
     pub root: u8,
-    /// How to spell it: positive for sharps, negative for flats.
+    /// How to spell it: negative for flats, zero for naturals, positive
+    /// for sharps. Not an offset — the root already carries the pitch.
     pub accidental: i8,
     /// 12-bit scale set, root at bit 0.
     pub scale_mask: u32,
@@ -45,8 +52,11 @@ pub const SCALE_MASK_MAJOR: u32 = 0xAB5;
 const SHARP_NAMES: [&str; 12] = [
     "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
 ];
+/// Flat spellings. Note 4 and 11: in a flat key those are F♭ and C♭, not
+/// E and B — the naive table returns the natural name and gets C♭ major
+/// wrong.
 const FLAT_NAMES: [&str; 12] = [
-    "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B",
+    "C", "Db", "D", "Eb", "Fb", "F", "Gb", "G", "Ab", "A", "Bb", "Cb",
 ];
 
 impl KeySig {
@@ -199,6 +209,34 @@ mod tests {
         let chunk = "<KEYSIG\n  0 7 1 0xAB5\n>\n<TRACK\n  0 0 0 0x0\n>";
         let sigs = parse(chunk);
         assert_eq!(sigs.len(), 1);
+        assert_eq!(sigs[0].root_name(), "G");
+    }
+}
+
+#[cfg(test)]
+mod forum_cases {
+    use super::*;
+
+    /// From the Cockos thread that documents this format (t=287164):
+    /// root 11 spelled flat is C♭ major, spelled natural it's B major.
+    /// The fixture has no root 11, so a naive flat table (…, "Bb", "B")
+    /// passes every fixture test and still gets this wrong.
+    #[test]
+    fn root_eleven_spells_c_flat_or_b() {
+        let c_flat = parse("<KEYSIG\n  0 11 -1 0xAB5\n>");
+        assert_eq!(c_flat[0].root_name(), "Cb");
+        assert_eq!(c_flat[0].display(), "Cb major");
+
+        let b = parse("<KEYSIG\n  0 11 0 0xAB5\n>");
+        assert_eq!(b[0].root_name(), "B");
+        assert_eq!(b[0].display(), "B major");
+    }
+
+    /// Zero is a valid accidental, not just ±1.
+    #[test]
+    fn natural_spelling_is_accepted() {
+        let sigs = parse("<KEYSIG\n  0 7 0 0xAB5\n>");
+        assert_eq!(sigs[0].accidental, 0);
         assert_eq!(sigs[0].root_name(), "G");
     }
 }
