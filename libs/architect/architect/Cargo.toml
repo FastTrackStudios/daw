@@ -122,7 +122,20 @@ server-axum = [
     "dep:tracing",
     "dep:vox-core",
     "dep:vox-types",
+    "telemetry",
 ]
+
+# One `tracing` span per dispatched RPC call, at the LayerRouter choke
+# point (see `LayerRouter::call_span`). Without it a served WebSocket is
+# one opaque span and the calls inside it are invisible; with it every
+# call is named, timed, and correlatable with the logs it emits.
+#
+# Implied by `server-axum` — anything serving RPC over the network wants
+# this, and that feature already pulls `tracing`. Separate so an
+# in-process router (a DAW dispatcher, a wasm LocalServer) can opt in or
+# stay out. Costs a disabled-span check per call when no subscriber is
+# installed.
+telemetry = ["vox", "dep:tracing"]
 
 # ── Umbrella features — the two common consumer profiles ─────────────
 #
@@ -268,6 +281,8 @@ dioxus = { workspace = true }
 vox-core = { workspace = true }
 vox-types = { workspace = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+# rpc_spans.rs installs a capturing subscriber to assert the dispatch span.
+tracing-subscriber = { workspace = true }
 
 [[test]]
 name = "reconnect_supervisor"
