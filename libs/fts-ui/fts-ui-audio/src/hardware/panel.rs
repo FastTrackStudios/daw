@@ -58,6 +58,21 @@ pub enum PanelEnds {
     Wood,
 }
 
+/// The finish over a panel's paint.
+///
+/// `paint` gives a panel its colour and its top-to-bottom sheen. What it
+/// cannot give is *grain*: a brushed aluminium plate is covered in fine
+/// horizontal striations, and without them a silver panel reads as grey
+/// plastic no matter how well the gradient is tuned.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum PanelTexture {
+    /// Painted steel: the paint is the finish.
+    #[default]
+    Painted,
+    /// Brushed metal: horizontal grain under a broad diagonal sheen.
+    Brushed,
+}
+
 /// A hardware faceplate.
 ///
 /// `design_w` / `design_h` are the panel's drawing size in CSS px at scale 1;
@@ -75,6 +90,9 @@ pub fn Panel(
     /// How the panel is finished at its edges.
     #[props(default)]
     ends: PanelEnds,
+    /// The finish over the paint.
+    #[props(default)]
+    texture: PanelTexture,
     /// Rendered inside the panel, positioned absolutely in design space.
     children: Element,
 ) -> Element {
@@ -101,6 +119,29 @@ pub fn Panel(
                     4.0 * scale,
                     18.0 * scale,
                 ),
+
+                // The backplate: the metal itself, and nothing but.
+                //
+                // First child, so every knob, meter, lamp and legend the panel
+                // carries is painted over it — this is the plate they are
+                // mounted *on*, not a finish laid over the top of them.
+                //
+                // Grain only. An earlier version added a broad diagonal sheen
+                // across the whole plate, and however carefully it was tuned it
+                // read as a film over the controls rather than as light on
+                // metal; the paint's own top-to-bottom gradient does that job
+                // without spanning anything. The striations stay fine and
+                // low-contrast, because grain on a real plate is at the edge of
+                // visible and anything coarser reads as corduroy.
+                if texture == PanelTexture::Brushed {
+                    div {
+                        "data-testid": "panel-backplate",
+                        style: "position:absolute; inset:0; pointer-events:none; \
+                                background:repeating-linear-gradient(0deg, \
+                                  rgba(255,255,255,0.075) 0px 1px, \
+                                  rgba(0,0,0,0.055) 1px 2px);",
+                    }
+                }
 
                 // The edges: screwed rack ears, or the walnut cheeks a
                 // desktop unit of the period was sold with.

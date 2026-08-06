@@ -241,6 +241,8 @@ pub struct RackDesign {
     pub vu_card: crate::hardware::vu_svg::VuScale,
     /// How the panel is finished at its edges.
     pub ends: crate::hardware::panel::PanelEnds,
+    /// The finish over the paint — painted, or brushed metal.
+    pub texture: crate::hardware::panel::PanelTexture,
     pub knob: KnobStyle,
     pub items: &'static [RackItem],
 }
