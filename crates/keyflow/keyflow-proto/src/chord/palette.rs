@@ -58,6 +58,13 @@ pub struct ChordCandidate {
     pub root_pc: u8,
     /// Semitones above the root.
     pub semitones: Vec<u8>,
+    /// Whether every note lands on a scale tone.
+    ///
+    /// Out-of-scale chords are still offered rather than hidden — you
+    /// reach for a chromatic chord on purpose, and a grid that drops rows
+    /// as the key changes reflows under you. The flag is what lets a view
+    /// show them as the outsiders they are.
+    pub in_scale: bool,
 }
 
 impl ChordCandidate {
@@ -66,6 +73,26 @@ impl ChordCandidate {
     /// Anything that would leave MIDI range is dropped rather than
     /// wrapped, so an extreme octave thins the chord instead of
     /// scrambling its voicing.
+    /// Notes with `inversion` voices rotated up an octave — 0 is root
+    /// position, 1 puts the root on top, and so on. Rotating past the
+    /// voice count wraps, so a caller can increment freely.
+    pub fn notes_inverted(&self, octave: i32, inversion: usize) -> Vec<u8> {
+        let mut notes = self.notes(octave);
+        if notes.is_empty() {
+            return notes;
+        }
+        for _ in 0..(inversion % notes.len()) {
+            let lowest = notes.remove(0);
+            let raised = i32::from(lowest) + 12;
+            if raised > 127 {
+                notes.insert(0, lowest);
+                break;
+            }
+            notes.push(raised as u8);
+        }
+        notes
+    }
+
     pub fn notes(&self, octave: i32) -> Vec<u8> {
         let root = (octave + 1) * 12 + i32::from(self.root_pc);
         self.semitones
@@ -154,6 +181,7 @@ pub fn diatonic(key: &Key) -> Vec<ChordCandidate> {
                 role: ChordRole::Diatonic,
                 root_pc,
                 semitones: semis,
+                in_scale: true,
             }
         })
         .collect()
@@ -177,6 +205,7 @@ pub fn parallel_key(key: &Key) -> Vec<ChordCandidate> {
         .filter(|c| !own.iter().any(|(pc, s)| *pc == c.root_pc && *s == c.semitones))
         .map(|mut c| {
             c.role = ChordRole::ParallelKey;
+            c.in_scale = false;
             c.label = format!(
                 "{}{}",
                 pc_name(c.root_pc, spell_sharp(key, ChordRole::ParallelKey)),
@@ -215,6 +244,7 @@ pub fn approach(key: &Key) -> Vec<ChordCandidate> {
                 role,
                 root_pc,
                 semitones: DOM7.to_vec(),
+                in_scale: false,
             });
         }
     }
@@ -391,11 +421,12 @@ fn scale_pcs(key: &Key) -> Vec<u8> {
         .collect()
 }
 
-/// Every chord type that fits the scale at `degree` (1-7).
+/// Every chord type at `degree` (1-7), each flagged for whether it fits
+/// the scale.
 ///
-/// "Fits" means every note lands on a scale tone. That's the filter that
-/// makes a column worth scanning — an out-of-key option would just be
-/// noise next to six that work.
+/// All of them, not just the fitting ones: hiding the rest makes the grid
+/// reflow as the key changes, and a chromatic chord is something you
+/// reach for deliberately. `in_scale` is how a view tells them apart.
 pub fn variations(key: &Key, degree: u8) -> Vec<ChordCandidate> {
     if !(1..=7).contains(&degree) {
         return Vec::new();
@@ -410,16 +441,18 @@ pub fn variations(key: &Key, degree: u8) -> Vec<ChordCandidate> {
 
     CHORD_TYPES
         .iter()
-        .filter(|ty| {
-            ty.semitones
+        .map(|ty| {
+            let in_scale = ty
+                .semitones
                 .iter()
-                .all(|s| pcs.contains(&((root_pc + s) % 12)))
-        })
-        .map(|ty| ChordCandidate {
-            label: format!("{}{}", pc_name(root_pc, sharp), ty.display),
-            role: ChordRole::Diatonic,
-            root_pc,
-            semitones: ty.semitones.to_vec(),
+                .all(|s| pcs.contains(&((root_pc + s) % 12)));
+            ChordCandidate {
+                label: format!("{}{}", pc_name(root_pc, sharp), ty.display),
+                role: ChordRole::Diatonic,
+                root_pc,
+                semitones: ty.semitones.to_vec(),
+                in_scale,
+            }
         })
         .collect()
 }
@@ -441,22 +474,32 @@ mod grid_tests {
     fn the_grid_has_a_column_per_degree() {
         let g = grid(&c_major());
         assert_eq!(g.len(), 7);
-        assert!(g.iter().all(|col| !col.is_empty()), "every degree offers something");
+        assert!(
+            g.iter().all(|col| col.len() == CHORD_TYPES.len()),
+            "every column offers the whole vocabulary, flagged"
+        );
     }
 
     /// Degree 1 of C major: C, Csus2, Csus4, C6, Cmaj7 all sit in the
     /// key. Cm and Caug do not, and must not be offered.
     #[test]
-    fn first_degree_offers_only_in_key_types() {
+    fn first_degree_flags_in_key_types() {
         let labels: Vec<String> = variations(&c_major(), 1)
             .into_iter()
+            .filter(|c| c.in_scale)
             .map(|c| c.label)
             .collect();
         for expected in ["C", "Csus2", "Csus4", "C6", "Cmaj7"] {
             assert!(labels.iter().any(|l| l == expected), "missing {expected} in {labels:?}");
         }
+        // Still offered, but marked as outsiders rather than removed.
+        let out: Vec<String> = variations(&c_major(), 1)
+            .into_iter()
+            .filter(|c| !c.in_scale)
+            .map(|c| c.label)
+            .collect();
         for absent in ["Cm", "Caug", "Cdim", "C7"] {
-            assert!(!labels.iter().any(|l| l == absent), "{absent} is out of key");
+            assert!(out.iter().any(|l| l == absent), "{absent} should be flagged out-of-scale");
         }
     }
 
@@ -468,7 +511,7 @@ mod grid_tests {
             .filter(|d| {
                 variations(&c_major(), *d)
                     .iter()
-                    .any(|c| c.semitones == vec![0, 4, 7, 10])
+                    .any(|c| c.in_scale && c.semitones == vec![0, 4, 7, 10])
             })
             .collect();
         assert_eq!(with_dom7, vec![5], "G7 only");
@@ -481,7 +524,7 @@ mod grid_tests {
         let key = c_major();
         let pcs = scale_pcs(&key);
         for column in grid(&key) {
-            for chord in column {
+            for chord in column.into_iter().filter(|c| c.in_scale) {
                 for note in chord.notes(4) {
                     assert!(
                         pcs.contains(&(note % 12)),
@@ -498,9 +541,55 @@ mod grid_tests {
     fn the_seventh_degree_is_diminished_not_major() {
         let labels: Vec<String> = variations(&c_major(), 7)
             .into_iter()
+            .filter(|c| c.in_scale)
             .map(|c| c.label)
             .collect();
         assert!(labels.iter().any(|l| l == "Bdim"), "got {labels:?}");
         assert!(!labels.iter().any(|l| l == "B"), "B major is out of key");
+    }
+}
+
+#[cfg(test)]
+mod inversion_tests {
+    use super::*;
+
+    fn c_triad() -> ChordCandidate {
+        variations(&Key::major(MusicalNote::from_string("C").expect("C")), 1)
+            .into_iter()
+            .next()
+            .expect("C major triad")
+    }
+
+    #[test]
+    fn root_position_is_inversion_zero() {
+        assert_eq!(c_triad().notes_inverted(4, 0), vec![60, 64, 67]);
+    }
+
+    #[test]
+    fn each_inversion_lifts_the_lowest_voice_an_octave() {
+        assert_eq!(c_triad().notes_inverted(4, 1), vec![64, 67, 72]);
+        assert_eq!(c_triad().notes_inverted(4, 2), vec![67, 72, 76]);
+    }
+
+    /// Wrapping past the voice count returns to root position, so a
+    /// caller can increment without bounds-checking.
+    #[test]
+    fn inversion_wraps_at_the_voice_count() {
+        assert_eq!(c_triad().notes_inverted(4, 3), c_triad().notes_inverted(4, 0));
+    }
+
+    /// Inversion must never push a voice out of MIDI range.
+    #[test]
+    fn inversion_stops_rather_than_overflowing() {
+        let high = ChordCandidate {
+            label: "top".into(),
+            role: ChordRole::Diatonic,
+            root_pc: 0,
+            semitones: vec![0, 4, 7],
+            in_scale: true,
+        };
+        for note in high.notes_inverted(9, 2) {
+            assert!(note <= 127, "{note} is out of range");
+        }
     }
 }
