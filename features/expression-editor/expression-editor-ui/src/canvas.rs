@@ -475,3 +475,105 @@ pub fn razor_rects(ed: &Editor) -> Vec<RazorRect> {
         })
         .collect()
 }
+
+// ── velocity / CC lane strip ─────────────────────────────────────────
+
+/// One note's velocity stem in the strip.
+pub struct Stem {
+    pub note: NoteId,
+    pub x: f64,
+    /// Bar width — narrow, so dense passages stay countable.
+    pub w: f64,
+    pub y: f64,
+    pub h: f64,
+    pub color: &'static str,
+    pub selected: bool,
+    pub muted: bool,
+}
+
+/// Velocity stems for the visible notes, in a strip `h` pixels tall.
+///
+/// Stems are drawn at the note's *onset*, not across its length: what
+/// is being edited is a single value per note, and a full-width bar
+/// invites dragging a duration that does not exist here.
+pub fn stems(ed: &Editor, h: f64) -> Vec<Stem> {
+    use expression_editor_core::StripLane;
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let per_note = matches!(
+        ed.strip_lane,
+        StripLane::Velocity | StripLane::OffVelocity
+    );
+    if !per_note {
+        return Vec::new();
+    }
+    ed.doc
+        .notes
+        .iter()
+        .filter(|n| n.end >= t0 && n.start <= t1)
+        .map(|n| {
+            let v = match ed.strip_lane {
+                StripLane::OffVelocity => n.off_velocity,
+                _ => n.velocity,
+            }
+            .clamp(0.0, 1.0);
+            let bar = (ed.camera.x(n.end) - ed.camera.x(n.start)).clamp(3.0, 9.0);
+            Stem {
+                note: n.id,
+                x: ed.camera.x(n.start),
+                w: bar,
+                y: h * (1.0 - v),
+                h: h * v,
+                color: theme::pitch_class_color(n.row),
+                selected: ed.selection.contains(n.id),
+                muted: n.muted,
+            }
+        })
+        .collect()
+}
+
+/// The strip's continuous-lane curve, when it is showing one.
+///
+/// Every visible note's curve is drawn end to end, normalized into the
+/// strip — so a Pressure sweep reads as one gesture across the phrase
+/// rather than as a set of disconnected per-note boxes.
+pub fn strip_curves(ed: &Editor, h: f64) -> Vec<CurvePath> {
+    use expression_editor_core::StripLane;
+    let StripLane::Expression(lane) = ed.strip_lane else {
+        return Vec::new();
+    };
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let (lo, hi) = match lane {
+        Lane::Pitch => (-2.0, 2.0),
+        _ => (0.0, 1.0),
+    };
+    ed.doc
+        .notes
+        .iter()
+        .filter(|n| n.end >= t0 && n.start <= t1 && !n.lane(lane).is_empty())
+        .map(|n| {
+            let mut s = String::new();
+            for p in n.lane(lane).points() {
+                let y = h * (1.0 - ((p.value - lo) / (hi - lo)).clamp(0.0, 1.0));
+                s.push_str(&format!("{:.1},{y:.1} ", ed.camera.x(p.t)));
+            }
+            CurvePath {
+                note: n.id,
+                lane,
+                points: s,
+                color: theme::lane_color(lane),
+                active: true,
+                selected: ed.selection.contains(n.id),
+            }
+        })
+        .collect()
+}
+
+/// Horizontal reference lines in the strip, at eighths of full scale.
+pub fn strip_guides(h: f64) -> Vec<(f64, bool)> {
+    // Only quarter, half and three-quarter get a visible line; more
+    // would read as noise behind the stems.
+    [0.25, 0.5, 0.75]
+        .iter()
+        .map(|f| (h * (1.0 - f), (*f - 0.5).abs() < 1e-9))
+        .collect()
+}

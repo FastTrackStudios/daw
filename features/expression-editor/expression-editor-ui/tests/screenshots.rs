@@ -25,8 +25,11 @@ use expression_editor_ui::demo::{self, Scene};
 use expression_editor_ui::{ExpressionEditor, ModDrawer};
 
 const W: u32 = 1100;
-/// Window height minus the toolbar (two wrapped rows) and status bar.
-const CANVAS_H: f64 = 560.0;
+/// The roll's own height. The window has to hold this plus the top bar,
+/// the chord row, the lane strip and the status bar — the canvas sizes
+/// itself from its intrinsic aspect ratio, so overshooting here pushes
+/// the status bar out of frame rather than shrinking the roll.
+const CANVAS_H: f64 = 400.0;
 const H: u32 = 700;
 
 #[component]
@@ -186,4 +189,18 @@ async fn shoot_razor() {
     ed.razor.clear();
     ed.razor.add(area.translated(demo::PPQ * 4.0, 0));
     shoot(ed, "18-razor-moved").await;
+}
+
+/// The chord box on a real chord, with the velocity strip populated.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_chord_box() {
+    let vp = Viewport::new(W as f64, CANVAS_H);
+    let mut ed = demo::editor(Scene::Held, vp);
+    // Five stacked notes: the box should name the chord, not shrug.
+    ed.selection.notes = ed.doc.notes.iter().map(|n| n.id).collect();
+    // Spread the velocities so the strip shows shape rather than a wall.
+    for (i, n) in ed.doc.notes.iter_mut().enumerate() {
+        n.velocity = 0.35 + 0.13 * i as f64;
+    }
+    shoot(ed, "20-chord-box").await;
 }

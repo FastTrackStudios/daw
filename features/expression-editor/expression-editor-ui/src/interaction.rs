@@ -6,6 +6,8 @@
 
 use expression_editor_core::doc::{Lane, NoteId, Point, Target};
 use expression_editor_core::edit::Edit;
+use expression_editor_core::mouse::{Action, Context, Gesture};
+use expression_editor_core::razor::RazorArea;
 use expression_editor_core::tools::{self, Hit, Mods};
 use expression_editor_core::zoom::ZoomModes;
 use expression_editor_core::{Editor, Shape, Tool};
@@ -71,6 +73,32 @@ pub enum Drag {
     },
     SplitDrag { note: NoteId, from: f64 },
     NoteErase,
+    /// Dragging out a new razor rectangle.
+    RazorCreate {
+        origin: (f64, f64),
+        current: (f64, f64),
+    },
+    /// Moving or copying an existing area's contents.
+    RazorDrag {
+        area: RazorArea,
+        index: usize,
+        origin: (f64, f64),
+        copy: bool,
+        applied_t: f64,
+        applied_rows: i32,
+    },
+    /// Painting notes along a swept path.
+    Paint {
+        last_cell: Option<(i64, i32)>,
+        snap: bool,
+    },
+    /// Vertical drag over notes edits velocity.
+    Velocity {
+        notes: Vec<NoteId>,
+        origin_y: f64,
+        fine: bool,
+        applied: f64,
+    },
 }
 
 impl Drag {
@@ -92,8 +120,320 @@ impl Drag {
     }
 }
 
+/// Which mouse-modifier context `(x, y)` falls in.
+///
+/// Razor areas outrank notes: once you have drawn a rectangle, dragging
+/// inside it must operate on the region, not on whatever note happens
+/// to be under the pointer.
+pub fn context_at(ed: &Editor, x: f64, y: f64) -> Context {
+    let t = ed.camera.t_at(x);
+    let row = ed.camera.pitch_at(y, ed.viewport).round() as i32;
+
+    if let Some((_, area)) = ed.razor.at(t, row) {
+        let edge_px = 6.0;
+        if (ed.camera.x(area.t0) - x).abs() <= edge_px
+            || (ed.camera.x(area.t1) - x).abs() <= edge_px
+        {
+            return Context::RazorEdge;
+        }
+        return Context::RazorArea;
+    }
+    match ed.hit_test(x, y) {
+        Hit::ZoneSplit { .. } => Context::ZoneSplit,
+        Hit::NoteEdge { .. } => Context::NoteEdge,
+        Hit::Note { .. } | Hit::CurvePoint { .. } => Context::Note,
+        Hit::Empty { .. } => Context::PianoRoll,
+    }
+}
+
 /// Begin a gesture at element coordinates `(x, y)`.
+///
+/// Resolves the binding through [`Editor::mouse`] and then executes it.
+/// This function decides *nothing* about policy — which modifier does
+/// what lives in the map, so the drum, guitar and Melodyne editors can
+/// disagree without forking this code.
 pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) -> Drag {
+    let gesture = match button {
+        2 => Gesture::RightClick,
+        1 => Gesture::MiddleClick,
+        _ => Gesture::Drag,
+    };
+    let context = context_at(ed, x, y);
+    let action = ed.mouse.resolve(context, gesture, mods);
+    if action != Action::None {
+        if let Some(drag) = run_action(ed, action, context, x, y, mods) {
+            return drag;
+        }
+    }
+    legacy_pointer_down(ed, x, y, mods, button)
+}
+
+/// Execute a resolved action, returning the drag it opens.
+///
+/// `None` means "the map had nothing useful here" and the caller falls
+/// through to the tool-driven path, which still owns the expression
+/// tools (pen, curve, eraser).
+fn run_action(
+    ed: &mut Editor,
+    action: Action,
+    context: Context,
+    x: f64,
+    y: f64,
+    mods: Mods,
+) -> Option<Drag> {
+    let t = ed.camera.t_at(x);
+    let row = ed.camera.pitch_at(y, ed.viewport).round() as i32;
+    let under = match ed.hit_test(x, y) {
+        Hit::Note { id, .. } | Hit::NoteEdge { id, .. } => Some(id),
+        _ => None,
+    };
+    if action.is_edit() {
+        ed.begin_gesture();
+    }
+
+    match action {
+        Action::Pan => Some(Drag::Pan { last: (x, y) }),
+
+        // ── razor ────────────────────────────────────────────────────
+        Action::RazorCreate => Some(Drag::RazorCreate {
+            origin: (x, y),
+            current: (x, y),
+        }),
+        Action::RazorMoveContents
+        | Action::RazorMoveContentsNoSnap
+        | Action::RazorCopyContents => {
+            let (index, area) = ed.razor.at(t, row)?;
+            Some(Drag::RazorDrag {
+                area,
+                index,
+                origin: (x, y),
+                copy: action == Action::RazorCopyContents,
+                applied_t: 0.0,
+                applied_rows: 0,
+            })
+        }
+        Action::RazorRemoveArea => {
+            ed.razor.remove_at(t, row);
+            Some(Drag::None)
+        }
+        Action::RazorDeleteContents => {
+            let (_, area) = ed.razor.at(t, row)?;
+            expression_editor_core::razor::delete_contents(&mut ed.doc, area);
+            Some(Drag::None)
+        }
+        Action::RazorClearAll => {
+            ed.razor.clear();
+            Some(Drag::None)
+        }
+
+        // ── notes ────────────────────────────────────────────────────
+        Action::SelectNote => {
+            let id = under?;
+            ed.selection.set_single(id);
+            Some(Drag::None)
+        }
+        Action::AddNoteToSelection => {
+            ed.selection.add(under?);
+            Some(Drag::None)
+        }
+        Action::ToggleNoteSelection => {
+            ed.selection.toggle(under?);
+            Some(Drag::None)
+        }
+        Action::DeselectAll => {
+            ed.selection.clear();
+            Some(Drag::None)
+        }
+        Action::SelectNoteAndLater | Action::SelectNoteAndLaterSameRow => {
+            let id = under?;
+            let (start, note_row) = {
+                let n = ed.doc.note(id)?;
+                (n.start, n.row)
+            };
+            let same_row = action == Action::SelectNoteAndLaterSameRow;
+            ed.selection.notes = ed
+                .doc
+                .notes
+                .iter()
+                .filter(|n| n.start >= start && (!same_row || n.row == note_row))
+                .map(|n| n.id)
+                .collect();
+            Some(Drag::None)
+        }
+        Action::ToggleNoteMute => {
+            let id = under?;
+            ed.apply_live(&Edit::ToggleMuted { notes: vec![id] });
+            Some(Drag::None)
+        }
+        Action::EraseNote => {
+            let id = under?;
+            ed.apply_live(&Edit::DeleteNotes(vec![id]));
+            Some(Drag::None)
+        }
+        Action::DoubleNoteLength | Action::HalveNoteLength => {
+            let id = under?;
+            let factor = if action == Action::DoubleNoteLength { 2.0 } else { 0.5 };
+            ed.apply_live(&Edit::ScaleLength {
+                notes: vec![id],
+                factor,
+            });
+            Some(Drag::None)
+        }
+        Action::EditNoteVelocity | Action::EditNoteVelocityFine => {
+            let notes = tools::gesture_targets(&ed.selection, under);
+            if notes.is_empty() {
+                return None;
+            }
+            Some(Drag::Velocity {
+                notes,
+                origin_y: y,
+                fine: action == Action::EditNoteVelocityFine,
+                applied: 0.0,
+            })
+        }
+        Action::CopyNote | Action::CopyNoteNoSnap => {
+            let notes = tools::gesture_targets(&ed.selection, under);
+            if notes.is_empty() {
+                return None;
+            }
+            // Duplicate in place; the drag then moves the copies, so
+            // the originals stay put exactly where they were.
+            ed.apply_live(&Edit::CopyNotes {
+                notes: notes.clone(),
+                time_delta: 0.0,
+                row_delta: 0,
+            });
+            let copies: Vec<NoteId> = ed
+                .doc
+                .notes
+                .iter()
+                .rev()
+                .take(notes.len())
+                .map(|n| n.id)
+                .collect();
+            ed.selection.notes = copies.clone();
+            Some(Drag::MoveNotes {
+                notes: copies,
+                origin: (x, y),
+                applied_rows: 0,
+                applied_time: 0.0,
+            })
+        }
+        Action::MoveNote | Action::MoveNoteNoSnap | Action::MoveNoteOneAxis => {
+            let id = under?;
+            if !ed.selection.contains(id) {
+                ed.selection.set_single(id);
+            }
+            Some(Drag::MoveNotes {
+                notes: ed.selection.notes.clone(),
+                origin: (x, y),
+                applied_rows: 0,
+                applied_time: 0.0,
+            })
+        }
+        Action::MoveNoteEdge | Action::MoveNoteEdgeNoSnap => {
+            let Hit::NoteEdge { id, start_edge } = ed.hit_test(x, y) else {
+                return None;
+            };
+            let n = ed.doc.note(id)?;
+            let original = (n.start, n.end);
+            Some(Drag::Resize {
+                note: id,
+                start_edge,
+                original,
+            })
+        }
+        Action::InsertNote | Action::InsertNoteNoSnap | Action::InsertNoteDragToExtend => {
+            Some(begin_new_note(ed, x, y, mods))
+        }
+        Action::PaintNotes | Action::PaintNotesNoSnap => {
+            let snap = action == Action::PaintNotes;
+            let mut drag = Drag::Paint {
+                last_cell: None,
+                snap,
+            };
+            paint_at(ed, &mut drag, x, y);
+            Some(drag)
+        }
+        Action::MarqueeSelect | Action::MarqueeAdd | Action::MarqueeToggle => {
+            if action == Action::MarqueeSelect {
+                ed.selection.clear();
+            }
+            Some(Drag::Marquee {
+                origin: (x, y),
+                current: (x, y),
+                additive: action != Action::MarqueeSelect,
+            })
+        }
+        Action::MovePlayhead | Action::MovePlayheadNoSnap => {
+            ed.playhead = Some(if action == Action::MovePlayhead {
+                ed.snap_time(t)
+            } else {
+                t
+            });
+            Some(Drag::None)
+        }
+        Action::SelectRow => {
+            ed.selection.notes = ed
+                .doc
+                .notes
+                .iter()
+                .filter(|n| n.row == row)
+                .map(|n| n.id)
+                .collect();
+            Some(Drag::None)
+        }
+        // Expression tools and anything unmapped stay with the
+        // tool-driven path.
+        Action::ActiveTool | Action::PenOverride => None,
+        _ => {
+            let _ = context;
+            None
+        }
+    }
+}
+
+/// Fill the grid cell under the pointer, once per cell.
+fn paint_at(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64) {
+    let Drag::Paint { last_cell, snap } = drag else {
+        return;
+    };
+    let step = ed.grid.step(ed.units_per_beat()).max(1.0);
+    let raw = ed.camera.t_at(x);
+    let row = ed.camera.pitch_at(y, ed.viewport).round() as i32;
+    let cell = ((raw - ed.doc.start) / step).floor() as i64;
+    // One note per cell per sweep, or a slow drag stacks dozens.
+    if *last_cell == Some((cell, row)) {
+        return;
+    }
+    *last_cell = Some((cell, row));
+
+    let start = if *snap {
+        ed.doc.start + cell as f64 * step
+    } else {
+        raw
+    };
+    let end = start + step;
+    if ed
+        .doc
+        .notes
+        .iter()
+        .any(|n| n.row == row && n.start < end && n.end > start)
+    {
+        return;
+    }
+    let id = ed.doc.mint_id();
+    let mut note = expression_editor_core::Note::new(id, start, end, row.clamp(0, 127));
+    for lane in Lane::ALL {
+        let v = lane.default_value();
+        note.lane_mut(lane).set(start, v);
+        note.lane_mut(lane).set(end, v);
+    }
+    ed.apply_live(&Edit::AddNote(Box::new(note)));
+}
+
+/// The tool-driven path, for expression tools the map defers to.
+fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) -> Drag {
     // Right-drag pans regardless of tool.
     if button == 2 || (mods.ctrl && mods.shift) {
         return Drag::Pan { last: (x, y) };
@@ -479,6 +819,65 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                 ed.apply_live(&Edit::DeleteNotes(vec![id]));
             }
         }
+        Drag::RazorCreate { current, .. } => *current = (x, y),
+        Drag::RazorDrag {
+            area,
+            origin,
+            copy,
+            applied_t,
+            applied_rows,
+            index,
+        } => {
+            let raw = (x - origin.0) * ed.camera.units_per_px;
+            let dt = if ed.grid.enabled && !mods.shift {
+                let step = ed.grid.step(ed.units_per_beat());
+                (raw / step).round() * step
+            } else {
+                raw
+            };
+            let rows = (ed.camera.pitch_at(y, ed.viewport)
+                - ed.camera.pitch_at(origin.1, ed.viewport))
+            .round() as i32;
+            if (dt - *applied_t).abs() < 1e-9 && rows == *applied_rows {
+                return;
+            }
+            // Re-run from the captured area each frame rather than
+            // accumulating deltas: a razor move slices, and slicing
+            // repeatedly would shred the material.
+            expression_editor_core::razor::move_contents(
+                &mut ed.doc,
+                *area,
+                dt,
+                rows,
+                *copy,
+            );
+            *applied_t = dt;
+            *applied_rows = rows;
+            let moved = area.translated(dt, rows);
+            if let Some(slot) = ed.razor.areas.get_mut(*index) {
+                *slot = moved;
+            }
+        }
+        Drag::Paint { .. } => paint_at(ed, drag, x, y),
+        Drag::Velocity {
+            notes,
+            origin_y,
+            fine,
+            applied,
+        } => {
+            // Fine mode is a tenth the travel — the difference between
+            // shaping a phrase and nudging one hit.
+            let scale = if *fine { 0.0008 } else { 0.008 };
+            let delta = (*origin_y - y) * scale;
+            let step = delta - *applied;
+            if step.abs() > 1e-6 {
+                ed.apply_live(&Edit::NudgeVelocity {
+                    notes: notes.clone(),
+                    delta: step,
+                });
+                *applied = delta;
+            }
+        }
     }
 }
 
@@ -510,6 +909,19 @@ pub fn pointer_up(ed: &mut Editor, drag: Drag, x: f64, y: f64, mods: Mods) -> Dr
         }
         // The Curve gesture survives release.
         live @ Drag::Curve { .. } => live,
+        Drag::RazorCreate { origin, current } => {
+            let t0 = ed.camera.t_at(origin.0);
+            let t1 = ed.camera.t_at(current.0);
+            let r0 = ed.camera.pitch_at(origin.1, ed.viewport).round() as i32;
+            let r1 = ed.camera.pitch_at(current.1, ed.viewport).round() as i32;
+            let (t0, t1) = if ed.grid.enabled && !mods.shift {
+                (ed.snap_time(t0), ed.snap_time(t1))
+            } else {
+                (t0, t1)
+            };
+            ed.razor.add(RazorArea::new(t0, t1, r0, r1));
+            Drag::None
+        }
         Drag::Pen {
             notes,
             start,

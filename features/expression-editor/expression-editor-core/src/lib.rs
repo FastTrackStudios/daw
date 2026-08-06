@@ -26,6 +26,7 @@
 
 pub mod blob;
 pub mod camera;
+pub mod chord;
 pub mod doc;
 pub mod edit;
 pub mod modulation;
@@ -38,6 +39,7 @@ pub mod tuning;
 pub mod zoom;
 
 pub use camera::{Bounds, Camera, Content, Viewport};
+pub use chord::Chord;
 pub use doc::{Curve, ExpressionDoc, Lane, Marker, Note, NoteId, Point, Target, TimeBase};
 pub use edit::{Edit, History};
 pub use shape::Shape;
@@ -69,6 +71,10 @@ pub struct Editor {
     pub row_space: RowSpace,
     /// Active razor areas.
     pub razor: RazorSet,
+    /// Velocity / CC lane strip height in pixels, 0 when hidden.
+    pub lane_strip_h: f64,
+    /// Which lane the strip shows.
+    pub strip_lane: StripLane,
     /// Context × modifier → action. Editable, so a host can ship a
     /// REAPER-matching profile or its own.
     pub mouse: MouseMap,
@@ -101,6 +107,8 @@ impl Editor {
             selection: Selection::default(),
             row_space: RowSpace::Pitch,
             razor: RazorSet::default(),
+            lane_strip_h: 96.0,
+            strip_lane: StripLane::Velocity,
             mouse: MouseMap::default(),
             tuning: Tuning::default(),
             grid: Grid::default(),
@@ -292,6 +300,46 @@ impl Editor {
         self.grid.snap(t, self.doc.start, self.units_per_beat())
     }
 
+    /// Sounding pitches of the selected notes — what the chord box
+    /// reads.
+    ///
+    /// Falls back to the notes under the playhead when nothing is
+    /// selected, so the box says something useful while you navigate
+    /// rather than going blank.
+    pub fn chord_pitches(&self) -> Vec<i32> {
+        let space = &self.row_space;
+        if !self.selection.notes.is_empty() {
+            let mut v: Vec<i32> = self
+                .selection
+                .notes
+                .iter()
+                .filter_map(|id| self.doc.note(*id))
+                .map(|n| space.pitch_of(n))
+                .collect();
+            v.sort_unstable();
+            v.dedup();
+            return v;
+        }
+        let Some(t) = self.playhead else {
+            return Vec::new();
+        };
+        let mut v: Vec<i32> = self
+            .doc
+            .notes
+            .iter()
+            .filter(|n| n.start <= t && n.end > t && !n.muted)
+            .map(|n| space.pitch_of(n))
+            .collect();
+        v.sort_unstable();
+        v.dedup();
+        v
+    }
+
+    /// The chord the box shows, if the current pitches form one.
+    pub fn current_chord(&self) -> Option<Chord> {
+        chord::identify(&self.chord_pitches())
+    }
+
     /// Notes reduced to what zoom cares about.
     pub fn zoom_spans(&self) -> Vec<zoom::Span> {
         self.doc
@@ -385,5 +433,41 @@ pub fn content_of(doc: &ExpressionDoc) -> Content {
         t_end: doc.end.max(doc.start + 1.0),
         pitch_lo,
         pitch_hi: pitch_hi.max(pitch_lo + 1.0),
+    }
+}
+
+/// What the bottom lane strip displays.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum StripLane {
+    /// Per-note velocity, drawn as stems.
+    Velocity,
+    /// Per-note release velocity.
+    OffVelocity,
+    /// A continuous expression lane, drawn as a curve.
+    Expression(Lane),
+}
+
+impl StripLane {
+    pub const ALL: [StripLane; 5] = [
+        StripLane::Velocity,
+        StripLane::OffVelocity,
+        StripLane::Expression(Lane::Pitch),
+        StripLane::Expression(Lane::Pressure),
+        StripLane::Expression(Lane::Timbre),
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            StripLane::Velocity => "Velocity",
+            StripLane::OffVelocity => "Release",
+            StripLane::Expression(Lane::Pitch) => "Pitch",
+            StripLane::Expression(Lane::Pressure) => "Pressure",
+            StripLane::Expression(Lane::Timbre) => "Timbre",
+        }
+    }
+
+    /// Per-note lanes draw as stems; continuous ones draw as a curve.
+    pub fn is_per_note(&self) -> bool {
+        matches!(self, StripLane::Velocity | StripLane::OffVelocity)
     }
 }

@@ -60,17 +60,17 @@ fn render(ed: Editor) -> String {
 fn the_editor_renders_its_toolbar_canvas_and_status_bar() {
     let html = render(demo_editor(false, false));
     assert!(html.contains("<svg"), "the canvas must render");
-    // Toolbar groups.
-    for group in ["Tools", "Expression", "Curve", "Grid", "Tuning"] {
-        assert!(html.contains(group), "missing toolbar group: {group}");
-    }
+    // The top bar carries modes; the status bar carries settings.
+    assert!(html.contains("Undo"), "history controls");
+    assert!(html.contains("Reset view (V)"), "view controls");
+    assert!(html.contains("12TET"), "tuning moved to the status bar");
+    assert!(html.contains("Chord"), "the chord box renders");
     // Lane controls.
     for lane in Lane::ALL {
         let label = expression_editor_ui::theme::lane_label(lane);
         assert!(html.contains(label), "missing lane control: {label}");
     }
-    assert!(html.contains("Reset View"));
-    assert!(html.contains("1/16"), "the grid readout");
+    assert!(html.contains("1/16"), "the grid readout, now in the status bar");
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn zone_structure_draws_in_red() {
 fn the_status_bar_reports_the_selected_notes_analysis() {
     let html = render(demo_editor(false, false));
     assert!(html.contains("1 selected"));
-    assert!(html.contains("vibrato"), "the vibrato readout");
+    assert!(html.contains("vib"), "the vibrato readout");
     assert!(html.contains("drift"), "the drift readout");
     assert!(html.contains("Robot"), "the flatten button");
     assert!(html.contains("ch 3"), "the MPE member channel");

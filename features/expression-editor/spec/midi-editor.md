@@ -177,7 +177,7 @@ does not change as you approach an item edge.
 
 ## Status
 
-Landed (116 core tests):
+Landed (122 core tests):
 
 - `RowSpace` — pitch / drums / strings, with GM drum map, guitar and
   bass tunings, capo, nearest-hand fingering
@@ -192,20 +192,34 @@ Landed (116 core tests):
   scale length, stretch positions (arpeggiate), copy notes, partial
   quantize, legato, set text, set articulation, set string (re-fingers),
   set fret
+- **`MouseMap` is wired**: `pointer_down` resolves a context and a
+  gesture through the map and executes the resulting `Action`. Contexts
+  are detected including razor areas and edges (which outrank notes, so
+  a drawn rectangle owns its region). The tool-driven path survives
+  only for the expression tools the map explicitly defers to
+  (`ActiveTool`, `PenOverride`), which is what keeps pen/curve/eraser
+  behaviour intact.
+- **Chord box**, backed by `keyflow_proto::chord` rather than a second
+  detector. The adapter takes the *last* reading from
+  `detect_chords_from_midi_notes`, not the first: it emits progressive
+  interpretations as it accumulates pitches, so the first entry for a
+  Cmaj7 is just "C". Reads the selection, or the notes under the
+  playhead when nothing is selected.
+- **Velocity / CC lane strip** with per-note stems and continuous-lane
+  curves, sharing the roll's horizontal camera exactly.
+- **Bar layout reworked**: the top bar carries only modes (tool, lane,
+  shape, history, view) and now fits one row at plugin width; settings
+  (grid, key, temperament, bend, strip) moved to the status bar; the
+  selection row carries the chord plus the drift/vibrato blend
+  controls, which act on the selection and belong with it.
 - `zoom` — the MeMagic port: density-aware smart zoom, seven horizontal
   and ten vertical modes, contextual mode pairs, bound to `F` /
   `Shift+F` in the UI
 
 Next, in order:
 
-1. **Wire the mouse map into the interaction layer** — the razor
-   contexts are bound and the table is tested, but the pointer handlers
-   still branch on tool rather than resolving through `MouseMap`.
-2. **Velocity / CC lane strip** below the roll.
-3. **Multi Tool zones** as an overlay mode, per the table above.
-4. **Razor drag gestures in the UI** — the operations and rendering
-   exist; creating and dragging areas by mouse does not.
-5. **Row-space rendering** — drum diamonds, string roll with fret
+1. **Multi Tool zones** as an overlay mode, per the table above.
+2. **Row-space rendering** — drum diamonds, string roll with fret
    numbers, lyric labels, articulation badges.
 6. **Note context menu** (Riffer §6.2.2: cut/copy/paste/delete/select
    all/clear/copy measure + note properties).

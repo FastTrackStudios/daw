@@ -57,8 +57,10 @@ pub fn ExpressionEditor(
                     min-height: 0; overflow: hidden; background: {theme::BG}; \
                     color: {theme::TEXT}; font-family: system-ui, sans-serif;",
             toolbar::Toolbar { editor, drag, drawer }
+            toolbar::ChordBox { editor }
             Canvas { editor, drag, drawer }
-            StatusBar { editor }
+            LaneStrip { editor }
+            toolbar::StatusBar { editor }
         }
     }
 }
@@ -699,131 +701,159 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>)
     }
 }
 
-/// The bottom rail: selection readout plus the Melodyne drift/vibrato
-/// controls for the selected note.
+/// Write a strip value from a pointer position.
+///
+/// A free function over `Signal` (which is `Copy`) rather than a shared
+/// closure — otherwise both pointer handlers fight over one `FnMut`.
+fn strip_write(mut editor: Signal<Editor>, h: f64, x: f64, y: f64) {
+    let v = (1.0 - y / h).clamp(0.0, 1.0);
+    let hit: Vec<_> = {
+        let ed = editor.read();
+        let rx = x - canvas::GUTTER_W;
+        let t = ed.camera.t_at(rx);
+        ed.doc
+            .notes
+            .iter()
+            // A generous grab window around the onset: the stem is only
+            // a few pixels wide, and this is a value edit, not a
+            // precision selection.
+            .filter(|n| {
+                let dx = (ed.camera.x(n.start) - rx).abs();
+                dx <= 8.0 || (n.start <= t && n.end > t && dx <= 40.0)
+            })
+            .map(|n| n.id)
+            .collect()
+    };
+    if hit.is_empty() {
+        return;
+    }
+    let edit = match editor.read().strip_lane {
+        expression_editor_core::StripLane::OffVelocity => {
+            expression_editor_core::Edit::SetOffVelocity {
+                notes: hit,
+                velocity: v,
+            }
+        }
+        _ => expression_editor_core::Edit::SetVelocity {
+            notes: hit,
+            velocity: v,
+        },
+    };
+    editor.write().apply_live(&edit);
+}
+
+/// The velocity / CC lane strip below the roll.
+///
+/// Shares the roll's horizontal camera exactly — a stem must sit under
+/// its note — but has its own vertical scale, because the value being
+/// edited has nothing to do with pitch.
 #[component]
-fn StatusBar(editor: Signal<Editor>) -> Element {
+fn LaneStrip(editor: Signal<Editor>) -> Element {
     let mut editor = editor;
+    let mut drag = use_signal(|| None::<(f64, f64)>);
+
     let ed = editor.read();
-    let selected = ed.selection.notes.first().copied();
-    let info = selected.and_then(|id| ed.doc.note(id)).map(|n| {
-        let units_per_second = ed.doc.time_base.units_per_second(ed.bpm);
-        let d = expression_editor_core::blob::decompose(
-            &n.pitch,
-            n.start,
-            n.end,
-            64,
-            units_per_second,
-            0.0,
-        );
-        (
-            expression_editor_core::tuning::note_name(n.row),
-            n.channel,
-            n.zone_count(),
-            d.modulation_depth(),
-            d.drift_extent(),
-        )
-    });
-    let count = ed.selection.notes.len();
-    let tool = ed.tool;
-    let ambiguous = ed.doc.notes.iter().filter(|n| n.ambiguous).count();
-    let razor_areas = ed.razor.areas.len();
+    let h = ed.lane_strip_h;
+    if h <= 0.0 {
+        return rsx! {};
+    }
+    let vp = ed.viewport;
+    let stems = canvas::stems(&ed, h);
+    let curves = canvas::strip_curves(&ed, h);
+    let guides = canvas::strip_guides(h);
+    let label = ed.strip_lane.label();
+    let per_note = ed.strip_lane.is_per_note();
     drop(ed);
+
+
 
     rsx! {
         div {
-            style: "display: flex; flex: 0 0 auto; align-items: center; \
-                    flex-wrap: wrap; gap: 14px; padding: 4px 10px; \
-                    background: {theme::PANEL}; border-top: 1px solid {theme::PANEL_BORDER}; \
-                    color: {theme::TEXT_DIM}; font-size: 10px; \
-                    font-family: ui-monospace, monospace;",
-            span { "{tool.label()}" }
-            span { "{count} selected" }
-            if razor_areas > 0 {
-                span { style: "color: {theme::RAZOR};", "razor: {razor_areas}" }
-            }
-            if ambiguous > 0 {
-                span {
-                    style: "color: {theme::ZONE};",
-                    "\u{26a0} {ambiguous} notes share a channel \u{2014} ownership unresolved, writes blocked"
-                }
-            }
-            if let Some((name, channel, zones, vibrato, drift)) = info {
-                span { style: "color: {theme::TEXT};", "{name}" }
-                if let Some(ch) = channel {
-                    span { "ch {ch}" }
-                }
-                if zones > 1 {
-                    span { style: "color: {theme::ZONE};", "{zones} zones" }
-                }
-                span { "vibrato {vibrato * 100.0:.0}¢" }
-                span { "drift {drift * 100.0:+.0}¢" }
+            style: "position: relative; flex: 0 0 auto; height: {h}px; \
+                    background: #101017; border-top: 1px solid {theme::PANEL_BORDER};",
+            svg {
+                style: "display: block; width: 100%; height: 100%; \
+                        touch-action: none; user-select: none; cursor: ns-resize;",
+                view_box: "0 0 {vp.w + canvas::GUTTER_W:.0} {h:.0}",
+                preserve_aspect_ratio: "none",
+                onpointerdown: move |e: PointerEvent| {
+                    let c = e.data().element_coordinates();
+                    if !per_note {
+                        return;
+                    }
+                    editor.write().begin_gesture();
+                    drag.set(Some((c.x, c.y)));
+                    strip_write(editor, h, c.x, c.y);
+                },
+                onpointermove: move |e: PointerEvent| {
+                    if drag.read().is_none() {
+                        return;
+                    }
+                    let c = e.data().element_coordinates();
+                    strip_write(editor, h, c.x, c.y);
+                },
+                onpointerup: move |_| drag.set(None),
+                onpointerleave: move |_| drag.set(None),
 
-                // The two Melodyne sliders, centred on 1.0 = as sung.
-                Blend { editor, label: "Drift".to_string(), drift: true }
-                Blend { editor, label: "Vibrato".to_string(), drift: false }
-                button {
-                    style: theme::button_style(false),
-                    title: "Flatten drift and vibrato",
-                    onclick: move |_| {
-                        let Some(id) = selected else { return };
-                        let (t0, t1) = {
-                            let ed = editor.read();
-                            let Some(n) = ed.doc.note(id) else { return };
-                            (n.start, n.end)
-                        };
-                        editor.write().apply(&expression_editor_core::Edit::ReblendPitch {
-                            note: id,
-                            t0,
-                            t1,
-                            drift_amount: 0.0,
-                            modulation_amount: 0.0,
-                        });
-                    },
-                    "Robot"
+                // The gutter column, so the strip lines up with the roll.
+                rect {
+                    x: "0", y: "0",
+                    width: "{canvas::GUTTER_W:.0}", height: "{h:.0}",
+                    fill: theme::GUTTER_BG,
+                }
+                text {
+                    x: "6", y: "14",
+                    fill: theme::TEXT_DIM, font_size: "9",
+                    "{label}"
+                }
+
+                g {
+                    transform: "translate({canvas::GUTTER_W:.0} 0)",
+                    for (i, (y, major)) in guides.iter().enumerate() {
+                        line {
+                            key: "sg{i}",
+                            x1: "0", y1: "{y:.1}",
+                            x2: "{vp.w:.0}", y2: "{y:.1}",
+                            stroke: if *major { theme::GRID_BEAT } else { theme::GRID_SUB },
+                            stroke_width: "1",
+                        }
+                    }
+                    for (i, s) in stems.iter().enumerate() {
+                        g {
+                            key: "st{i}",
+                            rect {
+                                x: "{s.x:.1}",
+                                y: "{s.y:.1}",
+                                width: "{s.w:.1}",
+                                height: "{s.h.max(1.0):.1}",
+                                fill: s.color,
+                                fill_opacity: if s.muted { "0.2" } else { "0.85" },
+                            }
+                            // A cap on the selected stems, so the ones a
+                            // drag will actually move are obvious.
+                            if s.selected {
+                                rect {
+                                    x: "{s.x - 1.0:.1}",
+                                    y: "{s.y - 2.0:.1}",
+                                    width: "{s.w + 2.0:.1}",
+                                    height: "3",
+                                    fill: theme::SELECTED,
+                                }
+                            }
+                        }
+                    }
+                    for (i, c) in curves.iter().enumerate() {
+                        polyline {
+                            key: "sc{i}",
+                            points: "{c.points}",
+                            fill: "none",
+                            stroke: c.color,
+                            stroke_width: "1.5",
+                            stroke_opacity: if c.selected { "1" } else { "0.6" },
+                        }
+                    }
                 }
             }
-        }
-    }
-}
-
-/// One of the drift/vibrato sliders.
-///
-/// Parked at 1.0 rather than tracking a stored amount: each change
-/// re-decomposes the *current* curve, so the control is a relative
-/// scale on what is there now and never fights an earlier edit. The
-/// centre tick is therefore "leave as sung".
-#[component]
-fn Blend(editor: Signal<Editor>, label: String, drift: bool) -> Element {
-    let mut editor = editor;
-    let mut amount = use_signal(|| 1.0f64);
-    rsx! {
-        widgets::CenterSlider {
-            label: label.clone(),
-            value: amount(),
-            min: 0.0,
-            max: 1.5,
-            center: 1.0,
-            width: 84.0,
-            readout: format!("{:.0}%", amount() * 100.0),
-            on_change: move |v: f64| {
-                amount.set(v);
-                let Some(id) = editor.read().selection.notes.first().copied() else {
-                    return;
-                };
-                let (t0, t1) = {
-                    let ed = editor.read();
-                    let Some(n) = ed.doc.note(id) else { return };
-                    (n.start, n.end)
-                };
-                editor.write().apply(&expression_editor_core::Edit::ReblendPitch {
-                    note: id,
-                    t0,
-                    t1,
-                    drift_amount: if drift { v } else { 1.0 },
-                    modulation_amount: if drift { 1.0 } else { v },
-                });
-            },
         }
     }
 }

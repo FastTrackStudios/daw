@@ -2040,3 +2040,90 @@ fn no_preset_binds_the_same_gesture_twice() {
         }
     }
 }
+
+// ── chords (keyflow-backed) ──────────────────────────────────────────
+
+use expression_editor_core::chord;
+
+#[test]
+fn triads_and_sevenths_are_recognised() {
+    let name = |pitches: &[i32]| chord::identify(pitches).map(|c| chord::name(&c));
+    assert_eq!(name(&[60, 64, 67]).as_deref(), Some("C"));
+    assert_eq!(name(&[60, 63, 67]).as_deref(), Some("Cm"));
+    // A seventh must not be read as a plain triad.
+    assert_eq!(name(&[60, 64, 67, 71]).as_deref(), Some("Cmaj7"));
+    assert_eq!(name(&[60, 64, 67, 70]).as_deref(), Some("C7"));
+    assert_eq!(name(&[60, 63, 67, 70]).as_deref(), Some("Cm7"));
+}
+
+#[test]
+fn an_inversion_reads_as_a_slash_chord_not_a_different_chord() {
+    // C major with E in the bass.
+    let c = chord::identify(&[64, 67, 72]).unwrap();
+    assert_eq!(
+        chord::name(&c),
+        "C/E",
+        "first inversion of C is a slash chord, not Em"
+    );
+}
+
+#[test]
+fn a_single_note_is_not_a_chord() {
+    assert!(chord::identify(&[60]).is_none());
+    assert!(chord::identify(&[]).is_none());
+}
+
+#[test]
+fn the_chord_box_reads_the_selection() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    for (i, row) in [60, 64, 67].iter().enumerate() {
+        doc.push(Note::new(NoteId(i as u64 + 1), 0.0, PPQ * 2.0, *row));
+    }
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
+
+    // Nothing selected and no playhead: nothing to say.
+    assert!(ed.current_chord().is_none());
+
+    ed.selection.notes = vec![NoteId(1), NoteId(2), NoteId(3)];
+    assert_eq!(ed.chord_pitches(), vec![60, 64, 67]);
+    assert_eq!(
+        ed.current_chord().map(|c| chord::name(&c)).as_deref(),
+        Some("C")
+    );
+}
+
+#[test]
+fn with_nothing_selected_the_box_follows_the_playhead() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    for (i, row) in [60, 64, 67].iter().enumerate() {
+        doc.push(Note::new(NoteId(i as u64 + 1), 0.0, PPQ * 2.0, *row));
+    }
+    // A note that starts later must not be counted early.
+    doc.push(Note::new(NoteId(9), PPQ * 4.0, PPQ * 6.0, 70));
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
+    ed.playhead = Some(PPQ);
+    assert_eq!(ed.chord_pitches(), vec![60, 64, 67]);
+
+    // Muted notes are not sounding, so they are not in the chord.
+    ed.doc.note_mut(NoteId(2)).unwrap().muted = true;
+    assert_eq!(ed.chord_pitches(), vec![60, 67]);
+}
+
+#[test]
+fn a_string_roll_reports_sounding_pitches_not_string_numbers() {
+    let tuning = StringTuning::guitar_standard();
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    doc.row_space = RowSpace::Strings(tuning.clone());
+    // An open C major shape on the top three strings: G B E.
+    for (i, (string, fret)) in [(3usize, 0u8), (4, 1), (5, 0)].iter().enumerate() {
+        let mut n = Note::new(NoteId(i as u64 + 1), 0.0, PPQ, *string as i32);
+        n.fret = Some(*fret);
+        doc.push(n);
+    }
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
+    ed.row_space = RowSpace::Strings(tuning);
+    ed.selection.notes = vec![NoteId(1), NoteId(2), NoteId(3)];
+    // G=55, C=60, E=64 — the chord box must see pitches, not rows 3/4/5.
+    assert_eq!(ed.chord_pitches(), vec![55, 60, 64]);
+    assert!(ed.current_chord().is_some());
+}
