@@ -9,7 +9,7 @@ use expression_editor_core::doc::{Curve, ExpressionDoc, Lane, Note, NoteId, Poin
 use expression_editor_core::edit::{Edit, History};
 use expression_editor_core::modulation::{CurveTarget, Row, Stack, Wave};
 use expression_editor_core::shape::{self, Shape};
-use expression_editor_core::tools::{self, Grid, Selection, Tool};
+use expression_editor_core::tools::{self, Grid, Mods, Selection, Tool};
 use expression_editor_core::tuning::{self, Tuning};
 use expression_editor_core::{Editor, content_of};
 
@@ -1085,4 +1085,443 @@ fn restore_puts_a_captured_curve_back_exactly() {
         captured,
         "cancel must restore byte-for-byte"
     );
+}
+
+// ── full MIDI editing ────────────────────────────────────────────────
+
+use expression_editor_core::mouse::{Action, Context, Gesture, ModKey, MouseMap};
+use expression_editor_core::rows::{Articulation, DrumMap, RowSpace, StringTuning};
+
+fn doc_with_notes(n: usize) -> ExpressionDoc {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 16.0);
+    for i in 0..n {
+        let mut note = Note::new(
+            NoteId(i as u64 + 1),
+            PPQ * i as f64,
+            PPQ * (i as f64 + 0.5),
+            60 + i as i32,
+        );
+        note.channel = Some(2 + i as u8);
+        doc.push(note);
+    }
+    doc
+}
+
+fn ids(doc: &ExpressionDoc) -> Vec<NoteId> {
+    doc.notes.iter().map(|n| n.id).collect()
+}
+
+#[test]
+fn velocity_nudges_accumulate_and_clamp() {
+    let mut doc = doc_with_notes(1);
+    Edit::SetVelocity {
+        notes: vec![NoteId(1)],
+        velocity: 0.5,
+    }
+    .apply(&mut doc);
+    for _ in 0..10 {
+        Edit::NudgeVelocity {
+            notes: vec![NoteId(1)],
+            delta: 0.1,
+        }
+        .apply(&mut doc);
+    }
+    assert_eq!(doc.note(NoteId(1)).unwrap().velocity, 1.0, "clamps at full");
+}
+
+#[test]
+fn channel_nudge_wraps_inside_the_member_range() {
+    let mut doc = doc_with_notes(1);
+    doc.note_mut(NoteId(1)).unwrap().channel = Some(16);
+    Edit::NudgeChannel {
+        notes: vec![NoteId(1)],
+        delta: 1,
+    }
+    .apply(&mut doc);
+    // Channel 1 is the MPE master and must never be assigned.
+    assert_eq!(doc.note(NoteId(1)).unwrap().channel, Some(2));
+
+    Edit::NudgeChannel {
+        notes: vec![NoteId(1)],
+        delta: -1,
+    }
+    .apply(&mut doc);
+    assert_eq!(doc.note(NoteId(1)).unwrap().channel, Some(16));
+}
+
+#[test]
+fn muting_is_not_deleting() {
+    let mut doc = doc_with_notes(2);
+    Edit::ToggleMuted {
+        notes: vec![NoteId(1)],
+    }
+    .apply(&mut doc);
+    assert!(doc.note(NoteId(1)).unwrap().muted);
+    assert_eq!(doc.notes.len(), 2, "the note is still in the document");
+    Edit::ToggleMuted {
+        notes: vec![NoteId(1)],
+    }
+    .apply(&mut doc);
+    assert!(!doc.note(NoteId(1)).unwrap().muted);
+}
+
+#[test]
+fn doubling_and_halving_length_round_trip() {
+    let mut doc = doc_with_notes(1);
+    let len = doc.note(NoteId(1)).unwrap().len();
+    Edit::ScaleLength {
+        notes: vec![NoteId(1)],
+        factor: 2.0,
+    }
+    .apply(&mut doc);
+    assert!((doc.note(NoteId(1)).unwrap().len() - len * 2.0).abs() < 1e-6);
+    Edit::ScaleLength {
+        notes: vec![NoteId(1)],
+        factor: 0.5,
+    }
+    .apply(&mut doc);
+    assert!((doc.note(NoteId(1)).unwrap().len() - len).abs() < 1e-6);
+}
+
+#[test]
+fn stretching_positions_arpeggiates_about_the_pivot() {
+    let mut doc = doc_with_notes(3);
+    let all = ids(&doc);
+    Edit::StretchPositions {
+        notes: all,
+        pivot: 0.0,
+        factor: 2.0,
+    }
+    .apply(&mut doc);
+    assert_eq!(doc.note(NoteId(1)).unwrap().start, 0.0, "the pivot is fixed");
+    assert!((doc.note(NoteId(2)).unwrap().start - PPQ * 2.0).abs() < 1e-6);
+    assert!((doc.note(NoteId(3)).unwrap().start - PPQ * 4.0).abs() < 1e-6);
+}
+
+#[test]
+fn copying_notes_leaves_the_originals_and_carries_expression() {
+    let mut doc = doc_with_notes(1);
+    doc.note_mut(NoteId(1)).unwrap().pitch.set(0.0, 0.75);
+    Edit::CopyNotes {
+        notes: vec![NoteId(1)],
+        time_delta: PPQ * 4.0,
+        row_delta: 12,
+    }
+    .apply(&mut doc);
+    assert_eq!(doc.notes.len(), 2);
+    let copy = doc.notes.iter().find(|n| n.id != NoteId(1)).unwrap();
+    assert_eq!(copy.row, 72);
+    assert_eq!(copy.start, PPQ * 4.0);
+    assert_eq!(copy.pitch.sample(PPQ * 4.0, 0.0), 0.75, "expression came too");
+    assert_eq!(doc.note(NoteId(1)).unwrap().start, 0.0, "original untouched");
+}
+
+#[test]
+fn partial_quantize_pulls_toward_the_grid_without_nailing_to_it() {
+    let mut doc = doc_with_notes(1);
+    Edit::MoveTime {
+        notes: vec![NoteId(1)],
+        delta: 100.0,
+    }
+    .apply(&mut doc);
+
+    let mut half = doc.clone();
+    Edit::Quantize {
+        notes: vec![NoteId(1)],
+        step: PPQ,
+        origin: 0.0,
+        strength: 0.5,
+    }
+    .apply(&mut half);
+    assert!(
+        (half.note(NoteId(1)).unwrap().start - 50.0).abs() < 1e-6,
+        "half strength moves half the distance"
+    );
+
+    Edit::Quantize {
+        notes: vec![NoteId(1)],
+        step: PPQ,
+        origin: 0.0,
+        strength: 1.0,
+    }
+    .apply(&mut doc);
+    assert_eq!(doc.note(NoteId(1)).unwrap().start, 0.0);
+}
+
+#[test]
+fn legato_extends_each_note_to_the_next_on_its_row() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    doc.push(Note::new(NoteId(1), 0.0, PPQ * 0.25, 60));
+    doc.push(Note::new(NoteId(2), PPQ, PPQ * 1.25, 60));
+    // A different row must not close the first note's gap.
+    doc.push(Note::new(NoteId(3), PPQ * 0.5, PPQ * 0.75, 64));
+
+    Edit::Legato {
+        notes: vec![NoteId(1)],
+        gap: 0.0,
+    }
+    .apply(&mut doc);
+    assert_eq!(doc.note(NoteId(1)).unwrap().end, PPQ);
+}
+
+#[test]
+fn a_note_carries_its_lyric() {
+    let mut doc = doc_with_notes(1);
+    Edit::SetText {
+        note: NoteId(1),
+        text: Some("Ha".into()),
+    }
+    .apply(&mut doc);
+    assert_eq!(doc.note(NoteId(1)).unwrap().text.as_deref(), Some("Ha"));
+    // And a lyric is the note's label, outranking the note name.
+    assert_eq!(
+        RowSpace::Pitch.note_label(doc.note(NoteId(1)).unwrap()),
+        Some("Ha".to_string())
+    );
+}
+
+// ── guitar / bass ────────────────────────────────────────────────────
+
+#[test]
+fn a_string_roll_sounds_open_pitch_plus_fret() {
+    let t = StringTuning::guitar_standard();
+    assert_eq!(t.pitch(0, 0), 40, "low E");
+    assert_eq!(t.pitch(5, 0), 64, "high E");
+    assert_eq!(t.pitch(0, 12), 52, "twelfth fret is an octave");
+}
+
+#[test]
+fn a_capo_raises_every_open_string() {
+    let mut t = StringTuning::guitar_standard();
+    t.capo = 2;
+    assert_eq!(t.pitch(0, 0), 42);
+    assert_eq!(t.pitch(5, 3), 69);
+}
+
+#[test]
+fn fingering_prefers_the_position_nearest_the_hand() {
+    let t = StringTuning::guitar_standard();
+    // A4 = 69 is reachable on several strings.
+    let low = t.best_position(69, 0).unwrap();
+    let high = t.best_position(69, 14).unwrap();
+    assert_ne!(low, high, "the preferred fret must actually steer the choice");
+    assert!(low.1 < high.1, "a hand at the nut plays the lower fret");
+}
+
+#[test]
+fn moving_a_note_to_another_string_keeps_its_sounding_pitch() {
+    let tuning = StringTuning::guitar_standard();
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    doc.row_space = RowSpace::Strings(tuning.clone());
+    let mut n = Note::new(NoteId(1), 0.0, PPQ, 5); // high E string
+    n.fret = Some(5); // A4
+    doc.push(n);
+    let before = doc.row_space.pitch_of(doc.note(NoteId(1)).unwrap());
+
+    assert!(Edit::SetString {
+        note: NoteId(1),
+        string: 4,
+    }
+    .apply(&mut doc));
+
+    let n = doc.note(NoteId(1)).unwrap();
+    assert_eq!(n.row, 4);
+    assert_eq!(
+        doc.row_space.pitch_of(n),
+        before,
+        "changing string re-fingers, it does not transpose"
+    );
+    assert_eq!(n.fret, Some(10));
+}
+
+#[test]
+fn an_unreachable_string_refuses_the_move() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    doc.row_space = RowSpace::Strings(StringTuning::guitar_standard());
+    let mut n = Note::new(NoteId(1), 0.0, PPQ, 5);
+    n.fret = Some(0); // E4 — below the low E string's open pitch? no, above
+    doc.push(n);
+    // E4 = 64 cannot be played on the high E string at a negative fret,
+    // and moving a low note up a string can go out of range.
+    let mut n2 = Note::new(NoteId(2), 0.0, PPQ, 0);
+    n2.fret = Some(0); // E2 = 40
+    doc.push(n2);
+    assert!(
+        !Edit::SetString {
+            note: NoteId(2),
+            string: 5,
+        }
+        .apply(&mut doc),
+        "E2 is not reachable on the high E string"
+    );
+}
+
+#[test]
+fn a_string_roll_labels_notes_with_their_fret() {
+    let space = RowSpace::Strings(StringTuning::guitar_standard());
+    let mut n = Note::new(NoteId(1), 0.0, 100.0, 2);
+    n.fret = Some(7);
+    assert_eq!(space.note_label(&n), Some("7".to_string()));
+    assert_eq!(space.row_label(2), "D", "third string is D");
+}
+
+#[test]
+fn legato_articulations_are_marked_as_such() {
+    for a in Articulation::ALL {
+        let legato = matches!(
+            a,
+            Articulation::HammerOn | Articulation::PullOff | Articulation::LegatoSlide
+        );
+        assert_eq!(a.is_legato(), legato, "{a:?}");
+    }
+    // Natural harmonics only speak at certain frets.
+    assert!(Articulation::NaturalHarmonic
+        .valid_frets()
+        .unwrap()
+        .contains(&12));
+    assert!(Articulation::PalmMute.valid_frets().is_none());
+}
+
+#[test]
+fn setting_an_articulation_sets_the_legato_flag_with_it() {
+    let mut doc = doc_with_notes(1);
+    Edit::SetArticulation {
+        notes: vec![NoteId(1)],
+        articulation: Some(Articulation::HammerOn),
+    }
+    .apply(&mut doc);
+    assert!(doc.note(NoteId(1)).unwrap().legato);
+
+    Edit::SetArticulation {
+        notes: vec![NoteId(1)],
+        articulation: Some(Articulation::PalmMute),
+    }
+    .apply(&mut doc);
+    assert!(!doc.note(NoteId(1)).unwrap().legato);
+}
+
+// ── drums ────────────────────────────────────────────────────────────
+
+#[test]
+fn drum_rows_map_to_their_pitches_both_ways() {
+    let map = DrumMap::general_midi();
+    let space = RowSpace::Drums(map.clone());
+    let kick_row = map.row_of_pitch(36).unwrap();
+    let mut n = Note::new(NoteId(1), 0.0, 100.0, kick_row as i32);
+    assert_eq!(space.pitch_of(&n), 36);
+    assert_eq!(space.row_label(kick_row as i32), "Kick");
+    assert_eq!(space.row_of_pitch(38), map.row_of_pitch(38).map(|r| r as i32));
+    n.row = 0;
+    assert!(space.draws_diamonds(), "a drum hit has no meaningful length");
+}
+
+#[test]
+fn drum_rows_have_no_accidental_shading() {
+    let space = RowSpace::Drums(DrumMap::general_midi());
+    assert!(!space.is_accidental(1), "black keys mean nothing on a kit");
+    assert!(RowSpace::Pitch.is_accidental(61));
+}
+
+// ── mouse map ────────────────────────────────────────────────────────
+
+#[test]
+fn modifiers_resolve_to_their_bound_action() {
+    let m = MouseMap::reaper_like();
+    let none = Mods::default();
+    let ctrl = Mods {
+        ctrl: true,
+        ..Default::default()
+    };
+    let alt = Mods {
+        alt: true,
+        ..Default::default()
+    };
+    assert_eq!(
+        m.resolve(Context::PianoRoll, Gesture::Drag, none),
+        Action::MarqueeSelect
+    );
+    assert_eq!(
+        m.resolve(Context::Note, Gesture::Drag, ctrl),
+        Action::EditNoteVelocity
+    );
+    assert_eq!(m.resolve(Context::Note, Gesture::Drag, alt), Action::CopyNote);
+    assert_eq!(
+        m.resolve(Context::NoteEdge, Gesture::Drag, none),
+        Action::MoveNoteEdge
+    );
+}
+
+#[test]
+fn an_unbound_modifier_falls_back_to_the_plain_binding() {
+    let m = MouseMap::reaper_like();
+    let weird = Mods {
+        shift: true,
+        ctrl: true,
+        alt: true,
+    };
+    // Never dead: a user holding a stray modifier gets the obvious
+    // thing rather than nothing.
+    assert_eq!(
+        m.resolve(Context::Ruler, Gesture::Click, weird),
+        Action::MovePlayhead
+    );
+}
+
+#[test]
+fn presets_differ_where_the_products_differ() {
+    let none = Mods::default();
+    let reaper = MouseMap::reaper_like();
+    let drums = MouseMap::drums();
+    let riffer = MouseMap::riffer();
+
+    // A drum part is built by sweeping hits, not by marquee.
+    assert_eq!(
+        reaper.resolve(Context::PianoRoll, Gesture::Drag, none),
+        Action::MarqueeSelect
+    );
+    assert_eq!(
+        drums.resolve(Context::PianoRoll, Gesture::Drag, none),
+        Action::PaintNotes
+    );
+    // Riffer inserts on plain click and deletes on double-click.
+    assert_eq!(
+        riffer.resolve(Context::PianoRoll, Gesture::Click, none),
+        Action::InsertNote
+    );
+    assert_eq!(
+        riffer.resolve(Context::Note, Gesture::DoubleClick, none),
+        Action::EraseNote
+    );
+    // And every preset can still be listed for a cheat sheet.
+    for name in MouseMap::PRESETS {
+        assert!(!MouseMap::preset(name).bindings().is_empty());
+    }
+}
+
+#[test]
+fn rebinding_replaces_rather_than_stacking() {
+    let mut m = MouseMap::reaper_like();
+    let before = m.bindings().len();
+    m.set(
+        Context::Note,
+        Gesture::Drag,
+        ModKey::NONE,
+        Action::EditNoteVelocity,
+    );
+    assert_eq!(m.bindings().len(), before, "no duplicate binding");
+    assert_eq!(
+        m.resolve(Context::Note, Gesture::Drag, Mods::default()),
+        Action::EditNoteVelocity
+    );
+}
+
+#[test]
+fn edits_are_distinguished_from_navigation_for_undo_grouping() {
+    assert!(Action::MoveNote.is_edit());
+    assert!(Action::EditNoteVelocity.is_edit());
+    assert!(!Action::MarqueeSelect.is_edit());
+    assert!(!Action::Pan.is_edit());
+    assert!(!Action::Audition.is_edit());
+    assert!(Action::MoveNoteNoSnap.ignores_snap());
+    assert!(!Action::MoveNote.ignores_snap());
 }

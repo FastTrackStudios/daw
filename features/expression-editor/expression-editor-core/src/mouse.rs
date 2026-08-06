@@ -1,0 +1,462 @@
+//! Mouse modifiers: context × modifiers → action.
+//!
+//! Modelled directly on REAPER's MIDI-editor mouse-modifier system,
+//! whose contexts and behaviour names are already decoded in-tree at
+//! `features/reaper/reaper-input/src/input/mouse_modifiers/behaviors/
+//! midi/`. Same shape, so a REAPER mouse map can be loaded into this
+//! table without translation.
+//!
+//! The point of making this a *table* rather than a `match` in the
+//! event handler is that the five products this editor serves want
+//! different defaults — a drum editor wants paint-on-drag where a
+//! Melodyne editor wants marquee — and users want to rebind. The
+//! interaction layer resolves an [`Action`] and then executes it; it
+//! never decides policy.
+
+use crate::tools::Mods;
+
+/// Where a press landed. REAPER calls these mouse-modifier contexts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Context {
+    /// Empty canvas.
+    PianoRoll,
+    /// A note body.
+    Note,
+    /// Within the resize handle at either end of a note.
+    NoteEdge,
+    /// A Q-zone split handle.
+    ZoneSplit,
+    /// The velocity/CC lane strip below the roll.
+    CcLane,
+    /// An event already in a CC lane.
+    CcEvent,
+    /// The piano-key gutter.
+    Keys,
+    /// The timeline ruler.
+    Ruler,
+}
+
+/// How the press arrived.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Gesture {
+    Click,
+    DoubleClick,
+    Drag,
+    RightClick,
+    MiddleClick,
+}
+
+/// What a resolved binding does.
+///
+/// The names track REAPER's decoded behaviour names so the two can be
+/// mapped 1:1, with a few additions REAPER lacks (`EditLyric`,
+/// `CycleArticulation`) that the guitar and vocal editors need.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Action {
+    None,
+
+    // ── selection ────────────────────────────────────────────────────
+    SelectNote,
+    ToggleNoteSelection,
+    AddNoteToSelection,
+    DeselectAll,
+    SelectAllInMeasure,
+    /// Select this note and every later one — the "fix everything from
+    /// here" gesture.
+    SelectNoteAndLater,
+    /// Same, restricted to the note's own row.
+    SelectNoteAndLaterSameRow,
+    MarqueeSelect,
+    MarqueeAdd,
+    MarqueeToggle,
+    /// Select whatever the pointer sweeps over, without a rectangle.
+    SelectTouched,
+    ToggleSelectTouched,
+
+    // ── note creation ────────────────────────────────────────────────
+    /// Insert and let the drag set length, snapped.
+    InsertNoteDragToExtend,
+    InsertNoteDragToExtendNoSnap,
+    /// Insert and let the drag set pitch/position.
+    InsertNoteDragToMove,
+    /// Insert one note at the grid division and stop.
+    InsertNote,
+    InsertNoteNoSnap,
+    /// Insert and let vertical drag set velocity.
+    InsertNoteDragToEditVelocity,
+    /// Fill the swept path with notes on the grid.
+    PaintNotes,
+    PaintNotesNoSnap,
+    /// Repeat one row's note across the sweep.
+    PaintRowOfNotes,
+
+    // ── note editing ─────────────────────────────────────────────────
+    MoveNote,
+    MoveNoteNoSnap,
+    /// Locks to whichever axis the drag committed to first.
+    MoveNoteOneAxis,
+    MoveNoteHorizontally,
+    MoveNoteVertically,
+    /// Ignore the rest of the selection and move only what was grabbed.
+    MoveNoteIgnoringSelection,
+    CopyNote,
+    CopyNoteNoSnap,
+    MoveNoteEdge,
+    MoveNoteEdgeNoSnap,
+    /// Scale every selected note's length proportionally.
+    StretchNotes,
+    /// Scale selected note *positions* — arpeggiate.
+    StretchNotePositions,
+    EditNoteVelocity,
+    EditNoteVelocityFine,
+    EraseNote,
+    EraseNotes,
+    ToggleNoteMute,
+    SetNoteChannelHigher,
+    SetNoteChannelLower,
+    DoubleNoteLength,
+    HalveNoteLength,
+
+    // ── expression ───────────────────────────────────────────────────
+    /// Whichever expression tool the toolbar has active.
+    ActiveTool,
+    /// Temporary freehand pen, from any tool.
+    PenOverride,
+    ScaleExpression,
+    TransposeSnapped,
+    EditCcEvents,
+
+    // ── domain-specific ──────────────────────────────────────────────
+    /// Vocal editor: type a syllable onto the note.
+    EditLyric,
+    /// Guitar/bass: step the articulation badge.
+    CycleArticulation,
+    /// Guitar/bass: same pitch, next playable string.
+    CycleString,
+
+    // ── navigation ───────────────────────────────────────────────────
+    Pan,
+    ZoomAnchored,
+    MovePlayhead,
+    MovePlayheadNoSnap,
+    SelectRow,
+    ContextMenu,
+    /// Sound the note under the pointer without editing it.
+    Audition,
+}
+
+impl Action {
+    /// Actions that must snapshot history before the drag starts, so
+    /// the whole gesture collapses into one undo step.
+    pub fn is_edit(&self) -> bool {
+        !matches!(
+            self,
+            Action::None
+                | Action::SelectNote
+                | Action::ToggleNoteSelection
+                | Action::AddNoteToSelection
+                | Action::DeselectAll
+                | Action::SelectAllInMeasure
+                | Action::SelectNoteAndLater
+                | Action::SelectNoteAndLaterSameRow
+                | Action::MarqueeSelect
+                | Action::MarqueeAdd
+                | Action::MarqueeToggle
+                | Action::SelectTouched
+                | Action::ToggleSelectTouched
+                | Action::Pan
+                | Action::ZoomAnchored
+                | Action::MovePlayhead
+                | Action::MovePlayheadNoSnap
+                | Action::SelectRow
+                | Action::ContextMenu
+                | Action::Audition
+        )
+    }
+
+    /// Whether the action ignores the grid.
+    pub fn ignores_snap(&self) -> bool {
+        matches!(
+            self,
+            Action::InsertNoteDragToExtendNoSnap
+                | Action::InsertNoteNoSnap
+                | Action::MoveNoteNoSnap
+                | Action::CopyNoteNoSnap
+                | Action::MoveNoteEdgeNoSnap
+                | Action::PaintNotesNoSnap
+                | Action::MovePlayheadNoSnap
+        )
+    }
+}
+
+/// A modifier combination. Cmd is normalized to Ctrl upstream.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ModKey(u8);
+
+impl ModKey {
+    pub const NONE: ModKey = ModKey(0);
+    pub const SHIFT: ModKey = ModKey(1);
+    pub const CTRL: ModKey = ModKey(2);
+    pub const ALT: ModKey = ModKey(4);
+
+    pub fn of(m: Mods) -> Self {
+        let mut bits = 0;
+        if m.shift {
+            bits |= 1;
+        }
+        if m.ctrl {
+            bits |= 2;
+        }
+        if m.alt {
+            bits |= 4;
+        }
+        ModKey(bits)
+    }
+
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    /// REAPER's `<S-C-A->` notation.
+    pub fn notation(self) -> String {
+        if self.0 == 0 {
+            return String::new();
+        }
+        let mut s = String::from("<");
+        if self.0 & 1 != 0 {
+            s.push_str("S-");
+        }
+        if self.0 & 2 != 0 {
+            s.push_str("C-");
+        }
+        if self.0 & 4 != 0 {
+            s.push_str("A-");
+        }
+        s.push('>');
+        s
+    }
+}
+
+/// One binding.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Binding {
+    pub context: Context,
+    pub gesture: Gesture,
+    pub mods: ModKey,
+    pub action: Action,
+}
+
+/// The full table.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MouseMap {
+    pub name: &'static str,
+    bindings: Vec<Binding>,
+}
+
+impl Default for MouseMap {
+    fn default() -> Self {
+        Self::reaper_like()
+    }
+}
+
+impl MouseMap {
+    /// Resolve a press. Falls back to the unmodified binding for the
+    /// same context and gesture, then to `None`.
+    ///
+    /// Falling back matters: without it, every unbound modifier
+    /// combination becomes dead, and a user who happens to be holding
+    /// Shift gets nothing instead of the obvious thing.
+    pub fn resolve(&self, context: Context, gesture: Gesture, mods: Mods) -> Action {
+        let key = ModKey::of(mods);
+        self.find(context, gesture, key)
+            .or_else(|| self.find(context, gesture, ModKey::NONE))
+            .unwrap_or(Action::None)
+    }
+
+    fn find(&self, context: Context, gesture: Gesture, mods: ModKey) -> Option<Action> {
+        self.bindings
+            .iter()
+            .find(|b| b.context == context && b.gesture == gesture && b.mods == mods)
+            .map(|b| b.action)
+    }
+
+    pub fn bindings(&self) -> &[Binding] {
+        &self.bindings
+    }
+
+    /// Add or replace one binding.
+    pub fn set(&mut self, context: Context, gesture: Gesture, mods: ModKey, action: Action) {
+        match self
+            .bindings
+            .iter_mut()
+            .find(|b| b.context == context && b.gesture == gesture && b.mods == mods)
+        {
+            Some(b) => b.action = action,
+            None => self.bindings.push(Binding {
+                context,
+                gesture,
+                mods,
+                action,
+            }),
+        }
+    }
+
+    /// Every binding for one context, for a cheat-sheet UI.
+    pub fn for_context(&self, context: Context) -> Vec<&Binding> {
+        self.bindings
+            .iter()
+            .filter(|b| b.context == context)
+            .collect()
+    }
+
+    /// Defaults that follow REAPER's MIDI editor.
+    pub fn reaper_like() -> Self {
+        use Action as A;
+        use Context as C;
+        use Gesture as G;
+        const N: ModKey = ModKey::NONE;
+        const S: ModKey = ModKey::SHIFT;
+        const CT: ModKey = ModKey::CTRL;
+        const AL: ModKey = ModKey::ALT;
+        const SC: ModKey = ModKey(3);
+        const CA: ModKey = ModKey(6);
+        const SA: ModKey = ModKey(5);
+
+        let b = |context, gesture, mods, action| Binding {
+            context,
+            gesture,
+            mods,
+            action,
+        };
+
+        Self {
+            name: "REAPER-like",
+            bindings: vec![
+                // ── empty canvas ─────────────────────────────────────
+                b(C::PianoRoll, G::Drag, N, A::MarqueeSelect),
+                b(C::PianoRoll, G::Drag, S, A::MarqueeAdd),
+                b(C::PianoRoll, G::Drag, CT, A::PenOverride),
+                b(C::PianoRoll, G::Drag, AL, A::PaintNotes),
+                b(C::PianoRoll, G::Drag, SA, A::PaintNotesNoSnap),
+                b(C::PianoRoll, G::Drag, SC, A::Pan),
+                b(C::PianoRoll, G::Drag, CA, A::ZoomAnchored),
+                b(C::PianoRoll, G::Click, N, A::DeselectAll),
+                b(C::PianoRoll, G::Click, AL, A::MovePlayhead),
+                b(C::PianoRoll, G::DoubleClick, N, A::InsertNote),
+                b(C::PianoRoll, G::DoubleClick, AL, A::InsertNoteNoSnap),
+                b(C::PianoRoll, G::RightClick, N, A::ContextMenu),
+                b(C::PianoRoll, G::MiddleClick, N, A::MovePlayhead),
+                // ── notes ────────────────────────────────────────────
+                b(C::Note, G::Click, N, A::SelectNote),
+                b(C::Note, G::Click, S, A::AddNoteToSelection),
+                b(C::Note, G::Click, CT, A::ToggleNoteSelection),
+                b(C::Note, G::Click, AL, A::ToggleNoteMute),
+                b(C::Note, G::Click, SC, A::SelectNoteAndLater),
+                b(C::Note, G::Click, CA, A::SelectNoteAndLaterSameRow),
+                b(C::Note, G::DoubleClick, N, A::EraseNote),
+                b(C::Note, G::Drag, N, A::MoveNote),
+                b(C::Note, G::Drag, S, A::MoveNoteOneAxis),
+                b(C::Note, G::Drag, CT, A::EditNoteVelocity),
+                b(C::Note, G::Drag, AL, A::CopyNote),
+                b(C::Note, G::Drag, SC, A::EditNoteVelocityFine),
+                b(C::Note, G::Drag, CA, A::MoveNoteNoSnap),
+                b(C::Note, G::RightClick, N, A::ContextMenu),
+                b(C::Note, G::MiddleClick, N, A::Audition),
+                // ── note edges ───────────────────────────────────────
+                b(C::NoteEdge, G::Drag, N, A::MoveNoteEdge),
+                b(C::NoteEdge, G::Drag, CT, A::MoveNoteEdgeNoSnap),
+                b(C::NoteEdge, G::Drag, S, A::StretchNotes),
+                b(C::NoteEdge, G::Drag, AL, A::StretchNotePositions),
+                b(C::NoteEdge, G::Click, N, A::SelectNote),
+                b(C::NoteEdge, G::DoubleClick, N, A::DoubleNoteLength),
+                b(C::NoteEdge, G::DoubleClick, S, A::HalveNoteLength),
+                // ── zones ────────────────────────────────────────────
+                b(C::ZoneSplit, G::Drag, N, A::ActiveTool),
+                b(C::ZoneSplit, G::Click, AL, A::None),
+                b(C::ZoneSplit, G::RightClick, N, A::ContextMenu),
+                // ── velocity / CC lane ───────────────────────────────
+                b(C::CcLane, G::Drag, N, A::EditCcEvents),
+                b(C::CcLane, G::Drag, CT, A::PenOverride),
+                b(C::CcLane, G::Drag, S, A::MarqueeSelect),
+                b(C::CcLane, G::Click, N, A::EditCcEvents),
+                b(C::CcEvent, G::Drag, N, A::EditCcEvents),
+                b(C::CcEvent, G::Click, N, A::SelectNote),
+                // ── chrome ───────────────────────────────────────────
+                b(C::Keys, G::Click, N, A::SelectRow),
+                b(C::Keys, G::Click, AL, A::Audition),
+                b(C::Ruler, G::Click, N, A::MovePlayhead),
+                b(C::Ruler, G::Click, AL, A::MovePlayheadNoSnap),
+                b(C::Ruler, G::Drag, N, A::MovePlayhead),
+            ],
+        }
+    }
+
+    /// Drum-editor defaults.
+    ///
+    /// Painting is the primary gesture — a drum part is built by
+    /// sweeping hits onto the grid, not by drawing one note at a time —
+    /// and length editing is removed, since a diamond has none.
+    pub fn drums() -> Self {
+        use Action as A;
+        use Context as C;
+        use Gesture as G;
+        let mut m = Self::reaper_like();
+        m.name = "Drums";
+        m.set(C::PianoRoll, G::Drag, ModKey::NONE, A::PaintNotes);
+        m.set(C::PianoRoll, G::Click, ModKey::NONE, A::InsertNote);
+        m.set(C::PianoRoll, G::Drag, ModKey::SHIFT, A::MarqueeSelect);
+        m.set(C::Note, G::Drag, ModKey::NONE, A::EditNoteVelocity);
+        m.set(C::Note, G::Drag, ModKey::SHIFT, A::MoveNote);
+        m.set(C::Note, G::Click, ModKey::NONE, A::SelectNote);
+        m.set(C::NoteEdge, G::Drag, ModKey::NONE, A::EditNoteVelocity);
+        m
+    }
+
+    /// Guitar/bass defaults, following Ample's Riffer key commands.
+    ///
+    /// Riffer's set is deliberately terse and differs from REAPER's:
+    /// plain click inserts, double-click deletes, Ctrl+vertical-drag is
+    /// velocity, and Shift+drag moves. Matching it means someone coming
+    /// from Riffer is not retrained.
+    pub fn riffer() -> Self {
+        use Action as A;
+        use Context as C;
+        use Gesture as G;
+        let mut m = Self::reaper_like();
+        m.name = "Riffer (Ample)";
+        m.set(C::PianoRoll, G::Click, ModKey::NONE, A::InsertNote);
+        m.set(C::PianoRoll, G::Drag, ModKey::NONE, A::InsertNoteDragToExtend);
+        m.set(C::Note, G::Click, ModKey::NONE, A::SelectNote);
+        m.set(C::Note, G::DoubleClick, ModKey::NONE, A::EraseNote);
+        m.set(C::Note, G::Drag, ModKey::NONE, A::MoveNoteVertically);
+        m.set(C::Note, G::Drag, ModKey::CTRL, A::EditNoteVelocity);
+        m.set(C::Note, G::Drag, ModKey::SHIFT, A::MoveNote);
+        m.set(C::Note, G::Click, ModKey::ALT, A::ContextMenu);
+        m.set(C::NoteEdge, G::Drag, ModKey::NONE, A::MoveNoteEdge);
+        m.set(C::NoteEdge, G::Drag, ModKey::CTRL, A::MoveNoteEdgeNoSnap);
+        m.set(C::Keys, G::Click, ModKey::NONE, A::SelectRow);
+        m
+    }
+
+    /// Vocal-lyric defaults: double-clicking a note types on it.
+    pub fn lyrics() -> Self {
+        use Action as A;
+        use Context as C;
+        use Gesture as G;
+        let mut m = Self::reaper_like();
+        m.name = "Lyrics";
+        m.set(C::Note, G::DoubleClick, ModKey::NONE, A::EditLyric);
+        m
+    }
+
+    pub const PRESETS: [&'static str; 4] = ["REAPER-like", "Drums", "Riffer (Ample)", "Lyrics"];
+
+    pub fn preset(name: &str) -> Self {
+        match name {
+            "Drums" => Self::drums(),
+            "Riffer (Ample)" => Self::riffer(),
+            "Lyrics" => Self::lyrics(),
+            _ => Self::reaper_like(),
+        }
+    }
+}

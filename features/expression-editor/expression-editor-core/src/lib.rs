@@ -29,6 +29,8 @@ pub mod camera;
 pub mod doc;
 pub mod edit;
 pub mod modulation;
+pub mod mouse;
+pub mod rows;
 pub mod shape;
 pub mod tools;
 pub mod tuning;
@@ -37,6 +39,8 @@ pub use camera::{Bounds, Camera, Content, Viewport};
 pub use doc::{Curve, ExpressionDoc, Lane, Marker, Note, NoteId, Point, Target, TimeBase};
 pub use edit::{Edit, History};
 pub use shape::Shape;
+pub use mouse::{Action, MouseMap};
+pub use rows::{Articulation, DrumMap, RowSpace, StringTuning};
 pub use tools::{Grid, Hit, Mods, Selection, Tool};
 pub use tuning::{Temperament, Tuning};
 
@@ -57,6 +61,11 @@ pub struct Editor {
     /// Lanes drawn behind the active one.
     pub overlays: Vec<Lane>,
     pub selection: Selection,
+    /// What the vertical axis means — pitch, drum lanes, or strings.
+    pub row_space: RowSpace,
+    /// Context × modifier → action. Editable, so a host can ship a
+    /// REAPER-matching profile or its own.
+    pub mouse: MouseMap,
     pub tuning: Tuning,
     pub grid: Grid,
     pub shape: Shape,
@@ -82,6 +91,8 @@ impl Editor {
             lane: Lane::Pitch,
             overlays: Vec::new(),
             selection: Selection::default(),
+            row_space: RowSpace::Pitch,
+            mouse: MouseMap::default(),
             tuning: Tuning::default(),
             grid: Grid::default(),
             shape: Shape::Linear,

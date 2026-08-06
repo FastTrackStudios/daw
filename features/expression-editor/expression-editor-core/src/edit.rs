@@ -13,6 +13,7 @@
 use crate::blob;
 use crate::doc::{Curve, ExpressionDoc, Lane, Note, NoteId, Point, Target};
 use crate::modulation::Stack;
+use crate::rows::{Articulation, RowSpace};
 use crate::shape::Shape;
 
 /// One describable change to the document.
@@ -90,6 +91,48 @@ pub enum Edit {
     /// Set a note's sounding pitch offset from its row — how a
     /// microtonal target is stored.
     SetPitchOffset { note: NoteId, semitones: f64 },
+    /// Velocity, 0..1.
+    SetVelocity { notes: Vec<NoteId>, velocity: f64 },
+    /// Nudge velocity — the drag path, so a gesture can accumulate.
+    NudgeVelocity { notes: Vec<NoteId>, delta: f64 },
+    SetOffVelocity { notes: Vec<NoteId>, velocity: f64 },
+    SetMuted { notes: Vec<NoteId>, muted: bool },
+    ToggleMuted { notes: Vec<NoteId> },
+    /// Step the MPE member channel, wrapping within 2..=16.
+    NudgeChannel { notes: Vec<NoteId>, delta: i32 },
+    /// Scale note lengths about their own starts.
+    ScaleLength { notes: Vec<NoteId>, factor: f64 },
+    /// Scale note *positions* about `pivot` — arpeggiate.
+    StretchPositions {
+        notes: Vec<NoteId>,
+        pivot: f64,
+        factor: f64,
+    },
+    /// Duplicate notes at an offset; the copies become the selection.
+    CopyNotes {
+        notes: Vec<NoteId>,
+        time_delta: f64,
+        row_delta: i32,
+    },
+    /// Snap note starts to a grid, blending by `strength` (1 = full).
+    Quantize {
+        notes: Vec<NoteId>,
+        step: f64,
+        origin: f64,
+        strength: f64,
+    },
+    /// Extend each note to meet the next one on its row.
+    Legato { notes: Vec<NoteId>, gap: f64 },
+    /// Vocal editor: the syllable carried by the note.
+    SetText { note: NoteId, text: Option<String> },
+    /// Guitar/bass technique.
+    SetArticulation {
+        notes: Vec<NoteId>,
+        articulation: Option<Articulation>,
+    },
+    /// Guitar/bass: move to another string, keeping sounding pitch.
+    SetString { note: NoteId, string: i32 },
+    SetFret { notes: Vec<NoteId>, fret: u8 },
     AddNote(Box<Note>),
     DeleteNotes(Vec<NoteId>),
     SplitNote { note: NoteId, t: f64 },
@@ -322,6 +365,183 @@ impl Edit {
                     n.pitch.offset(s, e, *semitones - current);
                 }
                 true
+            }
+            Edit::SetVelocity { notes, velocity } => {
+                map_notes(doc, notes, |n| n.velocity = velocity.clamp(0.0, 1.0))
+            }
+            Edit::NudgeVelocity { notes, delta } => map_notes(doc, notes, |n| {
+                n.velocity = (n.velocity + delta).clamp(0.0, 1.0)
+            }),
+            Edit::SetOffVelocity { notes, velocity } => {
+                map_notes(doc, notes, |n| n.off_velocity = velocity.clamp(0.0, 1.0))
+            }
+            Edit::SetMuted { notes, muted } => map_notes(doc, notes, |n| n.muted = *muted),
+            Edit::ToggleMuted { notes } => map_notes(doc, notes, |n| n.muted = !n.muted),
+            Edit::NudgeChannel { notes, delta } => map_notes(doc, notes, |n| {
+                // Wrap inside the member range; channel 1 stays the MPE
+                // master and must never be assigned to a note.
+                let cur = n.channel.unwrap_or(2) as i32;
+                let wrapped = (cur - 2 + delta).rem_euclid(15) + 2;
+                n.channel = Some(wrapped as u8);
+            }),
+            Edit::ScaleLength { notes, factor } => {
+                let f = factor.max(1e-3);
+                let mut any = false;
+                for id in notes {
+                    let Some(n) = doc.note(*id).cloned() else {
+                        continue;
+                    };
+                    let end = n.start + (n.end - n.start) * f;
+                    any |= Edit::Resize {
+                        note: *id,
+                        start: n.start,
+                        end,
+                    }
+                    .apply(doc);
+                }
+                any
+            }
+            Edit::StretchPositions {
+                notes,
+                pivot,
+                factor,
+            } => {
+                let mut any = false;
+                for id in notes {
+                    let Some(n) = doc.note(*id).cloned() else {
+                        continue;
+                    };
+                    let delta = (pivot + (n.start - pivot) * factor) - n.start;
+                    any |= Edit::MoveTime {
+                        notes: vec![*id],
+                        delta,
+                    }
+                    .apply(doc);
+                }
+                any
+            }
+            Edit::CopyNotes {
+                notes,
+                time_delta,
+                row_delta,
+            } => {
+                let sources: Vec<Note> = notes
+                    .iter()
+                    .filter_map(|id| doc.note(*id).cloned())
+                    .collect();
+                if sources.is_empty() {
+                    return false;
+                }
+                for src in sources {
+                    let id = doc.mint_id();
+                    let mut copy = src.clone();
+                    copy.id = id;
+                    copy.row = (copy.row + row_delta).clamp(0, 127);
+                    doc.push(copy);
+                    Edit::MoveTime {
+                        notes: vec![id],
+                        delta: *time_delta,
+                    }
+                    .apply(doc);
+                }
+                true
+            }
+            Edit::Quantize {
+                notes,
+                step,
+                origin,
+                strength,
+            } => {
+                if *step <= 0.0 {
+                    return false;
+                }
+                let mut any = false;
+                for id in notes {
+                    let Some(n) = doc.note(*id).cloned() else {
+                        continue;
+                    };
+                    let target = origin + ((n.start - origin) / step).round() * step;
+                    // Partial strength is how a part keeps its feel:
+                    // pulled toward the grid without being nailed to it.
+                    let delta = (target - n.start) * strength.clamp(0.0, 1.0);
+                    if delta.abs() > 1e-9 {
+                        any |= Edit::MoveTime {
+                            notes: vec![*id],
+                            delta,
+                        }
+                        .apply(doc);
+                    }
+                }
+                any
+            }
+            Edit::Legato { notes, gap } => {
+                let mut any = false;
+                for id in notes {
+                    let Some(n) = doc.note(*id).cloned() else {
+                        continue;
+                    };
+                    // The next note starting on the same row.
+                    let next = doc
+                        .notes
+                        .iter()
+                        .filter(|o| o.row == n.row && o.start > n.start)
+                        .map(|o| o.start)
+                        .fold(f64::INFINITY, f64::min);
+                    if !next.is_finite() {
+                        continue;
+                    }
+                    let end = (next - gap).max(n.start + 1.0);
+                    any |= Edit::Resize {
+                        note: *id,
+                        start: n.start,
+                        end,
+                    }
+                    .apply(doc);
+                }
+                any
+            }
+            Edit::SetText { note, text } => {
+                let Some(n) = doc.note_mut(*note) else {
+                    return false;
+                };
+                n.text = text.clone();
+                true
+            }
+            Edit::SetArticulation {
+                notes,
+                articulation,
+            } => map_notes(doc, notes, |n| {
+                n.articulation = *articulation;
+                n.legato = articulation.is_some_and(|a| a.is_legato());
+            }),
+            Edit::SetString { note, string } => {
+                let RowSpace::Strings(tuning) = doc.row_space.clone() else {
+                    return false;
+                };
+                let Some(n) = doc.note(*note).cloned() else {
+                    return false;
+                };
+                let target = (*string).clamp(0, tuning.strings() as i32 - 1);
+                // Keep the sounding pitch and re-finger it: moving a
+                // note to another string means playing the same note
+                // somewhere else, not transposing it.
+                let pitch = tuning.pitch(n.row.max(0) as usize, n.fret.unwrap_or(0));
+                let Some(fret) = tuning.fret_for(target as usize, pitch) else {
+                    return false;
+                };
+                let Some(n) = doc.note_mut(*note) else {
+                    return false;
+                };
+                n.row = target;
+                n.fret = Some(fret);
+                true
+            }
+            Edit::SetFret { notes, fret } => {
+                let max = match &doc.row_space {
+                    RowSpace::Strings(t) => t.frets,
+                    _ => return false,
+                };
+                map_notes(doc, notes, |n| n.fret = Some((*fret).min(max)))
             }
             Edit::AddNote(note) => {
                 doc.push((**note).clone());
@@ -577,4 +797,16 @@ pub fn stroke_points(samples: &[(f64, f64)], lane: Lane) -> Vec<Point> {
         curve.set(t, lane.clamp(v));
     }
     curve.points().to_vec()
+}
+
+/// Apply `f` to every named note, reporting whether any existed.
+fn map_notes(doc: &mut ExpressionDoc, ids: &[NoteId], mut f: impl FnMut(&mut Note)) -> bool {
+    let mut any = false;
+    for id in ids {
+        if let Some(n) = doc.note_mut(*id) {
+            f(n);
+            any = true;
+        }
+    }
+    any
 }

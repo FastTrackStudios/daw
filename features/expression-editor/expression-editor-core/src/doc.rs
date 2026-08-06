@@ -16,6 +16,7 @@
 //! Pressure and Timbre are normalized 0..1 lanes with no pitch center.
 //! Their audio-domain meanings are dynamics and formant.
 
+use crate::rows::Articulation;
 use crate::shape::Shape;
 
 /// Stable identity for a note across edits and re-analysis.
@@ -315,6 +316,24 @@ pub struct Note {
     pub channel: Option<u8>,
     /// 0..1.
     pub velocity: f64,
+    /// Note-off velocity, 0..1 — release character on instruments that
+    /// respond to it (Ample's "Fingered Release").
+    pub off_velocity: f64,
+    /// Muted notes stay in the document and stay editable, but do not
+    /// sound. Not the same as deleting.
+    pub muted: bool,
+    /// Free text carried by the note. In a vocal editor this is the
+    /// lyric syllable, and it is the note's identity — the row already
+    /// shows the pitch.
+    pub text: Option<String>,
+    /// Playing technique (guitar/bass, and percussion dead notes).
+    pub articulation: Option<Articulation>,
+    /// Joined to the following note on the same string. Riffer's rule:
+    /// the legato is marked on the *first* note of the pair.
+    pub legato: bool,
+    /// Guitar/bass: fret. The string is the note's `row` in a
+    /// [`crate::rows::RowSpace::Strings`] roll.
+    pub fret: Option<u8>,
     pub pitch: Curve,
     pub pressure: Curve,
     pub timbre: Curve,
@@ -339,6 +358,12 @@ impl Note {
             row,
             channel: None,
             velocity: 100.0 / 127.0,
+            off_velocity: 64.0 / 127.0,
+            muted: false,
+            text: None,
+            articulation: None,
+            legato: false,
+            fret: None,
             pitch: Curve::new(),
             pressure: Curve::new(),
             timbre: Curve::new(),
@@ -467,6 +492,10 @@ pub struct ExpressionDoc {
     /// Must match, or pitch reads wrong on playback.
     pub bend_range: f64,
     pub markers: Vec<Marker>,
+    /// What the vertical axis means. Lives on the document because
+    /// edits (fret, string) are meaningless without the tuning, and
+    /// edits only ever see the document.
+    pub row_space: crate::rows::RowSpace,
     next_id: u64,
 }
 
@@ -479,6 +508,7 @@ impl ExpressionDoc {
             end,
             bend_range: 48.0,
             markers: Vec::new(),
+            row_space: crate::rows::RowSpace::Pitch,
             next_id: 1,
         }
     }
