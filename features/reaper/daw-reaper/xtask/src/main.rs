@@ -120,6 +120,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // chord-tool's insert path. Everything about it up to the DAW seam is
     // unit-tested; these are the only tests that prove the pitches keyflow
     // computes are the pitches REAPER ends up holding.
+    // session's Key-track tests: proof that a key stored as an item label
+    // survives a real project.
+    TestPackage {
+        package: "session".into(),
+        features: vec![],
+        test_threads: 1,
+        default_skips: vec![],
+        test_binary: Some("reaper_key_track".into()),
+    },
     TestPackage {
         package: "chord-tool-daw".into(),
         features: vec![],

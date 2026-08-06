@@ -136,6 +136,95 @@ fn parse_line(line: &str) -> Option<KeySig> {
     })
 }
 
+/// The line ending a chunk uses.
+///
+/// REAPER writes CRLF on every platform. A rewriter that assumes `\n`
+/// finds nothing, changes nothing, and reports success — so this is
+/// detected rather than assumed.
+fn line_ending(chunk: &str) -> &'static str {
+    if chunk.contains("\r\n") { "\r\n" } else { "\n" }
+}
+
+/// Render key signatures as the `<KEYSIG>` block REAPER writes.
+///
+/// Empty input yields an empty string — REAPER omits the block entirely
+/// when a project has none, and writing an empty one back would be a
+/// gratuitous difference.
+pub fn render(sigs: &[KeySig]) -> String {
+    render_with(sigs, "\n")
+}
+
+fn render_with(sigs: &[KeySig], eol: &str) -> String {
+    if sigs.is_empty() {
+        return String::new();
+    }
+    let mut out = format!("  <KEYSIG{eol}");
+    for sig in sigs {
+        out.push_str(&format!(
+            "    {} {} {} 0x{:X}{eol}",
+            sig.measure, sig.root, sig.accidental, sig.scale_mask
+        ));
+    }
+    out.push_str(&format!("  >{eol}"));
+    out
+}
+
+/// Replace a project chunk's `<KEYSIG>` block with `sigs`.
+///
+/// Splices rather than rewrites: every other line is passed through
+/// untouched, because this runs over a real project file and the only
+/// safe edit is the smallest one. Where there is no block yet, the new
+/// one goes just before the first `<TRACK`, which is where REAPER puts
+/// it. Line endings are preserved.
+pub fn splice(chunk: &str, sigs: &[KeySig]) -> String {
+    let eol = line_ending(chunk);
+    let mut out: Vec<String> = Vec::new();
+    let mut inside = false;
+    let mut wrote = false;
+
+    let block_lines = |sigs: &[KeySig]| -> Vec<String> {
+        if sigs.is_empty() {
+            return Vec::new();
+        }
+        let mut v = vec!["  <KEYSIG".to_string()];
+        for sig in sigs {
+            v.push(format!(
+                "    {} {} {} 0x{:X}",
+                sig.measure, sig.root, sig.accidental, sig.scale_mask
+            ));
+        }
+        v.push("  >".to_string());
+        v
+    };
+
+    for line in chunk.split(eol) {
+        if !inside && line.trim_start().starts_with("<KEYSIG") {
+            inside = true;
+            out.extend(block_lines(sigs));
+            wrote = true;
+            continue;
+        }
+        if inside {
+            // Between `<KEYSIG` and its closing `>` are the old
+            // signatures; they go.
+            if line.trim() == ">" {
+                inside = false;
+            }
+            continue;
+        }
+        if !wrote && !sigs.is_empty() && line.trim_start().starts_with("<TRACK") {
+            out.extend(block_lines(sigs));
+            wrote = true;
+        }
+        out.push(line.to_string());
+    }
+
+    if !wrote && !sigs.is_empty() {
+        out.extend(block_lines(sigs));
+    }
+    out.join(eol)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,5 +327,77 @@ mod forum_cases {
         let sigs = parse("<KEYSIG\n  0 7 0 0xAB5\n>");
         assert_eq!(sigs[0].accidental, 0);
         assert_eq!(sigs[0].root_name(), "G");
+    }
+}
+
+#[cfg(test)]
+mod write_tests {
+    use super::*;
+
+    const FIXTURE: &str = include_str!("../tests/fixtures/key-signatures.RPP");
+
+    /// Rendering what we parsed must reproduce REAPER's own block — the
+    /// property that makes writing into a real project safe.
+    #[test]
+    fn render_round_trips_the_fixture() {
+        let sigs = parse(FIXTURE);
+        let rendered = render(&sigs);
+        assert_eq!(parse(&rendered), sigs);
+        for line in ["0 0 1 0xAB5", "8 1 -1 0xAB5", "60 4 1 0xAB5"] {
+            assert!(rendered.contains(line), "missing `{line}` in\n{rendered}");
+        }
+    }
+
+    /// Splicing must change the KEYSIG block and nothing else. A project
+    /// file is someone's work; an edit that reformats it is not
+    /// acceptable even if it parses.
+    #[test]
+    fn splice_touches_only_the_block() {
+        let replacement = [KeySig {
+            measure: 0,
+            root: 7,
+            accidental: 1,
+            scale_mask: SCALE_MASK_MAJOR,
+        }];
+        let out = splice(FIXTURE, &replacement);
+
+        assert_eq!(parse(&out), replacement, "the block is replaced");
+        // Everything outside the block survives untouched.
+        for marker in ["<REAPER_PROJECT", "<TRACK", "IMGRESOURCEFLAGS", "<TEMPOENVEX"] {
+            assert_eq!(
+                out.matches(marker).count(),
+                FIXTURE.matches(marker).count(),
+                "{marker} count changed"
+            );
+        }
+        assert_eq!(out.matches("<KEYSIG").count(), 1, "exactly one block");
+    }
+
+    /// A project with no key signatures gains a block in the right place.
+    #[test]
+    fn splice_inserts_when_absent() {
+        let chunk = "<REAPER_PROJECT 0.1\n  TEMPO 120 4 4\n  <TRACK\n  >\n>";
+        let out = splice(
+            chunk,
+            &[KeySig {
+                measure: 0,
+                root: 5,
+                accidental: -1,
+                scale_mask: SCALE_MASK_MAJOR,
+            }],
+        );
+        assert_eq!(parse(&out)[0].root_name(), "F");
+        assert!(
+            out.find("<KEYSIG").expect("block") < out.find("<TRACK").expect("track"),
+            "the block belongs before the tracks"
+        );
+    }
+
+    /// Clearing removes the block rather than leaving an empty one.
+    #[test]
+    fn splicing_nothing_removes_the_block() {
+        let out = splice(FIXTURE, &[]);
+        assert!(!out.contains("<KEYSIG"), "no empty block left behind");
+        assert!(out.contains("<TRACK"), "the rest survives");
     }
 }
