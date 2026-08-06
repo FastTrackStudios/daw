@@ -55,6 +55,18 @@ impl Ring {
         }
     }
 
+    /// How many dots are printed evenly along the sweep, if this ring is a
+    /// dotted one. Zero for every other kind.
+    ///
+    /// 21 is the 1073's — dense enough to read as an arc from across a room,
+    /// sparse enough that you can still count to a position by eye.
+    pub fn dot_count(self) -> usize {
+        match self {
+            Ring::Dots(_) => 21,
+            _ => 0,
+        }
+    }
+
     /// Where this ring is printed: `(tick radius, numeral radius)` in the
     /// knob's own viewBox units, and whether tick marks are drawn at all.
     ///
@@ -69,6 +81,35 @@ impl Ring {
             // on, which is what "None" has to mean for a bypass knob.
             Ring::None => (41.0, 50.0, false),
             _ => (41.0, 50.0, true),
+        }
+    }
+}
+
+/// A filter-shape glyph silkscreened above a control.
+///
+/// Neve prints the *shape* over each band rather than naming it, which is why
+/// a 1073 is readable without a word of English on it. Drawn as a stroked
+/// polyline in a `-12 -8 24 16` box so a panel can place one anywhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FilterGlyph {
+    /// A step up at the top end — the 12 kHz shelf.
+    HighShelf,
+    /// A step up at the bottom end.
+    LowShelf,
+    /// A hump — the swept mid.
+    Bell,
+    /// A ramp rising out of the bottom corner — the high-pass.
+    HighPass,
+}
+
+impl FilterGlyph {
+    /// The glyph as an SVG path, in its own `-12 -8 24 16` box.
+    pub fn path(self) -> &'static str {
+        match self {
+            Self::HighShelf => "M -11 4 L -1 4 C 3 4 3 -4 7 -4 L 11 -4",
+            Self::LowShelf => "M 11 4 L 1 4 C -3 4 -3 -4 -7 -4 L -11 -4",
+            Self::Bell => "M -11 4 L -6 4 C -2 4 -2 -5 0 -5 C 2 -5 2 4 6 4 L 11 4",
+            Self::HighPass => "M -11 5 L -5 5 C -1 5 -1 -4 3 -4 L 11 -4",
         }
     }
 }
@@ -131,6 +172,15 @@ pub enum RackItem {
         x: f64,
         y: f64,
         labels: &'static [&'static str],
+    },
+    /// A filter-shape glyph printed above a band's control — Neve's way of
+    /// saying "shelf" or "high pass" without a word.
+    Glyph {
+        x: f64,
+        y: f64,
+        shape: FilterGlyph,
+        /// Drawing width in design px; the height follows the 24:16 box.
+        w: f64,
     },
     /// A numeric readout of a control's position on its printed 0–10 scale.
     ///

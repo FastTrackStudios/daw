@@ -25,6 +25,13 @@ const BODY_R: f64 = 30.0;
 const RING_R: f64 = 41.0;
 const LABEL_R: f64 = 50.0;
 
+/// Daka-Ware's skirt: coarse lobes you can count across a room, which is what
+/// the EQP-1A's knobs read as in a photograph. Fewer and deeper than a knurl.
+const DAKA_LOBES: usize = 22;
+const DAKA_LOBE_DEPTH: f64 = 2.4;
+/// Fine ridging around the raised body's wall, above the skirt.
+const DAKA_BODY_RIDGES: usize = 40;
+
 /// Pixels of vertical drag per full sweep. Looser than the FTS knob's 150 —
 /// these are big knobs with printed scales, and a coarse feel suits them.
 const SENSITIVITY: f64 = 190.0;
@@ -76,6 +83,13 @@ pub enum KnobStyle {
     /// a moulded *nose* that points at a scale printed on the panel. No skirt,
     /// no flutes — you read the nose.
     Pointer,
+    /// Neve 1073 and its module family: a moulded cap with a finely fluted
+    /// rim and a **dark** index line across a light top, sitting inside a ring
+    /// of white dots printed on the panel. The dots are the panel's, not the
+    /// knob's — see [`Ring::Dots`](crate::hardware::rack::Ring::Dots) — but the
+    /// dark-on-light index is what tells this apart from an SSL collet, whose
+    /// bar is white on a saturated cap.
+    Neve,
     /// Empirical Labs Distressor: a wide brushed dial whose *numerals are
     /// printed on the skirt* and turn with it, around a dark centre cap. The
     /// scale moving rather than a pointer moving is the whole look, and it is
@@ -119,6 +133,7 @@ impl KnobStyle {
                 | Self::Collet
                 | Self::SilverTop
                 | Self::MetalFluted
+                | Self::Neve
                 | Self::Dial
         )
     }
@@ -147,6 +162,8 @@ impl KnobStyle {
             Self::Collet => "rgba(0,0,0,0.42)",
             Self::SilverTop => "rgba(0,0,0,0.34)",
             Self::MetalFluted => "rgba(0,0,0,0.38)",
+            // A light cap: the flutes read as the shadow between the ribs.
+            Self::Neve => "rgba(0,0,0,0.40)",
             Self::Dial => "rgba(0,0,0,0.30)",
             _ => "rgba(255,255,255,0.30)",
         }
@@ -159,6 +176,7 @@ impl KnobStyle {
             Self::Collet => 28,
             Self::SilverTop => 46,
             Self::MetalFluted => 40,
+            Self::Neve => 52,
             Self::Dial => 72,
             Self::Marconi | Self::Pointer => 0,
             _ => 0,
@@ -198,6 +216,10 @@ impl KnobStyle {
             Self::SilverTop => {
                 "linear-gradient(148deg, #e2e2e0 0%, #b4b4b2 34%, #8e8e8c 62%, #cfcfcd 100%)"
             }
+            // A moulded light-grey cap, lit as a slightly domed face.
+            Self::Neve => {
+                "radial-gradient(circle at 36% 24%, #cfd2d6 0%, #a8acb2 46%, #83878d 100%)"
+            }
             // The cap in the middle of the dial.
             Self::Dial => {
                 "radial-gradient(circle at 38% 28%, #55575c 0%, #303236 46%, #1c1e21 100%)"
@@ -234,6 +256,8 @@ impl KnobStyle {
             | Self::Pointer => "#f2f2f0",
             // A dark line on a silver top, which is how you read one.
             Self::Metal | Self::SilverTop | Self::MetalFluted => "#1c1c1e",
+            // Dark on a light cap — the 1073's line is a groove, not a stripe.
+            Self::Neve => "#17181b",
             Self::Dial => "#f2f2f0",
         }
     }
@@ -328,6 +352,13 @@ pub fn HardwareKnob(
     /// Draw tick marks, or numerals alone.
     #[props(default = true)]
     ticks: bool,
+    /// Dots printed evenly along the sweep instead of ticks, and how many.
+    ///
+    /// The 1073's rings are dots, not dashes, and they are what the panel
+    /// reads as before you can make out a number — a small bright arc around
+    /// each knob. Zero draws none.
+    #[props(default = 0)]
+    dots: usize,
     /// Override the knob body's colour.
     ///
     /// A console colour-codes its bands — the SSL's blue LMF, green HMF,
@@ -385,6 +416,27 @@ pub fn HardwareKnob(
                         opacity: "0.35",
                     }
                 }
+                // The printed dot ring — the 1073's, and the thing you see of
+                // one of its knobs before any number resolves. Evenly spaced
+                // along the sweep, on the panel and so not turning.
+                for i in 0..dots {
+                    {
+                        let n = if dots > 1 {
+                            i as f64 / (dots - 1) as f64
+                        } else {
+                            0.5
+                        };
+                        let (dx, dy) = ring_point(n, ring_r);
+                        rsx! {
+                            circle {
+                                cx: "{dx:.2}", cy: "{dy:.2}", r: "1.35",
+                                fill: "{ink}",
+                                opacity: "0.92",
+                            }
+                        }
+                    }
+                }
+
                 // A dial's scale is printed on its own skirt, so it is drawn
                 // with the rotating parts below rather than here on the panel.
                 for mark in marks.iter().filter(|_| !style.numerals_on_knob()) {
@@ -430,53 +482,94 @@ pub fn HardwareKnob(
                 svg {
                     style: "position:absolute; inset:0; width:100%; height:100%; display:block;",
                     view_box: "-55 -55 110 110",
+                    // Everything in here turns. The light does not — it is
+                    // drawn after this group, not inside it.
                     g {
                         transform: "rotate({angle:.2})",
                         // Contact shadow: the same outline, dropped.
                         path {
-                            d: "{scallop_path(BODY_R, 26, 1.7)}",
-                            transform: "translate(0 1.6)",
-                            fill: "rgba(0,0,0,0.45)",
+                            d: "{scallop_path(BODY_R, DAKA_LOBES, DAKA_LOBE_DEPTH)}",
+                            transform: "translate(0 1.8)",
+                            fill: "rgba(0,0,0,0.50)",
                         }
-                        // The scalloped skirt.
+                        // The scalloped skirt — the widest tier, and the one
+                        // you actually grip.
                         path {
-                            d: "{scallop_path(BODY_R, 26, 1.7)}",
-                            fill: "#141416",
-                            stroke: "rgba(0,0,0,0.65)",
+                            d: "{scallop_path(BODY_R, DAKA_LOBES, DAKA_LOBE_DEPTH)}",
+                            fill: "#131316",
+                            stroke: "rgba(0,0,0,0.7)",
                             stroke_width: "0.7",
                         }
-                        // Two tiers over it, each a shade lighter — the knob
-                        // is stepped, not domed.
-                        circle { cx: "0", cy: "0", r: "{BODY_R * 0.74:.1}", fill: "#1c1c1f" }
+                        // The step up to the body, read as a shadowed wall
+                        // rather than a drawn edge.
                         circle {
-                            cx: "0", cy: "0", r: "{BODY_R * 0.56:.1}",
-                            fill: "#232327",
-                            stroke: "rgba(0,0,0,0.55)", stroke_width: "0.6",
+                            cx: "0", cy: "0", r: "{BODY_R * 0.74:.1}",
+                            fill: "#0d0d10",
                         }
+                        // The body: a raised cylinder, lighter than the skirt.
                         circle {
-                            cx: "0", cy: "0", r: "{BODY_R * 0.34:.1}",
-                            fill: "#2a2a2f",
-                            stroke: "rgba(255,255,255,0.06)", stroke_width: "0.5",
+                            cx: "0", cy: "0", r: "{BODY_R * 0.70:.1}",
+                            fill: "#242429",
                         }
-                        // The light the panel is lit by, caught on the upper
-                        // left of each tier.
-                        ellipse {
-                            cx: "{-BODY_R * 0.20:.1}", cy: "{-BODY_R * 0.34:.1}",
-                            rx: "{BODY_R * 0.34:.1}", ry: "{BODY_R * 0.18:.1}",
-                            fill: "rgba(255,255,255,0.05)",
+                        // Fine ridging around the body's wall — the knurl the
+                        // photograph reads as a bright ring at this size.
+                        for i in 0..DAKA_BODY_RIDGES {
+                            {
+                                let a = (i as f64 / DAKA_BODY_RIDGES as f64)
+                                    * std::f64::consts::TAU;
+                                let (sx, sy) = (a.sin(), -a.cos());
+                                let inner = BODY_R * 0.60;
+                                let outer = BODY_R * 0.70;
+                                rsx! {
+                                    line {
+                                        x1: "{sx * inner:.2}", y1: "{sy * inner:.2}",
+                                        x2: "{sx * outer:.2}", y2: "{sy * outer:.2}",
+                                        stroke: "rgba(255,255,255,0.10)",
+                                        stroke_width: "0.7",
+                                    }
+                                }
+                            }
                         }
-                        // The index: engraved into the skirt and filled white,
-                        // out at the rim where it is read against the panel.
-                        // Short, and out at the rim: on the unit it is a dash
-                        // in the skirt, not a stripe across the face.
+                        // The domed top the index is moulded into.
+                        circle { cx: "0", cy: "0", r: "{BODY_R * 0.52:.1}", fill: "#2b2b31" }
+                        circle { cx: "0", cy: "0", r: "{BODY_R * 0.30:.1}", fill: "#313138" }
+                        // The index: engraved from the dome out across the
+                        // body to the skirt's edge and filled white. It is a
+                        // long line on this knob, not a dash on the rim — the
+                        // one thing you read the unit's settings by.
                         rect {
-                            x: "-1.0",
-                            y: "{-(BODY_R - 1.4):.1}",
-                            width: "2.0",
-                            height: "{BODY_R * 0.17:.1}",
-                            rx: "0.7",
+                            x: "-1.2",
+                            y: "{-(BODY_R - 1.5):.1}",
+                            width: "2.4",
+                            height: "{BODY_R * 0.66:.1}",
+                            rx: "1.2",
                             fill: "#eceae4",
                         }
+                    }
+
+                    // The panel's light, caught on the upper left. Outside the
+                    // rotating group on purpose: a reflection that turns with
+                    // the knob is the first thing that reads as wrong, because
+                    // the lamp above the rack does not move when you turn a
+                    // control.
+                    ellipse {
+                        // Named so a test can assert it is NOT inside the
+                        // rotating group — the bug this replaced was invisible
+                        // in code and obvious the moment you turned a knob.
+                        "data-testid": "hw-knob-{testid}-light",
+                        cx: "{-BODY_R * 0.22:.1}", cy: "{-BODY_R * 0.30:.1}",
+                        rx: "{BODY_R * 0.46:.1}", ry: "{BODY_R * 0.30:.1}",
+                        transform: "rotate(-32)",
+                        fill: "rgba(255,255,255,0.07)",
+                    }
+                    // A hairline of the same light along the top rim.
+                    path {
+                        d: "M {-BODY_R * 0.72:.2} {-BODY_R * 0.58:.2} \
+                            A {BODY_R * 0.93:.2} {BODY_R * 0.93:.2} 0 0 1 \
+                            {BODY_R * 0.40:.2} {-BODY_R * 0.84:.2}",
+                        fill: "none",
+                        stroke: "rgba(255,255,255,0.12)",
+                        stroke_width: "1.0",
                     }
                 }
             }
@@ -751,6 +844,19 @@ pub fn HardwareKnob(
                             width: "2.4",
                             height: "{body_r - 5.0:.1}",
                             rx: "1.0",
+                            fill: "{style.pointer()}",
+                        }
+                    }
+
+                    // The 1073's line: a dark groove from the hub out to the
+                    // rim, read against the ring of dots printed around it.
+                    if style == KnobStyle::Neve {
+                        rect {
+                            x: "-1.5",
+                            y: "{-(body_r - 2.0):.1}",
+                            width: "3.0",
+                            height: "{body_r - 3.0:.1}",
+                            rx: "1.2",
                             fill: "{style.pointer()}",
                         }
                     }
