@@ -179,7 +179,11 @@ pub enum Index {
     /// A Marconi wing: a coloured moulding laid across the knob and
     /// overhanging it, with a line down the middle. The overhang is the
     /// silhouette — see `WING_REACH` in the renderer.
-    Wing { color: &'static str },
+    ///
+    /// `body` is the disc the wing is proportioned to, as a fraction of the
+    /// knob — its *width* follows that, while its reach past the rim is
+    /// measured off the knob itself.
+    Wing { color: &'static str, body: f64 },
     /// A pointer knob's moulded nose, reaching past the body toward the
     /// panel's printed scale.
     Nose { color: &'static str },
@@ -209,6 +213,14 @@ pub struct Flutes {
     /// How the ridges catch the light. Dark phenolic ridges read as
     /// highlights; a light cap's read as the shadow between them.
     pub stroke: &'static str,
+    pub width: f64,
+    /// The shadowed side of each ridge, half a flute over.
+    ///
+    /// A moulded knurl has a lit face and a dark one, and drawing both is
+    /// what makes it read as cut rather than printed. Fine ridging on a dark
+    /// body does not: at that size the pair merges into a bright band, which
+    /// is why this is optional.
+    pub shadow: Option<&'static str>,
     pub turns: Turns,
 }
 
@@ -219,14 +231,39 @@ pub struct Flutes {
 /// rack does not move when you turn a knob.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Specular {
-    pub cx: f64,
-    pub cy: f64,
-    pub rx: f64,
-    pub ry: f64,
-    pub rotate: f64,
+    /// The blob's size and offset, as fractions of the knob's outer
+    /// **diameter**. It is a CSS div rather than an SVG shape because the
+    /// soft falloff is the whole point and a flat fill has a hard edge.
+    pub w: f64,
+    pub h: f64,
+    pub dx: f64,
+    pub dy: f64,
+    /// The gradient painted into it.
     pub fill: &'static str,
-    /// A hairline of the same light along the top rim.
+    /// Tilt, in degrees. A light smear on a moulded face runs with the
+    /// surface, not with the screen's axes.
+    pub rotate: f64,
+    /// A hairline of the same light along the top rim, as an SVG arc.
     pub rim: Option<&'static str>,
+}
+
+/// The soft highlight a moulded or turned surface takes from the light every
+/// panel is lit by: offset up and left, and small — a big one reads as gloss
+/// paint rather than plastic.
+///
+/// `body` is the lit tier's diameter as a fraction of the knob's, so a knob
+/// whose face is a cap inside a collar gets a highlight sized to the cap.
+pub const fn dome(body: f64) -> Specular {
+    Specular {
+        w: 0.62 * body,
+        h: 0.42 * body,
+        dx: -0.46 * body,
+        dy: -0.40 * body,
+        fill: "radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.15) 0%, \
+               rgba(255,255,255,0.0) 70%)",
+        rotate: 0.0,
+        rim: None,
+    }
 }
 
 /// A knob, as data.
@@ -250,6 +287,12 @@ pub struct KnobSpec {
     /// The scale is printed on the knob's own skirt and turns with it, rather
     /// than on the panel around it.
     pub numerals_on_knob: bool,
+    /// A small shadow at the very centre — the hub the index radiates from.
+    ///
+    /// Fixed, not rotating: it is the shaft the knob is pressed onto, and it
+    /// does not turn with the cap. `None` for knobs whose own tiers already
+    /// give the middle somewhere to be.
+    pub hub: Option<&'static str>,
 }
 
 impl KnobSpec {
@@ -312,6 +355,7 @@ mod tests {
             specular: None,
             ring_offset: 0.0,
             numerals_on_knob: false,
+            hub: None,
         };
         assert_eq!(spec.cap_fraction(), 0.62);
     }
@@ -327,6 +371,7 @@ mod tests {
             specular: None,
             ring_offset: 0.0,
             numerals_on_knob: false,
+            hub: None,
         };
         assert_eq!(spec.cap_fraction(), 0.0);
     }

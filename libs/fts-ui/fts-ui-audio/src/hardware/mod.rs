@@ -16,6 +16,8 @@
 
 pub mod button;
 pub mod knob;
+pub mod knob_kit;
+pub mod knob_parts;
 pub mod knob_svg;
 pub mod lever;
 pub mod panel;
