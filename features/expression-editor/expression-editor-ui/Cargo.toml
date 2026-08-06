@@ -1,0 +1,23 @@
+[package]
+name = "expression-editor-ui"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition = "2021"          # matches the nice-plug plugin stack (eq-ui, comp-ui)
+description = "Expression editor GUI — the Melodyne/MPE canvas, toolbar, and inspector as a portable Dioxus surface"
+
+[features]
+default = []
+# The Blitz/vello plugin editor. Off → the surface still compiles for
+# wasm remotes and the web build, which is the whole point: the same
+# component renders standalone, in a VST3/CLAP window, and in a browser.
+native = ["dep:nice-plug-dioxus", "dep:fts-ui"]
+
+[dependencies]
+expression-editor-core = { workspace = true }
+dioxus = { workspace = true }
+fts-ui = { workspace = true, optional = true }
+nice-plug-dioxus = { workspace = true, optional = true }
+
+[dev-dependencies]
+dioxus-ssr = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", default-features = false }

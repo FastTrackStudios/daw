@@ -1,0 +1,14 @@
+[package]
+name = "expression-editor-core"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Portable engine for the expression editor — note/curve document, camera, tuning, curve shaping. No UI, no DSP, no DAW."
+
+# Deliberately dependency-free: this is the headlessly-testable half, and it
+# has to compile for wasm, Blitz-native, and (eventually) no_std hosts alike.
+# Everything domain-specific (MIDI events, audio analysis) lives in adapters.
+[dependencies]
+
+[dev-dependencies]

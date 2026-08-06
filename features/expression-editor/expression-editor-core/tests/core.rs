@@ -1,0 +1,989 @@
+//! Regression suite for the portable engine — the headless half.
+//!
+//! Everything here is reachable without a GPU, a DAW, or a browser,
+//! which is the point of keeping the engine dependency-free.
+
+use expression_editor_core::blob;
+use expression_editor_core::camera::{self, Bounds, Camera, Content, Viewport};
+use expression_editor_core::doc::{Curve, ExpressionDoc, Lane, Note, NoteId, Point, Target, TimeBase};
+use expression_editor_core::edit::{Edit, History};
+use expression_editor_core::modulation::{CurveTarget, Row, Stack, Wave};
+use expression_editor_core::shape::{self, Shape};
+use expression_editor_core::tools::{self, Grid, Selection, Tool};
+use expression_editor_core::tuning::{self, Tuning};
+use expression_editor_core::{Editor, content_of};
+
+const PPQ: f64 = 960.0;
+
+fn doc_with_note() -> ExpressionDoc {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let mut n = Note::new(NoteId(1), 0.0, PPQ * 2.0, 60);
+    n.channel = Some(2);
+    doc.push(n);
+    doc
+}
+
+// ── curves ───────────────────────────────────────────────────────────
+
+#[test]
+fn curve_replaces_rather_than_stacks_at_a_repeated_time() {
+    let mut c = Curve::new();
+    c.set(100.0, 1.0);
+    c.set(100.0, 2.0);
+    assert_eq!(c.len(), 1, "a revisited tick must replace, not duplicate");
+    assert_eq!(c.points()[0].value, 2.0);
+}
+
+#[test]
+fn curve_stays_sorted_when_drawn_right_to_left() {
+    let mut c = Curve::new();
+    for t in [500.0, 100.0, 300.0, 200.0] {
+        c.set(t, t / 1000.0);
+    }
+    let ts: Vec<f64> = c.points().iter().map(|p| p.t).collect();
+    assert_eq!(ts, vec![100.0, 200.0, 300.0, 500.0]);
+}
+
+#[test]
+fn curve_holds_its_endpoints_outside_the_authored_range() {
+    let mut c = Curve::new();
+    c.set(100.0, 3.0);
+    c.set(200.0, 5.0);
+    // Not the default — an authored curve must not snap to center at
+    // the note edges.
+    assert_eq!(c.sample(0.0, 0.0), 3.0);
+    assert_eq!(c.sample(999.0, 0.0), 5.0);
+    assert_eq!(c.sample(150.0, 0.0), 4.0, "linear between points");
+}
+
+#[test]
+fn splice_preserves_points_outside_the_interval() {
+    let mut c = Curve::from_points(vec![
+        Point { t: 0.0, value: 0.0 },
+        Point { t: 100.0, value: 1.0 },
+        Point { t: 200.0, value: 2.0 },
+        Point { t: 300.0, value: 3.0 },
+    ]);
+    c.splice(100.0, 200.0, &[Point { t: 150.0, value: 9.0 }]);
+    let pts: Vec<(f64, f64)> = c.points().iter().map(|p| (p.t, p.value)).collect();
+    assert_eq!(pts, vec![(0.0, 0.0), (150.0, 9.0), (300.0, 3.0)]);
+}
+
+#[test]
+fn reshape_preserves_endpoints_exactly() {
+    let mut c = Curve::new();
+    c.set(0.0, 0.0);
+    c.set(400.0, 12.0);
+    for shape in Shape::ALL {
+        let mut c2 = c.clone();
+        c2.reshape(0.0, 400.0, shape, 32, 0.0);
+        assert!((c2.sample(0.0, 0.0) - 0.0).abs() < 1e-9, "{shape:?} start");
+        assert!((c2.sample(400.0, 0.0) - 12.0).abs() < 1e-6, "{shape:?} end");
+    }
+}
+
+#[test]
+fn scale_about_below_zero_inverts_the_gesture() {
+    let mut c = Curve::from_points(vec![
+        Point { t: 0.0, value: 0.0 },
+        Point { t: 100.0, value: 2.0 },
+    ]);
+    c.scale_about(0.0, 100.0, 1.0, -1.0);
+    assert_eq!(c.sample(0.0, 0.0), 2.0);
+    assert_eq!(c.sample(100.0, 0.0), 0.0);
+}
+
+#[test]
+fn remap_time_stretches_owned_expression_onto_new_bounds() {
+    let mut c = Curve::from_points(vec![
+        Point { t: 0.0, value: 0.0 },
+        Point { t: 100.0, value: 1.0 },
+    ]);
+    c.remap_time(0.0, 100.0, 0.0, 400.0);
+    assert_eq!(c.points().last().unwrap().t, 400.0);
+}
+
+// ── shapes ───────────────────────────────────────────────────────────
+
+#[test]
+fn every_shape_is_a_unit_map() {
+    for shape in Shape::ALL {
+        assert!(shape.amount(0.0).abs() < 1e-9, "{shape:?} at 0");
+        assert!((shape.amount(1.0) - 1.0).abs() < 1e-9, "{shape:?} at 1");
+        // Monotone: no shape may double back.
+        let mut prev = -1.0;
+        for i in 0..=50 {
+            let v = shape.amount(i as f64 / 50.0);
+            assert!(v >= prev - 1e-9, "{shape:?} not monotone at {i}");
+            prev = v;
+        }
+    }
+}
+
+#[test]
+fn simplify_trims_collinear_runs_but_keeps_the_gesture() {
+    let straight: Vec<(f64, f64)> = (0..50).map(|i| (i as f64, i as f64 * 2.0)).collect();
+    assert_eq!(shape::simplify(&straight, 0.01).len(), 2);
+
+    let peaked: Vec<(f64, f64)> = (0..=20)
+        .map(|i| (i as f64, if i == 10 { 50.0 } else { 0.0 }))
+        .collect();
+    let kept = shape::simplify(&peaked, 0.5);
+    assert!(
+        kept.iter().any(|&(_, y)| y == 50.0),
+        "the peak must survive simplification"
+    );
+}
+
+// ── zones ────────────────────────────────────────────────────────────
+
+#[test]
+fn a_note_without_splits_still_has_exactly_one_zone() {
+    let n = Note::new(NoteId(1), 0.0, 100.0, 60);
+    assert_eq!(n.zone_count(), 1);
+    assert_eq!(n.zones(), vec![(0.0, 100.0)]);
+}
+
+#[test]
+fn splits_stay_sorted_and_interior() {
+    let mut n = Note::new(NoteId(1), 0.0, 100.0, 60);
+    assert!(n.add_split(60.0));
+    assert!(n.add_split(30.0));
+    assert!(!n.add_split(0.0), "a split at the note start is not interior");
+    assert!(!n.add_split(100.0), "nor at the end");
+    assert!(!n.add_split(30.0), "nor a duplicate");
+    assert_eq!(n.splits, vec![30.0, 60.0]);
+    assert_eq!(n.zones(), vec![(0.0, 30.0), (30.0, 60.0), (60.0, 100.0)]);
+}
+
+#[test]
+fn inserting_a_split_before_the_active_zone_keeps_the_same_zone_active() {
+    let mut n = Note::new(NoteId(1), 0.0, 100.0, 60);
+    n.add_split(50.0);
+    n.target = Target::Zone(1); // the 50..100 half
+    n.add_split(25.0);
+    assert_eq!(n.target, Target::Zone(2));
+    assert_eq!(n.target_span(), (50.0, 100.0), "still the same region");
+}
+
+#[test]
+fn target_toggles_between_one_zone_and_the_whole_note() {
+    assert_eq!(tools::toggle_target(Target::WholeNote, 1), Target::Zone(1));
+    assert_eq!(tools::toggle_target(Target::Zone(1), 1), Target::WholeNote);
+    assert_eq!(tools::toggle_target(Target::Zone(1), 2), Target::Zone(2));
+}
+
+// ── edits ────────────────────────────────────────────────────────────
+
+#[test]
+fn drawing_extends_to_the_note_edges_so_no_gap_is_left() {
+    let mut doc = doc_with_note();
+    let edit = Edit::DrawLane {
+        note: NoteId(1),
+        lane: Lane::Pitch,
+        t0: 500.0,
+        t1: 1000.0,
+        points: vec![
+            Point { t: 500.0, value: 1.0 },
+            Point { t: 1000.0, value: 2.0 },
+        ],
+    };
+    assert!(edit.apply(&mut doc));
+    let n = doc.note(NoteId(1)).unwrap();
+    assert_eq!(n.pitch.sample(n.start, 0.0), 1.0, "held back to note start");
+    assert_eq!(n.pitch.sample(n.end, 0.0), 2.0, "held out to note end");
+}
+
+#[test]
+fn erasing_one_lane_leaves_the_others_untouched() {
+    let mut doc = doc_with_note();
+    for lane in Lane::ALL {
+        Edit::DrawLane {
+            note: NoteId(1),
+            lane,
+            t0: 0.0,
+            t1: 1000.0,
+            points: vec![
+                Point { t: 0.0, value: 0.5 },
+                Point { t: 1000.0, value: 0.5 },
+            ],
+        }
+        .apply(&mut doc);
+    }
+    let before = doc.note(NoteId(1)).unwrap().pitch.clone();
+    Edit::EraseLane {
+        note: NoteId(1),
+        lane: Lane::Pressure,
+        // The whole note: drawing held the curve out to the note edges,
+        // so erasing only the drawn interval would leave those.
+        t0: 0.0,
+        t1: PPQ * 2.0,
+    }
+    .apply(&mut doc);
+    let n = doc.note(NoteId(1)).unwrap();
+    assert_eq!(n.pitch, before, "pitch must survive a pressure edit byte-for-byte");
+    assert!(n.pressure.is_empty());
+}
+
+#[test]
+fn resize_stretches_expression_and_zones_together() {
+    let mut doc = doc_with_note();
+    {
+        let n = doc.note_mut(NoteId(1)).unwrap();
+        n.add_split(PPQ);
+        n.pitch.set(0.0, 0.0);
+        n.pitch.set(PPQ * 2.0, 4.0);
+    }
+    assert!(Edit::Resize {
+        note: NoteId(1),
+        start: 0.0,
+        end: PPQ * 4.0,
+    }
+    .apply(&mut doc));
+    let n = doc.note(NoteId(1)).unwrap();
+    assert_eq!(n.splits, vec![PPQ * 2.0], "the split scales with the note");
+    assert_eq!(n.pitch.points().last().unwrap().t, PPQ * 4.0);
+}
+
+#[test]
+fn splitting_a_note_gives_both_halves_the_boundary_value() {
+    let mut doc = doc_with_note();
+    {
+        let n = doc.note_mut(NoteId(1)).unwrap();
+        n.pitch.set(0.0, 0.0);
+        n.pitch.set(PPQ * 2.0, 4.0);
+    }
+    assert!(Edit::SplitNote {
+        note: NoteId(1),
+        t: PPQ,
+    }
+    .apply(&mut doc));
+    assert_eq!(doc.notes.len(), 2);
+    let left = doc.note(NoteId(1)).unwrap();
+    assert_eq!(left.end, PPQ);
+    let right = doc.notes.iter().find(|n| n.id != NoteId(1)).unwrap();
+    assert_eq!(right.start, PPQ);
+    // Both sides hold the value at the split — no jump across the cut.
+    assert!((left.pitch.sample(PPQ, 0.0) - right.pitch.sample(PPQ, 0.0)).abs() < 1e-9);
+}
+
+#[test]
+fn transpose_moves_the_row_and_leaves_the_curve_shape_alone() {
+    let mut doc = doc_with_note();
+    doc.note_mut(NoteId(1)).unwrap().pitch.set(0.0, 0.25);
+    Edit::Transpose {
+        notes: vec![NoteId(1)],
+        semitones: 3,
+    }
+    .apply(&mut doc);
+    let n = doc.note(NoteId(1)).unwrap();
+    assert_eq!(n.row, 63);
+    assert_eq!(n.pitch.sample(0.0, 0.0), 0.25, "the gesture moves rigidly");
+    assert!((n.sounding_midi(0.0) - 63.25).abs() < 1e-9);
+}
+
+#[test]
+fn move_time_carries_owned_expression() {
+    let mut doc = doc_with_note();
+    doc.note_mut(NoteId(1)).unwrap().pitch.set(100.0, 1.0);
+    Edit::MoveTime {
+        notes: vec![NoteId(1)],
+        delta: PPQ,
+    }
+    .apply(&mut doc);
+    let n = doc.note(NoteId(1)).unwrap();
+    assert_eq!(n.start, PPQ);
+    assert_eq!(n.pitch.points()[0].t, 100.0 + PPQ);
+}
+
+// ── MPE safety ───────────────────────────────────────────────────────
+
+#[test]
+fn overlapping_notes_sharing_a_channel_are_flagged_ambiguous() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let mut a = Note::new(NoteId(1), 0.0, PPQ * 2.0, 60);
+    a.channel = Some(2);
+    let mut b = Note::new(NoteId(2), PPQ, PPQ * 3.0, 64);
+    b.channel = Some(2);
+    doc.push(a);
+    doc.push(b);
+    doc.mark_ambiguity();
+    assert!(doc.notes.iter().all(|n| n.ambiguous));
+}
+
+#[test]
+fn notes_on_different_channels_are_never_ambiguous() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let mut a = Note::new(NoteId(1), 0.0, PPQ * 2.0, 60);
+    a.channel = Some(2);
+    let mut b = Note::new(NoteId(2), PPQ, PPQ * 3.0, 64);
+    b.channel = Some(3);
+    doc.push(a);
+    doc.push(b);
+    doc.mark_ambiguity();
+    assert!(doc.notes.iter().all(|n| !n.ambiguous));
+}
+
+#[test]
+fn channel_assignment_separates_overlapping_and_consecutive_notes() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 16.0);
+    // Three overlapping, then one starting exactly where another ends.
+    doc.push(Note::new(NoteId(1), 0.0, PPQ * 4.0, 60));
+    doc.push(Note::new(NoteId(2), PPQ, PPQ * 5.0, 64));
+    doc.push(Note::new(NoteId(3), PPQ * 2.0, PPQ * 6.0, 67));
+    doc.push(Note::new(NoteId(4), PPQ * 4.0, PPQ * 8.0, 72));
+    let ids: Vec<NoteId> = doc.notes.iter().map(|n| n.id).collect();
+    assert!(Edit::AssignChannels {
+        notes: ids,
+        seed: 42
+    }
+    .apply(&mut doc));
+
+    for n in &doc.notes {
+        let ch = n.channel.expect("every note gets a member channel");
+        assert!((2..=16).contains(&ch), "channel 1 stays the MPE master");
+    }
+    // Touching counts as conflicting: note 4 starts where note 1 ends.
+    let ch1 = doc.note(NoteId(1)).unwrap().channel;
+    let ch4 = doc.note(NoteId(4)).unwrap().channel;
+    assert_ne!(ch1, ch4, "a touching handoff must not reuse the channel");
+    assert!(doc.notes.iter().all(|n| !n.ambiguous));
+}
+
+#[test]
+fn channel_assignment_is_deterministic_per_seed() {
+    let build = |seed: u64| {
+        let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 16.0);
+        for i in 0..6 {
+            doc.push(Note::new(
+                NoteId(i + 1),
+                PPQ * i as f64 * 0.5,
+                PPQ * (i as f64 * 0.5 + 2.0),
+                60 + i as i32,
+            ));
+        }
+        let ids: Vec<NoteId> = doc.notes.iter().map(|n| n.id).collect();
+        Edit::AssignChannels { notes: ids, seed }.apply(&mut doc);
+        doc.notes
+            .iter()
+            .map(|n| n.channel)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(build(7), build(7));
+}
+
+// ── tuning ───────────────────────────────────────────────────────────
+
+#[test]
+fn equal_temperament_has_no_offsets() {
+    assert!(tuning::EQUAL.is_equal());
+    for t in tuning::PRESETS.iter().skip(1) {
+        assert!(!t.is_equal(), "{} should not be equal", t.name);
+    }
+}
+
+#[test]
+fn bend_round_trips_through_the_14_bit_word() {
+    for st in [-24.0, -1.0, 0.0, 0.5, 12.0, 47.0] {
+        let raw = tuning::semitones_to_bend14(st, 48.0);
+        let back = tuning::bend14_to_semitones(raw, 48.0);
+        assert!((back - st).abs() < 0.01, "{st} round-tripped to {back}");
+    }
+    assert_eq!(tuning::semitones_to_bend14(0.0, 48.0), 8192, "center");
+}
+
+#[test]
+fn snapping_offers_microtonal_and_ordinary_centers_together() {
+    let t = Tuning {
+        temperament: tuning::RAST,
+        key_pc: 0,
+        snap_12tet: true,
+    };
+    // E in the key of C is Rast's half-flat third: 50 cents low.
+    assert!((t.center(64) - 63.5).abs() < 1e-6);
+    let targets = t.targets_near(63.6, 1.0);
+    assert!(targets.iter().any(|x| (x.pitch - 63.5).abs() < 1e-6));
+    assert!(
+        targets.iter().any(|x| (x.pitch - 64.0).abs() < 1e-6),
+        "with snap_12tet on, the plain semitone is offered too"
+    );
+    assert!((t.snap(63.6).pitch - 63.5).abs() < 1e-6);
+}
+
+#[test]
+fn snapping_without_12tet_lands_only_on_the_temperament() {
+    let t = Tuning {
+        temperament: tuning::RAST,
+        key_pc: 0,
+        snap_12tet: false,
+    };
+    let targets = t.targets_near(63.9, 1.0);
+    assert!(
+        !targets.iter().any(|x| (x.pitch - 64.0).abs() < 1e-6),
+        "the plain semitone must not be offered"
+    );
+}
+
+#[test]
+fn note_names_follow_the_midi_60_is_c4_convention() {
+    assert_eq!(tuning::note_name(60), "C4");
+    assert_eq!(tuning::note_name(69), "A4");
+    assert_eq!(tuning::note_name(0), "C-1");
+}
+
+// ── decomposition ────────────────────────────────────────────────────
+
+#[test]
+fn decomposition_round_trips_the_curve_it_came_from() {
+    // A slide plus vibrato, sampled as if analyzed.
+    let mut c = Curve::new();
+    for i in 0..200 {
+        let t = i as f64 * 10.0;
+        let secs = t / 960.0;
+        let slide = -0.4 * secs;
+        let vib = 0.3 * (core::f64::consts::TAU * 5.5 * secs).sin();
+        c.set(t, slide + vib);
+    }
+    let d = blob::decompose(&c, 0.0, 1990.0, 200, 960.0, 0.0);
+    let back = d.recompose(d.center, 1.0, 1.0);
+    for i in 0..200 {
+        let t = i as f64 * 10.0;
+        let a = c.sample(t, 0.0);
+        let b = back.sample(t, 0.0);
+        assert!((a - b).abs() < 1e-6, "at t={t}: {a} vs {b}");
+    }
+}
+
+#[test]
+fn flattening_both_amounts_gives_a_dead_flat_line() {
+    let mut c = Curve::new();
+    for i in 0..100 {
+        let t = i as f64 * 10.0;
+        c.set(t, (i as f64 * 0.3).sin() * 0.5);
+    }
+    let d = blob::decompose(&c, 0.0, 990.0, 100, 960.0, 0.0);
+    let robot = d.recompose(d.center, 0.0, 0.0);
+    let values: Vec<f64> = robot.points().iter().map(|p| p.value).collect();
+    assert!(values.iter().all(|v| (v - d.center).abs() < 1e-12));
+}
+
+#[test]
+fn drift_and_vibrato_separate_at_the_three_hertz_line() {
+    // 0.5 Hz slide + 6 Hz vibrato over two seconds at 960 units/sec.
+    let mut c = Curve::new();
+    let n = 400;
+    for i in 0..n {
+        let secs = i as f64 / 200.0;
+        let t = secs * 960.0;
+        let drift = 0.8 * (core::f64::consts::TAU * 0.5 * secs).sin();
+        let vib = 0.25 * (core::f64::consts::TAU * 6.0 * secs).sin();
+        c.set(t, drift + vib);
+    }
+    let d = blob::decompose(&c, 0.0, 1920.0, n, 960.0, 0.0);
+    // The vibrato lands in `modulation`, the slide in `drift`.
+    assert!(
+        d.modulation_depth() > 0.3,
+        "vibrato depth {} should be near 0.5 peak-to-peak",
+        d.modulation_depth()
+    );
+    let drift_pp = d.drift.iter().cloned().fold(f64::MIN, f64::max)
+        - d.drift.iter().cloned().fold(f64::MAX, f64::min);
+    assert!(drift_pp > 1.0, "the 0.5 Hz slide belongs to drift, got {drift_pp}");
+}
+
+#[test]
+fn effective_center_finds_where_the_curve_dwells_not_its_mean() {
+    // A scoop: starts a fourth low, settles on target for most of the
+    // note. The mean would sit well below the target.
+    let mut c = Curve::new();
+    for i in 0..100 {
+        let t = i as f64 * 10.0;
+        c.set(t, if i < 15 { -5.0 + i as f64 * 0.33 } else { 0.0 });
+    }
+    let center = blob::effective_center(&c, 0.0, 990.0, 100, 0.0);
+    assert!(
+        center.abs() < 0.5,
+        "should settle on the target, got {center}"
+    );
+}
+
+#[test]
+fn reblending_pitch_flattens_vibrato_without_moving_the_center() {
+    let mut doc = doc_with_note();
+    {
+        let n = doc.note_mut(NoteId(1)).unwrap();
+        for i in 0..100 {
+            let t = i as f64 * (PPQ * 2.0 / 100.0);
+            n.pitch.set(t, 0.4 * (i as f64 * 0.4).sin());
+        }
+    }
+    assert!(Edit::ReblendPitch {
+        note: NoteId(1),
+        t0: 0.0,
+        t1: PPQ * 2.0,
+        drift_amount: 0.0,
+        modulation_amount: 0.0,
+    }
+    .apply(&mut doc));
+    let n = doc.note(NoteId(1)).unwrap();
+    let (lo, hi) = n.pitch.value_bounds().unwrap();
+    assert!(hi - lo < 1e-6, "robot mode should be flat, spread {}", hi - lo);
+}
+
+// ── history ──────────────────────────────────────────────────────────
+
+#[test]
+fn undo_restores_zones_notes_and_expression_as_one_step() {
+    let mut doc = doc_with_note();
+    let mut history = History::new(10);
+    let before = doc.clone();
+
+    history.apply(&mut doc, &Edit::AddZoneSplit {
+        note: NoteId(1),
+        t: PPQ,
+    });
+    assert_eq!(doc.note(NoteId(1)).unwrap().splits.len(), 1);
+
+    assert!(history.undo(&mut doc));
+    assert_eq!(doc, before);
+    assert!(history.redo(&mut doc));
+    assert_eq!(doc.note(NoteId(1)).unwrap().splits.len(), 1);
+}
+
+#[test]
+fn a_failed_edit_records_no_undo_step() {
+    let mut doc = doc_with_note();
+    let mut history = History::new(10);
+    assert!(!history.apply(&mut doc, &Edit::Transpose {
+        notes: vec![NoteId(999)],
+        semitones: 1
+    }));
+    assert!(!history.can_undo());
+}
+
+#[test]
+fn history_is_bounded() {
+    let mut doc = doc_with_note();
+    let mut history = History::new(3);
+    for i in 0..10 {
+        history.apply(&mut doc, &Edit::AddZoneSplit {
+            note: NoteId(1),
+            t: 10.0 + i as f64 * 10.0,
+        });
+    }
+    let mut count = 0;
+    while history.undo(&mut doc) {
+        count += 1;
+    }
+    assert_eq!(count, 3);
+}
+
+// ── camera ───────────────────────────────────────────────────────────
+
+fn test_content() -> Content {
+    Content {
+        t_start: 0.0,
+        t_end: 4000.0,
+        pitch_lo: 58.0,
+        pitch_hi: 70.0,
+    }
+}
+
+#[test]
+fn zoom_pins_the_anchor_under_the_pointer() {
+    let vp = Viewport::new(800.0, 480.0);
+    let mut cam = camera::reset_view(test_content(), vp, 0.03, 0.35);
+    let anchor_t = cam.t_at(200.0);
+    cam.zoom_time_about(anchor_t, 2.0);
+    assert!(
+        (cam.x(anchor_t) - 200.0).abs() < 1e-6,
+        "the anchored time must stay at the same pixel"
+    );
+
+    let anchor_p = cam.pitch_at(120.0, vp);
+    cam.zoom_pitch_about(anchor_p, 2.0, vp);
+    assert!((cam.y(anchor_p, vp) - 120.0).abs() < 1e-6);
+}
+
+#[test]
+fn reset_view_frames_the_content_with_headroom() {
+    let vp = Viewport::new(800.0, 480.0);
+    let c = test_content();
+    let cam = camera::reset_view(c, vp, 0.03, 0.35);
+    let (lo, hi) = cam.pitch_span(vp);
+    assert!(lo < c.pitch_lo && hi > c.pitch_hi, "content must fit inside");
+    let (t0, t1) = cam.time_span(vp);
+    assert!(t0 < c.t_start && t1 > c.t_end);
+    assert!(
+        (cam.pitch_center - 64.0).abs() < 1e-6,
+        "centered on the content midpoint"
+    );
+}
+
+#[test]
+fn blending_with_no_influences_is_the_identity() {
+    let vp = Viewport::new(800.0, 480.0);
+    let cam = camera::reset_view(test_content(), vp, 0.03, 0.35);
+    assert_eq!(camera::blend(cam, &[]), cam);
+}
+
+#[test]
+fn a_full_weight_influence_fully_replaces_the_base() {
+    let vp = Viewport::new(800.0, 480.0);
+    let base = camera::reset_view(test_content(), vp, 0.03, 0.35);
+    let target = Camera {
+        t0: 1234.0,
+        units_per_px: 2.0,
+        pitch_center: 70.0,
+        px_per_semitone: 20.0,
+    };
+    let out = camera::blend(base, &[camera::Influence {
+        camera: target,
+        weight: 1.0,
+    }]);
+    assert!((out.t0 - target.t0).abs() < 1e-6);
+    assert!((out.px_per_semitone - target.px_per_semitone).abs() < 1e-6);
+}
+
+#[test]
+fn scales_blend_geometrically_so_zoom_stays_even() {
+    let base = Camera {
+        t0: 0.0,
+        units_per_px: 1.0,
+        pitch_center: 60.0,
+        px_per_semitone: 10.0,
+    };
+    let target = Camera {
+        units_per_px: 100.0,
+        ..base
+    };
+    let out = camera::blend(base, &[camera::Influence {
+        camera: target,
+        weight: 0.5,
+    }]);
+    // Geometric midpoint of 1 and 100 is 10, not the arithmetic 50.5 —
+    // an arithmetic blend would bias every magnet toward zoomed-out.
+    assert!((out.units_per_px - 10.0).abs() < 1e-6, "got {}", out.units_per_px);
+}
+
+#[test]
+fn the_edge_magnet_is_inert_in_the_middle_of_the_item() {
+    let vp = Viewport::new(800.0, 480.0);
+    let c = test_content();
+    let cam = camera::reset_view(c, vp, 0.03, 0.35);
+    assert!(
+        camera::edge_magnet(cam, 2000.0, c, vp, 0.35, 0.2).is_none(),
+        "no pull at the item center"
+    );
+    let near_edge = camera::edge_magnet(cam, 3950.0, c, vp, 0.35, 0.2);
+    assert!(near_edge.is_some_and(|i| i.weight > 0.9), "full pull at the edge");
+}
+
+#[test]
+fn the_reset_tail_stays_out_until_the_final_stretch() {
+    let vp = Viewport::new(800.0, 480.0);
+    let reset = camera::reset_view(test_content(), vp, 0.03, 0.35);
+    // Deep zoom-in: nowhere near reset.
+    let deep = Camera {
+        units_per_px: reset.units_per_px / 50.0,
+        px_per_semitone: reset.px_per_semitone * 50.0,
+        ..reset
+    };
+    assert!(
+        camera::reset_tail(deep, reset, 0.8).is_none(),
+        "the reset magnet must not fight an ordinary zoom-out"
+    );
+    // Essentially there.
+    let close = Camera {
+        units_per_px: reset.units_per_px * 0.98,
+        ..reset
+    };
+    assert!(camera::reset_tail(close, reset, 0.8).is_some());
+}
+
+#[test]
+fn constrain_never_shows_more_than_the_cushioned_item() {
+    let vp = Viewport::new(800.0, 480.0);
+    let bounds = Bounds {
+        t_min: 0.0,
+        t_max: 4000.0,
+        ..Bounds::default()
+    };
+    let mut cam = Camera {
+        t0: -99999.0,
+        units_per_px: 1000.0,
+        pitch_center: 200.0,
+        px_per_semitone: 0.001,
+    };
+    cam.constrain(bounds, vp);
+    let (t0, t1) = cam.time_span(vp);
+    assert!(t1 - t0 <= 4000.0 + 1e-6);
+    assert!(cam.pitch_center <= 127.0 && cam.pitch_center >= 0.0);
+    assert!(cam.px_per_semitone >= bounds.min_px_per_semitone);
+    assert!(t0 >= bounds.t_min - (t1 - t0) * bounds.edge_whitespace - 1e-6);
+}
+
+// ── editor integration ───────────────────────────────────────────────
+
+fn test_editor() -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    for i in 0..4 {
+        let mut n = Note::new(
+            NoteId(i + 1),
+            PPQ * i as f64,
+            PPQ * (i as f64 + 0.9),
+            60 + i as i32 * 2,
+        );
+        n.channel = Some(2 + i as u8);
+        doc.push(n);
+    }
+    Editor::new(doc, Viewport::new(900.0, 500.0))
+}
+
+#[test]
+fn a_new_editor_frames_its_content() {
+    let ed = test_editor();
+    let c = content_of(&ed.doc);
+    let (lo, hi) = ed.camera.pitch_span(ed.viewport);
+    assert!(lo <= c.pitch_lo && hi >= c.pitch_hi);
+    assert_eq!(ed.tool, Tool::Curve, "Curve is the default tool");
+    assert_eq!(ed.lane, Lane::Pitch);
+}
+
+#[test]
+fn v_returns_to_the_same_camera_from_anywhere() {
+    let mut ed = test_editor();
+    let reset = ed.camera;
+    ed.zoom_in_at(300.0, 200.0, 4.0);
+    assert_ne!(ed.camera, reset);
+    ed.reset_view();
+    assert_eq!(ed.camera, reset, "V is exact, not approximate");
+}
+
+#[test]
+fn zooming_in_never_drifts_toward_reset_view() {
+    let mut ed = test_editor();
+    let start = ed.camera.units_per_px;
+    for _ in 0..5 {
+        ed.zoom_in_at(450.0, 250.0, 1.3);
+    }
+    assert!(
+        ed.camera.units_per_px < start,
+        "zoom-in must monotonically increase magnification"
+    );
+}
+
+#[test]
+fn repeated_zoom_out_converges_on_reset_view() {
+    let mut ed = test_editor();
+    ed.zoom_in_at(450.0, 250.0, 20.0);
+    for _ in 0..80 {
+        ed.zoom_out_at(450.0, 250.0, 1.2);
+    }
+    let reset = ed.reset_camera();
+    assert!(
+        (ed.camera.units_per_px / reset.units_per_px - 1.0).abs() < 0.3,
+        "zoom-out should land near Reset View: {} vs {}",
+        ed.camera.units_per_px,
+        reset.units_per_px
+    );
+}
+
+#[test]
+fn hit_testing_prefers_a_note_body_over_empty_canvas() {
+    let ed = test_editor();
+    let n = &ed.doc.notes[0];
+    let x = ed.camera.x((n.start + n.end) * 0.5);
+    let y = ed.camera.y(n.row as f64, ed.viewport);
+    match ed.hit_test(x, y) {
+        expression_editor_core::Hit::Note { id, zone } => {
+            assert_eq!(id, n.id);
+            assert_eq!(zone, 0);
+        }
+        other => panic!("expected the note body, got {other:?}"),
+    }
+}
+
+#[test]
+fn hit_testing_prefers_an_edge_handle_over_the_body() {
+    let ed = test_editor();
+    let n = &ed.doc.notes[0];
+    let x = ed.camera.x(n.end);
+    let y = ed.camera.y(n.row as f64, ed.viewport);
+    assert!(matches!(
+        ed.hit_test(x, y),
+        expression_editor_core::Hit::NoteEdge { start_edge: false, .. }
+    ));
+}
+
+#[test]
+fn the_whole_row_height_belongs_to_the_note() {
+    let ed = test_editor();
+    let n = &ed.doc.notes[0];
+    let x = ed.camera.x((n.start + n.end) * 0.5);
+    // Just inside the top of the row band.
+    let y = ed.camera.y(n.row as f64 + 0.45, ed.viewport);
+    assert!(matches!(
+        ed.hit_test(x, y),
+        expression_editor_core::Hit::Note { .. }
+    ));
+}
+
+#[test]
+fn marquee_selects_the_notes_it_covers() {
+    let ed = test_editor();
+    let mut sel = Selection::default();
+    let x0 = ed.camera.x(0.0);
+    // Stops just short of the third note's onset — marquee selection is
+    // intersection-based, so touching its start would include it.
+    let x1 = ed.camera.x(PPQ * 1.95);
+    let y0 = ed.camera.y(70.0, ed.viewport);
+    let y1 = ed.camera.y(58.0, ed.viewport);
+    sel.marquee(&ed.doc, &ed.camera, ed.viewport, (x0, y0), (x1, y1), false);
+    assert_eq!(sel.notes.len(), 2, "the first two notes only");
+}
+
+#[test]
+fn a_drag_belongs_to_the_selection_not_the_note_under_the_pointer() {
+    let mut sel = Selection::default();
+    sel.add(NoteId(1));
+    sel.add(NoteId(2));
+    assert_eq!(
+        tools::gesture_targets(&sel, Some(NoteId(3))),
+        vec![NoteId(1), NoteId(2)]
+    );
+    assert_eq!(
+        tools::gesture_targets(&Selection::default(), Some(NoteId(3))),
+        vec![NoteId(3)]
+    );
+}
+
+#[test]
+fn gestures_clamp_directionally_when_they_start_outside_the_span() {
+    // Starting left of the note extends only to the left boundary.
+    assert_eq!(tools::clamp_gesture((100.0, 200.0), 50.0, 50.0, 150.0), (100.0, 150.0));
+    // Starting right extends only to the right boundary.
+    assert_eq!(tools::clamp_gesture((100.0, 200.0), 250.0, 150.0, 250.0), (150.0, 200.0));
+    // Starting inside clamps both ends.
+    assert_eq!(tools::clamp_gesture((100.0, 200.0), 150.0, 50.0, 250.0), (100.0, 200.0));
+}
+
+#[test]
+fn the_local_grid_reads_out_as_musical_fractions() {
+    let mut g = Grid::default();
+    assert_eq!(g.label(), "1/16");
+    g.triplet = true;
+    assert_eq!(g.label(), "1/16T");
+    g.triplet = false;
+    g.coarser();
+    assert_eq!(g.label(), "1/8");
+    g.finer();
+    g.finer();
+    assert_eq!(g.label(), "1/32");
+}
+
+#[test]
+fn grid_snapping_uses_the_documents_own_origin() {
+    let g = Grid::default();
+    // 1/16 at 960 ppq = 240 units.
+    assert_eq!(g.step(PPQ), 240.0);
+    assert_eq!(g.snap(250.0, 0.0, PPQ), 240.0);
+    assert_eq!(g.snap(250.0, 100.0, PPQ), 340.0, "origin shifts the phase");
+}
+
+#[test]
+fn pressure_and_timbre_map_into_a_fixed_two_semitone_box() {
+    let ed = test_editor();
+    let row = 60;
+    for v in [0.0, 0.25, 0.5, 1.0] {
+        let y = tools::lane_box_y(&ed.camera, ed.viewport, row, v);
+        let back = tools::lane_box_value(&ed.camera, ed.viewport, row, y);
+        assert!((back - v).abs() < 1e-9, "{v} round-tripped to {back}");
+    }
+}
+
+#[test]
+fn the_active_lane_draws_last_and_overlays_never_duplicate_it() {
+    let mut ed = test_editor();
+    ed.lane = Lane::Pressure;
+    ed.overlays = vec![Lane::Pitch, Lane::Pressure];
+    assert_eq!(ed.draw_order(), vec![Lane::Pitch, Lane::Pressure]);
+}
+
+// ── modulation ───────────────────────────────────────────────────────
+
+#[test]
+fn an_oscillator_alone_stays_within_its_amplitude() {
+    let stack = Stack {
+        rows: vec![Row::Oscillator {
+            wave: Wave::Sine,
+            amplitude: 0.5,
+            rate: 4.0,
+        }],
+    };
+    for v in stack.render(200) {
+        assert!(v.abs() <= 0.5 + 1e-9);
+    }
+}
+
+#[test]
+fn a_following_curve_row_envelopes_the_oscillator() {
+    let stack = Stack::growing_vibrato();
+    let rendered = stack.render(200);
+    let early = rendered[..20].iter().fold(0.0f64, |a, b| a.max(b.abs()));
+    let late = rendered[180..].iter().fold(0.0f64, |a, b| a.max(b.abs()));
+    assert!(late > early * 2.0, "vibrato should grow: {early} → {late}");
+
+    let receding = Stack::receding_vibrato().render(200);
+    let early = receding[..20].iter().fold(0.0f64, |a, b| a.max(b.abs()));
+    let late = receding[180..].iter().fold(0.0f64, |a, b| a.max(b.abs()));
+    assert!(early > late * 2.0, "and recede: {early} → {late}");
+}
+
+#[test]
+fn a_rate_curve_accelerates_phase_instead_of_stepping_it() {
+    let stack = Stack {
+        rows: vec![
+            Row::Oscillator {
+                wave: Wave::Sine,
+                amplitude: 1.0,
+                rate: 8.0,
+            },
+            Row::Curve {
+                shape: Shape::Linear,
+                depth: 1.0,
+                up: true,
+                target: CurveTarget::Rate,
+            },
+        ],
+    };
+    // Count zero crossings in the first and last quarter: an
+    // accelerating vibrato has more cycles late than early.
+    let r = stack.render(2000);
+    let crossings = |s: &[f64]| s.windows(2).filter(|w| w[0].signum() != w[1].signum()).count();
+    let early = crossings(&r[..500]);
+    let late = crossings(&r[1500..]);
+    assert!(late > early, "rate should ramp up: {early} → {late}");
+    // And the output stays continuous — no jump between cycles.
+    let max_step = r.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f64, f64::max);
+    assert!(max_step < 0.2, "phase must integrate smoothly, max step {max_step}");
+}
+
+#[test]
+fn modulation_tapers_to_nothing_at_the_boundaries() {
+    let mut values = vec![0.0f64; 200];
+    let stack = Stack {
+        rows: vec![Row::Oscillator {
+            wave: Wave::Square,
+            amplitude: 1.0,
+            rate: 6.0,
+        }],
+    };
+    expression_editor_core::modulation::apply(&mut values, &stack, 0.1);
+    assert!(values[0].abs() < 1e-9, "no step at the start");
+    assert!(values[199].abs() < 1e-9, "no step at the end");
+    assert!(
+        values.iter().any(|v| v.abs() > 0.5),
+        "but full depth in the middle"
+    );
+}
