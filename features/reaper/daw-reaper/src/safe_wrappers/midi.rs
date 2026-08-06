@@ -91,6 +91,72 @@ pub fn insert_note(
     }
 }
 
+/// Fields of an existing note to change. `None` leaves a field alone.
+///
+/// `MIDI_SetNote` takes a null pointer per field to mean "don't touch",
+/// which is what makes it usable for a velocity edit that must not
+/// disturb timing or pitch. Modelling that as `Option`s keeps the unsafe
+/// pointer juggling in one place instead of at every call site.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MidiNoteEdit {
+    pub selected: Option<bool>,
+    pub muted: Option<bool>,
+    pub start_ppq: Option<f64>,
+    pub end_ppq: Option<f64>,
+    pub channel: Option<i32>,
+    pub pitch: Option<i32>,
+    pub velocity: Option<i32>,
+}
+
+/// Modify an existing note in place. Returns whether REAPER accepted it.
+///
+/// `no_sort` is passed true: callers editing a run of notes should sort
+/// once at the end via [`sort`], not once per note. Sorting per note is
+/// O(n²) over a take and — worse — can renumber the very indices the
+/// caller is still iterating over.
+pub fn set_note(
+    low: &ReaperLow,
+    take: MediaItemTake,
+    index: i32,
+    edit: MidiNoteEdit,
+) -> bool {
+    // These must outlive the call: the pointers handed to REAPER point
+    // into these locals.
+    let mut selected = edit.selected.unwrap_or_default();
+    let mut muted = edit.muted.unwrap_or_default();
+    let mut start_ppq = edit.start_ppq.unwrap_or_default();
+    let mut end_ppq = edit.end_ppq.unwrap_or_default();
+    let mut channel = edit.channel.unwrap_or_default();
+    let mut pitch = edit.pitch.unwrap_or_default();
+    let mut velocity = edit.velocity.unwrap_or_default();
+    let mut no_sort = true;
+
+    macro_rules! opt_ptr {
+        ($field:expr, $local:expr) => {
+            if $field.is_some() {
+                &mut $local
+            } else {
+                std::ptr::null_mut()
+            }
+        };
+    }
+
+    unsafe {
+        low.MIDI_SetNote(
+            take.as_ptr(),
+            index,
+            opt_ptr!(edit.selected, selected),
+            opt_ptr!(edit.muted, muted),
+            opt_ptr!(edit.start_ppq, start_ppq),
+            opt_ptr!(edit.end_ppq, end_ppq),
+            opt_ptr!(edit.channel, channel),
+            opt_ptr!(edit.pitch, pitch),
+            opt_ptr!(edit.velocity, velocity),
+            &mut no_sort,
+        )
+    }
+}
+
 /// Sort MIDI events in a take.
 pub fn sort(low: &ReaperLow, take: MediaItemTake) {
     unsafe { low.MIDI_Sort(take.as_ptr()) };

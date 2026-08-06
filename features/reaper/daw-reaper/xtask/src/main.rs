@@ -126,6 +126,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         test_threads: 1,
         default_skips: vec![],
         test_binary: None,
+    },
+    // midi-tools' velocity write path. The engines are unit-tested against
+    // `&[Note]`; these are the only tests that prove a resolved session
+    // lands on the right REAPER notes with the right values.
+    TestPackage {
+        package: "midi-tools-daw".into(),
+        features: vec![],
+        test_threads: 1,
+        default_skips: vec![],
+        test_binary: None,
     }];
 
     runner.install_daw_bridge(&repo_root)?;
