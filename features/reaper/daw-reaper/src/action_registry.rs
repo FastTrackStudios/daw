@@ -885,6 +885,46 @@ fn register_action_core(
     id
 }
 
+/// REAPER's MIDI editor action section.
+///
+/// Actions live in sections, and the MIDI editor's toolbar and key map
+/// only see actions registered in *this* one. An action registered the
+/// normal way lands in Main (0) — it shows up in the main action list and
+/// works on a global keybind, but a MIDI-toolbar button referencing it
+/// silently does nothing, because REAPER cannot resolve the command in
+/// the section the toolbar belongs to.
+pub const MIDI_EDITOR_SECTION_ID: i32 = 32060;
+
+/// Additionally expose an action in `section_id`.
+///
+/// Call this *after* the normal registration. `plugin_register_add_command_id`
+/// is keyed by command name, so the section registration resolves to the
+/// same command id and reuses the handler already stored for it — this
+/// only adds the section's `custom_action` entry, which is the part that
+/// makes the action bindable and toolbar-able there.
+///
+/// Must be called from the main thread.
+pub fn register_action_in_section_main_thread(
+    command_name: &str,
+    description: &str,
+    section_id: i32,
+    trigger: impl FnMut() + 'static,
+) -> u32 {
+    let action = Reaper::get().register_action_in_section(
+        command_name.to_string(),
+        description.to_string(),
+        section_id,
+        trigger,
+        ActionKind::NotToggleable,
+    );
+    let id = action.command_id().get();
+    info!(command_name, section_id, id, "Registered action in section");
+    // Held for the process lifetime: dropping a `RegisteredAction`
+    // unregisters it, and these actions live as long as the extension.
+    std::mem::forget(action);
+    id
+}
+
 pub fn unregister_action_main_thread(command_name: &str) -> bool {
     let removed = owned_actions()
         .lock_recoverable("action_registry")

@@ -1969,7 +1969,11 @@ fn panel_wndproc_inner(
                 && msg != 0x0215
             /*WM_CAPTURECHANGED*/
             {
-                tracing::info!(
+                // `debug`, not `info`: WM_MOVE (0x0003) alone fires per
+                // frame while a panel is dragged, and this line produced
+                // ~5 MB of log in a single session — enough to bury the
+                // messages you actually need when a panel misbehaves.
+                tracing::debug!(
                     msg = format!("0x{msg:04X}"),
                     wparam,
                     lparam,
