@@ -8,9 +8,6 @@
 use dioxus::prelude::*;
 use crate::prelude::*;
 
-/// How many buttons a bank stacks before it starts a second column.
-const MAX_BUTTON_ROWS: usize = 5;
-
 /// Normalized position of detent `index` out of `count`.
 fn detent(index: usize, count: usize) -> f32 {
     if count < 2 {
@@ -109,19 +106,18 @@ pub fn ToggleSwitch(
 
 /// A bank of push-in selector buttons — the 1176's ratios, the Distressor's.
 ///
-/// These are latching mechanical buttons, and the way you read one is that it
-/// is *lower than its neighbours*. So every cap is the same light plastic and
-/// the engaged one sits down in its housing with the shadow falling on it,
-/// rather than changing colour: a bank where the selected button is a
-/// different colour is a row of lamps, not a row of buttons.
+/// Built from the photograph: **tall black caps butted into one column**, with
+/// the numbers printed on the *panel beside them* rather than on the buttons.
+/// That is what a mechanical selector looks like — one continuous bank of
+/// plastic in a housing — and it is why the numbers can be silkscreened in the
+/// panel's own ink while the caps stay black.
+///
+/// The engaged one is the one sitting *lower*: same cap, different light. A
+/// bank where the selected button changes colour reads as a row of lamps.
 ///
 /// Exactly one is in at a time. (The real 1176 lets you push several at once —
 /// "all buttons" — which the profile models as one more detent rather than as
 /// real multi-select.)
-///
-/// Banks longer than [`MAX_BUTTON_ROWS`] run into a second column rather than
-/// off the bottom of the panel: the Distressor has eight ratios and a rack
-/// unit is only 300 px tall.
 #[component]
 pub fn RatioButtons(
     handle: ParamHandle,
@@ -129,91 +125,110 @@ pub fn RatioButtons(
     scale: f64,
     labels: Vec<String>,
     #[props(default = "#e8e2d8".to_string())] ink: String,
+    /// Print the first label at the *bottom*. The 1176 runs 20 down to 4 from
+    /// the top, which is the opposite of the parameter's order.
+    #[props(default = false)]
+    reverse: bool,
+    /// Cap width and the height of one cap, in design px.
+    #[props(default = 26.0)]
+    cap_w: f64,
+    #[props(default = 26.0)] cap_h: f64,
 ) -> Element {
     let count = labels.len();
     let selected = detent_index(handle.normalized(), count);
 
-    let bw = 34.0 * scale;
-    let bh = 22.0 * scale;
-    let rows = count.div_ceil((count + MAX_BUTTON_ROWS - 1) / MAX_BUTTON_ROWS);
+    // Top-to-bottom order on the panel, as indices into `labels`.
+    let order: Vec<usize> = if reverse {
+        (0..count).rev().collect()
+    } else {
+        (0..count).collect()
+    };
 
     rsx! {
         div {
             "data-testid": "hw-buttons-{testid}",
             "data-index": "{selected}",
-            // The housing the caps sit down into.
-            style: format!(
-                "display:flex; flex-direction:column; flex-wrap:wrap; \
-                 align-content:center; gap:{:.1}px; max-height:{:.1}px; \
-                 padding:{:.1}px; border-radius:{:.1}px; \
-                 background:linear-gradient(180deg, #131315, #0a0a0c); \
-                 border:{:.1}px solid rgba(0,0,0,0.6); \
-                 box-shadow:inset 0 {:.1}px {:.1}px rgba(0,0,0,0.55);",
-                4.0 * scale,
-                // The wrap limit is a border-box height, so it has to cover
-                // the caps, the gaps between them, the housing's padding and
-                // border, and the pressed cap's offset. Forgetting any of it
-                // splits a five-button bank into two columns, which is what a
-                // screenshot showed and arithmetic should have.
-                rows as f64 * bh
-                    + (rows.saturating_sub(1)) as f64 * 4.0 * scale
-                    + 7.0 * scale
-                    + 2.0 * scale
-                    + 2.0,
-                3.5 * scale,
-                3.0 * scale,
-                (1.0 * scale).max(1.0),
-                1.0 * scale,
-                3.0 * scale,
-            ),
+            style: format!("display:flex; align-items:center; gap:{:.1}px;", 7.0 * scale),
 
-            for (i , label) in labels.iter().enumerate() {
-                div {
-                    "data-testid": "hw-button-{testid}-{i}",
-                    style: format!(
-                        "width:{bw:.1}px; height:{bh:.1}px; border-radius:{:.1}px; \
-                         display:flex; align-items:center; justify-content:center; \
-                         font-size:{:.1}px; font-weight:700; cursor:pointer; \
-                         color:#1b1a18; background:{}; \
-                         border:{:.1}px solid rgba(0,0,0,0.55); \
-                         margin-top:{:.1}px; box-shadow:{};",
-                        2.5 * scale,
-                        10.0 * scale,
-                        // Same cap either way — only the light on it changes.
-                        if i == selected {
-                            "linear-gradient(180deg, #b9b5aa, #cdc9be)"
-                        } else {
-                            "linear-gradient(180deg, #efece3, #cbc7bc)"
-                        },
-                        (1.0 * scale).max(1.0),
-                        // Pushed in: it sits lower and takes the housing's
-                        // shadow across its top.
-                        if i == selected { 1.5 * scale } else { 0.0 },
-                        if i == selected {
-                            format!(
-                                "inset 0 {:.1}px {:.1}px rgba(0,0,0,0.55)",
-                                2.0 * scale,
-                                3.5 * scale,
-                            )
-                        } else {
-                            format!(
-                                "0 {:.1}px {:.1}px rgba(0,0,0,0.45), \
-                                 inset 0 {:.1}px 0 rgba(255,255,255,0.55)",
-                                2.0 * scale,
-                                3.0 * scale,
-                                1.0 * scale,
-                            )
-                        },
-                    ),
-                    onclick: {
+            // The printed scale, on the panel beside the bank.
+            div {
+                style: format!(
+                    "display:flex; flex-direction:column; \
+                     font-size:{:.1}px; font-weight:700; color:{ink}; text-align:right;",
+                    9.5 * scale,
+                ),
+                for index in order.iter().copied() {
+                    div {
+                        style: format!(
+                            "height:{:.1}px; display:flex; align-items:center; \
+                             justify-content:flex-end;",
+                            cap_h * scale,
+                        ),
+                        "{labels[index]}"
+                    }
+                }
+            }
+
+            // The bank: one column of caps in a housing, no gaps between them.
+            div {
+                style: format!(
+                    "display:flex; flex-direction:column; \
+                     padding:{:.1}px; border-radius:{:.1}px; \
+                     background:linear-gradient(180deg, #17181a, #0b0c0d); \
+                     border:{:.1}px solid rgba(0,0,0,0.7); \
+                     box-shadow:inset 0 {:.1}px {:.1}px rgba(0,0,0,0.6);",
+                    2.0 * scale,
+                    2.5 * scale,
+                    (1.0 * scale).max(1.0),
+                    1.0 * scale,
+                    3.0 * scale,
+                ),
+                for index in order.iter().copied() {
+                    {
+                        let on = index == selected;
                         let handle = handle.clone();
-                        move |_| {
-                            handle.begin_edit();
-                            handle.set_normalized(detent(i, count));
-                            handle.end_edit();
+                        rsx! {
+                            div {
+                                "data-testid": "hw-button-{testid}-{index}",
+                                "data-on": "{on}",
+                                style: format!(
+                                    "width:{:.1}px; height:{:.1}px; border-radius:{:.1}px; \
+                                     cursor:pointer; background:{}; \
+                                     border-top:{:.1}px solid rgba(255,255,255,{}); \
+                                     border-bottom:{:.1}px solid rgba(0,0,0,0.55); \
+                                     box-shadow:{};",
+                                    cap_w * scale,
+                                    cap_h * scale,
+                                    1.5 * scale,
+                                    if on {
+                                        "linear-gradient(180deg, #101113, #191a1d)"
+                                    } else {
+                                        "linear-gradient(180deg, #34353a, #1c1d20)"
+                                    },
+                                    (1.0 * scale).max(0.8),
+                                    if on { "0.05" } else { "0.16" },
+                                    (1.0 * scale).max(0.8),
+                                    if on {
+                                        format!(
+                                            "inset 0 {:.1}px {:.1}px rgba(0,0,0,0.75)",
+                                            2.0 * scale,
+                                            4.0 * scale,
+                                        )
+                                    } else {
+                                        format!(
+                                            "inset 0 {:.1}px 0 rgba(255,255,255,0.06)",
+                                            1.0 * scale,
+                                        )
+                                    },
+                                ),
+                                onclick: move |_| {
+                                    handle.begin_edit();
+                                    handle.set_normalized(detent(index, count));
+                                    handle.end_edit();
+                                },
+                            }
                         }
-                    },
-                    "{label}"
+                    }
                 }
             }
         }
@@ -251,33 +266,31 @@ mod tests {
 
 #[cfg(test)]
 mod layout_tests {
-    use super::MAX_BUTTON_ROWS;
-
-    /// The row count the component computes: banks split into as few columns
-    /// as fit, balanced rather than one long column plus a stub.
-    fn rows(count: usize) -> usize {
-        count.div_ceil((count + MAX_BUTTON_ROWS - 1) / MAX_BUTTON_ROWS)
-    }
-
-    #[test]
-    fn short_banks_stay_in_one_column() {
-        for count in 1..=MAX_BUTTON_ROWS {
-            assert_eq!(rows(count), count, "{count} buttons should stack");
+    /// Top-to-bottom order of a bank's labels, as indices.
+    fn order(count: usize, reverse: bool) -> Vec<usize> {
+        if reverse {
+            (0..count).rev().collect()
+        } else {
+            (0..count).collect()
         }
     }
 
     #[test]
-    fn long_banks_split_into_balanced_columns() {
-        // The Distressor's eight ratios: two columns of four, not 5 + 3.
-        assert_eq!(rows(8), 4);
-        assert_eq!(rows(6), 3);
-        assert_eq!(rows(10), 5);
+    fn a_reversed_bank_prints_its_last_label_first() {
+        // The 1176 runs 20 down to 4 from the top; the parameter runs the
+        // other way, and the *mapping* must not follow the printing.
+        assert_eq!(order(4, true), vec![3, 2, 1, 0]);
+        assert_eq!(order(4, false), vec![0, 1, 2, 3]);
     }
 
     #[test]
-    fn no_bank_is_taller_than_the_limit() {
-        for count in 1..=12 {
-            assert!(rows(count) <= MAX_BUTTON_ROWS, "{count} → {}", rows(count));
+    fn every_position_is_printed_exactly_once() {
+        for count in 1..=8 {
+            for reverse in [false, true] {
+                let mut seen = order(count, reverse);
+                seen.sort_unstable();
+                assert_eq!(seen, (0..count).collect::<Vec<_>>());
+            }
         }
     }
 }

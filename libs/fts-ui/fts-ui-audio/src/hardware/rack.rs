@@ -101,13 +101,17 @@ pub enum RackItem {
         /// three small pointer knobs are different parts.
         style: Option<KnobStyle>,
     },
-    /// A vertical bank of radio-like buttons (the 1176's ratios).
+    /// A vertical bank of push-in selector buttons (the 1176's ratios).
     Buttons {
         id: &'static str,
         legend: &'static str,
         x: f64,
         y: f64,
         labels: &'static [&'static str],
+        /// Print the scale high-to-low. The 1176's ratios run 20 down to 4
+        /// from the top; its meter bank runs GR down to OFF. Which way round a
+        /// bank reads is the panel's business, not the parameter's.
+        reverse: bool,
     },
     /// A two-position bat switch.
     Switch {

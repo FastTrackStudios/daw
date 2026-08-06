@@ -123,22 +123,31 @@ pub fn VuMeter(
         return rsx! {
             div {
                 "data-testid": "vu-bezel",
+                // The frame is a *border*, not padding: giving the four sides
+                // different colours makes the browser mitre the corners at
+                // 45°, which is exactly how a moulded bezel joins and the
+                // detail that says the movement is set into something.
                 style: format!(
                     "display:flex; flex-direction:column; align-items:center; \
-                     padding:{:.1}px {:.1}px {:.1}px; border-radius:{:.1}px; \
-                     background:linear-gradient(180deg, #1a1b1d, #0c0d0e); \
-                     border:{:.1}px solid rgba(0,0,0,0.7); \
-                     box-shadow:inset 0 {:.1}px {:.1}px rgba(255,255,255,0.06), \
-                       0 {:.1}px {:.1}px rgba(0,0,0,0.5);",
+                     background:#0d0e0f; border-radius:{:.1}px; \
+                     border-top:{:.1}px solid #3c3d40; \
+                     border-left:{:.1}px solid #303134; \
+                     border-right:{:.1}px solid #161719; \
+                     border-bottom:{:.1}px solid #101113; \
+                     padding:{:.1}px {:.1}px {:.1}px; \
+                     box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.55), \
+                       inset 0 0 {:.1}px rgba(0,0,0,0.8);",
+                    2.0 * scale,
                     9.0 * scale,
                     9.0 * scale,
+                    9.0 * scale,
+                    9.0 * scale,
+                    4.0 * scale,
+                    4.0 * scale,
+                    3.0 * scale,
+                    2.0 * scale,
                     6.0 * scale,
                     5.0 * scale,
-                    (1.0 * scale).max(1.0),
-                    1.0 * scale,
-                    2.0 * scale,
-                    2.0 * scale,
-                    6.0 * scale,
                 ),
                 VuMeter { scale, width, face, mode, value_db, legend, card }
                 // The vent under the glass, which is most of what says the
