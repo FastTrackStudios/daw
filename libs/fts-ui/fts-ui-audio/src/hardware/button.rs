@@ -94,7 +94,13 @@ pub fn PanelButton(
     }
 }
 
-/// A panel indicator lamp.
+/// A panel indicator lamp — a domed jewel in a bezel.
+///
+/// Built from explicit stops rather than `color-mix` on the lamp's colour: the
+/// core has to be *brighter than the colour itself* for the lens to read as
+/// lit from within, and a mix that silently fails leaves a dark disc that
+/// looks like a sticker. The colour supplies the hue in the middle band;
+/// white and black do the lighting.
 #[component]
 pub fn Lamp(
     scale: f64,
@@ -108,22 +114,40 @@ pub fn Lamp(
     rsx! {
         div {
             "data-testid": "hw-lamp",
+            "data-lit": "{lit}",
             style: format!(
                 "width:{:.1}px; height:{:.1}px; border-radius:50%; \
-                 background:radial-gradient(circle at 38% 32%, {}, {}); \
-                 box-shadow:{}; border:{:.1}px solid rgba(0,0,0,0.6);",
+                 background:{}; box-shadow:{}; \
+                 border:{:.1}px solid rgba(0,0,0,0.65);",
                 d * scale,
                 d * scale,
-                if lit { color.clone() } else { format!("color-mix(in oklab, {color} 34%, black)") },
                 if lit {
-                    format!("color-mix(in oklab, {color} 55%, black)")
+                    format!(
+                        "radial-gradient(circle at 36% 30%, \
+                           rgba(255,255,255,0.92) 0%, \
+                           rgba(255,255,255,0.35) 16%, \
+                           {color} 46%, \
+                           {color} 66%, \
+                           rgba(0,0,0,0.55) 100%)"
+                    )
                 } else {
-                    "rgba(0,0,0,0.8)".to_string()
+                    format!(
+                        "radial-gradient(circle at 36% 30%, \
+                           rgba(255,255,255,0.10) 0%, \
+                           {color} 52%, \
+                           rgba(0,0,0,0.72) 100%)"
+                    )
                 },
                 if lit {
-                    format!("0 0 {:.1}px color-mix(in oklab, {color} 70%, transparent)", 6.0 * scale)
+                    format!(
+                        "0 0 {:.1}px {}, inset 0 {:.1}px {:.1}px rgba(0,0,0,0.35)",
+                        d * 0.7 * scale,
+                        color,
+                        d * 0.16 * scale,
+                        d * 0.26 * scale,
+                    )
                 } else {
-                    format!("inset 0 0 {:.1}px rgba(0,0,0,0.7)", 3.0 * scale)
+                    format!("inset 0 0 {:.1}px rgba(0,0,0,0.75)", d * 0.34 * scale)
                 },
                 (1.0 * scale).max(1.0),
             ),
