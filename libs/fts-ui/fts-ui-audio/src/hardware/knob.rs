@@ -32,11 +32,12 @@ const DAKA_LOBE_DEPTH: f64 = 2.4;
 /// Fine ridging around the raised body's wall, above the skirt.
 const DAKA_BODY_RIDGES: usize = 40;
 
-/// The 1073 collar's teeth. Not a knurl — the ring is *geared*, with bumps
-/// coarse enough to count, and that toothed silhouette is what the knob reads
-/// as before any shading does.
-const NEVE_TEETH: usize = 18;
-const NEVE_TOOTH_DEPTH: f64 = 3.4;
+/// The 1073 cap's teeth. Not a knurl — the *inner* knob is geared, with bumps
+/// coarse enough to count, inside a smooth outer ring. That pairing is what
+/// the knob reads as before any shading does, and getting it the other way
+/// round (teeth outside, smooth cap) makes it someone else's knob.
+const NEVE_TEETH: usize = 16;
+const NEVE_TOOTH_DEPTH: f64 = 2.2;
 
 /// How far a Marconi wing overhangs the skirt it is mounted on, as a multiple
 /// of the skirt's radius, and how far its tail runs the other way.
@@ -99,21 +100,19 @@ pub enum KnobStyle {
     /// a moulded *nose* that points at a scale printed on the panel. No skirt,
     /// no flutes — you read the nose.
     Pointer,
-    /// Neve 1073 and its module family: a **geared** collar — bumps coarse
-    /// enough to count around the outside, not a knurl — in matte grey, with a
-    /// painted white index out at the teeth, around a matte cap carrying a
-    /// shorter white line of its own. It sits inside a ring of white dots
-    /// printed on the panel (see
+    /// Neve 1073 and its module family: a smooth turned outer ring around a
+    /// **geared** cap — bumps coarse enough to count, on the inner knob — with
+    /// a painted white index out at the cap's teeth. It sits inside a ring of
+    /// white dots printed on the panel (see
     /// [`Ring::Dots`](crate::hardware::rack::Ring::Dots)).
     ///
-    /// The teeth are the whole silhouette, so they are a path rather than a
-    /// circle with knurl lines drawn over it, and the metal is deliberately
-    /// flat: a brushed gradient here reads as chrome and makes a row of these
-    /// look plated rather than painted.
+    /// Which part is toothed is the whole tell: teeth outside a smooth cap is
+    /// somebody else's knob. So the cap is a path rather than a plain disc,
+    /// and the metal is deliberately flat — a brushed gradient here reads as
+    /// chrome and makes a row of these look plated rather than painted.
     ///
-    /// Pairs with `inner_handle` on
-    /// [`HardwareKnob`] — on the module the collar and the cap are two
-    /// different controls.
+    /// Pairs with `inner_handle` on [`HardwareKnob`]: on the module the ring
+    /// and the cap are two different controls, and the toothed one is the cap.
     Neve,
     /// Empirical Labs Distressor: a wide brushed dial whose *numerals are
     /// printed on the skirt* and turn with it, around a dark centre cap. The
@@ -673,14 +672,12 @@ pub fn HardwareKnob(
                 }
             }
 
-            // The 1073's collar: a geared ring, not a disc.
+            // The 1073's collar: a plain turned ring.
             //
-            // The teeth are the silhouette — bumps coarse enough to count
-            // around the outside — so the collar is a path rather than a
-            // border-radius circle with knurl lines drawn over it. Flat fills
-            // in a mid grey, because these are painted metal on a console
-            // under studio light: a bright brushed gradient here read as
-            // chrome and made the whole row look plated.
+            // Smooth — the teeth on these knobs are on the *cap* inside it,
+            // not out here. Flat fills in a light grey, because these are
+            // painted metal on a console under studio light: a brushed
+            // gradient read as chrome and made the whole row look plated.
             //
             // Everything in the rotating group belongs to the *outer*
             // control, which on a concentric band is the frequency.
@@ -690,32 +687,34 @@ pub fn HardwareKnob(
                     view_box: "-55 -55 110 110",
                     g {
                         transform: "rotate({angle:.2})",
-                        path {
-                            d: "{scallop_path(BODY_R, NEVE_TEETH, NEVE_TOOTH_DEPTH)}",
-                            transform: "translate(0 1.6)",
+                        circle {
+                            cx: "0", cy: "1.6", r: "{BODY_R:.1}",
                             fill: "rgba(0,0,0,0.45)",
                         }
-                        path {
-                            d: "{scallop_path(BODY_R, NEVE_TEETH, NEVE_TOOTH_DEPTH)}",
-                            fill: "#b4b9be",
-                            stroke: "rgba(0,0,0,0.45)",
-                            stroke_width: "0.7",
-                        }
-                        // The flat of the ring inside the teeth.
                         circle {
-                            cx: "0", cy: "0", r: "{BODY_R - NEVE_TOOTH_DEPTH - 0.8:.1}",
-                            fill: "#c2c7cc",
+                            cx: "0", cy: "0", r: "{BODY_R:.1}",
+                            fill: "#c3c8cd",
+                            stroke: "rgba(0,0,0,0.42)",
+                            stroke_width: "0.8",
                         }
-                        // The index: a painted white line out at the teeth,
-                        // which is where the module's is and what the ring of
-                        // dots is read against.
+                        // A turned groove near the rim, which is most of what
+                        // a plain ring has to say for itself.
+                        circle {
+                            cx: "0", cy: "0", r: "{BODY_R - 3.2:.1}",
+                            fill: "none",
+                            stroke: "rgba(0,0,0,0.13)",
+                            stroke_width: "0.8",
+                        }
+                        // The ring's index, slim: this control is read off
+                        // the printed dots, and the cap's line is the one
+                        // that should catch the eye.
                         rect {
-                            x: "-1.6",
-                            y: "{-(BODY_R + 0.6):.1}",
-                            width: "3.2",
-                            height: "{BODY_R * 0.34:.1}",
-                            rx: "1.0",
-                            fill: "#f4f4f2",
+                            x: "-1.1",
+                            y: "{-(BODY_R - 1.0):.1}",
+                            width: "2.2",
+                            height: "{BODY_R * 0.22:.1}",
+                            rx: "0.9",
+                            fill: "#3c4046",
                         }
                     }
                 }
@@ -773,7 +772,10 @@ pub fn HardwareKnob(
             // bottom, a light inner rim at the top, and a hairline edge. A
             // knob is a cylinder seen from above, and that is mostly what you
             // read at the rim.
-            if style != KnobStyle::Daka {
+            // Neve is excluded on both counts: its cap is a toothed path in
+            // the rotating layer below, and a specular blob on matte painted
+            // metal is exactly the gloss this face is trying not to have.
+            if !matches!(style, KnobStyle::Daka | KnobStyle::Neve) {
             div {
                 style: format!(
                     "position:absolute; left:50%; top:50%; \
@@ -803,7 +805,7 @@ pub fn HardwareKnob(
             }
             }
 
-            if style != KnobStyle::Daka {
+            if !matches!(style, KnobStyle::Daka | KnobStyle::Neve) {
             // Specular: the soft highlight a moulded or turned surface takes
             // from the light every panel is lit by. Offset up and left, and
             // small — a big one reads as gloss paint rather than plastic.
@@ -1026,27 +1028,38 @@ pub fn HardwareKnob(
                         }
                     }
 
-                    // The 1073's band knob: a dark groove cut across the grey
-                    // cap, read against the collar and the printed dots. It
-                    // stays inside the cap — a line that ran onto the bright
-                    // collar would vanish into it.
+                    // The 1073's band knob: a geared cap.
+                    //
+                    // The bumps are on this, the inner control, and they are
+                    // the silhouette — so the cap is a toothed path drawn
+                    // here in the rotating group rather than the plain disc
+                    // every other style gets from a CSS div. The white index
+                    // sits out at the teeth, where it reads against the
+                    // collar around it.
                     if style == KnobStyle::Neve {
-                        // The seam where the cap meets the collar.
-                        circle {
-                            cx: "0", cy: "0", r: "{body_r:.1}",
-                            fill: "none",
-                            stroke: "rgba(0,0,0,0.45)",
-                            stroke_width: "1.0",
+                        path {
+                            d: "{scallop_path(body_r, NEVE_TEETH, NEVE_TOOTH_DEPTH)}",
+                            transform: "translate(0 1.2)",
+                            fill: "rgba(0,0,0,0.42)",
                         }
-                        // The cap's own index, for the inner control. Kept
-                        // shorter than the collar's so the two readings do
-                        // not compete — the gear's line is the loud one.
+                        path {
+                            d: "{scallop_path(body_r, NEVE_TEETH, NEVE_TOOTH_DEPTH)}",
+                            fill: "{tint.as_deref().unwrap_or(\"#8f949b\")}",
+                            stroke: "rgba(0,0,0,0.5)",
+                            stroke_width: "0.7",
+                        }
+                        // The flat of the cap inside the teeth.
+                        circle {
+                            cx: "0", cy: "0",
+                            r: "{body_r - NEVE_TOOTH_DEPTH - 0.6:.1}",
+                            fill: "rgba(255,255,255,0.07)",
+                        }
                         rect {
-                            x: "-1.3",
-                            y: "{-(body_r - 2.0):.1}",
-                            width: "2.6",
-                            height: "{body_r * 0.52:.1}",
-                            rx: "1.1",
+                            x: "-1.5",
+                            y: "{-(body_r + 0.4):.1}",
+                            width: "3.0",
+                            height: "{body_r * 0.60:.1}",
+                            rx: "1.2",
                             fill: "{style.pointer()}",
                         }
                     }
