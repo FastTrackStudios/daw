@@ -28,6 +28,7 @@ mod intervals; // Internal module - extends Chord with interval methods
 pub mod midi;
 mod normalization; // Internal module - extends Chord with normalization
 pub mod quality;
+pub mod realize;
 pub mod root;
 pub mod semitone_sequence;
 pub mod timing;
@@ -43,6 +44,7 @@ pub use detail_level::{DetailLevel, UpperStructure};
 pub use duration::{ChordRhythm, LilySyntax, PushPullAmount, PushPullBase};
 pub use error::{ChordParseError, ChordParseErrors};
 pub use extensions::{ExtensionQuality, Extensions};
+pub use realize::{ChordSize, chord_notes, scale_chords, scale_note};
 pub use family::ChordFamily;
 pub use midi::{
     DetectedChord, MidiNote, MidiNoteName, detect_chords_from_midi_notes,
