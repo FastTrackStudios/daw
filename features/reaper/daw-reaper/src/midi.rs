@@ -303,24 +303,37 @@ impl Midi for crate::Reaper {
         (count_before..count_before + notes.len() as u32).collect()
     }
 
-    fn delete_note(&self, _location: MidiTakeLocation, _index: u32) {
-        readonly_warn("delete_note");
+    fn delete_note(&self, location: MidiTakeLocation, index: u32) {
+        Midi::delete_notes(self, location, vec![index]);
     }
 
-    fn delete_notes(&self, _location: MidiTakeLocation, _indices: Vec<u32>) {
-        readonly_warn("delete_notes");
+    fn delete_notes(&self, location: MidiTakeLocation, indices: Vec<u32>) {
+        let medium = reaper_high::Reaper::get().medium_reaper();
+        let Some(take) = resolve_take_for_location(medium, &location) else {
+            return;
+        };
+        let low = medium.low();
+        // Highest index first: each deletion renumbers everything above
+        // it, so ascending order deletes the wrong notes.
+        let mut sorted = indices;
+        sorted.sort_unstable_by(|a, b| b.cmp(a));
+        sorted.dedup();
+        for i in sorted {
+            sw::delete_note(low, take, i as i32);
+        }
+        sw::sort(low, take);
     }
 
     fn delete_selected_notes(&self, _location: MidiTakeLocation) {
         readonly_warn("delete_selected_notes");
     }
 
-    fn set_note_pitch(&self, _location: MidiTakeLocation, _index: u32, _pitch: u8) {
-        readonly_warn("set_note_pitch");
+    fn set_note_pitch(&self, location: MidiTakeLocation, index: u32, pitch: u8) {
+        set_note_field(&location, index, |f| f.pitch = Some(pitch as i32));
     }
 
-    fn set_note_velocity(&self, _location: MidiTakeLocation, _index: u32, _velocity: u8) {
-        readonly_warn("set_note_velocity");
+    fn set_note_velocity(&self, location: MidiTakeLocation, index: u32, velocity: u8) {
+        set_note_field(&location, index, |f| f.velocity = Some(velocity as i32));
     }
 
     fn set_note_position(&self, _location: MidiTakeLocation, _index: u32, _start_ppq: f64) {
@@ -473,4 +486,40 @@ impl Midi for crate::Reaper {
     fn set_note_expression_value(&self, _: MidiTakeLocation, _: u32, _: f64) {
         readonly_warn("set_note_expression_value");
     }
+}
+
+/// Fields a partial note update may set.
+#[derive(Default)]
+struct NoteFields {
+    selected: Option<bool>,
+    muted: Option<bool>,
+    start_ppq: Option<f64>,
+    end_ppq: Option<f64>,
+    channel: Option<i32>,
+    pitch: Option<i32>,
+    velocity: Option<i32>,
+}
+
+/// Apply a partial update to one note.
+fn set_note_field(location: &MidiTakeLocation, index: u32, f: impl FnOnce(&mut NoteFields)) {
+    let medium = reaper_high::Reaper::get().medium_reaper();
+    let Some(take) = resolve_take_for_location(medium, location) else {
+        return;
+    };
+    let mut fields = NoteFields::default();
+    f(&mut fields);
+    let low = medium.low();
+    sw::set_note(
+        low,
+        take,
+        index as i32,
+        fields.selected,
+        fields.muted,
+        fields.start_ppq,
+        fields.end_ppq,
+        fields.channel,
+        fields.pitch,
+        fields.velocity,
+    );
+    sw::sort(low, take);
 }

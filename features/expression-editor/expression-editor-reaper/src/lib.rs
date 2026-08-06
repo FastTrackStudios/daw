@@ -161,6 +161,24 @@ impl DawModule for ExpressionEditorModule {
                     reload();
                 },
             ),
+            // An edit the integration test can trigger from outside the
+            // process. The test binary talks to REAPER over a socket and
+            // cannot see this extension's memory, so "did the editor
+            // load and edit correctly" is only answerable by making a
+            // change that shows up in the take.
+            ActionDef::new(
+                "FTS_EXPRESSION_EDITOR_TEST_TRANSPOSE",
+                "FTS: Expression Editor — transpose loaded notes +12 (test)",
+                || {
+                    with_editor(|ed| {
+                        let ids: Vec<_> = ed.doc.notes.iter().map(|n| n.id).collect();
+                        ed.apply(&expression_editor_core::Edit::Transpose {
+                            notes: ids,
+                            semitones: 12,
+                        });
+                    });
+                },
+            ),
         ]
     }
 
@@ -282,4 +300,9 @@ fn empty_editor() -> expression_editor_core::Editor {
 pub fn with_editor<R>(f: impl FnOnce(&mut expression_editor_core::Editor) -> R) -> Option<R> {
     let mut guard = session().lock().unwrap();
     guard.as_mut().map(|s| f(&mut s.editor))
+}
+
+/// The module, for the extension's registry.
+pub fn module() -> Box<dyn DawModule> {
+    Box::new(ExpressionEditorModule)
 }

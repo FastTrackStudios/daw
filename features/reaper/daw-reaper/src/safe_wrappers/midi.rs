@@ -123,3 +123,50 @@ pub fn get_active_take(low: &ReaperLow, item: MediaItem) -> Option<MediaItemTake
     let ptr = unsafe { low.GetActiveTake(item.as_ptr()) };
     MediaItemTake::new(ptr)
 }
+
+/// Delete a MIDI note by index.
+///
+/// Indices shift down as notes are removed, so a caller deleting
+/// several must work from the highest index down.
+pub fn delete_note(low: &ReaperLow, take: MediaItemTake, index: i32) -> bool {
+    unsafe { low.MIDI_DeleteNote(take.as_ptr(), index) }
+}
+
+/// Overwrite a note's fields. `None` leaves a field as it is.
+#[allow(clippy::too_many_arguments)]
+pub fn set_note(
+    low: &ReaperLow,
+    take: MediaItemTake,
+    index: i32,
+    selected: Option<bool>,
+    muted: Option<bool>,
+    start_ppq: Option<f64>,
+    end_ppq: Option<f64>,
+    channel: Option<i32>,
+    pitch: Option<i32>,
+    velocity: Option<i32>,
+) -> bool {
+    // REAPER reads through the pointers it is given and ignores null
+    // ones, which is how a partial update is expressed.
+    let mut sel = selected.unwrap_or(false);
+    let mut mute = muted.unwrap_or(false);
+    let mut start = start_ppq.unwrap_or(0.0);
+    let mut end = end_ppq.unwrap_or(0.0);
+    let mut chan = channel.unwrap_or(0);
+    let mut p = pitch.unwrap_or(0);
+    let mut vel = velocity.unwrap_or(0);
+    unsafe {
+        low.MIDI_SetNote(
+            take.as_ptr(),
+            index,
+            if selected.is_some() { &mut sel } else { std::ptr::null_mut() },
+            if muted.is_some() { &mut mute } else { std::ptr::null_mut() },
+            if start_ppq.is_some() { &mut start } else { std::ptr::null_mut() },
+            if end_ppq.is_some() { &mut end } else { std::ptr::null_mut() },
+            if channel.is_some() { &mut chan } else { std::ptr::null_mut() },
+            if pitch.is_some() { &mut p } else { std::ptr::null_mut() },
+            if velocity.is_some() { &mut vel } else { std::ptr::null_mut() },
+            std::ptr::null_mut(),
+        )
+    }
+}
