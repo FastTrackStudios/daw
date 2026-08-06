@@ -987,3 +987,102 @@ fn modulation_tapers_to_nothing_at_the_boundaries() {
         "but full depth in the middle"
     );
 }
+
+// ── modulation as an edit ────────────────────────────────────────────
+
+#[test]
+fn applying_modulation_tapers_at_the_span_edges() {
+    let mut doc = doc_with_note();
+    {
+        let n = doc.note_mut(NoteId(1)).unwrap();
+        n.pitch.set(0.0, 0.0);
+        n.pitch.set(PPQ * 2.0, 0.0);
+    }
+    let stack = Stack {
+        rows: vec![Row::Oscillator {
+            wave: Wave::Sine,
+            amplitude: 0.5,
+            rate: 8.0,
+        }],
+    };
+    assert!(Edit::ApplyModulation {
+        note: NoteId(1),
+        lane: Lane::Pitch,
+        t0: 0.0,
+        t1: PPQ * 2.0,
+        stack,
+        taper: 0.1,
+        samples: 128,
+    }
+    .apply(&mut doc));
+
+    let n = doc.note(NoteId(1)).unwrap();
+    // No step at the boundaries — a modulation dropped in cold at a
+    // nonzero phase would click.
+    assert!(n.pitch.sample(0.0, 0.0).abs() < 1e-6);
+    assert!(n.pitch.sample(PPQ * 2.0, 0.0).abs() < 1e-6);
+    let (lo, hi) = n.pitch.value_bounds().unwrap();
+    assert!(hi - lo > 0.5, "but full depth inside, got {}", hi - lo);
+}
+
+#[test]
+fn modulation_preserves_data_outside_its_target_range() {
+    let mut doc = doc_with_note();
+    {
+        let n = doc.note_mut(NoteId(1)).unwrap();
+        n.pitch.set(0.0, 3.0);
+        n.pitch.set(PPQ * 2.0, 3.0);
+    }
+    // Target only the second half.
+    Edit::ApplyModulation {
+        note: NoteId(1),
+        lane: Lane::Pitch,
+        t0: PPQ,
+        t1: PPQ * 2.0,
+        stack: Stack::growing_vibrato(),
+        taper: 0.1,
+        samples: 64,
+    }
+    .apply(&mut doc);
+    let n = doc.note(NoteId(1)).unwrap();
+    assert_eq!(n.pitch.sample(0.0, 0.0), 3.0, "the untouched half is intact");
+    assert!((n.pitch.sample(PPQ, 0.0) - 3.0).abs() < 1e-6, "and the seam");
+}
+
+#[test]
+fn restore_puts_a_captured_curve_back_exactly() {
+    let mut doc = doc_with_note();
+    {
+        let n = doc.note_mut(NoteId(1)).unwrap();
+        for i in 0..40 {
+            n.pitch.set(i as f64 * 48.0, (i as f64 * 0.3).sin());
+        }
+    }
+    let captured = doc.note(NoteId(1)).unwrap().pitch.clone();
+
+    Edit::ApplyModulation {
+        note: NoteId(1),
+        lane: Lane::Pitch,
+        t0: 0.0,
+        t1: PPQ * 2.0,
+        stack: Stack::growing_vibrato(),
+        taper: 0.1,
+        samples: 64,
+    }
+    .apply(&mut doc);
+    assert_ne!(doc.note(NoteId(1)).unwrap().pitch, captured);
+
+    Edit::RestoreLane {
+        note: NoteId(1),
+        lane: Lane::Pitch,
+        t0: 0.0,
+        t1: PPQ * 2.0,
+        points: captured.points().to_vec(),
+    }
+    .apply(&mut doc);
+    assert_eq!(
+        doc.note(NoteId(1)).unwrap().pitch,
+        captured,
+        "cancel must restore byte-for-byte"
+    );
+}

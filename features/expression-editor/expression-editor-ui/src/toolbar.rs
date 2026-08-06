@@ -4,6 +4,7 @@ use dioxus::prelude::*;
 use expression_editor_core::doc::Lane;
 use expression_editor_core::{Editor, Shape, Tool};
 
+use crate::drawer::ModDrawer;
 use crate::interaction::{self, Drag};
 use crate::theme;
 
@@ -32,7 +33,12 @@ fn shape_glyph(shape: Shape) -> &'static str {
 }
 
 #[component]
-pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>) -> Element {
+pub fn Toolbar(
+    editor: Signal<Editor>,
+    drag: Signal<Drag>,
+    drawer: Signal<ModDrawer>,
+) -> Element {
+    let mut drawer = drawer;
     let ed = editor.read();
     let tool = ed.tool;
     let lane = ed.lane;
@@ -50,7 +56,8 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>) -> Element {
 
     rsx! {
         div {
-            style: "display: flex; align-items: center; flex-wrap: wrap; gap: 2px; \
+            style: "display: flex; flex: 0 0 auto; align-items: center; \
+                    flex-wrap: wrap; row-gap: 4px; gap: 2px; \
                     padding: 5px 4px; background: {theme::PANEL}; \
                     border-bottom: 1px solid {theme::PANEL_BORDER}; \
                     font-family: system-ui, sans-serif;",
@@ -167,37 +174,31 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>) -> Element {
             div {
                 style: theme::group_style(),
                 span { style: theme::group_label_style(), "Tuning" }
-                select {
-                    style: theme::select_style(),
-                    value: "{temperament}",
-                    onchange: move |e| {
-                        let name = e.value();
-                        if let Some(t) = expression_editor_core::tuning::PRESETS
+                // Cycling buttons, not <select>: Blitz renders a
+                // native select as an empty box, and the same component
+                // has to look right in a plugin window and a browser.
+                button {
+                    style: format!("{} min-width: 118px;", theme::button_style(false)),
+                    title: "Temperament — click to cycle",
+                    onclick: move |_| {
+                        let presets = expression_editor_core::tuning::PRESETS;
+                        let mut ed = editor.write();
+                        let i = presets
                             .iter()
-                            .find(|t| t.name == name)
-                        {
-                            editor.write().tuning.temperament = (*t).clone();
-                        }
+                            .position(|t| t.name == ed.tuning.temperament.name)
+                            .unwrap_or(0);
+                        ed.tuning.temperament = presets[(i + 1) % presets.len()].clone();
                     },
-                    for t in expression_editor_core::tuning::PRESETS {
-                        option { key: "{t.name}", value: "{t.name}", "{t.name}" }
-                    }
+                    "{temperament}"
                 }
-                select {
-                    style: theme::select_style(),
-                    value: "{key_pc}",
-                    onchange: move |e| {
-                        if let Ok(pc) = e.value().parse::<i32>() {
-                            editor.write().tuning.key_pc = pc;
-                        }
+                button {
+                    style: format!("{} min-width: 34px;", theme::button_style(false)),
+                    title: "Key — click to cycle",
+                    onclick: move |_| {
+                        let mut ed = editor.write();
+                        ed.tuning.key_pc = (ed.tuning.key_pc + 1).rem_euclid(12);
                     },
-                    for pc in 0..12 {
-                        option {
-                            key: "{pc}",
-                            value: "{pc}",
-                            "{expression_editor_core::tuning::pitch_class_name(pc)}"
-                        }
-                    }
+                    "{expression_editor_core::tuning::pitch_class_name(key_pc)}"
                 }
                 button {
                     style: theme::button_style(snap_12tet),
@@ -243,6 +244,19 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>) -> Element {
                     title: "Redo",
                     onclick: move |_| { editor.write().redo(); },
                     "↷"
+                }
+                button {
+                    style: theme::button_style(drawer.read().open),
+                    title: "Modulation (B)",
+                    onclick: move |_| {
+                        let mut dw = drawer.write();
+                        if dw.open {
+                            dw.cancel(&mut editor.write());
+                        } else if dw.open_on(&editor.read()) {
+                            dw.preview(&mut editor.write());
+                        }
+                    },
+                    "Mod"
                 }
                 button {
                     style: theme::button_style(false),

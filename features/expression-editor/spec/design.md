@@ -97,18 +97,45 @@ overlapping ones: reusing a channel the instant a note ends means the
 incoming note's setup expression lands while the outgoing release is
 still sounding. Channel 1 stays free as the MPE master.
 
+## Screenshots
+
+`cargo test -p expression-editor-ui --test screenshots` rasterizes the
+real editor to `target/gui-shots/expression-editor/` — headless Blitz
+DOM through a CPU rasterizer, so it needs no GPU, no DAW and no browser.
+Scenes come from `expression_editor_ui::demo`, the same module a
+runnable example would mount, so the pictures cannot drift from what the
+app actually launches.
+
+Two things the shot loop caught that no assertion would have:
+
+- Blitz sizes an inline `<svg>` as a replaced element, so the canvas
+  either ate the toolbar and status bar or collapsed to nothing
+  depending on the flex basis. Hence `flex: 1 1 auto` plus a floor.
+- `<select>` and `<input type="range">` render as empty/thumbless boxes
+  under Blitz. The tuning dropdowns are now cycling buttons and the
+  sliders are drawn in SVG (`widgets.rs`), which behave identically in
+  all three hosts.
+
 ## Status
 
-Landed: core engine (62 tests), Dioxus surface (6 SSR tests), wasm-clean.
+Landed: core engine (65 tests), Dioxus surface (6 SSR + 4 screenshot
+tests), wasm-clean.
+
+The surface has a piano-key gutter, a bar/beat ruler with markers and a
+playhead, per-note amplitude ribbons, note-name and cents labels,
+microtonal guides, Q-zone structure with effective-pitch guides, a loud
+channel-conflict warning, an empty state, and the modulation drawer with
+live preview and byte-exact cancel.
 
 Open:
 
 - **domain adapters** — MIDI take ↔ `ExpressionDoc`, and
-  `tune_dsp::PitchDoc` ↔ `ExpressionDoc`
-- **audition** — nothing sounds yet; needs a host hook
-- **modulation drawer** — `core::modulation` is built and tested, but
-  has no UI
+  `tune_dsp::PitchDoc` ↔ `ExpressionDoc`. Nothing is connected yet; this
+  is the next real work.
+- **audition** — nothing sounds; needs a host hook
 - **wheel anchoring** — a wheel event carries no pointer position, so
-  zoom currently anchors on the canvas center
+  zoom anchors on the roll centre
 - **time warp** — the melonix marker model exists in `tune_dsp`; this
   document has no time-warp term yet
+- **drawer camera** — opening it should centre the captured target in
+  the reduced canvas and restore the camera on close

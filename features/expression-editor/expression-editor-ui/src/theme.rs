@@ -9,15 +9,15 @@
 /// Canvas background.
 pub const BG: &str = "#0d0d11";
 /// Piano-roll white-key row.
-pub const ROW_WHITE: &str = "#17171e";
+pub const ROW_WHITE: &str = "#1d1d26";
 /// Piano-roll black-key row.
-pub const ROW_BLACK: &str = "#111117";
+pub const ROW_BLACK: &str = "#131319";
 /// Octave (C) divider.
-pub const OCTAVE_LINE: &str = "#2f2f3d";
+pub const OCTAVE_LINE: &str = "#3a3a4d";
 /// Beat gridline.
-pub const GRID_BEAT: &str = "#23232e";
+pub const GRID_BEAT: &str = "#2b2b3a";
 /// Subdivision gridline.
-pub const GRID_SUB: &str = "#1a1a23";
+pub const GRID_SUB: &str = "#20202a";
 
 pub const PANEL: &str = "#15151c";
 pub const PANEL_BORDER: &str = "#2b2b38";
@@ -31,6 +31,12 @@ pub const SELECTED: &str = "#f0f9ff";
 pub const ZONE: &str = "#ef4444";
 /// Microtonal centers and off-ET targets.
 pub const GOLD: &str = "#eab308";
+/// Transport position.
+pub const PLAYHEAD: &str = "#f8fafc";
+/// Piano-key gutter.
+pub const KEY_WHITE: &str = "#d8dce6";
+pub const KEY_BLACK: &str = "#26262f";
+pub const GUTTER_BG: &str = "#101016";
 
 /// Twelve pitch-class hues. Notes are colored by pitch class so a
 /// melodic shape is readable at a glance without reading the piano

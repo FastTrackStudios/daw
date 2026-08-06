@@ -77,6 +77,7 @@ pub fn grid_lines(ed: &Editor) -> Vec<GridLine> {
 /// A note rectangle ready to draw.
 pub struct NoteRect {
     pub id: NoteId,
+    pub row: i32,
     pub x: f64,
     pub y: f64,
     pub w: f64,
@@ -87,8 +88,12 @@ pub struct NoteRect {
     pub ambiguous: bool,
     /// Zone spans in pixels, and whether each is the active target.
     pub zones: Vec<(f64, f64, bool)>,
-    /// Sounding detune in cents, when it differs from 12-TET.
+    /// Sounding detune in cents from the row's tuned center.
     pub cents: Option<f64>,
+    /// Amplitude ribbon polygon, when Pressure has been authored.
+    pub ribbon: Option<String>,
+    /// Note name, when the body is big enough to hold it.
+    pub label: Option<String>,
 }
 
 pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
@@ -117,8 +122,11 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
                 })
                 .collect();
             let cents = sounding_cents(ed, n);
+            let name = expression_editor_core::tuning::note_name(n.row);
+            let label = (w > name.len() as f64 * 7.5 + 10.0 && h >= 13.0).then_some(name);
             NoteRect {
                 id: n.id,
+                row: n.row,
                 x,
                 y: ed.camera.y(n.row as f64 + 0.5, ed.viewport),
                 w,
@@ -129,6 +137,8 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
                 ambiguous: n.ambiguous,
                 zones,
                 cents,
+                ribbon: note_ribbon(ed, n),
+                label,
             }
         })
         .collect()
@@ -140,11 +150,55 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
 /// because of what was drawn or sung, and the badge should follow the
 /// audible truth.
 fn sounding_cents(ed: &Editor, n: &Note) -> Option<f64> {
+    // Only where it is being asked about: the selected note always, and
+    // otherwise only when a non-equal tuning makes the row's own center
+    // ambiguous. A badge on every note is a wall of numbers.
+    if !ed.selection.contains(n.id) && ed.tuning.temperament.is_equal() {
+        return None;
+    }
+    // Measured against the row's tuned center, not raw 12-TET, so under
+    // a temperament the badge reads "off the target" rather than
+    // restating the temperament.
+    let center_offset = ed.tuning.cents(n.row) / 100.0;
     let mid = (n.start + n.end) * 0.5;
-    let offset = n.pitch.sample(mid, 0.0);
-    let cents = offset * 100.0;
-    let _ = ed;
+    let cents = (n.pitch.sample(mid, 0.0) - center_offset) * 100.0;
     (cents.abs() > 3.0).then_some(cents)
+}
+
+/// The note body's amplitude ribbon: the Pressure curve drawn as a
+/// filled shape inside the note rectangle.
+///
+/// This is what makes a note read as a *blob* rather than a bar — you
+/// can see where it swells and where it dies without switching lanes.
+pub fn note_ribbon(ed: &Editor, n: &Note) -> Option<String> {
+    if n.pressure.is_empty() {
+        return None;
+    }
+    let top = ed.camera.y(n.row as f64 + 0.5, ed.viewport);
+    let h = ed.camera.px_per_semitone;
+    if h < 6.0 {
+        return None;
+    }
+    let mid = top + h * 0.5;
+    let pts: Vec<(f64, f64)> = n
+        .pressure
+        .points()
+        .iter()
+        .map(|p| (ed.camera.x(p.t), p.value.clamp(0.0, 1.0)))
+        .collect();
+    if pts.len() < 2 {
+        return None;
+    }
+    // Symmetric about the note's centre line: out along the top, back
+    // along the bottom, closed.
+    let mut s = String::new();
+    for &(x, v) in &pts {
+        s.push_str(&format!("{:.1},{:.1} ", x, mid - h * 0.46 * v));
+    }
+    for &(x, v) in pts.iter().rev() {
+        s.push_str(&format!("{:.1},{:.1} ", x, mid + h * 0.46 * v));
+    }
+    Some(s)
 }
 
 /// A rendered expression curve.
@@ -289,4 +343,103 @@ pub fn zone_guides(ed: &Editor) -> Vec<ZoneGuide> {
         }
     }
     out
+}
+
+// ── chrome: keyboard gutter and timeline ruler ───────────────────────
+//
+// Both live inside the same SVG as the roll, drawn in the margins the
+// roll is translated away from. One element, one coordinate system, one
+// set of pointer handlers — a separate scrolling keyboard element would
+// have to be kept in sync with the camera every frame.
+
+/// Width of the piano-key gutter on the left.
+pub const GUTTER_W: f64 = 54.0;
+/// Height of the timeline ruler on top.
+pub const RULER_H: f64 = 28.0;
+
+/// One key in the gutter.
+pub struct Key {
+    pub row: i32,
+    pub y: f64,
+    pub h: f64,
+    pub black: bool,
+    /// Only C rows are labelled, so the gutter stays readable when the
+    /// rows get short.
+    pub label: Option<String>,
+}
+
+pub fn keyboard(ed: &Editor) -> Vec<Key> {
+    let (lo, hi) = ed.camera.pitch_span(ed.viewport);
+    let h = ed.camera.px_per_semitone;
+    let label_rows = h >= 9.0;
+    ((lo.floor() as i32).max(0)..=(hi.ceil() as i32).min(127))
+        .map(|row| {
+            let black = theme::is_black_key(row);
+            Key {
+                row,
+                y: ed.camera.y(row as f64 + 0.5, ed.viewport),
+                h,
+                black,
+                label: (label_rows && (row.rem_euclid(12) == 0 || h >= 18.0))
+                    .then(|| expression_editor_core::tuning::note_name(row)),
+            }
+        })
+        .collect()
+}
+
+/// A ruler tick.
+pub struct Tick {
+    pub x: f64,
+    /// Bar starts get a full-height line and a number.
+    pub bar: bool,
+    pub label: Option<String>,
+}
+
+pub fn ruler(ed: &Editor) -> Vec<Tick> {
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let beat = ed.units_per_beat();
+    let bar = ed.units_per_bar();
+    // Label bars only while they are far enough apart to read; beat
+    // ticks disappear entirely once they would be a grey smear.
+    let show_beats = beat / ed.camera.units_per_px >= 14.0;
+    let step = if show_beats { beat } else { bar };
+    if step <= 0.0 || (t1 - t0) / step > 400.0 {
+        return Vec::new();
+    }
+    let first = ((t0 - ed.doc.start) / step).floor() * step + ed.doc.start;
+    let label_bars = bar / ed.camera.units_per_px >= 40.0;
+    let mut out = Vec::new();
+    let mut t = first;
+    while t <= t1 {
+        if t >= t0 {
+            let (b, beat_n) = ed.bar_beat(t + step * 0.001);
+            let is_bar = beat_n == 1;
+            out.push(Tick {
+                x: ed.camera.x(t),
+                bar: is_bar,
+                label: (is_bar && label_bars).then(|| b.to_string()),
+            });
+        }
+        t += step;
+    }
+    out
+}
+
+/// Marker flags the host supplied.
+pub struct MarkerFlag {
+    pub x: f64,
+    pub label: String,
+}
+
+pub fn markers(ed: &Editor) -> Vec<MarkerFlag> {
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    ed.doc
+        .markers
+        .iter()
+        .filter(|m| m.t >= t0 && m.t <= t1)
+        .map(|m| MarkerFlag {
+            x: ed.camera.x(m.t),
+            label: m.label.clone().unwrap_or_default(),
+        })
+        .collect()
 }

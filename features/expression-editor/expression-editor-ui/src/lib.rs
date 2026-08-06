@@ -20,11 +20,15 @@ use expression_editor_core::tools::Mods;
 use expression_editor_core::{Editor, Lane, Viewport};
 
 pub mod canvas;
+pub mod demo;
+pub mod drawer;
 pub mod interaction;
 pub mod theme;
 pub mod toolbar;
+pub mod widgets;
 
 pub use expression_editor_core as core;
+pub use drawer::ModDrawer;
 pub use interaction::Drag;
 
 /// The editor: toolbar over canvas.
@@ -33,25 +37,63 @@ pub use interaction::Drag;
 /// MIDI take, or to an offline render job — without the component
 /// needing to know which domain it is serving.
 #[component]
-pub fn ExpressionEditor(editor: Signal<Editor>) -> Element {
+pub fn ExpressionEditor(
+    editor: Signal<Editor>,
+    /// Open the modulation drawer on mount. Hosts normally leave this
+    /// alone — it exists so a caller can restore a session, and so the
+    /// screenshot harness can shoot the drawer through the real path.
+    #[props(default)] initial_drawer: Option<ModDrawer>,
+) -> Element {
     let drag = use_signal(Drag::default);
+    let drawer = use_signal(|| initial_drawer.clone().unwrap_or_default());
 
     rsx! {
         div {
+            // The canvas is the only flexible child. Blitz sizes an
+            // inline <svg> as a replaced element with an intrinsic
+            // aspect ratio, so without an explicit `flex: 0 0 auto` on
+            // the chrome it will happily eat the toolbar and status bar.
             style: "display: flex; flex-direction: column; width: 100%; height: 100%; \
-                    min-height: 0; background: {theme::BG}; color: {theme::TEXT}; \
-                    font-family: system-ui, sans-serif;",
-            toolbar::Toolbar { editor, drag }
-            Canvas { editor, drag }
+                    min-height: 0; overflow: hidden; background: {theme::BG}; \
+                    color: {theme::TEXT}; font-family: system-ui, sans-serif;",
+            toolbar::Toolbar { editor, drag, drawer }
+            Canvas { editor, drag, drawer }
             StatusBar { editor }
         }
     }
 }
 
-/// Pointer coordinates relative to the canvas element.
+/// Pointer coordinates in **roll** space — element coordinates minus
+/// the keyboard gutter and timeline ruler.
+///
+/// Every interaction handler works in roll space, so the camera never
+/// has to know the chrome exists.
 fn local(e: &PointerEvent) -> (f64, f64) {
     let c = e.data().element_coordinates();
-    (c.x, c.y)
+    (c.x - canvas::GUTTER_W, c.y - canvas::RULER_H)
+}
+
+/// Where in the chrome a press landed, if it did.
+enum Chrome {
+    Roll,
+    /// The ruler: clicking it moves the playhead.
+    Ruler(f64),
+    /// A piano key: clicking it selects every note on that row.
+    Key(i32),
+}
+
+fn chrome_at(ed: &Editor, x: f64, y: f64) -> Chrome {
+    if y < canvas::RULER_H {
+        Chrome::Ruler(ed.camera.t_at(x - canvas::GUTTER_W))
+    } else if x < canvas::GUTTER_W {
+        Chrome::Key(
+            ed.camera
+                .pitch_at(y - canvas::RULER_H, ed.viewport)
+                .round() as i32,
+        )
+    } else {
+        Chrome::Roll
+    }
 }
 
 fn mods_of(m: Modifiers) -> Mods {
@@ -65,9 +107,14 @@ fn mods_of(m: Modifiers) -> Mods {
 }
 
 #[component]
-fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>) -> Element {
+fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>) -> Element {
     let mut editor = editor;
     let mut drag = drag;
+    let mut drawer = drawer;
+    // While the drawer is open its target is locked: editing gestures
+    // are blocked, but every navigation path stays live so the preview
+    // can be auditioned in context.
+    let locked = drawer.read().open;
 
     let ed = editor.read();
     let vp = ed.viewport;
@@ -78,9 +125,14 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>) -> Element {
     let boxes = canvas::lane_boxes(&ed);
     let guides = canvas::tuning_guides(&ed);
     let zone_guides = canvas::zone_guides(&ed);
+    let keys = canvas::keyboard(&ed);
+    let ticks = canvas::ruler(&ed);
+    let marker_flags = canvas::markers(&ed);
+    let playhead = ed.playhead.map(|t| ed.camera.x(t));
     let microtonal = !ed.tuning.temperament.is_equal();
     let temperament_name = ed.tuning.temperament.name;
     let lane = ed.lane;
+    let empty = ed.doc.notes.is_empty();
     drop(ed);
 
     let marquee = match &*drag.read() {
@@ -97,30 +149,85 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>) -> Element {
 
     rsx! {
         div {
-            style: "position: relative; flex: 1; min-height: 0; outline: none;",
+            // `flex: 1 1 auto` + a floor, not `flex: 1 1 0`: when the
+            // parent's height does not resolve (a plugin window before
+            // its first resize, a headless mount), a zero basis would
+            // collapse the canvas to nothing and the svg is the only
+            // child that could have given it height back.
+            style: "position: relative; flex: 1 1 auto; min-height: 360px; \
+                    overflow: hidden; outline: none;",
             tabindex: "0",
             onkeydown: move |e: KeyboardEvent| {
                 let key = e.key().to_string();
                 let m = mods_of(e.modifiers());
+                // B opens the drawer; Escape closes it. Both work
+                // whether or not it is already open.
+                if key == "b" && !m.ctrl {
+                    let mut dw = drawer.write();
+                    if dw.open {
+                        dw.cancel(&mut editor.write());
+                    } else if dw.open_on(&editor.read()) {
+                        dw.preview(&mut editor.write());
+                    }
+                    e.prevent_default();
+                    return;
+                }
+                if key == "Escape" && drawer.read().open {
+                    drawer.write().cancel(&mut editor.write());
+                    e.prevent_default();
+                    return;
+                }
+                if locked {
+                    return;
+                }
                 let d = drag.read().clone();
                 if interaction::key_down(&mut editor.write(), &d, &key, m) {
                     e.prevent_default();
                 }
             },
             svg {
-                style: "width: 100%; height: 100%; display: block; \
+                style: "display: block; width: 100%; height: 100%; \
                         touch-action: none; user-select: none; cursor: crosshair;",
-                view_box: "0 0 {vp.w:.0} {vp.h:.0}",
+                view_box: "0 0 {vp.w + canvas::GUTTER_W:.0} {vp.h + canvas::RULER_H:.0}",
                 preserve_aspect_ratio: "none",
                 onmounted: move |e| {
                     let data = e.data();
                     spawn(async move {
                         if let Ok(r) = data.get_client_rect().await {
-                            editor.write().resize(Viewport::new(r.width(), r.height()));
+                            editor.write().resize(Viewport::new(
+                                r.width() - canvas::GUTTER_W,
+                                r.height() - canvas::RULER_H,
+                            ));
                         }
                     });
                 },
                 onpointerdown: move |e: PointerEvent| {
+                    let raw = e.data().element_coordinates();
+                    // Resolve against a snapshot: the read guard must
+                    // be dropped before any arm can write.
+                    let where_ = chrome_at(&editor.read(), raw.x, raw.y);
+                    match where_ {
+                        Chrome::Ruler(t) => {
+                            editor.write().playhead = Some(t);
+                            return;
+                        }
+                        Chrome::Key(row) => {
+                            let ids: Vec<_> = editor
+                                .read()
+                                .doc
+                                .notes
+                                .iter()
+                                .filter(|n| n.row == row)
+                                .map(|n| n.id)
+                                .collect();
+                            editor.write().selection.notes = ids;
+                            return;
+                        }
+                        Chrome::Roll => {}
+                    }
+                    if locked {
+                        return;
+                    }
                     let (x, y) = local(&e);
                     let m = mods_of(e.modifiers());
                     let button = if e.trigger_button()
@@ -153,14 +260,31 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>) -> Element {
                     let delta = e.delta().strip_units();
                     let m = mods_of(e.modifiers());
                     // A wheel event carries no pointer position, so
-                    // zoom anchors on the canvas center until we track
-                    // the last pointer move.
+                    // zoom anchors on the roll centre until we track the
+                    // last pointer move.
                     let (x, y) = (vp.w * 0.5, vp.h * 0.5);
                     interaction::wheel(&mut editor.write(), x, y, delta.x, delta.y, m);
                     e.prevent_default();
                 },
 
-                rect { x: "0", y: "0", width: "{vp.w:.0}", height: "{vp.h:.0}", fill: theme::BG }
+                // The roll is clipped to its own box so a pitch curve
+                // that travels off-screen cannot paint over the ruler or
+                // the keyboard.
+                defs {
+                    clipPath { id: "roll-clip",
+                        rect { x: "0", y: "0", width: "{vp.w:.0}", height: "{vp.h:.0}" }
+                    }
+                }
+                rect {
+                    x: "0", y: "0",
+                    width: "{vp.w + canvas::GUTTER_W:.0}",
+                    height: "{vp.h + canvas::RULER_H:.0}",
+                    fill: theme::BG,
+                }
+
+                g {
+                    transform: "translate({canvas::GUTTER_W:.0} {canvas::RULER_H:.0})",
+                    clip_path: "url(#roll-clip)",
 
                 // Piano-roll rows.
                 for r in rows.iter() {
@@ -290,10 +414,49 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>) -> Element {
                                 }
                             }
                         }
+                        if n.ambiguous {
+                            rect {
+                                x: "{n.x:.1}",
+                                y: "{n.y:.1}",
+                                width: "{n.w:.1}",
+                                height: "{n.h:.1}",
+                                rx: "{(n.h * 0.28).min(4.0):.1}",
+                                fill: theme::ZONE,
+                                fill_opacity: "0.42",
+                                pointer_events: "none",
+                            }
+                            text {
+                                x: "{n.x + 4.0:.1}",
+                                y: "{n.y + n.h * 0.5 + 4.0:.1}",
+                                fill: "#fff",
+                                font_size: "12",
+                                pointer_events: "none",
+                                "⚠"
+                            }
+                        }
+                        if let Some(ribbon) = n.ribbon.as_ref() {
+                            polygon {
+                                points: "{ribbon}",
+                                fill: theme::SELECTED,
+                                fill_opacity: "0.18",
+                                pointer_events: "none",
+                            }
+                        }
+                        if let Some(label) = n.label.as_ref() {
+                            text {
+                                x: "{n.x + 5.0:.1}",
+                                y: "{n.y + n.h * 0.5 + 3.5:.1}",
+                                fill: "#0b0b10",
+                                fill_opacity: "0.75",
+                                font_size: "10",
+                                pointer_events: "none",
+                                "{label}"
+                            }
+                        }
                         if let Some(cents) = n.cents {
                             text {
                                 x: "{n.x + 3.0:.1}",
-                                y: "{n.y - 2.0:.1}",
+                                y: "{n.y - 3.0:.1}",
                                 fill: theme::GOLD,
                                 font_size: "9",
                                 "{cents:+.0}¢"
@@ -346,7 +509,145 @@ fn Canvas(editor: Signal<Editor>, drag: Signal<Drag>) -> Element {
                         stroke_width: "1",
                     }
                 }
+
+                if let Some(t) = playhead {
+                    line {
+                        x1: "{t:.1}", y1: "0",
+                        x2: "{t:.1}", y2: "{vp.h:.0}",
+                        stroke: theme::PLAYHEAD,
+                        stroke_width: "1",
+                        stroke_opacity: "0.75",
+                    }
+                }
+
+                } // end roll group
+
+                // ── timeline ruler ───────────────────────────────────
+                g {
+                    transform: "translate({canvas::GUTTER_W:.0} 0)",
+                    rect {
+                        x: "0", y: "0",
+                        width: "{vp.w:.0}", height: "{canvas::RULER_H:.0}",
+                        fill: theme::PANEL,
+                    }
+                    for (i, tk) in ticks.iter().enumerate() {
+                        line {
+                            key: "tk{i}",
+                            x1: "{tk.x:.1}",
+                            y1: if tk.bar { "0" } else { "{canvas::RULER_H * 0.55:.0}" },
+                            x2: "{tk.x:.1}",
+                            y2: "{canvas::RULER_H:.0}",
+                            stroke: if tk.bar { theme::TEXT_DIM } else { theme::PANEL_BORDER },
+                            stroke_width: "1",
+                        }
+                    }
+                    for (i, tk) in ticks.iter().enumerate() {
+                        if let Some(label) = tk.label.as_ref() {
+                            text {
+                                key: "tl{i}",
+                                x: "{tk.x + 3.0:.1}",
+                                y: "11",
+                                fill: theme::TEXT_DIM,
+                                font_size: "9",
+                                "{label}"
+                            }
+                        }
+                    }
+                    for (i, mk) in marker_flags.iter().enumerate() {
+                        g {
+                            key: "mk{i}",
+                            line {
+                                x1: "{mk.x:.1}", y1: "0",
+                                x2: "{mk.x:.1}", y2: "{canvas::RULER_H:.0}",
+                                stroke: theme::ACCENT, stroke_width: "1",
+                            }
+                            text {
+                                x: "{mk.x + 3.0:.1}",
+                                y: "{canvas::RULER_H - 6.0:.0}",
+                                fill: theme::ACCENT,
+                                font_size: "9",
+                                "{mk.label}"
+                            }
+                        }
+                    }
+                    if let Some(t) = playhead {
+                        // A downward triangle, so the transport head
+                        // reads at a glance against the tick marks.
+                        polygon {
+                            points: "{t - 5.0:.1},0 {t + 5.0:.1},0 {t:.1},{canvas::RULER_H:.0}",
+                            fill: theme::PLAYHEAD,
+                        }
+                    }
+                    line {
+                        x1: "0", y1: "{canvas::RULER_H:.0}",
+                        x2: "{vp.w:.0}", y2: "{canvas::RULER_H:.0}",
+                        stroke: theme::PANEL_BORDER, stroke_width: "1",
+                    }
+                }
+
+                // ── piano-key gutter ─────────────────────────────────
+                g {
+                    transform: "translate(0 {canvas::RULER_H:.0})",
+                    rect {
+                        x: "0", y: "0",
+                        width: "{canvas::GUTTER_W:.0}", height: "{vp.h:.0}",
+                        fill: theme::GUTTER_BG,
+                    }
+                    for k in keys.iter() {
+                        rect {
+                            key: "k{k.row}",
+                            x: "0",
+                            y: "{k.y:.1}",
+                            // A hairline gap so adjacent white keys stay
+                            // distinguishable at small row heights.
+                            width: if k.black { "{canvas::GUTTER_W * 0.62:.0}" } else { "{canvas::GUTTER_W:.0}" },
+                            height: "{(k.h - 1.0).max(1.0):.2}",
+                            fill: if k.black { theme::KEY_BLACK } else { theme::KEY_WHITE },
+                        }
+                    }
+                    for k in keys.iter() {
+                        if let Some(label) = k.label.as_ref() {
+                            text {
+                                key: "kl{k.row}",
+                                x: "{canvas::GUTTER_W - 4.0:.0}",
+                                y: "{k.y + k.h * 0.5 + 3.0:.1}",
+                                text_anchor: "end",
+                                fill: if k.black { theme::TEXT_DIM } else { "#33333f" },
+                                font_size: "9",
+                                "{label}"
+                            }
+                        }
+                    }
+                    line {
+                        x1: "{canvas::GUTTER_W:.0}", y1: "0",
+                        x2: "{canvas::GUTTER_W:.0}", y2: "{vp.h:.0}",
+                        stroke: theme::PANEL_BORDER, stroke_width: "1",
+                    }
+                }
+
+                // The corner where ruler and gutter meet.
+                rect {
+                    x: "0", y: "0",
+                    width: "{canvas::GUTTER_W:.0}", height: "{canvas::RULER_H:.0}",
+                    fill: theme::PANEL,
+                }
             }
+
+            if empty {
+                div {
+                    style: "position: absolute; inset: 0; display: flex; \
+                            align-items: center; justify-content: center; \
+                            pointer-events: none; color: {theme::TEXT_DIM}; \
+                            font-size: 12px; text-align: center; line-height: 1.7;",
+                    div {
+                        div { style: "color: {theme::TEXT}; font-size: 14px;", "No notes" }
+                        div { "Press D for Note Draw, then click the grid" }
+                        div { "V resets the view \u{b7} B opens modulation" }
+                    }
+                }
+            }
+
+            drawer::ModulationDrawer { editor, drawer }
 
             // A non-equal tuning is always visibly flagged — silently
             // editing in a temperament you forgot about is how you ship
@@ -391,16 +692,24 @@ fn StatusBar(editor: Signal<Editor>) -> Element {
     });
     let count = ed.selection.notes.len();
     let tool = ed.tool;
+    let ambiguous = ed.doc.notes.iter().filter(|n| n.ambiguous).count();
     drop(ed);
 
     rsx! {
         div {
-            style: "display: flex; align-items: center; gap: 14px; padding: 4px 10px; \
+            style: "display: flex; flex: 0 0 auto; align-items: center; \
+                    flex-wrap: wrap; gap: 14px; padding: 4px 10px; \
                     background: {theme::PANEL}; border-top: 1px solid {theme::PANEL_BORDER}; \
                     color: {theme::TEXT_DIM}; font-size: 10px; \
                     font-family: ui-monospace, monospace;",
             span { "{tool.label()}" }
             span { "{count} selected" }
+            if ambiguous > 0 {
+                span {
+                    style: "color: {theme::ZONE};",
+                    "\u{26a0} {ambiguous} notes share a channel \u{2014} ownership unresolved, writes blocked"
+                }
+            }
             if let Some((name, channel, zones, vibrato, drift)) = info {
                 span { style: "color: {theme::TEXT};", "{name}" }
                 if let Some(ch) = channel {
@@ -412,9 +721,7 @@ fn StatusBar(editor: Signal<Editor>) -> Element {
                 span { "vibrato {vibrato * 100.0:.0}¢" }
                 span { "drift {drift * 100.0:+.0}¢" }
 
-                // The two Melodyne sliders. They work on a hand-drawn
-                // MPE bend as readily as on an analyzed vocal, because
-                // the decomposition is derived, not stored.
+                // The two Melodyne sliders, centred on 1.0 = as sung.
                 Blend { editor, label: "Drift".to_string(), drift: true }
                 Blend { editor, label: "Vibrato".to_string(), drift: false }
                 button {
@@ -444,42 +751,41 @@ fn StatusBar(editor: Signal<Editor>) -> Element {
 
 /// One of the drift/vibrato sliders.
 ///
-/// Parked at 100% rather than tracking a stored amount: each change
+/// Parked at 1.0 rather than tracking a stored amount: each change
 /// re-decomposes the *current* curve, so the control is a relative
-/// scale on what is there now and never fights an earlier edit.
+/// scale on what is there now and never fights an earlier edit. The
+/// centre tick is therefore "leave as sung".
 #[component]
 fn Blend(editor: Signal<Editor>, label: String, drift: bool) -> Element {
     let mut editor = editor;
+    let mut amount = use_signal(|| 1.0f64);
     rsx! {
-        label {
-            style: "display: flex; align-items: center; gap: 4px;",
-            "{label}"
-            input {
-                r#type: "range",
-                min: "0",
-                max: "150",
-                value: "100",
-                style: "width: 70px;",
-                onchange: move |e: FormEvent| {
-                    let Ok(v) = e.value().parse::<f64>() else { return };
-                    let amount = v / 100.0;
-                    let Some(id) = editor.read().selection.notes.first().copied() else {
-                        return;
-                    };
-                    let (t0, t1) = {
-                        let ed = editor.read();
-                        let Some(n) = ed.doc.note(id) else { return };
-                        (n.start, n.end)
-                    };
-                    editor.write().apply(&expression_editor_core::Edit::ReblendPitch {
-                        note: id,
-                        t0,
-                        t1,
-                        drift_amount: if drift { amount } else { 1.0 },
-                        modulation_amount: if drift { 1.0 } else { amount },
-                    });
-                },
-            }
+        widgets::CenterSlider {
+            label: label.clone(),
+            value: amount(),
+            min: 0.0,
+            max: 1.5,
+            center: 1.0,
+            width: 84.0,
+            readout: format!("{:.0}%", amount() * 100.0),
+            on_change: move |v: f64| {
+                amount.set(v);
+                let Some(id) = editor.read().selection.notes.first().copied() else {
+                    return;
+                };
+                let (t0, t1) = {
+                    let ed = editor.read();
+                    let Some(n) = ed.doc.note(id) else { return };
+                    (n.start, n.end)
+                };
+                editor.write().apply(&expression_editor_core::Edit::ReblendPitch {
+                    note: id,
+                    t0,
+                    t1,
+                    drift_amount: if drift { v } else { 1.0 },
+                    modulation_amount: if drift { 1.0 } else { v },
+                });
+            },
         }
     }
 }

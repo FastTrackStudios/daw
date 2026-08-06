@@ -1,0 +1,147 @@
+//! Visual-inspection harness: rasterize the real editor to PNGs.
+//!
+//! Mounts `ExpressionEditor` on the headless Blitz DOM and paints it
+//! through `DocumentTester::render_png` — CPU rasterizer, no GPU, no
+//! DAW, no browser. Nothing asserts about looks; a wrong-looking canvas
+//! is a picture you have to open:
+//!
+//! ```sh
+//! cargo test -p expression-editor-ui --test screenshots
+//! ```
+//!
+//! Output lands in `target/gui-shots/expression-editor/` (override with
+//! `FTS_SHOTS_DIR`).
+//!
+//! Scenes come from `expression_editor_ui::demo`, the same module the
+//! runnable example mounts, so these pictures cannot drift from what
+//! the app actually launches.
+
+use std::path::PathBuf;
+
+use dioxus::prelude::*;
+use dioxus_test::DocumentTester;
+use expression_editor_core::{Editor, Viewport};
+use expression_editor_ui::demo::{self, Scene};
+use expression_editor_ui::{ExpressionEditor, ModDrawer};
+
+const W: u32 = 1100;
+/// Window height minus the toolbar (two wrapped rows) and status bar.
+const CANVAS_H: f64 = 560.0;
+const H: u32 = 700;
+
+#[component]
+fn Harness(seed: Editor, drawer: Option<ModDrawer>) -> Element {
+    let editor = use_signal(|| seed.clone());
+    rsx! {
+        style {
+            "html, body {{ width: 100%; height: 100%; margin: 0; padding: 0; \
+              overflow: hidden; background: #0d0d11; }}"
+        }
+        div {
+            style: "width: 100%; height: 100%;",
+            ExpressionEditor { editor, initial_drawer: drawer.clone() }
+        }
+    }
+}
+
+fn shots_dir() -> PathBuf {
+    let dir = std::env::var("FTS_SHOTS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../target/gui-shots/expression-editor")
+        });
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("create {}: {e}", dir.display()));
+    dir
+}
+
+async fn shoot(ed: Editor, name: &str) {
+    shoot_with(ed, None, name).await
+}
+
+async fn shoot_with(ed: Editor, drawer: Option<ModDrawer>, name: &str) {
+    // The canvas measures itself from the mounted element; headless
+    // there is no resize event, so state the viewport the shot uses.
+    let mut ed = ed;
+    ed.resize(Viewport::new(W as f64, CANVAS_H));
+
+    let dom = VirtualDom::new_with_props(
+        Harness,
+        HarnessProps { seed: ed, drawer },
+    );
+    let tester = DocumentTester::from_virtual_dom(dom)
+        .with_window_size(W, H)
+        .build();
+    for _ in 0..4 {
+        let _ = tester.pump().await;
+    }
+    let path = shots_dir().join(format!("{name}.png"));
+    tester.render_png(&path);
+    println!("shot: {}", path.display());
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_every_scene() {
+    for scene in Scene::ALL {
+        let ed = demo::editor(scene, Viewport::new(W as f64, CANVAS_H));
+        shoot(ed, scene.slug()).await;
+    }
+}
+
+/// The same phrase at three zoom depths — the camera is most of the
+/// feel, and it is the part a still picture can still show.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_zoom_levels() {
+    let base = || demo::editor(Scene::Phrase, Viewport::new(W as f64, CANVAS_H));
+
+    let mut ed = base();
+    for _ in 0..6 {
+        ed.zoom_in_at(W as f64 * 0.45, CANVAS_H * 0.5, 1.25);
+    }
+    shoot(ed, "08-zoom-in").await;
+
+    // Near an item edge, where the edge magnet frames the boundary.
+    let mut ed = base();
+    for _ in 0..8 {
+        ed.zoom_in_at(W as f64 * 0.95, CANVAS_H * 0.5, 1.25);
+    }
+    shoot(ed, "09-edge-magnet").await;
+}
+
+/// Before and after the Robot button, on the same note.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_flatten() {
+    let vp = Viewport::new(W as f64, CANVAS_H);
+    let mut ed = demo::editor(Scene::Phrase, vp);
+    let id = ed.selection.notes[0];
+    let (t0, t1) = {
+        let n = ed.doc.note(id).unwrap();
+        (n.start, n.end)
+    };
+    for _ in 0..3 {
+        ed.zoom_in_at(W as f64 * 0.5, CANVAS_H * 0.5, 1.3);
+    }
+    shoot(ed.clone(), "10-as-sung").await;
+
+    ed.apply(&expression_editor_core::Edit::ReblendPitch {
+        note: id,
+        t0,
+        t1,
+        drift_amount: 0.0,
+        modulation_amount: 0.0,
+    });
+    shoot(ed, "11-robot").await;
+}
+
+/// The modulation drawer, opened through its real capture path.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_modulation_drawer() {
+    let mut ed = demo::editor(Scene::Phrase, Viewport::new(W as f64, CANVAS_H));
+    for _ in 0..3 {
+        ed.zoom_in_at(W as f64 * 0.5, CANVAS_H * 0.5, 1.3);
+    }
+    let mut drawer = ModDrawer::default();
+    assert!(drawer.open_on(&ed), "a note is selected, so it must open");
+    drawer.preview(&mut ed);
+    shoot_with(ed, Some(drawer), "12-modulation").await;
+}

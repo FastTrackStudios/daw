@@ -12,6 +12,7 @@
 
 use crate::blob;
 use crate::doc::{Curve, ExpressionDoc, Lane, Note, NoteId, Point, Target};
+use crate::modulation::Stack;
 use crate::shape::Shape;
 
 /// One describable change to the document.
@@ -59,6 +60,26 @@ pub enum Edit {
         t1: f64,
         drift_amount: f64,
         modulation_amount: f64,
+    },
+    /// Add a modulation stack over a span — programmatic vibrato and
+    /// swells. `taper` is the fraction of the span eased in and out.
+    ApplyModulation {
+        note: NoteId,
+        lane: Lane,
+        t0: f64,
+        t1: f64,
+        stack: Stack,
+        taper: f64,
+        samples: usize,
+    },
+    /// Replace a lane's span with given points — the drawer's cancel
+    /// path, restoring exactly what was captured.
+    RestoreLane {
+        note: NoteId,
+        lane: Lane,
+        t0: f64,
+        t1: f64,
+        points: Vec<Point>,
     },
     /// Transpose notes. The pitch gesture moves rigidly with the row.
     Transpose { notes: Vec<NoteId>, semitones: i32 },
@@ -180,6 +201,57 @@ impl Edit {
                 );
                 let rebuilt = d.recompose(d.center, *drift_amount, *modulation_amount);
                 n.pitch.splice(lo, hi, rebuilt.points());
+                true
+            }
+            Edit::ApplyModulation {
+                note,
+                lane,
+                t0,
+                t1,
+                stack,
+                taper,
+                samples,
+            } => {
+                let Some(n) = doc.note_mut(*note) else {
+                    return false;
+                };
+                let (lo, hi) = ordered(*t0, *t1);
+                if hi - lo <= 0.0 {
+                    return false;
+                }
+                let count = (*samples).max(8);
+                let default = lane.default_value();
+                let curve = n.lane(*lane);
+                let times: Vec<f64> = (0..count)
+                    .map(|i| lo + (hi - lo) * (i as f64 / (count - 1) as f64))
+                    .collect();
+                let mut values: Vec<f64> =
+                    times.iter().map(|&t| curve.sample(t, default)).collect();
+                crate::modulation::apply(&mut values, stack, *taper);
+                let points: Vec<Point> = times
+                    .iter()
+                    .zip(&values)
+                    .map(|(&t, &v)| Point {
+                        t,
+                        value: lane.clamp(v),
+                    })
+                    .collect();
+                // Splice, so data outside the target range survives.
+                n.lane_mut(*lane).splice(lo, hi, &points);
+                true
+            }
+            Edit::RestoreLane {
+                note,
+                lane,
+                t0,
+                t1,
+                points,
+            } => {
+                let Some(n) = doc.note_mut(*note) else {
+                    return false;
+                };
+                let (lo, hi) = ordered(*t0, *t1);
+                n.lane_mut(*lane).splice(lo, hi, points);
                 true
             }
             Edit::Transpose { notes, semitones } => {

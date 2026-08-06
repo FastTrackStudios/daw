@@ -63,6 +63,10 @@ pub struct Editor {
     /// Tempo used to place the grid; a real tempo map lives in the
     /// host adapter.
     pub bpm: f64,
+    /// Beats per bar, for the ruler's bar numbering.
+    pub beats_per_bar: f64,
+    /// Transport position, when the host supplies one.
+    pub playhead: Option<f64>,
     history: History,
 }
 
@@ -82,6 +86,8 @@ impl Editor {
             grid: Grid::default(),
             shape: Shape::Linear,
             bpm: 120.0,
+            beats_per_bar: 4.0,
+            playhead: None,
             history: History::new(10),
         }
     }
@@ -245,6 +251,19 @@ impl Editor {
     /// Document units per beat at the current tempo.
     pub fn units_per_beat(&self) -> f64 {
         self.doc.time_base.units_per_beat(self.bpm)
+    }
+
+    /// Document units per bar.
+    pub fn units_per_bar(&self) -> f64 {
+        self.units_per_beat() * self.beats_per_bar.max(1.0)
+    }
+
+    /// `(bar, beat)` at `t`, both 1-based — what the ruler prints.
+    pub fn bar_beat(&self, t: f64) -> (i64, i64) {
+        let beats = (t - self.doc.start) / self.units_per_beat();
+        let bpb = self.beats_per_bar.max(1.0);
+        let bar = (beats / bpb).floor();
+        (bar as i64 + 1, (beats - bar * bpb).floor() as i64 + 1)
     }
 
     /// Snap a time to the local grid.
