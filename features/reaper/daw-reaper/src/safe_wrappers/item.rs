@@ -95,6 +95,38 @@ pub fn get_take_name(low: &ReaperLow, take: MediaItemTake) -> String {
     super::buffer::string_from_buffer(&buf)
 }
 
+/// Set an item's notes (`P_NOTES`).
+///
+/// REAPER renders item notes as the item's on-screen label, which makes
+/// this the natural place to store what an item *means* — a chord symbol,
+/// a key change — so the data is visible, editable by hand, and travels
+/// with the item. Pair it with `IMGRESOURCEFLAGS 2` in the item chunk to
+/// have REAPER draw it as text.
+pub fn set_item_notes(low: &ReaperLow, item: MediaItem, notes: &std::ffi::CString) {
+    unsafe {
+        low.GetSetMediaItemInfo_String(
+            item.as_ptr(),
+            c"P_NOTES".as_ptr(),
+            notes.as_ptr() as *mut i8,
+            true,
+        );
+    }
+}
+
+/// Read an item's notes (`P_NOTES`).
+pub fn get_item_notes(low: &ReaperLow, item: MediaItem) -> String {
+    let mut buf = vec![0u8; 1024];
+    unsafe {
+        low.GetSetMediaItemInfo_String(
+            item.as_ptr(),
+            c"P_NOTES".as_ptr(),
+            buf.as_mut_ptr() as *mut i8,
+            false,
+        );
+    }
+    super::buffer::string_from_buffer(&buf)
+}
+
 /// Move a media item to a different track.
 pub fn move_item_to_track(low: &ReaperLow, item: MediaItem, track: MediaTrack) {
     unsafe {

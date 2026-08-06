@@ -116,6 +116,22 @@ pub trait Items {
         item: ItemRef,
         color: Option<u32>,
     ) -> DawResult<()>;
+    /// The item's on-screen label — REAPER's `P_NOTES`.
+    ///
+    /// The natural home for what an item *means* (a chord symbol, a key
+    /// change): visible in the arrange view, editable by hand, saved with
+    /// the project, and it moves when the item moves. Reads back, so it
+    /// needs no side-car store.
+    ///
+    /// Called `label` rather than `notes` deliberately: REAPER's field is
+    /// `P_NOTES`, but "notes" on a DAW trait already means pitches, and
+    /// `Midi::notes` is a method away. The two are unrelated and must not
+    /// read alike.
+    fn label(&self, project: ProjectContext, item: ItemRef) -> Option<String>;
+
+    /// Set the item's label. See [`Items::label`].
+    fn set_label(&self, project: ProjectContext, item: ItemRef, label: &str) -> DawResult<()>;
+
     fn set_group_id(
         &self,
         project: ProjectContext,

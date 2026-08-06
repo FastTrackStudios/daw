@@ -235,6 +235,18 @@ pub trait Midi {
     fn add_note(&self, location: MidiTakeLocation, note: MidiNoteCreate) -> u32;
 
     fn add_notes(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32>;
+
+    /// Add notes positioned in **raw take PPQ** — the same units
+    /// [`Midi::notes`] hands back.
+    ///
+    /// [`Midi::add_notes`] does *not* round-trip with [`Midi::notes`]:
+    /// it reads `start_ppq` as a project *quarter-note* position (the
+    /// REAPER backend runs it through `MIDI_GetPPQPosFromProjQN`), which
+    /// suits callers placing notes at musical positions they computed
+    /// themselves, and silently misplaces notes for anyone echoing back
+    /// what they just read. Use this when your positions came out of
+    /// `notes()`; use `add_notes` when they came out of a tempo map.
+    fn add_notes_ppq(&self, location: MidiTakeLocation, notes: Vec<MidiNoteCreate>) -> Vec<u32>;
     fn delete_note(&self, location: MidiTakeLocation, index: u32);
     fn delete_notes(&self, location: MidiTakeLocation, indices: Vec<u32>);
     fn delete_selected_notes(&self, location: MidiTakeLocation);

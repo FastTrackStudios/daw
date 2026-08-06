@@ -393,6 +393,27 @@ impl ItemHandle {
         Ok(())
     }
 
+    /// The item's on-screen label (REAPER's `P_NOTES`).
+    ///
+    /// Where an item records what it *means* — a chord symbol, a key
+    /// change — visibly and hand-editably. Not MIDI notes.
+    pub async fn label(&self) -> Result<Option<String>> {
+        Ok(self
+            .clients
+            .item
+            .label(self.context(), self.item_ref())
+            .await?)
+    }
+
+    /// Set the item's label. See [`ItemHandle::label`].
+    pub async fn set_label(&self, label: &str) -> Result<()> {
+        self.clients
+            .item
+            .set_label(self.context(), self.item_ref(), label.to_string())
+            .await??;
+        Ok(())
+    }
+
     /// Select the item
     pub async fn select(&self) -> Result<()> {
         self.clients

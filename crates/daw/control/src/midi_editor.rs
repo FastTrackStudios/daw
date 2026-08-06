@@ -120,6 +120,21 @@ impl MidiEditor {
         Ok(indices)
     }
 
+    /// Add notes positioned in raw take PPQ — the units [`Self::notes`]
+    /// returns.
+    ///
+    /// [`Self::add_notes`] does not round-trip with [`Self::notes`]: it
+    /// reads `start_ppq` as a project *quarter-note* position. Use this
+    /// one when the positions came from reading the take.
+    pub async fn add_notes_ppq(&self, notes: Vec<MidiNoteCreate>) -> Result<Vec<u32>> {
+        let indices = self
+            .clients
+            .midi
+            .add_notes_ppq(self.location(), notes)
+            .await?;
+        Ok(indices)
+    }
+
     /// Delete a note
     pub async fn delete_note(&self, index: u32) -> Result<()> {
         self.clients

@@ -40,6 +40,9 @@ use vox::{
 
 use crate::layer::LayerRouter;
 
+#[cfg(feature = "telemetry")]
+use tracing::Instrument as _;
+
 /// Metadata key carrying `Bearer <token>` (mirrors auth-proto's
 /// `AUTHORIZATION_METADATA_KEY`; duplicated here so architect does not
 /// depend on auth-proto).
@@ -281,6 +284,54 @@ where
             let c = call.get();
             (c.method_id, PermissionsGate::bearer_from(&c.metadata))
         };
+        // Everything below runs inside ONE span, which is the call's wide
+        // event. This matters for ordering: `decide` resolves the identity
+        // and audits the permission decision BEFORE dispatching, so it runs
+        // before `LayerRouter` opens its own `rpc` span. Without a span
+        // opened here, anything the gate records lands on whatever span
+        // happens to be current — in a WebSocket driver task, none — and
+        // is silently dropped. That is not hypothetical: the auth/perm
+        // fields were added, compiled, deployed, and recorded nothing,
+        // and only a query against the exported spans caught it.
+        //
+        // `LayerRouter`'s span nests inside this one and carries the
+        // rpc.service/method detail.
+        #[cfg(feature = "telemetry")]
+        {
+            // Named for the method, not a generic "rpc". This span is the
+            // trace ROOT, so its name is what a trace list shows — leaving
+            // it generic collapses every call in the UI into one
+            // indistinguishable bucket, which is the same readability
+            // failure the per-method naming in `LayerRouter` exists to
+            // avoid. The permit table already knows the names.
+            let name = self
+                .gate
+                .rules
+                .get(&method_id)
+                .map_or_else(|| "rpc".to_owned(), |r| format!("{}/{}", r.service, r.method));
+            self.dispatch(method_id, token, call, reply, schemas)
+                .instrument(tracing::info_span!("rpc.gated", otel.name = name))
+                .await;
+        }
+        // Without the feature there is no span to open and no `tracing`
+        // dependency to open it with — dispatch directly.
+        #[cfg(not(feature = "telemetry"))]
+        self.dispatch(method_id, token, call, reply, schemas).await;
+    }
+}
+
+impl<H> PermissionedRouter<H>
+where
+    H: Handler<DriverReplySink> + Send + Sync,
+{
+    async fn dispatch(
+        &self,
+        method_id: MethodId,
+        token: Option<String>,
+        call: SelfRef<RequestCall<'static>>,
+        reply: DriverReplySink,
+        schemas: Arc<SchemaRecvTracker>,
+    ) {
         let outcome = self.gate.decide(method_id, token).await;
         match outcome {
             GateOutcome::Pass => self.inner.handle(call, reply, schemas).await,

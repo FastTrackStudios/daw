@@ -96,8 +96,12 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use vox::{
-    DriverReplySink, Handler, MethodId, RequestCall, SchemaRecvTracker, SelfRef, ServiceDescriptor,
+    DriverReplySink, Handler, MethodDescriptor, MethodId, RequestCall, SchemaRecvTracker, SelfRef,
+    ServiceDescriptor,
 };
+
+#[cfg(feature = "telemetry")]
+use tracing::Instrument as _;
 
 // ── Erased handler ────────────────────────────────────────────────────────
 //
@@ -625,6 +629,15 @@ pub struct LayerRouter {
     /// trait mount once per instance (one per rig) on one merged router.
     scoped_map: HashMap<(String, MethodId), usize>,
     handlers: Vec<Arc<dyn DynHandler>>,
+    /// `MethodId` → its static descriptor, so dispatch can name the call
+    /// it is about to make. A `MethodId` is a hash — without this, a span
+    /// or a log line can only say "method 0x8f3a…", which is useless when
+    /// you are staring at a trace trying to find the slow call.
+    ///
+    /// Built from the same descriptors [`register`](Self::register)
+    /// already walks, so it costs one extra pointer-sized insert per
+    /// method at mount time and nothing at dispatch.
+    method_names: HashMap<MethodId, &'static MethodDescriptor>,
 }
 
 impl LayerRouter {
@@ -683,6 +696,7 @@ impl LayerRouter {
         for ((scope, id), idx) in other.scoped_map {
             self.scoped_map.insert((scope, id), base + idx);
         }
+        self.method_names.extend(other.method_names);
         self
     }
 
@@ -700,7 +714,47 @@ impl LayerRouter {
         for ((inner, id), idx) in other.scoped_map {
             self.scoped_map.insert((inner, id), base + idx);
         }
+        self.method_names.extend(other.method_names);
         self
+    }
+
+    /// The span covering one dispatched RPC call.
+    ///
+    /// This is the single choke point every vox call passes through, which
+    /// makes it the one place worth instrumenting: without it a whole
+    /// WebSocket session is one opaque HTTP span, and every RPC inside it
+    /// — the calls that actually do the work and actually fail — is
+    /// invisible. With it, each call is a timed, named span carrying the
+    /// service and method, so "which call was slow" and "which call
+    /// errored" are answerable from the trace alone.
+    ///
+    /// `otel.name` is the field `tracing-opentelemetry` reads to name the
+    /// exported span, so traces group per method (`Projects/list`) rather
+    /// than collapsing into one `rpc` bucket. It is inert without that
+    /// layer installed.
+    ///
+    /// Note the span measures *dispatch*, not the reply: the handler owns
+    /// the [`DriverReplySink`] and answers on its own schedule, so a
+    /// handler error is not visible here. Errors surface as `tracing`
+    /// events emitted inside the handler, which land as child log records
+    /// of this span and so carry its trace id.
+    #[cfg(feature = "telemetry")]
+    fn call_span(&self, method_id: MethodId, scope: Option<&str>) -> tracing::Span {
+        let (service, method) = self
+            .method_names
+            .get(&method_id)
+            .map(|d| (d.service_name, d.method_name))
+            .unwrap_or(("unknown", "unknown"));
+        tracing::info_span!(
+            "rpc",
+            otel.name = format!("{service}/{method}"),
+            rpc.system = "vox",
+            rpc.service = service,
+            rpc.method = method,
+            // Which rig/instance answered, when the same trait is mounted
+            // more than once (see `merge_router_scoped`).
+            rpc.scope = scope.unwrap_or_default(),
+        )
     }
 
     fn register(&mut self, descriptor: &ServiceDescriptor, handler: Arc<dyn DynHandler>) {
@@ -708,6 +762,7 @@ impl LayerRouter {
         self.handlers.push(handler);
         for method in descriptor.methods {
             self.method_map.insert(method.id, idx);
+            self.method_names.insert(method.id, method);
         }
     }
 
@@ -811,10 +866,24 @@ impl Handler<DriverReplySink> for LayerRouter {
         let method_id = call.get().method_id;
         // Scoped dispatch first: a call stamped `svc-scope` prefers the
         // matching instance; the flat map serves everything else.
-        let scoped = crate::scoped::scope_of(&call.get().metadata)
+        let scope = crate::scoped::scope_of(&call.get().metadata);
+        // The span outlives the borrow — `call` is moved into the handler
+        // below — so telemetry builds keep an owned copy. Only telemetry
+        // builds pay for it.
+        #[cfg(feature = "telemetry")]
+        let scope_owned = scope.map(str::to_owned);
+        let scoped = scope
             .and_then(|scope| self.scoped_map.get(&(scope.to_string(), method_id)))
             .copied();
         if let Some(idx) = scoped.or_else(|| self.method_map.get(&method_id).copied()) {
+            #[cfg(feature = "telemetry")]
+            {
+                self.handlers[idx]
+                    .handle(call, reply, schemas)
+                    .instrument(self.call_span(method_id, scope_owned.as_deref()))
+                    .await;
+            }
+            #[cfg(not(feature = "telemetry"))]
             self.handlers[idx].handle(call, reply, schemas).await;
         } else {
             use vox::ReplySink as _;
