@@ -22,6 +22,12 @@ use std::path::{Path, PathBuf};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     let filter = args.iter().skip(1).find(|a| !a.starts_with("--")).cloned();
+    // `--gui` shows REAPER's window instead of running it with DISPLAY=""
+    // — the only way to actually watch a test drive the DAW. Pair it with
+    // `--keep-open` (or FTS_KEEP_OPEN=1) to inspect the result afterwards,
+    // otherwise REAPER is killed the moment the run ends.
+    let gui = args.iter().any(|a| a == "--gui");
+    let keep_open = args.iter().any(|a| a == "--keep-open");
 
     // xtask lives at features/reaper/daw-reaper/xtask — repo root is
     // three levels up.
@@ -50,7 +56,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(600);
-    let runner = TestRunner::new(&resources_dir).with_timeout(timeout_secs);
+    let mut runner = TestRunner::new(&resources_dir).with_timeout(timeout_secs);
+    if gui {
+        runner = runner.with_headless(false);
+        println!("  Mode:      GUI (visible REAPER window)");
+    }
+    if keep_open {
+        runner.keep_open = true;
+        println!("  Keep open: REAPER stays up after the run");
+    }
 
     let packages = vec![TestPackage {
         package: "daw-reaper".into(),
