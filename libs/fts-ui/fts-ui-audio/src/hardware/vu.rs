@@ -7,7 +7,7 @@
 
 use dioxus::prelude::*;
 
-use crate::hardware::vu_kit::{Bezel, VuSpec};
+use crate::hardware::vu_kit::{Bezel, VuSpec, Wash};
 use crate::hardware::vu_svg::{
     scale_arc_for, scale_needle_tip, scale_point, VuScale, PIVOT_X, PIVOT_Y, VU_H, VU_W,
 };
@@ -41,12 +41,25 @@ pub enum VuFace {
     AmberBlue,
     /// Blue-lit card, white printing.
     Blue,
+    /// The modern console movement: a near-black card behind glass with the
+    /// lamp *behind the needle*, so the light pools at the pivot and falls
+    /// off upward, and the scale printed white over it.
+    ///
+    /// The one face that takes `tint` — the glow, the pool in the card and
+    /// the bloom off the needle all follow the colour a panel asks for.
+    Backlit,
 }
 
 impl VuFace {
     /// Every face in the kit, so a test or a contact sheet can walk them all
     /// without anyone having to remember to add the new one.
-    pub const ALL: [VuFace; 4] = [Self::Amber, Self::Ivory, Self::AmberBlue, Self::Blue];
+    pub const ALL: [VuFace; 5] = [
+        Self::Amber,
+        Self::Ivory,
+        Self::AmberBlue,
+        Self::Blue,
+        Self::Backlit,
+    ];
 
     /// How this face is printed and lit — see
     /// [`vu_kit`](crate::hardware::vu_kit).
@@ -61,7 +74,17 @@ impl VuFace {
             Self::Ivory => &kit::IVORY,
             Self::AmberBlue => &kit::AMBER_BLUE,
             Self::Blue => &kit::BLUE,
+            Self::Backlit => &kit::BACKLIT,
         }
+    }
+
+    /// Whether this face takes a colour from the call site.
+    ///
+    /// Almost none do. A period card is the colour it is, and recolouring one
+    /// would be a different unit rather than the same one under a different
+    /// lamp — which is exactly what a backlit movement *is*.
+    pub fn is_tintable(self) -> bool {
+        self.spec().wash != Wash::None
     }
 }
 
@@ -143,6 +166,14 @@ pub fn VuMeter(
     /// What the card is printed with — a VU standard or a plain decibel scale.
     #[props(default)]
     card: VuScale,
+    /// The colour a backlit movement is lit in.
+    ///
+    /// Only [`VuFace::Backlit`] takes one: on the period faces the card is
+    /// the colour it is, and a tint would be a recolour of a real part. Here
+    /// the glow, the pool in the card and the bloom off the needle all follow
+    /// it, and the printed scale stays white.
+    #[props(default)]
+    tint: Option<String>,
 ) -> Element {
     let value = match mode {
         VuMode::GainReduction => card.from_gain_reduction_db(value_db as f64),
@@ -154,6 +185,23 @@ pub fn VuMeter(
     let w = width * scale;
     let h = width * (VU_H / VU_W) * scale;
     let spec = face.spec();
+    // A tint only reaches a face that says it takes one.
+    let wash = tint.as_deref().filter(|_| spec.wash != Wash::None);
+    let card_css = wash
+        .and_then(|c| spec.wash.card(c))
+        .unwrap_or_else(|| spec.card.to_string());
+    let lamp_css = match wash.and_then(|c| spec.wash.lamp(c)) {
+        Some(color) => spec.lamp.map(|l| {
+            format!(
+                "radial-gradient(ellipse at {:.0}% {:.0}%, {color} 0%, rgba(0,0,0,0) {:.0}%)",
+                l.x, l.y, l.reach,
+            )
+        }),
+        None => spec.lamp_css(),
+    };
+    let halo_color = wash
+        .and_then(|c| spec.wash.halo(c))
+        .or_else(|| spec.needle.halo.map(|h| h.color.to_string()));
 
     if bezel {
         let b = match bezel_style {
@@ -210,7 +258,7 @@ pub fn VuMeter(
                         2.0 * scale,
                         5.0 * scale,
                     ),
-                    VuMeter { scale, width, face, mode, value_db, legend, card }
+                    VuMeter { scale, width, face, mode, value_db, legend, card, tint }
                 }
 
                 // The vent under the glass, which is most of what says the
@@ -241,14 +289,14 @@ pub fn VuMeter(
                  background:{}; border-radius:{:.1}px; overflow:hidden; \
                  border:{:.1}px solid rgba(0,0,0,0.55); \
                  box-shadow:inset 0 0 {:.1}px rgba(0,0,0,0.45);",
-                spec.card,
+                card_css,
                 3.0 * scale,
                 (1.5 * scale).max(1.0),
                 10.0 * scale,
             ),
 
             // Lamp wash — the meter is lit from behind the card.
-            if let Some(lamp) = spec.lamp_css() {
+            if let Some(lamp) = lamp_css {
                 div {
                     style: format!(
                         "position:absolute; inset:0; background:{lamp}; \
@@ -320,6 +368,20 @@ pub fn VuMeter(
                 }
 
                 // Needle + hub.
+                // The bloom off a lit needle: wide faint strokes under the
+                // crisp one. A needle in front of a lamp is not a line.
+                if let (Some(halo), Some(color)) = (spec.needle.halo, halo_color.as_deref()) {
+                    for (i , w) in halo.widths(spec.needle.width).into_iter().enumerate() {
+                        line {
+                            key: "halo{i}",
+                            x1: "{PIVOT_X:.2}", y1: "{PIVOT_Y:.2}",
+                            x2: "{nx:.2}", y2: "{ny:.2}",
+                            stroke: "{color}",
+                            stroke_width: "{w:.2}",
+                            stroke_linecap: "round",
+                        }
+                    }
+                }
                 line {
                     "data-testid": "vu-needle",
                     x1: "{PIVOT_X:.2}", y1: "{PIVOT_Y:.2}",

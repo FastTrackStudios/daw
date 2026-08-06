@@ -10,7 +10,7 @@
 //! One const per face — see [`vu_kit`](crate::hardware::vu_kit) for how to
 //! add one, and the `vu_sheet` test for how to look at it.
 
-use super::vu_kit::{Bezel, Glow, Lamp, Needle, Vent, VuSpec};
+use super::vu_kit::{Bezel, Glow, Halo, Lamp, Needle, Vent, VuSpec, Wash};
 
 // ─────────────────────────────────────────────────────────────────────────
 // Bezels
@@ -110,6 +110,21 @@ pub const LIT_BLUE: Bezel = Bezel {
     ..BLACK_RACK
 };
 
+/// A deep rectangular recess: the movement set well back behind glass, with
+/// the opening's walls doing the work rather than a frame around it. The
+/// modern console look — no vent, because there is no bulb to cool.
+pub const RECESSED: Bezel = Bezel {
+    frame: "linear-gradient(180deg, #212429 0%, #15181c 60%, #0d0f12 100%)",
+    radius: 3.0,
+    glow: None,
+    top: "#07080a",
+    left: "#0d0f12",
+    right: "#31353b",
+    bottom: "#454a51",
+    depth: 13.0,
+    vent: None,
+};
+
 /// A chromed ring around a lit movement — the halo reads doubly well off
 /// polished metal.
 pub const LIT_CHROME: Bezel = Bezel {
@@ -131,6 +146,7 @@ const DARK_NEEDLE: Needle = Needle {
     width: 1.1,
     hub_r: 4.0,
     hub_opacity: 0.9,
+    halo: None,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -149,6 +165,7 @@ pub static AMBER: VuSpec = VuSpec {
     }),
     glass: Some(GLASS),
     bezel: BLACK_RACK,
+    wash: Wash::None,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -170,6 +187,7 @@ pub static IVORY: VuSpec = VuSpec {
     }),
     glass: Some(GLASS),
     bezel: BLACK_RACK,
+    wash: Wash::None,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -193,6 +211,7 @@ pub static AMBER_BLUE: VuSpec = VuSpec {
     }),
     glass: Some(GLASS),
     bezel: BLACK_RACK,
+    wash: Wash::None,
 };
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -214,4 +233,54 @@ pub static BLUE: VuSpec = VuSpec {
     }),
     glass: Some(GLASS),
     bezel: BLACK_RACK,
+    wash: Wash::None,
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Backlit — the modern console movement: a near-black card behind glass with
+// the lamp *behind the needle*, so the light pools at the pivot and falls off
+// upward, and the scale printed white over it.
+//
+// The one face in the kit that takes a colour from the call site. On the
+// others the card is the colour it is; here the whole look is a lamp behind
+// smoked glass, and which colour that lamp is is a decision the panel makes.
+// Pass `tint` to `VuMeter` and the glow, the pool in the card and the bloom
+// off the needle all follow it. The print stays white — a lit meter is read
+// by contrast against the glow.
+// ─────────────────────────────────────────────────────────────────────────
+pub static BACKLIT: VuSpec = VuSpec {
+    card: "radial-gradient(ellipse at 50% 104%, #12294a 0%, #05070a 62%)",
+    ink: "#eef3f8",
+    // No red stretch. This is a compression meter, not a level meter — there
+    // is no 0 VU on it to be over, and the reference prints the whole scale
+    // in one colour.
+    hot: "#eef3f8",
+    needle: Needle {
+        color: "#ffffff",
+        width: 1.5,
+        hub_r: 3.0,
+        hub_opacity: 0.55,
+        halo: Some(Halo {
+            color: "rgba(190,222,255,0.34)",
+            spread: 6.5,
+        }),
+    },
+    // Behind the needle, at the pivot, falling off upward — not a wash across
+    // the top like a bulb-lit card. Tight: the corners of the card stay near
+    // black, which is what makes the pool read as a lamp rather than a colour.
+    lamp: Some(Lamp {
+        color: "rgba(130,190,255,0.50)",
+        x: 50.0,
+        y: 102.0,
+        reach: 60.0,
+    }),
+    // Heavier than a period meter's: this one is read through real glass, and
+    // the sweep across the top-left corner is most of what says so.
+    glass: Some(
+        "linear-gradient(146deg, rgba(255,255,255,0.26) 0%, \
+         rgba(255,255,255,0.10) 15%, rgba(255,255,255,0.02) 30%, \
+         rgba(255,255,255,0.0) 44%, rgba(0,0,0,0.26) 100%)",
+    ),
+    bezel: RECESSED,
+    wash: Wash::Backlit,
 };

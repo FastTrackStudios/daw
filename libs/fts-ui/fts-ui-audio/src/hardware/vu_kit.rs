@@ -41,6 +41,76 @@ pub struct Needle {
     /// so only its top half shows — which is what a real movement looks like.
     pub hub_r: f64,
     pub hub_opacity: f64,
+    /// Light bleeding off the needle itself, on a backlit movement.
+    ///
+    /// A needle in front of a lamp is not a line — it is a line with the
+    /// light spilling around it. Drawn as wide, faint strokes under the crisp
+    /// one rather than a blur filter, which does not survive every renderer.
+    pub halo: Option<Halo>,
+}
+
+/// The bloom around a lit needle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Halo {
+    pub color: &'static str,
+    /// How much wider the bloom is than the needle.
+    pub spread: f64,
+}
+
+impl Halo {
+    /// The bloom's strokes, widest first, so the crisp needle can be drawn
+    /// over them. Two is enough to read as light and cheap enough to be free.
+    pub fn widths(&self, needle_width: f64) -> [f64; 2] {
+        [
+            needle_width * self.spread,
+            needle_width * (1.0 + (self.spread - 1.0) * 0.45),
+        ]
+    }
+}
+
+/// How a face takes a colour asked for at the call site.
+///
+/// Most movements do not: an LA-2A's card is the colour it is. A backlit one
+/// is the exception — the whole look is a lamp behind smoked glass, and which
+/// colour that lamp is is a decision a *panel* makes, not the movement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Wash {
+    /// Fixed. A tint passed to this face is ignored.
+    None,
+    /// The colour becomes the glow behind the needle, the pool in the card
+    /// and the bloom off the needle. The print stays white — a lit meter is
+    /// read by contrast against the glow, not by tinting the numbers too.
+    Backlit,
+}
+
+impl Wash {
+    /// The card, under `color`.
+    pub fn card(self, color: &str) -> Option<String> {
+        match self {
+            Self::None => None,
+            Self::Backlit => Some(format!(
+                "radial-gradient(ellipse at 50% 104%, \
+                 color-mix(in srgb, {color} 30%, #05070a) 0%, #05070a 62%)"
+            )),
+        }
+    }
+
+    /// The lamp behind it. `color-mix` against `transparent` is how a hex
+    /// becomes a translucent glow without the caller writing rgba by hand.
+    pub fn lamp(self, color: &str) -> Option<String> {
+        match self {
+            Self::None => None,
+            Self::Backlit => Some(format!("color-mix(in srgb, {color} 50%, transparent)")),
+        }
+    }
+
+    /// The bloom off the needle.
+    pub fn halo(self, color: &str) -> Option<String> {
+        match self {
+            Self::None => None,
+            Self::Backlit => Some(format!("color-mix(in srgb, {color} 34%, transparent)")),
+        }
+    }
 }
 
 /// The bulb behind the card.
@@ -154,6 +224,8 @@ pub struct VuSpec {
     /// The reflection on the glass over the card. `None` for an open face.
     pub glass: Option<&'static str>,
     pub bezel: Bezel,
+    /// How this face takes a colour asked for at the call site.
+    pub wash: Wash,
 }
 
 impl VuSpec {
@@ -194,9 +266,16 @@ mod tests {
                 "{name}'s hub opacity is not an opacity",
             );
             if let Some(l) = spec.lamp {
+                // The bulb may sit a little outside the card — a backlit
+                // movement's is behind the *pivot*, which is below the card's
+                // bottom edge, and that is exactly what makes the light pool
+                // under the needle instead of washing the whole face. What it
+                // may not do is sit somewhere that lights nothing.
                 assert!(
-                    (0.0..=100.0).contains(&l.x) && (0.0..=100.0).contains(&l.y),
-                    "{name}'s bulb is off the card",
+                    (-25.0..=125.0).contains(&l.x) && (-25.0..=125.0).contains(&l.y),
+                    "{name}'s bulb at ({}, {}) is nowhere near the card",
+                    l.x,
+                    l.y,
                 );
                 assert!(l.reach > 0.0, "{name}'s lamp reaches nowhere");
             }

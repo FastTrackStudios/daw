@@ -26,6 +26,10 @@ use fts_ui_audio::hardware::vu_svg::VuScale;
 /// scale that crowds the wrong end.
 const READINGS: [f32; 3] = [0.0, 6.0, 14.0];
 
+/// The backlit face lit in the colours a panel might ask for. Its whole look
+/// is a lamp behind smoked glass, so this is the axis that matters for it.
+const LIT_COLOURS: [&str; 4] = ["#4a9eff", "#c0392b", "#39c07a", "#e8a33d"];
+
 #[component]
 fn Sheet() -> Element {
     rsx! {
@@ -67,6 +71,31 @@ fn Sheet() -> Element {
                         legend: "VU".to_string(),
                         bezel: true,
                         card: VuScale::Vu,
+                    }
+                }
+            }
+
+            // The backlit face, which is the one that takes a colour from the
+            // call site: same movement, same spec, different lamp.
+            div {
+                style: "margin-top:6px; color:#dfe3e8; font-size:12px; \
+                        font-weight:700; letter-spacing:0.04em;",
+                "BACKLIT — TINTED PER PANEL"
+            }
+            div {
+                style: "display:flex; flex-wrap:wrap; gap:16px; padding:8px 0 18px;",
+                for (i , color) in LIT_COLOURS.iter().enumerate() {
+                    VuMeter {
+                        key: "lit{i}",
+                        scale: 1.0,
+                        width: 168.0,
+                        face: VuFace::Backlit,
+                        mode: VuMode::GainReduction,
+                        value_db: 7.0,
+                        legend: "dB".to_string(),
+                        bezel: true,
+                        card: VuScale::Vu,
+                        tint: color.to_string(),
                     }
                 }
             }
@@ -120,7 +149,7 @@ fn shots_dir() -> PathBuf {
 #[tokio::test]
 async fn shot_every_vu_face_in_the_kit() {
     let tester = render(Sheet)
-        .with_window_size(760, 440 + 130 * VuFace::ALL.len() as u32)
+        .with_window_size(800, 620 + 130 * VuFace::ALL.len() as u32)
         .build();
     let _ = tester.pump().await;
     tester.relayout();
@@ -129,7 +158,8 @@ async fn shot_every_vu_face_in_the_kit() {
     let meters = tester.query_all(by_testid("vu-meter")).immediately();
     // Each face row is the readings plus one framed; then the bezel row is
     // one movement per frame in the kit.
-    let expected = VuFace::ALL.len() * (READINGS.len() + 1) + BezelStyle::ALL.len();
+    let expected =
+        VuFace::ALL.len() * (READINGS.len() + 1) + LIT_COLOURS.len() + BezelStyle::ALL.len();
     assert_eq!(
         meters.len(),
         expected,
@@ -163,7 +193,7 @@ async fn shot_every_vu_face_in_the_kit() {
     let bezels = tester.query_all(by_testid("vu-bezel")).immediately();
     assert_eq!(
         bezels.len(),
-        VuFace::ALL.len() + BezelStyle::ALL.len(),
+        VuFace::ALL.len() + LIT_COLOURS.len() + BezelStyle::ALL.len(),
         "not every frame drew",
     );
     let lit = bezels
@@ -174,6 +204,15 @@ async fn shot_every_vu_face_in_the_kit() {
         lit,
         BezelStyle::ALL.iter().filter(|s| s.is_lit()).count(),
         "the lit frames did not draw as lit",
+    );
+
+    // Exactly one face takes a colour. The rest are real parts in the colour
+    // they are, and quietly recolouring one would be a different unit.
+    let tintable: Vec<VuFace> = VuFace::ALL.into_iter().filter(|f| f.is_tintable()).collect();
+    assert_eq!(
+        tintable,
+        vec![VuFace::Backlit],
+        "the wrong faces claim to take a tint",
     );
 
     let path = shots_dir().join("kit.png");
