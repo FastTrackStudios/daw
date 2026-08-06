@@ -52,16 +52,19 @@ pub static EDITOR_FORMS: &[EditorForm] = &[
     EditorForm::Mini,
 ];
 
-/// 19" rack width and the height of one rack unit, in millimetres.
-const RACK_W_MM: f64 = 482.0;
-const RACK_U_MM: f64 = 44.45;
+/// How many rack units a face's own drawing is.
+///
+/// The panels are drawn as 2U units — an LA-2A or an 1176 sitting in a rack —
+/// so the face's preferred size *is* the 2U size, and the other rack forms are
+/// that scaled by their unit count. Deriving them from the 19"-at-2px/mm table
+/// instead gave a 1U editor 89px tall: physically true, and unrelated to the
+/// artwork it had to draw.
+pub const FACE_RACK_UNITS: f64 = 2.0;
+
 /// A 500-series module, in millimetres.
 const MODULE_W_MM: f64 = 38.0;
 const MODULE_H_MM: f64 = 133.0;
 
-/// Pixels per millimetre for the rack forms — chosen so 3U lands on the size
-/// the faces are already drawn for (about 950 px of panel).
-const RACK_PX_PER_MM: f64 = 2.0;
 /// A 500-series module drawn at a usable width rather than a true 76 px.
 const MODULE_PX_PER_MM: f64 = 7.4;
 
@@ -116,11 +119,11 @@ impl EditorForm {
     /// `Responsive` is the face's own answer; the rest are the hardware sizes,
     /// which is the whole point — a 1U editor is short because 1U is short.
     pub fn editor_size(self, rail_w: f64, face_preferred: (u32, u32)) -> (u32, u32) {
+        // A rack is one width: units add height and nothing else, so 1U is
+        // exactly half of 2U with the same window width.
         let rack = |units: f64| {
-            (
-                (RACK_W_MM * RACK_PX_PER_MM + rail_w) as u32,
-                (RACK_U_MM * units * RACK_PX_PER_MM) as u32,
-            )
+            let (w, h) = face_preferred;
+            (w, (h as f64 * units / FACE_RACK_UNITS) as u32)
         };
         match self {
             Self::Responsive => face_preferred,
@@ -208,6 +211,15 @@ mod tests {
         // An id from a newer build resolves to nothing rather than the wrong
         // size — same contract as the profile ids.
         assert_eq!(EditorForm::from_id("pedal"), None);
+    }
+
+    #[test]
+    fn a_rack_unit_is_half_of_two_and_the_face_is_two() {
+        let (w2, h2) = EditorForm::Rack2U.editor_size(RAIL, PREFERRED);
+        assert_eq!((w2, h2), PREFERRED, "the faces are drawn 2U, so 2U is their own size");
+        let (w1, h1) = EditorForm::Rack1U.editor_size(RAIL, PREFERRED);
+        assert_eq!(w1, w2, "a rack is one width");
+        assert_eq!(h1, h2 / 2, "1U is half the height of 2U");
     }
 
     #[test]
