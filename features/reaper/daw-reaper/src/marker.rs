@@ -256,7 +256,6 @@ impl Markers for Reaper {
 
         Err(DawError::not_found("Marker", &id.to_string()))
     }
-
 }
 
 impl daw_proto::marker::MarkersStreamSource for Reaper {

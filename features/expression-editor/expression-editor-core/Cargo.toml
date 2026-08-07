@@ -1,0 +1,20 @@
+[package]
+name = "expression-editor-core"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Portable engine for the expression editor — note/curve document, camera, tuning, curve shaping, chords. No UI, no DSP, no DAW."
+
+# One dependency, and a deliberate one: keyflow-proto already has real
+# chord recognition (extensions, alterations, inversions, key-aware
+# spelling), and a second detector in the same tree would eventually
+# disagree with it about what a chord is called. It is wasm-clean, which
+# is the property that matters for the plugin and browser builds.
+#
+# Everything else domain-specific (MIDI events, audio analysis) still
+# lives in adapters, not here.
+[dependencies]
+keyflow-proto = { workspace = true }
+
+[dev-dependencies]

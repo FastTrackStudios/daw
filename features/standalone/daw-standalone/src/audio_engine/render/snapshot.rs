@@ -513,7 +513,7 @@ fn snapshot_track(
                                     // Stored as signed −8192..8191; midicore's
                                     // PitchBend is 14-bit unsigned centered at 8192.
                                     bend: PitchBend::new(
-                                        (pb.value as i32 + 8192).clamp(0, 16383) as u16,
+                                        (pb.value as i32 + 8192).clamp(0, 16383) as u16
                                     ),
                                 },
                             });

@@ -38,8 +38,8 @@
 
 use crate::error::{DawError, DawResult};
 use crate::routing::Routing;
-use crate::track::{TracksDirectExt as _, TracksProjectScope, TracksTrackScope};
 use crate::track::Tracks;
+use crate::track::{TracksDirectExt as _, TracksProjectScope, TracksTrackScope};
 use crate::{
     Fx, FxChainContext, ProjectContext, RecordInput, RouteLocation, RouteRef, SendMode, Track,
     TrackRef,
@@ -47,13 +47,19 @@ use crate::{
 
 impl<D: Tracks + ?Sized> Clone for ProjectHandle<'_, D> {
     fn clone(&self) -> Self {
-        Self { daw: self.daw, scope: self.scope.clone() }
+        Self {
+            daw: self.daw,
+            scope: self.scope.clone(),
+        }
     }
 }
 
 impl<D: Tracks + ?Sized> Clone for TrackHandle<'_, D> {
     fn clone(&self) -> Self {
-        Self { scope: self.scope.clone(), guid: self.guid.clone() }
+        Self {
+            scope: self.scope.clone(),
+            guid: self.guid.clone(),
+        }
     }
 }
 
@@ -71,7 +77,10 @@ pub trait DawHandle: Tracks + Sized {
     /// A handle on a specific project.
     fn project(&self, guid: impl Into<String>) -> ProjectHandle<'_, Self> {
         let ctx = ProjectContext::Project(guid.into());
-        ProjectHandle { daw: self, scope: self.tracks_direct().project(ctx) }
+        ProjectHandle {
+            daw: self,
+            scope: self.tracks_direct().project(ctx),
+        }
     }
 }
 
@@ -128,7 +137,11 @@ impl<'d, D: Tracks + ?Sized> ProjectHandle<'d, D> {
     /// A [`TrackTree`] builder over this project — folder hierarchies with
     /// the REAPER depth convention handled for you.
     pub fn tree(&self) -> TrackTree<'d, D> {
-        TrackTree { project: self.clone(), open: 0, last: None }
+        TrackTree {
+            project: self.clone(),
+            open: 0,
+            last: None,
+        }
     }
 }
 
@@ -192,7 +205,12 @@ impl<'d, D: crate::FxChains + Tracks + ?Sized> TrackHandle<'d, D> {
         let fx = fx_scope
             .get(index)
             .ok_or_else(|| DawError::Internal(format!("fx slot {label:?} vanished after add")))?;
-        Ok(FxSlotHandle { daw: self.scope.backend(), track_guid: self.guid.clone(), index, fx })
+        Ok(FxSlotHandle {
+            daw: self.scope.backend(),
+            track_guid: self.guid.clone(),
+            index,
+            fx,
+        })
     }
 
     /// Enable/bypass the FX at `index` (bypass = `enabled(false)`).
@@ -245,8 +263,11 @@ impl<'d, D: ?Sized> FxSlotHandle<'d, D> {
 impl<'d, D: crate::FxChains + ?Sized> FxSlotHandle<'d, D> {
     /// Enable/bypass this slot.
     pub fn set_enabled(&self, enabled: bool) -> DawResult<()> {
-        self.daw
-            .set_enabled(FxChainContext::track(self.track_guid.clone()), self.index, enabled)
+        self.daw.set_enabled(
+            FxChainContext::track(self.track_guid.clone()),
+            self.index,
+            enabled,
+        )
     }
 }
 
@@ -378,7 +399,9 @@ impl<'d, D: Tracks + ?Sized> TrackTree<'d, D> {
     /// track, per the depth convention).
     pub fn end(&mut self) -> DawResult<()> {
         if self.open == 0 {
-            return Err(DawError::Internal("TrackTree::end with no open folder".into()));
+            return Err(DawError::Internal(
+                "TrackTree::end with no open folder".into(),
+            ));
         }
         let Some((_, depth)) = self.last.as_mut() else {
             return Err(DawError::Internal("TrackTree::end before any track".into()));

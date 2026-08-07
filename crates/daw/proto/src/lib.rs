@@ -38,10 +38,10 @@ pub mod error;
 pub mod event_bus;
 pub mod ext_state;
 pub mod fx;
-pub mod groups;
-pub mod handle;
 pub mod fx_chains;
 pub mod fx_params;
+pub mod groups;
+pub mod handle;
 pub mod health;
 pub mod input;
 pub mod item;
@@ -131,14 +131,14 @@ pub use fx_chains::{FxChains, FxChainsRpc};
 pub use fx_params::FxParamsClient;
 pub use fx_params::{FxParams, FxParamsRpc};
 #[cfg(feature = "vox")]
-pub use take::TakesClient;
-pub use take::{Takes, TakesRpc};
-#[cfg(feature = "vox")]
 pub use record_control::RecordControlServiceClient;
 pub use record_control::{
-    RecordControlService, RecordControlServiceDispatcher, record_control_service_service_descriptor,
-    serve_record_control_service,
+    RecordControlService, RecordControlServiceDispatcher,
+    record_control_service_service_descriptor, serve_record_control_service,
 };
+#[cfg(feature = "vox")]
+pub use take::TakesClient;
+pub use take::{Takes, TakesRpc};
 #[cfg(feature = "vox")]
 pub use take_ranking::TakeRankingServiceClient;
 pub use take_ranking::{
@@ -155,10 +155,9 @@ pub use track::TracksClient;
 pub use track::{
     AddChildren, FolderDepthChange, InputMonitoringMode, LaneDisplay, RecordInput,
     ReorderTracksBehavior, Track, TrackError, TrackEvent, TrackExtStateRequest, TrackGroup,
-    TrackGrouping, TrackHierarchy, TrackHierarchyBuilder, TrackNode, TrackRef,
-    TrackShape, TrackStructureBuilder, TrackTree, Tracks, TracksExt, TracksRpc, assert_tracks_equal,
-    display_tracklist,
-    format_tracklist,
+    TrackGrouping, TrackHierarchy, TrackHierarchyBuilder, TrackNode, TrackRef, TrackShape,
+    TrackStructureBuilder, TrackTree, Tracks, TracksExt, TracksRpc, assert_tracks_equal,
+    display_tracklist, format_tracklist,
 };
 pub use transport::*;
 pub use ui::*;

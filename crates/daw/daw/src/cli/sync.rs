@@ -15,7 +15,9 @@ use crate::rpc::Daw;
 use eyre::Result;
 use serde_json::{Value, json};
 
-use crate::cli::{connect, discover_all_sockets, kill_reaper, profile_by_id, spawn_reaper_with_env};
+use crate::cli::{
+    connect, discover_all_sockets, kill_reaper, profile_by_id, spawn_reaper_with_env,
+};
 
 /// REAPER ext-state section the sync runtime writes its beacons under.
 const EXT_SECTION: &str = "FTS_SYNC_EXT";

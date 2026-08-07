@@ -260,8 +260,7 @@ impl WebRenderer {
         let ItemRef::Guid(item_guid) = &loc.item else {
             return;
         };
-        let Some(active) =
-            Takes::get_active_take(&self.daw, ctx, ItemRef::Guid(item_guid.clone()))
+        let Some(active) = Takes::get_active_take(&self.daw, ctx, ItemRef::Guid(item_guid.clone()))
         else {
             return;
         };

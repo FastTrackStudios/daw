@@ -18,7 +18,7 @@ use architect::{Layer, Services, layers};
 use daw_proto::{
     action_registry, audio_engine, automation, batch, dawfile_service, event_bus, ext_state, fx,
     fx_chains, fx_params, health, input, item, live_midi, marker, midi, peak, plugin_loader,
-    project, region, routing, screenset, take, tempo_map, toolbar, track, transport,
+    project, region, resource, routing, screenset, take, tempo_map, toolbar, track, transport,
     window_geometry,
 };
 
@@ -54,6 +54,7 @@ impl Services for Standalone {
             action_registry::Service,
             input::Service,
             toolbar::Service,
+            resource::Service,
             screenset::Service,
             dawfile_service::Service,
             window_geometry::Service,

@@ -26,7 +26,7 @@ use reaper_medium::{
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::{CStr, CString};
 use std::ptr::null_mut;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
@@ -885,6 +885,126 @@ fn register_action_core(
     id
 }
 
+/// REAPER's MIDI editor action section.
+///
+/// Actions live in sections, and the MIDI editor's toolbar and key map
+/// only see actions registered in *this* one. An action registered the
+/// normal way lands in Main (0) — it shows up in the main action list and
+/// works on a global keybind, but a MIDI-toolbar button referencing it
+/// silently does nothing, because REAPER cannot resolve the command in
+/// the section the toolbar belongs to.
+pub const MIDI_EDITOR_SECTION_ID: i32 = 32060;
+
+/// Handlers for actions registered outside the Main section, by command id.
+///
+/// Needed because REAPER dispatches those through a *different* callback —
+/// see [`FtsSectionHook`].
+fn section_handlers() -> &'static Mutex<HashMap<u32, Arc<dyn Fn() + Send + Sync>>> {
+    static HANDLERS: OnceLock<Mutex<HashMap<u32, Arc<dyn Fn() + Send + Sync>>>> = OnceLock::new();
+    HANDLERS.get_or_init(Default::default)
+}
+
+/// Dispatches actions that live outside the Main section.
+///
+/// reaper-high registers `hook_command`, which REAPER only calls for the
+/// Main section. Anything registered into another section (the MIDI
+/// editor, say) arrives through `hook_command_2` instead, carrying the
+/// section it fired in. Without this, a section action registers fine,
+/// shows up in that section's action list, accepts a keybind and can be
+/// put on that section's toolbar — and then does nothing at all when
+/// invoked, because no callback is listening. That is not a hypothetical:
+/// it is exactly how this presented.
+struct FtsSectionHook;
+
+impl reaper_medium::HookCommand2 for FtsSectionHook {
+    fn call(
+        _section: reaper_medium::SectionContext,
+        command_id: reaper_medium::CommandId,
+        _value_change: reaper_medium::ActionValueChange,
+        _window: reaper_medium::WindowContext,
+    ) -> bool {
+        // Command ids come from `plugin_register_add_command_id`, which is
+        // global, so the id alone identifies the action — no need to match
+        // on the section as well.
+        let handler = section_handlers()
+            .lock_recoverable("section_handlers")
+            .get(&command_id.get())
+            .cloned();
+        match handler {
+            Some(handler) => {
+                handler();
+                true
+            }
+            // Not ours. Returning false lets REAPER and other extensions
+            // have it.
+            None => false,
+        }
+    }
+}
+
+/// Install [`FtsSectionHook`] once.
+fn ensure_section_hook() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if let Err(err) = Reaper::get()
+            .medium_session()
+            .plugin_register_add_hook_command_2::<FtsSectionHook>()
+        {
+            warn!("Failed to register hook_command_2: {err:?} — section actions will not fire");
+        } else {
+            info!("Registered hook_command_2 for non-Main section actions");
+        }
+    });
+}
+
+/// Additionally expose an action in `section_id`.
+///
+/// Call this *after* the normal registration. Two things have to happen
+/// for a section action to work, and doing only the first is a silent
+/// failure:
+///
+/// 1. **Registration** — a `custom_action` entry in that section, which is
+///    what makes the action appear there, bindable and toolbar-able.
+/// 2. **Dispatch** — a `hook_command_2` callback, because REAPER does not
+///    route non-Main sections through the ordinary `hook_command` that
+///    reaper-high installs.
+///
+/// Note this gets its *own* command id, distinct from the Main-section
+/// registration of the same name — REAPER does not dedupe them — which is
+/// why the handler is stored per id rather than per name.
+///
+/// Must be called from the main thread.
+pub fn register_action_in_section_main_thread(
+    command_name: &str,
+    description: &str,
+    section_id: i32,
+    trigger: Arc<dyn Fn() + Send + Sync>,
+) -> u32 {
+    ensure_section_hook();
+
+    let action = Reaper::get().register_action_in_section(
+        command_name.to_string(),
+        description.to_string(),
+        section_id,
+        {
+            let trigger = trigger.clone();
+            move || trigger()
+        },
+        ActionKind::NotToggleable,
+    );
+    let id = action.command_id().get();
+
+    section_handlers()
+        .lock_recoverable("section_handlers")
+        .insert(id, trigger);
+
+    info!(command_name, section_id, id, "Registered action in section");
+    // Held for the process lifetime: dropping a `RegisteredAction`
+    // unregisters it, and these actions live as long as the extension.
+    std::mem::forget(action);
+    id
+}
+
 pub fn unregister_action_main_thread(command_name: &str) -> bool {
     let removed = owned_actions()
         .lock_recoverable("action_registry")
@@ -1183,7 +1303,11 @@ impl ActionRegistration for crate::Reaper {
         let requested_action = action_id.to_string();
 
         let command_id = if let Ok(id) = action_id.parse::<u32>() {
-            if id == 0 { None } else { Some(CommandId::new(id)) }
+            if id == 0 {
+                None
+            } else {
+                Some(CommandId::new(id))
+            }
         } else {
             named_command_lookup(action_id)
         };

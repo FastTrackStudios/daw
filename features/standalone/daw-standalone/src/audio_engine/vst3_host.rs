@@ -1867,17 +1867,29 @@ fn midi_to_ctrl_assignment(message: &daw_proto::MidiEvent) -> Option<(i16, u8, f
             channel,
             controller,
             value,
-        } => Some((controller.get() as i16, channel.index(), value.get() as f64 / 127.0)),
+        } => Some((
+            controller.get() as i16,
+            channel.index(),
+            value.get() as f64 / 127.0,
+        )),
         MidiEvent::PitchBend { channel, bend } => {
             // 14-bit unsigned 0..16383 (center 8192) → normalized 0..1.
-            Some((kPitchBend as i16, channel.index(), bend.get() as f64 / 16383.0))
+            Some((
+                kPitchBend as i16,
+                channel.index(),
+                bend.get() as f64 / 16383.0,
+            ))
         }
-        MidiEvent::ProgramChange { channel, program } => {
-            Some((kCtrlProgramChange as i16, channel.index(), program.get() as f64 / 127.0))
-        }
-        MidiEvent::ChannelPressure { channel, pressure } => {
-            Some((kAfterTouch as i16, channel.index(), pressure.get() as f64 / 127.0))
-        }
+        MidiEvent::ProgramChange { channel, program } => Some((
+            kCtrlProgramChange as i16,
+            channel.index(),
+            program.get() as f64 / 127.0,
+        )),
+        MidiEvent::ChannelPressure { channel, pressure } => Some((
+            kAfterTouch as i16,
+            channel.index(),
+            pressure.get() as f64 / 127.0,
+        )),
         _ => None,
     }
 }

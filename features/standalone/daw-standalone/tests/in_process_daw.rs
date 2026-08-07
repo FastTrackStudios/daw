@@ -294,7 +294,9 @@ async fn track_structure_routing_and_colors_through_in_process_daw() -> eyre::Re
     Ok(())
 }
 
-async fn next_track_event(rx: &mut daw_control::EventStream<TrackStreamEvent>) -> eyre::Result<TrackStreamEvent> {
+async fn next_track_event(
+    rx: &mut daw_control::EventStream<TrackStreamEvent>,
+) -> eyre::Result<TrackStreamEvent> {
     let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
         .await
         .map_err(|_| eyre::eyre!("timed out waiting for track event"))??
@@ -304,7 +306,9 @@ async fn next_track_event(rx: &mut daw_control::EventStream<TrackStreamEvent>) -
     Ok(out.expect("vox SelfRef::map runs once"))
 }
 
-async fn next_marker_event(rx: &mut daw_control::EventStream<MarkerStreamEvent>) -> eyre::Result<MarkerStreamEvent> {
+async fn next_marker_event(
+    rx: &mut daw_control::EventStream<MarkerStreamEvent>,
+) -> eyre::Result<MarkerStreamEvent> {
     let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
         .await
         .map_err(|_| eyre::eyre!("timed out waiting for marker event"))??
@@ -330,7 +334,9 @@ async fn wait_for_marker_event(
     }
 }
 
-async fn next_region_event(rx: &mut daw_control::EventStream<RegionStreamEvent>) -> eyre::Result<RegionStreamEvent> {
+async fn next_region_event(
+    rx: &mut daw_control::EventStream<RegionStreamEvent>,
+) -> eyre::Result<RegionStreamEvent> {
     let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
         .await
         .map_err(|_| eyre::eyre!("timed out waiting for region event"))??

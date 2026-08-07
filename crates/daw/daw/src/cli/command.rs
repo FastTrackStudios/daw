@@ -25,7 +25,9 @@ impl From<ScreensetKindArg> for crate::service::ScreensetKind {
         }
     }
 }
-use crate::cli::cli_values::{OnOff, ToolbarIconKindValue, TrackColor, TrackFolderDepth, TrackName};
+use crate::cli::cli_values::{
+    OnOff, ToolbarIconKindValue, TrackColor, TrackFolderDepth, TrackName,
+};
 use eyre::Result;
 use serde_json::Value;
 
@@ -47,6 +49,17 @@ struct Cli {
 #[derive(Subcommand)]
 #[allow(clippy::enum_variant_names)]
 enum Command {
+    /// Version this machine's REAPER configuration into the repo, or
+    /// restore it.
+    ///
+    /// Only the ~350 KB that defines the setup travels: keybindings,
+    /// toolbars, mouse modifiers, the ReaPack manifest and a filtered
+    /// reaper.ini. ReaPack's downloads are never versioned — the
+    /// registry restores them.
+    ReaperConfig {
+        #[command(subcommand)]
+        action: ReaperConfigCommand,
+    },
     /// Show project info
     Info,
     /// List all tracks
@@ -417,6 +430,16 @@ enum Command {
         #[command(subcommand)]
         command: ActionsCommand,
     },
+    /// Reload REAPER's color theme, applying edits without a restart
+    ///
+    /// With no path this re-opens whatever theme is active — REAPER re-reads
+    /// rtconfig.txt and the image folder on every open, so that *is* a reload.
+    ThemeReload {
+        /// Theme to load (.ReaperTheme). Omit to reload the active one.
+        path: Option<PathBuf>,
+    },
+    /// Show REAPER's resource, ini and active-theme paths
+    ThemePaths,
     /// Return dynamic toolbar availability and tracked buttons
     Toolbar,
     /// Query live REAPER toolbar contents
@@ -942,6 +965,9 @@ where
 async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) -> Result<()> {
     match command {
         Command::Info => crate::cli::cmd_info(daw, json).await?,
+        // Purely local file work — no DAW connection needed, so this
+        // arm must come before anything that assumes a live session.
+        Command::ReaperConfig { ref action } => run_reaper_config(action)?,
         Command::Tracks => crate::cli::cmd_tracks(daw, json).await?,
         Command::Track { ref track } => crate::cli::cmd_track(daw, track, json).await?,
         Command::Call {
@@ -964,7 +990,9 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
             print_value(crate::cli::ops::run_batch(daw, &text).await?, json)?
         }
         Command::Fx { ref track } => crate::cli::cmd_fx(daw, track, json).await?,
-        Command::Params { ref track, ref fx } => crate::cli::cmd_params(daw, track, fx, json).await?,
+        Command::Params { ref track, ref fx } => {
+            crate::cli::cmd_params(daw, track, fx, json).await?
+        }
         Command::LastTouchedFx => print_value(crate::cli::ops::last_touched_fx(daw).await?, json)?,
         Command::BypassFx { ref track, ref fx } => print_value(
             crate::cli::ops::fx_set_enabled(daw, track, fx, false).await?,
@@ -1030,10 +1058,14 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
         Command::Transport => crate::cli::cmd_transport(daw, json).await?,
         Command::Play => print_value(crate::cli::ops::transport_control(daw, "play").await?, json)?,
         Command::Stop => print_value(crate::cli::ops::transport_control(daw, "stop").await?, json)?,
-        Command::Pause => print_value(crate::cli::ops::transport_control(daw, "pause").await?, json)?,
-        Command::Record => {
-            print_value(crate::cli::ops::transport_control(daw, "record").await?, json)?
-        }
+        Command::Pause => print_value(
+            crate::cli::ops::transport_control(daw, "pause").await?,
+            json,
+        )?,
+        Command::Record => print_value(
+            crate::cli::ops::transport_control(daw, "record").await?,
+            json,
+        )?,
         Command::PlayPause => print_value(
             crate::cli::ops::transport_control(daw, "play_pause").await?,
             json,
@@ -1048,7 +1080,9 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
         Command::Regions => crate::cli::cmd_regions(daw, json).await?,
 
         Command::Plugins => crate::cli::cmd_plugins(daw, json).await?,
-        Command::LoadedPlugins => print_value(crate::cli::ops::plugin_loader_list(daw).await?, json)?,
+        Command::LoadedPlugins => {
+            print_value(crate::cli::ops::plugin_loader_list(daw).await?, json)?
+        }
         Command::LoadPlugin { ref path } => {
             print_value(crate::cli::ops::plugin_loader_load(daw, path).await?, json)?
         }
@@ -1064,9 +1098,10 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
         Command::SaveAll => print_value(crate::cli::ops::save_all_projects(daw).await?, json)?,
         Command::Undo => print_value(crate::cli::ops::project_undo(daw).await?, json)?,
         Command::Redo => print_value(crate::cli::ops::project_redo(daw).await?, json)?,
-        Command::RunCommand { ref command } => {
-            print_value(crate::cli::ops::project_run_command(daw, command).await?, json)?
-        }
+        Command::RunCommand { ref command } => print_value(
+            crate::cli::ops::project_run_command(daw, command).await?,
+            json,
+        )?,
 
         Command::AddTrack { ref name, at } => {
             crate::cli::cmd_add_track(daw, name.as_deref(), at, json).await?
@@ -1107,7 +1142,10 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
         Command::TrackRename {
             ref track,
             ref name,
-        } => print_value(crate::cli::ops::track_rename(daw, track, &name.0).await?, json)?,
+        } => print_value(
+            crate::cli::ops::track_rename(daw, track, &name.0).await?,
+            json,
+        )?,
         Command::TrackColor { ref track, color } => print_value(
             crate::cli::ops::track_set_color(daw, track, color.0).await?,
             json,
@@ -1146,15 +1184,17 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
         )?,
 
         Command::AudioEngine => print_value(crate::cli::ops::audio_engine(daw).await?, json)?,
-        Command::AudioEngineDo { ref action } => {
-            print_value(crate::cli::ops::audio_engine_control(daw, action).await?, json)?
-        }
+        Command::AudioEngineDo { ref action } => print_value(
+            crate::cli::ops::audio_engine_control(daw, action).await?,
+            json,
+        )?,
         Command::Action { ref action_id } => {
             print_value(crate::cli::ops::action_execute(daw, action_id).await?, json)?
         }
-        Command::ActionLookup { ref command_name } => {
-            print_value(crate::cli::ops::action_lookup(daw, command_name).await?, json)?
-        }
+        Command::ActionLookup { ref command_name } => print_value(
+            crate::cli::ops::action_lookup(daw, command_name).await?,
+            json,
+        )?,
         Command::ActionToggle {
             ref command_name,
             is_on,
@@ -1170,7 +1210,8 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
                 limit,
                 columns,
             } => print_action_list(
-                crate::cli::ops::action_list(daw, filter, section, query.as_deref(), *limit).await?,
+                crate::cli::ops::action_list(daw, filter, section, query.as_deref(), *limit)
+                    .await?,
                 json,
                 columns,
             )?,
@@ -1190,7 +1231,8 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
                 limit,
                 columns,
             } => print_action_list(
-                crate::cli::ops::action_list(daw, "reaper", section, query.as_deref(), *limit).await?,
+                crate::cli::ops::action_list(daw, "reaper", section, query.as_deref(), *limit)
+                    .await?,
                 json,
                 columns,
             )?,
@@ -1217,12 +1259,14 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
                 columns,
             )?,
             ActionsCommand::Aliases => print_value(crate::cli::ops::action_aliases(), json)?,
-            ActionsCommand::ExecAlias { alias } => {
-                print_value(crate::cli::ops::action_execute_alias(daw, alias).await?, json)?
-            }
-            ActionsCommand::Lookup { command_name } => {
-                print_value(crate::cli::ops::action_lookup(daw, command_name).await?, json)?
-            }
+            ActionsCommand::ExecAlias { alias } => print_value(
+                crate::cli::ops::action_execute_alias(daw, alias).await?,
+                json,
+            )?,
+            ActionsCommand::Lookup { command_name } => print_value(
+                crate::cli::ops::action_lookup(daw, command_name).await?,
+                json,
+            )?,
             ActionsCommand::Exec { action_id } => {
                 print_value(crate::cli::ops::action_execute(daw, action_id).await?, json)?
             }
@@ -1234,8 +1278,15 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
                     .await?,
                 json,
             )?,
-            ActionsCommand::Toolbar => print_value(crate::cli::ops::toolbar_status(daw).await?, json)?,
+            ActionsCommand::Toolbar => {
+                print_value(crate::cli::ops::toolbar_status(daw).await?, json)?
+            }
         },
+        Command::ThemeReload { ref path } => print_value(
+            crate::cli::ops::theme_reload(daw, path.as_deref()).await?,
+            json,
+        )?,
+        Command::ThemePaths => print_value(crate::cli::ops::theme_paths(daw).await?, json)?,
         Command::Toolbar => print_value(crate::cli::ops::toolbar_status(daw).await?, json)?,
         Command::ToolbarLive { target } => print_value(
             crate::cli::ops::toolbar_live(daw, target.as_deref()).await?,
@@ -1394,5 +1445,76 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
         | Command::ServiceCatalog => unreachable!(),
     }
 
+    Ok(())
+}
+
+
+#[derive(clap::Subcommand, Debug)]
+enum ReaperConfigCommand {
+    /// Copy a live REAPER resource dir into the repo.
+    Export {
+        /// REAPER resource directory (default: $HOME/fts-dev).
+        resources: Option<std::path::PathBuf>,
+    },
+    /// Copy versioned config into a REAPER resource dir.
+    ///
+    /// `reaper.ini` is merged, not replaced: the target keeps its own
+    /// audio device and window layout.
+    Apply {
+        resources: Option<std::path::PathBuf>,
+    },
+    /// List what differs between a resource dir and the repo.
+    Diff {
+        resources: Option<std::path::PathBuf>,
+    },
+}
+
+fn reaper_config_dir() -> std::path::PathBuf {
+    std::env::var("FTS_REAPER_CONFIG_REPO")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../nix/reaper-config")
+        })
+}
+
+fn default_resources() -> std::path::PathBuf {
+    std::env::var("FTS_REAPER_RESOURCES")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("fts-dev")
+        })
+}
+
+/// Run a `reaper-config` subcommand.
+pub fn run_reaper_config(action: &ReaperConfigCommand) -> std::io::Result<()> {
+    use crate::reaper_config;
+    let repo = reaper_config_dir();
+    match action {
+        ReaperConfigCommand::Export { resources } => {
+            let live = resources.clone().unwrap_or_else(default_resources);
+            let written = reaper_config::export(&live, &repo)?;
+            println!("exported {} files from {}", written.len(), live.display());
+            for f in &written {
+                println!("  {}", f.display());
+            }
+        }
+        ReaperConfigCommand::Apply { resources } => {
+            let live = resources.clone().unwrap_or_else(default_resources);
+            let written = reaper_config::apply(&repo, &live)?;
+            println!("applied {} files to {}", written.len(), live.display());
+        }
+        ReaperConfigCommand::Diff { resources } => {
+            let live = resources.clone().unwrap_or_else(default_resources);
+            let changed = reaper_config::diff(&live, &repo);
+            if changed.is_empty() {
+                println!("in sync");
+            } else {
+                println!("{} files differ:", changed.len());
+                for f in &changed {
+                    println!("  {}", f.display());
+                }
+            }
+        }
+    }
     Ok(())
 }

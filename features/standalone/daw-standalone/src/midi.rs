@@ -20,6 +20,7 @@
 
 use daw_proto::item::SourceType;
 use daw_proto::midi::{
+    MidiTakeContent, MidiTakeSnapshot, WriteMode,
     HumanizeParams, Midi, MidiCC, MidiCCCreate, MidiChannelPressure, MidiChannelPressureCreate,
     MidiNote, MidiNoteCreate, MidiNoteExpression, MidiNoteExpressionCreate, MidiPitchBend,
     MidiPitchBendCreate, MidiPolyPressure, MidiPolyPressureCreate, MidiProgramChange,
@@ -85,6 +86,76 @@ fn renumber(notes: &mut [MidiNote]) {
 }
 
 impl Midi for Standalone {
+    // ── Bulk take access ───────────────────────────────────────────
+
+    fn read_take(&self, location: MidiTakeLocation) -> MidiTakeSnapshot {
+        MidiTakeSnapshot {
+            notes: Midi::notes(self, location.clone()),
+            ccs: Midi::ccs(self, location.clone(), None),
+            pitch_bends: Midi::pitch_bends(self, location.clone()),
+            channel_pressures: Midi::channel_pressures(self, location.clone()),
+            poly_pressures: Midi::poly_pressures(self, location.clone()),
+            note_expressions: Midi::note_expressions(self, location.clone()),
+            ppq: 960.0,
+            length_ppq: Midi::notes(self, location)
+                .iter()
+                .map(|n| n.end_ppq())
+                .fold(0.0, f64::max),
+        }
+    }
+
+    fn write_take(
+        &self,
+        location: MidiTakeLocation,
+        content: MidiTakeContent,
+        mode: WriteMode,
+    ) -> Vec<u32> {
+        if mode == WriteMode::Replace {
+            // Clear first so a replace is genuinely a replace; the
+            // per-index deletes below would otherwise leave the old
+            // notes interleaved with the new.
+            let existing: Vec<u32> = (0..Midi::note_count(self, location.clone())).collect();
+            Midi::delete_notes(self, location.clone(), existing);
+        }
+        let indices = Midi::add_notes(self, location.clone(), content.notes);
+        for cc in content.ccs {
+            Midi::add_cc(self, location.clone(), cc);
+        }
+        for pb in content.pitch_bends {
+            Midi::add_pitch_bend(self, location.clone(), pb);
+        }
+        for ne in content.note_expressions {
+            Midi::add_note_expression(self, location.clone(), ne);
+        }
+        indices
+    }
+
+    fn replace_range(
+        &self,
+        location: MidiTakeLocation,
+        range: PpqRange,
+        content: MidiTakeContent,
+    ) -> Vec<u32> {
+        // Delete high-to-low: every removal shifts the indices above
+        // it, so ascending order would delete the wrong notes.
+        let mut doomed: Vec<u32> = Midi::notes(self, location.clone())
+            .iter()
+            .filter(|n| n.overlaps(range.start, range.end))
+            .map(|n| n.index)
+            .collect();
+        doomed.sort_unstable_by(|a, b| b.cmp(a));
+        Midi::delete_notes(self, location.clone(), doomed);
+        Midi::write_take(self, location, content, WriteMode::Merge)
+    }
+
+    fn read_midi_file(&self, path: String, track_index: u32) -> Option<MidiTakeSnapshot> {
+        daw_proto::midi::smf::read(&path, track_index as usize)
+    }
+
+    fn write_midi_file(&self, path: String, content: MidiTakeContent, ppq: f64) -> bool {
+        daw_proto::midi::smf::write(&path, &content, ppq).is_ok()
+    }
+
     fn notes(&self, location: MidiTakeLocation) -> Vec<MidiNote> {
         let Some(take_guid) = resolve_take_guid(self, &location) else {
             return Vec::new();

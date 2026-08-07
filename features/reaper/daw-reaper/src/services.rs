@@ -33,8 +33,8 @@ use architect::{Layer, Services, layers};
 use daw_proto::{
     action_registry, audio_engine, automation, batch, dawfile_service, diagnostics, event_bus,
     ext_state, fx, fx_chains, fx_params, health, input, item, live_midi, marker, midi, peak,
-    plugin_loader, project, region, routing, screenset, take, tempo_map, toolbar, track, transport,
-    window_geometry, window_manager,
+    plugin_loader, project, region, resource, routing, screenset, take, tempo_map, toolbar, track,
+    transport, window_geometry, window_manager,
 };
 
 use crate::Reaper;
@@ -64,6 +64,11 @@ impl Services for Reaper {
             input::Service,
             toolbar::Service,
             screenset::Service,
+            // Resource paths + colour-theme loading. Mounted late: the trait
+            // existed and compiled for a long time with no consumer, so
+            // nothing noticed it was never in this list — an unmounted
+            // service answers with a schema mismatch, not "no such method".
+            resource::Service,
             dawfile_service::Service,
             window_geometry::Service,
             window_manager::Service,

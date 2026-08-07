@@ -350,5 +350,4 @@ impl TempoMap for Standalone {
             publish_tempo_map_event(self, &guid, TempoMapEvent::MapChanged(points));
         })
     }
-
 }

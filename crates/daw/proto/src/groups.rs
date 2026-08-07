@@ -71,16 +71,19 @@ mod group_id_tests {
     #[test]
     fn ids_match_pre_move_command_ids() {
         let ids: Vec<_> = GroupActionsActions::all().iter().map(|m| m.id).collect();
-        assert_eq!(ids, vec![
-            "FTS_SESSION_GROUP_APPLY_NAMING",
-            "FTS_SESSION_GROUP_ASSIGN_DRUMS",
-            "FTS_SESSION_GROUP_ASSIGN_BASS",
-            "FTS_SESSION_GROUP_ASSIGN_ELECTRIC_GTR",
-            "FTS_SESSION_GROUP_ASSIGN_ACOUSTIC_GTR",
-            "FTS_SESSION_GROUP_ASSIGN_KEYS",
-            "FTS_SESSION_GROUP_ASSIGN_SYNTHS",
-            "FTS_SESSION_GROUP_ASSIGN_LEAD_VOCAL",
-            "FTS_SESSION_GROUP_ASSIGN_BACKGROUND_VOX",
-        ]);
+        assert_eq!(
+            ids,
+            vec![
+                "FTS_SESSION_GROUP_APPLY_NAMING",
+                "FTS_SESSION_GROUP_ASSIGN_DRUMS",
+                "FTS_SESSION_GROUP_ASSIGN_BASS",
+                "FTS_SESSION_GROUP_ASSIGN_ELECTRIC_GTR",
+                "FTS_SESSION_GROUP_ASSIGN_ACOUSTIC_GTR",
+                "FTS_SESSION_GROUP_ASSIGN_KEYS",
+                "FTS_SESSION_GROUP_ASSIGN_SYNTHS",
+                "FTS_SESSION_GROUP_ASSIGN_LEAD_VOCAL",
+                "FTS_SESSION_GROUP_ASSIGN_BACKGROUND_VOX",
+            ]
+        );
     }
 }

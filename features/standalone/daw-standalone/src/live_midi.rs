@@ -5,7 +5,7 @@
 //! no-ops.
 
 use daw_proto::live_midi::{
-    LiveMidi, MidiInputDevice, MidiEvent, MidiOutputDevice, SendMidiTiming, StuffMidiTarget,
+    LiveMidi, MidiEvent, MidiInputDevice, MidiOutputDevice, SendMidiTiming, StuffMidiTarget,
 };
 
 use crate::sync::Standalone;
