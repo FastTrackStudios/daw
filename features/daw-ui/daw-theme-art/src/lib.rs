@@ -35,11 +35,15 @@
 
 pub mod components;
 pub mod derive;
+pub mod primitives;
+pub mod strip;
 
 #[cfg(feature = "render")]
 pub mod render;
 
 pub use derive::DerivedSpec;
 
+pub use primitives::{Button, ControlState, Groove, Meter, Panel, Thumb};
 #[cfg(feature = "render")]
-pub use render::{RenderError, render_for, render_sized};
+pub use render::{RenderError, render_for, render_sized, render_svg};
+pub use strip::{Mixer, MixerStrip};

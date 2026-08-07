@@ -14,6 +14,27 @@ use image::RgbaImage;
 use crate::components::ArtProps;
 use crate::derive::DerivedSpec;
 
+/// resvg options with system fonts loaded.
+///
+/// `Options::default()` ships an **empty font database**, and SVG `<text>`
+/// against an empty database renders *nothing at all* — no error, no
+/// fallback, no glyphs. Button labels simply vanished, which looks exactly
+/// like a component that forgot to draw them.
+fn options() -> resvg::usvg::Options<'static> {
+    use std::sync::OnceLock;
+    static FONTS: OnceLock<std::sync::Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
+    let db = FONTS.get_or_init(|| {
+        let mut db = resvg::usvg::fontdb::Database::new();
+        // Loading system fonts costs ~100ms and this runs per image across
+        // a few thousand of them, so it happens once.
+        db.load_system_fonts();
+        std::sync::Arc::new(db)
+    });
+    let mut opts = resvg::usvg::Options::default();
+    opts.fontdb = db.clone();
+    opts
+}
+
 #[derive(Debug)]
 pub enum RenderError {
     /// The component produced markup resvg could not parse.
@@ -49,7 +70,7 @@ pub fn render_sized(
 ) -> Result<RgbaImage, RenderError> {
     let markup = render_to_svg_sized(component, width, height);
 
-    let opts = resvg::usvg::Options::default();
+    let opts = options();
     let tree = resvg::usvg::Tree::from_str(&markup, &opts)
         .map_err(|e| RenderError::Svg(format!("{e}")))?;
 
@@ -79,6 +100,20 @@ pub fn render_for(
     }
     spec.stamp(&mut img);
     Ok(img)
+}
+
+/// Render any component with props to markup.
+///
+/// The primitives are SVG and the strip is HTML composing them, so this is
+/// deliberately untyped about which — it is the same dioxus-ssr call either
+/// way, and tests want both.
+pub fn render_svg<P: dioxus::dioxus_core::Properties>(
+    component: fn(P) -> Element,
+    props: P,
+) -> String {
+    let mut dom = VirtualDom::new_with_props(component, props);
+    dom.rebuild_in_place();
+    dioxus_ssr::render(&dom)
 }
 
 /// Render a component to SVG markup at a size.

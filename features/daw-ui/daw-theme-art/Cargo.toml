@@ -24,3 +24,11 @@ image = { workspace = true, optional = true }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+resvg = "0.45"
+image = { workspace = true }
+
+[[example]]
+name = "contact"
+required-features = ["render"]
