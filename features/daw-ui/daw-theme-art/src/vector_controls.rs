@@ -371,7 +371,9 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     // is 3:2 rather than square — drawing it in a square box, as this did
     // first, made the ring too large and the hole too wide.
     let (vw, vh) = (36.0f32, 24.0f32);
-    let (cx, cy) = (17.5, 12.0);
+    // Both traced: the ring spans x=10..24 and y=5..19, so it is centred on
+    // 17, not on the cell's 18.
+    let (cx, cy) = (17.0, 12.0);
     let outer = 7.5f32;
     let hole = 3.5f32;
     // A stroked circle: radius sits mid-band, width is the band.
@@ -406,17 +408,24 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
             // floating: in the original this shape is what seats the button
             // in the strip.
             //
-            // Traced row by row off `mcp_recarm_on`: it is 9px wide at y=1
-            // and widens to its full 29px by y=16, then runs straight down
-            // to a **flat bottom flush with the cell edge** — a dome on a
-            // block, so it sits on top of the MCP rather than floating in
-            // it. The fit is an ellipse, not a circle; a circular arc of
-            // the same width overshoots the top of the cell and gets
-            // clipped into a different silhouette entirely.
+            // Traced edge by edge off `mcp_recarm_on`, half-width per row:
+            //
+            //     y  1  3  5  7  9 …14  15    16 … 23
+            //      3.5 7.5 9.5 10.5 11.5  12.5  14.5
+            //
+            // Three parts, not one dome. A **shallow** elliptical cap —
+            // rx 11.5 but ry only ~8.4, which is the small radius — then
+            // the sides **square off** and run straight down from y=9,
+            // then a wider block from y=16 to a flat bottom flush with the
+            // cell edge. A single tall dome (this had ry 15) bulges where
+            // the original is vertical and is too narrow where it steps
+            // out, so the button reads as a lozenge instead of a switch
+            // seated on the strip.
             path {
-                d: "M {vw * 0.083} {vh} V {vh * 0.667}
-                    A {vw * 0.403} {vh * 0.625} 0 0 1 {vw * 0.889} {vh * 0.667}
-                    V {vh} Z",
+                d: "M {cx - vw * 0.319} {vh * 0.375}
+                    A {vw * 0.319} {vh * 0.350} 0 0 1 {cx + vw * 0.319} {vh * 0.375}
+                    V {vh * 0.667} H {cx + vw * 0.403} V {vh}
+                    H {cx - vw * 0.403} V {vh * 0.667} H {cx - vw * 0.319} Z",
                 fill: "{hole_fill.css()}",
             }
             circle {
@@ -498,14 +507,19 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
     // them — a track always has an output — and only the lower two light
     // up. Colouring the top bar conditionally, as this first did, made
     // an unrouted track look broken rather than merely unrouted.
-    let dim = t.chrome.text_faint;
+    //
+    // An unlit lane is #6c6c6c in the source — plain grey. It was
+    // `text_faint`, a blue-grey, so a track with nothing routed looked
+    // faintly lit rather than dark.
+    let dim = t.chrome.hardware_mark.shade(-0.33);
     let out = t.chrome.accent;
     let send = if props.has_sends { t.signal.meter_warn } else { dim };
     let recv = if props.has_receives { t.signal.rec } else { dim };
     let opacity = if props.disabled { "0.4" } else { "1" };
 
+    // Lanes at y=6, 13 and 20 of 32, each 4 tall.
     let bar_w = vw * 0.56;
-    let bar_h = vh * 0.10;
+    let bar_h = vh * 0.125;
     let bar_x = (vw - bar_w) / 2.0;
     let r = bar_h / 2.0;
 
@@ -527,7 +541,7 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
                 rect {
                     key: "{i}",
                     x: "{bar_x}",
-                    y: "{vh * (0.22 + 0.22 * i as f32)}",
+                    y: "{vh * (0.1875 + 0.219 * i as f32)}",
                     width: "{bar_w}", height: "{bar_h}",
                     rx: "{r}",
                     fill: "{colour.css()}",
