@@ -76,6 +76,20 @@ enum Command {
         #[arg(long)]
         swell: Option<PathBuf>,
     },
+    /// Restyle the theme's ARTWORK onto the palette
+    ///
+    /// The palette can't reach PNGs — toolbar backgrounds, mixer strips,
+    /// button faces. This pushes every neutral pixel through a luminance
+    /// ramp built from the theme, so chrome moves onto the theme's surfaces
+    /// while bevels and gradients survive. LEDs, fader caps and WALTER
+    /// marker pixels are left alone.
+    Restyle {
+        /// Canonical theme (.styx). Omit for the built-in FTS default.
+        from: Option<PathBuf>,
+        /// Report what would change without writing.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Screenshot a real REAPER wearing this theme, on a private X display.
     Shot {
         /// Output PNG.
@@ -205,6 +219,28 @@ fn main() -> Result<()> {
                     ""
                 }
             );
+        }
+
+        Command::Restyle { from, dry_run } => {
+            let source = fts_themer::apply::load_theme(from.as_deref())?;
+            let ramp = daw_theme::Ramp::for_chrome(&source);
+            let report = fts_themer::restyle::restyle(&theme, &ramp, dry_run)?;
+            for (path, err) in &report.failed {
+                eprintln!("FAILED {}: {err}", path.display());
+            }
+            println!(
+                "{} images restyled, {} already correct{}",
+                report.changed.len(),
+                report.unchanged,
+                if dry_run {
+                    " (dry run — nothing written)"
+                } else {
+                    ""
+                }
+            );
+            if !report.failed.is_empty() {
+                println!("{} failed", report.failed.len());
+            }
         }
 
         Command::Shot {

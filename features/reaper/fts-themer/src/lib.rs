@@ -29,6 +29,8 @@ pub mod groups;
 pub mod ini;
 #[cfg(feature = "fs")]
 pub mod recolor;
+#[cfg(feature = "apply")]
+pub mod restyle;
 pub mod rtconfig;
 #[cfg(feature = "shot")]
 pub mod shot;
