@@ -151,10 +151,7 @@ impl ActionRegistry {
     ///
     /// Maps to `Main_OnCommandEx(command_id, 0, current_project)` in REAPER.
     pub async fn run_action(&self, command_id: u32) -> crate::Result<()> {
-        self.clients
-            .action_registry
-            .run_action(command_id)
-            .await?;
+        self.clients.action_registry.run_action(command_id).await?;
         Ok(())
     }
 

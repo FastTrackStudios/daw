@@ -162,7 +162,8 @@ impl DawEventHub {
     pub fn publish_transport_state(&self, event: TransportEvent) {
         self.transport_hub
             .publish(TransportStreamEvent::State(event.clone()));
-        self.bus_hub.publish(DawEvent::TransportState(event.clone()));
+        self.bus_hub
+            .publish(DawEvent::TransportState(event.clone()));
         let _ = self.transport_state_tx.send(event);
     }
 
@@ -181,7 +182,8 @@ impl DawEventHub {
     pub fn publish_position(&self, tick: PositionTick) {
         self.transport_hub
             .publish(TransportStreamEvent::Position(tick.clone()));
-        self.bus_hub.publish(DawEvent::TransportPosition(tick.clone()));
+        self.bus_hub
+            .publish(DawEvent::TransportPosition(tick.clone()));
         let _ = self.position_tx.send(tick);
     }
 

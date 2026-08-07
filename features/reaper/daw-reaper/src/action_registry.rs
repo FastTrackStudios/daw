@@ -1303,7 +1303,11 @@ impl ActionRegistration for crate::Reaper {
         let requested_action = action_id.to_string();
 
         let command_id = if let Ok(id) = action_id.parse::<u32>() {
-            if id == 0 { None } else { Some(CommandId::new(id)) }
+            if id == 0 {
+                None
+            } else {
+                Some(CommandId::new(id))
+            }
         } else {
             named_command_lookup(action_id)
         };

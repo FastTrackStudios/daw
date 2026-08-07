@@ -202,7 +202,8 @@ impl Items for Standalone {
                 item.index = index;
                 item.position = position;
                 item.length = length;
-                p.items.insert(item_guid.clone(), ItemEntry { item: item.clone() });
+                p.items
+                    .insert(item_guid.clone(), ItemEntry { item: item.clone() });
                 Some((item_guid, track_guid, item))
             })
             .ok()

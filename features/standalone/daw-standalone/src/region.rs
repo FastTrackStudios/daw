@@ -149,5 +149,4 @@ impl Regions for Standalone {
         publish_region_event(self, &guid, RegionEvent::Changed(region));
         Ok(())
     }
-
 }

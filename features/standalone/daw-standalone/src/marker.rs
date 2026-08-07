@@ -161,7 +161,6 @@ impl Markers for Standalone {
         publish_marker_event(self, &guid, MarkerEvent::Changed(marker));
         Ok(())
     }
-
 }
 
 /// Map a `ProjectContext` onto a concrete guid the standalone state

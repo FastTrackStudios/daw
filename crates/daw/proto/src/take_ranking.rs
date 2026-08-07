@@ -58,7 +58,6 @@ pub use take_ranking_service::{
     take_ranking_service_rpc_service_descriptor, take_ranking_service_service_descriptor,
 };
 
-
 // ── Actions ─────────────────────────────────────────────────────────────
 
 #[architect::actions(namespace = "FTS_SESSION")]
@@ -146,20 +145,26 @@ mod takeranking_id_tests {
     /// `extension_loads.rs` all depend on them.
     #[test]
     fn ids_match_pre_move_command_ids() {
-        let ids: Vec<_> = TakeRankingActionsActions::all().iter().map(|m| m.id).collect();
-        assert_eq!(ids, vec![
-            "FTS_SESSION_TAKE_RANK_PLAYPOS_1",
-            "FTS_SESSION_TAKE_RANK_PLAYPOS_2",
-            "FTS_SESSION_TAKE_RANK_PLAYPOS_3",
-            "FTS_SESSION_TAKE_RANK_PLAYPOS_DOWN",
-            "FTS_SESSION_TAKE_RANK_ITEM_1",
-            "FTS_SESSION_TAKE_RANK_ITEM_2",
-            "FTS_SESSION_TAKE_RANK_ITEM_3",
-            "FTS_SESSION_TAKE_RANK_ITEM_DOWN",
-            "FTS_SESSION_TAKE_RANK_MOUSE_1",
-            "FTS_SESSION_TAKE_RANK_MOUSE_2",
-            "FTS_SESSION_TAKE_RANK_MOUSE_3",
-            "FTS_SESSION_TAKE_RANK_MOUSE_DOWN",
-        ]);
+        let ids: Vec<_> = TakeRankingActionsActions::all()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                "FTS_SESSION_TAKE_RANK_PLAYPOS_1",
+                "FTS_SESSION_TAKE_RANK_PLAYPOS_2",
+                "FTS_SESSION_TAKE_RANK_PLAYPOS_3",
+                "FTS_SESSION_TAKE_RANK_PLAYPOS_DOWN",
+                "FTS_SESSION_TAKE_RANK_ITEM_1",
+                "FTS_SESSION_TAKE_RANK_ITEM_2",
+                "FTS_SESSION_TAKE_RANK_ITEM_3",
+                "FTS_SESSION_TAKE_RANK_ITEM_DOWN",
+                "FTS_SESSION_TAKE_RANK_MOUSE_1",
+                "FTS_SESSION_TAKE_RANK_MOUSE_2",
+                "FTS_SESSION_TAKE_RANK_MOUSE_3",
+                "FTS_SESSION_TAKE_RANK_MOUSE_DOWN",
+            ]
+        );
     }
 }

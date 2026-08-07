@@ -159,8 +159,7 @@ impl TestRunner {
             return Err("Failed to build daw-bridge".into());
         }
 
-        let lib_path = cargo_target_dir(daw_workspace)
-            .join("release/libreaper_daw_bridge.so");
+        let lib_path = cargo_target_dir(daw_workspace).join("release/libreaper_daw_bridge.so");
         let plugins_dir = self.resources_dir.join("UserPlugins");
         install_plugin(&lib_path, "reaper_daw_bridge.so", &plugins_dir)?;
         Ok(())
@@ -422,7 +421,9 @@ impl TestRunner {
             let mode = std::env::var("FTS_LINUX_AUDIO_MODE").unwrap_or_else(|_| "2".to_string());
             let ini = reaper_launcher::ReaperIni::new(&reaper_ini);
             let _ = ini.set("linux_audio_mode", &mode);
-            println!("  linux_audio_mode: {mode} (2 = Dummy audio; override with FTS_LINUX_AUDIO_MODE)");
+            println!(
+                "  linux_audio_mode: {mode} (2 = Dummy audio; override with FTS_LINUX_AUDIO_MODE)"
+            );
         }
 
         // Patch lastt in [verchk] to suppress version-check dialog

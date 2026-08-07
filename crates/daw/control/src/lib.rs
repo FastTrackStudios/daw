@@ -130,6 +130,7 @@ pub(crate) use daw_proto::LiveMidiClient;
 pub(crate) use daw_proto::MarkersClient;
 pub(crate) use daw_proto::MidiClient;
 pub(crate) use daw_proto::PeaksClient;
+pub(crate) use daw_proto::PeaksStreamClient;
 pub(crate) use daw_proto::PositionConversionClient;
 pub(crate) use daw_proto::ProjectsClient;
 pub(crate) use daw_proto::RegionsClient;
@@ -144,14 +145,14 @@ pub(crate) use daw_proto::batch::BatchExecutionClient;
 pub(crate) use daw_proto::diagnostics::DiagnosticsClient;
 pub(crate) use daw_proto::dock_host::DockHostingClient;
 pub(crate) use daw_proto::event_bus::EventBusStreamClient;
-pub(crate) use daw_proto::transport::TransportStreamClient;
 pub(crate) use daw_proto::marker::MarkersStreamClient;
-pub(crate) use daw_proto::region::RegionsStreamClient;
-pub(crate) use daw_proto::tempo_map::TempoMapStreamClient;
-pub(crate) use daw_proto::track::TracksStreamClient;
-pub(crate) use daw_proto::PeaksStreamClient;
 pub(crate) use daw_proto::plugin_loader::PluginLoadingClient;
+pub(crate) use daw_proto::region::RegionsStreamClient;
+pub(crate) use daw_proto::resource::ResourcePathsClient;
+pub(crate) use daw_proto::tempo_map::TempoMapStreamClient;
 pub(crate) use daw_proto::toolbar::ToolbarClient;
+pub(crate) use daw_proto::track::TracksStreamClient;
+pub(crate) use daw_proto::transport::TransportStreamClient;
 pub(crate) use daw_proto::window_manager::WindowManagerClient;
 pub use vox::Caller;
 
@@ -177,6 +178,7 @@ mod midi_editor;
 mod plugin_loader;
 mod project;
 mod regions;
+mod resource;
 mod routing;
 mod screenset;
 mod stream;
@@ -204,6 +206,7 @@ pub use self::midi_editor::MidiEditor;
 pub use self::plugin_loader::PluginLoader;
 pub use self::project::Project;
 pub use self::regions::Regions;
+pub use self::resource::Resources;
 pub use self::routing::{HardwareOutputs, Receives, RouteHandle, Sends};
 pub use self::screenset::Screensets;
 pub use self::stream::EventStream;
@@ -243,6 +246,7 @@ architect::clients! {
         pub(crate) ext_state: ExtStateClient,
         pub(crate) health: HealthClient,
         pub(crate) input: InputClient,
+        pub(crate) resource: ResourcePathsClient,
         pub(crate) toolbar: ToolbarClient,
         pub(crate) plugin_loader: PluginLoadingClient,
         pub(crate) batch: BatchExecutionClient,
@@ -258,7 +262,6 @@ architect::clients! {
         pub(crate) peaks_stream: PeaksStreamClient,
     }
 }
-
 
 /// DAW API entry point
 ///
@@ -594,6 +597,15 @@ impl Daw {
     /// Extensions use this to add, update, and remove toolbar buttons.
     pub fn toolbar(&self) -> Toolbar {
         Toolbar::new(self.clients.clone())
+    }
+
+    /// Access REAPER's resource paths and color-theme loading.
+    ///
+    /// `resources().reload_color_theme()` is the theme-development loop:
+    /// REAPER re-reads rtconfig.txt and the images on every open, so
+    /// re-opening the active theme applies edits without a restart.
+    pub fn resources(&self) -> Resources {
+        Resources::new(self.clients.clone())
     }
 
     /// Access named FTS screensets.

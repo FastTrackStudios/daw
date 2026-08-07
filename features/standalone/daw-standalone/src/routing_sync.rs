@@ -246,54 +246,55 @@ impl Routing for Standalone {
 
     fn add_send(&self, project: ProjectContext, source: TrackRef, dest: TrackRef) -> Option<u32> {
         let pg = resolve_project(self, &project)?;
-        let result = self.with_project_mut(&pg, |p| {
-            let src_guid = resolve_track_guid(p, &source)?;
-            let dest_guid = resolve_track_guid(p, &dest)?;
-            if src_guid == dest_guid {
-                // No self-routing (would feedback-loop).
-                return None;
-            }
-            let dest_name = track_name_lookup(p, &dest_guid);
-            let src_channels = track_num_channels(p, &src_guid);
-            let dest_channels = track_num_channels(p, &dest_guid);
+        let result = self
+            .with_project_mut(&pg, |p| {
+                let src_guid = resolve_track_guid(p, &source)?;
+                let dest_guid = resolve_track_guid(p, &dest)?;
+                if src_guid == dest_guid {
+                    // No self-routing (would feedback-loop).
+                    return None;
+                }
+                let dest_name = track_name_lookup(p, &dest_guid);
+                let src_channels = track_num_channels(p, &src_guid);
+                let dest_channels = track_num_channels(p, &dest_guid);
 
-            let route = TrackRoute {
-                index: 0,
-                route_type: RouteType::Send,
-                source_track_guid: src_guid.clone(),
-                dest_track_guid: Some(dest_guid.clone()),
-                dest_track_name: dest_name,
-                hw_output_index: None,
-                hw_output_name: None,
-                volume: 1.0,
-                pan: 0.0,
-                muted: false,
-                mono: false,
-                phase_inverted: false,
-                send_mode: SendMode::PostFader,
-                automation_mode: Default::default(),
-                source_channels: ChannelMapping {
-                    start_channel: 0,
-                    num_channels: src_channels,
-                },
-                dest_channels: ChannelMapping {
-                    start_channel: 0,
-                    num_channels: dest_channels,
-                },
-                midi_channel_mapping: None,
-            };
-            let (new_index, created) = {
-                let sends = p.sends.entry(src_guid).or_default();
-                let i = sends.len() as u32;
-                sends.push(route.clone());
-                renumber(sends);
-                (i, sends[i as usize].clone())
-            };
-            sync_receive_mirror(p, &route);
-            Some((new_index, created))
-        })
-        .ok()
-        .flatten();
+                let route = TrackRoute {
+                    index: 0,
+                    route_type: RouteType::Send,
+                    source_track_guid: src_guid.clone(),
+                    dest_track_guid: Some(dest_guid.clone()),
+                    dest_track_name: dest_name,
+                    hw_output_index: None,
+                    hw_output_name: None,
+                    volume: 1.0,
+                    pan: 0.0,
+                    muted: false,
+                    mono: false,
+                    phase_inverted: false,
+                    send_mode: SendMode::PostFader,
+                    automation_mode: Default::default(),
+                    source_channels: ChannelMapping {
+                        start_channel: 0,
+                        num_channels: src_channels,
+                    },
+                    dest_channels: ChannelMapping {
+                        start_channel: 0,
+                        num_channels: dest_channels,
+                    },
+                    midi_channel_mapping: None,
+                };
+                let (new_index, created) = {
+                    let sends = p.sends.entry(src_guid).or_default();
+                    let i = sends.len() as u32;
+                    sends.push(route.clone());
+                    renumber(sends);
+                    (i, sends[i as usize].clone())
+                };
+                sync_receive_mirror(p, &route);
+                Some((new_index, created))
+            })
+            .ok()
+            .flatten();
         let (new_index, created) = result?;
         self.bus_events
             .publish(DawEvent::Routing(RoutingEvent::RouteCreated {

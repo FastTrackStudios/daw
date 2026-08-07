@@ -4,7 +4,9 @@ use crate::rpc::Daw;
 use eyre::Result;
 use serde_json::{Value, json};
 
-use crate::cli::{flags_str, format_position, fx_type_str, pan_to_string, resolve_track, vol_to_db};
+use crate::cli::{
+    flags_str, format_position, fx_type_str, pan_to_string, resolve_track, vol_to_db,
+};
 
 fn shape_name(shape: &'static facet::Shape) -> String {
     match shape.module_path {
@@ -1022,6 +1024,41 @@ pub async fn action_set_toggle(daw: &Daw, command_name: &str, is_on: bool) -> Re
     Ok(
         json!({ "command_name": command_name, "toggle_state": daw.action_registry().get_toggle_state(command_name).await? }),
     )
+}
+
+/// Reload REAPER's colour theme; `None` re-opens the active one.
+///
+/// The `loaded` flag is REAPER's own answer, not ours — a path it can't open
+/// comes back false rather than erroring, so report it rather than pretending
+/// the reload worked.
+pub async fn theme_reload(daw: &Daw, path: Option<&std::path::Path>) -> Result<Value> {
+    let resources = daw.resources();
+    let loaded = match path {
+        Some(p) => {
+            // Resolve here: REAPER interprets a relative path against its own
+            // working directory, not the shell's.
+            let abs =
+                std::fs::canonicalize(p).map_err(|e| eyre::eyre!("theme {}: {e}", p.display()))?;
+            resources.load_color_theme(abs).await?
+        }
+        None => resources.reload_color_theme().await?,
+    };
+    Ok(json!({
+        "loaded": loaded,
+        "theme": resources.color_theme_path().await?
+            .map(|p| p.display().to_string()),
+    }))
+}
+
+/// REAPER's resource, ini and active-theme paths.
+pub async fn theme_paths(daw: &Daw) -> Result<Value> {
+    let resources = daw.resources();
+    Ok(json!({
+        "resource_path": resources.resource_path().await?.display().to_string(),
+        "ini_file": resources.ini_file_path().await?.display().to_string(),
+        "color_theme": resources.color_theme_path().await?
+            .map(|p| p.display().to_string()),
+    }))
 }
 
 pub async fn toolbar_status(daw: &Daw) -> Result<Value> {

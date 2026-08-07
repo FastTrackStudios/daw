@@ -760,12 +760,11 @@ impl LoadedClapPlugin {
             .map(|s| (s.width, s.height))
             .unwrap_or((800, 500));
         size_parent(size.0, size.1);
-        let window = ClapWindow::from_window_handle(parent)
-            .ok_or(ClapHostError::GuiUnsupportedPlatform)?;
+        let window =
+            ClapWindow::from_window_handle(parent).ok_or(ClapHostError::GuiUnsupportedPlatform)?;
         // SAFETY: the caller keeps the parent window alive for the GUI's
         // lifetime (until `close_gui`), per set_parent's contract.
-        unsafe { gui.set_parent(&mut handle, window) }
-            .map_err(|_| ClapHostError::GuiCreate)?;
+        unsafe { gui.set_parent(&mut handle, window) }.map_err(|_| ClapHostError::GuiCreate)?;
         let _ = gui.show(&mut handle);
         Ok(size)
     }

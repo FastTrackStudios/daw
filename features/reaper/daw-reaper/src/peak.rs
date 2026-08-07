@@ -172,8 +172,7 @@ static METER_HOLDS: std::sync::OnceLock<
     std::sync::Mutex<std::collections::HashMap<String, MeterHoldState>>,
 > = std::sync::OnceLock::new();
 
-fn meter_holds()
--> &'static std::sync::Mutex<std::collections::HashMap<String, MeterHoldState>> {
+fn meter_holds() -> &'static std::sync::Mutex<std::collections::HashMap<String, MeterHoldState>> {
     METER_HOLDS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 

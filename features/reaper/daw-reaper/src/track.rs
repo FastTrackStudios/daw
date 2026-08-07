@@ -959,7 +959,6 @@ impl Tracks for crate::Reaper {
         medium.track_list_adjust_windows_minor();
         Ok(())
     }
-
 }
 
 impl daw_proto::track::TracksStreamSource for crate::Reaper {

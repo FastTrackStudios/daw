@@ -53,7 +53,7 @@ impl PhonesBus {
     /// The process-wide bus.
     pub fn shared() -> &'static PhonesBus {
         static BUS: PhonesBus = PhonesBus {
-            volume: std::sync::atomic::AtomicU32::new(0x3f800000),   // 1.0
+            volume: std::sync::atomic::AtomicU32::new(0x3f800000), // 1.0
             self_mix: std::sync::atomic::AtomicU32::new(0x3f800000), // 1.0
         };
         &BUS
@@ -189,7 +189,12 @@ impl DuplexAudioEngine {
         // Async + retried: the node's ports take a beat to appear in the graph.
         // The thread then stays alive as a re-link watchdog for device loss.
         let linker_stop = Arc::new(AtomicBool::new(false));
-        spawn_linker(prefs.clone(), in_channels, linker_stop.clone(), stats.clone());
+        spawn_linker(
+            prefs.clone(),
+            in_channels,
+            linker_stop.clone(),
+            stats.clone(),
+        );
 
         Ok(Self {
             shared,
