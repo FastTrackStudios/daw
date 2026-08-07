@@ -34,12 +34,12 @@
 //! the point: change the palette or a component and every scale regenerates.
 
 pub mod components;
-pub mod spec;
+pub mod derive;
 
 #[cfg(feature = "render")]
 pub mod render;
 
-pub use spec::{ArtSpec, NineSlice};
+pub use derive::DerivedSpec;
 
 #[cfg(feature = "render")]
-pub use render::{RenderError, render_png};
+pub use render::{RenderError, render_for, render_sized};

@@ -20,39 +20,59 @@ pub struct GenerateReport {
 }
 
 /// Render every component-drawn image into `theme`.
+///
+/// Each image's geometry is **measured from the art being replaced** — the
+/// pristine snapshot `restyle` keeps, falling back to what's live. Nothing
+/// about size or marker layout is authored here, because REAPER blits these
+/// where WALTER expects and only reads magenta as geometry when it lands
+/// where it expects. Getting that wrong renders the guides as visible
+/// magenta in the mixer.
 pub fn generate(theme: &ThemeDir, dry_run: bool) -> Result<GenerateReport> {
-    use daw_theme_art::components as art;
-
-    let items: Vec<(daw_theme_art::ArtSpec, fn() -> dioxus::prelude::Element)> = vec![
-        (art::MCP_BG, art::McpBg),
-        (art::MCP_VOLBG, art::McpVolBg),
-        (art::GEN_BUTTON, art::GenButton),
-    ];
-
     let mut report = GenerateReport::default();
-    for (spec, component) in items {
-        for (prefix, scale) in SCALES {
+
+    for (name, component) in daw_theme_art::components::registry() {
+        for (prefix, _scale) in SCALES {
             let dir = theme.scale_dir(prefix);
-            // Only write a scale the theme actually ships, so generating
-            // can't invent a 200/ folder in a theme that has none.
             if !dir.is_dir() {
                 continue;
             }
-            let path = dir.join(format!("{}.png", spec.name));
-            match daw_theme_art::render_png(&spec, scale, component) {
-                Ok(img) => {
-                    if !dry_run {
-                        if let Err(e) = img
-                            .save(&path)
-                            .with_context(|| format!("write {}", path.display()))
-                        {
-                            report.failed.push((spec.name.into(), format!("{e:#}")));
-                            continue;
-                        }
-                    }
-                    report.written.push(path);
+            let live = dir.join(format!("{name}.png"));
+
+            // Prefer the pristine snapshot: once restyle has run, the live
+            // file is already derived, and measuring a derived file works
+            // but means a second source of truth.
+            let pristine = theme
+                .scale_dir(prefix)
+                .join(crate::restyle::SOURCE_DIR)
+                .join(format!("{name}.png"));
+            let source = if pristine.is_file() { &pristine } else { &live };
+            if !source.is_file() {
+                continue;
+            }
+
+            let measured = match image::open(source) {
+                Ok(img) => daw_theme_art::DerivedSpec::from_image(&img.to_rgba8()),
+                Err(e) => {
+                    report
+                        .failed
+                        .push((name.into(), format!("read source: {e}")));
+                    continue;
                 }
-                Err(e) => report.failed.push((spec.name.into(), format!("{e}"))),
+            };
+
+            match daw_theme_art::render_for(component, &measured) {
+                Ok(img) => {
+                    if !dry_run
+                        && let Err(e) = img
+                            .save(&live)
+                            .with_context(|| format!("write {}", live.display()))
+                    {
+                        report.failed.push((name.into(), format!("{e:#}")));
+                        continue;
+                    }
+                    report.written.push(live);
+                }
+                Err(e) => report.failed.push((name.into(), format!("{e}"))),
             }
         }
     }
@@ -65,8 +85,9 @@ mod tests {
     use image::{Rgba, RgbaImage};
     use std::path::Path;
 
+    /// A theme whose `mcp_bg` matches REAPER's real shape: 4x4 with two
+    /// marker pixels at opposite corners. 100% and 150% exist; 200% does not.
     fn fixture(dir: &Path) {
-        // 100% and 150% exist; 200% deliberately does not.
         std::fs::create_dir_all(dir.join("T").join("150")).unwrap();
         std::fs::write(
             dir.join("T.ReaperTheme"),
@@ -74,8 +95,13 @@ mod tests {
         )
         .unwrap();
         std::fs::write(dir.join("T").join("rtconfig.txt"), "version 6.0\n").unwrap();
-        RgbaImage::from_fn(1, 1, |_, _| Rgba([0, 0, 0, 0]))
-            .save(dir.join("T").join("mcp_bg.png"))
+
+        let art = RgbaImage::from_fn(4, 4, |x, y| match (x, y) {
+            (0, 0) | (3, 3) => Rgba([255, 0, 255, 255]),
+            _ => Rgba([0x2a, 0x2a, 0x2a, 255]),
+        });
+        art.save(dir.join("T").join("mcp_bg.png")).unwrap();
+        art.save(dir.join("T").join("150").join("mcp_bg.png"))
             .unwrap();
     }
 
@@ -87,34 +113,54 @@ mod tests {
     }
 
     #[test]
-    fn writes_each_component_at_the_scales_the_theme_has() {
+    fn writes_only_the_scales_and_names_the_theme_has() {
         let d = tmpdir("scales");
         fixture(&d);
         let theme = ThemeDir::open(&d).unwrap();
         let report = generate(&theme, false).unwrap();
         assert!(report.failed.is_empty(), "{:?}", report.failed);
 
-        // 3 components × 2 present scales; the absent 200/ is skipped.
-        assert_eq!(report.written.len(), 6);
-        assert!(d.join("T").join("mcp_bg.png").is_file());
-        assert!(d.join("T").join("150").join("mcp_bg.png").is_file());
+        // mcp_bg at two scales. mcp_volbg is in the registry but absent from
+        // this theme, so it is skipped rather than invented.
+        assert_eq!(report.written.len(), 2, "{:?}", report.written);
+        assert!(!d.join("T").join("mcp_volbg.png").exists());
         assert!(!d.join("T").join("200").exists(), "invented a 200/ folder");
         std::fs::remove_dir_all(&d).ok();
     }
 
     #[test]
-    fn the_generated_image_has_the_specs_size() {
-        let d = tmpdir("size");
+    fn the_generated_image_keeps_the_sources_geometry() {
+        // The failure this replaced: authoring a size produced art REAPER
+        // blits wrongly and magenta it draws as visible pixels.
+        let d = tmpdir("geometry");
         fixture(&d);
         let theme = ThemeDir::open(&d).unwrap();
         generate(&theme, false).unwrap();
 
-        let img = image::open(d.join("T").join("150").join("mcp_bg.png"))
+        let img = image::open(d.join("T").join("mcp_bg.png"))
             .unwrap()
             .to_rgba8();
-        assert_eq!(
-            img.dimensions(),
-            daw_theme_art::components::MCP_BG.size_at(1.5)
+        assert_eq!(img.dimensions(), (4, 4), "size drifted from the source");
+        // Markers restored exactly where they were, and nowhere else.
+        assert_eq!(img.get_pixel(0, 0).0, [255, 0, 255, 255]);
+        assert_eq!(img.get_pixel(3, 3).0, [255, 0, 255, 255]);
+        assert_ne!(img.get_pixel(3, 0).0, [255, 0, 255, 255]);
+        std::fs::remove_dir_all(&d).ok();
+    }
+
+    #[test]
+    fn the_art_between_the_markers_is_actually_redrawn() {
+        let d = tmpdir("redraw");
+        fixture(&d);
+        let theme = ThemeDir::open(&d).unwrap();
+        generate(&theme, false).unwrap();
+        let img = image::open(d.join("T").join("mcp_bg.png"))
+            .unwrap()
+            .to_rgba8();
+        assert_ne!(
+            img.get_pixel(1, 1).0,
+            [0x2a, 0x2a, 0x2a, 255],
+            "component did not replace the source art"
         );
         std::fs::remove_dir_all(&d).ok();
     }
@@ -126,7 +172,7 @@ mod tests {
         let theme = ThemeDir::open(&d).unwrap();
         let before = std::fs::read(d.join("T").join("mcp_bg.png")).unwrap();
         let report = generate(&theme, true).unwrap();
-        assert_eq!(report.written.len(), 6);
+        assert_eq!(report.written.len(), 2);
         assert_eq!(
             std::fs::read(d.join("T").join("mcp_bg.png")).unwrap(),
             before
