@@ -371,9 +371,12 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     // is 3:2 rather than square — drawing it in a square box, as this did
     // first, made the ring too large and the hole too wide.
     let (vw, vh) = (36.0f32, 24.0f32);
-    // Both traced: the ring spans x=10..24 and y=5..19, so it is centred on
-    // 17, not on the cell's 18.
-    let (cx, cy) = (17.0, 12.0);
+    // Traced, in *edge* coordinates rather than pixel indices: the ring
+    // covers columns 10..24, which is the span [10, 25), so it is centred
+    // on 17.5 with radius 7.5 — and rows 5..19, centred on 12.5. Reading
+    // the indices directly gives 17 and 12 and puts the whole control half
+    // a pixel up and to the left.
+    let (cx, cy) = (17.5, 12.5);
     let outer = 7.5f32;
     let hole = 3.5f32;
     // A stroked circle: radius sits mid-band, width is the band.
@@ -410,22 +413,27 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
             //
             // Traced edge by edge off `mcp_recarm_on`, half-width per row:
             //
-            //     y  1  3  5  7  9 …14  15    16 … 23
-            //      3.5 7.5 9.5 10.5 11.5  12.5  14.5
+            //     y  1   2   3   4   5   6   7   8   9 …14  15    16…23
+            //       3.5 5.5 7.5 8.5 9.5 9.5 10.5 10.5 11.5    12.5  14.5
             //
-            // Three parts, not one dome. A **shallow** elliptical cap —
-            // rx 11.5 but ry only ~8.4, which is the small radius — then
-            // the sides **square off** and run straight down from y=9,
-            // then a wider block from y=16 to a flat bottom flush with the
-            // cell edge. A single tall dome (this had ry 15) bulges where
-            // the original is vertical and is too narrow where it steps
-            // out, so the button reads as a lozenge instead of a switch
-            // seated on the strip.
+            // Five segments, and the two that matter are the **45°
+            // diagonals**: a narrow flat top, a diagonal opening out to
+            // full width, straight vertical sides, a second diagonal
+            // flaring to the base, then a flat bottom flush with the cell
+            // edge. The upper one is 1:1; the lower is steeper — the
+            // source crosses from half 11.5 to 14.5 between y=15 and
+            // y=16, so it is a short hard flare, not a matching 45.
+            //
+            // Fitted as a dome first, which is the obvious reading and the
+            // wrong one: an ellipse through the same endpoints bulges, so
+            // it hit full width at y=6 where the source gets there at y=9,
+            // and the sides never read as squared off at all.
             path {
-                d: "M {cx - vw * 0.319} {vh * 0.375}
-                    A {vw * 0.319} {vh * 0.350} 0 0 1 {cx + vw * 0.319} {vh * 0.375}
-                    V {vh * 0.667} H {cx + vw * 0.403} V {vh}
-                    H {cx - vw * 0.403} V {vh * 0.667} H {cx - vw * 0.319} Z",
+                d: "M {cx - vw * 0.118} {vh * 0.042} H {cx + vw * 0.118}
+                    L {cx + vw * 0.319} {vh * 0.344} V {vh * 0.625}
+                    L {cx + vw * 0.403} {vh * 0.667} V {vh}
+                    H {cx - vw * 0.403} V {vh * 0.667}
+                    L {cx - vw * 0.319} {vh * 0.625} V {vh * 0.344} Z",
                 fill: "{hole_fill.css()}",
             }
             circle {

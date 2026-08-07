@@ -142,22 +142,49 @@ fn main() {
         ],
     ));
 
+    // Column pitch has to follow the *drawn* width, not `DISPLAY`.
+    //
+    // A cell is zoomed by a whole factor of its height, so a wide control
+    // ends up wider than `DISPLAY`: record-arm is 36x24, zoomed 3x, so
+    // 108px in a 92px column — its cells overlapped each other, and the
+    // overlap looked like the artwork being wrong rather than the sheet.
+    let cells: Vec<Vec<Option<image::RgbaImage>>> = groups
+        .iter()
+        .map(|(_, entries)| {
+            entries
+                .iter()
+                .map(|e| original_cell(e.source.0, e.source.1))
+                .collect()
+        })
+        .collect();
+    let drawn = |img: &Option<image::RgbaImage>| {
+        img.as_ref()
+            .map(|o| o.width() * (DISPLAY / o.height().max(1)).max(1))
+            .unwrap_or(DISPLAY)
+    };
+    let pitch = cells
+        .iter()
+        .flatten()
+        .map(|c| drawn(c) + PAD)
+        .max()
+        .unwrap_or(DISPLAY + PAD);
+
     let cols = groups.iter().map(|(_, e)| e.len()).max().unwrap_or(1) as u32;
     let row_h = DISPLAY + PAD;
     let group_h = row_h * 3 + PAD * 2;
-    let sheet_w = PAD + cols * (DISPLAY + PAD);
+    let sheet_w = PAD + cols * pitch;
     let sheet_h = PAD + groups.len() as u32 * group_h;
     let mut sheet = image::RgbaImage::from_pixel(sheet_w, sheet_h, image::Rgba(BG));
 
     let mut y = PAD;
     let mut report: Vec<String> = Vec::new();
 
-    for (title, entries) in &groups {
+    for (g, (title, entries)) in groups.iter().enumerate() {
         for (col, e) in entries.iter().enumerate() {
-            let x = PAD + col as u32 * (DISPLAY + PAD);
+            let x = PAD + col as u32 * pitch;
 
             // 1 — the original, at native size, nearest-zoomed.
-            let native = original_cell(e.source.0, e.source.1);
+            let native = cells[g][col].clone();
             if let Some(orig) = &native {
                 let z = zoom(orig, DISPLAY);
                 image::imageops::overlay(&mut sheet, &z, x as i64, y as i64);
