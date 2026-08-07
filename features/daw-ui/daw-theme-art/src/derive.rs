@@ -42,8 +42,8 @@ pub const MARKERS: [[u8; 4]; 2] = [[255, 0, 255, 255], [255, 255, 0, 255]];
 /// differ only in brightness, and misses input-monitor, whose cells change
 /// icon.
 pub fn sprite_cells(img: &RgbaImage) -> u32 {
-    if let Some(n) = cells_from_gaps(img) {
-        return n;
+    if let Some(segments) = cells_from_gaps(img) {
+        return segments.len() as u32;
     }
     let (w, h) = (img.width(), img.height());
     for n in [4u32, 3, 2] {
@@ -64,12 +64,13 @@ pub fn sprite_cells(img: &RgbaImage) -> u32 {
     1
 }
 
-/// Count cells by looking for the clear columns between them.
+/// Find the cells by looking for the clear columns between them.
 ///
-/// Returns `None` when the gaps do not describe a plausible strip — equal
-/// enough segments, and not so many that we are counting the gaps *inside*
-/// a drawing rather than between cells.
-fn cells_from_gaps(img: &RgbaImage) -> Option<u32> {
+/// Returns each cell as `(x, width)`, or `None` when the gaps do not
+/// describe a plausible strip — equal enough segments, and not so many
+/// that we are counting the gaps *inside* a drawing rather than between
+/// cells.
+fn cells_from_gaps(img: &RgbaImage) -> Option<Vec<(u32, u32)>> {
     let (w, h) = (img.width(), img.height());
     if w < 12 {
         return None;
@@ -122,7 +123,56 @@ fn cells_from_gaps(img: &RgbaImage) -> Option<u32> {
         return None;
     }
 
-    Some(n)
+    Some(
+        segments
+            .into_iter()
+            .map(|(a, b)| (a, b - a + 1))
+            .collect(),
+    )
+}
+
+/// Where each sprite cell actually sits, as `(x, width)`.
+///
+/// **Not** an even division of the file width, which is the assumption
+/// that looks right and quietly isn't: `mcp_fx_norm` is 86px of three
+/// 28px cells starting at x=1, 29 and 57, with a marker column before
+/// them and a spare column after. Dividing 86 by 3 puts cell 2 at x=58
+/// and leaves column 57 — a real column of a real button — undrawn.
+///
+/// Falls back to even division only when the gap scan finds no strip,
+/// which is the case for controls drawn edge to edge like `mcp_mute_*`.
+pub fn cell_bounds(img: &RgbaImage) -> Vec<(u32, u32)> {
+    if let Some(cells) = cells_from_gaps(img) {
+        // The gap scan finds each cell's *solid* part. A cell's outermost
+        // column is often a soft edge under the `SOLID` threshold — on
+        // `mcp_fx_norm` the segments come back 27 wide on a 28 pitch, and
+        // using them directly shifts every button a pixel and leaves a
+        // column of each one undrawn.
+        //
+        // The pitch between segment starts is exact even when the widths
+        // are short, so reclaim the difference on the left. Where the
+        // segments already are the cells, the width equals the pitch and
+        // this changes nothing.
+        if cells.len() >= 2 {
+            let pitch = cells[1].0.saturating_sub(cells[0].0);
+            if pitch >= cells[0].1 {
+                let origin = cells[0].0.saturating_sub(pitch - cells[0].1);
+                return (0..cells.len() as u32)
+                    .map(|i| (origin + i * pitch, pitch))
+                    .collect();
+            }
+        }
+        return cells;
+    }
+    let n = sprite_cells(img).max(1);
+    let w = img.width();
+    (0..n)
+        .map(|i| {
+            let a = i * w / n;
+            let b = (i + 1) * w / n;
+            (a, b.saturating_sub(a).max(1))
+        })
+        .collect()
 }
 
 /// The geometry of one theme image, measured from the original.
@@ -135,6 +185,9 @@ pub struct DerivedSpec {
     pub height: u32,
     /// Every marker pixel, as `(x, y, rgba)`, to be stamped back verbatim.
     pub markers: Vec<(u32, u32, [u8; 4])>,
+    /// Where each sprite cell sits, as `(x, width)` — measured, not
+    /// divided. See [`cell_bounds`].
+    pub cells: Vec<(u32, u32)>,
 }
 
 impl DerivedSpec {
@@ -150,6 +203,7 @@ impl DerivedSpec {
             width: img.width(),
             height: img.height(),
             markers,
+            cells: cell_bounds(img),
         }
     }
 
@@ -229,6 +283,7 @@ mod tests {
             width: 10,
             height: 10,
             markers: vec![(9, 9, [255, 0, 255, 255])],
+            cells: vec![(0, 10)],
         };
         let mut small = img(&[[0, 0, 0, 255]]);
         spec.stamp(&mut small);

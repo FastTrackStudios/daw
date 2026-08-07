@@ -183,6 +183,7 @@ mod tests {
             width: 4,
             height: 4,
             markers: vec![(0, 0, [255, 0, 255, 255]), (3, 3, [255, 0, 255, 255])],
+            cells: vec![(0, 4)],
         };
         let img = render_for(McpBg, &spec).unwrap();
         assert_eq!(img.dimensions(), (4, 4));
@@ -200,6 +201,7 @@ mod tests {
             width: 8,
             height: 8,
             markers: vec![],
+            cells: vec![(0, 8)],
         };
         let img = render_for(McpBg, &spec).unwrap();
         assert!(

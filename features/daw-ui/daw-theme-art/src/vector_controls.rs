@@ -438,13 +438,34 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                     L {cx + vw * 0.3194} {vh * 0.592} Z",
                 fill: "{hole_fill.css()}",
             }
-            circle {
-                cx: "{cx}", cy: "{cy}", r: "{r}",
-                fill: "{hole_fill.css()}",
-                stroke: "{ring.css()}",
-                stroke_width: "{band}",
+            // Auto is a **solid disc with the A knocked out of it**, not a
+            // ring with a letter laid inside. Drawing both gave a grey
+            // annulus with a second grey A floating in its hole — two
+            // marks where the source has one.
+            if auto {
+                circle {
+                    cx: "{cx}", cy: "{cy}", r: "{outer}",
+                    fill: "{ring.css()}",
+                }
+                text {
+                    x: "{cx}", y: "{cy}",
+                    text_anchor: "middle", dominant_baseline: "central",
+                    font_family: "Fira Sans, DejaVu Sans, sans-serif",
+                    font_weight: "700", font_size: "{outer * 1.6}",
+                    // The housing colour, so the glyph is a hole through
+                    // the disc rather than ink on top of it.
+                    fill: "{hole_fill.css()}",
+                    "A"
+                }
+            } else {
+                circle {
+                    cx: "{cx}", cy: "{cy}", r: "{r}",
+                    fill: "{hole_fill.css()}",
+                    stroke: "{ring.css()}",
+                    stroke_width: "{band}",
+                }
             }
-            if barred {
+            if barred && !auto {
                 // Four radial notches, not two crossing lines: the original
                 // reads as a life-ring, with the cuts running right through
                 // the band to the outer edge.
@@ -465,16 +486,6 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                             }
                         }
                     }
-                }
-            }
-            if auto && !armed {
-                text {
-                    x: "{cx}", y: "{cy}",
-                    text_anchor: "middle", dominant_baseline: "central",
-                    font_family: "Fira Sans, DejaVu Sans, sans-serif",
-                    font_weight: "700", font_size: "{hole * 2.2}",
-                    fill: "{ring.css()}",
-                    "A"
                 }
             }
         }

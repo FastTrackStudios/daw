@@ -42,6 +42,7 @@ pub mod mixer_controls;
 pub mod primitives;
 pub mod strip;
 pub mod trace;
+pub mod export;
 pub mod vector_controls;
 
 #[cfg(feature = "render")]
@@ -59,4 +60,5 @@ pub use mixer_controls::{
 pub use primitives::{Button, ControlState, Groove, Meter, Panel, Thumb};
 #[cfg(feature = "render")]
 pub use render::{RenderError, render_for, render_sized, render_svg};
+pub use export::{cell_markup, composite_cells, generatable, render_control};
 pub use strip::{Mixer, MixerStrip};

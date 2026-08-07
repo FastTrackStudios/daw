@@ -315,3 +315,57 @@ fn button_labels_sit_where_the_source_puts_them() {
         );
     }
 }
+
+
+/// A vector control exports as a REAPER strip with its guides intact.
+///
+/// The unit tests for this use a synthetic spec; this runs it against the
+/// theme's real art, where the marker layout is whatever ReaperTips
+/// actually shipped rather than whatever seemed reasonable. `mcp_fx_norm`
+/// is the interesting one: 86px of three cells is 28.67 each, so integer
+/// division drops a column, and `mcp_io_s_r` carries live magenta guides
+/// down its left edge.
+#[test]
+fn exported_controls_keep_the_sources_guides() {
+    let Some(dir) = source_dir() else { return };
+
+    for name in ["mcp_mute_on", "mcp_fx_norm", "mcp_io_s_r", "mcp_recarm_auto"] {
+        let src = image::open(dir.join(format!("{name}.png")))
+            .expect("source png")
+            .to_rgba8();
+        let spec = daw_theme_art::DerivedSpec::from_image(&src);
+        let out = daw_theme_art::render_control(name, &spec)
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
+
+        assert_eq!(
+            out.dimensions(),
+            (spec.width, spec.height),
+            "{name}: wrong size for the image it replaces",
+        );
+
+        for &(x, y, rgba) in &spec.markers {
+            assert_eq!(
+                out.get_pixel(x, y).0,
+                rgba,
+                "{name}: guide at {x},{y} did not survive export",
+            );
+        }
+
+        // Every cell must have been drawn into. Checked per cell rather
+        // than per column: a control legitimately leaves its outermost
+        // column clear — that gap is what separates the buttons in the
+        // strip — so "no blank columns" fails on correct output. A
+        // *skipped* cell is the thing that matters, and it is easy to miss
+        // against a dark mixer while being fatal to the layout.
+        for (i, &(x, w)) in spec.cells.iter().enumerate() {
+            let drawn = (x..x + w)
+                .flat_map(|cx| (0..out.height()).map(move |cy| (cx, cy)))
+                .filter(|&(cx, cy)| out.get_pixel(cx, cy).0[3] > 8)
+                .count();
+            assert!(
+                drawn > (w * out.height() / 8) as usize,
+                "{name}: cell {i} at x={x} is essentially empty ({drawn} px)",
+            );
+        }
+    }
+}

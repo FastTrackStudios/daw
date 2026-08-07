@@ -16,6 +16,11 @@ use crate::theme::{SCALES, ThemeDir};
 #[derive(Debug, Clone, Default)]
 pub struct GenerateReport {
     pub written: Vec<PathBuf>,
+    /// Of `written`, those drawn from a true vector control rather than
+    /// from traced rects — worth reporting because only these get sharper
+    /// at 150/200%, and a control silently falling back to its trace is
+    /// invisible in the output.
+    pub vectorised: Vec<PathBuf>,
     pub failed: Vec<(String, String)>,
 }
 
@@ -62,7 +67,16 @@ pub fn generate(theme: &ThemeDir, dry_run: bool) -> Result<GenerateReport> {
                 }
             };
 
-            match render_art(art, &measured) {
+            // A vector control if one draws this image, the trace
+            // otherwise. Both stamp the same measured markers back.
+            let vector = daw_theme_art::cell_markup(name, Default::default()).is_some();
+            let drawn = if vector {
+                daw_theme_art::render_control(name, &measured).map_err(|e| format!("{e}"))
+            } else {
+                render_art(art, &measured)
+            };
+
+            match drawn {
                 Ok(img) => {
                     if !dry_run
                         && let Err(e) = img
@@ -72,6 +86,9 @@ pub fn generate(theme: &ThemeDir, dry_run: bool) -> Result<GenerateReport> {
                         report.failed.push((name.into(), format!("{e:#}")));
                         continue;
                     }
+                    if vector {
+                        report.vectorised.push(path.clone());
+                    }
                     report.written.push(path);
                 }
                 Err(e) => report.failed.push((name.into(), e)),
@@ -79,30 +96,37 @@ pub fn generate(theme: &ThemeDir, dry_run: bool) -> Result<GenerateReport> {
         }
     }
     report.written.sort();
+    report.vectorised.sort();
     Ok(report)
 }
 
 /// Render traced art at the geometry measured from the image it replaces,
 /// stamping that image's marker pixels back.
+///
+/// Cell by cell, because `ArtImage` draws **one** sprite cell — asking it
+/// for the full strip width does not draw the strip, it stretches cell 0
+/// across all of it. That produces a plausible-looking blurry button
+/// rather than an obviously wrong one, so it is worth being explicit
+/// about here.
 fn render_art(
     art: daw_theme_art::ArtData,
     spec: &daw_theme_art::DerivedSpec,
 ) -> std::result::Result<image::RgbaImage, String> {
     use daw_theme_art::art_data::{ArtImage, ArtImageProps, ColorMode};
 
-    let svg = daw_theme_art::render_svg(
-        ArtImage,
-        ArtImageProps {
-            art,
-            width: Some(spec.width),
-            height: Some(spec.height),
-            mode: ColorMode::Themed,
-        },
-    );
-    let mut img = daw_theme_art::render::rasterise(&svg, spec.width, spec.height)
-        .map_err(|e| format!("{e}"))?;
-    spec.stamp(&mut img);
-    Ok(img)
+    daw_theme_art::composite_cells(spec, |i, w| {
+        Ok(daw_theme_art::render_svg(
+            ArtImage,
+            ArtImageProps {
+                art,
+                width: Some(w),
+                height: Some(spec.height),
+                mode: ColorMode::Themed,
+                cell: i,
+            },
+        ))
+    })
+    .map_err(|e| format!("{e}"))
 }
 
 #[cfg(test)]
