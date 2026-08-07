@@ -6,13 +6,16 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-use fts_themer::{add_accent, color::Rgb, groups, ThemeDir};
+use fts_themer::{ThemeDir, add_accent, color::Rgb, groups};
 
 /// Default theme location, relative to the repo root.
 const DEFAULT_THEME: &str = "features/reaper/fts-theme";
 
 #[derive(Parser)]
-#[command(name = "fts-themer", about = "Edit a REAPER theme's colors and artwork")]
+#[command(
+    name = "fts-themer",
+    about = "Edit a REAPER theme's colors and artwork"
+)]
 struct Cli {
     /// Theme directory (holding <name>.ReaperTheme) or the .ReaperTheme itself.
     #[arg(long, short, global = true, default_value = DEFAULT_THEME)]
@@ -56,6 +59,25 @@ enum Command {
         /// artwork's lightness — so the new accent sits tonally with the set.
         #[arg(long)]
         keep_tone: bool,
+    },
+    /// Screenshot a real REAPER wearing this theme, on a private X display.
+    Shot {
+        /// Output PNG.
+        #[arg(long, short, default_value = "target/theme-shots/theme.png")]
+        out: PathBuf,
+        /// Shoot against an existing resource dir (e.g. ~/fts-dev) instead of
+        /// a throwaway profile. Its reaper.ini is restored afterwards.
+        #[arg(long)]
+        profile: Option<PathBuf>,
+        /// Xvfb screen spec.
+        #[arg(long, default_value = "1920x1200x24")]
+        geometry: String,
+        /// X display to run on.
+        #[arg(long, default_value = ":97")]
+        display: String,
+        /// Seconds to let REAPER settle before capturing.
+        #[arg(long, default_value_t = 14)]
+        settle: u64,
     },
 }
 
@@ -108,8 +130,7 @@ fn main() -> Result<()> {
                 let (key, value) = pair
                     .split_once('=')
                     .with_context(|| format!("expected key=#rrggbb, got {pair:?}"))?;
-                let color = Rgb::parse_hex(value)
-                    .with_context(|| format!("color for {key}"))?;
+                let color = Rgb::parse_hex(value).with_context(|| format!("color for {key}"))?;
                 let before = theme.ini().color(key);
                 theme.ini_mut().set_color(key, color);
                 match before {
@@ -139,9 +160,34 @@ fn main() -> Result<()> {
                 println!("wrote {}", path.display());
             }
             match report.layouts {
-                0 => println!("layouts already registered in {}", report.rtconfig.display()),
+                0 => println!(
+                    "layouts already registered in {}",
+                    report.rtconfig.display()
+                ),
                 n => println!("added {n} layout blocks to {}", report.rtconfig.display()),
             }
+        }
+
+        Command::Shot {
+            out,
+            profile,
+            geometry,
+            display,
+            settle,
+        } => {
+            use fts_themer::shot::{self, Profile, ShotOptions};
+
+            let mut opts = ShotOptions::new(&cli.theme, &out);
+            opts.geometry = geometry;
+            opts.display = display;
+            opts.settle = std::time::Duration::from_secs(settle);
+            if let Some(dir) = profile {
+                opts.profile = Profile::Existing(dir);
+            }
+            println!("  theme:   {}", theme.name);
+            println!("  tracks:  {}", opts.tracks.len());
+            let path = shot::capture(&opts)?;
+            println!("\nWrote {}", path.display());
         }
     }
 

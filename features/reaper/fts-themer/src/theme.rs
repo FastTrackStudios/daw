@@ -5,12 +5,12 @@
 //! convention we can assume — it's whatever `ui_img=` in the ini says — so
 //! [`ThemeDir::open`] resolves it through the ini rather than by guessing.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 
 use crate::color::Rgb;
 use crate::ini::ThemeIni;
-use crate::recolor::{dominant_accent, Retint};
+use crate::recolor::{Retint, dominant_accent};
 
 /// The DPI variants REAPER looks for: (image subfolder, scale factor).
 /// The 100% set lives at the image-folder root, hence the empty prefix.
@@ -121,8 +121,8 @@ impl ThemeDir {
     /// list is what REAPER can actually render.
     pub fn accents(&self) -> Result<Vec<String>> {
         let path = self.rtconfig_path();
-        let text = std::fs::read_to_string(&path)
-            .with_context(|| format!("read {}", path.display()))?;
+        let text =
+            std::fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
         Ok(crate::rtconfig::accent_folders(&text)
             .into_iter()
             .filter(|f| self.images_dir().join(f).join(ACCENT_IMAGE).is_file())
@@ -243,8 +243,12 @@ mod tests {
             2 => Rgba([0x2f, 0x8a, 0xc4, 255]),
             _ => Rgba([0, 0, 0, 0]),
         });
-        thumb.save(dir.join(ui_img).join("blue").join(ACCENT_IMAGE)).unwrap();
-        thumb.save(dir.join(ui_img).join("strip").join(ACCENT_IMAGE)).unwrap();
+        thumb
+            .save(dir.join(ui_img).join("blue").join(ACCENT_IMAGE))
+            .unwrap();
+        thumb
+            .save(dir.join(ui_img).join("strip").join(ACCENT_IMAGE))
+            .unwrap();
         thumb
             .save(dir.join(ui_img).join("150").join("blue").join(ACCENT_IMAGE))
             .unwrap();
@@ -310,8 +314,20 @@ mod tests {
 
         // 100% and 150% exist in the fixture; 200% does not and is skipped.
         assert_eq!(written.len(), 2);
-        assert!(theme.scale_dir("").join("crimson").join(ACCENT_IMAGE).is_file());
-        assert!(theme.scale_dir("150").join("crimson").join(ACCENT_IMAGE).is_file());
+        assert!(
+            theme
+                .scale_dir("")
+                .join("crimson")
+                .join(ACCENT_IMAGE)
+                .is_file()
+        );
+        assert!(
+            theme
+                .scale_dir("150")
+                .join("crimson")
+                .join(ACCENT_IMAGE)
+                .is_file()
+        );
         std::fs::remove_dir_all(&d).ok();
     }
 
@@ -321,7 +337,9 @@ mod tests {
         fixture(&d, "T");
         let theme = ThemeDir::open(&d).unwrap();
         let target = Rgb::new(0xd1, 0x28, 0x3c);
-        theme.generate_accent("crimson", target, "blue", false).unwrap();
+        theme
+            .generate_accent("crimson", target, "blue", false)
+            .unwrap();
 
         let out = image::open(theme.scale_dir("").join("crimson").join(ACCENT_IMAGE))
             .unwrap()
@@ -355,9 +373,11 @@ mod tests {
         let d = tmpdir("nosrc");
         fixture(&d, "T");
         let theme = ThemeDir::open(&d).unwrap();
-        assert!(theme
-            .generate_accent("x", Rgb::new(1, 2, 3), "does-not-exist", false)
-            .is_err());
+        assert!(
+            theme
+                .generate_accent("x", Rgb::new(1, 2, 3), "does-not-exist", false)
+                .is_err()
+        );
         std::fs::remove_dir_all(&d).ok();
     }
 
@@ -366,9 +386,11 @@ mod tests {
         let d = tmpdir("traverse");
         fixture(&d, "T");
         let theme = ThemeDir::open(&d).unwrap();
-        assert!(theme
-            .generate_accent("../escape", Rgb::new(1, 2, 3), "blue", false)
-            .is_err());
+        assert!(
+            theme
+                .generate_accent("../escape", Rgb::new(1, 2, 3), "blue", false)
+                .is_err()
+        );
         std::fs::remove_dir_all(&d).ok();
     }
 }

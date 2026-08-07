@@ -6,7 +6,7 @@
 //! the surrounding indentation, so a generated accent reads like the nine that
 //! shipped with the theme.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 /// The three DPI tiers, as `(layout name prefix, image folder prefix)`.
 const TIERS: [(&str, &str); 3] = [("", ""), ("150%_", "150/"), ("200%_", "200/")];
@@ -116,7 +116,9 @@ pub fn add_accent_layout(text: &str, name: &str, folder: &str) -> Result<(String
     }
 
     if patched == 0 {
-        bail!("no existing \"{ACCENT_LAYOUT}*\" layouts to extend — is this a Reapertips-derived theme?");
+        bail!(
+            "no existing \"{ACCENT_LAYOUT}*\" layouts to extend — is this a Reapertips-derived theme?"
+        );
     }
 
     let mut out = lines.join("\n");

@@ -17,17 +17,21 @@ required-features = ["cli"]
 
 [features]
 default = ["cli"]
-cli = ["dep:clap"]
+# The CLI implies the filesystem half.
+cli = ["dep:clap", "fs", "shot"]
+# Filesystem + image work: reading a theme directory, recoloring artwork.
+# Off by default for wasm consumers, which edit the ini as a string and get
+# their preview from `ReaperTheme::from_sources` — no disk, no image decode.
+fs = ["dep:image"]
+# Screenshotting a real REAPER on a private X display (Linux/X11).
+shot = ["fs"]
 
 [dependencies]
 anyhow = { workspace = true }
 serde = { workspace = true }
-image = { workspace = true }
 palette = { workspace = true }
+image = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
-
-# The read half already exists — palette/rtconfig/image parsing.
-daw-theme-reaper = { workspace = true }
 
 [lints]
 workspace = true

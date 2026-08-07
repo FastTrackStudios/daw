@@ -111,7 +111,11 @@ impl Retint {
         // case where the source accent is itself grey.
         let sat = if fs > 0.001 { s * (ts / fs) } else { ts };
         // Lightness as a delta, keeping the ramp's shape.
-        let light = if self.keep_lightness { l } else { l + (tl - fl) };
+        let light = if self.keep_lightness {
+            l
+        } else {
+            l + (tl - fl)
+        };
         // Hue set outright, carrying any local deviation from the source hue
         // (highlights are often a few degrees off the body color).
         let hue = th + signed_hue_delta(h, fh);
@@ -157,8 +161,7 @@ fn hue_distance(a: f32, b: f32) -> f32 {
 
 /// Signed shortest offset from `reference` to `h`, in degrees (-180..180).
 fn signed_hue_delta(h: f32, reference: f32) -> f32 {
-    let d = (h - reference + 540.0) % 360.0 - 180.0;
-    d
+    (h - reference + 540.0) % 360.0 - 180.0
 }
 
 /// The dominant saturated color of an image — the accent it's built around.
@@ -184,7 +187,7 @@ pub fn dominant_accent(img: &RgbaImage) -> Option<Rgb> {
             continue;
         }
         let (h, s, l) = c.hsl();
-        if s < GREY_THRESHOLD || l < 0.08 || l > 0.97 {
+        if s < GREY_THRESHOLD || !(0.08..=0.97).contains(&l) {
             continue;
         }
         // Circular mean, weighted by saturation.
@@ -212,9 +215,7 @@ mod tests {
     use super::*;
 
     fn img(pixels: &[[u8; 4]]) -> RgbaImage {
-        RgbaImage::from_fn(pixels.len() as u32, 1, |x, _| {
-            Rgba(pixels[x as usize])
-        })
+        RgbaImage::from_fn(pixels.len() as u32, 1, |x, _| Rgba(pixels[x as usize]))
     }
 
     #[test]
@@ -231,7 +232,11 @@ mod tests {
     #[test]
     fn greys_survive_untouched() {
         let rt = Retint::new(Rgb::new(0x46, 0xb9, 0xfe), Rgb::new(0xff, 0x00, 0x00));
-        for grey in [Rgb::new(0, 0, 0), Rgb::new(0x45, 0x45, 0x45), Rgb::new(255, 255, 255)] {
+        for grey in [
+            Rgb::new(0, 0, 0),
+            Rgb::new(0x45, 0x45, 0x45),
+            Rgb::new(255, 255, 255),
+        ] {
             assert_eq!(rt.apply(grey), grey, "grey {grey:?} got tinted");
         }
     }
@@ -305,8 +310,8 @@ mod tests {
             [0x46, 0xb9, 0xfe, 255],
             [255, 255, 0, 255],
         ]);
-        let out = Retint::new(Rgb::new(0x46, 0xb9, 0xfe), Rgb::new(0xd1, 0x28, 0x3c))
-            .apply_image(&src);
+        let out =
+            Retint::new(Rgb::new(0x46, 0xb9, 0xfe), Rgb::new(0xd1, 0x28, 0x3c)).apply_image(&src);
         assert_eq!(out.get_pixel(0, 0).0, [255, 0, 255, 255]);
         assert_eq!(out.get_pixel(2, 0).0, [255, 255, 0, 255]);
         assert_ne!(out.get_pixel(1, 0).0, [0x46, 0xb9, 0xfe, 255]);
@@ -319,7 +324,10 @@ mod tests {
         let found = dominant_accent(&src).expect("an accent");
         let (h, _, _) = found.hsl();
         let (want, _, _) = Rgb::new(0x46, 0xb9, 0xfe).hsl();
-        assert!(hue_distance(h, want) < 6.0, "marker skewed detection: hue {h}");
+        assert!(
+            hue_distance(h, want) < 6.0,
+            "marker skewed detection: hue {h}"
+        );
     }
 
     #[test]

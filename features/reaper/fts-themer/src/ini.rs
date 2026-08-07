@@ -1,6 +1,6 @@
 //! Round-trip editing of a `.ReaperTheme` ini.
 //!
-//! [`daw_theme_reaper::Palette`] parses the file into a `HashMap`, which is all
+//! `daw_theme_reaper::Palette` parses the file into a `HashMap`, which is all
 //! a *reader* needs. An editor needs more: REAPER rewrites this file itself
 //! (every color you change in its own dialogs), so we must not reorder keys,
 //! drop the `[REAPER]` font blobs, or normalise anything we didn't touch —
@@ -11,8 +11,10 @@
 //! the one line that changed. A key that doesn't exist yet is appended to its
 //! section rather than dropped.
 
+#[cfg(feature = "fs")]
 use anyhow::{Context, Result};
 use std::collections::HashMap;
+#[cfg(feature = "fs")]
 use std::path::Path;
 
 use crate::color::Rgb;
@@ -51,9 +53,7 @@ impl ThemeIni {
                 in_colors = section.eq_ignore_ascii_case(COLOR_SECTION);
                 continue;
             }
-            if in_colors
-                && let Some((key, _)) = t.split_once('=')
-            {
+            if in_colors && let Some((key, _)) = t.split_once('=') {
                 index.insert(key.trim().to_ascii_lowercase(), i);
                 section_end = i + 1;
             }
@@ -68,10 +68,11 @@ impl ThemeIni {
     }
 
     /// Read a `.ReaperTheme` from disk.
+    #[cfg(feature = "fs")]
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("read {}", path.display()))?;
+        let text =
+            std::fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
         Ok(Self::parse(&text))
     }
 
@@ -85,15 +86,17 @@ impl ThemeIni {
     }
 
     /// Write back to disk.
+    #[cfg(feature = "fs")]
     pub fn save(&self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
-        std::fs::write(path, self.to_text())
-            .with_context(|| format!("write {}", path.display()))
+        std::fs::write(path, self.to_text()).with_context(|| format!("write {}", path.display()))
     }
 
     /// Raw integer for a color-section key.
     pub fn int(&self, key: &str) -> Option<i32> {
-        let line = self.lines.get(*self.index.get(&key.to_ascii_lowercase())?)?;
+        let line = self
+            .lines
+            .get(*self.index.get(&key.to_ascii_lowercase())?)?;
         line.split_once('=')?.1.trim().parse().ok()
     }
 
@@ -109,7 +112,8 @@ impl ThemeIni {
             self.lines[i] = format!("{key}={value}");
             return;
         }
-        self.lines.insert(self.section_end, format!("{key}={value}"));
+        self.lines
+            .insert(self.section_end, format!("{key}={value}"));
         // Everything at or past the insert point shifted down by one.
         for i in self.index.values_mut() {
             if *i >= self.section_end {
@@ -215,7 +219,10 @@ tl_font=DEADBEEF
         let mut ini = ThemeIni::parse(INI);
         ini.set_int("col_brand_new", 42);
         let out = ini.to_text();
-        let new_at = out.lines().position(|l| l.starts_with("col_brand_new")).unwrap();
+        let new_at = out
+            .lines()
+            .position(|l| l.starts_with("col_brand_new"))
+            .unwrap();
         let reaper_at = out.lines().position(|l| l == "[REAPER]").unwrap();
         assert!(new_at < reaper_at, "new key escaped into [REAPER]:\n{out}");
         assert_eq!(ThemeIni::parse(&out).int("col_brand_new"), Some(42));

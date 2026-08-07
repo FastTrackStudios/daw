@@ -7,7 +7,7 @@
 //! - **hex** — `#rrggbb`, what a GUI color input speaks.
 //! - **HSL** — what recoloring and accent generation work in.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use palette::{FromColor, Hsl, IntoColor, Srgb};
 
 /// An opaque 8-bit RGB triple. Alpha lives outside the palette (REAPER
@@ -73,7 +73,9 @@ impl Rgb {
     }
 
     fn to_hsl(self) -> Hsl {
-        Srgb::new(self.r, self.g, self.b).into_format::<f32>().into_color()
+        Srgb::new(self.r, self.g, self.b)
+            .into_format::<f32>()
+            .into_color()
     }
 
     fn from_hsl(hsl: Hsl) -> Self {
@@ -149,7 +151,10 @@ mod tests {
     #[test]
     fn hex_parses_both_widths() {
         assert_eq!(Rgb::parse_hex("#fff").unwrap(), Rgb::new(255, 255, 255));
-        assert_eq!(Rgb::parse_hex("1e90ff").unwrap(), Rgb::new(0x1e, 0x90, 0xff));
+        assert_eq!(
+            Rgb::parse_hex("1e90ff").unwrap(),
+            Rgb::new(0x1e, 0x90, 0xff)
+        );
         assert!(Rgb::parse_hex("#12345").is_err());
     }
 

@@ -1,12 +1,17 @@
 //! REAPER theme editing — the write half.
 //!
-//! [`daw_theme_reaper`] already *reads* an unpacked theme (palette, rtconfig
+//! `daw-theme-reaper` already *reads* an unpacked theme (palette, rtconfig
 //! globals and `define_parameter`s, sliced image atlases) for the FTS UI to
 //! render. This crate is the other direction: change a color, generate an
 //! accent variant, and push the result into a running REAPER.
 //!
 //! Everything is library-first; the `fts-themer` binary and the web GUI are
 //! both thin shells over these types.
+//!
+//! The `fs` feature (on by default) carries everything that touches disk or
+//! decodes images. Without it the crate is wasm-clean, which is what lets the
+//! browser editor hold a [`ThemeIni`] in a signal and re-render its preview
+//! from the edited string on every keystroke.
 //!
 //! ```no_run
 //! use fts_themer::{color::Rgb, ThemeDir};
@@ -20,16 +25,23 @@
 pub mod color;
 pub mod groups;
 pub mod ini;
+#[cfg(feature = "fs")]
 pub mod recolor;
 pub mod rtconfig;
+#[cfg(feature = "shot")]
+pub mod shot;
+#[cfg(feature = "fs")]
 pub mod theme;
 
 pub use color::Rgb;
 pub use groups::Group;
 pub use ini::ThemeIni;
-pub use theme::{ThemeDir, ACCENT_IMAGE, SCALES};
+#[cfg(feature = "fs")]
+pub use theme::{ACCENT_IMAGE, SCALES, ThemeDir};
 
+#[cfg(feature = "fs")]
 use anyhow::Result;
+#[cfg(feature = "fs")]
 use std::path::PathBuf;
 
 /// Generate an accent variant end to end: recolor the artwork at every DPI
@@ -38,6 +50,7 @@ use std::path::PathBuf;
 /// Doing only half of this is a silent no-op from the user's point of view —
 /// images with no layout never render, a layout with no images renders blank —
 /// so the two steps live behind one call.
+#[cfg(feature = "fs")]
 pub fn add_accent(
     theme: &ThemeDir,
     name: &str,
@@ -62,6 +75,7 @@ pub fn add_accent(
 }
 
 /// What [`add_accent`] wrote.
+#[cfg(feature = "fs")]
 #[derive(Debug, Clone)]
 pub struct AccentReport {
     /// PNGs written, one per DPI scale.
