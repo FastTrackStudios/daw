@@ -157,13 +157,42 @@ impl PermissionsGate {
         PermissionedRouter {
             inner,
             gate: Arc::new(self),
+            connection_bearer: None,
         }
     }
 
     /// Wrap with an ALREADY-SHARED gate (one gate, many lanes/connections —
     /// the per-connection serve path).
     pub fn wrap_shared<H>(gate: Arc<PermissionsGate>, inner: H) -> PermissionedRouter<H> {
-        PermissionedRouter { inner, gate }
+        PermissionedRouter {
+            inner,
+            gate,
+            connection_bearer: None,
+        }
+    }
+
+    /// [`wrap_shared`](Self::wrap_shared) with a **connection-scoped**
+    /// bearer: the identity presented ONCE at transport establish (a
+    /// WebSocket upgrade header or subprotocol) rather than on each call.
+    ///
+    /// Browsers cannot set arbitrary WebSocket headers and must not put a
+    /// token in the URL (it lands in proxy + access logs), so the token
+    /// rides the handshake and applies to every call on that connection.
+    /// Per-call `authorization` metadata still WINS where present, so a
+    /// per-typed-client [`ClientMiddleware`] and this can coexist — a
+    /// connection carrying one identity can still make a call as another.
+    ///
+    /// [`ClientMiddleware`]: vox::ClientMiddleware
+    pub fn wrap_shared_with_bearer<H>(
+        gate: Arc<PermissionsGate>,
+        inner: H,
+        bearer: Option<String>,
+    ) -> PermissionedRouter<H> {
+        PermissionedRouter {
+            inner,
+            gate,
+            connection_bearer: bearer.map(Arc::from),
+        }
     }
 
     /// The engine this gate consults — for mounting a `PermissionsService`
@@ -256,6 +285,10 @@ enum GateOutcome {
 pub struct PermissionedRouter<H = LayerRouter> {
     inner: H,
     gate: Arc<PermissionsGate>,
+    /// Identity presented at transport establish, applied to every call on
+    /// this connection when the call itself carries no `authorization`
+    /// metadata. See [`PermissionsGate::wrap_shared_with_bearer`].
+    connection_bearer: Option<Arc<str>>,
 }
 
 impl<H> PermissionedRouter<H> {
@@ -286,6 +319,10 @@ where
             let c = call.get();
             (c.method_id, PermissionsGate::bearer_from(&c.metadata))
         };
+        // Per-call metadata wins; the connection's establish-time bearer is
+        // the fallback. Browsers can't set WebSocket headers per call, so
+        // for the web client this IS the identity on every call.
+        let token = token.or_else(|| self.connection_bearer.as_deref().map(str::to_owned));
         // Everything below runs inside ONE span, which is the call's wide
         // event. This matters for ordering: `decide` resolves the identity
         // and audits the permission decision BEFORE dispatching, so it runs
