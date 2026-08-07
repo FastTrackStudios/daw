@@ -416,24 +416,26 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
             //     y  1   2   3   4   5   6   7   8   9 …14  15    16…23
             //       3.5 5.5 7.5 8.5 9.5 9.5 10.5 10.5 11.5    12.5  14.5
             //
-            // Five segments, and the two that matter are the **45°
-            // diagonals**: a narrow flat top, a diagonal opening out to
-            // full width, straight vertical sides, a second diagonal
-            // flaring to the base, then a flat bottom flush with the cell
-            // edge. The upper one is 1:1; the lower is steeper — the
-            // source crosses from half 11.5 to 14.5 between y=15 and
-            // y=16, so it is a short hard flare, not a matching 45.
+            // Fitting a circle to those points gives radius 12.26 centred
+            // on (17.5, 13.25) — and that circle independently predicts
+            // full width at exactly y=9, which is where the source squares
+            // off. So the housing is one **circular bezel around the
+            // ring**, clipped to half-width 11.5, sitting on a wider base
+            // with a flat bottom flush with the cell edge. The straight
+            // sides are the clip, not a separate segment.
             //
-            // Fitted as a dome first, which is the obvious reading and the
-            // wrong one: an ellipse through the same endpoints bulges, so
-            // it hit full width at y=6 where the source gets there at y=9,
-            // and the sides never read as squared off at all.
+            // Two wrong readings came first. An *ellipse* through the same
+            // endpoints bulges: full width by y=6, so the sides never read
+            // as squared off. A *chamfer* with a flat top is too narrow
+            // through the middle and visibly cut off square at any zoom.
+            // Both look plausible against the numbers; only the circle
+            // also lands the corner in the right place.
             path {
-                d: "M {cx - vw * 0.118} {vh * 0.042} H {cx + vw * 0.118}
-                    L {cx + vw * 0.319} {vh * 0.344} V {vh * 0.625}
-                    L {cx + vw * 0.403} {vh * 0.667} V {vh}
-                    H {cx - vw * 0.403} V {vh * 0.667}
-                    L {cx - vw * 0.319} {vh * 0.625} V {vh * 0.344} Z",
+                d: "M {cx - vw * 0.3194} {vh * 0.375}
+                    A {vw * 0.3406} {vw * 0.3406} 0 0 1 {cx + vw * 0.3194} {vh * 0.375}
+                    V {vh * 0.625} L {cx + vw * 0.4028} {vh * 0.667} V {vh}
+                    H {cx - vw * 0.4028} V {vh * 0.667}
+                    L {cx - vw * 0.3194} {vh * 0.625} Z",
                 fill: "{hole_fill.css()}",
             }
             circle {
