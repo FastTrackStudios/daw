@@ -65,6 +65,16 @@ pub const TRACKED: &[&str] = &[
 ///
 /// A prefix here is tracked recursively. Extend it when you add a
 /// directory of your own.
+/// Placeholder standing in for the resource directory in versioned
+/// paths.
+///
+/// REAPER writes absolute paths for things like the active theme
+/// (`lastthemefn5=/home/cody/fts-dev/ColorThemes/…`). Keeping those
+/// verbatim would break on any machine whose resource directory differs
+/// — which is every other machine — so they are rewritten to this token
+/// on export and back to the real directory on apply.
+pub const RESOURCES_TOKEN: &str = "$REAPER_RESOURCES";
+
 pub const AUTHORED: &[&str] = &[
     "Scripts/FTS",
     "Effects/FTS",
@@ -76,9 +86,16 @@ pub const AUTHORED: &[&str] = &[
 pub const EXCLUDED_DIRS: &[&str] = &["__pycache__", ".git", "cache"];
 
 /// File patterns never versioned.
+///
+/// `Default_*.ReaperTheme*` are REAPER's own stock themes — ~25 MB
+/// each, and every install already has them. Any *other* theme in
+/// `ColorThemes/` is one you added, so it travels.
 pub const EXCLUDED_FILES: &[&str] = &[
     ".bak", ".log", ".dat", ".tmp", "~", ".pyc", ".DS_Store",
 ];
+
+/// Filename prefixes never versioned.
+pub const EXCLUDED_PREFIXES: &[&str] = &["Default_"];
 
 /// `reaper.ini` keys that describe a machine rather than a preference.
 ///
@@ -105,7 +122,6 @@ pub const MACHINE_KEYS: &[&str] = &[
     "recent",
     "lastproject",
     "lastcwd",
-    "lastthemefn",
     "lasttrackfx",
     // Caches and scan results.
     "vstpath",
@@ -131,6 +147,13 @@ pub fn is_tracked(relative: &Path) -> bool {
         return true;
     }
     if EXCLUDED_FILES.iter().any(|p| s.ends_with(p)) {
+        return false;
+    }
+    let name = relative
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if EXCLUDED_PREFIXES.iter().any(|p| name.starts_with(p)) {
         return false;
     }
     let excluded_dir = relative
@@ -186,6 +209,45 @@ fn walk(root: &Path, dir: &Path, out: &mut BTreeSet<Entry>) {
     }
 }
 
+/// The theme files a `reaper.ini` refers to, relative to the resource
+/// directory.
+///
+/// Only the theme actually in use travels: `ColorThemes/` also holds
+/// REAPER's two stock themes at ~25 MB each, which every install
+/// already has.
+pub fn referenced_themes(ini: &str) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for line in ini.lines() {
+        let t = line.trim_start().to_ascii_lowercase();
+        if !t.starts_with("lastthemefn") {
+            continue;
+        }
+        let Some(value) = line.split_once('=').map(|(_, v)| v.trim()) else {
+            continue;
+        };
+        // Either an absolute path under the resource dir, or already
+        // tokenised from a previous export.
+        let tail = value
+            .rsplit_once("ColorThemes/")
+            .map(|(_, name)| name)
+            .unwrap_or(value);
+        if !tail.is_empty() {
+            out.push(PathBuf::from("ColorThemes").join(tail));
+        }
+    }
+    out
+}
+
+/// Replace an absolute resource-dir prefix with [`RESOURCES_TOKEN`].
+pub fn tokenise_paths(contents: &str, resources: &Path) -> String {
+    contents.replace(&resources.to_string_lossy().to_string(), RESOURCES_TOKEN)
+}
+
+/// Expand [`RESOURCES_TOKEN`] back to a real resource directory.
+pub fn expand_paths(contents: &str, resources: &Path) -> String {
+    contents.replace(RESOURCES_TOKEN, &resources.to_string_lossy())
+}
+
 /// Strip machine-specific keys from a `reaper.ini`.
 ///
 /// Sections are preserved even when they end up empty, so a diff
@@ -230,10 +292,50 @@ pub fn export(resources: &Path, repo: &Path) -> std::io::Result<Vec<PathBuf>> {
     let ini = resources.join("reaper.ini");
     if ini.is_file() {
         let contents = std::fs::read_to_string(&ini)?;
-        std::fs::write(repo.join("reaper.ini"), filter_reaper_ini(&contents))?;
+        // Only the theme in use — `ColorThemes/` also holds REAPER's
+        // stock themes at ~25 MB each, which every install already has.
+        for theme in referenced_themes(&contents) {
+            let src = resources.join(&theme);
+            if src.is_file() {
+                let dst = repo.join(&theme);
+                if let Some(parent) = dst.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::copy(&src, &dst)?;
+                written.push(theme);
+            }
+        }
+        let filtered = tokenise_paths(&filter_reaper_ini(&contents), resources);
+        std::fs::write(repo.join("reaper.ini"), filtered)?;
         written.push(PathBuf::from("reaper.ini"));
     }
     Ok(written)
+}
+
+/// Copy the versioned themes back.
+///
+/// `ColorThemes/` is never swept on export — it holds REAPER's stock
+/// themes and, if a theme has been unzipped, thousands of images. Only
+/// what `reaper.ini` points at is exported, so on the way back the
+/// whole (small) directory can simply be copied.
+fn apply_themes(repo: &Path, resources: &Path, written: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    let src_dir = repo.join("ColorThemes");
+    if !src_dir.is_dir() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(&src_dir)?.flatten() {
+        if !entry.path().is_file() {
+            continue;
+        }
+        let rel = PathBuf::from("ColorThemes").join(entry.file_name());
+        let dst = resources.join(&rel);
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(entry.path(), &dst)?;
+        written.push(rel);
+    }
+    Ok(())
 }
 
 /// Copy versioned config from `repo` into a REAPER resource directory.
@@ -253,9 +355,12 @@ pub fn apply(repo: &Path, resources: &Path) -> std::io::Result<Vec<PathBuf>> {
         written.push(entry.relative);
     }
 
+    apply_themes(repo, resources, &mut written)?;
+
     let repo_ini = repo.join("reaper.ini");
     if repo_ini.is_file() {
-        let incoming = std::fs::read_to_string(&repo_ini)?;
+        // Paths come back pointing at *this* machine's resource dir.
+        let incoming = expand_paths(&std::fs::read_to_string(&repo_ini)?, resources);
         let target = resources.join("reaper.ini");
         let existing = std::fs::read_to_string(&target).unwrap_or_default();
         std::fs::write(&target, merge_reaper_ini(&existing, &incoming))?;
