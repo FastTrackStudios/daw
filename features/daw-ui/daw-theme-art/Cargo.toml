@@ -52,3 +52,7 @@ required-features = ["render"]
 [[example]]
 name = "controls"
 required-features = ["render"]
+
+[[example]]
+name = "vectors"
+required-features = ["render"]

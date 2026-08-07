@@ -42,6 +42,7 @@ pub mod mixer_controls;
 pub mod primitives;
 pub mod strip;
 pub mod trace;
+pub mod vector_controls;
 
 #[cfg(feature = "render")]
 pub mod render;
