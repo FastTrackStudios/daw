@@ -56,3 +56,7 @@ required-features = ["render"]
 [[example]]
 name = "vectors"
 required-features = ["render"]
+
+[[example]]
+name = "compare_sheet"
+required-features = ["render"]
