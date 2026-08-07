@@ -129,20 +129,24 @@ impl Overrides {
     ///
     /// `clap_path` is intentionally absent — CLAP is what we load, and its
     /// scan is cheap.
-    pub fn for_screenshot() -> Vec<(&'static str, String)> {
+    /// `empty` is a directory containing no plugins — see below.
+    pub fn for_screenshot(empty: &Path) -> Vec<(&'static str, String)> {
+        let empty = empty.display().to_string();
         vec![
-            // The expensive one: a few hundred VSTs, behind a modal dialog.
+            // The expensive one: a few hundred VSTs, behind a modal dialog
+            // that lands on top of whatever we came to photograph.
             //
-            // `vst_noscan` is the switch that actually works. Blanking the
-            // paths alone is not enough — REAPER treats an empty `vstpath`
-            // as "unset" and scans its defaults, so a profile with no
-            // plugin cache still sat through a full scan. That went
-            // unnoticed for a while because a *warm* profile skips the scan
-            // regardless, so it only reappears on a fresh one.
-            ("vst_noscan", "1".into()),
-            ("vstpath", String::new()),
-            ("vstpath64", String::new()),
-            ("lv2path_linux", String::new()),
+            // Point the search at a directory with nothing in it. Two
+            // things that look like they should work do not: blanking
+            // `vstpath` makes REAPER treat it as *unset* and scan its
+            // defaults, and `vst_noscan=1` — which this used to rely on —
+            // does not appear in a real profile at all and did not stop a
+            // cold run scanning 134 plugins. What actually keeps a warm
+            // profile quiet is its plugin *cache*, which a throwaway
+            // profile by definition does not have.
+            ("vstpath", empty.clone()),
+            ("vstpath64", empty.clone()),
+            ("lv2path_linux", empty),
             // "A new REAPER is available" pops over the arrange view.
             ("verchk", "0".into()),
             // No device to open — and no chance of stealing the live rig's.
@@ -284,8 +288,13 @@ pub fn capture(opts: &ShotOptions) -> Result<PathBuf> {
         }
     }
 
+    // A real directory with nothing in it, so the plugin scan finishes
+    // instantly instead of being skipped by a flag that does not work.
+    let empty = dir.join("no-plugins");
+    std::fs::create_dir_all(&empty)?;
+
     let ini = dir.join("reaper.ini");
-    let mut values = Overrides::for_screenshot();
+    let mut values = Overrides::for_screenshot(&empty);
     let theme_ini = std::fs::canonicalize(theme.ini_path())?;
     values.push(("lastthemefn5", theme_ini.display().to_string()));
     let _guard = Overrides::apply(&ini, &values, restore)?;
@@ -530,14 +539,21 @@ mod tests {
     }
 
     #[test]
-    fn screenshot_overrides_blank_vst_but_leave_clap_alone() {
-        // The whole point: CLAP is what we load, and its scan is cheap.
-        let keys: Vec<&str> = Overrides::for_screenshot()
-            .iter()
-            .map(|(k, _)| *k)
-            .collect();
-        assert!(keys.contains(&"vstpath"));
-        assert!(!keys.iter().any(|k| k.contains("clap")));
+    fn screenshot_points_vst_at_an_empty_dir_and_leaves_clap_alone() {
+        // CLAP is what we load, and its scan is cheap.
+        //
+        // The VST paths must be *set to somewhere empty*, not blanked: an
+        // empty value reads as unset and REAPER scans its defaults, which
+        // is how a cold run ended up photographing a scan dialog.
+        let values = Overrides::for_screenshot(Path::new("/tmp/empty"));
+        for key in ["vstpath", "vstpath64", "lv2path_linux"] {
+            let v = values
+                .iter()
+                .find(|(k, _)| *k == key)
+                .unwrap_or_else(|| panic!("{key} not overridden"));
+            assert_eq!(v.1, "/tmp/empty", "{key} must point somewhere empty");
+        }
+        assert!(!values.iter().any(|(k, _)| k.contains("clap")));
     }
 
     #[test]
@@ -549,11 +565,13 @@ mod tests {
         std::fs::write(&ini, original).unwrap();
 
         {
-            let _g = Overrides::apply(&ini, &Overrides::for_screenshot(), true).unwrap();
+            let _g =
+                Overrides::apply(&ini, &Overrides::for_screenshot(Path::new("/tmp/empty")), true)
+                    .unwrap();
             assert!(
                 std::fs::read_to_string(&ini)
                     .unwrap()
-                    .contains("vstpath=\n")
+                    .contains("vstpath=/tmp/empty\n")
             );
         }
         // Dropped — a run must never leave a real profile without its paths.
@@ -568,12 +586,14 @@ mod tests {
         let ini = dir.join("reaper.ini");
         std::fs::write(&ini, "[REAPER]\nvstpath=x\n").unwrap();
         {
-            let _g = Overrides::apply(&ini, &Overrides::for_screenshot(), false).unwrap();
+            let _g =
+                Overrides::apply(&ini, &Overrides::for_screenshot(Path::new("/tmp/empty")), false)
+                    .unwrap();
         }
         assert!(
             std::fs::read_to_string(&ini)
                 .unwrap()
-                .contains("vstpath=\n")
+                .contains("vstpath=/tmp/empty\n")
         );
         std::fs::remove_dir_all(&dir).ok();
     }
