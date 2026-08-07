@@ -22,6 +22,8 @@
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
+#[cfg(feature = "apply")]
+pub mod apply;
 pub mod color;
 pub mod groups;
 pub mod ini;

@@ -60,6 +60,17 @@ enum Command {
         #[arg(long)]
         keep_tone: bool,
     },
+    /// Paint this REAPER theme from the canonical FTS theme
+    ///
+    /// Only the keys the FTS palette determines are written; everything
+    /// else in the .ReaperTheme is left exactly as it was.
+    Apply {
+        /// Canonical theme (.styx). Omit for the built-in FTS default.
+        from: Option<PathBuf>,
+        /// Show what would change without writing.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Screenshot a real REAPER wearing this theme, on a private X display.
     Shot {
         /// Output PNG.
@@ -166,6 +177,24 @@ fn main() -> Result<()> {
                 ),
                 n => println!("added {n} layout blocks to {}", report.rtconfig.display()),
             }
+        }
+
+        Command::Apply { from, dry_run } => {
+            let source = fts_themer::apply::load_theme(from.as_deref())?;
+            let report = fts_themer::apply::apply_theme(&cli.theme, &source, dry_run)?;
+            for (key, before, after) in &report.changed {
+                println!("{key:<26} {} -> {}", before.to_hex(), after.to_hex());
+            }
+            println!(
+                "\n{} changed, {} already correct{}",
+                report.changed.len(),
+                report.unchanged,
+                if dry_run {
+                    " (dry run — nothing written)"
+                } else {
+                    ""
+                }
+            );
         }
 
         Command::Shot {
