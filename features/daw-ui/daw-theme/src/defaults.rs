@@ -83,7 +83,12 @@ pub const METER_SAFE: &str = "#22c55e";
 pub const METER_WARN: &str = "#eab308";
 pub const METER_DANGER: &str = "#ef4444";
 pub const SOLO: &str = "#eab308";
-pub const MUTE: &str = "#ef4444";
+/// Deeper and less saturated than [`REC`], which is the point: a muted
+/// track is a *withdrawn* state, and the source theme draws it a full step
+/// darker than record-arm rather than as another bright red. This was a
+/// generic `#ef4444` for a while and made every muted track shout louder
+/// than an armed one.
+pub const MUTE: &str = "#b8394e";
 pub const REC: &str = "#e13a53";
 /// Waveform / peak body.
 pub const PEAKS: &str = "#5b8def";

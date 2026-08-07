@@ -227,14 +227,26 @@ pub struct FxProps {
 
 /// The FX-chain button.
 ///
-/// Not a [`LabelButton`] with a different word on it. In all three source
-/// images the *face is the same dark grey* — empty, active and bypassed are
-/// told apart entirely by the colour of the letters (grey, white, red).
-/// Lighting the face instead, as this first did, produced coloured slabs
-/// that read as toggles and made the mixer look like a different theme.
+/// Not a [`LabelButton`] with a different word on it, in two ways.
 ///
-/// The cell is 28x22 (`mcp_fx_*` is 86x22 in three), wider and taller than
-/// mute's 21x20, and the letters are wide-set across most of that width.
+/// **Colour.** In all three source images the *face is the same dark
+/// grey* — empty, active and bypassed are told apart entirely by the
+/// colour of the letters (grey, white, red). Lighting the face instead
+/// produced coloured slabs that read as toggles.
+///
+/// **Shape.** Mute and solo are symmetric: a 1px border all the way
+/// round a 21x20 cell with 1px corners. FX is not. Reading `mcp_fx_norm`
+/// row by row, cell 0 occupies x=1..28 of a 29-wide cell and the
+/// rightmost column is *body*, not border — the button runs flush off
+/// the right edge with no border and no corner there, and only the left
+/// side is bordered and rounded, because these butt up against what
+/// follows them in the strip. Drawing it as an evenly rounded rect put a
+/// seam down the middle of the mixer strip.
+///
+/// **Height.** The body is y=1..16 of a 22-tall cell — about three
+/// quarters of it — with two darker rows beneath for the shadow that
+/// seats it. Filling the cell, as this did, made the button visibly
+/// taller than the one it replaces.
 #[component]
 pub fn FxButton(props: FxProps) -> Element {
     let t = Theme::default();
@@ -248,8 +260,24 @@ pub fn FxButton(props: FxProps) -> Element {
         FxChain::Active => t.chrome.text,
         FxChain::Bypassed => t.signal.rec,
     };
-    let r = vh * 0.12;
-    let edge = vh * 0.045;
+
+    // Rounded down the left, square down the right, flush to `vw`.
+    let flush = |x: f32, y: f32, h: f32, r: f32| {
+        format!(
+            "M {} {y} H {vw} V {} H {} A {r} {r} 0 0 1 {x} {} V {} A {r} {r} 0 0 1 {} {y} Z",
+            x + r,
+            y + h,
+            x + r,
+            y + h - r,
+            y + r,
+            x + r,
+        )
+    };
+
+    let x = vw * 0.036;
+    let top = vh * 0.045;
+    let body_h = vh * 0.68;
+    let r = vh * 0.09;
 
     rsx! {
         svg {
@@ -263,25 +291,26 @@ pub fn FxButton(props: FxProps) -> Element {
                     stop { offset: "1", stop_color: "{k.face.shade(-0.12).css()}" }
                 }
             }
-            // Inset right and bottom: the source leaves a pixel there for
-            // the drop shadow, which is what seats the button in the strip.
-            rect {
-                x: "{edge / 2.0}", y: "{edge / 2.0}",
-                width: "{vw - edge - vw * 0.04}",
-                height: "{vh - edge - vh * 0.05}",
-                rx: "{r}",
+            // The shadow the button sits on — the same silhouette, dropped.
+            path {
+                d: "{flush(x, top + vh * 0.09, body_h, r)}",
+                fill: "{t.chrome.surface_deep().css()}",
+            }
+            // Border, then the face inset over it: stroking would draw an
+            // edge down the right, which is exactly what the source omits.
+            path { d: "{flush(x, top, body_h, r)}", fill: "{k.border.css()}" }
+            path {
+                d: "{flush(x + vw * 0.036, top + vh * 0.045, body_h - vh * 0.09, r * 0.7)}",
                 fill: "url(#fxface)",
-                stroke: "{k.border.css()}",
-                stroke_width: "{edge}",
             }
             text {
-                x: "{(vw - vw * 0.04) * 0.5}", y: "{vh * 0.52}",
+                x: "{(x + vw) * 0.5}", y: "{top + body_h * 0.5}",
                 text_anchor: "middle", dominant_baseline: "central",
                 font_family: "Fira Sans, DejaVu Sans, sans-serif",
                 // Lighter than mute's glyph and spread wide — the original
                 // letters are open and airy, not a packed bold pair.
                 font_weight: "500",
-                font_size: "{vh * 0.54}",
+                font_size: "{vh * 0.42}",
                 letter_spacing: "{vw * 0.025}",
                 fill: "{text.css()}",
                 "FX"
@@ -348,15 +377,21 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
             height: "{props.height.unwrap_or(24)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
-            // The housing the ring sits in — a dark pedestal with rounded
-            // top corners, filling most of the cell. Drawing the ring alone
-            // left it floating: in the original this shape is what seats the
-            // button in the strip, and without it the control reads as an
-            // icon rather than as hardware.
+            // The housing the ring sits in. Drawing the ring alone left it
+            // floating: in the original this shape is what seats the button
+            // in the strip.
+            //
+            // Traced row by row off `mcp_recarm_on`: it is 9px wide at y=1
+            // and widens to its full 29px by y=16, then runs straight down
+            // to a **flat bottom flush with the cell edge** — a dome on a
+            // block, so it sits on top of the MCP rather than floating in
+            // it. The fit is an ellipse, not a circle; a circular arc of
+            // the same width overshoots the top of the cell and gets
+            // clipped into a different silhouette entirely.
             path {
-                d: "M {cx - 14.0} {vh} L {cx - 14.0} {vh * 0.42}
-                    A 14 14 0 0 1 {cx + 14.0} {vh * 0.42}
-                    L {cx + 14.0} {vh} Z",
+                d: "M {vw * 0.083} {vh} V {vh * 0.667}
+                    A {vw * 0.403} {vh * 0.625} 0 0 1 {vw * 0.889} {vh * 0.667}
+                    V {vh} Z",
                 fill: "{t.chrome.surface_sunken.css()}",
             }
             circle {
