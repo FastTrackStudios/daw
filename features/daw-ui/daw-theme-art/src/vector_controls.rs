@@ -64,11 +64,10 @@ fn ink(lit: Option<Color>, at: Interaction) -> Ink {
         // pick its own falloff.
         face,
         border: c.hardware_edge,
-        text: if lit.is_some() {
-            c.text.shade(0.35)
-        } else {
-            c.text
-        },
+        // Neutral, and the same lit or not: the source prints #cccccc on
+        // mute and solo in both states. `text` is the panel blue-white,
+        // which on a plastic button reads as a backlit legend.
+        text: c.hardware_mark.shade(0.26),
     }
 }
 
@@ -265,10 +264,15 @@ pub fn FxButton(props: FxProps) -> Element {
     let k = ink(None, props.at);
     let (vw, vh) = (28.0f32, 22.0f32);
 
+    // Neutral, like everything else on a hardware control. The source
+    // letters are #9c9c9c empty, #dadada active and a desaturated #c34a54
+    // bypassed — so `text_faint` (a dark blue-grey) and `text` (blue-white)
+    // both read as lit indicators rather than printing on plastic, and
+    // `rec` was far too bright for a chain that is switched *off*.
     let text = match props.state {
-        FxChain::Empty => t.chrome.text_faint,
-        FxChain::Active => t.chrome.text,
-        FxChain::Bypassed => t.signal.rec,
+        FxChain::Empty => t.chrome.hardware_mark,
+        FxChain::Active => t.chrome.hardware_mark.shade(0.35),
+        FxChain::Bypassed => t.signal.mute,
     };
 
     // Chamfered down the left, square down the right, flush to `vw`.
