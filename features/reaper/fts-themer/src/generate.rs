@@ -30,53 +30,79 @@ pub struct GenerateReport {
 pub fn generate(theme: &ThemeDir, dry_run: bool) -> Result<GenerateReport> {
     let mut report = GenerateReport::default();
 
-    for (name, component) in daw_theme_art::components::registry() {
-        for (prefix, _scale) in SCALES {
-            let dir = theme.scale_dir(prefix);
-            if !dir.is_dir() {
+    for (prefix, _scale) in SCALES {
+        let dir = theme.scale_dir(prefix);
+        if !dir.is_dir() {
+            continue;
+        }
+        for entry in std::fs::read_dir(&dir)?.flatten() {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "png") {
                 continue;
             }
-            let live = dir.join(format!("{name}.png"));
-
-            // Prefer the pristine snapshot: once restyle has run, the live
-            // file is already derived, and measuring a derived file works
-            // but means a second source of truth.
-            let pristine = theme
-                .scale_dir(prefix)
-                .join(crate::restyle::SOURCE_DIR)
-                .join(format!("{name}.png"));
-            let source = if pristine.is_file() { &pristine } else { &live };
-            if !source.is_file() {
+            let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
                 continue;
-            }
+            };
+            // The traced art is keyed on the 100% names; a DPI variant
+            // finds the same drawing and renders it at the size that
+            // folder wants.
+            let Some(art) = daw_theme_art::generated::by_name(name) else {
+                continue;
+            };
 
-            let measured = match image::open(source) {
+            // Geometry still comes from the image being replaced, not from
+            // the traced source: REAPER's 150% art is not reliably 1.5x the
+            // 100%, and blitting at the wrong size is what renders markers
+            // as visible magenta.
+            let measured = match image::open(&path) {
                 Ok(img) => daw_theme_art::DerivedSpec::from_image(&img.to_rgba8()),
                 Err(e) => {
-                    report
-                        .failed
-                        .push((name.into(), format!("read source: {e}")));
+                    report.failed.push((name.into(), format!("read: {e}")));
                     continue;
                 }
             };
 
-            match daw_theme_art::render_for(component, &measured) {
+            match render_art(art, &measured) {
                 Ok(img) => {
                     if !dry_run
                         && let Err(e) = img
-                            .save(&live)
-                            .with_context(|| format!("write {}", live.display()))
+                            .save(&path)
+                            .with_context(|| format!("write {}", path.display()))
                     {
                         report.failed.push((name.into(), format!("{e:#}")));
                         continue;
                     }
-                    report.written.push(live);
+                    report.written.push(path);
                 }
-                Err(e) => report.failed.push((name.into(), format!("{e}"))),
+                Err(e) => report.failed.push((name.into(), e)),
             }
         }
     }
+    report.written.sort();
     Ok(report)
+}
+
+/// Render traced art at the geometry measured from the image it replaces,
+/// stamping that image's marker pixels back.
+fn render_art(
+    art: daw_theme_art::ArtData,
+    spec: &daw_theme_art::DerivedSpec,
+) -> std::result::Result<image::RgbaImage, String> {
+    use daw_theme_art::art_data::{ArtImage, ArtImageProps, ColorMode};
+
+    let svg = daw_theme_art::render_svg(
+        ArtImage,
+        ArtImageProps {
+            art,
+            width: Some(spec.width),
+            height: Some(spec.height),
+            mode: ColorMode::Themed,
+        },
+    );
+    let mut img = daw_theme_art::render::rasterise(&svg, spec.width, spec.height)
+        .map_err(|e| format!("{e}"))?;
+    spec.stamp(&mut img);
+    Ok(img)
 }
 
 #[cfg(test)]

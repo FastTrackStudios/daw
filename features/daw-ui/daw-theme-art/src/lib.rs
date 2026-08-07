@@ -33,17 +33,22 @@
 //! REAPER cannot load SVG. The PNGs are build output from here on, which is
 //! the point: change the palette or a component and every scale regenerates.
 
+pub mod art_data;
 pub mod compare;
 pub mod components;
 pub mod derive;
+pub mod generated;
 pub mod primitives;
 pub mod strip;
+pub mod trace;
 
 #[cfg(feature = "render")]
 pub mod render;
 
+pub use art_data::{ArtData, ArtImage, ColorMode, Rect};
 pub use compare::{Fidelity, compare};
 pub use derive::DerivedSpec;
+pub use trace::trace;
 
 pub use primitives::{Button, ControlState, Groove, Meter, Panel, Thumb};
 #[cfg(feature = "render")]

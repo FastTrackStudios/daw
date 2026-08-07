@@ -40,3 +40,11 @@ required-features = ["render"]
 [[example]]
 name = "analyse"
 required-features = ["render"]
+
+[[example]]
+name = "codegen"
+required-features = ["render"]
+
+[[example]]
+name = "diffone"
+required-features = ["render"]

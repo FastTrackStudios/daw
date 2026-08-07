@@ -62,6 +62,25 @@ impl std::fmt::Display for RenderError {
 
 impl std::error::Error for RenderError {}
 
+/// Rasterise SVG markup into a box of a given size.
+///
+/// The vector is *scaled* to the box rather than rendered at its own size
+/// and resampled — which is the whole reason the art is vector now, and the
+/// only way a 150% variant comes out sharper than an upscaled PNG.
+pub fn rasterise(markup: &str, width: u32, height: u32) -> Result<RgbaImage, RenderError> {
+    let tree = resvg::usvg::Tree::from_str(markup, &options())
+        .map_err(|e| RenderError::Svg(format!("{e}")))?;
+    let mut pixmap =
+        resvg::tiny_skia::Pixmap::new(width, height).ok_or(RenderError::Pixmap(width, height))?;
+    let (vw, vh) = (tree.size().width(), tree.size().height());
+    let transform = resvg::tiny_skia::Transform::from_scale(
+        width as f32 / vw.max(1.0),
+        height as f32 / vh.max(1.0),
+    );
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    Ok(to_rgba(&pixmap))
+}
+
 /// Render a component at an exact pixel size.
 pub fn render_sized(
     component: fn(ArtProps) -> Element,
@@ -82,7 +101,23 @@ pub fn render_sized(
         &mut pixmap.as_mut(),
     );
 
-    RgbaImage::from_raw(width, height, pixmap.take()).ok_or(RenderError::Pixmap(width, height))
+    Ok(to_rgba(&pixmap))
+}
+
+/// Convert a rendered pixmap to straight-alpha RGBA.
+///
+/// tiny_skia stores pixels **premultiplied**, so reading `take()` directly
+/// into an `RgbaImage` silently darkens every translucent pixel in
+/// proportion to its transparency. On this theme — which is largely
+/// translucent overlays — that is most of the artwork, and it shows up as
+/// "the trace does not round-trip" rather than as anything alpha-shaped.
+pub fn to_rgba(pixmap: &resvg::tiny_skia::Pixmap) -> RgbaImage {
+    let mut out = RgbaImage::new(pixmap.width(), pixmap.height());
+    for (px, dst) in pixmap.pixels().iter().zip(out.pixels_mut()) {
+        let c = px.demultiply();
+        *dst = image::Rgba([c.red(), c.green(), c.blue(), c.alpha()]);
+    }
+    out
 }
 
 /// Render a component into the geometry measured from its source image,
