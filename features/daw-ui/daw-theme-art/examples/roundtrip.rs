@@ -26,13 +26,6 @@ fn source_dir() -> std::path::PathBuf {
     std::path::Path::new("features/reaper/fts-theme/FastTrackStudio/.source-art").to_path_buf()
 }
 
-/// A component's own size, as declared by its `viewBox`.
-fn intrinsic(svg: &str) -> Option<(f32, f32)> {
-    let opts = resvg::usvg::Options::default();
-    let tree = resvg::usvg::Tree::from_str(svg, &opts).ok()?;
-    Some((tree.size().width(), tree.size().height()))
-}
-
 /// Rasterise SVG at an exact pixel size — REAPER's, when round-tripping.
 fn raster(svg: &str, w: u32, h: u32) -> Option<image::RgbaImage> {
     let mut db = resvg::usvg::fontdb::Database::new();
@@ -172,15 +165,18 @@ fn main() {
                 report.push(format!("{title}: no source for {}", e.source.0));
             }
 
-            // 2 — the component as vector, at display size.
+            // 2 — the component as vector, drawn to occupy exactly the
+            // footprint the original does in row 1.
             //
-            // Scaled from its own aspect, not into a fixed box. Rastering
-            // every control into one 3:2 frame stretched the square ones
-            // wide and made the components look mis-sized when the fault
-            // was here, in the sheet.
-            if let Some((iw, ih)) = intrinsic(&e.svg) {
-                let w = ((DISPLAY as f32 * iw / ih).round() as u32).max(1);
-                if let Some(v) = raster(&e.svg, w, DISPLAY) {
+            // Rows 1 and 3 are integer zooms of the native cell; scaling
+            // this one to a fixed display height instead made it visibly
+            // larger than the thing it is supposed to be compared against,
+            // which reads as the component being oversized when it is the
+            // sheet that is inconsistent. The three rows must share one
+            // scale or the comparison means nothing.
+            if let Some(orig) = &native {
+                let f = (DISPLAY / orig.height().max(1)).max(1);
+                if let Some(v) = raster(&e.svg, orig.width() * f, orig.height() * f) {
                     image::imageops::overlay(&mut sheet, &v, x as i64, (y + row_h) as i64);
                 }
             }

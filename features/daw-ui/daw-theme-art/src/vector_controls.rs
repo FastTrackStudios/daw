@@ -225,20 +225,67 @@ pub struct FxProps {
     pub at: Interaction,
 }
 
+/// The FX-chain button.
+///
+/// Not a [`LabelButton`] with a different word on it. In all three source
+/// images the *face is the same dark grey* — empty, active and bypassed are
+/// told apart entirely by the colour of the letters (grey, white, red).
+/// Lighting the face instead, as this first did, produced coloured slabs
+/// that read as toggles and made the mixer look like a different theme.
+///
+/// The cell is 28x22 (`mcp_fx_*` is 86x22 in three), wider and taller than
+/// mute's 21x20, and the letters are wide-set across most of that width.
 #[component]
 pub fn FxButton(props: FxProps) -> Element {
     let t = Theme::default();
-    let lit = match props.state {
-        FxChain::Empty => None,
-        FxChain::Active => Some(t.chrome.surface_raised.mix(t.chrome.accent, 0.35)),
-        FxChain::Bypassed => Some(t.signal.meter_warn.shade(-0.25)),
+    // `lit: None` — the face never takes a state colour, only the pointer
+    // shading every button gets.
+    let k = ink(None, props.at);
+    let (vw, vh) = (28.0f32, 22.0f32);
+
+    let text = match props.state {
+        FxChain::Empty => t.chrome.text_faint,
+        FxChain::Active => t.chrome.text,
+        FxChain::Bypassed => t.signal.rec,
     };
+    let r = vh * 0.12;
+    let edge = vh * 0.045;
+
     rsx! {
-        // `mcp_fx_*` is 86x22 in three cells — 28x22, wider and taller than
-        // mute's 21x20.
-        LabelButton {
-            label: "FX", lit, cell: (28.0, 22.0),
-            width: props.width, height: props.height, at: props.at,
+        svg {
+            width: "{props.width.unwrap_or(28)}",
+            height: "{props.height.unwrap_or(22)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                linearGradient { id: "fxface", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{k.face.shade(0.10).css()}" }
+                    stop { offset: "1", stop_color: "{k.face.shade(-0.12).css()}" }
+                }
+            }
+            // Inset right and bottom: the source leaves a pixel there for
+            // the drop shadow, which is what seats the button in the strip.
+            rect {
+                x: "{edge / 2.0}", y: "{edge / 2.0}",
+                width: "{vw - edge - vw * 0.04}",
+                height: "{vh - edge - vh * 0.05}",
+                rx: "{r}",
+                fill: "url(#fxface)",
+                stroke: "{k.border.css()}",
+                stroke_width: "{edge}",
+            }
+            text {
+                x: "{(vw - vw * 0.04) * 0.5}", y: "{vh * 0.52}",
+                text_anchor: "middle", dominant_baseline: "central",
+                font_family: "Fira Sans, DejaVu Sans, sans-serif",
+                // Lighter than mute's glyph and spread wide — the original
+                // letters are open and airy, not a packed bold pair.
+                font_weight: "500",
+                font_size: "{vh * 0.54}",
+                letter_spacing: "{vw * 0.025}",
+                fill: "{text.css()}",
+                "FX"
+            }
         }
     }
 }
