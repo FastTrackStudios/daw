@@ -3,17 +3,19 @@
 //! Wraps a [`LayerRouter`](crate::layer::LayerRouter) so every inbound call
 //! is checked against an [`architect_permissions::PermissionEngine`] BEFORE
 //! dispatch. vox's `ServerMiddleware` can observe requests but cannot refuse
-//! them; a wrapping [`Handler`] can — it owns the reply sink, so a denied
+//! them; a wrapping [`vox::Handler`] can — it owns the reply sink, so a denied
 //! call is answered with an error and the inner handler never runs.
 //!
 //! Granularity: METHOD-level. Each service registers a
-//! [`ServicePermits`] table mapping method → (action, resource template);
-//! the gate checks the template's [`coarse_resource`]
+//! [`architect_permissions::ServicePermits`] table mapping method →
+//! (action, resource template);
+//! the gate checks the template's `coarse_resource`
 //! (`vault/{path}` → `vault/**`). Argument-level distinctions (the exact
 //! `{path}`) are the service impl's job via a direct
-//! [`PermissionEngine::check`] — same engine, finer resource. Methods
+//! [`architect_permissions::PermissionEngine::check`] — same engine, finer
+//! resource. Methods
 //! missing from a registered table are DENIED (fail-closed); services with
-//! no table follow the gate's [`UnlistedPolicy`].
+//! no table follow the gate's `UnlistedPolicy`.
 //!
 //! Deny wire form: `VoxError::InvalidPayload("permission denied: …")`,
 //! encoded in the METHOD'S OWN response wire shape
