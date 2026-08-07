@@ -281,6 +281,16 @@ fn main() -> Result<()> {
                     ""
                 }
             );
+            // Worth separating: only the vector ones are drawn from real
+            // component geometry and get sharper at 150/200%. The rest
+            // replay traced rects, which is pixel-exact but still a
+            // picture of a bitmap — and a control quietly falling back to
+            // its trace looks identical in the output.
+            println!(
+                "  {} from vector components, {} from traced art",
+                report.vectorised.len(),
+                report.written.len() - report.vectorised.len(),
+            );
         }
 
         Command::Walter { dry_run } => {
