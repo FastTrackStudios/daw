@@ -204,7 +204,7 @@ mod meter_ebur128 {
 
         /// Process a single stereo sample pair.
         ///
-        /// Note: For performance, prefer calling [`process`] with full buffers.
+        /// Note: For performance, prefer calling [`Self::process`] with full buffers.
         /// This method feeds one frame at a time.
         pub fn process_sample(&mut self, left: f64, right: f64) {
             let inner = match self.inner.as_mut() {

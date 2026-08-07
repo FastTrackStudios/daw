@@ -169,6 +169,9 @@ pub fn align(anchor: f64, length: f64, alignment: f64) -> (f64, f64) {
 }
 
 /// Apply a horizontal mode, returning the new camera.
+// Eight camera/zoom inputs with no natural grouping — bundling them
+// into a struct would only move the argument list to the call sites.
+#[allow(clippy::too_many_arguments)]
 pub fn apply_horizontal(
     camera: Camera,
     mode: HorizontalMode,

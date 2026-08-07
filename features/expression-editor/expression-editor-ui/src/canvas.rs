@@ -149,7 +149,7 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
                 // is a straight vertical line you can align to the grid
                 // by eye, which is the whole reason for a head over a
                 // diamond.
-                let size = h.min(18.0).max(5.0);
+                let size = h.clamp(5.0, 18.0);
                 let top = ed.camera.y(n.row as f64 + 0.5, ed.viewport) + (h - size) * 0.5;
                 format!(
                     "{x:.1},{top:.1} {x:.1},{:.1} {:.1},{:.1}",

@@ -15,7 +15,6 @@
 
 use dawfile_reaper::RppSerialize;
 use dawfile_reaper::types::project::ReaperProject;
-use dawfile_reaper::types::track::TrackSoloState;
 
 const FIXTURES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),

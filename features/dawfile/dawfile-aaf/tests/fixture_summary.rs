@@ -3,7 +3,7 @@
 
 use dawfile_aaf::parse::parse_session;
 use dawfile_aaf::types::{ClipKind, TrackKind};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const FIXTURE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
 

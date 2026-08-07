@@ -24,6 +24,7 @@ fn audio_tracks(session: &dawfile_aaf::types::AafSession) -> usize {
         .count()
 }
 
+#[allow(dead_code)]
 fn video_tracks(session: &dawfile_aaf::types::AafSession) -> usize {
     session
         .tracks

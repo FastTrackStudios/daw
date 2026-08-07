@@ -147,7 +147,7 @@ pub fn set_note(low: &ReaperLow, take: MediaItemTake, index: i32, edit: MidiNote
             opt_ptr!(edit.channel, channel),
             opt_ptr!(edit.pitch, pitch),
             opt_ptr!(edit.velocity, velocity),
-            &mut no_sort,
+            &no_sort,
         )
     }
 }
