@@ -26,7 +26,7 @@ fs = ["dep:image"]
 # Painting a REAPER theme from the canonical FTS theme.
 apply = ["fs", "dep:daw-theme"]
 # Screenshotting a real REAPER on a private X display (Linux/X11).
-shot = ["fs"]
+shot = ["fs", "dep:daw", "daw/test-harness"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -35,6 +35,8 @@ palette = { workspace = true }
 # The canonical FTS theme — `fts-themer apply` paints REAPER from it.
 daw-theme = { workspace = true, optional = true }
 image = { workspace = true, optional = true }
+# The shared REAPER test harness (VirtualDisplay: Xvfb + WM + capture).
+daw = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
 
 [lints]

@@ -1448,7 +1448,6 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
     Ok(())
 }
 
-
 #[derive(clap::Subcommand, Debug)]
 enum ReaperConfigCommand {
     /// Copy a live REAPER resource dir into the repo.

@@ -12,7 +12,10 @@ fn the_files_that_define_how_reaper_feels_are_tracked() {
         "reapack.ini",
         "ReaPack/registry.db",
     ] {
-        assert!(reaper_config::is_tracked(Path::new(f)), "{f} should be tracked");
+        assert!(
+            reaper_config::is_tracked(Path::new(f)),
+            "{f} should be tracked"
+        );
     }
 }
 
@@ -27,7 +30,10 @@ fn reapacks_downloads_are_never_versioned() {
         "Effects/ReaTeam JSFX/thing.jsfx",
         "ReaPack/cache/something",
     ] {
-        assert!(!reaper_config::is_tracked(Path::new(f)), "{f} must not be tracked");
+        assert!(
+            !reaper_config::is_tracked(Path::new(f)),
+            "{f} must not be tracked"
+        );
     }
     // Authors we have never heard of are excluded by default, because
     // the rule is an allowlist — a blocklist would have to enumerate
@@ -39,7 +45,10 @@ fn reapacks_downloads_are_never_versioned() {
         "Effects/sstillwell/thing.jsfx",
         "Scripts/some brand new author/thing.lua",
     ] {
-        assert!(!reaper_config::is_tracked(Path::new(f)), "{f} must not be tracked");
+        assert!(
+            !reaper_config::is_tracked(Path::new(f)),
+            "{f} must not be tracked"
+        );
     }
     // Themes are deliberately outside the sweep: `ColorThemes/` holds
     // REAPER's stock themes and, if one has been unzipped, thousands of
@@ -50,15 +59,19 @@ fn reapacks_downloads_are_never_versioned() {
         "ColorThemes/Reapertips Theme.ReaperThemeZip"
     )));
     // But your own scripts are.
-    assert!(reaper_config::is_tracked(Path::new("Scripts/FTS/my_action.lua")));
-    assert!(reaper_config::is_tracked(Path::new("Effects/FTS/mine.jsfx")));
+    assert!(reaper_config::is_tracked(Path::new(
+        "Scripts/FTS/my_action.lua"
+    )));
+    assert!(reaper_config::is_tracked(Path::new(
+        "Effects/FTS/mine.jsfx"
+    )));
 }
 
 #[test]
 fn binaries_state_and_backups_are_excluded() {
     for f in [
-        "UserPlugins/reaper_sws.so",   // binary, not config
-        "Data/soundfont.sf2",          // ships with REAPER
+        "UserPlugins/reaper_sws.so", // binary, not config
+        "Data/soundfont.sf2",        // ships with REAPER
         // REAPER's stock themes ship with every install.
         "ColorThemes/Default_7.0.ReaperThemeZip",
         "ColorThemes/Default_6.0.ReaperThemeZip",
@@ -66,7 +79,10 @@ fn binaries_state_and_backups_are_excluded() {
         "fts-daw-reaper.log",
         "Scripts/thing.lua~",
     ] {
-        assert!(!reaper_config::is_tracked(Path::new(f)), "{f} must not be tracked");
+        assert!(
+            !reaper_config::is_tracked(Path::new(f)),
+            "{f} must not be tracked"
+        );
     }
 }
 
@@ -115,7 +131,10 @@ defvzoom=4
 ";
     let merged = merge_reaper_ini(existing, incoming);
     // Applying config must not reset this machine's sound card.
-    assert!(merged.contains("audiodev=ALSA hw:5,0"), "machine keys must survive");
+    assert!(
+        merged.contains("audiodev=ALSA hw:5,0"),
+        "machine keys must survive"
+    );
     assert!(merged.contains("wnd_x=42"));
     // The repo wins on preferences, and the old value does not linger.
     assert!(merged.contains("midieditor=1"));
@@ -147,10 +166,15 @@ fn export_then_apply_round_trips_through_a_temp_tree() {
     let written = reaper_config::export(&live, &repo).unwrap();
     assert!(written.iter().any(|p| p.ends_with("mine.lua")));
     assert!(
-        !written.iter().any(|p| p.to_string_lossy().contains("SomeAuthor")),
+        !written
+            .iter()
+            .any(|p| p.to_string_lossy().contains("SomeAuthor")),
         "ReaPack downloads must not be exported"
     );
-    assert!(repo.join("ReaPack/registry.db").exists(), "the manifest is the point");
+    assert!(
+        repo.join("ReaPack/registry.db").exists(),
+        "the manifest is the point"
+    );
     let stored = std::fs::read_to_string(repo.join("reaper.ini")).unwrap();
     assert!(!stored.contains("audiodev"));
 
@@ -178,7 +202,8 @@ fn export_then_apply_round_trips_through_a_temp_tree() {
 
 #[test]
 fn the_theme_in_use_travels_but_its_absolute_path_does_not() {
-    let ini = "[REAPER]\nlastthemefn5=/home/cody/fts-dev/ColorThemes/Reapertips Theme.ReaperThemeZip\n";
+    let ini =
+        "[REAPER]\nlastthemefn5=/home/cody/fts-dev/ColorThemes/Reapertips Theme.ReaperThemeZip\n";
     // The choice of theme is a preference and must follow.
     assert!(filter_reaper_ini(ini).contains("lastthemefn5"));
     // And we know which file to carry.
@@ -192,7 +217,10 @@ fn the_theme_in_use_travels_but_its_absolute_path_does_not() {
     // tokenised out and restored per-machine on apply.
     let live = Path::new("/home/cody/fts-dev");
     let stored = reaper_config::tokenise_paths(ini, live);
-    assert!(!stored.contains("/home/cody"), "absolute path leaked: {stored}");
+    assert!(
+        !stored.contains("/home/cody"),
+        "absolute path leaked: {stored}"
+    );
     assert!(stored.contains(reaper_config::RESOURCES_TOKEN));
 
     let elsewhere = Path::new("/Users/someone/Library/REAPER");

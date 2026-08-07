@@ -48,6 +48,14 @@ impl VirtualDisplay {
             "/tmp/.X11-unix/X{}",
             display.trim_start_matches(':')
         ));
+        if socket.exists() && !Self::display_responds(display) {
+            // A killed Xvfb leaves its socket behind, so "the file exists"
+            // is not "a server is listening". Borrowing a dead display looks
+            // like success right up until the capture, which then fails with
+            // imagemagick's unhelpful "missing an image filename" — a long
+            // way from the actual cause. Clear it and start our own.
+            let _ = std::fs::remove_file(&socket);
+        }
         if socket.exists() {
             // Someone else's display: use it, but do not own it.
             let mut vd = Self {
@@ -87,6 +95,20 @@ impl VirtualDisplay {
 
         vd.start_window_manager();
         Ok(vd)
+    }
+
+    /// Does an X server actually answer on this display?
+    ///
+    /// `xwininfo` is already a hard dependency of this harness, so probing
+    /// costs no new tooling.
+    fn display_responds(display: &str) -> bool {
+        Command::new("xwininfo")
+            .args(["-display", display, "-root"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
     }
 
     /// Convenience: the conventional test display.
@@ -144,6 +166,35 @@ impl VirtualDisplay {
             return Ok(false);
         };
         self.capture(&["-window", &id], path.as_ref())?;
+        Ok(true)
+    }
+
+    /// Capture one window found by title.
+    ///
+    /// `xdotool search` prints ids in **decimal**, and `import -window`
+    /// only accepts hex — handing one straight to the other fails with a
+    /// bare "missing an image filename", which reads like a path problem
+    /// rather than a window one. Converting here keeps that trap in one
+    /// place.
+    pub fn screenshot_window_named(
+        &self,
+        pattern: &str,
+        path: impl AsRef<Path>,
+    ) -> std::io::Result<bool> {
+        // `--onlyvisible`: an unmapped window matches the title search but
+        // cannot be captured, and `import` fails on it rather than
+        // skipping it. Highest id among the visible ones is the most
+        // recently mapped, i.e. the main window rather than a splash.
+        let Some(id) = self
+            .xdotool(&["search", "--onlyvisible", "--name", pattern])
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| l.trim().parse::<u64>().ok())
+            .max()
+        else {
+            return Ok(false);
+        };
+        self.capture(&["-window", &format!("0x{id:x}")], path.as_ref())?;
         Ok(true)
     }
 
