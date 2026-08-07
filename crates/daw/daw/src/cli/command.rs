@@ -49,6 +49,17 @@ struct Cli {
 #[derive(Subcommand)]
 #[allow(clippy::enum_variant_names)]
 enum Command {
+    /// Version this machine's REAPER configuration into the repo, or
+    /// restore it.
+    ///
+    /// Only the ~350 KB that defines the setup travels: keybindings,
+    /// toolbars, mouse modifiers, the ReaPack manifest and a filtered
+    /// reaper.ini. ReaPack's downloads are never versioned — the
+    /// registry restores them.
+    ReaperConfig {
+        #[command(subcommand)]
+        action: ReaperConfigCommand,
+    },
     /// Show project info
     Info,
     /// List all tracks
@@ -954,6 +965,9 @@ where
 async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) -> Result<()> {
     match command {
         Command::Info => crate::cli::cmd_info(daw, json).await?,
+        // Purely local file work — no DAW connection needed, so this
+        // arm must come before anything that assumes a live session.
+        Command::ReaperConfig { ref action } => run_reaper_config(action)?,
         Command::Tracks => crate::cli::cmd_tracks(daw, json).await?,
         Command::Track { ref track } => crate::cli::cmd_track(daw, track, json).await?,
         Command::Call {
@@ -1431,5 +1445,76 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
         | Command::ServiceCatalog => unreachable!(),
     }
 
+    Ok(())
+}
+
+
+#[derive(clap::Subcommand, Debug)]
+enum ReaperConfigCommand {
+    /// Copy a live REAPER resource dir into the repo.
+    Export {
+        /// REAPER resource directory (default: $HOME/fts-dev).
+        resources: Option<std::path::PathBuf>,
+    },
+    /// Copy versioned config into a REAPER resource dir.
+    ///
+    /// `reaper.ini` is merged, not replaced: the target keeps its own
+    /// audio device and window layout.
+    Apply {
+        resources: Option<std::path::PathBuf>,
+    },
+    /// List what differs between a resource dir and the repo.
+    Diff {
+        resources: Option<std::path::PathBuf>,
+    },
+}
+
+fn reaper_config_dir() -> std::path::PathBuf {
+    std::env::var("FTS_REAPER_CONFIG_REPO")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../nix/reaper-config")
+        })
+}
+
+fn default_resources() -> std::path::PathBuf {
+    std::env::var("FTS_REAPER_RESOURCES")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default()).join("fts-dev")
+        })
+}
+
+/// Run a `reaper-config` subcommand.
+pub fn run_reaper_config(action: &ReaperConfigCommand) -> std::io::Result<()> {
+    use crate::reaper_config;
+    let repo = reaper_config_dir();
+    match action {
+        ReaperConfigCommand::Export { resources } => {
+            let live = resources.clone().unwrap_or_else(default_resources);
+            let written = reaper_config::export(&live, &repo)?;
+            println!("exported {} files from {}", written.len(), live.display());
+            for f in &written {
+                println!("  {}", f.display());
+            }
+        }
+        ReaperConfigCommand::Apply { resources } => {
+            let live = resources.clone().unwrap_or_else(default_resources);
+            let written = reaper_config::apply(&repo, &live)?;
+            println!("applied {} files to {}", written.len(), live.display());
+        }
+        ReaperConfigCommand::Diff { resources } => {
+            let live = resources.clone().unwrap_or_else(default_resources);
+            let changed = reaper_config::diff(&live, &repo);
+            if changed.is_empty() {
+                println!("in sync");
+            } else {
+                println!("{} files differ:", changed.len());
+                for f in &changed {
+                    println!("  {}", f.display());
+                }
+            }
+        }
+    }
     Ok(())
 }

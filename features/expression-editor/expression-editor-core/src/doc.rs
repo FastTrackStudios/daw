@@ -1,0 +1,596 @@
+//! The editable document: notes that own expression curves.
+//!
+//! One model serves two domains. A MIDI/MPE take and an analyzed audio
+//! clip are the same shape once you accept the central claim:
+//!
+//! > A note sits on an integer pitch row and carries a continuous
+//! > pitch curve measured in semitones **relative to that row**.
+//!
+//! For MPE that curve is the per-note pitch bend. For audio it is the
+//! tracked f0 contour minus the rounded center. Both render identically,
+//! both edit identically, and in both cases the note rectangle stays
+//! anchored to its literal row while the curve shows the sounding
+//! offset — the rule MPElodyne arrived at for microtonal display and
+//! the rule Melodyne uses for a sung note that is 30 cents flat.
+//!
+//! Pressure and Timbre are normalized 0..1 lanes with no pitch center.
+//! Their audio-domain meanings are dynamics and formant.
+
+use crate::rows::Articulation;
+use crate::shape::Shape;
+
+/// Stable identity for a note across edits and re-analysis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NoteId(pub u64);
+
+/// How document time units map to musical and wall-clock time.
+///
+/// The editor's `t` is always `f64` in these units; only the grid and
+/// the audition need to know what they mean.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum TimeBase {
+    /// MIDI ticks, `ppq` per quarter note.
+    Ppq { ppq: f64 },
+    /// Analysis frames at a fixed rate (audio domain).
+    Frames { frame_rate: f64 },
+}
+
+impl TimeBase {
+    /// Units per quarter note at `bpm` (constant-tempo approximation;
+    /// a tempo map lives in the host adapter, not here).
+    pub fn units_per_beat(&self, bpm: f64) -> f64 {
+        match *self {
+            TimeBase::Ppq { ppq } => ppq,
+            TimeBase::Frames { frame_rate } => frame_rate * 60.0 / bpm.max(1e-6),
+        }
+    }
+
+    /// Units per second.
+    pub fn units_per_second(&self, bpm: f64) -> f64 {
+        match *self {
+            TimeBase::Ppq { ppq } => ppq * bpm.max(1e-6) / 60.0,
+            TimeBase::Frames { frame_rate } => frame_rate,
+        }
+    }
+}
+
+/// The three MPE expression dimensions. Audio reads them as pitch,
+/// dynamics, and formant.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Lane {
+    Pitch,
+    Pressure,
+    Timbre,
+}
+
+impl Lane {
+    pub const ALL: [Lane; 3] = [Lane::Pitch, Lane::Pressure, Lane::Timbre];
+
+    /// Value a lane holds where nothing has been authored.
+    ///
+    /// Pitch rests at the note's own row; Pressure/Timbre default to
+    /// the MPE convention of 100/127 rather than full scale.
+    pub fn default_value(&self) -> f64 {
+        match self {
+            Lane::Pitch => 0.0,
+            Lane::Pressure | Lane::Timbre => 100.0 / 127.0,
+        }
+    }
+
+    /// Pitch is unbounded (clamped later by bend range); the others are
+    /// normalized.
+    pub fn range(&self) -> (f64, f64) {
+        match self {
+            Lane::Pitch => (-127.0, 127.0),
+            Lane::Pressure | Lane::Timbre => (0.0, 1.0),
+        }
+    }
+
+    pub fn clamp(&self, v: f64) -> f64 {
+        let (lo, hi) = self.range();
+        v.clamp(lo, hi)
+    }
+}
+
+/// One point on an expression curve.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Point {
+    /// Document time, absolute (not note-relative) — keeps edits that
+    /// span note boundaries honest.
+    pub t: f64,
+    /// Lane-native value. Pitch: semitones from the note row.
+    pub value: f64,
+}
+
+/// A sampled expression curve: points sorted by `t`, at most one per
+/// `t`.
+///
+/// Interpolation is linear, matching what REAPER's linear CC shape
+/// renders, so the native MIDI editor and this canvas agree.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Curve {
+    points: Vec<Point>,
+}
+
+impl Curve {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn from_points(mut points: Vec<Point>) -> Self {
+        points.sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap_or(core::cmp::Ordering::Equal));
+        points.dedup_by(|a, b| a.t == b.t);
+        Self { points }
+    }
+
+    pub fn points(&self) -> &[Point] {
+        &self.points
+    }
+
+    /// Mutable access to values. Times must stay sorted, so callers may
+    /// change `value` freely but should not reorder `t`.
+    pub fn points_mut(&mut self) -> &mut [Point] {
+        &mut self.points
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.points.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.points.len()
+    }
+
+    pub fn clear(&mut self) {
+        self.points.clear();
+    }
+
+    /// Insert or replace the value at `t`.
+    ///
+    /// Replacing rather than appending is what lets a freehand pen
+    /// stroke double back over itself without stacking duplicate events
+    /// at the same tick.
+    pub fn set(&mut self, t: f64, value: f64) {
+        match self.index_of(t) {
+            Ok(i) => self.points[i].value = value,
+            Err(i) => self.points.insert(i, Point { t, value }),
+        }
+    }
+
+    /// Remove every point in `[t0, t1]`, returning how many went.
+    pub fn remove_range(&mut self, t0: f64, t1: f64) -> usize {
+        let before = self.points.len();
+        self.points.retain(|p| p.t < t0 || p.t > t1);
+        before - self.points.len()
+    }
+
+    /// Linear sample. Before the first / after the last point the curve
+    /// holds that endpoint's value — it never falls back to the default
+    /// mid-note, which is what stops an authored curve from snapping to
+    /// center at the note edges.
+    pub fn sample(&self, t: f64, default: f64) -> f64 {
+        if self.points.is_empty() {
+            return default;
+        }
+        match self.index_of(t) {
+            Ok(i) => self.points[i].value,
+            Err(0) => self.points[0].value,
+            Err(i) if i >= self.points.len() => self.points[self.points.len() - 1].value,
+            Err(i) => {
+                let (a, b) = (self.points[i - 1], self.points[i]);
+                let span = b.t - a.t;
+                if span <= 0.0 {
+                    b.value
+                } else {
+                    a.value + (b.value - a.value) * ((t - a.t) / span)
+                }
+            }
+        }
+    }
+
+    /// First/last authored time, if any.
+    pub fn bounds(&self) -> Option<(f64, f64)> {
+        match (self.points.first(), self.points.last()) {
+            (Some(a), Some(b)) => Some((a.t, b.t)),
+            _ => None,
+        }
+    }
+
+    /// Min/max authored value, if any.
+    pub fn value_bounds(&self) -> Option<(f64, f64)> {
+        let mut lo = f64::MAX;
+        let mut hi = f64::MIN;
+        for p in &self.points {
+            lo = lo.min(p.value);
+            hi = hi.max(p.value);
+        }
+        (lo <= hi).then_some((lo, hi))
+    }
+
+    /// Replace `[t0, t1]` with `replacement`, splicing so the points
+    /// outside the interval survive byte-for-byte.
+    pub fn splice(&mut self, t0: f64, t1: f64, replacement: &[Point]) {
+        self.remove_range(t0, t1);
+        for p in replacement {
+            self.set(p.t, p.value);
+        }
+    }
+
+    /// Rewrite `[t0, t1]` as an eased ramp between its own current
+    /// endpoints, at `count` samples. Endpoints are preserved exactly,
+    /// so reshaping never moves the boundary values.
+    pub fn reshape(&mut self, t0: f64, t1: f64, shape: Shape, count: usize, default: f64) {
+        if t1 <= t0 || count < 2 {
+            return;
+        }
+        let v0 = self.sample(t0, default);
+        let v1 = self.sample(t1, default);
+        let pts: Vec<Point> = (0..count)
+            .map(|i| {
+                let x = i as f64 / (count - 1) as f64;
+                Point {
+                    t: t0 + (t1 - t0) * x,
+                    value: v0 + (v1 - v0) * shape.amount(x),
+                }
+            })
+            .collect();
+        self.splice(t0, t1, &pts);
+    }
+
+    /// Scale values in `[t0, t1]` about `pivot`. `factor` below zero
+    /// reconstructs the gesture inverted — the far side of the
+    /// alt-drag flatten.
+    pub fn scale_about(&mut self, t0: f64, t1: f64, pivot: f64, factor: f64) {
+        for p in self.points.iter_mut() {
+            if p.t >= t0 && p.t <= t1 {
+                p.value = pivot + (p.value - pivot) * factor;
+            }
+        }
+    }
+
+    /// Shift values in `[t0, t1]` by `delta`.
+    pub fn offset(&mut self, t0: f64, t1: f64, delta: f64) {
+        for p in self.points.iter_mut() {
+            if p.t >= t0 && p.t <= t1 {
+                p.value += delta;
+            }
+        }
+    }
+
+    /// Move every point in `[t0, t1]` in time by `delta`, re-sorting.
+    pub fn shift_time(&mut self, t0: f64, t1: f64, delta: f64) {
+        for p in self.points.iter_mut() {
+            if p.t >= t0 && p.t <= t1 {
+                p.t += delta;
+            }
+        }
+        self.points
+            .sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap_or(core::cmp::Ordering::Equal));
+        self.points.dedup_by(|a, b| a.t == b.t);
+    }
+
+    /// Map `[from0, from1]` onto `[to0, to1]` — the note-resize case,
+    /// where owned expression stretches with the new bounds.
+    pub fn remap_time(&mut self, from0: f64, from1: f64, to0: f64, to1: f64) {
+        let src = from1 - from0;
+        if src.abs() < 1e-9 {
+            return;
+        }
+        let scale = (to1 - to0) / src;
+        for p in self.points.iter_mut() {
+            p.t = to0 + (p.t - from0) * scale;
+        }
+        self.points
+            .sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap_or(core::cmp::Ordering::Equal));
+        self.points.dedup_by(|a, b| a.t == b.t);
+    }
+
+    fn index_of(&self, t: f64) -> Result<usize, usize> {
+        self.points
+            .binary_search_by(|p| p.t.partial_cmp(&t).unwrap_or(core::cmp::Ordering::Equal))
+    }
+}
+
+/// A scaling zone boundary inside a note (MPElodyne's "Q split").
+///
+/// Editor-local metadata: zones never become MIDI events. They divide
+/// a note so that scaling, transposition, and drawing target one
+/// segment while the rest of the melodic contour is left alone.
+pub type ZoneSplit = f64;
+
+/// What an edit gesture applies to within a note.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Target {
+    /// The complete note (every zone moves together).
+    WholeNote,
+    /// One zone, by index into the note's segment list.
+    Zone(usize),
+}
+
+/// A note plus the expression it owns.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Note {
+    pub id: NoteId,
+    /// Note-on time, document units.
+    pub start: f64,
+    /// Note-off time, document units.
+    pub end: f64,
+    /// The integer pitch row the rectangle is drawn on. Microtonal and
+    /// sung-flat offsets live in the Pitch curve, never here.
+    pub row: i32,
+    /// MPE member channel (2..=16), or `None` in the audio domain.
+    pub channel: Option<u8>,
+    /// 0..1.
+    pub velocity: f64,
+    /// Note-off velocity, 0..1 — release character on instruments that
+    /// respond to it (Ample's "Fingered Release").
+    pub off_velocity: f64,
+    /// Muted notes stay in the document and stay editable, but do not
+    /// sound. Not the same as deleting.
+    pub muted: bool,
+    /// Free text carried by the note. In a vocal editor this is the
+    /// lyric syllable, and it is the note's identity — the row already
+    /// shows the pitch.
+    pub text: Option<String>,
+    /// Playing technique (guitar/bass, and percussion dead notes).
+    pub articulation: Option<Articulation>,
+    /// Joined to the following note on the same string. Riffer's rule:
+    /// the legato is marked on the *first* note of the pair.
+    pub legato: bool,
+    /// Guitar/bass: fret. The string is the note's `row` in a
+    /// [`crate::rows::RowSpace::Strings`] roll.
+    pub fret: Option<u8>,
+    pub pitch: Curve,
+    pub pressure: Curve,
+    pub timbre: Curve,
+    /// Interior split times, sorted, strictly inside (start, end).
+    pub splits: Vec<ZoneSplit>,
+    /// Which zone (if any) gestures currently target.
+    pub target: Target,
+    /// Expression ownership could not be resolved — another sounding
+    /// note shares this channel. The writer must refuse rather than
+    /// guess. Drawn red.
+    pub ambiguous: bool,
+    /// Display weight 0..1 (analysis RMS in the audio domain).
+    pub weight: f64,
+}
+
+impl Note {
+    pub fn new(id: NoteId, start: f64, end: f64, row: i32) -> Self {
+        Self {
+            id,
+            start,
+            end,
+            row,
+            channel: None,
+            velocity: 100.0 / 127.0,
+            off_velocity: 64.0 / 127.0,
+            muted: false,
+            text: None,
+            articulation: None,
+            legato: false,
+            fret: None,
+            pitch: Curve::new(),
+            pressure: Curve::new(),
+            timbre: Curve::new(),
+            splits: Vec::new(),
+            target: Target::WholeNote,
+            ambiguous: false,
+            weight: 1.0,
+        }
+    }
+
+    pub fn len(&self) -> f64 {
+        self.end - self.start
+    }
+
+    pub fn lane(&self, lane: Lane) -> &Curve {
+        match lane {
+            Lane::Pitch => &self.pitch,
+            Lane::Pressure => &self.pressure,
+            Lane::Timbre => &self.timbre,
+        }
+    }
+
+    pub fn lane_mut(&mut self, lane: Lane) -> &mut Curve {
+        match lane {
+            Lane::Pitch => &mut self.pitch,
+            Lane::Pressure => &mut self.pressure,
+            Lane::Timbre => &mut self.timbre,
+        }
+    }
+
+    /// Sounding pitch in MIDI at `t` — row plus the pitch curve.
+    pub fn sounding_midi(&self, t: f64) -> f64 {
+        self.row as f64 + self.pitch.sample(t, 0.0)
+    }
+
+    /// Zone boundaries as `[start, split.., end]`.
+    pub fn zone_edges(&self) -> Vec<f64> {
+        let mut edges = Vec::with_capacity(self.splits.len() + 2);
+        edges.push(self.start);
+        edges.extend(self.splits.iter().copied());
+        edges.push(self.end);
+        edges
+    }
+
+    /// `(t0, t1)` for each zone. A note with no splits has one zone
+    /// spanning the whole note, so callers never special-case.
+    pub fn zones(&self) -> Vec<(f64, f64)> {
+        let edges = self.zone_edges();
+        edges.windows(2).map(|w| (w[0], w[1])).collect()
+    }
+
+    pub fn zone_count(&self) -> usize {
+        self.splits.len() + 1
+    }
+
+    /// Zone index containing `t`, saturating at the ends.
+    pub fn zone_at(&self, t: f64) -> usize {
+        self.splits.iter().filter(|&&s| t >= s).count()
+    }
+
+    /// Time span the current [`Target`] covers.
+    pub fn target_span(&self) -> (f64, f64) {
+        match self.target {
+            Target::WholeNote => (self.start, self.end),
+            Target::Zone(i) => self.zones().get(i).copied().unwrap_or((self.start, self.end)),
+        }
+    }
+
+    /// Add an interior split, keeping the list sorted and rejecting
+    /// duplicates or out-of-range positions.
+    pub fn add_split(&mut self, t: f64) -> bool {
+        if t <= self.start || t >= self.end || self.splits.iter().any(|&s| (s - t).abs() < 1e-6) {
+            return false;
+        }
+        let i = self
+            .splits
+            .partition_point(|&s| s < t);
+        self.splits.insert(i, t);
+        // A split inserted before the active zone shifts its index.
+        if let Target::Zone(z) = self.target {
+            if i <= z {
+                self.target = Target::Zone(z + 1);
+            }
+        }
+        true
+    }
+
+    /// Remove the split nearest `t` within `tolerance`, merging its
+    /// neighbours.
+    pub fn remove_split_near(&mut self, t: f64, tolerance: f64) -> bool {
+        let Some((i, _)) = self
+            .splits
+            .iter()
+            .enumerate()
+            .map(|(i, &s)| (i, (s - t).abs()))
+            .filter(|&(_, d)| d <= tolerance)
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(core::cmp::Ordering::Equal))
+        else {
+            return false;
+        };
+        self.splits.remove(i);
+        if let Target::Zone(z) = self.target {
+            self.target = Target::Zone(z.min(self.zone_count() - 1));
+        }
+        true
+    }
+}
+
+/// A read-only marker drawn on the timeline (bar lines, item edges,
+/// section names) — supplied by the host, never edited here.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Marker {
+    pub t: f64,
+    pub label: Option<String>,
+}
+
+/// The whole editable surface.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExpressionDoc {
+    pub notes: Vec<Note>,
+    pub time_base: TimeBase,
+    /// Editable span (the item, or the analyzed clip).
+    pub start: f64,
+    pub end: f64,
+    /// Semitones of MPE bend range the receiving instrument expects.
+    /// Must match, or pitch reads wrong on playback.
+    pub bend_range: f64,
+    pub markers: Vec<Marker>,
+    /// Document-level controller lanes. Not per-note: an orchestral
+    /// part rides CC1/CC11 across a phrase regardless of where the note
+    /// boundaries fall.
+    pub cc: crate::cc::CcSet,
+    /// What the vertical axis means. Lives on the document because
+    /// edits (fret, string) are meaningless without the tuning, and
+    /// edits only ever see the document.
+    pub row_space: crate::rows::RowSpace,
+    next_id: u64,
+}
+
+impl ExpressionDoc {
+    pub fn new(time_base: TimeBase, start: f64, end: f64) -> Self {
+        Self {
+            notes: Vec::new(),
+            time_base,
+            start,
+            end,
+            bend_range: 48.0,
+            markers: Vec::new(),
+            cc: crate::cc::CcSet::default(),
+            row_space: crate::rows::RowSpace::Pitch,
+            next_id: 1,
+        }
+    }
+
+    /// Mint an id that no current note holds.
+    pub fn mint_id(&mut self) -> NoteId {
+        let id = NoteId(self.next_id);
+        self.next_id += 1;
+        id
+    }
+
+    pub fn push(&mut self, note: Note) {
+        self.next_id = self.next_id.max(note.id.0 + 1);
+        self.notes.push(note);
+    }
+
+    pub fn note(&self, id: NoteId) -> Option<&Note> {
+        self.notes.iter().find(|n| n.id == id)
+    }
+
+    pub fn note_mut(&mut self, id: NoteId) -> Option<&mut Note> {
+        self.notes.iter_mut().find(|n| n.id == id)
+    }
+
+    pub fn remove(&mut self, id: NoteId) -> Option<Note> {
+        let i = self.notes.iter().position(|n| n.id == id)?;
+        Some(self.notes.remove(i))
+    }
+
+    /// Pitch extent of the content: integer rows *and* where the pitch
+    /// curves actually travel, so Reset View frames a deep scoop
+    /// instead of clipping it.
+    pub fn pitch_extent(&self) -> Option<(f64, f64)> {
+        let mut lo = f64::MAX;
+        let mut hi = f64::MIN;
+        for n in &self.notes {
+            lo = lo.min(n.row as f64 - 0.5);
+            hi = hi.max(n.row as f64 + 0.5);
+            if let Some((vlo, vhi)) = n.pitch.value_bounds() {
+                lo = lo.min(n.row as f64 + vlo);
+                hi = hi.max(n.row as f64 + vhi);
+            }
+        }
+        (lo <= hi).then_some((lo, hi))
+    }
+
+    /// Notes sounding at `t`, sharing `channel`. More than one means
+    /// expression ownership in that overlap is undecidable.
+    pub fn channel_conflicts(&self, t: f64, channel: u8) -> usize {
+        self.notes
+            .iter()
+            .filter(|n| n.channel == Some(channel) && n.start <= t && n.end > t)
+            .count()
+    }
+
+    /// Flag every note whose channel is shared with another sounding
+    /// note. Cleared first, so this is idempotent.
+    pub fn mark_ambiguity(&mut self) {
+        for i in 0..self.notes.len() {
+            self.notes[i].ambiguous = false;
+        }
+        for i in 0..self.notes.len() {
+            for j in (i + 1)..self.notes.len() {
+                let (a, b) = (&self.notes[i], &self.notes[j]);
+                let overlaps = a.start < b.end && b.start < a.end;
+                let shared = a.channel.is_some() && a.channel == b.channel;
+                if overlaps && shared {
+                    self.notes[i].ambiguous = true;
+                    self.notes[j].ambiguous = true;
+                }
+            }
+        }
+    }
+}
