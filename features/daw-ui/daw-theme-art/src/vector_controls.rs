@@ -263,7 +263,9 @@ pub fn SoloButton(props: SoloProps) -> Element {
     let lit = match props.state {
         Solo::Off => None,
         Solo::On => Some(t.signal.solo),
-        Solo::Defeat => Some(t.chrome.accent),
+        // #3898d3 in the source — its own blue, a clear step below the
+        // accent used for a lit routing lane rather than the same one.
+        Solo::Defeat => Some(t.chrome.accent.shade(-0.22)),
     };
     rsx! {
         LabelButton {
@@ -280,6 +282,14 @@ pub struct FxProps {
     /// The cell this replaces: `mcp_fx_*` is 28x22, `track_fx_*` 20x22.
     #[props(default = (28.0, 22.0))]
     pub cell: (f32, f32),
+    /// Draw the face as a translucent scrim rather than an opaque grey.
+    ///
+    /// A family-wide difference, not a shade: every track-panel control is
+    /// black at about 35% over the strip, so the track colour shows
+    /// through it, while the mixer's are opaque plastic. Painting both
+    /// opaque made the track buttons sit *on* the strip instead of in it.
+    #[props(default = false)]
+    pub scrim: bool,
     /// How much of the cell's height the button body occupies.
     ///
     /// Not a constant: the mixer's button is 18 rows of 22 and the track
@@ -355,6 +365,11 @@ pub fn FxButton(props: FxProps) -> Element {
     // and clipped a column off its left edge.
     let x = 0.0f32;
     let top = vh * 0.045;
+    let (face_hi, face_lo, face_alpha) = if props.scrim {
+        ("#000000".to_string(), "#000000".to_string(), 0.35)
+    } else {
+        (k.face.shade(0.10).css(), k.face.shade(-0.12).css(), 1.0)
+    };
     // The outer shape starts a row in and runs `body` of the height; the
     // lit face stops short of it, and the dark rows beneath are the
     // button's bottom edge rather than a shadow under it.
@@ -370,8 +385,8 @@ pub fn FxButton(props: FxProps) -> Element {
             xmlns: "http://www.w3.org/2000/svg",
             defs {
                 linearGradient { id: "fxface", x1: "0", y1: "0", x2: "0", y2: "1",
-                    stop { offset: "0", stop_color: "{k.face.shade(0.10).css()}" }
-                    stop { offset: "1", stop_color: "{k.face.shade(-0.12).css()}" }
+                    stop { offset: "0", stop_color: "{face_hi}" }
+                    stop { offset: "1", stop_color: "{face_lo}" }
                 }
             }
             // Edge, then the face laid over it. Stroking instead would draw
@@ -380,6 +395,7 @@ pub fn FxButton(props: FxProps) -> Element {
             path {
                 d: "{cut(x + vw * 0.036, top + vh * 0.045, face_h, chamfer * 0.75)}",
                 fill: "url(#fxface)",
+                fill_opacity: "{face_alpha}",
             }
             text {
                 x: "{(x + vw) * 0.5}",
@@ -629,7 +645,10 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                 // that goes flat near its widest point, sitting on a base
                 // whose top corners are 45° flares. No vertical section.
                 circle {
-                    cx: "{cx}", cy: "{vh * 0.5125}", r: "{vw * 0.3194}",
+                    // 12.5, not 12.3: at 12.3 the circle's top lands at
+                    // y=0.8 and catches row 0, where the source starts at
+                    // row 1. Half a pixel of centre, a whole row of art.
+                    cx: "{cx}", cy: "{vh * 0.5208}", r: "{vw * 0.3194}",
                     fill: "{hole_fill.css()}",
                 }
                 path {
@@ -744,10 +763,12 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
     let recv = if props.has_receives { t.signal.meter_danger } else { dim };
     let opacity = if props.disabled { "0.4" } else { "1" };
 
-    // Mixer: lanes at y=6, 13, 20 of 32, four tall, 56% of the width.
-    // Track panel: the same three lanes turned a quarter turn — 4 wide and
-    // 10 tall at x=6, 13, 20 of 29, which is the same rhythm along the
-    // other axis rather than a different drawing.
+    // Traced lane geometry, per family. The mixer runs three 11x4 bars
+    // down a 23x32 cell at y=6, 13, 20; the track panel runs three 4x10
+    // bars across a 28x22 cell at x=5, 12, 19. Same rhythm — pitch 7 —
+    // turned a quarter turn, but *not* the same fractions: guessing them
+    // as "56% of the width, centred" put every lane a pixel and a bit
+    // left of the art.
     let horizontal = props.axis == Axis::Horizontal;
     // x, y, w, h of the panel as fractions of the cell — traced.
     let (box_x, box_y, box_w, box_h) = if horizontal {
@@ -756,14 +777,14 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
         (1.0 / 23.0, 1.0 / 32.0, 21.0 / 23.0, 28.0 / 32.0)
     };
     let (lane_l, lane_t) = if horizontal {
-        (vw * 0.138, vw * 0.241)
+        (vw * 5.0 / 28.0, vw * 7.0 / 28.0)
     } else {
-        (vh * 0.125, vh * 0.219)
+        (vh * 6.0 / 32.0, vh * 7.0 / 32.0)
     };
     let (bar_w, bar_h) = if horizontal {
-        (vw * 0.138, vh * 0.455)
+        (vw * 4.0 / 28.0, vh * 10.0 / 22.0)
     } else {
-        (vw * 0.56, vh * 0.125)
+        (vw * 11.0 / 23.0, vh * 4.0 / 32.0)
     };
     let cross = if horizontal {
         (vh - bar_h) / 2.0
@@ -772,6 +793,11 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
     };
     let r = bar_w.min(bar_h) / 2.0;
     let edge = vh * 0.03;
+    let (panel, panel_alpha) = if horizontal {
+        ("#000000".to_string(), 0.35)
+    } else {
+        (k.face.shade(0.10).css(), 1.0)
+    };
 
     rsx! {
         svg {
@@ -794,7 +820,16 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
                 x: "{vw * box_x + edge / 2.0}", y: "{vh * box_y + edge / 2.0}",
                 width: "{vw * box_w - edge}", height: "{vh * box_h - edge}",
                 rx: "{vw.min(vh) * 0.16}",
-                fill: "{k.face.shade(-0.55).css()}",
+                // The two families are not the same fill at two
+                // brightnesses. The mixer's panel is an opaque #464646 —
+                // a touch lighter than plain hardware grey. The track
+                // panel's is **black at 35% alpha**, a scrim that lets the
+                // track colour through, which is why it looks near-black
+                // on a dark strip and tinted on a coloured one. Painting
+                // both opaque made the track buttons sit on the strip
+                // instead of in it.
+                fill: "{panel}",
+                fill_opacity: "{panel_alpha}",
                 stroke: "{k.border.css()}", stroke_width: "{edge}",
             }
             for (i, colour) in [out, send, recv].iter().enumerate() {
@@ -940,7 +975,9 @@ pub fn PanningKnob(props: PanProps) -> Element {
     // `mcp_pan_knob_small` is 24x25 — a hair taller than wide.
     let (vw, vh) = (24.0f32, 25.0f32);
     let (cx, cy) = (vw * 0.5, vh * 0.5);
-    let r = vw * (if props.large { 0.50 } else { 0.44 });
+    // 0.40 of the width, not 0.44: the disc measured two pixels wider
+    // than the source's at the small size.
+    let r = vw * (if props.large { 0.46 } else { 0.40 });
 
     // Measured off the source: a plain dark disc with a soft light dot,
     // and at rest the dot is dead centre — not offset, and with no
@@ -1131,7 +1168,7 @@ mod tests {
             ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { cell: (36.0, 24.0), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_mute_on", render_svg(MuteButton, ToggleProps { cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_solo_on", render_svg(SoloButton, SoloProps { cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_fx_norm", render_svg(FxButton, FxProps { cell: (28.0, 22.0), body: 18.0 / 22.0, state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_fx_norm", render_svg(FxButton, FxProps { cell: (28.0, 22.0), scrim: false, body: 18.0 / 22.0, state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, width: n.0, height: n.1 })),
@@ -1188,6 +1225,7 @@ mod tests {
                 render_svg(
                     FxButton,
                     FxProps {
+                        scrim: false,
                         body: 18.0 / 22.0,
                         cell: (28.0, 22.0),
                         state: FxChain::Active,

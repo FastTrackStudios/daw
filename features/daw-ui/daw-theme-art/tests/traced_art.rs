@@ -278,6 +278,7 @@ fn button_labels_sit_where_the_source_puts_them() {
             daw_theme_art::render_svg(
                 vector::FxButton,
                 vector::FxProps {
+                    scrim: false,
                     body: 18.0 / 22.0,
                     cell: (28.0, 22.0),
                     state: vector::FxChain::Active,

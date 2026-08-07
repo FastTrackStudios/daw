@@ -110,6 +110,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 state,
                 cell: if track { (20.0, 22.0) } else { (28.0, 22.0) },
                 body: if track { 20.0 / 22.0 } else { 18.0 / 22.0 },
+                scrim: track,
                 width: n.0,
                 height: n.1,
                 at,
