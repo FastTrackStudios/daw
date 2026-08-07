@@ -15,7 +15,11 @@
 //! stack.
 
 pub mod button;
+pub mod button_kit;
+pub mod button_parts;
 pub mod knob;
+pub mod knob_kit;
+pub mod knob_parts;
 pub mod knob_svg;
 pub mod lever;
 pub mod panel;
@@ -23,4 +27,6 @@ pub mod panel_svg;
 pub mod rack;
 pub mod switches;
 pub mod vu;
+pub mod vu_faces;
+pub mod vu_kit;
 pub mod vu_svg;

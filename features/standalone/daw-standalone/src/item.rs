@@ -492,6 +492,15 @@ impl Items for Standalone {
         mutate_item(self, &project, &item, |i| i.color = color)
     }
 
+    fn label(&self, project: ProjectContext, item: ItemRef) -> Option<String> {
+        Items::get_item(self, project, item).and_then(|i| i.label)
+    }
+
+    fn set_label(&self, project: ProjectContext, item: ItemRef, label: &str) -> DawResult<()> {
+        let label = label.to_string();
+        mutate_item(self, &project, &item, |i| i.label = Some(label))
+    }
+
     fn set_group_id(
         &self,
         project: ProjectContext,

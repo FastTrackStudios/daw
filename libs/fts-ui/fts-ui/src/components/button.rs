@@ -111,7 +111,15 @@ pub fn Button(props: ButtonProps) -> Element {
         ButtonRenderAs::Button => rsx! {
             button {
                 class,
-                disabled,
+                // Emit `disabled` only when the button really is disabled.
+                // `disabled: false` renders the attribute as `disabled="false"`,
+                // and Blitz — like the HTML spec — treats the attribute's mere
+                // presence as disabled, regardless of value. Combined with the
+                // `disabled:pointer-events-none` in the base class that makes
+                // every *enabled* button unclickable under Blitz (plugin
+                // editors and the standalone shell alike). `None` omits the
+                // attribute entirely.
+                disabled: if disabled { Some("true") } else { None },
                 r#type: "button",
                 onclick: move |e| {
                     if let Some(cb) = &props.on_click {

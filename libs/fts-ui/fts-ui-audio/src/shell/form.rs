@@ -52,16 +52,19 @@ pub static EDITOR_FORMS: &[EditorForm] = &[
     EditorForm::Mini,
 ];
 
-/// 19" rack width and the height of one rack unit, in millimetres.
-const RACK_W_MM: f64 = 482.0;
-const RACK_U_MM: f64 = 44.45;
+/// How many rack units a face's own drawing is.
+///
+/// The panels are drawn as 2U units — an LA-2A or an 1176 sitting in a rack —
+/// so the face's preferred size *is* the 2U size, and the other rack forms are
+/// that scaled by their unit count. Deriving them from the 19"-at-2px/mm table
+/// instead gave a 1U editor 89px tall: physically true, and unrelated to the
+/// artwork it had to draw.
+pub const FACE_RACK_UNITS: f64 = 2.0;
+
 /// A 500-series module, in millimetres.
 const MODULE_W_MM: f64 = 38.0;
 const MODULE_H_MM: f64 = 133.0;
 
-/// Pixels per millimetre for the rack forms — chosen so 3U lands on the size
-/// the faces are already drawn for (about 950 px of panel).
-const RACK_PX_PER_MM: f64 = 2.0;
 /// A 500-series module drawn at a usable width rather than a true 76 px.
 const MODULE_PX_PER_MM: f64 = 7.4;
 
@@ -116,11 +119,11 @@ impl EditorForm {
     /// `Responsive` is the face's own answer; the rest are the hardware sizes,
     /// which is the whole point — a 1U editor is short because 1U is short.
     pub fn editor_size(self, rail_w: f64, face_preferred: (u32, u32)) -> (u32, u32) {
+        // A rack is one width: units add height and nothing else, so 1U is
+        // exactly half of 2U with the same window width.
         let rack = |units: f64| {
-            (
-                (RACK_W_MM * RACK_PX_PER_MM + rail_w) as u32,
-                (RACK_U_MM * units * RACK_PX_PER_MM) as u32,
-            )
+            let (w, h) = face_preferred;
+            (w, (h as f64 * units / FACE_RACK_UNITS) as u32)
         };
         match self {
             Self::Responsive => face_preferred,
@@ -137,6 +140,36 @@ impl EditorForm {
             ),
             Self::Mini => ((260.0 + rail_w) as u32, 200),
         }
+    }
+
+    /// The smallest, and largest, box any form asks for.
+    ///
+    /// These are what an editor should declare as its resize bounds, and
+    /// declaring anything narrower is not a stricter policy — it is a broken
+    /// size button. The host clamps a resize request to the bounds it was
+    /// given, so a 300px floor silently turned both 1U (89px) and 2U (178px)
+    /// into the same 300px window, and a 720px width floor turned a portrait
+    /// 500-series module into a landscape one. The forms are physical sizes;
+    /// if a form is offered, its size has to be reachable.
+    ///
+    /// `Responsive` is excluded — it has no size of its own, it defers to the
+    /// face, and faces are checked against these bounds separately.
+    pub fn size_bounds(rail_w: f64, face_preferred: (u32, u32)) -> ((u32, u32), (u32, u32)) {
+        let sizes = || {
+            EDITOR_FORMS
+                .iter()
+                .filter(|f| **f != Self::Responsive)
+                .map(|f| f.editor_size(rail_w, face_preferred))
+        };
+        let min = (
+            sizes().map(|(w, _)| w).min().unwrap_or(0),
+            sizes().map(|(_, h)| h).min().unwrap_or(0),
+        );
+        let max = (
+            sizes().map(|(w, _)| w).max().unwrap_or(0),
+            sizes().map(|(_, h)| h).max().unwrap_or(0),
+        );
+        (min, max)
     }
 
     /// Whether a face should draw its panel at this form, or flow its controls
@@ -181,6 +214,15 @@ mod tests {
     }
 
     #[test]
+    fn a_rack_unit_is_half_of_two_and_the_face_is_two() {
+        let (w2, h2) = EditorForm::Rack2U.editor_size(RAIL, PREFERRED);
+        assert_eq!((w2, h2), PREFERRED, "the faces are drawn 2U, so 2U is their own size");
+        let (w1, h1) = EditorForm::Rack1U.editor_size(RAIL, PREFERRED);
+        assert_eq!(w1, w2, "a rack is one width");
+        assert_eq!(h1, h2 / 2, "1U is half the height of 2U");
+    }
+
+    #[test]
     fn rack_units_stack_in_height_and_share_a_width() {
         let (w1, h1) = EditorForm::Rack1U.editor_size(RAIL, PREFERRED);
         let (w2, h2) = EditorForm::Rack2U.editor_size(RAIL, PREFERRED);
@@ -216,6 +258,33 @@ mod tests {
         assert!(fits(EditorForm::Rack3U), "3U is what the faces are drawn for");
         assert!(!fits(EditorForm::Series500), "a 3:1 panel does not go in a module");
         assert!(!fits(EditorForm::Mini));
+    }
+
+    #[test]
+    fn every_form_fits_inside_the_bounds_the_forms_themselves_declare() {
+        let (min, max) = EditorForm::size_bounds(RAIL, PREFERRED);
+        for form in EDITOR_FORMS {
+            if *form == EditorForm::Responsive {
+                continue;
+            }
+            let (w, h) = form.editor_size(RAIL, PREFERRED);
+            assert!(
+                w >= min.0 && w <= max.0 && h >= min.1 && h <= max.1,
+                "{} is {w}x{h}, outside {min:?}..{max:?} — the host would clamp it",
+                form.id(),
+            );
+        }
+    }
+
+    #[test]
+    fn the_bounds_are_the_extremes_and_not_one_form_s_box() {
+        let (min, max) = EditorForm::size_bounds(RAIL, PREFERRED);
+        // The shortest form is a 1U rack and the narrowest is a single module,
+        // and those are different forms — the bounds are per axis.
+        assert_eq!(min.1, EditorForm::Rack1U.editor_size(RAIL, PREFERRED).1);
+        assert_eq!(min.0, EditorForm::Mini.editor_size(RAIL, PREFERRED).0);
+        assert_eq!(max.1, EditorForm::Series500.editor_size(RAIL, PREFERRED).1);
+        assert_eq!(max.0, EditorForm::Rack3U.editor_size(RAIL, PREFERRED).0);
     }
 
     #[test]

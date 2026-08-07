@@ -247,6 +247,7 @@ pub fn poll_and_broadcast_items() {
                             project_guid: project_guid.clone(),
                             track_guid: curr.track_guid.clone(),
                             item: Item {
+                                label: None,
                                 guid: curr.guid.clone(),
                                 track_guid: curr.track_guid.clone(),
                                 index: 0,
@@ -534,6 +535,10 @@ impl ReaperItem {
         };
 
         Some(Item {
+            label: {
+                let text = item_sw::get_item_notes(low, item);
+                (!text.is_empty()).then_some(text)
+            },
             guid,
             track_guid,
             index: 0, // Will be set by caller if needed
@@ -967,6 +972,26 @@ impl Items for crate::Reaper {
             ItemAttributeKey::CustomColor,
             value as f64,
         );
+        Ok(())
+    }
+
+    fn label(&self, _project: ProjectContext, item: ItemRef) -> Option<String> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)?;
+        let notes = item_sw::get_item_notes(Reaper::get().medium_reaper().low(), item_ptr);
+        (!notes.is_empty()).then_some(notes)
+    }
+
+    fn set_label(
+        &self,
+        _project: ProjectContext,
+        item: ItemRef,
+        label: &str,
+    ) -> daw_proto::DawResult<()> {
+        let item_ptr = ReaperItem::resolve_item(&item, ReaperProjectContext::CurrentProject)
+            .ok_or_else(|| item_not_found(&item))?;
+        let text = std::ffi::CString::new(label)
+            .map_err(|_| daw_proto::DawError::OperationFailed("item notes contain a NUL".into()))?;
+        item_sw::set_item_notes(Reaper::get().medium_reaper().low(), item_ptr, &text);
         Ok(())
     }
 

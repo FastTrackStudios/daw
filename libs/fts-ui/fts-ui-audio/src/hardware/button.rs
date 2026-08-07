@@ -11,7 +11,53 @@
 
 use dioxus::prelude::*;
 
+use crate::hardware::button_kit::{ButtonSpec, Lit};
 use crate::param::ParamHandle;
+
+/// Which button a panel is asking for.
+///
+/// The *shape* is what tells an 1176's ratio bank from an SSL's illuminated
+/// square — not the colour, which is why a colour prop alone could never make
+/// these read as different parts.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ButtonStyle {
+    /// A latching rectangular cap with a jewel under it. The desk idiom.
+    #[default]
+    Console,
+    /// The cap itself lights and the legend glows through it, in a surround.
+    Illuminated,
+    /// No lamp: read by which one is down. The 1176's ratio bank.
+    PushIn,
+    /// A small hard-cornered backlit switch, for rows of them.
+    Square,
+    /// A machined metal cap with a jewel under it.
+    Metal,
+}
+
+impl ButtonStyle {
+    /// Every button in the kit, so a test or a contact sheet can walk them
+    /// all without anyone having to remember to add the new one.
+    pub const ALL: [ButtonStyle; 5] = [
+        Self::Console,
+        Self::Illuminated,
+        Self::PushIn,
+        Self::Square,
+        Self::Metal,
+    ];
+
+    /// What this button is made of — see
+    /// [`button_kit`](crate::hardware::button_kit).
+    pub fn spec(self) -> &'static ButtonSpec {
+        use crate::hardware::button_parts as kit;
+        match self {
+            Self::Console => &kit::CONSOLE,
+            Self::Illuminated => &kit::ILLUMINATED,
+            Self::PushIn => &kit::PUSH_IN,
+            Self::Square => &kit::SQUARE,
+            Self::Metal => &kit::METAL,
+        }
+    }
+}
 
 /// A latching panel button with an indicator lamp beneath it.
 ///
@@ -29,9 +75,12 @@ pub fn PanelButton(
     /// Label colour.
     #[props(default = "#23252a".to_string())]
     ink: String,
-    /// Lamp colour. Empty draws no lamp.
+    /// Lamp colour. Empty draws no lamp, whatever the style would do.
     #[props(default = "#43d17a".to_string())]
     led: String,
+    /// Which part this is. Defaults to the desk idiom.
+    #[props(default)]
+    style: ButtonStyle,
     #[props(default = 34.0)] w: f64,
     #[props(default = 46.0)] h: f64,
 ) -> Element {
@@ -40,61 +89,113 @@ pub fn PanelButton(
         .map(|h| h.normalized() >= 0.5)
         .unwrap_or(false);
     let wired = handle.is_some();
+    let spec = style.spec();
+    // An empty `led` overrides the part: a panel can ask for an unlit one of
+    // anything, which is how a face says "this switch has no lamp on ours".
+    let lit = if led.is_empty() { Lit::Unlit } else { spec.lit };
+
+    let cap_w = w * scale;
+    let cap_h = h * scale;
+
+    // A backlit cap *is* the lamp, so when it is on the cap takes the lamp's
+    // colour rather than its own. Off, it falls back to the face colour —
+    // an unlit switch is still a coloured cap, not a hole.
+    let cap_color = match (lit, on) {
+        (Lit::Backlit { .. }, true) => led.clone(),
+        _ => color.clone(),
+    };
+    let glow = match (lit, on) {
+        (Lit::Backlit { bloom }, true) => {
+            format!(", 0 0 {:.1}px {led}", bloom * scale)
+        }
+        _ => String::new(),
+    };
+
+    let cap = rsx! {
+        div {
+            "data-testid": "hw-button-{testid}-cap",
+            style: format!(
+                "width:{cap_w:.1}px; height:{cap_h:.1}px; border-radius:{:.1}px; \
+                 display:flex; align-items:center; justify-content:center; \
+                 text-align:center; line-height:1.05; \
+                 font-size:{:.1}px; font-weight:800; letter-spacing:0.02em; \
+                 color:{ink}; cursor:{}; \
+                 background:{}; \
+                 border:{:.1}px solid {}; \
+                 box-shadow:{}{glow};",
+                spec.cap.radius * scale,
+                spec.legend * scale,
+                if wired { "pointer" } else { "default" },
+                spec.cap.finish.css(&cap_color),
+                (1.0 * scale).max(1.0),
+                spec.cap.border,
+                spec.shadow(on, scale),
+            ),
+            onclick: {
+                let handle = handle.clone();
+                move |_| {
+                    if let Some(handle) = &handle {
+                        handle.begin_edit();
+                        handle.set_normalized(if on { 0.0 } else { 1.0 });
+                        handle.end_edit();
+                    }
+                }
+            },
+            "{label}"
+        }
+    };
 
     rsx! {
         div {
             "data-testid": "hw-button-{testid}",
             "data-on": "{on}",
             "data-wired": "{wired}",
+            "data-style": "{style:?}",
             style: format!(
                 "display:flex; flex-direction:column; align-items:center; gap:{:.1}px;",
-                5.0 * scale,
+                match lit {
+                    Lit::Jewel { gap, .. } => gap * scale,
+                    _ => 0.0,
+                },
             ),
 
-            div {
-                style: format!(
-                    "width:{:.1}px; height:{:.1}px; border-radius:{:.1}px; \
-                     display:flex; align-items:center; justify-content:center; \
-                     text-align:center; line-height:1.05; \
-                     font-size:{:.1}px; font-weight:800; letter-spacing:0.02em; \
-                     color:{ink}; cursor:{}; \
-                     background:linear-gradient(180deg, \
-                       color-mix(in oklab, {color} 88%, white), {color}); \
-                     border:{:.1}px solid rgba(0,0,0,0.62); \
-                     box-shadow:{};",
-                    w * scale,
-                    h * scale,
-                    3.0 * scale,
-                    9.0 * scale,
-                    if wired { "pointer" } else { "default" },
-                    (1.0 * scale).max(1.0),
-                    if on {
-                        format!("inset 0 {:.1}px {:.1}px rgba(0,0,0,0.45)", 1.5 * scale, 3.0 * scale)
-                    } else {
-                        format!("0 {:.1}px {:.1}px rgba(0,0,0,0.45)", 1.5 * scale, 3.0 * scale)
-                    },
-                ),
-                onclick: {
-                    let handle = handle.clone();
-                    move |_| {
-                        if let Some(handle) = &handle {
-                            handle.begin_edit();
-                            handle.set_normalized(if on { 0.0 } else { 1.0 });
-                            handle.end_edit();
-                        }
-                    }
-                },
-                "{label}"
+            // The surround, where the part has one: it stops a backlit cap's
+            // glow bleeding into the panel, and gives the cap somewhere to
+            // sink into.
+            if let Some(s) = spec.surround {
+                div {
+                    "data-testid": "hw-button-{testid}-surround",
+                    style: format!(
+                        "padding:{:.1}px; border-radius:{:.1}px; background:{}; \
+                         box-shadow:inset 0 {:.1}px {:.1}px rgba(0,0,0,0.55); \
+                         line-height:0;",
+                        s.pad * scale,
+                        s.radius * scale,
+                        s.color,
+                        (1.0 * scale).max(1.0),
+                        3.0 * scale,
+                    ),
+                    {cap.clone()}
+                }
+            } else {
+                {cap.clone()}
             }
 
-            if !led.is_empty() {
-                Lamp { scale, color: led.clone(), lit: on }
+            // The jewel below, on the parts that have one.
+            if let Lit::Jewel { d, .. } = lit {
+                Lamp { scale, color: led.clone(), lit: on, d }
             }
         }
     }
 }
 
-/// A panel indicator lamp.
+/// A panel indicator lamp — a domed jewel in a bezel.
+///
+/// Built from explicit stops rather than `color-mix` on the lamp's colour: the
+/// core has to be *brighter than the colour itself* for the lens to read as
+/// lit from within, and a mix that silently fails leaves a dark disc that
+/// looks like a sticker. The colour supplies the hue in the middle band;
+/// white and black do the lighting.
 #[component]
 pub fn Lamp(
     scale: f64,
@@ -108,22 +209,40 @@ pub fn Lamp(
     rsx! {
         div {
             "data-testid": "hw-lamp",
+            "data-lit": "{lit}",
             style: format!(
                 "width:{:.1}px; height:{:.1}px; border-radius:50%; \
-                 background:radial-gradient(circle at 38% 32%, {}, {}); \
-                 box-shadow:{}; border:{:.1}px solid rgba(0,0,0,0.6);",
+                 background:{}; box-shadow:{}; \
+                 border:{:.1}px solid rgba(0,0,0,0.65);",
                 d * scale,
                 d * scale,
-                if lit { color.clone() } else { format!("color-mix(in oklab, {color} 34%, black)") },
                 if lit {
-                    format!("color-mix(in oklab, {color} 55%, black)")
+                    format!(
+                        "radial-gradient(circle at 36% 30%, \
+                           rgba(255,255,255,0.92) 0%, \
+                           rgba(255,255,255,0.35) 16%, \
+                           {color} 46%, \
+                           {color} 66%, \
+                           rgba(0,0,0,0.55) 100%)"
+                    )
                 } else {
-                    "rgba(0,0,0,0.8)".to_string()
+                    format!(
+                        "radial-gradient(circle at 36% 30%, \
+                           rgba(255,255,255,0.10) 0%, \
+                           {color} 52%, \
+                           rgba(0,0,0,0.72) 100%)"
+                    )
                 },
                 if lit {
-                    format!("0 0 {:.1}px color-mix(in oklab, {color} 70%, transparent)", 6.0 * scale)
+                    format!(
+                        "0 0 {:.1}px {}, inset 0 {:.1}px {:.1}px rgba(0,0,0,0.35)",
+                        d * 0.7 * scale,
+                        color,
+                        d * 0.16 * scale,
+                        d * 0.26 * scale,
+                    )
                 } else {
-                    format!("inset 0 0 {:.1}px rgba(0,0,0,0.7)", 3.0 * scale)
+                    format!("inset 0 0 {:.1}px rgba(0,0,0,0.75)", d * 0.34 * scale)
                 },
                 (1.0 * scale).max(1.0),
             ),

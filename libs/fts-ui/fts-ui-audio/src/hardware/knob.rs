@@ -15,6 +15,7 @@ use dioxus::prelude::*;
 use crate::drag::{begin_drag, DragState};
 use crate::prelude::*;
 
+use crate::hardware::knob_kit::{Edge, Index, KnobSpec, Paint, Turns};
 use crate::hardware::knob_svg::{knob_angle, pointer_polygon, ring_arc_path, ring_point, ScaleMark};
 
 /// Design-space radii inside the knob's own `-55 -55 110 110` viewBox.
@@ -24,6 +25,18 @@ const BODY_R: f64 = 30.0;
 /// [`Ring::geometry`](crate::hardware::rack::Ring::geometry).
 const RING_R: f64 = 41.0;
 const LABEL_R: f64 = 50.0;
+
+
+
+/// How far a Marconi wing overhangs the skirt it is mounted on, as a multiple
+/// of the skirt's radius, and how far its tail runs the other way.
+///
+/// The wing is a bar laid *across* the knob and overhanging it — that overhang
+/// is the whole silhouette, and a wing contained inside its own disc reads as
+/// a stripe painted on a circle. `ring_offset` moves the printed scale out to
+/// make room for it.
+const WING_REACH: f64 = 1.26;
+const WING_TAIL: f64 = 0.66;
 
 /// Pixels of vertical drag per full sweep. Looser than the FTS knob's 150 —
 /// these are big knobs with printed scales, and a coarse feel suits them.
@@ -47,10 +60,12 @@ const WHEEL_STEP_FINE: f64 = 0.005;
 /// - **Collet** (SSL 4000 channel): a flat-topped coloured cap with a fluted
 ///   rim and a single white bar across the top. No skirt: the panel prints the
 ///   travel as dots around it instead.
-/// - **Silver-top** (UREI 1176): a black plastic body with a *brushed silver
-///   top* and a clear plastic collar around its base — the collar catches the
-///   panel light, which is why an 1176's knobs read as rings from across a
-///   room. INPUT and OUTPUT take the large one, ATTACK and RELEASE the small.
+/// - **Silver-top** (UREI 1176): a wide matte black collar with a *brushed,
+///   knurled aluminium cap* set into the middle of it, and the index a white
+///   line on the **collar** — outside the cap, not across it. That is the
+///   arrangement that makes an 1176's knobs read as rings from across a room:
+///   a dark annulus around a bright disc. INPUT and OUTPUT take the large
+///   one, ATTACK and RELEASE the small.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum KnobStyle {
     /// Black bakelite with a white pointer line — the LA-2A / 1176 knob.
@@ -67,10 +82,27 @@ pub enum KnobStyle {
     Collet,
     /// UREI 1176: black body, brushed silver top, clear collar.
     SilverTop,
+    /// dbx and its generation: a brushed aluminium knob with a fluted rim and
+    /// a dark centre cap, read by a line across the metal.
+    MetalFluted,
     /// Teletronix LA-2A and its contemporaries: a plain black round knob with
     /// a moulded *nose* that points at a scale printed on the panel. No skirt,
     /// no flutes — you read the nose.
     Pointer,
+    /// Neve 1073 and its module family: a smooth turned outer ring around a
+    /// **geared** cap — bumps coarse enough to count, on the inner knob — with
+    /// a painted white index out at the cap's teeth. It sits inside a ring of
+    /// white dots printed on the panel (see
+    /// [`Ring::Dots`](crate::hardware::rack::Ring::Dots)).
+    ///
+    /// Which part is toothed is the whole tell: teeth outside a smooth cap is
+    /// somebody else's knob. So the cap is a path rather than a plain disc,
+    /// and the metal is deliberately flat — a brushed gradient here reads as
+    /// chrome and makes a row of these look plated rather than painted.
+    ///
+    /// Pairs with `inner_handle` on [`HardwareKnob`]: on the module the ring
+    /// and the cap are two different controls, and the toothed one is the cap.
+    Neve,
     /// Empirical Labs Distressor: a wide brushed dial whose *numerals are
     /// printed on the skirt* and turn with it, around a dark centre cap. The
     /// scale moving rather than a pointer moving is the whole look, and it is
@@ -79,146 +111,61 @@ pub enum KnobStyle {
 }
 
 impl KnobStyle {
-    /// The body's diameter as a fraction of the knob's overall size — the rest
-    /// is skirt. Daka-Ware's real ratio is 1.125" over 1.5".
-    fn body_fraction(self) -> f64 {
-        match self {
-            Self::Daka => 0.75,
-            Self::Marconi => 0.70,
-            // The clear collar is a visible ring around the body, not a hair
-            // of trim: on the unit it is most of what you see of the knob.
-            Self::SilverTop => 0.72,
-            // The dark cap inside the numbered skirt.
-            Self::Dial => 0.58,
-            _ => 1.0,
-        }
-    }
+    /// Every knob in the kit, so a test or a contact sheet can walk them all
+    /// without anyone having to remember to add the new one.
+    pub const ALL: [KnobStyle; 11] = [
+        Self::Bakelite,
+        Self::Metal,
+        Self::Skirted,
+        Self::Daka,
+        Self::Marconi,
+        Self::Collet,
+        Self::SilverTop,
+        Self::MetalFluted,
+        Self::Pointer,
+        Self::Neve,
+        Self::Dial,
+    ];
 
-    /// Whether a wider skirt is drawn under the body.
-    fn has_skirt(self) -> bool {
-        matches!(self, Self::Daka | Self::Marconi | Self::SilverTop | Self::Dial)
-    }
-
-    /// Whether this knob draws its own index — a nose, a wing, a bar, an
-    /// engraved dash — rather than taking the generic blade across the face.
+    /// What this knob is made of — see
+    /// [`knob_kit`](crate::hardware::knob_kit).
     ///
-    /// Getting this wrong is invisible in code and obvious in a screenshot: a
-    /// Daka-Ware knob drew both its own rim dash *and* the blade, which read
-    /// as one long white wedge and was the first thing you noticed.
-    fn draws_own_index(self) -> bool {
-        matches!(
-            self,
-            Self::Daka | Self::Marconi | Self::Pointer | Self::Collet | Self::SilverTop | Self::Dial
-        )
+    /// This is the only place a style maps to an appearance. The renderer
+    /// below walks the spec and knows nothing about which unit it is drawing,
+    /// so a new knob is a variant here plus one const in
+    /// [`knob_parts`](crate::hardware::knob_parts).
+    pub fn spec(self) -> &'static KnobSpec {
+        use crate::hardware::knob_parts as kit;
+        match self {
+            Self::Bakelite => &kit::BAKELITE,
+            Self::Metal => &kit::METAL,
+            Self::Skirted => &kit::SKIRTED,
+            Self::Daka => &kit::DAKA,
+            Self::Marconi => &kit::MARCONI,
+            Self::Collet => &kit::COLLET,
+            Self::SilverTop => &kit::SILVER_TOP,
+            Self::MetalFluted => &kit::METAL_FLUTED,
+            Self::Pointer => &kit::POINTER,
+            Self::Neve => &kit::NEVE,
+            Self::Dial => &kit::DIAL,
+        }
     }
 
     /// How far out the panel's printed scale has to sit for this knob, in the
     /// knob's viewBox units.
-    ///
-    /// A pointer knob's nose reaches past its body by design — that is how it
-    /// points — so a ring drawn for a flush knob lands underneath it.
     pub fn ring_offset(self) -> f64 {
-        match self {
-            Self::Pointer => 13.0,
-            _ => 0.0,
-        }
+        self.spec().ring_offset
     }
 
     /// Whether the printed scale belongs to the knob rather than the panel.
     pub fn numerals_on_knob(self) -> bool {
-        matches!(self, Self::Dial)
+        self.spec().numerals_on_knob
     }
 
-    /// How the flutes catch the light. Phenolic is dark, so its ridges read as
-    /// highlights; a coloured cap's read as shadow between them.
-    fn flute_stroke(self) -> &'static str {
-        match self {
-            Self::Collet => "rgba(0,0,0,0.42)",
-            Self::SilverTop => "rgba(0,0,0,0.34)",
-            Self::Dial => "rgba(0,0,0,0.30)",
-            _ => "rgba(255,255,255,0.30)",
-        }
-    }
-
-    /// How many flutes are moulded around the grip, if any.
-    fn flutes(self) -> usize {
-        match self {
-            Self::Daka => 44,
-            Self::Collet => 28,
-            Self::SilverTop => 30,
-            Self::Dial => 72,
-            Self::Marconi | Self::Pointer => 0,
-            _ => 0,
-        }
-    }
-}
-
-impl KnobStyle {
-    fn body(self) -> &'static str {
-        match self {
-            Self::Bakelite => "radial-gradient(circle at 34% 26%, #4a4a4e 0%, #17171a 62%, #0b0b0d 100%)",
-            Self::Metal => "radial-gradient(circle at 34% 26%, #d8d8d4 0%, #9a9a96 58%, #6d6d69 100%)",
-            // Concentric ribs, lit from the top left like the photo.
-            Self::Skirted => {
-                "radial-gradient(circle at 38% 24%, #4c4c50 0%, #232326 38%, #101012 72%, #0a0a0c 100%)"
-            }
-            // Glossy phenolic, lifted off the matte skirt beneath it.
-            Self::Daka => {
-                "radial-gradient(circle at 36% 22%, #63636a 0%, #33333a 34%, #17171b 74%, #101014 100%)"
-            }
-            Self::Marconi => {
-                "radial-gradient(circle at 36% 22%, #3c3c40 0%, #1e1e21 46%, #121214 100%)"
-            }
-            Self::Pointer => {
-                "radial-gradient(circle at 34% 24%, #48484d 0%, #232327 44%, #0f0f12 100%)"
-            }
-            // A collet cap is flat-topped, so it is lit as a face rather than
-            // as a sphere.
-            Self::Collet => {
-                "linear-gradient(162deg, #4a4a4e 0%, #303034 42%, #202024 100%)"
-            }
-            // Brushed aluminium: a sweep across the top, not a point highlight.
-            Self::SilverTop => {
-                "linear-gradient(148deg, #e2e2e0 0%, #b4b4b2 34%, #8e8e8c 62%, #cfcfcd 100%)"
-            }
-            // The cap in the middle of the dial.
-            Self::Dial => {
-                "radial-gradient(circle at 38% 28%, #55575c 0%, #303236 46%, #1c1e21 100%)"
-            }
-        }
-    }
-    /// The same finish in a given colour — the gradient's shape is what makes
-    /// it read as moulded plastic or brushed metal, so only the hue moves.
-    fn tinted(self, color: &str) -> String {
-        match self {
-            Self::Metal => format!(
-                "radial-gradient(circle at 34% 26%, color-mix(in oklab, {color} 55%, white) 0%, \
-                 {color} 58%, color-mix(in oklab, {color} 70%, black) 100%)"
-            ),
-            // Flat-topped: a sheen across the face, not a highlight on a dome.
-            Self::Collet => format!(
-                "linear-gradient(162deg, color-mix(in oklab, {color} 76%, white) 0%, \
-                 {color} 44%, color-mix(in oklab, {color} 72%, black) 100%)"
-            ),
-            _ => format!(
-                "radial-gradient(circle at 36% 24%, color-mix(in oklab, {color} 72%, white) 0%, \
-                 {color} 42%, color-mix(in oklab, {color} 62%, black) 100%)"
-            ),
-        }
-    }
-
-    fn pointer(self) -> &'static str {
-        match self {
-            Self::Bakelite
-            | Self::Skirted
-            | Self::Daka
-            | Self::Marconi
-            | Self::Collet
-            | Self::Pointer => "#f2f2f0",
-            // A dark line on a silver top, which is how you read one.
-            Self::Metal | Self::SilverTop => "#1c1c1e",
-            Self::Dial => "#f2f2f0",
-        }
+    /// The cap's diameter as a fraction of the knob's — what a dual-concentric
+    /// knob sizes its inner drag region to.
+    pub fn cap_fraction(self) -> f64 {
+        self.spec().cap_fraction()
     }
 }
 
@@ -270,18 +217,116 @@ fn nose_points(body_r: f64) -> String {
 /// The Marconi wing, as an SVG polygon in the knob's viewBox: a raised grip
 /// that runs across the body and tapers to the indicator end.
 fn wing_points(body_r: f64) -> String {
-    let w = body_r * 0.34;
+    let w = body_r * 0.46;
     format!(
         "{:.2},{:.2} {:.2},{:.2} {:.2},{:.2} {:.2},{:.2}",
         -w,
-        body_r * 0.82,
+        BODY_R * WING_TAIL,
         w,
-        body_r * 0.82,
-        w * 0.42,
-        -(body_r * 1.28),
-        -w * 0.42,
-        -(body_r * 1.28),
+        BODY_R * WING_TAIL,
+        w * 0.64,
+        -(BODY_R * WING_REACH),
+        -w * 0.64,
+        -(BODY_R * WING_REACH),
     )
+}
+
+/// The lit flank of a [`wing_points`] moulding: a narrow sliver down its left
+/// side, so the wing reads as a raised bar rather than a painted stripe.
+fn wing_highlight_points(body_r: f64) -> String {
+    let w = body_r * 0.46;
+    format!(
+        "{:.2},{:.2} {:.2},{:.2} {:.2},{:.2} {:.2},{:.2}",
+        -w,
+        BODY_R * WING_TAIL,
+        -w * 0.55,
+        BODY_R * WING_TAIL,
+        -w * 0.36,
+        -(BODY_R * WING_REACH),
+        -w * 0.64,
+        -(BODY_R * WING_REACH),
+    )
+}
+
+/// One index, in the knob's viewBox, before rotation.
+///
+/// Every style's pointer goes through here: a bar between two radii, a
+/// tapered blade, a Marconi wing, a moulded nose, or nothing at all. Adding a
+/// silhouette means an [`Index`] variant and an arm here — and nothing else,
+/// because the renderer only ever calls this.
+fn draw_index(index: Index, tint: Option<&str>) -> Element {
+    match index {
+        Index::None => rsx! {},
+        Index::Bar {
+            from,
+            to,
+            width,
+            color,
+        } => rsx! {
+            rect {
+                x: "{-width / 2.0:.2}",
+                y: "{-(BODY_R * to):.2}",
+                width: "{width:.2}",
+                height: "{BODY_R * (to - from):.2}",
+                rx: "{(width / 2.4).min(1.6):.2}",
+                fill: "{color}",
+            }
+        },
+        Index::Blade {
+            to,
+            half_width,
+            color,
+        } => rsx! {
+            polygon {
+                points: "{pointer_polygon(BODY_R * to, BODY_R * half_width)}",
+                fill: "{color}",
+            }
+        },
+        Index::Nose { color } => rsx! {
+            polygon {
+                points: "{nose_points(BODY_R)}",
+                fill: "#232327",
+                stroke: "rgba(0,0,0,0.55)",
+                stroke_width: "0.8",
+            }
+            rect {
+                x: "-1.2",
+                y: "{-(BODY_R + 7.0):.1}",
+                width: "2.4",
+                height: "{BODY_R * 0.55:.1}",
+                rx: "1.0",
+                fill: "{color}",
+            }
+        },
+        // The wing takes the control's colour: on a 1073 the wing IS the
+        // colour, and a translucent sliver over a coloured body read as a
+        // smudge on a circle rather than a bar standing off it.
+        Index::Wing { color, body } => rsx! {
+            polygon {
+                points: "{wing_points(BODY_R * body)}",
+                transform: "translate(0.8 1.6)",
+                fill: "rgba(0,0,0,0.45)",
+            }
+            polygon {
+                points: "{wing_points(BODY_R * body)}",
+                fill: "{tint.unwrap_or(\"#3a3a40\")}",
+                stroke: "rgba(0,0,0,0.6)",
+                stroke_width: "0.9",
+            }
+            polygon {
+                points: "{wing_highlight_points(BODY_R * body)}",
+                fill: "rgba(255,255,255,0.20)",
+            }
+            rect {
+                x: "-1.3",
+                y: "{-(BODY_R - 2.0):.1}",
+                width: "2.6",
+                height: "{BODY_R * 0.62:.1}",
+                rx: "1.0",
+                fill: "{color}",
+            }
+        },
+    }
 }
 
 /// A knob on a hardware faceplate.
@@ -311,6 +356,13 @@ pub fn HardwareKnob(
     /// Draw tick marks, or numerals alone.
     #[props(default = true)]
     ticks: bool,
+    /// Dots printed evenly along the sweep instead of ticks, and how many.
+    ///
+    /// The 1073's rings are dots, not dashes, and they are what the panel
+    /// reads as before you can make out a number — a small bright arc around
+    /// each knob. Zero draws none.
+    #[props(default = 0)]
+    dots: usize,
     /// Override the knob body's colour.
     ///
     /// A console colour-codes its bands — the SSL's blue LMF, green HMF,
@@ -318,31 +370,42 @@ pub fn HardwareKnob(
     /// reading anything. The [`KnobStyle`] still decides the finish.
     #[props(default)]
     tint: Option<String>,
+    /// The *inner* control of a dual-concentric knob.
+    ///
+    /// A 1073's EQ knobs are two controls in one place: the bright collar
+    /// selects the band's frequency, and the grey cap sitting inside it sets
+    /// that band's gain. They turn independently, so this draws two indices at
+    /// two angles and hands the cap its own drag region — press the collar and
+    /// you are on `handle`, press the cap and you are on this one.
+    ///
+    /// `None` is an ordinary knob, where the whole thing turns together.
+    #[props(default)]
+    inner_handle: Option<ParamHandle>,
 ) -> Element {
     let mut drag: Signal<DragState> = use_context();
     // Re-render while a drag is in flight so the pointer tracks the cursor.
     let _ = drag.read().move_count;
 
     let normalized = handle.normalized() as f64;
+    // The collar's angle, and the cap's. They are the same knob unless an
+    // inner control was given, in which case the two halves move apart.
     let angle = knob_angle(normalized);
+    let inner_angle = match &inner_handle {
+        Some(inner) => knob_angle(inner.normalized() as f64),
+        None => angle,
+    };
     let display = handle.display_value();
     let name = handle.name();
 
     // The printed ring is drawn outside the body, so the box is wider than
     // the knob — the viewBox spans -55..55 with the body at r = 30.
     let box_px = diameter * (110.0 / (BODY_R * 2.0)) * scale;
-    // A skirted knob is read by the index mark on its rim; the others by a
-    // pointer across the face.
-    let pointer = if style == KnobStyle::Skirted {
-        pointer_polygon(BODY_R - 1.0, 2.2)
-    } else {
-        pointer_polygon(BODY_R - 5.0, 3.4)
-    };
     let ring = ring_arc_path(ring_r);
-    let body_px = diameter * style.body_fraction() * scale;
-    // Body radius in the knob's own viewBox units, so the rotating detail
-    // lands on the body rather than on the skirt.
-    let body_r = BODY_R * style.body_fraction();
+    // What the knob is made of. Everything below is a walk over this — the
+    // renderer never asks which unit it is drawing.
+    let spec = style.spec();
+    // The cap: what a dual-concentric knob's inner drag region is sized to.
+    let body_px = diameter * spec.cap_fraction().max(0.001) * scale;
 
     rsx! {
         div {
@@ -368,6 +431,27 @@ pub fn HardwareKnob(
                         opacity: "0.35",
                     }
                 }
+                // The printed dot ring — the 1073's, and the thing you see of
+                // one of its knobs before any number resolves. Evenly spaced
+                // along the sweep, on the panel and so not turning.
+                for i in 0..dots {
+                    {
+                        let n = if dots > 1 {
+                            i as f64 / (dots - 1) as f64
+                        } else {
+                            0.5
+                        };
+                        let (dx, dy) = ring_point(n, ring_r);
+                        rsx! {
+                            circle {
+                                cx: "{dx:.2}", cy: "{dy:.2}", r: "1.35",
+                                fill: "{ink}",
+                                opacity: "0.92",
+                            }
+                        }
+                    }
+                }
+
                 // A dial's scale is printed on its own skirt, so it is drawn
                 // with the rotating parts below rather than here on the panel.
                 for mark in marks.iter().filter(|_| !style.numerals_on_knob()) {
@@ -406,178 +490,175 @@ pub fn HardwareKnob(
                 }
             }
 
-            // Daka-Ware draws itself: a lobed skirt is a path, not a border
-            // radius, and the tiers above it are concentric discs rather than
-            // one gradient. Everything here turns with the knob.
-            if style == KnobStyle::Daka {
-                svg {
-                    style: "position:absolute; inset:0; width:100%; height:100%; display:block;",
-                    view_box: "-55 -55 110 110",
-                    g {
-                        transform: "rotate({angle:.2})",
-                        // Contact shadow: the same outline, dropped.
-                        path {
-                            d: "{scallop_path(BODY_R, 26, 1.7)}",
-                            transform: "translate(0 1.6)",
-                            fill: "rgba(0,0,0,0.45)",
-                        }
-                        // The scalloped skirt.
-                        path {
-                            d: "{scallop_path(BODY_R, 26, 1.7)}",
-                            fill: "#141416",
-                            stroke: "rgba(0,0,0,0.65)",
-                            stroke_width: "0.7",
-                        }
-                        // Two tiers over it, each a shade lighter — the knob
-                        // is stepped, not domed.
-                        circle { cx: "0", cy: "0", r: "{BODY_R * 0.74:.1}", fill: "#1c1c1f" }
-                        circle {
-                            cx: "0", cy: "0", r: "{BODY_R * 0.56:.1}",
-                            fill: "#232327",
-                            stroke: "rgba(0,0,0,0.55)", stroke_width: "0.6",
-                        }
-                        circle {
-                            cx: "0", cy: "0", r: "{BODY_R * 0.34:.1}",
-                            fill: "#2a2a2f",
-                            stroke: "rgba(255,255,255,0.06)", stroke_width: "0.5",
-                        }
-                        // The light the panel is lit by, caught on the upper
-                        // left of each tier.
-                        ellipse {
-                            cx: "{-BODY_R * 0.20:.1}", cy: "{-BODY_R * 0.34:.1}",
-                            rx: "{BODY_R * 0.34:.1}", ry: "{BODY_R * 0.18:.1}",
-                            fill: "rgba(255,255,255,0.05)",
-                        }
-                        // The index: engraved into the skirt and filled white,
-                        // out at the rim where it is read against the panel.
-                        // Short, and out at the rim: on the unit it is a dash
-                        // in the skirt, not a stripe across the face.
-                        rect {
-                            x: "-1.0",
-                            y: "{-(BODY_R - 1.4):.1}",
-                            width: "2.0",
-                            height: "{BODY_R * 0.17:.1}",
-                            rx: "0.7",
-                            fill: "#eceae4",
+            // ── The knob itself, walked off its spec ─────────────────────
+            //
+            // Tiers outermost-first. Each is either a CSS div (a gradient is
+            // the only thing that reads as a material) or an SVG shape in a
+            // rotating group. A tier turns with the collar or with the cap,
+            // which on an ordinary knob is the same angle and on a
+            // concentric one is not.
+            for (i , tier) in spec.tiers.iter().enumerate() {
+                {
+                    let a = if tier.turns == Turns::Cap { inner_angle } else { angle };
+                    let r = BODY_R * tier.r;
+                    let px = diameter * tier.r * scale;
+                    rsx! {
+                        match tier.paint {
+                            // A gradient surface: a div, so it can carry one.
+                            Paint::Surface { css, finish, tint: tintable } => rsx! {
+                                div {
+                                    key: "tier-{i}",
+                                    style: format!(
+                                        "position:absolute; left:50%; top:50%; \
+                                         width:{0:.1}px; height:{0:.1}px; \
+                                         margin-left:{1:.1}px; margin-top:{1:.1}px; \
+                                         border-radius:50%; background:{2}; \
+                                         border:{3:.1}px solid rgba(0,0,0,0.45); \
+                                         box-shadow:0 {4:.1}px {5:.1}px rgba(0,0,0,0.55), \
+                                           0 {6:.1}px {7:.1}px rgba(0,0,0,0.30), \
+                                           inset 0 {8:.1}px {9:.1}px rgba(0,0,0,0.45), \
+                                           inset 0 {10:.1}px {11:.1}px rgba(255,255,255,0.16);",
+                                        px,
+                                        -px / 2.0,
+                                        match (tintable, tint.as_deref()) {
+                                            (true, Some(c)) => finish.tinted(c),
+                                            _ => css.to_string(),
+                                        },
+                                        (0.5 * scale).max(0.6),
+                                        1.5 * scale,
+                                        3.0 * scale,
+                                        4.0 * scale,
+                                        10.0 * scale,
+                                        -px * 0.10,
+                                        px * 0.16,
+                                        px * 0.05,
+                                        px * 0.10,
+                                    ),
+                                }
+                            },
+                            // Flat fills and grooves are SVG, in a group that
+                            // turns with whichever control owns the tier.
+                            _ => rsx! {
+                                svg {
+                                    key: "tier-{i}",
+                                    style: "position:absolute; inset:0; width:100%; \
+                                            height:100%; display:block; pointer-events:none;",
+                                    view_box: "-55 -55 110 110",
+                                    g {
+                                        transform: "rotate({a:.2})",
+                                        if tier.shadow > 0.0 {
+                                            match tier.edge {
+                                                Edge::Toothed { teeth, depth } => rsx! {
+                                                    path {
+                                                        d: "{scallop_path(r, teeth, BODY_R * depth)}",
+                                                        transform: "translate(0 {BODY_R * tier.shadow:.2})",
+                                                        fill: "rgba(0,0,0,0.45)",
+                                                    }
+                                                },
+                                                Edge::Round => rsx! {
+                                                    circle {
+                                                        cx: "0", cy: "{BODY_R * tier.shadow:.2}",
+                                                        r: "{r:.2}",
+                                                        fill: "rgba(0,0,0,0.45)",
+                                                    }
+                                                },
+                                            }
+                                        }
+                                        {
+                                            let (fill, stroke, sw) = match tier.paint {
+                                                Paint::Flat(c) => (c.to_string(), None, 0.0),
+                                                Paint::Tinted(fallback) => (
+                                                    tint.clone().unwrap_or_else(|| fallback.to_string()),
+                                                    None,
+                                                    0.0,
+                                                ),
+                                                Paint::Groove { color, width } => {
+                                                    ("none".to_string(), Some(color), width)
+                                                }
+                                                Paint::Surface { .. } => unreachable!(),
+                                            };
+                                            let (stroke, sw) = match (stroke, tier.stroke) {
+                                                (Some(c), _) => (c.to_string(), sw),
+                                                (None, Some((c, w))) => (c.to_string(), w),
+                                                (None, None) => ("none".to_string(), 0.0),
+                                            };
+                                            rsx! {
+                                                match tier.edge {
+                                                    Edge::Toothed { teeth, depth } => rsx! {
+                                                        path {
+                                                            d: "{scallop_path(r, teeth, BODY_R * depth)}",
+                                                            fill: "{fill}",
+                                                            stroke: "{stroke}",
+                                                            stroke_width: "{sw:.2}",
+                                                        }
+                                                    },
+                                                    Edge::Round => rsx! {
+                                                        circle {
+                                                            cx: "0", cy: "0", r: "{r:.2}",
+                                                            fill: "{fill}",
+                                                            stroke: "{stroke}",
+                                                            stroke_width: "{sw:.2}",
+                                                        }
+                                                    },
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
                         }
                     }
                 }
             }
 
-            // The skirt: the wider disc a Marconi or 1176 body sits on.
-            // Drawn first so the body stacks over it.
-            if style.has_skirt() && style != KnobStyle::Daka {
+            // The room's light. Outside every rotating group on purpose: a
+            // reflection that turns with the knob is the first thing that
+            // reads as wrong, because the lamp above the rack does not move
+            // when you turn a control.
+            if let Some(lit) = spec.specular {
                 div {
+                    "data-testid": "hw-knob-{testid}-light",
                     style: format!(
                         "position:absolute; left:50%; top:50%; \
                          width:{:.1}px; height:{:.1}px; \
                          margin-left:{:.1}px; margin-top:{:.1}px; \
-                         border-radius:50%; \
-                         background:{}; \
-                         box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.5), \
-                           inset 0 0 {:.1}px rgba(255,255,255,0.10);",
-                        diameter * scale,
-                        diameter * scale,
-                        -(diameter * scale) / 2.0,
-                        -(diameter * scale) / 2.0,
-                        if style == KnobStyle::SilverTop {
-                            // Clear plastic: it takes the panel's light rather
-                            // than absorbing it.
-                            "radial-gradient(circle at 44% 34%, rgba(226,232,238,0.34) 0%, \
-                             rgba(150,164,176,0.20) 56%, rgba(20,22,26,0.55) 100%)"
-                        } else if style == KnobStyle::Dial {
-                            "radial-gradient(circle at 40% 26%, #e8e8e6 0%, #c2c2c0 44%, \
-                             #9a9a98 78%, #cbcbc9 100%)"
-                        } else {
-                            "radial-gradient(circle at 44% 36%, #202024 0%, #101013 58%, #08080a 100%)"
-                        },
-                        1.5 * scale,
-                        4.0 * scale,
-                        2.0 * scale,
+                         border-radius:50%; pointer-events:none; \
+                         background:{}; transform:rotate({:.1}deg);",
+                        diameter * lit.w * scale,
+                        diameter * lit.h * scale,
+                        diameter * lit.dx * scale,
+                        diameter * lit.dy * scale,
+                        lit.fill,
+                        lit.rotate,
                     ),
                 }
             }
 
-            // The knob body itself is a div so it can carry a CSS gradient —
-            // the moulded-plastic look does not survive as flat SVG fill.
-            // (Daka-Ware is the exception, drawn above.)
-            //
-            // Four shadows do the work of making it an object rather than a
-            // circle: a cast shadow on the panel, a dark inner rim at the
-            // bottom, a light inner rim at the top, and a hairline edge. A
-            // knob is a cylinder seen from above, and that is mostly what you
-            // read at the rim.
-            if style != KnobStyle::Daka {
-            div {
-                style: format!(
-                    "position:absolute; left:50%; top:50%; \
-                     width:{:.1}px; height:{:.1}px; \
-                     margin-left:{:.1}px; margin-top:{:.1}px; \
-                     border-radius:50%; background:{}; \
-                     border:{:.1}px solid rgba(0,0,0,0.45); \
-                     box-shadow:0 {:.1}px {:.1}px rgba(0,0,0,0.55), \
-                       0 {:.1}px {:.1}px rgba(0,0,0,0.30), \
-                       inset 0 {:.1}px {:.1}px rgba(0,0,0,0.45), \
-                       inset 0 {:.1}px {:.1}px rgba(255,255,255,0.16);",
-                    body_px,
-                    body_px,
-                    -body_px / 2.0,
-                    -body_px / 2.0,
-                    tint.as_deref().map(|c| style.tinted(c)).unwrap_or_else(|| style.body().to_string()),
-                    (0.5 * scale).max(0.6),
-                    1.5 * scale,
-                    3.0 * scale,
-                    4.0 * scale,
-                    10.0 * scale,
-                    -body_px * 0.10,
-                    body_px * 0.16,
-                    body_px * 0.05,
-                    body_px * 0.10,
-                ),
-            }
-            }
-
-            if style != KnobStyle::Daka {
-            // Specular: the soft highlight a moulded or turned surface takes
-            // from the light every panel is lit by. Offset up and left, and
-            // small — a big one reads as gloss paint rather than plastic.
-            div {
-                style: format!(
-                    "position:absolute; left:50%; top:50%; \
-                     width:{:.1}px; height:{:.1}px; \
-                     margin-left:{:.1}px; margin-top:{:.1}px; \
-                     border-radius:50%; pointer-events:none; \
-                     background:{};",
-                    body_px * 0.62,
-                    body_px * 0.42,
-                    -body_px * 0.46,
-                    -body_px * 0.40,
-                    if style == KnobStyle::Collet {
-                        // Flat top: a sheen across it rather than a highlight
-                        // sitting on a dome.
-                        "linear-gradient(150deg, rgba(255,255,255,0.20) 0%, \
-                         rgba(255,255,255,0.04) 46%, rgba(255,255,255,0.0) 72%)"
-                    } else {
-                        "radial-gradient(ellipse at 50% 50%, rgba(255,255,255,0.15) 0%, \
-                         rgba(255,255,255,0.0) 70%)"
-                    },
-                ),
-            }
-            }
-
-            // Pointer, rotated to the value. Kept in its own SVG layer above
-            // the body so the rotation is exact at any panel scale.
+            // ── Everything that turns: knurl, numerals, indices ──────────
             svg {
                 style: "position:absolute; inset:0; width:100%; height:100%; \
                         display:block; pointer-events:none;",
                 view_box: "-55 -55 110 110",
-                g {
-                    transform: "rotate({angle:.2})",
 
-                    // A dial's numerals: printed around the skirt, turning
-                    // with it. The reading is where they line up with the
-                    // panel's index, not where a pointer lands.
-                    if style.numerals_on_knob() {
+                if let Some(lit) = spec.specular {
+                    if let Some(rim) = lit.rim {
+                        path {
+                            d: "M {-BODY_R * 0.72:.2} {-BODY_R * 0.58:.2} \
+                                A {BODY_R * 0.93:.2} {BODY_R * 0.93:.2} 0 0 1 \
+                                {BODY_R * 0.40:.2} {-BODY_R * 0.84:.2}",
+                            fill: "none",
+                            stroke: "{rim}",
+                            stroke_width: "1.0",
+                        }
+                    }
+                }
+
+                // A dial's numerals: printed around its own skirt and turning
+                // with it. The reading is where they line up with the panel's
+                // index, not where a pointer lands.
+                if spec.numerals_on_knob {
+                    g {
+                        transform: "rotate({angle:.2})",
                         for mark in marks.iter() {
                             {
                                 let (lx, ly) = ring_point(mark.normalized, BODY_R - 6.0);
@@ -594,145 +675,68 @@ pub fn HardwareKnob(
                             }
                         }
                     }
+                }
 
-                    // Moulded flutes around the grip. They turn with the knob,
-                    // which is most of what tells you it moved at a glance.
-                    for i in 0..(if style == KnobStyle::Daka { 0 } else { style.flutes() }) {
-                        {
-                            let count = style.flutes() as f64;
-                            let a = (i as f64 / count) * std::f64::consts::TAU;
-                            // Half a flute over, for the shadowed side.
-                            let b = a + std::f64::consts::TAU / (count * 2.0);
-                            let (sx, sy) = (a.sin(), -a.cos());
-                            let (bx, by) = (b.sin(), -b.cos());
-                            let inner = body_r - 4.2;
-                            rsx! {
-                                line {
-                                    x1: "{sx * inner:.2}",
-                                    y1: "{sy * inner:.2}",
-                                    x2: "{sx * body_r:.2}",
-                                    y2: "{sy * body_r:.2}",
-                                    stroke: "{style.flute_stroke()}",
-                                    stroke_width: "1.2",
-                                }
-                                line {
-                                    x1: "{bx * inner:.2}",
-                                    y1: "{by * inner:.2}",
-                                    x2: "{bx * body_r:.2}",
-                                    y2: "{by * body_r:.2}",
-                                    stroke: "rgba(0,0,0,0.40)",
-                                    stroke_width: "1.2",
+                // The knurl, on whichever band and whichever half owns it.
+                if let Some(fl) = spec.flutes {
+                    {
+                        let fa = if fl.turns == Turns::Cap { inner_angle } else { angle };
+                        rsx! {
+                    g {
+                        transform: "rotate({fa:.2})",
+                        for i in 0..fl.count {
+                            {
+                                let count = fl.count as f64;
+                                let a = (i as f64 / count) * std::f64::consts::TAU;
+                                // Half a flute over, for the shadowed side.
+                                let b = a + std::f64::consts::TAU / (count * 2.0);
+                                let (sx, sy) = (a.sin(), -a.cos());
+                                let (bx, by) = (b.sin(), -b.cos());
+                                let (inner, outer) = (BODY_R * fl.from, BODY_R * fl.to);
+                                rsx! {
+                                    line {
+                                        x1: "{sx * inner:.2}", y1: "{sy * inner:.2}",
+                                        x2: "{sx * outer:.2}", y2: "{sy * outer:.2}",
+                                        stroke: "{fl.stroke}",
+                                        stroke_width: "{fl.width:.2}",
+                                    }
+                                    if let Some(dark) = fl.shadow {
+                                        line {
+                                            x1: "{bx * inner:.2}", y1: "{by * inner:.2}",
+                                            x2: "{bx * outer:.2}", y2: "{by * outer:.2}",
+                                            stroke: "{dark}",
+                                            stroke_width: "{fl.width:.2}",
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-
-                    // The Marconi wing: the raised grip you actually turn,
-                    // reaching past the body toward the skirt's edge.
-                    if style == KnobStyle::Marconi {
-                        polygon {
-                            points: "{wing_points(body_r)}",
-                            fill: "rgba(255,255,255,0.09)",
-                            stroke: "rgba(0,0,0,0.55)",
-                            stroke_width: "0.9",
-                        }
-                        rect {
-                            x: "-1.3",
-                            y: "{-(BODY_R - 2.0):.1}",
-                            width: "2.6",
-                            height: "{BODY_R * 0.62:.1}",
-                            rx: "1.0",
-                            fill: "{style.pointer()}",
-                        }
-                    }
-
-                    // Daka-Ware's index is engraved into the body and filled
-                    // white — it runs from the hub out to the body's edge, not
-                    // a mark perched on the rim.
-                    // The moulded nose: it *is* the pointer, so it reaches past
-                    // the body toward the panel's printed scale.
-                    if style == KnobStyle::Pointer {
-                        polygon {
-                            points: "{nose_points(BODY_R)}",
-                            fill: "{style.body()}",
-                            stroke: "rgba(0,0,0,0.55)",
-                            stroke_width: "0.8",
-                        }
-                        rect {
-                            x: "-1.2",
-                            y: "{-(BODY_R + 7.0):.1}",
-                            width: "2.4",
-                            height: "{BODY_R * 0.55:.1}",
-                            rx: "1.0",
-                            fill: "rgba(255,255,255,0.85)",
-                        }
-                    }
-
-                    if style == KnobStyle::SilverTop {
-                        rect {
-                            x: "-1.3",
-                            y: "{-(body_r - 1.5):.1}",
-                            width: "2.6",
-                            height: "{body_r - 4.0:.1}",
-                            rx: "1.0",
-                            fill: "{style.pointer()}",
-                        }
-                    }
-
-                    if false {
-                        rect {
-                            x: "-1.2",
-                            y: "{-(body_r - 1.5):.1}",
-                            width: "2.4",
-                            height: "{body_r - 5.0:.1}",
-                            rx: "1.0",
-                            fill: "{style.pointer()}",
-                        }
-                    }
-
-                    // A collet cap is read by one bar across its flat top.
-                    if style == KnobStyle::Collet {
-                        rect {
-                            x: "-1.8",
-                            y: "{-(body_r - 3.0):.1}",
-                            width: "3.6",
-                            height: "{body_r - 6.0:.1}",
-                            rx: "1.2",
-                            fill: "{style.pointer()}",
-                        }
-                    }
-
-                    if style == KnobStyle::Skirted {
-                        // A short bar on the skirt's rim — the vintage
-                        // outboard index, which is what the printed numerals
-                        // are read against.
-                        rect {
-                            x: "-1.9",
-                            y: "{-(BODY_R - 1.0):.1}",
-                            width: "3.8",
-                            height: "{BODY_R * 0.34:.1}",
-                            rx: "1.2",
-                            fill: "{style.pointer()}",
-                        }
-                    } else if !style.draws_own_index() {
-                        polygon {
-                            points: "{pointer}",
-                            fill: "{style.pointer()}",
                         }
                     }
                 }
-                if style == KnobStyle::Skirted {
-                    // The smooth cap inside the fluted skirt.
-                    circle {
-                        cx: "0", cy: "0", r: "{BODY_R * 0.62:.1}",
-                        fill: "rgba(255,255,255,0.035)",
-                        stroke: "rgba(0,0,0,0.45)",
-                        stroke_width: "0.8",
+
+                // The collar's index, where the two halves are separate
+                // controls. Drawn before the cap's so the cap's sits on top.
+                if let Some(idx) = spec.collar_index {
+                    g {
+                        transform: "rotate({angle:.2})",
+                        {draw_index(idx, tint.as_deref())}
                     }
-                } else {
-                    circle { cx: "0", cy: "0", r: "4.5", fill: "rgba(0,0,0,0.35)" }
+                }
+
+                // The cap's index — what an ordinary knob is read by.
+                g {
+                    transform: "rotate({inner_angle:.2})",
+                    {draw_index(spec.index, tint.as_deref())}
+                }
+
+                // The hub, over everything and turning with nothing.
+                if let Some(hub) = spec.hub {
+                    circle { cx: "0", cy: "0", r: "4.5", fill: "{hub}" }
                 }
             }
+
 
             // The panel's index, which a dial's moving numerals are read
             // against. Fixed, unlike everything else on the knob.
@@ -785,6 +789,66 @@ pub fn HardwareKnob(
                         handle.end_edit();
                     }
                 },
+            }
+
+            // The cap's own drag region, on a dual-concentric knob.
+            //
+            // Laid over the collar's overlay and sized to the cap, so the two
+            // controls are hit exactly where they are drawn: press the grey
+            // middle and you have the inner control, press the bright ring
+            // around it and the press falls through to the outer one. That is
+            // how the real thing is operated, and it needs no modifier key.
+            if let Some(inner) = &inner_handle {
+                div {
+                    "data-testid": "hw-knob-{testid}-inner",
+                    style: format!(
+                        "position:absolute; left:50%; top:50%; \
+                         width:{0:.1}px; height:{0:.1}px; \
+                         margin-left:{1:.1}px; margin-top:{1:.1}px; \
+                         border-radius:50%; cursor:ns-resize; user-select:none;",
+                        body_px,
+                        -body_px / 2.0,
+                    ),
+                    onmousedown: {
+                        let inner = inner.clone();
+                        move |evt: MouseEvent| {
+                            evt.stop_propagation();
+                            if evt.modifiers().alt() {
+                                evt.prevent_default();
+                                inner.reset_to_default();
+                                return;
+                            }
+                            begin_drag(
+                                &mut drag,
+                                inner.clone(),
+                                evt.client_coordinates().y,
+                                SENSITIVITY,
+                            );
+                        }
+                    },
+                    onwheel: {
+                        let inner = inner.clone();
+                        move |evt: WheelEvent| {
+                            evt.prevent_default();
+                            evt.stop_propagation();
+                            let delta_y = evt.delta().strip_units().y;
+                            if delta_y == 0.0 {
+                                return;
+                            }
+                            let direction = if delta_y < 0.0 { 1.0 } else { -1.0 };
+                            let step = if evt.modifiers().shift() {
+                                WHEEL_STEP_FINE
+                            } else {
+                                WHEEL_STEP
+                            };
+                            let next = (inner.normalized() as f64 + direction * step)
+                                .clamp(0.0, 1.0) as f32;
+                            inner.begin_edit();
+                            inner.set_normalized(next);
+                            inner.end_edit();
+                        }
+                    },
+                }
             }
         }
     }
