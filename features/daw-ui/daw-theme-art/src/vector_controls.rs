@@ -252,9 +252,17 @@ pub fn SoloButton(props: SoloProps) -> Element {
 pub struct FxProps {
     #[props(default)]
     pub state: FxChain,
-    /// The cell this replaces: `mcp_fx_*` is 28x22, `track_fx_*` 21x22.
+    /// The cell this replaces: `mcp_fx_*` is 28x22, `track_fx_*` 20x22.
     #[props(default = (28.0, 22.0))]
     pub cell: (f32, f32),
+    /// How much of the cell's height the button body occupies.
+    ///
+    /// Not a constant: the mixer's button is 18 rows of 22 and the track
+    /// panel's is 20 of the same 22. Same shape, different proportion, so
+    /// one number cannot serve both and the track button came out two
+    /// rows short.
+    #[props(default = 18.0 / 22.0)]
+    pub body: f32,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -316,11 +324,17 @@ pub fn FxButton(props: FxProps) -> Element {
         )
     };
 
-    let x = vw * 0.036;
+    // No left inset: cell boundaries are measured from the art now, so a
+    // cell *starts* at the button. Keeping the old 1px offset — from when
+    // cells were assumed to start at x=0 — shifted every FX button right
+    // and clipped a column off its left edge.
+    let x = 0.0f32;
     let top = vh * 0.045;
-    // y=1..18 for the outer shape, y=2..15 for the face.
-    let outer_h = vh * 0.818;
-    let face_h = vh * 0.636;
+    // The outer shape starts a row in and runs `body` of the height; the
+    // lit face stops short of it, and the dark rows beneath are the
+    // button's bottom edge rather than a shadow under it.
+    let outer_h = vh * props.body;
+    let face_h = outer_h - vh * 0.182;
     let chamfer = vh * 0.091;
 
     rsx! {
@@ -418,7 +432,8 @@ pub fn FxBypassToggle(props: FxBypassProps) -> Element {
     let lit = match props.state {
         FxBypass::Empty => None,
         FxBypass::On => Some(t.chrome.accent),
-        FxBypass::Off => Some(t.signal.rec),
+        // The same lit red as a routing lane, not the record ring's.
+        FxBypass::Off => Some(t.signal.meter_danger),
     };
     // Empty + pointer is the "add FX" affordance, not a lit state.
     let plus = props.state == FxBypass::Empty && props.at != Interaction::Normal;
@@ -443,8 +458,11 @@ pub fn FxBypassToggle(props: FxBypassProps) -> Element {
                     }
                 }
             }
+            // Inset by a row top and bottom, like the buttons beside it:
+            // the source is 16x20 in a 16x22 cell, and filling the cell
+            // made the toggle taller than the FX button it sits against.
             rect {
-                x: "0", y: "0", width: "{vw}", height: "{vh}",
+                x: "0", y: "{vh / 22.0}", width: "{vw}", height: "{vh * 20.0 / 22.0}",
                 rx: "{vh * 0.12}",
                 fill: "{k.face.shade(-0.72).css()}",
             }
@@ -696,7 +714,9 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
     let dim = t.chrome.hardware_mark.shade(-0.33);
     let out = t.chrome.accent;
     let send = if props.has_sends { t.signal.meter_warn } else { dim };
-    let recv = if props.has_receives { t.signal.rec } else { dim };
+    // `meter_danger`, not `rec`: the source uses a brighter #ff5260 for a
+    // lit lane than the #e23b53 of the record ring.
+    let recv = if props.has_receives { t.signal.meter_danger } else { dim };
     let opacity = if props.disabled { "0.4" } else { "1" };
 
     // Mixer: lanes at y=6, 13, 20 of 32, four tall, 56% of the width.
@@ -704,6 +724,12 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
     // 10 tall at x=6, 13, 20 of 29, which is the same rhythm along the
     // other axis rather than a different drawing.
     let horizontal = props.axis == Axis::Horizontal;
+    // x, y, w, h of the panel as fractions of the cell — traced.
+    let (box_x, box_y, box_w, box_h) = if horizontal {
+        (0.0, 1.0 / 22.0, 1.0, 20.0 / 22.0)
+    } else {
+        (1.0 / 23.0, 1.0 / 32.0, 21.0 / 23.0, 28.0 / 32.0)
+    };
     let (lane_l, lane_t) = if horizontal {
         (vw * 0.138, vw * 0.241)
     } else {
@@ -720,6 +746,7 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
         (vw - bar_w) / 2.0
     };
     let r = bar_w.min(bar_h) / 2.0;
+    let edge = vh * 0.03;
 
     rsx! {
         svg {
@@ -728,12 +755,22 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             opacity: "{opacity}",
+            // The panel does not fill its cell. Measured: the mixer's is
+            // 21x28 in a 23x32 cell, the track panel's 28x20 in 28x22 —
+            // so the inset differs by axis rather than being one margin.
+            // Filling the cell made both buttons visibly chunkier than
+            // the art beside them.
+            // Inset by half the stroke, which straddles the edge it is
+            // drawn on: without this the button measures two pixels wider
+            // and taller than the art it replaces, in both families at
+            // once — which reads as "the sizing is wrong" rather than as
+            // a stroke problem.
             rect {
-                x: "{vw * 0.03}", y: "{vh * 0.03}",
-                width: "{vw * 0.94}", height: "{vh * 0.94}",
+                x: "{vw * box_x + edge / 2.0}", y: "{vh * box_y + edge / 2.0}",
+                width: "{vw * box_w - edge}", height: "{vh * box_h - edge}",
                 rx: "{vw.min(vh) * 0.16}",
                 fill: "{k.face.shade(-0.55).css()}",
-                stroke: "{k.border.css()}", stroke_width: "{vh * 0.03}",
+                stroke: "{k.border.css()}", stroke_width: "{edge}",
             }
             for (i, colour) in [out, send, recv].iter().enumerate() {
                 rect {
@@ -780,9 +817,11 @@ pub fn InputMonitorIndicator(props: MonitoringProps) -> Element {
     // left with arcs opening leftward in the track panel. This first drew
     // arcs *above* a dot at the bottom, which is the same parts assembled
     // into a different icon — it read as wifi, not as a monitored input.
+    // Neutral: the lit icon is #a6a6a6 in the source, and `chrome.text` is
+    // the panel blue-white — on a mixer strip that reads as backlit.
     let colour = match props.state {
-        Monitoring::Off => t.chrome.text_dim,
-        Monitoring::On => t.chrome.text,
+        Monitoring::Off => t.chrome.hardware_mark.shade(-0.3),
+        Monitoring::On => t.chrome.hardware_mark,
         Monitoring::Auto => t.signal.rec,
     };
     let colour = match props.at {
@@ -1067,7 +1106,7 @@ mod tests {
             ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { cell: (36.0, 24.0), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_mute_on", render_svg(MuteButton, ToggleProps { cell: (21.0, 20.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_solo_on", render_svg(SoloButton, SoloProps { cell: (21.0, 20.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_fx_norm", render_svg(FxButton, FxProps { cell: (28.0, 22.0), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_fx_norm", render_svg(FxButton, FxProps { cell: (28.0, 22.0), body: 18.0 / 22.0, state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, width: n.0, height: n.1 })),
@@ -1122,6 +1161,7 @@ mod tests {
                 render_svg(
                     FxButton,
                     FxProps {
+                        body: 18.0 / 22.0,
                         cell: (28.0, 22.0),
                         state: FxChain::Active,
                         width: w,

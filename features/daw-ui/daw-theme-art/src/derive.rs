@@ -129,16 +129,19 @@ fn detect_strip(img: &RgbaImage) -> Option<(u32, u32, u32)> {
                             / period as f32
                     })
                     .fold(f32::INFINITY, f32::min);
-                // How many guide columns this layout swallows. A cell that
-                // begins on a magenta column is a layout shifted by one:
-                // the guides sit *outside* the cells, and offsets either
-                // side of the truth score within a thousandth of each
-                // other, so the correlation alone cannot choose. Two
-                // controls landed a pixel left before this was added.
-                let swallowed = (0..n)
+                // How many guide columns this layout swallows.
+                //
+                // A cell that begins on a magenta column is a layout
+                // shifted by one: the guides mark the gap *between* cells,
+                // so a correct split leaves them outside. Offsets either
+                // side of the truth correlate almost equally well — they
+                // are the same buttons either way — so this, not the
+                // score, is what picks between them, and the window below
+                // has to be wide enough to let it.
+                let swallowed: u32 = (0..n)
                     .flat_map(|c| {
                         let a = origin + c * period;
-                        (a..a + period).map(|x| guides[x as usize] as u32)
+                        (a..a + period).map(|x| guides[x as usize])
                     })
                     .sum();
                 found.push((score, swallowed, period, origin));
@@ -152,7 +155,10 @@ fn detect_strip(img: &RgbaImage) -> Option<(u32, u32, u32)> {
         if best > 0.9 {
             let (_, _, period, origin) = found
                 .into_iter()
-                .filter(|(s, ..)| best - s < 0.01)
+                // Offsets either side of the truth are the same buttons
+                // sampled a pixel apart, so they all correlate within a
+                // few thousandths and the *guides* are the real evidence.
+                .filter(|(s, ..)| best - s < 0.05)
                 .min_by_key(|(_, swallowed, _, origin)| (*swallowed, *origin))
                 .expect("a best exists");
             return Some((n, period, origin));
@@ -161,10 +167,21 @@ fn detect_strip(img: &RgbaImage) -> Option<(u32, u32, u32)> {
     None
 }
 
-/// Which columns hold WALTER guide pixels.
-fn marker_columns(img: &RgbaImage) -> Vec<bool> {
+/// How many WALTER guide pixels each column holds.
+///
+/// A count, not a flag. Counting *columns* cannot separate the offsets
+/// that matter: on `track_mute_on` every candidate touches exactly two
+/// guide columns, so they tied and the smallest offset won by default —
+/// a pixel to the left of the truth. By pixel it is 22 against 2, because
+/// one of those columns is the full-height guide down the left edge and
+/// the other is a single corner tick.
+fn marker_columns(img: &RgbaImage) -> Vec<u32> {
     (0..img.width())
-        .map(|x| (0..img.height()).any(|y| MARKERS.contains(&img.get_pixel(x, y).0)))
+        .map(|x| {
+            (0..img.height())
+                .filter(|&y| MARKERS.contains(&img.get_pixel(x, y).0))
+                .count() as u32
+        })
         .collect()
 }
 

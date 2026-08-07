@@ -243,6 +243,7 @@ fn main() {
                             render_svg(
                                 vector::FxButton,
                                 vector::FxProps {
+                                    body: 18.0 / 22.0,
                                     cell: (28.0, 22.0),
                                     state: *v,
                                     width: None,

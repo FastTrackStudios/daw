@@ -99,7 +99,8 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::FxButton,
             v::FxProps {
                 state,
-                cell: if track { (21.0, 22.0) } else { (28.0, 22.0) },
+                cell: if track { (20.0, 22.0) } else { (28.0, 22.0) },
+                body: if track { 20.0 / 22.0 } else { 18.0 / 22.0 },
                 width: n.0,
                 height: n.1,
                 at,

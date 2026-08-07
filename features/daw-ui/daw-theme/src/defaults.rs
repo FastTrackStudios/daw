@@ -39,7 +39,12 @@ pub const TEXT_DIM: &str = "#7b8397";
 /// Tertiary text — watermark level.
 pub const TEXT_FAINT: &str = "#4a5062";
 /// The one colour meaning "live / selected / yours".
-pub const ACCENT: &str = "#38bdf8";
+///
+/// ReaperTips' own blue, sampled from the routing lanes and the FX bypass
+/// LED. Held here rather than a nearby Tailwind blue so that a generated
+/// control and the art it replaces differ in *shape only* — which is the
+/// whole point of the comparison sheets.
+pub const ACCENT: &str = "#47b9fe";
 /// A control's resting surface — buttons, selects, entry fields.
 pub const CONTROL: &str = "#1c1c25";
 /// A control that is engaged: the resting surface pulled toward the accent.
@@ -99,16 +104,23 @@ pub const BANNER_WARN: &str = "#422006";
 // ── signal ───────────────────────────────────────────────────────────────
 
 pub const METER_SAFE: &str = "#22c55e";
-pub const METER_WARN: &str = "#eab308";
-pub const METER_DANGER: &str = "#ef4444";
-pub const SOLO: &str = "#eab308";
+/// The routing button's send lane, sampled from `mcp_io_s`.
+pub const METER_WARN: &str = "#f4c54e";
+/// Lit red: the routing button's receive lane and the FX bypass LED.
+///
+/// Distinct from [`REC`], which is the record ring's deeper `#e23b53` —
+/// the source theme really does use two reds, and collapsing them makes
+/// an armed track and a bypassed chain shout at the same volume.
+pub const METER_DANGER: &str = "#ff5260";
+/// Sampled from `mcp_solo_on` — duller than the meter amber.
+pub const SOLO: &str = "#d3a738";
 /// Deeper and less saturated than [`REC`], which is the point: a muted
 /// track is a *withdrawn* state, and the source theme draws it a full step
 /// darker than record-arm rather than as another bright red. This was a
 /// generic `#ef4444` for a while and made every muted track shout louder
 /// than an armed one.
 pub const MUTE: &str = "#b8394e";
-pub const REC: &str = "#e13a53";
+pub const REC: &str = "#e23b53";
 /// Waveform / peak body.
 pub const PEAKS: &str = "#5b8def";
 /// Playhead and edit cursor — the same idea on both surfaces.

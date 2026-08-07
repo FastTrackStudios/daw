@@ -96,6 +96,7 @@ fn main() {
             &render_svg(
                 FxButton,
                 FxProps {
+                    body: 18.0 / 22.0,
                     cell: (28.0, 22.0),
                     state: FxChain::Active,
                     width: None,
