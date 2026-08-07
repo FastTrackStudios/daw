@@ -18,7 +18,9 @@ pub enum Drag {
     #[default]
     None,
     /// Right-drag or ctrl+shift-drag.
-    Pan { last: (f64, f64) },
+    Pan {
+        last: (f64, f64),
+    },
     Marquee {
         origin: (f64, f64),
         current: (f64, f64),
@@ -71,7 +73,10 @@ pub enum Drag {
         start_edge: bool,
         original: (f64, f64),
     },
-    SplitDrag { note: NoteId, from: f64 },
+    SplitDrag {
+        note: NoteId,
+        from: f64,
+    },
     NoteErase,
     /// Dragging out a new razor rectangle.
     RazorCreate {
@@ -217,9 +222,7 @@ fn run_action(
             origin: (x, y),
             current: (x, y),
         }),
-        Action::RazorMoveContents
-        | Action::RazorMoveContentsNoSnap
-        | Action::RazorCopyContents => {
+        Action::RazorMoveContents | Action::RazorMoveContentsNoSnap | Action::RazorCopyContents => {
             let (index, area) = ed.razor.at(t, row)?;
             Some(Drag::RazorDrag {
                 area,
@@ -290,7 +293,11 @@ fn run_action(
         }
         Action::DoubleNoteLength | Action::HalveNoteLength => {
             let id = under?;
-            let factor = if action == Action::DoubleNoteLength { 2.0 } else { 0.5 };
+            let factor = if action == Action::DoubleNoteLength {
+                2.0
+            } else {
+                0.5
+            };
             ed.apply_live(&Edit::ScaleLength {
                 notes: vec![id],
                 factor,
@@ -749,7 +756,8 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             applied,
         } => {
             let base = base_rows.first().copied().unwrap_or(60);
-            let raw = ed.camera.pitch_at(y, ed.viewport) - ed.camera.pitch_at(origin.1, ed.viewport);
+            let raw =
+                ed.camera.pitch_at(y, ed.viewport) - ed.camera.pitch_at(origin.1, ed.viewport);
             let target = ed.tuning.snap(base as f64 + raw);
             let delta = target.row - base;
             if delta != *applied {
@@ -766,9 +774,9 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             applied_rows,
             applied_time,
         } => {
-            let rows =
-                (ed.camera.pitch_at(y, ed.viewport) - ed.camera.pitch_at(origin.1, ed.viewport))
-                    .round() as i32;
+            let rows = (ed.camera.pitch_at(y, ed.viewport)
+                - ed.camera.pitch_at(origin.1, ed.viewport))
+            .round() as i32;
             if rows != *applied_rows {
                 ed.apply_live(&Edit::Transpose {
                     notes: notes.clone(),
@@ -856,16 +864,12 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                 // Track where it actually landed — the edit clamps
                 // against the neighbouring boundaries.
                 if let Some(n) = ed.doc.note(*note) {
-                    if let Some(&s) = n
-                        .splits
-                        .iter()
-                        .min_by(|a, b| {
-                            (*a - to)
-                                .abs()
-                                .partial_cmp(&(*b - to).abs())
-                                .unwrap_or(std::cmp::Ordering::Equal)
-                        })
-                    {
+                    if let Some(&s) = n.splits.iter().min_by(|a, b| {
+                        (*a - to)
+                            .abs()
+                            .partial_cmp(&(*b - to).abs())
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    }) {
                         *from = s;
                     }
                 }
@@ -903,13 +907,7 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             // Re-run from the captured area each frame rather than
             // accumulating deltas: a razor move slices, and slicing
             // repeatedly would shred the material.
-            expression_editor_core::razor::move_contents(
-                &mut ed.doc,
-                *area,
-                dt,
-                rows,
-                *copy,
-            );
+            expression_editor_core::razor::move_contents(&mut ed.doc, *area, dt, rows, *copy);
             *applied_t = dt;
             *applied_rows = rows;
             let moved = area.translated(dt, rows);
@@ -953,14 +951,7 @@ pub fn pointer_up(ed: &mut Editor, drag: Drag, x: f64, y: f64, mods: Mods) -> Dr
             let moved = (current.0 - origin.0).abs() + (current.1 - origin.1).abs();
             if moved > 3.0 {
                 let mut sel = ed.selection.clone();
-                sel.marquee(
-                    &ed.doc,
-                    &ed.camera,
-                    ed.viewport,
-                    origin,
-                    current,
-                    additive,
-                );
+                sel.marquee(&ed.doc, &ed.camera, ed.viewport, origin, current, additive);
                 ed.selection = sel;
             } else if !mods.shift {
                 ed.selection.clear();
@@ -996,7 +987,13 @@ pub fn pointer_up(ed: &mut Editor, drag: Drag, x: f64, y: f64, mods: Mods) -> Dr
 
 /// Map one pointer stroke across every targeted note, honouring each
 /// note's own whole-note or zone target.
-fn write_pen(ed: &mut Editor, notes: &[NoteId], start: (f64, f64), samples: &[(f64, f64)], mods: Mods) {
+fn write_pen(
+    ed: &mut Editor,
+    notes: &[NoteId],
+    start: (f64, f64),
+    samples: &[(f64, f64)],
+    mods: Mods,
+) {
     let lane = ed.lane;
     let start_t = ed.camera.t_at(start.0);
     for &id in notes {
@@ -1042,7 +1039,13 @@ fn write_pen(ed: &mut Editor, notes: &[NoteId], start: (f64, f64), samples: &[(f
 }
 
 /// A shaped ramp from the gesture's start to its current position.
-fn write_curve(ed: &mut Editor, notes: &[NoteId], start: (f64, f64), end: (f64, f64), shape: Shape) {
+fn write_curve(
+    ed: &mut Editor,
+    notes: &[NoteId],
+    start: (f64, f64),
+    end: (f64, f64),
+    shape: Shape,
+) {
     const SAMPLES: usize = 48;
     let lane = ed.lane;
     let start_t = ed.camera.t_at(start.0);
@@ -1094,7 +1097,11 @@ fn gesture_bounds(points: &[Point]) -> (f64, f64) {
         lo = lo.min(p.t);
         hi = hi.max(p.t);
     }
-    if lo > hi { (0.0, 0.0) } else { (lo, hi) }
+    if lo > hi {
+        (0.0, 0.0)
+    } else {
+        (lo, hi)
+    }
 }
 
 /// Restyle the most recent Curve gesture if there is one; otherwise the
@@ -1263,7 +1270,11 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
         }
         ("r", false, _) => {
             let notes = ed.selection.notes.clone();
-            !notes.is_empty() && ed.apply(&Edit::AssignChannels { notes, seed: 0x5EED })
+            !notes.is_empty()
+                && ed.apply(&Edit::AssignChannels {
+                    notes,
+                    seed: 0x5EED,
+                })
         }
         ("Delete", _, _) | ("Backspace", _, _) => {
             let notes = ed.selection.notes.clone();

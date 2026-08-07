@@ -74,9 +74,9 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
     let is_strings = matches!(space, RowSpace::Strings(_));
     drop(ed);
 
-    let decomposition = note.as_ref().map(|n| {
-        blob::decompose(&n.pitch, n.start, n.end, 64, ups, 0.0)
-    });
+    let decomposition = note
+        .as_ref()
+        .map(|n| blob::decompose(&n.pitch, n.start, n.end, 64, ups, 0.0));
 
     rsx! {
         div {

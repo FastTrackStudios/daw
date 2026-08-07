@@ -74,7 +74,11 @@ fn Seg(
         }
     });
     let bg = if active {
-        if accent { "#1e3a5f" } else { "#2a2a36" }
+        if accent {
+            "#1e3a5f"
+        } else {
+            "#2a2a36"
+        }
     } else {
         "transparent"
     };
@@ -105,11 +109,7 @@ fn divider() -> Element {
 // ── top bar ──────────────────────────────────────────────────────────
 
 #[component]
-pub fn Toolbar(
-    editor: Signal<Editor>,
-    drag: Signal<Drag>,
-    drawer: Signal<ModDrawer>,
-) -> Element {
+pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>) -> Element {
     let mut editor = editor;
     let mut drawer = drawer;
 
@@ -379,9 +379,7 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
     let single = ed.selection.notes.first().copied();
     let analysis = single.and_then(|id| ed.doc.note(id)).map(|n| {
         let ups = ed.doc.time_base.units_per_second(ed.bpm);
-        let d = expression_editor_core::blob::decompose(
-            &n.pitch, n.start, n.end, 64, ups, 0.0,
-        );
+        let d = expression_editor_core::blob::decompose(&n.pitch, n.start, n.end, 64, ups, 0.0);
         (
             expression_editor_core::tuning::note_name(n.row),
             n.channel,

@@ -31,6 +31,7 @@
 //! ```
 
 pub mod color;
+pub mod defaults;
 pub mod palette;
 pub mod reaper_export;
 

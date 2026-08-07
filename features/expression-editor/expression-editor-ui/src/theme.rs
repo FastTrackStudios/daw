@@ -5,60 +5,70 @@
 //! identically standalone, as a VST3/CLAP editor, and in the browser —
 //! so there is nowhere to put a stylesheet that all three would agree
 //! on. Tailwind classes may be added on top, but never depended on.
+//!
+//! The colours themselves are **not** defined here. They are re-exported
+//! from [`daw_theme::defaults`], the canonical FastTrackStudio palette that
+//! also drives the Dioxus panels and generates the REAPER theme. Change a
+//! colour there and this editor, the mixer and REAPER all move together —
+//! that shared vocabulary is the point, and a local literal would quietly
+//! opt this surface out of it.
+//!
+//! These stay `&'static str` consts (rather than resolving a theme at
+//! runtime) because inline styles are built in `rsx!` at every call site;
+//! a runtime theme is the next step, and wants a context, not a global.
+
+use daw_theme::defaults as d;
 
 /// Canvas background.
-pub const BG: &str = "#0d0d11";
+pub const BG: &str = d::SURFACE;
 /// Piano-roll white-key row.
-pub const ROW_WHITE: &str = "#1d1d26";
+pub const ROW_WHITE: &str = d::ROW_WHITE;
 /// Piano-roll black-key row.
-pub const ROW_BLACK: &str = "#131319";
+pub const ROW_BLACK: &str = d::ROW_BLACK;
 /// Octave (C) divider.
-pub const OCTAVE_LINE: &str = "#3a3a4d";
+pub const OCTAVE_LINE: &str = d::OCTAVE_LINE;
 /// Beat gridline.
-pub const GRID_BEAT: &str = "#2b2b3a";
+pub const GRID_BEAT: &str = d::GRID_BEAT;
 /// Subdivision gridline.
-pub const GRID_SUB: &str = "#20202a";
+pub const GRID_SUB: &str = d::GRID_SUB;
 
-pub const PANEL: &str = "#15151c";
-pub const PANEL_BORDER: &str = "#2b2b38";
-pub const TEXT: &str = "#c8cede";
-pub const TEXT_DIM: &str = "#7b8397";
-pub const ACCENT: &str = "#38bdf8";
-pub const SELECTED: &str = "#f0f9ff";
+pub const PANEL: &str = d::SURFACE_RAISED;
+pub const PANEL_BORDER: &str = d::BORDER;
+pub const TEXT: &str = d::TEXT;
+pub const TEXT_DIM: &str = d::TEXT_DIM;
+pub const ACCENT: &str = d::ACCENT;
+pub const SELECTED: &str = d::SELECTED;
 
 /// Q-zone structure and the ambiguity warning share red on purpose:
 /// both mean "this region has boundaries you must be aware of".
-pub const ZONE: &str = "#ef4444";
+pub const ZONE: &str = d::ZONE;
 /// Microtonal centers and off-ET targets.
-pub const GOLD: &str = "#eab308";
+pub const GOLD: &str = d::MICROTONAL;
 /// Transport position.
-pub const PLAYHEAD: &str = "#f8fafc";
+pub const PLAYHEAD: &str = d::PLAYHEAD;
 /// Piano-key gutter.
-pub const KEY_WHITE: &str = "#d8dce6";
-pub const KEY_BLACK: &str = "#26262f";
-pub const GUTTER_BG: &str = "#101016";
+pub const KEY_WHITE: &str = d::KEY_WHITE;
+pub const KEY_BLACK: &str = d::KEY_BLACK;
+pub const GUTTER_BG: &str = d::GUTTER;
 /// Razor areas. Distinct from ZONE red — a razor is a region you are
 /// about to operate on, not a warning.
-pub const RAZOR: &str = "#22d3ee";
+pub const RAZOR: &str = d::RAZOR;
+
+/// A control's resting surface, and the engaged variant.
+pub const CONTROL: &str = d::CONTROL;
+pub const CONTROL_ACTIVE: &str = d::CONTROL_ACTIVE;
+/// An inset well inside a panel.
+pub const SURFACE_INSET: &str = d::SURFACE_INSET;
+/// A divider that must read above [`PANEL_BORDER`].
+pub const BORDER_STRONG: &str = d::BORDER_STRONG;
+/// Emphasised text, above [`TEXT`].
+pub const TEXT_BRIGHT: &str = d::TEXT_BRIGHT;
 
 /// Twelve pitch-class hues. Notes are colored by pitch class so a
 /// melodic shape is readable at a glance without reading the piano
 /// keys; selection adds a bright outline rather than a fill change, so
 /// the hue survives selection.
-pub const PITCH_CLASS: [&str; 12] = [
-    "#ef4444", // C
-    "#f97316", // C#
-    "#f59e0b", // D
-    "#eab308", // D#
-    "#84cc16", // E
-    "#22c55e", // F
-    "#14b8a6", // F#
-    "#06b6d4", // G
-    "#3b82f6", // G#
-    "#6366f1", // A
-    "#a855f7", // A#
-    "#ec4899", // B
-];
+pub const PITCH_CLASS: [&str; 12] = d::PITCH_CLASSES;
 
 pub fn pitch_class_color(row: i32) -> &'static str {
     PITCH_CLASS[row.rem_euclid(12) as usize]
@@ -68,9 +78,9 @@ pub fn pitch_class_color(row: i32) -> &'static str {
 pub fn lane_color(lane: expression_editor_core::Lane) -> &'static str {
     use expression_editor_core::Lane;
     match lane {
-        Lane::Pitch => "#7dd3fc",
-        Lane::Pressure => "#fda4af",
-        Lane::Timbre => "#a7f3d0",
+        Lane::Pitch => d::LANE_PITCH,
+        Lane::Pressure => d::LANE_PRESSURE,
+        Lane::Timbre => d::LANE_TIMBRE,
     }
 }
 
@@ -90,9 +100,9 @@ pub fn is_black_key(row: i32) -> bool {
 /// A toolbar button, active or not.
 pub fn button_style(active: bool) -> String {
     let (bg, border, fg) = if active {
-        ("#1e3a5f", ACCENT, SELECTED)
+        (d::CONTROL_ACTIVE, ACCENT, SELECTED)
     } else {
-        ("#1c1c25", PANEL_BORDER, TEXT)
+        (d::CONTROL, PANEL_BORDER, TEXT)
     };
     format!(
         "display: flex; align-items: center; justify-content: center; \
@@ -120,7 +130,7 @@ pub fn group_label_style() -> String {
 
 pub fn select_style() -> String {
     format!(
-        "height: 26px; background: #1c1c25; border: 1px solid {PANEL_BORDER}; \
+        "height: 26px; background: {CONTROL}; border: 1px solid {PANEL_BORDER}; \
          border-radius: 5px; color: {TEXT}; font-size: 11px; padding: 0 6px;"
     )
 }
@@ -137,21 +147,56 @@ pub fn mode_icon(mode: expression_editor_core::Mode) -> &'static str {
         // Piano keys.
         Mode::Midi => "M1 4h14v8H1z M4.5 4v5 M7 4v5 M10.5 4v5 M13 4v5",
         // Keys with a bend arrow over them — per-note expression.
-        Mode::Mpe => "M1 7h14v5H1z M4.5 7v3 M7 7v3 M10.5 7v3 M13 7v3 \
-                      M2 4.5c3-3 5 1 7-1s3-1 4 0",
+        Mode::Mpe => {
+            "M1 7h14v5H1z M4.5 7v3 M7 7v3 M10.5 7v3 M13 7v3 \
+                      M2 4.5c3-3 5 1 7-1s3-1 4 0"
+        }
         // Kick drum: a circle with lugs and a beater line.
-        Mode::Drums => "M8 2.5a5.5 5.5 0 100 11 5.5 5.5 0 100-11z \
+        Mode::Drums => {
+            "M8 2.5a5.5 5.5 0 100 11 5.5 5.5 0 100-11z \
                         M8 5.5a2.5 2.5 0 100 5 2.5 2.5 0 100-5z \
                         M2.6 5.3l2.2 1 M13.4 5.3l-2.2 1 \
-                        M4.8 12.6l1-2.2 M11.2 12.6l-1-2.2",
+                        M4.8 12.6l1-2.2 M11.2 12.6l-1-2.2"
+        }
         // Guitar: body, neck, and strings.
-        Mode::Guitar => "M5 14a3 3 0 100-6 3 3 0 100 6z M6.6 9.6l6-6 \
-                         M11.4 2.2l2.4 2.4 M12.2 5.4l-1.6-1.6",
+        Mode::Guitar => {
+            "M5 14a3 3 0 100-6 3 3 0 100 6z M6.6 9.6l6-6 \
+                         M11.4 2.2l2.4 2.4 M12.2 5.4l-1.6-1.6"
+        }
         // Microphone.
-        Mode::Vocals => "M8 2a2 2 0 012 2v4a2 2 0 01-4 0V4a2 2 0 012-2z \
-                         M4.5 7.5a3.5 3.5 0 007 0 M8 11v3 M6 14h4",
+        Mode::Vocals => {
+            "M8 2a2 2 0 012 2v4a2 2 0 01-4 0V4a2 2 0 012-2z \
+                         M4.5 7.5a3.5 3.5 0 007 0 M8 11v3 M6 14h4"
+        }
         // Waveform.
-        Mode::Audio => "M1 8h1.5 M2.5 8v0 M3.5 5v6 M5.5 3v10 M7.5 6v4 \
-                        M9.5 2v12 M11.5 5v6 M13.5 7v2 M15 8h0",
+        Mode::Audio => {
+            "M1 8h1.5 M2.5 8v0 M3.5 5v6 M5.5 3v10 M7.5 6v4 \
+                        M9.5 2v12 M11.5 5v6 M13.5 7v2 M15 8h0"
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every colour this module exposes must come from the canonical
+    /// palette, never a local literal.
+    ///
+    /// A literal here is how a surface quietly opts out of the shared theme:
+    /// it keeps rendering, looks fine in isolation, and only surfaces much
+    /// later as "the editor doesn't quite match REAPER". Two such duplicates
+    /// existed before this migration — one of them was the accent, re-typed
+    /// by hand.
+    #[test]
+    fn no_colour_is_defined_locally() {
+        for line in include_str!("theme.rs").lines() {
+            let line = line.trim();
+            if !line.starts_with("pub const") || !line.contains(": &str") {
+                continue;
+            }
+            assert!(
+                line.contains("d::"),
+                "colour defined locally instead of in daw_theme::defaults:\n  {line}"
+            );
+        }
     }
 }

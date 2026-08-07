@@ -202,7 +202,6 @@ pub fn ModulationDrawer(editor: Signal<Editor>, drawer: Signal<ModDrawer>) -> El
     let selected = d.selected_row;
     let rows = d.stack.rows.clone();
 
-
     rsx! {
         div {
             style: "position: absolute; top: 0; right: 0; bottom: 0; width: 268px; \

@@ -70,12 +70,7 @@ async fn shoot_with(ed: Editor, drawer: Option<ModDrawer>, name: &str) {
     shoot_full(ed, drawer, None, name).await
 }
 
-async fn shoot_full(
-    ed: Editor,
-    drawer: Option<ModDrawer>,
-    multi: Option<MultiTool>,
-    name: &str,
-) {
+async fn shoot_full(ed: Editor, drawer: Option<ModDrawer>, multi: Option<MultiTool>, name: &str) {
     // The canvas measures itself from the mounted element; headless
     // there is no resize event, so state the viewport the shot uses.
     let mut ed = ed;

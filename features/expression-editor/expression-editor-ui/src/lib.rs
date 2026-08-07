@@ -15,22 +15,22 @@
 
 use dioxus::prelude::*;
 use dioxus_elements::input_data::MouseButton;
-use keyboard_types::Modifiers;
 use expression_editor_core::tools::Mods;
 use expression_editor_core::{Editor, Lane, Viewport};
+use keyboard_types::Modifiers;
 
 pub mod canvas;
 pub mod demo;
 pub mod drawer;
 pub mod inspector;
-pub mod multitool_ui;
 pub mod interaction;
+pub mod multitool_ui;
 pub mod theme;
 pub mod toolbar;
 pub mod widgets;
 
-pub use expression_editor_core as core;
 pub use drawer::ModDrawer;
+pub use expression_editor_core as core;
 pub use interaction::Drag;
 pub use multitool_ui::MultiTool;
 
@@ -45,11 +45,13 @@ pub fn ExpressionEditor(
     /// Open the modulation drawer on mount. Hosts normally leave this
     /// alone — it exists so a caller can restore a session, and so the
     /// screenshot harness can shoot the drawer through the real path.
-    #[props(default)] initial_drawer: Option<ModDrawer>,
+    #[props(default)]
+    initial_drawer: Option<ModDrawer>,
     /// Arm the Multi Tool on mount. Same purpose as `initial_drawer`:
     /// restore a session, and let the screenshot harness reach a state
     /// that is otherwise only produced by a key press.
-    #[props(default)] initial_multi: Option<MultiTool>,
+    #[props(default)]
+    initial_multi: Option<MultiTool>,
 ) -> Element {
     let drag = use_signal(Drag::default);
     let drawer = use_signal(|| initial_drawer.clone().unwrap_or_default());
@@ -105,11 +107,7 @@ fn chrome_at(ed: &Editor, x: f64, y: f64) -> Chrome {
     if y < canvas::RULER_H {
         Chrome::Ruler(ed.camera.t_at(x - canvas::GUTTER_W))
     } else if x < canvas::GUTTER_W {
-        Chrome::Key(
-            ed.camera
-                .pitch_at(y - canvas::RULER_H, ed.viewport)
-                .round() as i32,
-        )
+        Chrome::Key(ed.camera.pitch_at(y - canvas::RULER_H, ed.viewport).round() as i32)
     } else {
         Chrome::Roll
     }
@@ -912,8 +910,6 @@ fn LaneStrip(editor: Signal<Editor>) -> Element {
     let label = ed.strip_lane.label();
     let per_note = ed.strip_lane.is_per_note();
     drop(ed);
-
-
 
     rsx! {
         div {

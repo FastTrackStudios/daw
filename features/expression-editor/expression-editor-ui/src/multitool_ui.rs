@@ -243,8 +243,14 @@ pub fn MultiToolOverlay(editor: Signal<Editor>, tool: Signal<MultiTool>) -> Elem
     // than the canvas paints over the inspector.
     let x0 = ed.camera.x(t0).clamp(0.0, vp.w);
     let x1 = ed.camera.x(t1).clamp(0.0, vp.w);
-    let y_top = ed.camera.y(row_hi as f64 + 0.5, ed.viewport).clamp(0.0, vp.h);
-    let y_bot = ed.camera.y(row_lo as f64 - 0.5, ed.viewport).clamp(0.0, vp.h);
+    let y_top = ed
+        .camera
+        .y(row_hi as f64 + 0.5, ed.viewport)
+        .clamp(0.0, vp.h);
+    let y_bot = ed
+        .camera
+        .y(row_lo as f64 - 0.5, ed.viewport)
+        .clamp(0.0, vp.h);
     drop(ed);
 
     // A floor on the box: a single short note would otherwise give

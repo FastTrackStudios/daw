@@ -117,7 +117,8 @@ fn sung_note(id: u64, start: f64, len: f64, row: i32, channel: u8, scoop: f64) -
         // take back out.
         let drift = -0.18 * f;
         n.pitch.set(t, approach + vibrato + drift);
-        n.pressure.set(t, (0.35 + 0.6 * (f * 3.1).sin().abs()).clamp(0.0, 1.0));
+        n.pressure
+            .set(t, (0.35 + 0.6 * (f * 3.1).sin().abs()).clamp(0.0, 1.0));
         n.timbre.set(t, (0.2 + 0.7 * f).clamp(0.0, 1.0));
     }
     n
@@ -196,9 +197,8 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
         Scene::Drums => {
             use expression_editor_core::{DrumMap, RowSpace};
             let map = DrumMap::general_midi();
-            let row = |name: &str| {
-                map.lanes.iter().position(|l| l.name == name).unwrap_or(0) as i32
-            };
+            let row =
+                |name: &str| map.lanes.iter().position(|l| l.name == name).unwrap_or(0) as i32;
             let mut id = 1u64;
             let mut hit = |doc: &mut ExpressionDoc, r: i32, beat: f64, vel: f64| {
                 let t = PPQ * beat;
@@ -213,7 +213,12 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
                 let b = bar as f64 * 4.0;
                 for eighth in 0..8 {
                     let t = b + eighth as f64 * 0.5;
-                    hit(&mut doc, row("HH Closed"), t, if eighth % 2 == 0 { 0.8 } else { 0.5 });
+                    hit(
+                        &mut doc,
+                        row("HH Closed"),
+                        t,
+                        if eighth % 2 == 0 { 0.8 } else { 0.5 },
+                    );
                 }
                 hit(&mut doc, row("Kick"), b, 0.95);
                 hit(&mut doc, row("Kick"), b + 2.5, 0.9);
@@ -351,8 +356,14 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
     // Section markers the host would normally supply.
     if scene != Scene::Empty {
         doc.markers = vec![
-            Marker { t: 0.0, label: Some("Verse".into()) },
-            Marker { t: PPQ * 4.0, label: Some("Chorus".into()) },
+            Marker {
+                t: 0.0,
+                label: Some("Verse".into()),
+            },
+            Marker {
+                t: PPQ * 4.0,
+                label: Some("Chorus".into()),
+            },
         ];
     }
     doc.mark_ambiguity();

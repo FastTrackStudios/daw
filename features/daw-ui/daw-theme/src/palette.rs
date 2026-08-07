@@ -141,58 +141,57 @@ impl Theme {
 }
 
 impl Default for Theme {
-    /// The FastTrackStudio dark default — the tuned values the expression
-    /// editor and the REAPER theme were both already using, reconciled.
+    /// The FastTrackStudio dark theme, parsed from [`crate::defaults`].
+    ///
+    /// Built from the same `&'static str` consts the expression editor
+    /// compiles against, so there is exactly one place a colour is written
+    /// down — change it there and the panels, the editor and the generated
+    /// REAPER theme all move together.
     fn default() -> Self {
-        let hex = |s: &str| Color::hex(s).expect("literal hex");
+        use crate::defaults as d;
+        let hex = |s: &str| Color::hex(s).expect("defaults are valid hex (tested)");
         Self {
             name: "FastTrackStudio".into(),
             chrome: Chrome {
-                surface: hex("#0d0d11"),
-                surface_raised: hex("#15151c"),
-                surface_sunken: hex("#101016"),
-                border: hex("#2b2b38"),
-                text: hex("#c8cede"),
-                text_dim: hex("#7b8397"),
-                text_faint: hex("#4a5062"),
-                accent: hex("#38bdf8"),
-                selected: hex("#f0f9ff"),
+                surface: hex(d::SURFACE),
+                surface_raised: hex(d::SURFACE_RAISED),
+                surface_sunken: hex(d::SURFACE_SUNKEN),
+                border: hex(d::BORDER),
+                text: hex(d::TEXT),
+                text_dim: hex(d::TEXT_DIM),
+                text_faint: hex(d::TEXT_FAINT),
+                accent: hex(d::ACCENT),
+                selected: hex(d::SELECTED),
             },
             signal: Signal {
-                meter_safe: hex("#22c55e"),
-                meter_warn: hex("#eab308"),
-                meter_danger: hex("#ef4444"),
-                solo: hex("#eab308"),
-                mute: hex("#ef4444"),
-                rec: hex("#e13a53"),
-                peaks: hex("#5b8def"),
-                playhead: hex("#f8fafc"),
-                neutral_track: hex("#828282"),
+                meter_safe: hex(d::METER_SAFE),
+                meter_warn: hex(d::METER_WARN),
+                meter_danger: hex(d::METER_DANGER),
+                solo: hex(d::SOLO),
+                mute: hex(d::MUTE),
+                rec: hex(d::REC),
+                peaks: hex(d::PEAKS),
+                playhead: hex(d::PLAYHEAD),
+                neutral_track: hex(d::NEUTRAL_TRACK),
             },
             editor: Editor {
-                row_white: hex("#1d1d26"),
-                row_black: hex("#131319"),
-                octave_line: hex("#3a3a4d"),
-                grid_beat: hex("#2b2b3a"),
-                grid_sub: hex("#20202a"),
-                gutter: hex("#101016"),
-                key_white: hex("#d8dce6"),
-                key_black: hex("#26262f"),
-                zone: hex("#ef4444"),
-                microtonal: hex("#eab308"),
-                razor: hex("#22d3ee"),
-                pitch_classes: [
-                    "#ef4444", "#f97316", "#f59e0b", "#eab308", "#84cc16", "#22c55e", "#14b8a6",
-                    "#06b6d4", "#3b82f6", "#6366f1", "#a855f7", "#ec4899",
-                ]
-                .into_iter()
-                .map(hex)
-                .collect(),
+                row_white: hex(d::ROW_WHITE),
+                row_black: hex(d::ROW_BLACK),
+                octave_line: hex(d::OCTAVE_LINE),
+                grid_beat: hex(d::GRID_BEAT),
+                grid_sub: hex(d::GRID_SUB),
+                gutter: hex(d::GUTTER),
+                key_white: hex(d::KEY_WHITE),
+                key_black: hex(d::KEY_BLACK),
+                zone: hex(d::ZONE),
+                microtonal: hex(d::MICROTONAL),
+                razor: hex(d::RAZOR),
+                pitch_classes: d::PITCH_CLASSES.into_iter().map(hex).collect(),
             },
             metrics: Metrics {
-                radius: 5.0,
-                track_tint: 0.12,
-                dim_unselected: 0.0,
+                radius: d::RADIUS,
+                track_tint: d::TRACK_TINT,
+                dim_unselected: d::DIM_UNSELECTED,
             },
         }
     }

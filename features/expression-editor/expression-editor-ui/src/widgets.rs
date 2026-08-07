@@ -22,7 +22,8 @@ pub fn Slider(
     max: f64,
     #[props(default = 96.0)] width: f64,
     /// Rendered next to the handle. Defaults to the raw value.
-    #[props(default)] readout: Option<String>,
+    #[props(default)]
+    readout: Option<String>,
     on_change: EventHandler<f64>,
 ) -> Element {
     let mut dragging = use_signal(|| false);
