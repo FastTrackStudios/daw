@@ -38,6 +38,8 @@ pub mod rtconfig;
 pub mod shot;
 #[cfg(feature = "fs")]
 pub mod theme;
+#[cfg(feature = "apply")]
+pub mod walter_colors;
 
 pub use color::Rgb;
 pub use groups::Group;

@@ -100,6 +100,17 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Retint the colour literals inside rtconfig.txt
+    ///
+    /// WALTER scripts carry hardcoded RGB — the mixer strip body is
+    /// `[0 0 0 0 61 61 61]` in a `set mcp_bg_color` line. The palette,
+    /// the artwork and SWELL can all be perfectly dark while this keeps
+    /// the theme's original greys.
+    Walter {
+        /// Report what would change without writing.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Screenshot a real REAPER wearing this theme, on a private X display.
     Shot {
         /// Output PNG.
@@ -264,6 +275,29 @@ fn main() -> Result<()> {
             println!(
                 "\n{} images generated{}",
                 report.written.len(),
+                if dry_run {
+                    " (dry run — nothing written)"
+                } else {
+                    ""
+                }
+            );
+        }
+
+        Command::Walter { dry_run } => {
+            let source = fts_themer::apply::load_theme(None)?;
+            let ramp = daw_theme::Ramp::for_chrome(&source);
+            let changes = fts_themer::walter_colors::retint_file_from(
+                &theme.rtconfig_path(),
+                &theme.images_dir().join(fts_themer::restyle::SOURCE_DIR),
+                &ramp,
+                dry_run,
+            )?;
+            for c in changes.iter().take(20) {
+                println!("{:>5}  {}", c.line, c.after);
+            }
+            println!(
+                "\n{} lines retinted{}",
+                changes.len(),
                 if dry_run {
                     " (dry run — nothing written)"
                 } else {
