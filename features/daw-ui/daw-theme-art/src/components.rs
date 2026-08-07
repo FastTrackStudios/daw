@@ -25,64 +25,68 @@ pub struct ArtProps {
     pub width: u32,
     pub height: u32,
 }
-
-/// The panel behind a mixer strip.
+/// The mixer strip's background fill.
 ///
-/// A nine-slice source: REAPER stretches the middle, so this is a border
-/// plus a fill, and the corners carry whatever radius fits.
+/// Measured from the original: 4×4, markers at opposite corners, a flat
+/// opaque block filling everything inside a **1px transparent gutter**. No
+/// radius, no stroke, no highlight — REAPER stretches this across the whole
+/// strip, so any modelling drawn here would be smeared over all of it.
+///
+/// The gutter is not decoration: the marker row and column must stay clear,
+/// and the art lives inside them.
 #[component]
 pub fn McpBg(props: ArtProps) -> Element {
     let t = Theme::default();
-    let c = &t.chrome;
-    let (w, h) = (props.width, props.height);
-    // At 4×4 a 1px stroke *is* the whole border; radius has to stay under
-    // half the smaller side or the shape collapses.
-    let radius = (w.min(h) as f32 / 2.0 - 0.5).clamp(0.0, t.metrics.radius);
+    let (w, h) = (props.width as f32, props.height as f32);
+    // Inset by the marker gutter. At 4×4 this leaves exactly the 2×2 the
+    // original fills.
+    let g = 1.0;
     rsx! {
         svg {
-            width: "{w}",
-            height: "{h}",
-            view_box: "0 0 {w} {h}",
+            width: "{props.width}", height: "{props.height}",
+            view_box: "0 0 {props.width} {props.height}",
             xmlns: "http://www.w3.org/2000/svg",
             rect {
-                x: "0.5",
-                y: "0.5",
-                width: "{w as f32 - 1.0}",
-                height: "{h as f32 - 1.0}",
-                rx: "{radius}",
-                fill: "{c.surface_raised.css()}",
-                stroke: "{c.border.css()}",
-                stroke_width: "1",
+                x: "{g}", y: "{g}",
+                width: "{(w - g * 2.0).max(0.0)}",
+                height: "{(h - g * 2.0).max(0.0)}",
+                fill: "{t.chrome.surface_raised.css()}",
             }
         }
     }
 }
 
-/// The trough a mixer fader runs in.
+/// The mixer fader's groove.
+///
+/// Measured from the original (23×55): a **1px translucent black hairline**
+/// down the centre at alpha 215, with a 1px soft edge either side at alpha
+/// 60. Everything else transparent.
+///
+/// Translucent black rather than a palette colour, deliberately — and this
+/// is how most of the theme works. The art *darkens what the palette puts
+/// behind it* rather than painting over it, so a groove drawn this way
+/// stays correct on any strip colour. Filling it with `surface_sunken`
+/// would look right on one background and wrong on every other.
 #[component]
 pub fn McpVolBg(props: ArtProps) -> Element {
-    let t = Theme::default();
-    let c = &t.chrome;
-    let (w, h) = (props.width, props.height);
-    // The groove sits centred in whatever width the source uses; the art
-    // either side is chrome the strip shows through.
-    let groove = (w as f32 * 0.35).max(3.0);
-    let x = (w as f32 - groove) / 2.0;
+    let (w, h) = (props.width as f32, props.height as f32);
+    let cx = (w / 2.0).floor();
     rsx! {
         svg {
-            width: "{w}",
-            height: "{h}",
-            view_box: "0 0 {w} {h}",
+            width: "{props.width}", height: "{props.height}",
+            view_box: "0 0 {props.width} {props.height}",
             xmlns: "http://www.w3.org/2000/svg",
             rect {
-                x: "{x}",
-                y: "0.5",
-                width: "{groove}",
-                height: "{h as f32 - 1.0}",
-                rx: "{groove / 2.0}",
-                fill: "{c.surface_sunken.css()}",
-                stroke: "{c.border.css()}",
-                stroke_width: "1",
+                x: "{(cx - 1.0).max(0.0)}", y: "0", width: "1", height: "{h}",
+                fill: "#000000", fill_opacity: "0.235",
+            }
+            rect {
+                x: "{cx + 1.0}", y: "0", width: "1", height: "{h}",
+                fill: "#000000", fill_opacity: "0.235",
+            }
+            rect {
+                x: "{cx}", y: "0", width: "1", height: "{h}",
+                fill: "#000000", fill_opacity: "0.843",
             }
         }
     }
