@@ -23,6 +23,22 @@ use dioxus::prelude::*;
 
 pub use crate::mixer_controls::{FxChain, Interaction, Monitoring, RecordArm, Solo};
 
+/// Which way a control is laid out.
+///
+/// The track panel and the mixer draw the *same* controls along different
+/// axes — routing stacks its three lanes in the mixer and sets them side
+/// by side in the track panel; input monitoring radiates downward there
+/// and rightward here. Same geometry, turned a quarter turn, so it is a
+/// prop rather than a second component.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum Axis {
+    /// Mixer: lanes stacked, waves radiating down.
+    #[default]
+    Vertical,
+    /// Track panel: lanes in a row, waves radiating right.
+    Horizontal,
+}
+
 /// Common sizing props.
 #[derive(Props, Clone, PartialEq, Default)]
 pub struct VectorProps {
@@ -173,6 +189,9 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
 pub struct ToggleProps {
     #[props(default)]
     pub on: bool,
+    /// The cell this replaces: `mcp_mute_*` is 21x20, `track_mute_*` 22x24.
+    #[props(default = (21.0, 20.0))]
+    pub cell: (f32, f32),
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -189,6 +208,7 @@ pub fn MuteButton(props: ToggleProps) -> Element {
         LabelButton {
             label: "M",
             lit: props.on.then_some(t.signal.mute),
+            cell: props.cell,
             width: props.width, height: props.height, at: props.at,
         }
     }
@@ -198,6 +218,9 @@ pub fn MuteButton(props: ToggleProps) -> Element {
 pub struct SoloProps {
     #[props(default)]
     pub state: Solo,
+    /// The cell this replaces: `mcp_mute_*` is 21x20, `track_mute_*` 22x24.
+    #[props(default = (21.0, 20.0))]
+    pub cell: (f32, f32),
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -218,7 +241,10 @@ pub fn SoloButton(props: SoloProps) -> Element {
         Solo::Defeat => Some(t.chrome.accent),
     };
     rsx! {
-        LabelButton { label: "S", lit, width: props.width, height: props.height, at: props.at }
+        LabelButton {
+            label: "S", lit, cell: props.cell,
+            width: props.width, height: props.height, at: props.at,
+        }
     }
 }
 
@@ -226,6 +252,9 @@ pub fn SoloButton(props: SoloProps) -> Element {
 pub struct FxProps {
     #[props(default)]
     pub state: FxChain,
+    /// The cell this replaces: `mcp_fx_*` is 28x22, `track_fx_*` 21x22.
+    #[props(default = (28.0, 22.0))]
+    pub cell: (f32, f32),
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -296,8 +325,8 @@ pub fn FxButton(props: FxProps) -> Element {
 
     rsx! {
         svg {
-            width: "{props.width.unwrap_or(28)}",
-            height: "{props.height.unwrap_or(22)}",
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             defs {
@@ -464,6 +493,16 @@ pub fn FxBypassToggle(props: FxBypassProps) -> Element {
 pub struct RecordArmProps {
     #[props(default)]
     pub state: RecordArm,
+    /// The cell this replaces: `mcp_recarm_*` is 36x24, `track_*` 20x20.
+    #[props(default = (36.0, 24.0))]
+    pub cell: (f32, f32),
+    /// Draw the moulded housing the ring is seated in.
+    ///
+    /// The mixer has one; the track panel draws a bare ring on the strip.
+    /// Keeping it a prop rather than inferring it from the cell size means
+    /// a narrow mixer cell still gets its housing.
+    #[props(default = true)]
+    pub housing: bool,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -486,19 +525,23 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     );
     let barred = matches!(props.state, RecordArm::NoRecord | RecordArm::AutoNoRecord);
 
-    // Measured off `mcp_recarm_on`, cell 0 (36x24), row 12: the ring spans
-    // x=10..24 with a 7px hole at x=14..20, centred on x=17.5. So the cell
-    // is 3:2 rather than square — drawing it in a square box, as this did
-    // first, made the ring too large and the hole too wide.
-    let (vw, vh) = (36.0f32, 24.0f32);
-    // Traced, in *edge* coordinates rather than pixel indices: the ring
-    // covers columns 10..24, which is the span [10, 25), so it is centred
-    // on 17.5 with radius 7.5 — and rows 5..19, centred on 12.5. Reading
-    // the indices directly gives 17 and 12 and puts the whole control half
-    // a pixel up and to the left.
-    let (cx, cy) = (17.5, 12.5);
-    let outer = 7.5f32;
-    let hole = 3.5f32;
+    let (vw, vh) = props.cell;
+    let unit = vw.min(vh);
+
+    // Traced, in *edge* coordinates rather than pixel indices. In the
+    // mixer's 36x24 the ring covers columns 10..24 — the span [10, 25) —
+    // so it is centred on 17.5 with radius 7.5, and rows 5..19, centred on
+    // 12.5. Reading the indices directly gives 17 and 12 and puts the whole
+    // control half a pixel up and to the left.
+    //
+    // The track panel's 20x20 ring is centred and **larger** relative to
+    // its cell (radius 8 of 20) because there is no housing competing for
+    // the room, so the two fractions differ rather than one being wrong.
+    let (cx, cy, outer, hole) = if props.housing {
+        (vw * 0.486, vh * 0.521, unit * 0.3125, unit * 0.1458)
+    } else {
+        (vw * 0.5, vh * 0.5, unit * 0.40, unit * 0.15)
+    };
     // A stroked circle: radius sits mid-band, width is the band.
     let band = outer - hole;
     let r = hole + band / 2.0;
@@ -519,44 +562,40 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     // The hole is not a window onto the surface behind — it is the housing
     // showing through, and in the source both are the same #262626. Filling
     // it from `surface` punched a blue-black hole through the middle.
+    //
+    // Without a housing there is nothing behind it, so the hole is a hole.
     let hole_fill = t.chrome.hardware.shade(-0.40);
 
     rsx! {
         svg {
-            width: "{props.width.unwrap_or(36)}",
-            height: "{props.height.unwrap_or(24)}",
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
-            // The housing the ring sits in. Drawing the ring alone left it
-            // floating: in the original this shape is what seats the button
-            // in the strip.
-            //
-            // Traced off `mcp_recarm_on` by **sub-pixel coverage**, not by
-            // thresholding the alpha. Down column 6 the alpha runs 49, 101,
-            // 153, 205, 244 from y=8 to y=12 — an edge still creeping
-            // outward at about a fifth of a pixel per row, where a
-            // threshold reports a hard vertical line at x=6 for six rows
-            // running. Every earlier reading of this shape was built on
-            // that phantom straight edge.
-            //
-            // What it actually is: a circle of radius 11.5 centred on
-            // (17.5, 12.3) — concentric with the ring, give or take — that
-            // simply goes flat near its widest point, sitting on a base
-            // whose top corners are 45° flares. No vertical section at all.
-            //
-            // Two earlier fits both assumed one, and neither could land
-            // the corner: an ellipse reached full width by y=6, a chamfer
-            // was too narrow through the middle.
-            circle {
-                cx: "{cx}", cy: "{vh * 0.5125}", r: "{vw * 0.3194}",
-                fill: "{hole_fill.css()}",
-            }
-            path {
-                d: "M {cx - vw * 0.3194} {vh * 0.592}
-                    L {cx - vw * 0.4028} {vh * 0.717} V {vh}
-                    H {cx + vw * 0.4028} V {vh * 0.717}
-                    L {cx + vw * 0.3194} {vh * 0.592} Z",
-                fill: "{hole_fill.css()}",
+            if props.housing {
+                // Traced off `mcp_recarm_on` by **sub-pixel coverage**, not
+                // by thresholding the alpha. Down column 6 the alpha runs
+                // 49, 101, 153, 205, 244 from y=8 to y=12 — an edge still
+                // creeping outward at about a fifth of a pixel per row,
+                // where a threshold reports a hard vertical line at x=6 for
+                // six rows running. Every earlier reading of this shape was
+                // built on that phantom straight edge.
+                //
+                // What it is: a circle of radius 11.5 centred on
+                // (17.5, 12.3) — concentric with the ring, give or take —
+                // that goes flat near its widest point, sitting on a base
+                // whose top corners are 45° flares. No vertical section.
+                circle {
+                    cx: "{cx}", cy: "{vh * 0.5125}", r: "{vw * 0.3194}",
+                    fill: "{hole_fill.css()}",
+                }
+                path {
+                    d: "M {cx - vw * 0.3194} {vh * 0.592}
+                        L {cx - vw * 0.4028} {vh * 0.717} V {vh}
+                        H {cx + vw * 0.4028} V {vh * 0.717}
+                        L {cx + vw * 0.3194} {vh * 0.592} Z",
+                    fill: "{hole_fill.css()}",
+                }
             }
             // Auto is a **solid disc with the A knocked out of it**, not a
             // ring with a letter laid inside. Drawing both gave a grey
@@ -596,10 +635,10 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                         rsx! {
                             line {
                                 key: "{i}",
-                                x1: "{cx + dx * (hole - 0.5)}",
-                                y1: "{cy + dy * (hole - 0.5)}",
-                                x2: "{cx + dx * (outer + 0.8)}",
-                                y2: "{cy + dy * (outer + 0.8)}",
+                                x1: "{cx + dx * (hole - unit * 0.02)}",
+                                y1: "{cy + dy * (hole - unit * 0.02)}",
+                                x2: "{cx + dx * (outer + unit * 0.03)}",
+                                y2: "{cy + dy * (outer + unit * 0.03)}",
                                 stroke: "{hole_fill.css()}",
                                 stroke_width: "{band * 0.85}",
                                 stroke_linecap: "butt",
@@ -622,6 +661,12 @@ pub struct RoutingProps {
     pub has_receives: bool,
     #[props(default)]
     pub disabled: bool,
+    /// The cell this replaces: `mcp_io*` is 23x32, `track_io*` 29x22.
+    #[props(default = (23.0, 32.0))]
+    pub cell: (f32, f32),
+    /// Mixer stacks the lanes; the track panel sets them in a row.
+    #[props(default)]
+    pub axis: Axis,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -635,54 +680,66 @@ pub struct RoutingProps {
 pub fn RoutingButton(props: RoutingProps) -> Element {
     let t = Theme::default();
     let k = ink(None, props.at);
-    // `mcp_io_s_r` is 71x32 in three cells — so each is about 23x32,
-    // taller than wide. Drawing it square, as this did first, squashed the
-    // bars together and lost the stacked-lane read entirely.
-    let (vw, vh) = (23.0f32, 32.0f32);
+    let (vw, vh) = props.cell;
 
     // Three lanes, not two: the original stacks the track's own output,
     // its sends and its receives. Two bars cannot express what the
     // control reports.
     //
-    // Read off the three source cells: the top bar is blue in all of
-    // them — a track always has an output — and only the lower two light
-    // up. Colouring the top bar conditionally, as this first did, made
-    // an unrouted track look broken rather than merely unrouted.
+    // Read off the source cells: the top lane is blue in all of them — a
+    // track always has an output — and only the lower two light up.
+    // Colouring it conditionally made an unrouted track look broken
+    // rather than merely unrouted.
     //
-    // An unlit lane is #6c6c6c in the source — plain grey. It was
-    // `text_faint`, a blue-grey, so a track with nothing routed looked
-    // faintly lit rather than dark.
+    // An unlit lane is #6c6c6c — plain grey. It was `text_faint`, a
+    // blue-grey, so a track with nothing routed looked faintly lit.
     let dim = t.chrome.hardware_mark.shade(-0.33);
     let out = t.chrome.accent;
     let send = if props.has_sends { t.signal.meter_warn } else { dim };
     let recv = if props.has_receives { t.signal.rec } else { dim };
     let opacity = if props.disabled { "0.4" } else { "1" };
 
-    // Lanes at y=6, 13 and 20 of 32, each 4 tall.
-    let bar_w = vw * 0.56;
-    let bar_h = vh * 0.125;
-    let bar_x = (vw - bar_w) / 2.0;
-    let r = bar_h / 2.0;
+    // Mixer: lanes at y=6, 13, 20 of 32, four tall, 56% of the width.
+    // Track panel: the same three lanes turned a quarter turn — 4 wide and
+    // 10 tall at x=6, 13, 20 of 29, which is the same rhythm along the
+    // other axis rather than a different drawing.
+    let horizontal = props.axis == Axis::Horizontal;
+    let (lane_l, lane_t) = if horizontal {
+        (vw * 0.138, vw * 0.241)
+    } else {
+        (vh * 0.125, vh * 0.219)
+    };
+    let (bar_w, bar_h) = if horizontal {
+        (vw * 0.138, vh * 0.455)
+    } else {
+        (vw * 0.56, vh * 0.125)
+    };
+    let cross = if horizontal {
+        (vh - bar_h) / 2.0
+    } else {
+        (vw - bar_w) / 2.0
+    };
+    let r = bar_w.min(bar_h) / 2.0;
 
     rsx! {
         svg {
-            width: "{props.width.unwrap_or(23)}",
-            height: "{props.height.unwrap_or(32)}",
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             opacity: "{opacity}",
             rect {
-                x: "{vw * 0.06}", y: "{vh * 0.06}",
-                width: "{vw * 0.88}", height: "{vh * 0.88}",
-                rx: "{vw * 0.16}",
-                fill: "{k.face.css()}",
+                x: "{vw * 0.03}", y: "{vh * 0.03}",
+                width: "{vw * 0.94}", height: "{vh * 0.94}",
+                rx: "{vw.min(vh) * 0.16}",
+                fill: "{k.face.shade(-0.55).css()}",
                 stroke: "{k.border.css()}", stroke_width: "{vh * 0.03}",
             }
             for (i, colour) in [out, send, recv].iter().enumerate() {
                 rect {
                     key: "{i}",
-                    x: "{bar_x}",
-                    y: "{vh * (0.1875 + 0.219 * i as f32)}",
+                    x: if horizontal { "{lane_l + lane_t * i as f32}" } else { "{cross}" },
+                    y: if horizontal { "{cross}" } else { "{lane_l + lane_t * i as f32}" },
                     width: "{bar_w}", height: "{bar_h}",
                     rx: "{r}",
                     fill: "{colour.css()}",
@@ -698,6 +755,12 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
 pub struct MonitoringProps {
     #[props(default)]
     pub state: Monitoring,
+    /// The cell this replaces: `mcp_monitor_*` is 21x20, `track_*` 16x24.
+    #[props(default = (21.0, 20.0))]
+    pub cell: (f32, f32),
+    /// Mixer radiates downward; the track panel radiates right.
+    #[props(default)]
+    pub axis: Axis,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -710,13 +773,13 @@ pub struct MonitoringProps {
 #[component]
 pub fn InputMonitorIndicator(props: MonitoringProps) -> Element {
     let t = Theme::default();
-    // 21x20, the same cell as mute and solo — `mcp_monitor_*` is 63x20.
-    let (vw, vh) = (21.0f32, 20.0f32);
+    let (vw, vh) = props.cell;
 
-    // The original is a source radiating *downward*: a filled dot near the
-    // top with two arcs opening upward beneath it. This first drew arcs
-    // above a dot at the bottom, which is the same parts assembled into a
-    // different icon — it read as wifi, not as a monitored input.
+    // The original is a source radiating away from a filled dot: dot at
+    // the top with arcs opening upward beneath it in the mixer, dot at the
+    // left with arcs opening leftward in the track panel. This first drew
+    // arcs *above* a dot at the bottom, which is the same parts assembled
+    // into a different icon — it read as wifi, not as a monitored input.
     let colour = match props.state {
         Monitoring::Off => t.chrome.text_dim,
         Monitoring::On => t.chrome.text,
@@ -728,31 +791,38 @@ pub fn InputMonitorIndicator(props: MonitoringProps) -> Element {
         Interaction::Pressed => colour.shade(-0.12),
     };
 
-    let cx = vw * 0.5;
-    let cy = vh * 0.24;
-    let sw = vh * 0.10;
-    let dot = vh * 0.09;
+    // One drawing, turned. `origin` is where the dot sits and `deg` the
+    // direction the waves travel, so the arc maths below is written once.
+    let horizontal = props.axis == Axis::Horizontal;
+    let unit = vw.min(vh);
+    let (cx, cy, deg) = if horizontal {
+        (vw * 0.22, vh * 0.5, 0.0f32)
+    } else {
+        (vw * 0.5, vh * 0.24, 90.0f32)
+    };
+    let sw = unit * 0.10;
+    let dot = unit * 0.09;
 
-    // Arc endpoints at ±55° either side of straight down.
+    // Arc endpoints at ±55° either side of the travel direction.
     let arc = |r: f32| {
-        let (dx, dy) = (35.0f32.to_radians().cos(), 35.0f32.to_radians().sin());
+        let (a, b) = ((deg - 55.0).to_radians(), (deg + 55.0).to_radians());
         format!(
             "M {} {} A {r} {r} 0 0 1 {} {}",
-            cx + dx * r,
-            cy + dy * r,
-            cx - dx * r,
-            cy + dy * r,
+            cx + a.cos() * r,
+            cy + a.sin() * r,
+            cx + b.cos() * r,
+            cy + b.sin() * r,
         )
     };
 
     rsx! {
         svg {
-            width: "{props.width.unwrap_or(21)}",
-            height: "{props.height.unwrap_or(20)}",
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             circle { cx: "{cx}", cy: "{cy}", r: "{dot}", fill: "{colour.css()}" }
-            for (i, rad) in [vh * 0.26, vh * 0.44].iter().enumerate() {
+            for (i, rad) in [unit * 0.26, unit * 0.44].iter().enumerate() {
                 path {
                     key: "{i}",
                     d: "{arc(*rad)}",
@@ -994,12 +1064,12 @@ mod tests {
     fn every_control_is_shaped_like_the_cell_it_replaces() {
         let n = (None, None);
         let cases: [(&str, String); 7] = [
-            ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { on: true, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_solo_on", render_svg(SoloButton, SoloProps { state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_fx_norm", render_svg(FxButton, FxProps { state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { cell: (36.0, 24.0), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { cell: (21.0, 20.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_solo_on", render_svg(SoloButton, SoloProps { cell: (21.0, 20.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_fx_norm", render_svg(FxButton, FxProps { cell: (28.0, 22.0), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, width: n.0, height: n.1 })),
         ];
 
@@ -1032,6 +1102,7 @@ mod tests {
                 render_svg(
                     MuteButton,
                     ToggleProps {
+                        cell: (21.0, 20.0),
                         on: true,
                         width: w,
                         height: h,
@@ -1041,6 +1112,7 @@ mod tests {
                 render_svg(
                     SoloButton,
                     SoloProps {
+                        cell: (21.0, 20.0),
                         state: Solo::Defeat,
                         width: w,
                         height: h,
@@ -1050,6 +1122,7 @@ mod tests {
                 render_svg(
                     FxButton,
                     FxProps {
+                        cell: (28.0, 22.0),
                         state: FxChain::Active,
                         width: w,
                         height: h,
@@ -1059,6 +1132,8 @@ mod tests {
                 render_svg(
                     RecordArmButton,
                     RecordArmProps {
+                        cell: (36.0, 24.0),
+                        housing: true,
                         state: RecordArm::NoRecord,
                         width: w,
                         height: h,
@@ -1068,6 +1143,8 @@ mod tests {
                 render_svg(
                     RoutingButton,
                     RoutingProps {
+                        cell: (23.0, 32.0),
+                        axis: Default::default(),
                         has_sends: true,
                         has_receives: true,
                         disabled: false,
@@ -1079,6 +1156,8 @@ mod tests {
                 render_svg(
                     InputMonitorIndicator,
                     MonitoringProps {
+                        cell: (21.0, 20.0),
+                        axis: Default::default(),
                         state: Monitoring::On,
                         width: w,
                         height: h,
@@ -1126,6 +1205,7 @@ mod tests {
         let small = render_svg(
             MuteButton,
             ToggleProps {
+                cell: (21.0, 20.0),
                 on: false,
                 width: Some(21),
                 height: Some(20),
@@ -1135,6 +1215,7 @@ mod tests {
         let large = render_svg(
             MuteButton,
             ToggleProps {
+                cell: (21.0, 20.0),
                 on: false,
                 width: Some(210),
                 height: Some(200),
@@ -1211,6 +1292,7 @@ mod tests {
         let n = render_svg(
             MuteButton,
             ToggleProps {
+                cell: (21.0, 20.0),
                 on: false,
                 width: None,
                 height: None,
@@ -1220,6 +1302,7 @@ mod tests {
         let h = render_svg(
             MuteButton,
             ToggleProps {
+                cell: (21.0, 20.0),
                 on: false,
                 width: None,
                 height: None,
@@ -1229,6 +1312,7 @@ mod tests {
         let p = render_svg(
             MuteButton,
             ToggleProps {
+                cell: (21.0, 20.0),
                 on: false,
                 width: None,
                 height: None,
@@ -1245,6 +1329,7 @@ mod tests {
         let off = render_svg(
             SoloButton,
             SoloProps {
+                cell: (21.0, 20.0),
                 state: Solo::Off,
                 width: None,
                 height: None,
@@ -1254,6 +1339,7 @@ mod tests {
         let on = render_svg(
             SoloButton,
             SoloProps {
+                cell: (21.0, 20.0),
                 state: Solo::On,
                 width: None,
                 height: None,
@@ -1263,6 +1349,7 @@ mod tests {
         let defeat = render_svg(
             SoloButton,
             SoloProps {
+                cell: (21.0, 20.0),
                 state: Solo::Defeat,
                 width: None,
                 height: None,

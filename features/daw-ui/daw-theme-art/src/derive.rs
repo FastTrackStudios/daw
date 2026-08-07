@@ -24,154 +24,147 @@ pub const MARKERS: [[u8; 4]; 2] = [[255, 0, 255, 255], [255, 255, 0, 255]];
 /// How many equal-width cells an image is a sprite strip of.
 ///
 /// REAPER packs a control's interaction states side by side: `mcp_solo_off`
-/// is three 21×20 cells — normal, hover, pressed — in one 63×20 file.
+/// is three 21x20 cells — normal, hover, pressed — in one 63x20 file.
 /// Drawing the whole file draws all three, which is right for REAPER (it
 /// blits the cell it wants) and wrong everywhere else.
-///
-/// Two signals, in order:
-///
-/// 1. **Transparent gaps.** Most strips separate their cells with fully
-///    clear columns. This is the reliable one, and the only one that finds
-///    strips whose width is *not* a multiple of the cell count —
-///    `mcp_fx_norm` is 86px of three 28px buttons plus gaps, and no
-///    divisibility test will ever see it.
-/// 2. **Even division with a matching silhouette**, for strips drawn edge
-///    to edge with no gap.
-///
-/// Silhouette alone is not enough: it finds mute and solo, whose cells
-/// differ only in brightness, and misses input-monitor, whose cells change
-/// icon.
 pub fn sprite_cells(img: &RgbaImage) -> u32 {
-    if let Some(segments) = cells_from_gaps(img) {
-        return segments.len() as u32;
-    }
-    let (w, h) = (img.width(), img.height());
-    for n in [4u32, 3, 2] {
-        if w % n != 0 || w / n < 4 {
-            continue;
-        }
-        let cw = w / n;
-        let same = (0..h).all(|y| {
-            (0..cw).all(|x| {
-                let a0 = img.get_pixel(x, y).0[3] > 8;
-                (1..n).all(|c| (img.get_pixel(x + c * cw, y).0[3] > 8) == a0)
-            })
-        });
-        if same {
-            return n;
-        }
-    }
-    1
-}
-
-/// Find the cells by looking for the clear columns between them.
-///
-/// Returns each cell as `(x, width)`, or `None` when the gaps do not
-/// describe a plausible strip — equal enough segments, and not so many
-/// that we are counting the gaps *inside* a drawing rather than between
-/// cells.
-fn cells_from_gaps(img: &RgbaImage) -> Option<Vec<(u32, u32)>> {
-    let (w, h) = (img.width(), img.height());
-    if w < 12 {
-        return None;
-    }
-
-    // A column counts as a gap when nothing *solid* is in it. The
-    // threshold is not fussiness: the gaps between REAPER's buttons carry
-    // the neighbouring cells' drop shadows, so a strictly-transparent test
-    // finds no gap at all and the whole strip reads as one drawing.
-    //
-    // Markers are excluded too — they sit in the outer row and column, and
-    // would bridge every gap they touch.
-    const SOLID: u8 = 96;
-    let clear: Vec<bool> = (0..w)
-        .map(|x| {
-            (0..h).all(|y| {
-                let px = img.get_pixel(x, y).0;
-                px[3] < SOLID || MARKERS.contains(&px)
-            })
-        })
-        .collect();
-
-    // Segments of drawn columns.
-    let mut segments: Vec<(u32, u32)> = Vec::new();
-    let mut start: Option<u32> = None;
-    for x in 0..w {
-        match (clear[x as usize], start) {
-            (false, None) => start = Some(x),
-            (true, Some(s)) => {
-                segments.push((s, x - 1));
-                start = None;
-            }
-            _ => {}
-        }
-    }
-    if let Some(s) = start {
-        segments.push((s, w - 1));
-    }
-
-    let n = segments.len() as u32;
-    if !(2..=4).contains(&n) {
-        return None;
-    }
-
-    // Segments must be near-equal: a control's states are the same size.
-    // Unequal ones mean these are parts of one drawing, not repeats.
-    let widths: Vec<u32> = segments.iter().map(|(a, b)| b - a + 1).collect();
-    let (min, max) = (*widths.iter().min().unwrap(), *widths.iter().max().unwrap());
-    if min < 4 || max - min > max / 4 {
-        return None;
-    }
-
-    Some(
-        segments
-            .into_iter()
-            .map(|(a, b)| (a, b - a + 1))
-            .collect(),
-    )
+    cell_bounds(img).len() as u32
 }
 
 /// Where each sprite cell actually sits, as `(x, width)`.
 ///
-/// **Not** an even division of the file width, which is the assumption
-/// that looks right and quietly isn't: `mcp_fx_norm` is 86px of three
-/// 28px cells starting at x=1, 29 and 57, with a marker column before
-/// them and a spare column after. Dividing 86 by 3 puts cell 2 at x=58
-/// and leaves column 57 — a real column of a real button — undrawn.
+/// Found by **correlating the image's column profile with itself**, which
+/// is the only method here that survived contact with the whole theme.
+/// Four earlier attempts each worked on the images they were written for
+/// and failed on the next family:
 ///
-/// Falls back to even division only when the gap scan finds no strip,
-/// which is the case for controls drawn edge to edge like `mcp_mute_*`.
+/// - *Even division.* `track_mute_on` is 65px of three buttons — 21.67
+///   each — so `w % n == 0` rejected it and the export stretched one
+///   button across the whole strip.
+/// - *Transparent gaps.* Finds strips whose cells are separated by clear
+///   columns, and nothing else; the track panel's buttons touch.
+/// - *Alpha silhouette.* Says almost nothing about opaque rectangles —
+///   a 3-cell strip matches `n = 4` happily.
+/// - *Colour, or edge maps.* Too strict in the other direction: the cells
+///   of a strip are the same button lit differently, so hover and pressed
+///   differ from normal everywhere at once.
+///
+/// A z-normalised profile is brightness-invariant by construction, which
+/// is exactly the property the last two lacked, and correlating it finds
+/// the period *and* the offset — `mcp_fx_norm` turns out to be three 28px
+/// cells starting at x=1, with a marker column before them and a spare
+/// after, which no arithmetic on 86 and 3 will ever produce.
 pub fn cell_bounds(img: &RgbaImage) -> Vec<(u32, u32)> {
-    if let Some(cells) = cells_from_gaps(img) {
-        // The gap scan finds each cell's *solid* part. A cell's outermost
-        // column is often a soft edge under the `SOLID` threshold — on
-        // `mcp_fx_norm` the segments come back 27 wide on a 28 pitch, and
-        // using them directly shifts every button a pixel and leaves a
-        // column of each one undrawn.
-        //
-        // The pitch between segment starts is exact even when the widths
-        // are short, so reclaim the difference on the left. Where the
-        // segments already are the cells, the width equals the pitch and
-        // this changes nothing.
-        if cells.len() >= 2 {
-            let pitch = cells[1].0.saturating_sub(cells[0].0);
-            if pitch >= cells[0].1 {
-                let origin = cells[0].0.saturating_sub(pitch - cells[0].1);
-                return (0..cells.len() as u32)
-                    .map(|i| (origin + i * pitch, pitch))
+    match detect_strip(img) {
+        Some((n, period, origin)) => (0..n).map(|i| (origin + i * period, period)).collect(),
+        None => vec![(0, img.width())],
+    }
+}
+
+/// Mean brightness of each column, weighted by alpha.
+///
+/// Markers are skipped: they are WALTER geometry rather than art, sit in
+/// the outer row and column, and are bright enough to dominate a profile.
+fn column_profile(img: &RgbaImage) -> Vec<f32> {
+    let (w, h) = (img.width(), img.height());
+    (0..w)
+        .map(|x| {
+            let sum: f32 = (0..h)
+                .map(|y| {
+                    let p = img.get_pixel(x, y).0;
+                    if MARKERS.contains(&p) {
+                        return 0.0;
+                    }
+                    let l = p[0] as f32 * 0.3 + p[1] as f32 * 0.6 + p[2] as f32 * 0.1;
+                    l * p[3] as f32 / 255.0
+                })
+                .sum();
+            sum / h as f32
+        })
+        .collect()
+}
+
+/// Shift and scale a slice to zero mean and unit deviation.
+fn znorm(v: &[f32]) -> Vec<f32> {
+    let n = v.len() as f32;
+    let mean = v.iter().sum::<f32>() / n;
+    let var = v.iter().map(|x| (x - mean) * (x - mean)).sum::<f32>() / n;
+    let sd = var.sqrt().max(1e-6);
+    v.iter().map(|x| (x - mean) / sd).collect()
+}
+
+/// `(cells, period, origin)` for the best-fitting strip, if any.
+fn detect_strip(img: &RgbaImage) -> Option<(u32, u32, u32)> {
+    let w = img.width();
+    if w < 12 {
+        return None;
+    }
+    let profile = column_profile(img);
+    let guides = marker_columns(img);
+
+    // Larger counts first: a 4-cell strip also half-matches at 2.
+    for n in [4u32, 3, 2] {
+        let widest = w / n;
+        if widest < 6 {
+            continue;
+        }
+        // The cells cover nearly the whole file — anything less is a
+        // coincidence between two parts of one drawing.
+        let narrowest = ((w as f32 * 0.85 / n as f32) as u32).max(6);
+        let mut found: Vec<(f32, u32, u32, u32)> = Vec::new();
+
+        for period in narrowest..=widest {
+            // Strips start at the very edge or one guide column in; a
+            // wider search costs time and finds only noise.
+            for origin in 0..=(w - n * period).min(3) {
+                let segs: Vec<Vec<f32>> = (0..n)
+                    .map(|c| {
+                        let a = (origin + c * period) as usize;
+                        znorm(&profile[a..a + period as usize])
+                    })
                     .collect();
+                let score = (1..n as usize)
+                    .map(|c| {
+                        segs[0].iter().zip(&segs[c]).map(|(a, b)| a * b).sum::<f32>()
+                            / period as f32
+                    })
+                    .fold(f32::INFINITY, f32::min);
+                // How many guide columns this layout swallows. A cell that
+                // begins on a magenta column is a layout shifted by one:
+                // the guides sit *outside* the cells, and offsets either
+                // side of the truth score within a thousandth of each
+                // other, so the correlation alone cannot choose. Two
+                // controls landed a pixel left before this was added.
+                let swallowed = (0..n)
+                    .flat_map(|c| {
+                        let a = origin + c * period;
+                        (a..a + period).map(|x| guides[x as usize] as u32)
+                    })
+                    .sum();
+                found.push((score, swallowed, period, origin));
             }
         }
-        return cells;
+
+        let best = found
+            .iter()
+            .map(|(s, ..)| *s)
+            .fold(f32::NEG_INFINITY, f32::max);
+        if best > 0.9 {
+            let (_, _, period, origin) = found
+                .into_iter()
+                .filter(|(s, ..)| best - s < 0.01)
+                .min_by_key(|(_, swallowed, _, origin)| (*swallowed, *origin))
+                .expect("a best exists");
+            return Some((n, period, origin));
+        }
     }
-    let n = sprite_cells(img).max(1);
-    let w = img.width();
-    (0..n)
-        .map(|i| {
-            let a = i * w / n;
-            let b = (i + 1) * w / n;
-            (a, b.saturating_sub(a).max(1))
-        })
+    None
+}
+
+/// Which columns hold WALTER guide pixels.
+fn marker_columns(img: &RgbaImage) -> Vec<bool> {
+    (0..img.width())
+        .map(|x| (0..img.height()).any(|y| MARKERS.contains(&img.get_pixel(x, y).0)))
         .collect()
 }
 

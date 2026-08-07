@@ -104,6 +104,8 @@ fn main() {
                             render_svg(
                                 vector::RecordArmButton,
                                 vector::RecordArmProps {
+                                    cell: (36.0, 24.0),
+                                    housing: true,
                                     state: *v,
                                     width: None,
                                     height: None,
@@ -145,6 +147,7 @@ fn main() {
                             render_svg(
                                 vector::MuteButton,
                                 vector::ToggleProps {
+                                    cell: (21.0, 20.0),
                                     on: *on,
                                     width: None,
                                     height: None,
@@ -188,6 +191,7 @@ fn main() {
                             render_svg(
                                 vector::SoloButton,
                                 vector::SoloProps {
+                                    cell: (21.0, 20.0),
                                     state: *v,
                                     width: None,
                                     height: None,
@@ -239,6 +243,7 @@ fn main() {
                             render_svg(
                                 vector::FxButton,
                                 vector::FxProps {
+                                    cell: (28.0, 22.0),
                                     state: *v,
                                     width: None,
                                     height: None,
@@ -289,6 +294,8 @@ fn main() {
                             render_svg(
                                 vector::RoutingButton,
                                 vector::RoutingProps {
+                                    cell: (23.0, 32.0),
+                                    axis: Default::default(),
                                     has_sends: *s,
                                     has_receives: *r,
                                     disabled: *d,
@@ -342,6 +349,8 @@ fn main() {
                             render_svg(
                                 vector::InputMonitorIndicator,
                                 vector::MonitoringProps {
+                                    cell: (21.0, 20.0),
+                                    axis: Default::default(),
                                     state: *v,
                                     width: None,
                                     height: None,

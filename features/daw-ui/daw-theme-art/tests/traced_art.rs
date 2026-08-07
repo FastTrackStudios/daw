@@ -248,6 +248,7 @@ fn button_labels_sit_where_the_source_puts_them() {
             daw_theme_art::render_svg(
                 vector::MuteButton,
                 vector::ToggleProps {
+                    cell: (21.0, 20.0),
                     on: true,
                     width: n.0,
                     height: n.1,
@@ -261,6 +262,7 @@ fn button_labels_sit_where_the_source_puts_them() {
             daw_theme_art::render_svg(
                 vector::SoloButton,
                 vector::SoloProps {
+                    cell: (21.0, 20.0),
                     state: vector::Solo::On,
                     width: n.0,
                     height: n.1,
@@ -274,6 +276,7 @@ fn button_labels_sit_where_the_source_puts_them() {
             daw_theme_art::render_svg(
                 vector::FxButton,
                 vector::FxProps {
+                    cell: (28.0, 22.0),
                     state: vector::FxChain::Active,
                     width: n.0,
                     height: n.1,
@@ -365,6 +368,61 @@ fn exported_controls_keep_the_sources_guides() {
             assert!(
                 drawn > (w * out.height() / 8) as usize,
                 "{name}: cell {i} at x={x} is essentially empty ({drawn} px)",
+            );
+        }
+    }
+}
+
+
+/// Cell layouts, against the real art rather than a fixture.
+///
+/// Every wrong answer here is silent: too few cells stretches one state
+/// across the whole strip, too many squeezes four buttons where three
+/// belong, and a wrong offset shifts every control sideways. All three
+/// happened while this was being written, and none failed a test — they
+/// were caught by looking at a contact sheet.
+///
+/// **The count is asserted exactly; the origin only to within two
+/// pixels.** REAPER divides a strip by its own arithmetic, and 71/3 or
+/// 86/3 do not come out whole, so cells are not all the same width and
+/// the gutter between two of them is two pixels wide. Which pixel of that
+/// gutter a boundary falls on is not observable from the art — both
+/// answers contain the whole drawing — so pinning it exactly would be
+/// asserting an implementation detail of the detector rather than a fact
+/// about the theme.
+#[test]
+fn strips_are_split_where_the_art_says() {
+    let Some(dir) = source_dir() else { return };
+
+    // Origins traced by hand from the first drawn column of each cell.
+    let cases: [(&str, usize, u32, &[u32]); 9] = [
+        ("mcp_recarm_on", 3, 36, &[0, 36, 72]),
+        ("mcp_mute_on", 3, 21, &[0, 21, 42]),
+        ("mcp_fx_norm", 3, 28, &[1, 29, 57]),
+        ("mcp_io_s_r", 3, 23, &[2, 25, 48]),
+        ("track_recarm_on", 3, 20, &[0, 20, 40]),
+        ("track_mute_on", 3, 21, &[1, 22, 43]),
+        ("track_fx_norm", 3, 20, &[1, 21, 41]),
+        ("track_monitor_on", 3, 15, &[1, 16, 31]),
+        // Not a strip at all: one drawing, whole width.
+        ("mcp_volthumb", 1, 27, &[0]),
+    ];
+
+    for (name, cells, width, origins) in cases {
+        let img = image::open(dir.join(format!("{name}.png")))
+            .unwrap_or_else(|e| panic!("{name}: {e}"))
+            .to_rgba8();
+        let got = daw_theme_art::derive::cell_bounds(&img);
+
+        assert_eq!(got.len(), cells, "{name}: wrong cell count — {got:?}");
+        for (i, (&(x, w), &want)) in got.iter().zip(origins).enumerate() {
+            assert!(
+                w.abs_diff(width) <= 1,
+                "{name}: cell {i} is {w}px, expected about {width}",
+            );
+            assert!(
+                x.abs_diff(want) <= 2,
+                "{name}: cell {i} starts at {x}, expected about {want}",
             );
         }
     }

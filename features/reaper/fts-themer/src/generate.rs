@@ -59,7 +59,15 @@ pub fn generate(theme: &ThemeDir, dry_run: bool) -> Result<GenerateReport> {
             // the traced source: REAPER's 150% art is not reliably 1.5x the
             // 100%, and blitting at the wrong size is what renders markers
             // as visible magenta.
-            let measured = match image::open(&path) {
+            //
+            // From the **pristine snapshot** where there is one, because
+            // measuring the live file makes generation self-referential:
+            // once a run split a strip wrongly and wrote a stretched
+            // button over it, every later run measured the stretched
+            // button, agreed it was a single cell, and reproduced the
+            // mistake. That looks exactly like a fix not taking effect.
+            let measured_from = pristine(&dir, name).unwrap_or_else(|| path.clone());
+            let measured = match image::open(&measured_from) {
                 Ok(img) => daw_theme_art::DerivedSpec::from_image(&img.to_rgba8()),
                 Err(e) => {
                     report.failed.push((name.into(), format!("read: {e}")));
@@ -98,6 +106,18 @@ pub fn generate(theme: &ThemeDir, dry_run: bool) -> Result<GenerateReport> {
     report.written.sort();
     report.vectorised.sort();
     Ok(report)
+}
+
+/// The untouched original of `name`, if the theme kept one.
+///
+/// `restyle` snapshots every image into `.source-art/` before its first
+/// pass, so this is what the theme shipped rather than what the last run
+/// left behind.
+fn pristine(dir: &std::path::Path, name: &str) -> Option<PathBuf> {
+    let p = dir
+        .join(crate::restyle::SOURCE_DIR)
+        .join(format!("{name}.png"));
+    p.is_file().then_some(p)
 }
 
 /// Render traced art at the geometry measured from the image it replaces,

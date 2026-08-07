@@ -47,11 +47,35 @@ fn interaction(cell: usize) -> v::Interaction {
 /// from a control's state to the image REAPER blits.
 pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
     let n = (None, None);
+
+    // Cell sizes, measured from the art. The two families are *not* the
+    // same drawings at two sizes: the track panel's ring has no housing
+    // and is proportionally larger for it, its routing lanes sit in a row
+    // rather than stacked, and its monitor icon radiates right rather
+    // than down. Same components, turned and resized.
+    let track = name.starts_with("track_");
+    let axis = if track { v::Axis::Horizontal } else { v::Axis::Vertical };
+
     let rec = |state| {
         render_svg(
             v::RecordArmButton,
             v::RecordArmProps {
                 state,
+                cell: if track { (20.0, 20.0) } else { (36.0, 24.0) },
+                housing: !track,
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let label_cell = if track { (22.0, 24.0) } else { (21.0, 20.0) };
+    let mute = |on| {
+        render_svg(
+            v::MuteButton,
+            v::ToggleProps {
+                on,
+                cell: label_cell,
                 width: n.0,
                 height: n.1,
                 at,
@@ -63,6 +87,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::SoloButton,
             v::SoloProps {
                 state,
+                cell: label_cell,
                 width: n.0,
                 height: n.1,
                 at,
@@ -74,6 +99,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::FxButton,
             v::FxProps {
                 state,
+                cell: if track { (21.0, 22.0) } else { (28.0, 22.0) },
                 width: n.0,
                 height: n.1,
                 at,
@@ -85,17 +111,8 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::InputMonitorIndicator,
             v::MonitoringProps {
                 state,
-                width: n.0,
-                height: n.1,
-                at,
-            },
-        )
-    };
-    let mute = |on| {
-        render_svg(
-            v::MuteButton,
-            v::ToggleProps {
-                on,
+                cell: if track { (16.0, 24.0) } else { (21.0, 20.0) },
+                axis,
                 width: n.0,
                 height: n.1,
                 at,
@@ -109,6 +126,8 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 has_sends,
                 has_receives,
                 disabled,
+                cell: if track { (29.0, 22.0) } else { (23.0, 32.0) },
+                axis,
                 width: n.0,
                 height: n.1,
                 at,
@@ -116,8 +135,8 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         )
     };
 
-    // `track_fx*_h` is 50x22 in three cells, `_v` 56x22 — the TCP's FX
-    // bypass toggle, which has no `mcp_` twin at all.
+    // `track_fx*_h` is 50x22 in three cells, `_v` 56x22 — the track
+    // panel's FX bypass toggle, which has no `mcp_` twin at all.
     let byp = |state, cell| {
         render_svg(
             v::FxBypassToggle,
@@ -130,49 +149,54 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             },
         )
     };
-    const H: (f32, f32) = (17.0, 22.0);
-    const VE: (f32, f32) = (19.0, 22.0);
 
-    Some(match name {
-        "track_fxempty_h" => byp(v::FxBypass::Empty, H),
-        "track_fxon_h" => byp(v::FxBypass::On, H),
-        "track_fxoff_h" => byp(v::FxBypass::Off, H),
-        "track_fxempty_v" => byp(v::FxBypass::Empty, VE),
-        "track_fxon_v" => byp(v::FxBypass::On, VE),
-        "track_fxoff_v" => byp(v::FxBypass::Off, VE),
+    // Both families answer to the same eight controls, so match on the
+    // part after the prefix rather than writing every name twice.
+    let stem = name
+        .strip_prefix("mcp_")
+        .or_else(|| name.strip_prefix("track_"))?;
 
-        "mcp_recarm_off" => rec(v::RecordArm::Off),
-        "mcp_recarm_on" => rec(v::RecordArm::On),
-        "mcp_recarm_norec" => rec(v::RecordArm::NoRecord),
-        "mcp_recarm_auto" => rec(v::RecordArm::Auto),
-        "mcp_recarm_auto_on" => rec(v::RecordArm::AutoOn),
-        "mcp_recarm_auto_norec" => rec(v::RecordArm::AutoNoRecord),
+    Some(match stem {
+        "fxempty_h" => byp(v::FxBypass::Empty, (17.0, 22.0)),
+        "fxon_h" => byp(v::FxBypass::On, (17.0, 22.0)),
+        "fxoff_h" => byp(v::FxBypass::Off, (17.0, 22.0)),
+        "fxempty_v" => byp(v::FxBypass::Empty, (19.0, 22.0)),
+        "fxon_v" => byp(v::FxBypass::On, (19.0, 22.0)),
+        "fxoff_v" => byp(v::FxBypass::Off, (19.0, 22.0)),
 
-        "mcp_mute_off" => mute(false),
-        "mcp_mute_on" => mute(true),
+        "recarm_off" => rec(v::RecordArm::Off),
+        "recarm_on" => rec(v::RecordArm::On),
+        "recarm_norec" => rec(v::RecordArm::NoRecord),
+        "recarm_auto" => rec(v::RecordArm::Auto),
+        "recarm_auto_on" => rec(v::RecordArm::AutoOn),
+        "recarm_auto_norec" => rec(v::RecordArm::AutoNoRecord),
 
-        "mcp_solo_off" => solo(v::Solo::Off),
-        "mcp_solo_on" => solo(v::Solo::On),
-        "mcp_solodefeat_on" => solo(v::Solo::Defeat),
+        "mute_off" => mute(false),
+        "mute_on" => mute(true),
 
-        "mcp_fx_empty" => fx(v::FxChain::Empty),
-        "mcp_fx_norm" => fx(v::FxChain::Active),
-        "mcp_fx_dis" => fx(v::FxChain::Bypassed),
+        "solo_off" => solo(v::Solo::Off),
+        "solo_on" => solo(v::Solo::On),
+        "solodefeat_on" => solo(v::Solo::Defeat),
 
-        "mcp_io" => io(false, false, false),
-        "mcp_io_dis" => io(false, false, true),
-        "mcp_io_s" => io(true, false, false),
-        "mcp_io_s_dis" => io(true, false, true),
-        "mcp_io_r" => io(false, true, false),
-        "mcp_io_r_dis" => io(false, true, true),
-        "mcp_io_s_r" => io(true, true, false),
-        "mcp_io_s_r_dis" => io(true, true, true),
+        "fx_empty" => fx(v::FxChain::Empty),
+        "fx_norm" => fx(v::FxChain::Active),
+        "fx_dis" => fx(v::FxChain::Bypassed),
 
-        "mcp_monitor_off" => mon(v::Monitoring::Off),
-        "mcp_monitor_on" => mon(v::Monitoring::On),
-        "mcp_monitor_auto" => mon(v::Monitoring::Auto),
+        "io" => io(false, false, false),
+        "io_dis" => io(false, false, true),
+        "io_s" => io(true, false, false),
+        "io_s_dis" => io(true, false, true),
+        "io_r" => io(false, true, false),
+        "io_r_dis" => io(false, true, true),
+        "io_s_r" => io(true, true, false),
+        "io_s_r_dis" => io(true, true, true),
 
-        "mcp_pan_knob_small" => render_svg(
+        "monitor_off" => mon(v::Monitoring::Off),
+        "monitor_on" => mon(v::Monitoring::On),
+        "monitor_auto" => mon(v::Monitoring::Auto),
+
+        // Mixer-only: the knobs and the fader live in one panel.
+        "pan_knob_small" => render_svg(
             v::PanningKnob,
             v::PanProps {
                 position: 0.0,
@@ -181,7 +205,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 height: n.1,
             },
         ),
-        "mcp_pan_knob" => render_svg(
+        "pan_knob_large" => render_svg(
             v::PanningKnob,
             v::PanProps {
                 position: 0.0,
@@ -190,7 +214,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 height: n.1,
             },
         ),
-        "mcp_volthumb" => render_svg(
+        "volthumb" => render_svg(
             v::VolumeFaderCap,
             v::FaderCapProps {
                 accent: None,
@@ -198,7 +222,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 height: n.1,
             },
         ),
-        "mcp_volbg" => render_svg(
+        "volbg" => render_svg(
             v::VolumeFaderTrack,
             v::FaderCapProps {
                 accent: None,
@@ -229,9 +253,7 @@ pub fn missing_twins() -> Vec<&'static str> {
     generated::ALL
         .iter()
         .map(|a| a.name)
-        .filter(|n| {
-            n.starts_with("track_") && cell_markup(n, v::Interaction::Normal).is_none()
-        })
+        .filter(|n| n.starts_with("track_") && cell_markup(n, v::Interaction::Normal).is_none())
         .collect()
 }
 

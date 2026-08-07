@@ -40,6 +40,7 @@ fn main() {
             &render_svg(
                 MuteButton,
                 ToggleProps {
+                    cell: (21.0, 20.0),
                     on: false,
                     width: None,
                     height: None,
@@ -53,6 +54,7 @@ fn main() {
             &render_svg(
                 MuteButton,
                 ToggleProps {
+                    cell: (21.0, 20.0),
                     on: true,
                     width: None,
                     height: None,
@@ -66,6 +68,7 @@ fn main() {
             &render_svg(
                 SoloButton,
                 SoloProps {
+                    cell: (21.0, 20.0),
                     state: Solo::On,
                     width: None,
                     height: None,
@@ -79,6 +82,7 @@ fn main() {
             &render_svg(
                 SoloButton,
                 SoloProps {
+                    cell: (21.0, 20.0),
                     state: Solo::Defeat,
                     width: None,
                     height: None,
@@ -92,6 +96,7 @@ fn main() {
             &render_svg(
                 FxButton,
                 FxProps {
+                    cell: (28.0, 22.0),
                     state: FxChain::Active,
                     width: None,
                     height: None,
@@ -105,6 +110,8 @@ fn main() {
             &render_svg(
                 RecordArmButton,
                 RecordArmProps {
+                    cell: (36.0, 24.0),
+                    housing: true,
                     state: RecordArm::On,
                     width: None,
                     height: None,
@@ -118,6 +125,8 @@ fn main() {
             &render_svg(
                 RecordArmButton,
                 RecordArmProps {
+                    cell: (36.0, 24.0),
+                    housing: true,
                     state: RecordArm::NoRecord,
                     width: None,
                     height: None,
@@ -131,6 +140,8 @@ fn main() {
             &render_svg(
                 RecordArmButton,
                 RecordArmProps {
+                    cell: (36.0, 24.0),
+                    housing: true,
                     state: RecordArm::Auto,
                     width: None,
                     height: None,
@@ -144,6 +155,8 @@ fn main() {
             &render_svg(
                 RoutingButton,
                 RoutingProps {
+                    cell: (23.0, 32.0),
+                    axis: Default::default(),
                     has_sends: true,
                     has_receives: true,
                     disabled: false,
@@ -159,6 +172,8 @@ fn main() {
             &render_svg(
                 InputMonitorIndicator,
                 MonitoringProps {
+                    cell: (21.0, 20.0),
+                    axis: Default::default(),
                     state: Monitoring::On,
                     width: None,
                     height: None,
