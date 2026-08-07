@@ -411,31 +411,31 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
             // floating: in the original this shape is what seats the button
             // in the strip.
             //
-            // Traced edge by edge off `mcp_recarm_on`, half-width per row:
+            // Traced off `mcp_recarm_on` by **sub-pixel coverage**, not by
+            // thresholding the alpha. Down column 6 the alpha runs 49, 101,
+            // 153, 205, 244 from y=8 to y=12 — an edge still creeping
+            // outward at about a fifth of a pixel per row, where a
+            // threshold reports a hard vertical line at x=6 for six rows
+            // running. Every earlier reading of this shape was built on
+            // that phantom straight edge.
             //
-            //     y  1   2   3   4   5   6   7   8   9 …14  15    16…23
-            //       3.5 5.5 7.5 8.5 9.5 9.5 10.5 10.5 11.5    12.5  14.5
+            // What it actually is: a circle of radius 11.5 centred on
+            // (17.5, 12.3) — concentric with the ring, give or take — that
+            // simply goes flat near its widest point, sitting on a base
+            // whose top corners are 45° flares. No vertical section at all.
             //
-            // Fitting a circle to those points gives radius 12.26 centred
-            // on (17.5, 13.25) — and that circle independently predicts
-            // full width at exactly y=9, which is where the source squares
-            // off. So the housing is one **circular bezel around the
-            // ring**, clipped to half-width 11.5, sitting on a wider base
-            // with a flat bottom flush with the cell edge. The straight
-            // sides are the clip, not a separate segment.
-            //
-            // Two wrong readings came first. An *ellipse* through the same
-            // endpoints bulges: full width by y=6, so the sides never read
-            // as squared off. A *chamfer* with a flat top is too narrow
-            // through the middle and visibly cut off square at any zoom.
-            // Both look plausible against the numbers; only the circle
-            // also lands the corner in the right place.
+            // Two earlier fits both assumed one, and neither could land
+            // the corner: an ellipse reached full width by y=6, a chamfer
+            // was too narrow through the middle.
+            circle {
+                cx: "{cx}", cy: "{vh * 0.5125}", r: "{vw * 0.3194}",
+                fill: "{hole_fill.css()}",
+            }
             path {
-                d: "M {cx - vw * 0.3194} {vh * 0.375}
-                    A {vw * 0.3406} {vw * 0.3406} 0 0 1 {cx + vw * 0.3194} {vh * 0.375}
-                    V {vh * 0.625} L {cx + vw * 0.4028} {vh * 0.667} V {vh}
-                    H {cx - vw * 0.4028} V {vh * 0.667}
-                    L {cx - vw * 0.3194} {vh * 0.625} Z",
+                d: "M {cx - vw * 0.3194} {vh * 0.592}
+                    L {cx - vw * 0.4028} {vh * 0.717} V {vh}
+                    H {cx + vw * 0.4028} V {vh * 0.717}
+                    L {cx + vw * 0.3194} {vh * 0.592} Z",
                 fill: "{hole_fill.css()}",
             }
             circle {
