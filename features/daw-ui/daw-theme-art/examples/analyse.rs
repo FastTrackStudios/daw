@@ -67,8 +67,8 @@ fn main() {
 
     let mut tally: HashMap<&str, usize> = HashMap::new();
     println!(
-        "{:<32} {:>9} {:>6} {:>7} {:>8}  {:<9} {}",
-        "image", "size", "opaq%", "colours", "markers", "kind", "sprite"
+        "{:<32} {:>9} {:>6} {:>7} {:>8}  {:<9} sprite",
+        "image", "size", "opaq%", "colours", "markers", "kind"
     );
 
     for path in &entries {

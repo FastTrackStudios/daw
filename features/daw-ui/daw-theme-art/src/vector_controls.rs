@@ -38,7 +38,6 @@ pub struct VectorProps {
 /// A control's palette, resolved once per render.
 struct Ink {
     face: Color,
-    face_top: Color,
     border: Color,
     text: Color,
 }
@@ -56,10 +55,9 @@ fn ink(lit: Option<Color>, at: Interaction) -> Ink {
         Interaction::Pressed => base.shade(-0.12),
     };
     Ink {
-        // The originals light from the top: the face is a vertical gradient
-        // with the lighter stop above, which is most of what makes them
-        // read as physical rather than flat.
-        face_top: face.shade(0.10),
+        // The originals light from the top. The lighter stop is derived at
+        // the point of use rather than carried here, so each control can
+        // pick its own falloff.
         face,
         border: c.border,
         text: if lit.is_some() {
@@ -139,8 +137,14 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
                 x: "{vw * 0.5}", y: "{vh * 0.54}",
                 text_anchor: "middle", dominant_baseline: "central",
                 font_family: "Fira Sans, DejaVu Sans, sans-serif",
-                font_weight: "700",
-                font_size: "{vh * 0.46}",
+                // Heavier and larger than the measured glyph height: at
+                // 21x20 a normal-weight 9px letter rasterises thin and
+                // grey, where the original is crisp and solid. Matching
+                // the *measured* size gave a lighter button than the
+                // original, which is the trap in measuring geometry
+                // without checking how it renders.
+                font_weight: "900",
+                font_size: "{vh * 0.58}",
                 fill: "{k.text.css()}",
                 "{props.label}"
             }
@@ -285,6 +289,17 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
             height: "{props.height.unwrap_or(24)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
+            // The housing the ring sits in — a dark pedestal with rounded
+            // top corners, filling most of the cell. Drawing the ring alone
+            // left it floating: in the original this shape is what seats the
+            // button in the strip, and without it the control reads as an
+            // icon rather than as hardware.
+            path {
+                d: "M {cx - 14.0} {vh} L {cx - 14.0} {vh * 0.42}
+                    A 14 14 0 0 1 {cx + 14.0} {vh * 0.42}
+                    L {cx + 14.0} {vh} Z",
+                fill: "{t.chrome.surface_sunken.css()}",
+            }
             circle {
                 cx: "{cx}", cy: "{cy}", r: "{r}",
                 fill: "{hole_fill.css()}",
@@ -351,45 +366,53 @@ pub struct RoutingProps {
 pub fn RoutingButton(props: RoutingProps) -> Element {
     let t = Theme::default();
     let k = ink(None, props.at);
-    let (vw, vh) = (20.0f32, 20.0f32);
+    // `mcp_io_s_r` is 71x32 in three cells — so each is about 23x32,
+    // taller than wide. Drawing it square, as this did first, squashed the
+    // bars together and lost the stacked-lane read entirely.
+    let (vw, vh) = (23.0f32, 32.0f32);
+
+    // Three lanes, not two: the original stacks the track's own output,
+    // its sends and its receives. Two bars cannot express what the
+    // control reports.
+    //
+    // Read off the three source cells: the top bar is blue in all of
+    // them — a track always has an output — and only the lower two light
+    // up. Colouring the top bar conditionally, as this first did, made
+    // an unrouted track look broken rather than merely unrouted.
     let dim = t.chrome.text_faint;
-    // Top bar = receives, bottom = sends. Lit means present, which is the
-    // whole information the control carries.
-    let recv = if props.has_receives {
-        t.chrome.accent
-    } else {
-        dim
-    };
-    let send = if props.has_sends {
-        t.signal.meter_warn
-    } else {
-        dim
-    };
+    let out = t.chrome.accent;
+    let send = if props.has_sends { t.signal.meter_warn } else { dim };
+    let recv = if props.has_receives { t.signal.rec } else { dim };
     let opacity = if props.disabled { "0.4" } else { "1" };
+
+    let bar_w = vw * 0.56;
+    let bar_h = vh * 0.10;
+    let bar_x = (vw - bar_w) / 2.0;
+    let r = bar_h / 2.0;
 
     rsx! {
         svg {
-            width: "{props.width.unwrap_or(20)}",
-            height: "{props.height.unwrap_or(20)}",
+            width: "{props.width.unwrap_or(23)}",
+            height: "{props.height.unwrap_or(32)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             opacity: "{opacity}",
             rect {
-                x: "{vw * 0.08}", y: "{vh * 0.08}",
-                width: "{vw * 0.84}", height: "{vh * 0.84}",
-                rx: "{vh * 0.16}",
+                x: "{vw * 0.06}", y: "{vh * 0.06}",
+                width: "{vw * 0.88}", height: "{vh * 0.88}",
+                rx: "{vw * 0.16}",
                 fill: "{k.face.css()}",
-                stroke: "{k.border.css()}", stroke_width: "{vh * 0.05}",
+                stroke: "{k.border.css()}", stroke_width: "{vh * 0.03}",
             }
-            rect {
-                x: "{vw * 0.24}", y: "{vh * 0.28}",
-                width: "{vw * 0.52}", height: "{vh * 0.12}",
-                rx: "{vh * 0.06}", fill: "{recv.css()}",
-            }
-            rect {
-                x: "{vw * 0.24}", y: "{vh * 0.6}",
-                width: "{vw * 0.52}", height: "{vh * 0.12}",
-                rx: "{vh * 0.06}", fill: "{send.css()}",
+            for (i, colour) in [out, send, recv].iter().enumerate() {
+                rect {
+                    key: "{i}",
+                    x: "{bar_x}",
+                    y: "{vh * (0.22 + 0.22 * i as f32)}",
+                    width: "{bar_w}", height: "{bar_h}",
+                    rx: "{r}",
+                    fill: "{colour.css()}",
+                }
             }
         }
     }
@@ -413,30 +436,72 @@ pub struct MonitoringProps {
 #[component]
 pub fn InputMonitorIndicator(props: MonitoringProps) -> Element {
     let t = Theme::default();
-    let (vw, vh) = (20.0f32, 20.0f32);
+    // 21x20, the same cell as mute and solo — `mcp_monitor_*` is 63x20.
+    let (vw, vh) = (21.0f32, 20.0f32);
+
+    // The original is a source radiating *downward*: a filled dot near the
+    // top with two arcs opening upward beneath it. This first drew arcs
+    // above a dot at the bottom, which is the same parts assembled into a
+    // different icon — it read as wifi, not as a monitored input.
     let colour = match props.state {
-        Monitoring::Off => t.chrome.text_faint,
-        Monitoring::On => t.signal.meter_safe,
-        Monitoring::Auto => t.signal.meter_warn,
+        Monitoring::Off => t.chrome.text_dim,
+        Monitoring::On => t.chrome.text,
+        Monitoring::Auto => t.signal.rec,
     };
+    let colour = match props.at {
+        Interaction::Normal => colour,
+        Interaction::Hover => colour.shade(0.18),
+        Interaction::Pressed => colour.shade(-0.12),
+    };
+
     let cx = vw * 0.5;
-    let cy = vh * 0.72;
-    let sw = vh * 0.09;
+    let cy = vh * 0.24;
+    let sw = vh * 0.10;
+    let dot = vh * 0.09;
+
+    // Arc endpoints at ±55° either side of straight down.
+    let arc = |r: f32| {
+        let (dx, dy) = (35.0f32.to_radians().cos(), 35.0f32.to_radians().sin());
+        format!(
+            "M {} {} A {r} {r} 0 0 1 {} {}",
+            cx + dx * r,
+            cy + dy * r,
+            cx - dx * r,
+            cy + dy * r,
+        )
+    };
 
     rsx! {
         svg {
-            width: "{props.width.unwrap_or(20)}",
+            width: "{props.width.unwrap_or(21)}",
             height: "{props.height.unwrap_or(20)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
-            circle { cx: "{cx}", cy: "{cy}", r: "{vh * 0.07}", fill: "{colour.css()}" }
-            // Two arcs above the dot — signal arriving, which is what
-            // monitoring means. Radii are fractions so they never crowd.
-            for (i, rad) in [vh * 0.22, vh * 0.36].iter().enumerate() {
+            circle { cx: "{cx}", cy: "{cy}", r: "{dot}", fill: "{colour.css()}" }
+            for (i, rad) in [vh * 0.26, vh * 0.44].iter().enumerate() {
                 path {
                     key: "{i}",
-                    d: "M {cx - rad} {cy} A {rad} {rad} 0 0 1 {cx + rad} {cy}",
+                    d: "{arc(*rad)}",
                     fill: "none",
+                    stroke: "{colour.css()}",
+                    stroke_width: "{sw}",
+                    stroke_linecap: "round",
+                }
+            }
+            if matches!(props.state, Monitoring::Off) {
+                // Struck through corner to corner. The dark casing under it
+                // is what makes the slash read as *cutting* the arcs rather
+                // than sitting on top of them at 20px.
+                line {
+                    x1: "{vw * 0.12}", y1: "{vh * 0.88}",
+                    x2: "{vw * 0.88}", y2: "{vh * 0.12}",
+                    stroke: "{t.chrome.surface.css()}",
+                    stroke_width: "{sw * 2.4}",
+                    stroke_linecap: "round",
+                }
+                line {
+                    x1: "{vw * 0.12}", y1: "{vh * 0.88}",
+                    x2: "{vw * 0.88}", y2: "{vh * 0.12}",
                     stroke: "{colour.css()}",
                     stroke_width: "{sw}",
                     stroke_linecap: "round",
@@ -464,40 +529,44 @@ pub struct PanProps {
 #[component]
 pub fn PanningKnob(props: PanProps) -> Element {
     let t = Theme::default();
-    let k = ink(None, Interaction::Normal);
-    let (vw, vh) = (24.0f32, 24.0f32);
+    // `mcp_pan_knob_small` is 24x25 — a hair taller than wide.
+    let (vw, vh) = (24.0f32, 25.0f32);
     let (cx, cy) = (vw * 0.5, vh * 0.5);
-    let r = vh * (if props.large { 0.42 } else { 0.36 });
+    let r = vw * (if props.large { 0.50 } else { 0.44 });
 
-    // A real rotation rather than a chosen sprite frame — which is the
-    // point of drawing this as vector: 128 baked frames become continuous.
+    // Measured off the source: a plain dark disc with a soft light dot,
+    // and at rest the dot is dead centre — not offset, and with no
+    // pointer line anywhere. The first version drew a line to the rim,
+    // which is a different control: this knob shows pan by *sliding* the
+    // dot across, so centre reads as centre.
     let pos = props.position.clamp(-1.0, 1.0);
-    let angle = pos * 135.0f32;
-    let rad = (angle - 90.0).to_radians();
-    let (px, py) = (cx + rad.cos() * r * 0.72, cy + rad.sin() * r * 0.72);
+    let dot_r = r * 0.42;
+    let travel = r - dot_r - vw * 0.04;
+    let dx = pos * travel;
+
+    let disc = t.chrome.surface_sunken.shade(0.10);
+    let dot = if props.position == 0.0 {
+        t.chrome.text_dim
+    } else {
+        t.chrome.accent
+    };
 
     rsx! {
         svg {
             width: "{props.width.unwrap_or(24)}",
-            height: "{props.height.unwrap_or(24)}",
+            height: "{props.height.unwrap_or(25)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             defs {
-                linearGradient { id: "panknob", x1: "0", y1: "0", x2: "0", y2: "1",
-                    stop { offset: "0", stop_color: "{k.face_top.css()}" }
-                    stop { offset: "1", stop_color: "{k.face.shade(-0.15).css()}" }
+                radialGradient { id: "panface", cx: "0.5", cy: "0.35", r: "0.75",
+                    stop { offset: "0", stop_color: "{disc.shade(0.22).css()}" }
+                    stop { offset: "1", stop_color: "{disc.shade(-0.25).css()}" }
                 }
             }
+            circle { cx: "{cx}", cy: "{cy}", r: "{r}", fill: "url(#panface)" }
             circle {
-                cx: "{cx}", cy: "{cy}", r: "{r}",
-                fill: "url(#panknob)",
-                stroke: "{k.border.css()}", stroke_width: "{vh * 0.04}",
-            }
-            line {
-                x1: "{cx}", y1: "{cy}", x2: "{px}", y2: "{py}",
-                stroke: "{t.chrome.accent.css()}",
-                stroke_width: "{vh * 0.08}",
-                stroke_linecap: "round",
+                cx: "{cx + dx}", cy: "{cy}", r: "{dot_r}",
+                fill: "{dot.css()}",
             }
         }
     }
@@ -525,9 +594,22 @@ pub struct FaderCapProps {
 #[component]
 pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
     let t = Theme::default();
-    let accent = props.accent.unwrap_or(t.chrome.accent);
     let (vw, vh) = (27.0f32, 53.0f32);
-    const RIBS: usize = 7;
+    // Six ridges per half, matching the source. Deriving the count from
+    // height would thin them at one size and crowd them at another, which
+    // is exactly what drawing this as vector is meant to stop.
+    const RIBS: usize = 6;
+
+    // The grip is light grey plastic in the original, and only REAPER's
+    // colour variants tint it. Painting the panel with the theme accent by
+    // default, as this first did, turned every fader into a coloured slab
+    // and lost the ribbed-plastic read entirely.
+    let grip = props.accent.unwrap_or(t.chrome.text_dim.shade(0.35));
+    let body = t.chrome.surface_raised;
+
+    let (px, pw) = (vw * 0.26, vw * 0.48);
+    // Two halves either side of a dark seam across the middle.
+    let halves = [(vh * 0.14, vh * 0.34), (vh * 0.52, vh * 0.34)];
 
     rsx! {
         svg {
@@ -537,48 +619,49 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
             xmlns: "http://www.w3.org/2000/svg",
             defs {
                 linearGradient { id: "capbody", x1: "0", y1: "0", x2: "0", y2: "1",
-                    stop { offset: "0", stop_color: "{t.chrome.surface_raised.shade(0.18).css()}" }
-                    stop { offset: "0.5", stop_color: "{t.chrome.surface_raised.css()}" }
-                    stop { offset: "1", stop_color: "{t.chrome.surface.css()}" }
+                    stop { offset: "0", stop_color: "{body.shade(0.25).css()}" }
+                    stop { offset: "0.5", stop_color: "{body.css()}" }
+                    stop { offset: "1", stop_color: "{body.shade(-0.35).css()}" }
+                }
+                linearGradient { id: "capgrip", x1: "0", y1: "0", x2: "1", y2: "0",
+                    stop { offset: "0", stop_color: "{grip.shade(-0.18).css()}" }
+                    stop { offset: "0.35", stop_color: "{grip.shade(0.12).css()}" }
+                    stop { offset: "1", stop_color: "{grip.shade(-0.25).css()}" }
                 }
             }
-            // Body.
             rect {
-                x: "{vw * 0.08}", y: "{vh * 0.03}",
-                width: "{vw * 0.84}", height: "{vh * 0.94}",
-                rx: "{vw * 0.22}",
+                x: "{vw * 0.07}", y: "{vh * 0.03}",
+                width: "{vw * 0.86}", height: "{vh * 0.94}",
+                rx: "{vw * 0.26}",
                 fill: "url(#capbody)",
-                stroke: "{t.chrome.surface.shade(-0.4).css()}",
-                stroke_width: "{vw * 0.05}",
+                stroke: "{t.chrome.surface_deep().css()}",
+                stroke_width: "{vw * 0.06}",
             }
-            // Inset panel the ribs sit on.
-            rect {
-                x: "{vw * 0.26}", y: "{vh * 0.1}",
-                width: "{vw * 0.48}", height: "{vh * 0.8}",
-                rx: "{vw * 0.08}",
-                fill: "{accent.css()}",
+            for (i, (y, h)) in halves.iter().enumerate() {
+                rect {
+                    key: "h{i}",
+                    x: "{px}", y: "{y}", width: "{pw}", height: "{h}",
+                    rx: "{vw * 0.09}",
+                    fill: "url(#capgrip)",
+                }
             }
-            // Ribs, split either side of the centre line — the original's
-            // two-part grip.
-            for i in 0..RIBS {
-                {
-                    let t0 = (i as f32 + 0.5) / RIBS as f32;
-                    let y = vh * (0.13 + 0.74 * t0);
-                    rsx! {
-                        rect {
-                            key: "{i}",
-                            x: "{vw * 0.3}", y: "{y}",
-                            width: "{vw * 0.4}", height: "{vh * 0.022}",
-                            fill: "{accent.shade(-0.45).css()}",
+            // The ridges: dark lines cut across each grip half.
+            for (hi, (y, h)) in halves.iter().enumerate() {
+                for i in 0..RIBS {
+                    {
+                        let step = h / RIBS as f32;
+                        rsx! {
+                            rect {
+                                key: "{hi}-{i}",
+                                x: "{px + vw * 0.03}",
+                                y: "{y + step * (i as f32 + 0.5)}",
+                                width: "{pw - vw * 0.06}",
+                                height: "{vh * 0.018}",
+                                fill: "{grip.shade(-0.55).css()}",
+                            }
                         }
                     }
                 }
-            }
-            // The centre split.
-            rect {
-                x: "{vw * 0.22}", y: "{vh * 0.49}",
-                width: "{vw * 0.56}", height: "{vh * 0.02}",
-                fill: "{t.chrome.surface.shade(-0.3).css()}",
             }
         }
     }
@@ -895,6 +978,21 @@ mod tests {
                 height: None,
             },
         );
-        assert!(svg.contains(&green.to_hex()), "{svg}");
+        // The grip is a gradient of shaded variants, so the accent never
+        // appears verbatim — asserting on its exact hex only passed while
+        // the panel was a flat fill, and would fail any shading change
+        // without anything actually being wrong.
+        assert!(svg.contains(&green.shade(0.12).to_hex()), "{svg}");
+        assert!(svg.contains(&green.shade(-0.55).to_hex()), "ribs: {svg}");
+
+        let plain = render_svg(
+            VolumeFaderCap,
+            FaderCapProps {
+                accent: None,
+                width: None,
+                height: None,
+            },
+        );
+        assert_ne!(svg, plain, "the accent made no difference");
     }
 }
