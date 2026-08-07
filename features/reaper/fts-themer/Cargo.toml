@@ -1,0 +1,33 @@
+[package]
+name = "fts-themer"
+description = "REAPER theme editor core — round-trip .ReaperTheme colors, recolor image sets, generate accent variants"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "fts_themer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fts-themer"
+path = "src/bin/fts-themer.rs"
+required-features = ["cli"]
+
+[features]
+default = ["cli"]
+cli = ["dep:clap"]
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+image = { workspace = true }
+palette = { workspace = true }
+clap = { workspace = true, optional = true }
+
+# The read half already exists — palette/rtconfig/image parsing.
+daw-theme-reaper = { workspace = true }
+
+[lints]
+workspace = true
