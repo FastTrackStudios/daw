@@ -78,6 +78,13 @@ impl ArtData {
     }
 }
 
+/// Props every control component takes: the box to draw into.
+#[derive(Props, Clone, PartialEq)]
+pub struct ArtProps {
+    pub width: u32,
+    pub height: u32,
+}
+
 /// How a traced colour is reinterpreted.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ColorMode {

@@ -38,6 +38,7 @@ pub mod compare;
 pub mod components;
 pub mod derive;
 pub mod generated;
+pub mod mixer_controls;
 pub mod primitives;
 pub mod strip;
 pub mod trace;
@@ -50,6 +51,10 @@ pub use compare::{Fidelity, compare};
 pub use derive::DerivedSpec;
 pub use trace::trace;
 
+pub use mixer_controls::{
+    FxButton, FxChain, InputMonitorIndicator, Monitoring, MuteButton, PanningKnob, RecordArm,
+    RecordArmButton, RoutingButton, Solo, SoloButton, VolumeFaderCap, VolumeFaderTrack,
+};
 pub use primitives::{Button, ControlState, Groove, Meter, Panel, Thumb};
 #[cfg(feature = "render")]
 pub use render::{RenderError, render_for, render_sized, render_svg};
