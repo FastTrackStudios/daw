@@ -45,7 +45,11 @@ struct Ink {
 fn ink(lit: Option<Color>, at: Interaction) -> Ink {
     let t = Theme::default();
     let c = &t.chrome;
-    let base = lit.unwrap_or_else(|| c.surface_raised.shade(0.06));
+    // Unlit controls take the neutral control grey, not a shade of the
+    // surface ladder: deriving it from `surface_raised` made every mute,
+    // solo and FX button blue-cast and far darker than the art it stands
+    // in for.
+    let base = lit.unwrap_or(c.hardware);
     // The original's three sprite cells are the same button lit differently:
     // hover lifts, pressed sinks. Reproducing that as a shade keeps one
     // drawing doing the work of three images.
@@ -59,7 +63,7 @@ fn ink(lit: Option<Color>, at: Interaction) -> Ink {
         // the point of use rather than carried here, so each control can
         // pick its own falloff.
         face,
-        border: c.border,
+        border: c.hardware_edge,
         text: if lit.is_some() {
             c.text.shade(0.35)
         } else {
@@ -359,17 +363,23 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     let band = outer - hole;
     let r = hole + band / 2.0;
 
+    // Neutral when unarmed — the source ring is #a6a6a6, which is
+    // `hardware_mark`. It was `text_dim`, a blue-grey that made a disarmed
+    // track look faintly lit.
     let ring = if armed {
         t.signal.rec
     } else {
-        t.chrome.text_dim
+        t.chrome.hardware_mark
     };
     let ring = match props.at {
         Interaction::Normal => ring,
         Interaction::Hover => ring.shade(0.15),
         Interaction::Pressed => ring.shade(-0.12),
     };
-    let hole_fill = t.chrome.surface.shade(0.08);
+    // The hole is not a window onto the surface behind — it is the housing
+    // showing through, and in the source both are the same #262626. Filling
+    // it from `surface` punched a blue-black hole through the middle.
+    let hole_fill = t.chrome.hardware.shade(-0.40);
 
     rsx! {
         svg {
@@ -392,7 +402,7 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                 d: "M {vw * 0.083} {vh} V {vh * 0.667}
                     A {vw * 0.403} {vh * 0.625} 0 0 1 {vw * 0.889} {vh * 0.667}
                     V {vh} Z",
-                fill: "{t.chrome.surface_sunken.css()}",
+                fill: "{hole_fill.css()}",
             }
             circle {
                 cx: "{cx}", cy: "{cy}", r: "{r}",
@@ -638,9 +648,12 @@ pub fn PanningKnob(props: PanProps) -> Element {
     let travel = r - dot_r - vw * 0.04;
     let dx = pos * travel;
 
-    let disc = t.chrome.surface_sunken.shade(0.10);
+    // Both neutral. The dot was `text_dim`, which is a light *blue*-grey
+    // — right for a label on a panel, wrong for a moulded marker on a
+    // knob, where it read as a lit indicator rather than plastic.
+    let disc = t.chrome.hardware.shade(-0.09);
     let dot = if props.position == 0.0 {
-        t.chrome.text_dim
+        t.chrome.hardware_mark
     } else {
         t.chrome.accent
     };
@@ -698,8 +711,8 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
     // colour variants tint it. Painting the panel with the theme accent by
     // default, as this first did, turned every fader into a coloured slab
     // and lost the ribbed-plastic read entirely.
-    let grip = props.accent.unwrap_or(t.chrome.text_dim.shade(0.35));
-    let body = t.chrome.surface_raised;
+    let grip = props.accent.unwrap_or(t.chrome.hardware_mark.shade(0.22));
+    let body = t.chrome.hardware.shade(-0.25);
 
     let (px, pw) = (vw * 0.26, vw * 0.48);
     // Two halves either side of a dark seam across the middle.

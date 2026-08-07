@@ -39,6 +39,22 @@ pub struct Chrome {
     pub accent: Color,
     /// Selection highlight, brighter than accent.
     pub selected: Color,
+
+    // ── hardware controls ────────────────────────────────────────────
+    //
+    // Buttons, knob bodies and fader caps are **neutral grey**, not a
+    // shade of the surface ladder. That ladder is deliberately blue-cast
+    // — it is what makes the panels feel like one product — but deriving
+    // a mute button's face from it tinted every control blue and left
+    // them far darker than the art they replace. Physical controls read
+    // as moulded plastic sitting *on* the surface, so they get their own
+    // neutral entries rather than a `shade()` of something else.
+    /// The resting face of a button, knob body or cap.
+    pub hardware: Color,
+    /// The hairline around one — far darker than [`Chrome::border`].
+    pub hardware_edge: Color,
+    /// The light marker *on* one: a knob's dot, a cap's grip.
+    pub hardware_mark: Color,
 }
 
 /// Audio-domain state: meters, transport, track buttons.
@@ -162,6 +178,9 @@ impl Default for Theme {
                 text_faint: hex(d::TEXT_FAINT),
                 accent: hex(d::ACCENT),
                 selected: hex(d::SELECTED),
+                hardware: hex(d::HARDWARE),
+                hardware_edge: hex(d::HARDWARE_EDGE),
+                hardware_mark: hex(d::HARDWARE_MARK),
             },
             signal: Signal {
                 meter_safe: hex(d::METER_SAFE),

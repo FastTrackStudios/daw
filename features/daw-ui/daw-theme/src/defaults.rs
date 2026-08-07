@@ -52,6 +52,7 @@ pub const BORDER_STRONG: &str = "#4a4a58";
 pub const TEXT_BRIGHT: &str = "#cfd6e4";
 /// Selection highlight, brighter than the accent.
 pub const SELECTED: &str = "#f0f9ff";
+
 /// The deepest step — the bottom of the ladder, e.g. behind a piano-roll
 /// gutter. See the ladder note on [`SURFACE`].
 pub const SURFACE_DEEP: &str = "#08080b";
@@ -66,6 +67,24 @@ pub const CONTROL_HOVER: &str = "#2a2a36";
 pub const CONTROL_GROOVE: &str = "#26262f";
 /// A draggable handle — knob pointer, slider thumb.
 pub const HANDLE: &str = "#cfd6e4";
+
+// ── hardware controls ────────────────────────────────────────────────────
+//
+// Neutral, and deliberately not on the surface ladder — see the note on
+// `Chrome::hardware`. These are measured off the theme's own artwork:
+// `mcp_mute_off` and `mcp_fx_norm` are #3f3f3f faces on #171717 edges, and
+// `mcp_pan_knob_small` puts an #a2a2a2 dot on a #393939 body.
+
+/// The resting face of a button, knob body or cap.
+///
+/// Distinct from [`CONTROL`], which is a *flat* panel control — a select,
+/// an entry field — and belongs on the surface ladder. This is moulded
+/// plastic sitting on top of a mixer strip.
+pub const HARDWARE: &str = "#3f3f3f";
+/// The hairline around a hardware control — far darker than [`BORDER`].
+pub const HARDWARE_EDGE: &str = "#171717";
+/// The light marker *on* a hardware control: a knob's dot, a cap's grip.
+pub const HARDWARE_MARK: &str = "#a2a2a2";
 
 // ── banners ──────────────────────────────────────────────────────────────
 //
@@ -209,6 +228,9 @@ mod tests {
             ("CONTROL_HOVER", CONTROL_HOVER),
             ("CONTROL_GROOVE", CONTROL_GROOVE),
             ("HANDLE", HANDLE),
+            ("HARDWARE", HARDWARE),
+            ("HARDWARE_EDGE", HARDWARE_EDGE),
+            ("HARDWARE_MARK", HARDWARE_MARK),
             ("BANNER_INFO", BANNER_INFO),
             ("BANNER_WARN", BANNER_WARN),
             ("TOOL_COMPRESS", TOOL_COMPRESS),
