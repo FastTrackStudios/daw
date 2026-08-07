@@ -426,6 +426,10 @@ pub mod dawproject {
 // RPC surface. Generalized over the `DawBackend` trait (single concrete impl:
 // `ReaperBackend`). Re-exports the `#[daw_test]` / `#[reaper_test]` macros.
 #[cfg(feature = "test-harness")]
+/// Versioning a REAPER configuration — the ~350 KB that actually
+/// defines "your REAPER", filtered out of a ~360 MB resource directory.
+pub mod reaper_config;
+
 pub mod test;
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
