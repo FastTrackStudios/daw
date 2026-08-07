@@ -142,22 +142,34 @@ impl Theme {
             a("col_seltrack2", c.accent),
             a("col_tr1_itembgsel", strip_a.mix(c.accent, 0.25)),
             a("col_tr2_itembgsel", strip_b.mix(c.accent, 0.25)),
-            a("tcp_list_scrollbar", c.border_strong()),
+            // The thin pill inside the FX button strip is this, not the FX
+            // colours and not artwork — it is the FX list's scrollbar
+            // thumb, and it is the only lit-looking thing on an empty
+            // strip. Deriving it from the border was blue-cast, so it read as a status
+            // indicator sitting on a neutral grey button.
+            a("tcp_list_scrollbar", c.hardware_mark.shade(-0.45)),
             a("tcp_list_scrollbar_mouseover", c.accent),
             // ── mixer panels ────────────────────────────────────────────
             // The strip chrome REAPER paints itself — the rest of the mixer
             // is image art and cannot be reached from here.
-            a("mcp_fx_normal", c.text),
-            a("mcp_fx_bypassed", s.meter_warn),
-            a("mcp_fx_offlined", s.mute),
-            a("mcp_fxparm_normal", c.text),
-            a("mcp_fxparm_bypassed", s.meter_warn),
-            a("mcp_fxparm_offlined", c.text_faint),
+            // The FX list and its bypass toggle sit *inside* the FX button
+            // strip, and REAPER draws them from the palette rather than
+            // from artwork — so they are the one part of that control a
+            // component cannot reach. They still have to match the
+            // component beside them, which means the neutral hardware
+            // family, not the blue-cast chrome text ramp: `c.text` here
+            // put a faintly blue pill against a grey button.
+            a("mcp_fx_normal", c.hardware_mark.shade(0.35)),
+            a("mcp_fx_bypassed", s.mute),
+            a("mcp_fx_offlined", c.hardware_mark.shade(-0.33)),
+            a("mcp_fxparm_normal", c.hardware_mark.shade(0.35)),
+            a("mcp_fxparm_bypassed", s.mute),
+            a("mcp_fxparm_offlined", c.hardware_mark.shade(-0.33)),
             a("mcp_sends_normal", s.meter_warn),
             a("mcp_sends_muted", s.mute),
             a("mcp_sends_levels", c.text_dim),
             a("mcp_send_midihw", c.accent),
-            a("mcp_list_scrollbar", c.border_strong()),
+            a("mcp_list_scrollbar", c.hardware_mark.shade(-0.45)),
             a("mcp_list_scrollbar_mouseover", c.accent),
             // ── routing / IO dialogs ────────────────────────────────────
             a("io_text", c.text),
@@ -335,15 +347,6 @@ impl Theme {
         }
 
         out
-    }
-}
-
-impl crate::palette::Chrome {
-    /// A divider that must read above [`Chrome::border`] — scrollbars,
-    /// handles. Derived rather than authored: it is always the border
-    /// lifted toward the text.
-    fn border_strong(&self) -> Color {
-        self.border.mix(self.text_dim, 0.5)
     }
 }
 

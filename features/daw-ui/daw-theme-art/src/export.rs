@@ -116,7 +116,31 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         )
     };
 
+    // `track_fx*_h` is 50x22 in three cells, `_v` 56x22 — the TCP's FX
+    // bypass toggle, which has no `mcp_` twin at all.
+    let byp = |state, cell| {
+        render_svg(
+            v::FxBypassToggle,
+            v::FxBypassProps {
+                state,
+                cell,
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    const H: (f32, f32) = (17.0, 22.0);
+    const VE: (f32, f32) = (19.0, 22.0);
+
     Some(match name {
+        "track_fxempty_h" => byp(v::FxBypass::Empty, H),
+        "track_fxon_h" => byp(v::FxBypass::On, H),
+        "track_fxoff_h" => byp(v::FxBypass::Off, H),
+        "track_fxempty_v" => byp(v::FxBypass::Empty, VE),
+        "track_fxon_v" => byp(v::FxBypass::On, VE),
+        "track_fxoff_v" => byp(v::FxBypass::Off, VE),
+
         "mcp_recarm_off" => rec(v::RecordArm::Off),
         "mcp_recarm_on" => rec(v::RecordArm::On),
         "mcp_recarm_norec" => rec(v::RecordArm::NoRecord),
@@ -192,6 +216,22 @@ pub fn generatable() -> Vec<&'static str> {
         .iter()
         .map(|a| a.name)
         .filter(|n| cell_markup(n, v::Interaction::Normal).is_some())
+        .collect()
+}
+
+/// Images a vector control *should* draw but none does yet.
+///
+/// The `track_*` family is the track panel's own set — its own sizes, its
+/// own drawings — and replacing the `mcp_*` mixer art leaves all of it
+/// untouched. That is invisible in a mixer screenshot and obvious in the
+/// track panel, so it is worth being able to ask.
+pub fn missing_twins() -> Vec<&'static str> {
+    generated::ALL
+        .iter()
+        .map(|a| a.name)
+        .filter(|n| {
+            n.starts_with("track_") && cell_markup(n, v::Interaction::Normal).is_none()
+        })
         .collect()
 }
 

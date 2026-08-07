@@ -338,6 +338,126 @@ pub fn FxButton(props: FxProps) -> Element {
     }
 }
 
+// ── FX bypass: a glowing pill ────────────────────────────────────────────
+
+/// What the FX chain is doing, as the bypass toggle reports it.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum FxBypass {
+    /// No FX at all — the toggle is an affordance, not a state.
+    #[default]
+    Empty,
+    /// Chain active.
+    On,
+    /// Chain bypassed.
+    Off,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct FxBypassProps {
+    #[props(default)]
+    pub state: FxBypass,
+    /// The cell this replaces: `track_fx*_h` is 50x22 in three, `_v` 56x22.
+    #[props(default = (17.0, 22.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    /// Pointer state — hover lifts the face, pressed sinks it.
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The FX bypass toggle — the lit pill beside the FX button.
+///
+/// This one is easy to miss entirely: it lives in the `track_*` family,
+/// not `mcp_*`, so nothing that replaced the mixer artwork touched it and
+/// it kept REAPER's inherited look while everything around it changed.
+///
+/// Three states, and the empty one is not a dimmer version of the others:
+/// with no FX loaded the source shows a dark pill at rest and swaps to a
+/// **plus** under the pointer, because there the control means "add"
+/// rather than "toggle". Loaded, it is a lit capsule — blue running, red
+/// bypassed — with a bright core and a soft halo, which is what makes it
+/// read as an LED rather than as a filled rectangle.
+#[component]
+pub fn FxBypassToggle(props: FxBypassProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let k = ink(None, props.at);
+
+    let lit = match props.state {
+        FxBypass::Empty => None,
+        FxBypass::On => Some(t.chrome.accent),
+        FxBypass::Off => Some(t.signal.rec),
+    };
+    // Empty + pointer is the "add FX" affordance, not a lit state.
+    let plus = props.state == FxBypass::Empty && props.at != Interaction::Normal;
+
+    let (cx, cy) = (vw * 0.5, vh * 0.5);
+    let pw = vw * 0.30;
+    let ph = vh * 0.52;
+    let id = "fxled";
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                if let Some(c) = lit {
+                    linearGradient { id: "{id}", x1: "0", y1: "0", x2: "1", y2: "0",
+                        stop { offset: "0", stop_color: "{c.shade(-0.25).css()}" }
+                        stop { offset: "0.4", stop_color: "{c.shade(0.30).css()}" }
+                        stop { offset: "1", stop_color: "{c.shade(-0.30).css()}" }
+                    }
+                }
+            }
+            rect {
+                x: "0", y: "0", width: "{vw}", height: "{vh}",
+                rx: "{vh * 0.12}",
+                fill: "{k.face.shade(-0.72).css()}",
+            }
+            if plus {
+                // A plus, drawn as two bars so its weight is set here rather
+                // than by whatever font happens to be installed.
+                rect {
+                    x: "{cx - pw * 0.75}", y: "{cy - vh * 0.055}",
+                    width: "{pw * 1.5}", height: "{vh * 0.11}",
+                    fill: "{t.chrome.hardware_mark.css()}",
+                }
+                rect {
+                    x: "{cx - pw * 0.22}", y: "{cy - ph * 0.5}",
+                    width: "{pw * 0.44}", height: "{ph}",
+                    fill: "{t.chrome.hardware_mark.css()}",
+                }
+            } else if let Some(c) = lit {
+                // The halo: what separates an LED from a coloured rectangle.
+                rect {
+                    x: "{cx - pw * 0.85}", y: "{cy - ph * 0.62}",
+                    width: "{pw * 1.7}", height: "{ph * 1.24}",
+                    rx: "{pw * 0.85}",
+                    fill: "{c.css()}", fill_opacity: "0.22",
+                }
+                rect {
+                    x: "{cx - pw * 0.5}", y: "{cy - ph * 0.5}",
+                    width: "{pw}", height: "{ph}",
+                    rx: "{pw * 0.5}",
+                    fill: "url(#{id})",
+                }
+            } else {
+                rect {
+                    x: "{cx - pw * 0.5}", y: "{cy - ph * 0.5}",
+                    width: "{pw}", height: "{ph}",
+                    rx: "{pw * 0.5}",
+                    fill: "{k.face.shade(-0.25).css()}",
+                }
+            }
+        }
+    }
+}
+
 // ── record arm: a ring ───────────────────────────────────────────────────
 
 #[derive(Props, Clone, PartialEq)]
