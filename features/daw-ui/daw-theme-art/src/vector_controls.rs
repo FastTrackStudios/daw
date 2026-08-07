@@ -239,18 +239,17 @@ pub struct FxProps {
 /// produced coloured slabs that read as toggles.
 ///
 /// **Shape.** Mute and solo are symmetric: a 1px border all the way
-/// round a 21x20 cell with 1px corners. FX is not. Reading `mcp_fx_norm`
-/// row by row, cell 0 occupies x=1..28 of a 29-wide cell and the
-/// rightmost column is *body*, not border — the button runs flush off
-/// the right edge with no border and no corner there, and only the left
-/// side is bordered and rounded, because these butt up against what
-/// follows them in the strip. Drawing it as an evenly rounded rect put a
-/// seam down the middle of the mixer strip.
+/// round a 21x20 cell with 1px corners. FX is not. Tracing cell 0 of
+/// `mcp_fx_norm` row by row gives a left edge at x=3, 2, 1, 1 … 1, 2, 3
+/// and a right edge that never moves — so the corners are **chamfered**,
+/// a straight two-pixel diagonal cut, and only on the left. The right
+/// side runs flush off the cell with no border and no corner at all,
+/// because these butt against what follows them in the strip.
 ///
-/// **Height.** The body is y=1..16 of a 22-tall cell — about three
-/// quarters of it — with two darker rows beneath for the shadow that
-/// seats it. Filling the cell, as this did, made the button visibly
-/// taller than the one it replaces.
+/// The shape spans y=1..18 of a 22-tall cell, and the lit face stops at
+/// y=15 — the three dark rows under it are the bottom edge, not a
+/// separate shadow. Drawing rounded corners on a shorter body made a
+/// button that was both too small and the wrong silhouette.
 #[component]
 pub fn FxButton(props: FxProps) -> Element {
     let t = Theme::default();
@@ -265,23 +264,24 @@ pub fn FxButton(props: FxProps) -> Element {
         FxChain::Bypassed => t.signal.rec,
     };
 
-    // Rounded down the left, square down the right, flush to `vw`.
-    let flush = |x: f32, y: f32, h: f32, r: f32| {
+    // Chamfered down the left, square down the right, flush to `vw`.
+    let cut = |x: f32, y: f32, h: f32, c: f32| {
         format!(
-            "M {} {y} H {vw} V {} H {} A {r} {r} 0 0 1 {x} {} V {} A {r} {r} 0 0 1 {} {y} Z",
-            x + r,
+            "M {} {y} H {vw} V {} H {} L {x} {} V {} Z",
+            x + c,
             y + h,
-            x + r,
-            y + h - r,
-            y + r,
-            x + r,
+            x + c,
+            y + h - c,
+            y + c,
         )
     };
 
     let x = vw * 0.036;
     let top = vh * 0.045;
-    let body_h = vh * 0.68;
-    let r = vh * 0.09;
+    // y=1..18 for the outer shape, y=2..15 for the face.
+    let outer_h = vh * 0.818;
+    let face_h = vh * 0.636;
+    let chamfer = vh * 0.091;
 
     rsx! {
         svg {
@@ -295,26 +295,22 @@ pub fn FxButton(props: FxProps) -> Element {
                     stop { offset: "1", stop_color: "{k.face.shade(-0.12).css()}" }
                 }
             }
-            // The shadow the button sits on — the same silhouette, dropped.
+            // Edge, then the face laid over it. Stroking instead would draw
+            // a line down the right, which is exactly what the source omits.
+            path { d: "{cut(x, top, outer_h, chamfer)}", fill: "{k.border.css()}" }
             path {
-                d: "{flush(x, top + vh * 0.09, body_h, r)}",
-                fill: "{t.chrome.surface_deep().css()}",
-            }
-            // Border, then the face inset over it: stroking would draw an
-            // edge down the right, which is exactly what the source omits.
-            path { d: "{flush(x, top, body_h, r)}", fill: "{k.border.css()}" }
-            path {
-                d: "{flush(x + vw * 0.036, top + vh * 0.045, body_h - vh * 0.09, r * 0.7)}",
+                d: "{cut(x + vw * 0.036, top + vh * 0.045, face_h, chamfer * 0.75)}",
                 fill: "url(#fxface)",
             }
             text {
-                x: "{(x + vw) * 0.5}", y: "{top + body_h * 0.5}",
+                x: "{(x + vw) * 0.5}",
+                y: "{top + vh * 0.045 + face_h * 0.5}",
                 text_anchor: "middle", dominant_baseline: "central",
                 font_family: "Fira Sans, DejaVu Sans, sans-serif",
                 // Lighter than mute's glyph and spread wide — the original
                 // letters are open and airy, not a packed bold pair.
                 font_weight: "500",
-                font_size: "{vh * 0.42}",
+                font_size: "{vh * 0.44}",
                 letter_spacing: "{vw * 0.025}",
                 fill: "{text.css()}",
                 "FX"
