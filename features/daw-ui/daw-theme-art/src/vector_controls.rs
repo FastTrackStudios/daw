@@ -41,7 +41,6 @@ struct Ink {
     face_top: Color,
     border: Color,
     text: Color,
-    shadow: Color,
 }
 
 fn ink(lit: Option<Color>, at: Interaction) -> Ink {
@@ -63,8 +62,11 @@ fn ink(lit: Option<Color>, at: Interaction) -> Ink {
         face_top: face.shade(0.10),
         face,
         border: c.border,
-        text: if lit.is_some() { c.selected } else { c.text },
-        shadow: c.surface.shade(-0.4),
+        text: if lit.is_some() {
+            c.text.shade(0.35)
+        } else {
+            c.text
+        },
     }
 }
 
@@ -86,13 +88,24 @@ pub struct LabelButtonProps {
 }
 
 /// The shape mute, solo and FX all share.
+///
+/// Measured off `mcp_mute_on`, cell 0: 21x20, a 1px near-black border, a
+/// single lighter highlight row just inside the top, and a body gradient
+/// running darker downward. The glyph is about 9px tall — under half the
+/// cell — in a soft off-white, with **no drop shadow**; the darker pixels
+/// around it in the original are antialiasing, not a stamped edge.
+///
+/// The first version of this had a 0.62-of-height glyph and a hard
+/// offset shadow, which read as a bevel at 20px and as a badge at 300px.
 #[component]
 pub fn LabelButton(props: LabelButtonProps) -> Element {
     let k = ink(props.lit, props.at);
-    // Native proportions of REAPER's button art: 21x20 per sprite cell.
     let (vw, vh) = (21.0f32, 20.0f32);
-    let r = vh * 0.18;
     let id = format!("lb{}", props.label.replace(' ', ""));
+    // Corners are barely rounded in the original — a large radius is what
+    // makes a redraw look like a generic UI kit rather than this theme.
+    let r = vh * 0.10;
+    let edge = vh * 0.05;
 
     rsx! {
         svg {
@@ -102,37 +115,32 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
             xmlns: "http://www.w3.org/2000/svg",
             defs {
                 linearGradient { id: "{id}", x1: "0", y1: "0", x2: "0", y2: "1",
-                    stop { offset: "0", stop_color: "{k.face_top.css()}" }
-                    stop { offset: "1", stop_color: "{k.face.css()}" }
+                    stop { offset: "0", stop_color: "{k.face.shade(0.06).css()}" }
+                    stop { offset: "1", stop_color: "{k.face.shade(-0.10).css()}" }
                 }
             }
+            // Body, inset by half the border so the stroke sits inside.
             rect {
-                x: "{vw * 0.06}", y: "{vh * 0.06}",
-                width: "{vw * 0.88}", height: "{vh * 0.88}",
+                x: "{edge / 2.0}", y: "{edge / 2.0}",
+                width: "{vw - edge}", height: "{vh - edge}",
                 rx: "{r}",
                 fill: "url(#{id})",
                 stroke: "{k.border.css()}",
-                stroke_width: "{vh * 0.05}",
+                stroke_width: "{edge}",
             }
-            // The glyph is drawn twice: a shadow a fraction below, then the
-            // face. That offset is what gives the originals their stamped
-            // look, and being proportional it survives any zoom.
+            // The highlight row just inside the top edge.
+            rect {
+                x: "{vw * 0.1}", y: "{edge + vh * 0.01}",
+                width: "{vw * 0.8}", height: "{vh * 0.05}",
+                fill: "{k.face.shade(0.22).css()}",
+                fill_opacity: "0.9",
+            }
             text {
-                x: "{vw * 0.5}", y: "{vh * 0.56 + vh * 0.04}",
+                x: "{vw * 0.5}", y: "{vh * 0.54}",
                 text_anchor: "middle", dominant_baseline: "central",
                 font_family: "Fira Sans, DejaVu Sans, sans-serif",
                 font_weight: "700",
-                font_size: "{vh * 0.62}",
-                fill: "{k.shadow.css()}",
-                fill_opacity: "0.55",
-                "{props.label}"
-            }
-            text {
-                x: "{vw * 0.5}", y: "{vh * 0.56}",
-                text_anchor: "middle", dominant_baseline: "central",
-                font_family: "Fira Sans, DejaVu Sans, sans-serif",
-                font_weight: "700",
-                font_size: "{vh * 0.62}",
+                font_size: "{vh * 0.46}",
                 fill: "{k.text.css()}",
                 "{props.label}"
             }
@@ -247,47 +255,63 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     );
     let barred = matches!(props.state, RecordArm::NoRecord | RecordArm::AutoNoRecord);
 
+    // Measured off `mcp_recarm_on`, cell 0 (36x24), row 12: the ring spans
+    // x=10..24 with a 7px hole at x=14..20, centred on x=17.5. So the cell
+    // is 3:2 rather than square — drawing it in a square box, as this did
+    // first, made the ring too large and the hole too wide.
+    let (vw, vh) = (36.0f32, 24.0f32);
+    let (cx, cy) = (17.5, 12.0);
+    let outer = 7.5f32;
+    let hole = 3.5f32;
+    // A stroked circle: radius sits mid-band, width is the band.
+    let band = outer - hole;
+    let r = hole + band / 2.0;
+
     let ring = if armed {
         t.signal.rec
     } else {
         t.chrome.text_dim
     };
-    let (vw, vh) = (20.0f32, 20.0f32);
-    let cx = vw * 0.5;
-    let cy = vh * 0.5;
-    // Stroke width *is* the ring: a filled circle with a stroke this thick
-    // is how the original reads, and keeping it a fraction of the box is
-    // what lets it scale.
-    let stroke = vh * 0.16;
-    let radius = vh * 0.26;
+    let ring = match props.at {
+        Interaction::Normal => ring,
+        Interaction::Hover => ring.shade(0.15),
+        Interaction::Pressed => ring.shade(-0.12),
+    };
+    let hole_fill = t.chrome.surface.shade(0.08);
 
     rsx! {
         svg {
-            width: "{props.width.unwrap_or(20)}",
-            height: "{props.height.unwrap_or(20)}",
+            width: "{props.width.unwrap_or(36)}",
+            height: "{props.height.unwrap_or(24)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             circle {
-                cx: "{cx}", cy: "{cy}", r: "{radius}",
-                fill: "{t.chrome.surface.css()}",
+                cx: "{cx}", cy: "{cy}", r: "{r}",
+                fill: "{hole_fill.css()}",
                 stroke: "{ring.css()}",
-                stroke_width: "{stroke}",
+                stroke_width: "{band}",
             }
             if barred {
-                // The "armed but cannot record" cross.
-                line {
-                    x1: "{cx - radius}", y1: "{cy - radius}",
-                    x2: "{cx + radius}", y2: "{cy + radius}",
-                    stroke: "{t.chrome.surface.css()}",
-                    stroke_width: "{stroke * 0.9}",
-                    stroke_linecap: "round",
-                }
-                line {
-                    x1: "{cx + radius}", y1: "{cy - radius}",
-                    x2: "{cx - radius}", y2: "{cy + radius}",
-                    stroke: "{t.chrome.surface.css()}",
-                    stroke_width: "{stroke * 0.9}",
-                    stroke_linecap: "round",
+                // Four radial notches, not two crossing lines: the original
+                // reads as a life-ring, with the cuts running right through
+                // the band to the outer edge.
+                for (i, deg) in [45.0f32, 135.0, 225.0, 315.0].iter().enumerate() {
+                    {
+                        let a = deg.to_radians();
+                        let (dx, dy) = (a.cos(), a.sin());
+                        rsx! {
+                            line {
+                                key: "{i}",
+                                x1: "{cx + dx * (hole - 0.5)}",
+                                y1: "{cy + dy * (hole - 0.5)}",
+                                x2: "{cx + dx * (outer + 0.8)}",
+                                y2: "{cy + dy * (outer + 0.8)}",
+                                stroke: "{hole_fill.css()}",
+                                stroke_width: "{band * 0.85}",
+                                stroke_linecap: "butt",
+                            }
+                        }
+                    }
                 }
             }
             if auto && !armed {
@@ -295,7 +319,7 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                     x: "{cx}", y: "{cy}",
                     text_anchor: "middle", dominant_baseline: "central",
                     font_family: "Fira Sans, DejaVu Sans, sans-serif",
-                    font_weight: "700", font_size: "{vh * 0.42}",
+                    font_weight: "700", font_size: "{hole * 2.2}",
                     fill: "{ring.css()}",
                     "A"
                 }

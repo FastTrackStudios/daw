@@ -28,10 +28,23 @@ pub const MARKERS: [[u8; 4]; 2] = [[255, 0, 255, 255], [255, 255, 0, 255]];
 /// Drawing the whole file draws all three, which is right for REAPER (it
 /// blits the cell it wants) and wrong everywhere else.
 ///
-/// Detected on the **alpha silhouette** rather than colour, because states
-/// routinely differ completely in hue — solo-off is grey, solo-on amber —
-/// while sharing a shape.
+/// Two signals, in order:
+///
+/// 1. **Transparent gaps.** Most strips separate their cells with fully
+///    clear columns. This is the reliable one, and the only one that finds
+///    strips whose width is *not* a multiple of the cell count —
+///    `mcp_fx_norm` is 86px of three 28px buttons plus gaps, and no
+///    divisibility test will ever see it.
+/// 2. **Even division with a matching silhouette**, for strips drawn edge
+///    to edge with no gap.
+///
+/// Silhouette alone is not enough: it finds mute and solo, whose cells
+/// differ only in brightness, and misses input-monitor, whose cells change
+/// icon.
 pub fn sprite_cells(img: &RgbaImage) -> u32 {
+    if let Some(n) = cells_from_gaps(img) {
+        return n;
+    }
     let (w, h) = (img.width(), img.height());
     for n in [4u32, 3, 2] {
         if w % n != 0 || w / n < 4 {
@@ -49,6 +62,67 @@ pub fn sprite_cells(img: &RgbaImage) -> u32 {
         }
     }
     1
+}
+
+/// Count cells by looking for the clear columns between them.
+///
+/// Returns `None` when the gaps do not describe a plausible strip — equal
+/// enough segments, and not so many that we are counting the gaps *inside*
+/// a drawing rather than between cells.
+fn cells_from_gaps(img: &RgbaImage) -> Option<u32> {
+    let (w, h) = (img.width(), img.height());
+    if w < 12 {
+        return None;
+    }
+
+    // A column counts as a gap when nothing *solid* is in it. The
+    // threshold is not fussiness: the gaps between REAPER's buttons carry
+    // the neighbouring cells' drop shadows, so a strictly-transparent test
+    // finds no gap at all and the whole strip reads as one drawing.
+    //
+    // Markers are excluded too — they sit in the outer row and column, and
+    // would bridge every gap they touch.
+    const SOLID: u8 = 96;
+    let clear: Vec<bool> = (0..w)
+        .map(|x| {
+            (0..h).all(|y| {
+                let px = img.get_pixel(x, y).0;
+                px[3] < SOLID || MARKERS.contains(&px)
+            })
+        })
+        .collect();
+
+    // Segments of drawn columns.
+    let mut segments: Vec<(u32, u32)> = Vec::new();
+    let mut start: Option<u32> = None;
+    for x in 0..w {
+        match (clear[x as usize], start) {
+            (false, None) => start = Some(x),
+            (true, Some(s)) => {
+                segments.push((s, x - 1));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(s) = start {
+        segments.push((s, w - 1));
+    }
+
+    let n = segments.len() as u32;
+    if !(2..=4).contains(&n) {
+        return None;
+    }
+
+    // Segments must be near-equal: a control's states are the same size.
+    // Unequal ones mean these are parts of one drawing, not repeats.
+    let widths: Vec<u32> = segments.iter().map(|(a, b)| b - a + 1).collect();
+    let (min, max) = (*widths.iter().min().unwrap(), *widths.iter().max().unwrap());
+    if min < 4 || max - min > max / 4 {
+        return None;
+    }
+
+    Some(n)
 }
 
 /// The geometry of one theme image, measured from the original.

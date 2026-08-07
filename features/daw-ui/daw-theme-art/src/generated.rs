@@ -1566,24 +1566,24 @@ pub const ITEM_TIMEBASE_TIME_ON_HIDPI: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `item_volknob.png` — 48x18, 271 rects, 1 sprite cell(s).
+/// `item_volknob.png` — 48x18, 271 rects, 2 sprite cell(s).
 pub const ITEM_VOLKNOB: ArtData = ArtData {
     name: "item_volknob",
     width: 48,
     height: 18,
     offset: 659004,
     count: 271,
-    cells: 1,
+    cells: 2,
     blob: BLOB,
 };
-/// `item_volknob_hidpi.png` — 84x28, 673 rects, 1 sprite cell(s).
+/// `item_volknob_hidpi.png` — 84x28, 673 rects, 2 sprite cell(s).
 pub const ITEM_VOLKNOB_HIDPI: ArtData = ArtData {
     name: "item_volknob_hidpi",
     width: 84,
     height: 28,
     offset: 662256,
     count: 673,
-    cells: 1,
+    cells: 2,
     blob: BLOB,
 };
 /// `lane_solo_down.png` — 60x15, 72 rects, 3 sprite cell(s).
@@ -1666,64 +1666,64 @@ pub const MCP_BGSEL: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `mcp_env.png` — 65x32, 351 rects, 1 sprite cell(s).
+/// `mcp_env.png` — 65x32, 351 rects, 3 sprite cell(s).
 pub const MCP_ENV: ArtData = ArtData {
     name: "mcp_env",
     width: 65,
     height: 32,
     offset: 684816,
     count: 351,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_env_latch.png` — 65x32, 356 rects, 1 sprite cell(s).
+/// `mcp_env_latch.png` — 65x32, 356 rects, 3 sprite cell(s).
 pub const MCP_ENV_LATCH: ArtData = ArtData {
     name: "mcp_env_latch",
     width: 65,
     height: 32,
     offset: 689028,
     count: 356,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_env_preview.png` — 65x32, 342 rects, 1 sprite cell(s).
+/// `mcp_env_preview.png` — 65x32, 342 rects, 3 sprite cell(s).
 pub const MCP_ENV_PREVIEW: ArtData = ArtData {
     name: "mcp_env_preview",
     width: 65,
     height: 32,
     offset: 693300,
     count: 342,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_env_read.png` — 65x32, 363 rects, 1 sprite cell(s).
+/// `mcp_env_read.png` — 65x32, 363 rects, 3 sprite cell(s).
 pub const MCP_ENV_READ: ArtData = ArtData {
     name: "mcp_env_read",
     width: 65,
     height: 32,
     offset: 697404,
     count: 363,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_env_touch.png` — 65x32, 267 rects, 1 sprite cell(s).
+/// `mcp_env_touch.png` — 65x32, 267 rects, 3 sprite cell(s).
 pub const MCP_ENV_TOUCH: ArtData = ArtData {
     name: "mcp_env_touch",
     width: 65,
     height: 32,
     offset: 701760,
     count: 267,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_env_write.png` — 65x32, 381 rects, 1 sprite cell(s).
+/// `mcp_env_write.png` — 65x32, 381 rects, 3 sprite cell(s).
 pub const MCP_ENV_WRITE: ArtData = ArtData {
     name: "mcp_env_write",
     width: 65,
     height: 32,
     offset: 704964,
     count: 381,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `mcp_extmixbg.png` — 3x3, 3 rects, 1 sprite cell(s).
@@ -1746,14 +1746,14 @@ pub const MCP_EXTMIXBGSEL: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `mcp_fcomp_off.png` — 149x23, 95 rects, 1 sprite cell(s).
+/// `mcp_fcomp_off.png` — 149x23, 95 rects, 3 sprite cell(s).
 pub const MCP_FCOMP_OFF: ArtData = ArtData {
     name: "mcp_fcomp_off",
     width: 149,
     height: 23,
     offset: 709584,
     count: 95,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `mcp_fcomp_tiny.png` — 149x23, 111 rects, 1 sprite cell(s).
@@ -1786,24 +1786,24 @@ pub const MCP_FOLDER_ON: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `mcp_fx_dis.png` — 86x22, 372 rects, 1 sprite cell(s).
+/// `mcp_fx_dis.png` — 86x22, 372 rects, 3 sprite cell(s).
 pub const MCP_FX_DIS: ArtData = ArtData {
     name: "mcp_fx_dis",
     width: 86,
     height: 22,
     offset: 712908,
     count: 372,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_fx_empty.png` — 86x22, 378 rects, 1 sprite cell(s).
+/// `mcp_fx_empty.png` — 86x22, 378 rects, 3 sprite cell(s).
 pub const MCP_FX_EMPTY: ArtData = ArtData {
     name: "mcp_fx_empty",
     width: 86,
     height: 22,
     offset: 717372,
     count: 378,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `mcp_fx_in_empty.png` — 225x12, 421 rects, 1 sprite cell(s).
@@ -1846,14 +1846,14 @@ pub const MCP_FX_IN_NORM_OL_2: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `mcp_fx_norm.png` — 86x22, 381 rects, 1 sprite cell(s).
+/// `mcp_fx_norm.png` — 86x22, 381 rects, 3 sprite cell(s).
 pub const MCP_FX_NORM: ArtData = ArtData {
     name: "mcp_fx_norm",
     width: 86,
     height: 22,
     offset: 742452,
     count: 381,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `mcp_fxlist_bg.png` — 44x6, 1 rects, 1 sprite cell(s).
@@ -2006,84 +2006,84 @@ pub const MCP_IDXBG_SEL: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `mcp_io.png` — 71x32, 563 rects, 1 sprite cell(s).
+/// `mcp_io.png` — 71x32, 563 rects, 3 sprite cell(s).
 pub const MCP_IO: ArtData = ArtData {
     name: "mcp_io",
     width: 71,
     height: 32,
     offset: 822852,
     count: 563,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_io_dis.png` — 71x32, 513 rects, 1 sprite cell(s).
+/// `mcp_io_dis.png` — 71x32, 513 rects, 3 sprite cell(s).
 pub const MCP_IO_DIS: ArtData = ArtData {
     name: "mcp_io_dis",
     width: 71,
     height: 32,
     offset: 829608,
     count: 513,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_io_r.png` — 71x32, 594 rects, 1 sprite cell(s).
+/// `mcp_io_r.png` — 71x32, 594 rects, 3 sprite cell(s).
 pub const MCP_IO_R: ArtData = ArtData {
     name: "mcp_io_r",
     width: 71,
     height: 32,
     offset: 835764,
     count: 594,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_io_r_dis.png` — 71x32, 552 rects, 1 sprite cell(s).
+/// `mcp_io_r_dis.png` — 71x32, 552 rects, 3 sprite cell(s).
 pub const MCP_IO_R_DIS: ArtData = ArtData {
     name: "mcp_io_r_dis",
     width: 71,
     height: 32,
     offset: 842892,
     count: 552,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_io_s.png` — 71x32, 585 rects, 1 sprite cell(s).
+/// `mcp_io_s.png` — 71x32, 585 rects, 3 sprite cell(s).
 pub const MCP_IO_S: ArtData = ArtData {
     name: "mcp_io_s",
     width: 71,
     height: 32,
     offset: 849516,
     count: 585,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_io_s_dis.png` — 71x32, 554 rects, 1 sprite cell(s).
+/// `mcp_io_s_dis.png` — 71x32, 554 rects, 3 sprite cell(s).
 pub const MCP_IO_S_DIS: ArtData = ArtData {
     name: "mcp_io_s_dis",
     width: 71,
     height: 32,
     offset: 856536,
     count: 554,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_io_s_r.png` — 71x32, 618 rects, 1 sprite cell(s).
+/// `mcp_io_s_r.png` — 71x32, 618 rects, 3 sprite cell(s).
 pub const MCP_IO_S_R: ArtData = ArtData {
     name: "mcp_io_s_r",
     width: 71,
     height: 32,
     offset: 863184,
     count: 618,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_io_s_r_dis.png` — 71x32, 581 rects, 1 sprite cell(s).
+/// `mcp_io_s_r_dis.png` — 71x32, 581 rects, 3 sprite cell(s).
 pub const MCP_IO_S_R_DIS: ArtData = ArtData {
     name: "mcp_io_s_r_dis",
     width: 71,
     height: 32,
     offset: 870600,
     count: 581,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `mcp_main_namebg.png` — 8x9, 8 rects, 2 sprite cell(s).
@@ -2176,44 +2176,44 @@ pub const MCP_MASTER_VOLTHUMB: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `mcp_monitor_auto.png` — 63x20, 633 rects, 1 sprite cell(s).
+/// `mcp_monitor_auto.png` — 63x20, 633 rects, 3 sprite cell(s).
 pub const MCP_MONITOR_AUTO: ArtData = ArtData {
     name: "mcp_monitor_auto",
     width: 63,
     height: 20,
     offset: 883260,
     count: 633,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_monitor_off.png` — 63x20, 840 rects, 1 sprite cell(s).
+/// `mcp_monitor_off.png` — 63x20, 840 rects, 3 sprite cell(s).
 pub const MCP_MONITOR_OFF: ArtData = ArtData {
     name: "mcp_monitor_off",
     width: 63,
     height: 20,
     offset: 890856,
     count: 840,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_monitor_on.png` — 63x20, 682 rects, 1 sprite cell(s).
+/// `mcp_monitor_on.png` — 63x20, 682 rects, 3 sprite cell(s).
 pub const MCP_MONITOR_ON: ArtData = ArtData {
     name: "mcp_monitor_on",
     width: 63,
     height: 20,
     offset: 900936,
     count: 682,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `mcp_mono.png` — 77x35, 1332 rects, 1 sprite cell(s).
+/// `mcp_mono.png` — 77x35, 1332 rects, 3 sprite cell(s).
 pub const MCP_MONO: ArtData = ArtData {
     name: "mcp_mono",
     width: 77,
     height: 35,
     offset: 909120,
     count: 1332,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `mcp_mute_off.png` — 63x20, 357 rects, 3 sprite cell(s).
@@ -2406,14 +2406,14 @@ pub const MCP_RECMODE_OFF: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `mcp_recmode_out.png` — 125x18, 467 rects, 1 sprite cell(s).
+/// `mcp_recmode_out.png` — 125x18, 467 rects, 3 sprite cell(s).
 pub const MCP_RECMODE_OUT: ArtData = ArtData {
     name: "mcp_recmode_out",
     width: 125,
     height: 18,
     offset: 1013844,
     count: 467,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `mcp_send_knob_stack.png` — 23x1150, 5036 rects, 1 sprite cell(s).
@@ -2516,14 +2516,14 @@ pub const MCP_SOLODEFEAT_ON: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `mcp_stereo.png` — 77x35, 863 rects, 1 sprite cell(s).
+/// `mcp_stereo.png` — 77x35, 863 rects, 3 sprite cell(s).
 pub const MCP_STEREO: ArtData = ArtData {
     name: "mcp_stereo",
     width: 77,
     height: 35,
     offset: 1106448,
     count: 863,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `mcp_volbg.png` — 23x55, 5 rects, 1 sprite cell(s).
@@ -2726,14 +2726,14 @@ pub const METER_STRIP_H_RMS: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `meter_strip_v.png` — 32x168, 238 rects, 2 sprite cell(s).
+/// `meter_strip_v.png` — 32x168, 238 rects, 4 sprite cell(s).
 pub const METER_STRIP_V: ArtData = ArtData {
     name: "meter_strip_v",
     width: 32,
     height: 168,
     offset: 1136172,
     count: 238,
-    cells: 2,
+    cells: 4,
     blob: BLOB,
 };
 /// `meter_strip_v_rms.png` — 32x2, 8 rects, 4 sprite cell(s).
@@ -3076,14 +3076,14 @@ pub const TAB_UP_SEL: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `table_expand_off.png` — 48x16, 21 rects, 1 sprite cell(s).
+/// `table_expand_off.png` — 48x16, 21 rects, 3 sprite cell(s).
 pub const TABLE_EXPAND_OFF: ArtData = ArtData {
     name: "table_expand_off",
     width: 48,
     height: 16,
     offset: 1428420,
     count: 21,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `table_expand_on.png` — 48x16, 27 rects, 3 sprite cell(s).
@@ -3206,24 +3206,24 @@ pub const TABLE_SOLO_ON: ArtData = ArtData {
     cells: 4,
     blob: BLOB,
 };
-/// `table_sub_expand_off.png` — 48x16, 69 rects, 1 sprite cell(s).
+/// `table_sub_expand_off.png` — 48x16, 69 rects, 3 sprite cell(s).
 pub const TABLE_SUB_EXPAND_OFF: ArtData = ArtData {
     name: "table_sub_expand_off",
     width: 48,
     height: 16,
     offset: 1452492,
     count: 69,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `table_sub_expand_on.png` — 48x16, 37 rects, 1 sprite cell(s).
+/// `table_sub_expand_on.png` — 48x16, 37 rects, 3 sprite cell(s).
 pub const TABLE_SUB_EXPAND_ON: ArtData = ArtData {
     name: "table_sub_expand_on",
     width: 48,
     height: 16,
     offset: 1453320,
     count: 37,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `table_target_invalid.png` — 48x16, 42 rects, 3 sprite cell(s).
@@ -3956,14 +3956,14 @@ pub const TOOLBAR_BLANK: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `toolbar_blank_inverted.png` — 90x30, 37 rects, 1 sprite cell(s).
+/// `toolbar_blank_inverted.png` — 90x30, 37 rects, 3 sprite cell(s).
 pub const TOOLBAR_BLANK_INVERTED: ArtData = ArtData {
     name: "toolbar_blank_inverted",
     width: 90,
     height: 30,
     offset: 1902816,
     count: 37,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `toolbar_clip_properties.png` — 90x30, 549 rects, 3 sprite cell(s).
@@ -4196,14 +4196,14 @@ pub const TOOLBAR_CPU_PROPERTIES_PERFORMANCE: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `toolbar_delete.png` — 90x30, 231 rects, 1 sprite cell(s).
+/// `toolbar_delete.png` — 90x30, 231 rects, 3 sprite cell(s).
 pub const TOOLBAR_DELETE: ArtData = ArtData {
     name: "toolbar_delete",
     width: 90,
     height: 30,
     offset: 1965852,
     count: 231,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `toolbar_disk_properties_resource_path.png` — 90x30, 318 rects, 3 sprite cell(s).
@@ -4586,14 +4586,14 @@ pub const TOOLBAR_ENVELOPE_SHOW: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `toolbar_envelope_tempo_time_clock.png` — 90x30, 416 rects, 1 sprite cell(s).
+/// `toolbar_envelope_tempo_time_clock.png` — 90x30, 416 rects, 3 sprite cell(s).
 pub const TOOLBAR_ENVELOPE_TEMPO_TIME_CLOCK: ArtData = ArtData {
     name: "toolbar_envelope_tempo_time_clock",
     width: 90,
     height: 30,
     offset: 2097120,
     count: 416,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `toolbar_envelope_time_selection.png` — 90x30, 147 rects, 3 sprite cell(s).
@@ -5156,14 +5156,14 @@ pub const TOOLBAR_GROUP_ON: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `toolbar_group_record.png` — 90x30, 789 rects, 1 sprite cell(s).
+/// `toolbar_group_record.png` — 90x30, 789 rects, 3 sprite cell(s).
 pub const TOOLBAR_GROUP_RECORD: ArtData = ArtData {
     name: "toolbar_group_record",
     width: 90,
     height: 30,
     offset: 2368332,
     count: 789,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `toolbar_group_ungroup_remove_item.png` — 90x30, 510 rects, 3 sprite cell(s).
@@ -6766,14 +6766,14 @@ pub const TOOLBAR_MISC_FIREWIRE: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `toolbar_misc_game.png` — 90x30, 57 rects, 1 sprite cell(s).
+/// `toolbar_misc_game.png` — 90x30, 57 rects, 3 sprite cell(s).
 pub const TOOLBAR_MISC_GAME: ArtData = ArtData {
     name: "toolbar_misc_game",
     width: 90,
     height: 30,
     offset: 2820240,
     count: 57,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `toolbar_misc_guitar.png` — 90x30, 314 rects, 3 sprite cell(s).
@@ -7316,14 +7316,14 @@ pub const TOOLBAR_PITCH_PRESERVE_LOCK: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `toolbar_preroll_clock.png` — 90x30, 454 rects, 1 sprite cell(s).
+/// `toolbar_preroll_clock.png` — 90x30, 454 rects, 3 sprite cell(s).
 pub const TOOLBAR_PREROLL_CLOCK: ArtData = ArtData {
     name: "toolbar_preroll_clock",
     width: 90,
     height: 30,
     offset: 2967444,
     count: 454,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `toolbar_preroll_clock_record.png` — 90x30, 587 rects, 3 sprite cell(s).
@@ -7776,14 +7776,14 @@ pub const TOOLBAR_RIPPLE_ON: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `toolbar_ripple_one.png` — 90x30, 210 rects, 1 sprite cell(s).
+/// `toolbar_ripple_one.png` — 90x30, 210 rects, 3 sprite cell(s).
 pub const TOOLBAR_RIPPLE_ONE: ArtData = ArtData {
     name: "toolbar_ripple_one",
     width: 90,
     height: 30,
     offset: 3171924,
     count: 210,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `toolbar_save.png` — 90x30, 369 rects, 1 sprite cell(s).
@@ -8316,14 +8316,14 @@ pub const TOOLBAR_TIME_BEATS: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `toolbar_time_clock.png` — 90x30, 431 rects, 1 sprite cell(s).
+/// `toolbar_time_clock.png` — 90x30, 431 rects, 3 sprite cell(s).
 pub const TOOLBAR_TIME_CLOCK: ArtData = ArtData {
     name: "toolbar_time_clock",
     width: 90,
     height: 30,
     offset: 3353160,
     count: 431,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `toolbar_time_clock_properties.png` — 90x30, 456 rects, 3 sprite cell(s).
@@ -8416,14 +8416,14 @@ pub const TOOLBAR_TIME_SELECTION_FIT_ITEM_SELECTED: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `toolbar_time_selection_item_cut.png` — 90x30, 275 rects, 1 sprite cell(s).
+/// `toolbar_time_selection_item_cut.png` — 90x30, 275 rects, 3 sprite cell(s).
 pub const TOOLBAR_TIME_SELECTION_ITEM_CUT: ArtData = ArtData {
     name: "toolbar_time_selection_item_cut",
     width: 90,
     height: 30,
     offset: 3400092,
     count: 275,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `toolbar_time_selection_item_delete_remove.png` — 90x30, 207 rects, 3 sprite cell(s).
@@ -8526,14 +8526,14 @@ pub const TOOLBAR_TIME_SELECTION_RIGHT: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `toolbar_time_stretch.png` — 90x30, 405 rects, 1 sprite cell(s).
+/// `toolbar_time_stretch.png` — 90x30, 405 rects, 3 sprite cell(s).
 pub const TOOLBAR_TIME_STRETCH: ArtData = ArtData {
     name: "toolbar_time_stretch",
     width: 90,
     height: 30,
     offset: 3420600,
     count: 405,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `toolbar_timebase_beats_position.png` — 90x30, 87 rects, 3 sprite cell(s).
@@ -8626,14 +8626,14 @@ pub const TOOLBAR_TOOL_PENCIL_DRAW: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `toolbar_tool_razor_blade.png` — 90x30, 245 rects, 1 sprite cell(s).
+/// `toolbar_tool_razor_blade.png` — 90x30, 245 rects, 3 sprite cell(s).
 pub const TOOLBAR_TOOL_RAZOR_BLADE: ArtData = ArtData {
     name: "toolbar_tool_razor_blade",
     width: 90,
     height: 30,
     offset: 3447948,
     count: 245,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `toolbar_tool_scissors_cut_trim.png` — 90x30, 288 rects, 3 sprite cell(s).
@@ -9226,14 +9226,14 @@ pub const TOOLBAR_WINDOW_TAB_SCREENSET_LAYOUT: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `toolbar_window_tab_undo_history.png` — 90x30, 412 rects, 1 sprite cell(s).
+/// `toolbar_window_tab_undo_history.png` — 90x30, 412 rects, 3 sprite cell(s).
 pub const TOOLBAR_WINDOW_TAB_UNDO_HISTORY: ArtData = ArtData {
     name: "toolbar_window_tab_undo_history",
     width: 90,
     height: 30,
     offset: 3591132,
     count: 412,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `toolbar_window_tab_video.png` — 90x30, 219 rects, 3 sprite cell(s).
@@ -9406,54 +9406,54 @@ pub const TRACK_ENV: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `track_env_latch.png` — 60x20, 249 rects, 4 sprite cell(s).
+/// `track_env_latch.png` — 60x20, 249 rects, 3 sprite cell(s).
 pub const TRACK_ENV_LATCH: ArtData = ArtData {
     name: "track_env_latch",
     width: 60,
     height: 20,
     offset: 3654792,
     count: 249,
-    cells: 4,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_env_preview.png` — 60x20, 288 rects, 4 sprite cell(s).
+/// `track_env_preview.png` — 60x20, 288 rects, 3 sprite cell(s).
 pub const TRACK_ENV_PREVIEW: ArtData = ArtData {
     name: "track_env_preview",
     width: 60,
     height: 20,
     offset: 3657780,
     count: 288,
-    cells: 4,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_env_read.png` — 60x20, 306 rects, 4 sprite cell(s).
+/// `track_env_read.png` — 60x20, 306 rects, 3 sprite cell(s).
 pub const TRACK_ENV_READ: ArtData = ArtData {
     name: "track_env_read",
     width: 60,
     height: 20,
     offset: 3661236,
     count: 306,
-    cells: 4,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_env_touch.png` — 60x20, 270 rects, 4 sprite cell(s).
+/// `track_env_touch.png` — 60x20, 270 rects, 3 sprite cell(s).
 pub const TRACK_ENV_TOUCH: ArtData = ArtData {
     name: "track_env_touch",
     width: 60,
     height: 20,
     offset: 3664908,
     count: 270,
-    cells: 4,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_env_write.png` — 60x20, 369 rects, 4 sprite cell(s).
+/// `track_env_write.png` — 60x20, 369 rects, 3 sprite cell(s).
 pub const TRACK_ENV_WRITE: ArtData = ArtData {
     name: "track_env_write",
     width: 60,
     height: 20,
     offset: 3668148,
     count: 369,
-    cells: 4,
+    cells: 3,
     blob: BLOB,
 };
 /// `track_fcomp_off.png` — 51x13, 201 rects, 1 sprite cell(s).
@@ -9466,24 +9466,24 @@ pub const TRACK_FCOMP_OFF: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `track_fcomp_small.png` — 51x13, 187 rects, 1 sprite cell(s).
+/// `track_fcomp_small.png` — 51x13, 187 rects, 3 sprite cell(s).
 pub const TRACK_FCOMP_SMALL: ArtData = ArtData {
     name: "track_fcomp_small",
     width: 51,
     height: 13,
     offset: 3674988,
     count: 187,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_fcomp_tiny.png` — 51x13, 203 rects, 1 sprite cell(s).
+/// `track_fcomp_tiny.png` — 51x13, 203 rects, 3 sprite cell(s).
 pub const TRACK_FCOMP_TINY: ArtData = ArtData {
     name: "track_fcomp_tiny",
     width: 51,
     height: 13,
     offset: 3677232,
     count: 203,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `track_folder_last.png` — 54x14, 92 rects, 1 sprite cell(s).
@@ -9516,14 +9516,14 @@ pub const TRACK_FOLDER_ON: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `track_fx_dis.png` — 62x22, 411 rects, 1 sprite cell(s).
+/// `track_fx_dis.png` — 62x22, 411 rects, 3 sprite cell(s).
 pub const TRACK_FX_DIS: ArtData = ArtData {
     name: "track_fx_dis",
     width: 62,
     height: 22,
     offset: 3682980,
     count: 411,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `track_fx_empty.png` — 62x22, 402 rects, 1 sprite cell(s).
@@ -9546,14 +9546,14 @@ pub const TRACK_FX_IN_EMPTY: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `track_fx_in_norm.png` — 88x20, 300 rects, 1 sprite cell(s).
+/// `track_fx_in_norm.png` — 88x20, 300 rects, 3 sprite cell(s).
 pub const TRACK_FX_IN_NORM: ArtData = ArtData {
     name: "track_fx_in_norm",
     width: 88,
     height: 20,
     offset: 3695448,
     count: 300,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `track_fx_norm.png` — 62x22, 405 rects, 1 sprite cell(s).
@@ -9566,34 +9566,34 @@ pub const TRACK_FX_NORM: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `track_fxempty_h.png` — 50x22, 251 rects, 1 sprite cell(s).
+/// `track_fxempty_h.png` — 50x22, 251 rects, 3 sprite cell(s).
 pub const TRACK_FXEMPTY_H: ArtData = ArtData {
     name: "track_fxempty_h",
     width: 50,
     height: 22,
     offset: 3703908,
     count: 251,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_fxempty_v.png` — 56x22, 225 rects, 1 sprite cell(s).
+/// `track_fxempty_v.png` — 56x22, 225 rects, 3 sprite cell(s).
 pub const TRACK_FXEMPTY_V: ArtData = ArtData {
     name: "track_fxempty_v",
     width: 56,
     height: 22,
     offset: 3706920,
     count: 225,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_fxoff_h.png` — 50x22, 261 rects, 1 sprite cell(s).
+/// `track_fxoff_h.png` — 50x22, 261 rects, 3 sprite cell(s).
 pub const TRACK_FXOFF_H: ArtData = ArtData {
     name: "track_fxoff_h",
     width: 50,
     height: 22,
     offset: 3709620,
     count: 261,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `track_fxoff_v.png` — 56x22, 258 rects, 1 sprite cell(s).
@@ -9606,104 +9606,104 @@ pub const TRACK_FXOFF_V: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `track_fxon_h.png` — 50x22, 270 rects, 1 sprite cell(s).
+/// `track_fxon_h.png` — 50x22, 270 rects, 3 sprite cell(s).
 pub const TRACK_FXON_H: ArtData = ArtData {
     name: "track_fxon_h",
     width: 50,
     height: 22,
     offset: 3715848,
     count: 270,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_fxon_v.png` — 56x22, 273 rects, 1 sprite cell(s).
+/// `track_fxon_v.png` — 56x22, 273 rects, 3 sprite cell(s).
 pub const TRACK_FXON_V: ArtData = ArtData {
     name: "track_fxon_v",
     width: 56,
     height: 22,
     offset: 3719088,
     count: 273,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_io.png` — 86x22, 581 rects, 1 sprite cell(s).
+/// `track_io.png` — 86x22, 581 rects, 3 sprite cell(s).
 pub const TRACK_IO: ArtData = ArtData {
     name: "track_io",
     width: 86,
     height: 22,
     offset: 3722364,
     count: 581,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_io_dis.png` — 86x22, 521 rects, 1 sprite cell(s).
+/// `track_io_dis.png` — 86x22, 521 rects, 3 sprite cell(s).
 pub const TRACK_IO_DIS: ArtData = ArtData {
     name: "track_io_dis",
     width: 86,
     height: 22,
     offset: 3729336,
     count: 521,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_io_r.png` — 86x22, 521 rects, 1 sprite cell(s).
+/// `track_io_r.png` — 86x22, 521 rects, 3 sprite cell(s).
 pub const TRACK_IO_R: ArtData = ArtData {
     name: "track_io_r",
     width: 86,
     height: 22,
     offset: 3735588,
     count: 521,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_io_r_dis.png` — 86x22, 521 rects, 1 sprite cell(s).
+/// `track_io_r_dis.png` — 86x22, 521 rects, 3 sprite cell(s).
 pub const TRACK_IO_R_DIS: ArtData = ArtData {
     name: "track_io_r_dis",
     width: 86,
     height: 22,
     offset: 3741840,
     count: 521,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_io_s.png` — 86x22, 521 rects, 1 sprite cell(s).
+/// `track_io_s.png` — 86x22, 521 rects, 3 sprite cell(s).
 pub const TRACK_IO_S: ArtData = ArtData {
     name: "track_io_s",
     width: 86,
     height: 22,
     offset: 3748092,
     count: 521,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_io_s_dis.png` — 86x22, 521 rects, 1 sprite cell(s).
+/// `track_io_s_dis.png` — 86x22, 521 rects, 3 sprite cell(s).
 pub const TRACK_IO_S_DIS: ArtData = ArtData {
     name: "track_io_s_dis",
     width: 86,
     height: 22,
     offset: 3754344,
     count: 521,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_io_s_r.png` — 86x22, 521 rects, 1 sprite cell(s).
+/// `track_io_s_r.png` — 86x22, 521 rects, 3 sprite cell(s).
 pub const TRACK_IO_S_R: ArtData = ArtData {
     name: "track_io_s_r",
     width: 86,
     height: 22,
     offset: 3760596,
     count: 521,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
-/// `track_io_s_r_dis.png` — 86x22, 521 rects, 1 sprite cell(s).
+/// `track_io_s_r_dis.png` — 86x22, 521 rects, 3 sprite cell(s).
 pub const TRACK_IO_S_R_DIS: ArtData = ArtData {
     name: "track_io_s_r_dis",
     width: 86,
     height: 22,
     offset: 3766848,
     count: 521,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `track_monitor_auto.png` — 47x24, 248 rects, 1 sprite cell(s).
@@ -9716,14 +9716,14 @@ pub const TRACK_MONITOR_AUTO: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `track_monitor_off.png` — 47x24, 306 rects, 1 sprite cell(s).
+/// `track_monitor_off.png` — 47x24, 306 rects, 3 sprite cell(s).
 pub const TRACK_MONITOR_OFF: ArtData = ArtData {
     name: "track_monitor_off",
     width: 47,
     height: 24,
     offset: 3776076,
     count: 306,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `track_monitor_on.png` — 47x24, 225 rects, 1 sprite cell(s).
@@ -9816,14 +9816,14 @@ pub const TRACK_RECARM_AUTO_ON: ArtData = ArtData {
     cells: 3,
     blob: BLOB,
 };
-/// `track_recarm_norec.png` — 60x20, 364 rects, 1 sprite cell(s).
+/// `track_recarm_norec.png` — 60x20, 364 rects, 3 sprite cell(s).
 pub const TRACK_RECARM_NOREC: ArtData = ArtData {
     name: "track_recarm_norec",
     width: 60,
     height: 20,
     offset: 3837120,
     count: 364,
-    cells: 1,
+    cells: 3,
     blob: BLOB,
 };
 /// `track_recarm_off.png` — 60x20, 264 rects, 3 sprite cell(s).
@@ -9926,14 +9926,14 @@ pub const TRANSPORT_BG: ArtData = ArtData {
     cells: 1,
     blob: BLOB,
 };
-/// `transport_bpm.png` — 92x26, 62 rects, 1 sprite cell(s).
+/// `transport_bpm.png` — 92x26, 62 rects, 2 sprite cell(s).
 pub const TRANSPORT_BPM: ArtData = ArtData {
     name: "transport_bpm",
     width: 92,
     height: 26,
     offset: 3887040,
     count: 62,
-    cells: 1,
+    cells: 2,
     blob: BLOB,
 };
 /// `transport_bpm_bg.png` — 6x10, 0 rects, 1 sprite cell(s).
