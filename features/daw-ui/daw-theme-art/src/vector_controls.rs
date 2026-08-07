@@ -91,6 +91,14 @@ fn ink(lit: Option<Color>, at: Interaction) -> Ink {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct LabelButtonProps {
+    /// Where the button sits in its cell: `(top, height)` as fractions.
+    ///
+    /// The mixer's buttons fill their cell; the track panel's are inset a
+    /// row at the top and three at the bottom — `track_mute_on` draws rows
+    /// 1..20 of 24, and the magenta guide runs to row 20 to say so.
+    /// Filling the cell there pushed the button past its own guide.
+    #[props(default = (0.0, 1.0))]
+    pub body: (f32, f32),
     pub label: String,
     /// Face colour when engaged. `None` draws the resting state.
     #[props(default)]
@@ -125,6 +133,7 @@ pub struct LabelButtonProps {
 pub fn LabelButton(props: LabelButtonProps) -> Element {
     let k = ink(props.lit, props.at);
     let (vw, vh) = props.cell;
+    let (body_y, body_h) = (vh * props.body.0, vh * props.body.1);
     let id = format!("lb{}", props.label.replace(' ', ""));
     // Corners are barely rounded in the original — a large radius is what
     // makes a redraw look like a generic UI kit rather than this theme.
@@ -143,10 +152,10 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
                     stop { offset: "1", stop_color: "{k.face.shade(-0.10).css()}" }
                 }
             }
-            // Body, inset by half the border so the stroke sits inside.
+            // Inset by half the border so the stroke sits inside.
             rect {
-                x: "{edge / 2.0}", y: "{edge / 2.0}",
-                width: "{vw - edge}", height: "{vh - edge}",
+                x: "{edge / 2.0}", y: "{body_y + edge / 2.0}",
+                width: "{vw - edge}", height: "{body_h - edge}",
                 rx: "{r}",
                 fill: "url(#{id})",
                 stroke: "{k.border.css()}",
@@ -154,7 +163,7 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
             }
             // The highlight row just inside the top edge.
             rect {
-                x: "{vw * 0.1}", y: "{edge + vh * 0.01}",
+                x: "{vw * 0.1}", y: "{body_y + edge + vh * 0.01}",
                 width: "{vw * 0.8}", height: "{vh * 0.05}",
                 fill: "{k.face.shade(0.22).css()}",
                 fill_opacity: "0.9",
@@ -167,7 +176,7 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
                 // the font's own middle, which put it a further half-pixel
                 // down. Sitting it at 0.54 rendered a full row low in every
                 // one of mute, solo and FX.
-                y: "{vh * 0.49}",
+                y: "{body_y + body_h * 0.49}",
                 text_anchor: "middle", dominant_baseline: "central",
                 font_family: "Fira Sans, DejaVu Sans, sans-serif",
                 // Heavier and larger than the measured glyph height: at
@@ -187,6 +196,14 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ToggleProps {
+    /// Where the button sits in its cell: `(top, height)` as fractions.
+    ///
+    /// The mixer's buttons fill their cell; the track panel's are inset a
+    /// row at the top and three at the bottom — `track_mute_on` draws rows
+    /// 1..20 of 24, and the magenta guide runs to row 20 to say so.
+    /// Filling the cell there pushed the button past its own guide.
+    #[props(default = (0.0, 1.0))]
+    pub body: (f32, f32),
     #[props(default)]
     pub on: bool,
     /// The cell this replaces: `mcp_mute_*` is 21x20, `track_mute_*` 22x24.
@@ -208,7 +225,7 @@ pub fn MuteButton(props: ToggleProps) -> Element {
         LabelButton {
             label: "M",
             lit: props.on.then_some(t.signal.mute),
-            cell: props.cell,
+            cell: props.cell, body: props.body,
             width: props.width, height: props.height, at: props.at,
         }
     }
@@ -216,6 +233,14 @@ pub fn MuteButton(props: ToggleProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct SoloProps {
+    /// Where the button sits in its cell: `(top, height)` as fractions.
+    ///
+    /// The mixer's buttons fill their cell; the track panel's are inset a
+    /// row at the top and three at the bottom — `track_mute_on` draws rows
+    /// 1..20 of 24, and the magenta guide runs to row 20 to say so.
+    /// Filling the cell there pushed the button past its own guide.
+    #[props(default = (0.0, 1.0))]
+    pub body: (f32, f32),
     #[props(default)]
     pub state: Solo,
     /// The cell this replaces: `mcp_mute_*` is 21x20, `track_mute_*` 22x24.
@@ -242,7 +267,7 @@ pub fn SoloButton(props: SoloProps) -> Element {
     };
     rsx! {
         LabelButton {
-            label: "S", lit, cell: props.cell,
+            label: "S", lit, cell: props.cell, body: props.body,
             width: props.width, height: props.height, at: props.at,
         }
     }
@@ -1104,8 +1129,8 @@ mod tests {
         let n = (None, None);
         let cases: [(&str, String); 7] = [
             ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { cell: (36.0, 24.0), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { cell: (21.0, 20.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_solo_on", render_svg(SoloButton, SoloProps { cell: (21.0, 20.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_solo_on", render_svg(SoloButton, SoloProps { cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_fx_norm", render_svg(FxButton, FxProps { cell: (28.0, 22.0), body: 18.0 / 22.0, state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
@@ -1141,6 +1166,7 @@ mod tests {
                 render_svg(
                     MuteButton,
                     ToggleProps {
+                        body: (0.0, 1.0),
                         cell: (21.0, 20.0),
                         on: true,
                         width: w,
@@ -1151,6 +1177,7 @@ mod tests {
                 render_svg(
                     SoloButton,
                     SoloProps {
+                        body: (0.0, 1.0),
                         cell: (21.0, 20.0),
                         state: Solo::Defeat,
                         width: w,
@@ -1245,6 +1272,7 @@ mod tests {
         let small = render_svg(
             MuteButton,
             ToggleProps {
+                body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 on: false,
                 width: Some(21),
@@ -1255,6 +1283,7 @@ mod tests {
         let large = render_svg(
             MuteButton,
             ToggleProps {
+                body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 on: false,
                 width: Some(210),
@@ -1332,6 +1361,7 @@ mod tests {
         let n = render_svg(
             MuteButton,
             ToggleProps {
+                body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 on: false,
                 width: None,
@@ -1342,6 +1372,7 @@ mod tests {
         let h = render_svg(
             MuteButton,
             ToggleProps {
+                body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 on: false,
                 width: None,
@@ -1352,6 +1383,7 @@ mod tests {
         let p = render_svg(
             MuteButton,
             ToggleProps {
+                body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 on: false,
                 width: None,
@@ -1369,6 +1401,7 @@ mod tests {
         let off = render_svg(
             SoloButton,
             SoloProps {
+                body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 state: Solo::Off,
                 width: None,
@@ -1379,6 +1412,7 @@ mod tests {
         let on = render_svg(
             SoloButton,
             SoloProps {
+                body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 state: Solo::On,
                 width: None,
@@ -1389,6 +1423,7 @@ mod tests {
         let defeat = render_svg(
             SoloButton,
             SoloProps {
+                body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 state: Solo::Defeat,
                 width: None,

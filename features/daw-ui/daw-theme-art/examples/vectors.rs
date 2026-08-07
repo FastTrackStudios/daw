@@ -40,6 +40,7 @@ fn main() {
             &render_svg(
                 MuteButton,
                 ToggleProps {
+                    body: (0.0, 1.0),
                     cell: (21.0, 20.0),
                     on: false,
                     width: None,
@@ -54,6 +55,7 @@ fn main() {
             &render_svg(
                 MuteButton,
                 ToggleProps {
+                    body: (0.0, 1.0),
                     cell: (21.0, 20.0),
                     on: true,
                     width: None,
@@ -68,6 +70,7 @@ fn main() {
             &render_svg(
                 SoloButton,
                 SoloProps {
+                    body: (0.0, 1.0),
                     cell: (21.0, 20.0),
                     state: Solo::On,
                     width: None,
@@ -82,6 +85,7 @@ fn main() {
             &render_svg(
                 SoloButton,
                 SoloProps {
+                    body: (0.0, 1.0),
                     cell: (21.0, 20.0),
                     state: Solo::Defeat,
                     width: None,

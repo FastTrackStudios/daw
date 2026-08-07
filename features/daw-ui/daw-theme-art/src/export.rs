@@ -70,12 +70,20 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         )
     };
     let label_cell = if track { (22.0, 24.0) } else { (21.0, 20.0) };
+    // Traced: the track panel's buttons occupy rows 1..20 of a 24-row
+    // cell; the mixer's fill theirs.
+    let label_body = if track {
+        (1.0 / 24.0, 20.0 / 24.0)
+    } else {
+        (0.0, 1.0)
+    };
     let mute = |on| {
         render_svg(
             v::MuteButton,
             v::ToggleProps {
                 on,
                 cell: label_cell,
+                body: label_body,
                 width: n.0,
                 height: n.1,
                 at,
@@ -88,6 +96,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::SoloProps {
                 state,
                 cell: label_cell,
+                body: label_body,
                 width: n.0,
                 height: n.1,
                 at,
