@@ -90,6 +90,16 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Render the component-drawn artwork into the theme
+    ///
+    /// Each image is drawn by a Dioxus component and rasterised from the
+    /// vector at 100/150/200 % — the same components the web GUI renders
+    /// live. Replaces the inherited art rather than recolouring it.
+    Generate {
+        /// Report what would be written without writing.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Screenshot a real REAPER wearing this theme, on a private X display.
     Shot {
         /// Output PNG.
@@ -241,6 +251,25 @@ fn main() -> Result<()> {
             if !report.failed.is_empty() {
                 println!("{} failed", report.failed.len());
             }
+        }
+
+        Command::Generate { dry_run } => {
+            let report = fts_themer::generate::generate(&theme, dry_run)?;
+            for (name, err) in &report.failed {
+                eprintln!("FAILED {name}: {err}");
+            }
+            for path in &report.written {
+                println!("wrote {}", path.display());
+            }
+            println!(
+                "\n{} images generated{}",
+                report.written.len(),
+                if dry_run {
+                    " (dry run — nothing written)"
+                } else {
+                    ""
+                }
+            );
         }
 
         Command::Shot {

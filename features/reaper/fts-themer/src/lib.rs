@@ -25,6 +25,8 @@
 #[cfg(feature = "apply")]
 pub mod apply;
 pub mod color;
+#[cfg(feature = "generate")]
+pub mod generate;
 pub mod groups;
 pub mod ini;
 #[cfg(feature = "fs")]
