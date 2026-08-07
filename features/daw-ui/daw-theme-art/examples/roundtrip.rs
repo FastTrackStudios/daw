@@ -26,6 +26,13 @@ fn source_dir() -> std::path::PathBuf {
     std::path::Path::new("features/reaper/fts-theme/FastTrackStudio/.source-art").to_path_buf()
 }
 
+/// A component's own size, as declared by its `viewBox`.
+fn intrinsic(svg: &str) -> Option<(f32, f32)> {
+    let opts = resvg::usvg::Options::default();
+    let tree = resvg::usvg::Tree::from_str(svg, &opts).ok()?;
+    Some((tree.size().width(), tree.size().height()))
+}
+
 /// Rasterise SVG at an exact pixel size — REAPER's, when round-tripping.
 fn raster(svg: &str, w: u32, h: u32) -> Option<image::RgbaImage> {
     let mut db = resvg::usvg::fontdb::Database::new();
@@ -166,9 +173,16 @@ fn main() {
             }
 
             // 2 — the component as vector, at display size.
-            if let Some(v) = raster(&e.svg, DISPLAY * 3 / 2, DISPLAY) {
-                let v = image::imageops::resize(&v, v.width(), DISPLAY, image::imageops::FilterType::Lanczos3);
-                image::imageops::overlay(&mut sheet, &v, x as i64, (y + row_h) as i64);
+            //
+            // Scaled from its own aspect, not into a fixed box. Rastering
+            // every control into one 3:2 frame stretched the square ones
+            // wide and made the components look mis-sized when the fault
+            // was here, in the sheet.
+            if let Some((iw, ih)) = intrinsic(&e.svg) {
+                let w = ((DISPLAY as f32 * iw / ih).round() as u32).max(1);
+                if let Some(v) = raster(&e.svg, w, DISPLAY) {
+                    image::imageops::overlay(&mut sheet, &v, x as i64, (y + row_h) as i64);
+                }
             }
 
             // 3 — the component rasterised to REAPER's native size, then

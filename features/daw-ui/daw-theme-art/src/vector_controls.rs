@@ -76,6 +76,13 @@ pub struct LabelButtonProps {
     /// Face colour when engaged. `None` draws the resting state.
     #[props(default)]
     pub lit: Option<Color>,
+    /// The cell this button replaces, in REAPER's pixels.
+    ///
+    /// Not cosmetic: mute and solo are 21x20 but FX is 28x22, and drawing
+    /// both at 21x20 left the FX button to be stretched into its cell by
+    /// whatever rendered it — visibly wide, with an oval `FX` on it.
+    #[props(default = (21.0, 20.0))]
+    pub cell: (f32, f32),
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -98,7 +105,7 @@ pub struct LabelButtonProps {
 #[component]
 pub fn LabelButton(props: LabelButtonProps) -> Element {
     let k = ink(props.lit, props.at);
-    let (vw, vh) = (21.0f32, 20.0f32);
+    let (vw, vh) = props.cell;
     let id = format!("lb{}", props.label.replace(' ', ""));
     // Corners are barely rounded in the original — a large radius is what
     // makes a redraw look like a generic UI kit rather than this theme.
@@ -107,8 +114,8 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
 
     rsx! {
         svg {
-            width: "{props.width.unwrap_or(21)}",
-            height: "{props.height.unwrap_or(20)}",
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             defs {
@@ -227,7 +234,12 @@ pub fn FxButton(props: FxProps) -> Element {
         FxChain::Bypassed => Some(t.signal.meter_warn.shade(-0.25)),
     };
     rsx! {
-        LabelButton { label: "FX", lit, width: props.width, height: props.height, at: props.at }
+        // `mcp_fx_*` is 86x22 in three cells — 28x22, wider and taller than
+        // mute's 21x20.
+        LabelButton {
+            label: "FX", lit, cell: (28.0, 22.0),
+            width: props.width, height: props.height, at: props.at,
+        }
     }
 }
 
@@ -696,6 +708,53 @@ mod tests {
     fn valid(svg: &str) -> bool {
         let opts = resvg::usvg::Options::default();
         resvg::usvg::Tree::from_str(svg, &opts).is_ok()
+    }
+
+    /// A control's own size, as declared by the SVG it renders.
+    fn intrinsic(svg: &str) -> (f32, f32) {
+        let opts = resvg::usvg::Options::default();
+        let tree = resvg::usvg::Tree::from_str(svg, &opts).expect("valid svg");
+        (tree.size().width(), tree.size().height())
+    }
+
+    /// Every control draws at the aspect of the art it replaces.
+    ///
+    /// FX shared mute's 21x20 for a while, when `mcp_fx_*` cells are 28x22.
+    /// Nothing failed: the button simply got stretched into its cell by
+    /// whatever drew it, which looks like a rendering bug and is in fact a
+    /// wrong `viewBox`. The cell sizes come from the compiled-in art index,
+    /// so this checks against the real images rather than repeating numbers
+    /// that could go stale in both places at once.
+    #[test]
+    fn every_control_is_shaped_like_the_cell_it_replaces() {
+        let n = (None, None);
+        let cases: [(&str, String); 7] = [
+            ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { on: true, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_solo_on", render_svg(SoloButton, SoloProps { state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_fx_norm", render_svg(FxButton, FxProps { state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, width: n.0, height: n.1 })),
+        ];
+
+        for (name, svg) in &cases {
+            let art = crate::generated::by_name(name)
+                .unwrap_or_else(|| panic!("no art index entry for {name}"));
+            let cell_w = art.width as f32 / art.cells.max(1) as f32;
+            let cell_h = art.height as f32;
+            let (vw, vh) = intrinsic(svg);
+
+            // Cell widths are not always whole (86/3), so compare aspect
+            // with a tolerance rather than demanding exact pixels.
+            let want = cell_w / cell_h;
+            let got = vw / vh;
+            assert!(
+                (want - got).abs() < 0.06,
+                "{name}: cell is {cell_w}x{cell_h} (aspect {want:.3}) \
+                 but the vector is {vw}x{vh} (aspect {got:.3})",
+            );
+        }
     }
 
     #[test]
