@@ -20,17 +20,40 @@ use dioxus::prelude::*;
 use crate::art_data::{ArtImage, ColorMode};
 use crate::generated;
 
+/// Which sprite cell of a control strip to draw.
+///
+/// REAPER packs these side by side in one image, so this is a cell index,
+/// not a style — the artwork for hover already exists and simply has to be
+/// selected.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Interaction {
+    #[default]
+    Normal,
+    Hover,
+    Pressed,
+}
+
+impl Interaction {
+    fn cell(self) -> usize {
+        match self {
+            Self::Normal => 0,
+            Self::Hover => 1,
+            Self::Pressed => 2,
+        }
+    }
+}
+
 /// Draw a traced image by name, or nothing if the theme lacks it.
 ///
 /// Returning empty rather than panicking matters: a theme is allowed not
 /// to ship every image, and a missing `mcp_recarm_auto` should cost you
 /// that one indicator, not the whole mixer.
-fn art(name: &str, width: Option<u32>, height: Option<u32>) -> Element {
+fn art(name: &str, width: Option<u32>, height: Option<u32>, at: Interaction) -> Element {
     let Some(art) = generated::by_name(name) else {
         return rsx! {};
     };
     rsx! {
-        ArtImage { art, width, height, mode: ColorMode::Themed }
+        ArtImage { art, width, height, mode: ColorMode::Themed, cell: at.cell() }
     }
 }
 
@@ -61,6 +84,9 @@ pub struct RecordArmProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Which sprite cell — normal, hover, pressed.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
@@ -73,7 +99,7 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
         RecordArm::AutoOn => "mcp_recarm_auto_on",
         RecordArm::AutoNoRecord => "mcp_recarm_auto_norec",
     };
-    art(name, props.width, props.height)
+    art(name, props.width, props.height, props.at)
 }
 
 // ── mute ─────────────────────────────────────────────────────────────────
@@ -87,6 +113,9 @@ pub struct ToggleProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Which sprite cell — normal, hover, pressed.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
@@ -96,7 +125,7 @@ pub fn MuteButton(props: ToggleProps) -> Element {
     } else {
         "mcp_mute_off"
     };
-    art(name, props.width, props.height)
+    art(name, props.width, props.height, props.at)
 }
 
 // ── solo ─────────────────────────────────────────────────────────────────
@@ -121,6 +150,9 @@ pub struct SoloProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Which sprite cell — normal, hover, pressed.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
@@ -130,7 +162,7 @@ pub fn SoloButton(props: SoloProps) -> Element {
         Solo::On => "mcp_solo_on",
         Solo::Defeat => "mcp_solodefeat_on",
     };
-    art(name, props.width, props.height)
+    art(name, props.width, props.height, props.at)
 }
 
 // ── routing ──────────────────────────────────────────────────────────────
@@ -152,6 +184,9 @@ pub struct RoutingProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Which sprite cell — normal, hover, pressed.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
@@ -166,7 +201,7 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
         (false, false, false) => "mcp_io",
         (false, false, true) => "mcp_io_dis",
     };
-    art(name, props.width, props.height)
+    art(name, props.width, props.height, props.at)
 }
 
 // ── input monitoring ─────────────────────────────────────────────────────
@@ -189,6 +224,9 @@ pub struct MonitoringProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Which sprite cell — normal, hover, pressed.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
@@ -198,7 +236,7 @@ pub fn InputMonitorIndicator(props: MonitoringProps) -> Element {
         Monitoring::On => "mcp_monitor_on",
         Monitoring::Auto => "mcp_monitor_auto",
     };
-    art(name, props.width, props.height)
+    art(name, props.width, props.height, props.at)
 }
 
 // ── FX ───────────────────────────────────────────────────────────────────
@@ -224,6 +262,9 @@ pub struct FxProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Which sprite cell — normal, hover, pressed.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
@@ -233,7 +274,7 @@ pub fn FxButton(props: FxProps) -> Element {
         FxChain::Active => "mcp_fx_norm",
         FxChain::Bypassed => "mcp_fx_dis",
     };
-    art(name, props.width, props.height)
+    art(name, props.width, props.height, props.at)
 }
 
 // ── pan ──────────────────────────────────────────────────────────────────
@@ -254,6 +295,9 @@ pub struct PanProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Which sprite cell — normal, hover, pressed.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
@@ -267,7 +311,7 @@ pub fn PanningKnob(props: PanProps) -> Element {
         "mcp_pan_knob_small"
     };
     let _ = props.position;
-    art(name, props.width, props.height)
+    art(name, props.width, props.height, props.at)
 }
 
 /// How many rotations a knob stack holds.
@@ -289,17 +333,20 @@ pub struct FaderCapProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Which sprite cell — normal, hover, pressed.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
 pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
-    art("mcp_volthumb", props.width, props.height)
+    art("mcp_volthumb", props.width, props.height, props.at)
 }
 
 /// The trough the cap runs in.
 #[component]
 pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
-    art("mcp_volbg", props.width, props.height)
+    art("mcp_volbg", props.width, props.height, props.at)
 }
 
 #[cfg(test)]
@@ -325,6 +372,7 @@ mod tests {
                         state: RecordArm::Off,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -336,6 +384,7 @@ mod tests {
                         state: RecordArm::On,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -347,6 +396,7 @@ mod tests {
                         state: RecordArm::NoRecord,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -358,6 +408,7 @@ mod tests {
                         state: RecordArm::Auto,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -369,6 +420,7 @@ mod tests {
                         state: RecordArm::AutoOn,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -380,6 +432,7 @@ mod tests {
                         state: RecordArm::AutoNoRecord,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -391,6 +444,7 @@ mod tests {
                         on: false,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -402,6 +456,7 @@ mod tests {
                         on: true,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -413,6 +468,7 @@ mod tests {
                         state: Solo::Off,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -424,6 +480,7 @@ mod tests {
                         state: Solo::On,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -435,6 +492,7 @@ mod tests {
                         state: Solo::Defeat,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -446,6 +504,7 @@ mod tests {
                         state: Monitoring::Off,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -457,6 +516,7 @@ mod tests {
                         state: Monitoring::On,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -468,6 +528,7 @@ mod tests {
                         state: Monitoring::Auto,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -479,6 +540,7 @@ mod tests {
                         state: FxChain::Empty,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -490,6 +552,7 @@ mod tests {
                         state: FxChain::Active,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -501,6 +564,7 @@ mod tests {
                         state: FxChain::Bypassed,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -511,6 +575,7 @@ mod tests {
                     FaderCapProps {
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -521,6 +586,7 @@ mod tests {
                     FaderCapProps {
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -533,6 +599,7 @@ mod tests {
                         large: false,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -545,6 +612,7 @@ mod tests {
                         large: true,
                         width: None,
                         height: None,
+                        at: Interaction::Normal,
                     },
                 ),
             ),
@@ -567,6 +635,7 @@ mod tests {
                             disabled,
                             width: None,
                             height: None,
+                            at: Interaction::Normal,
                         },
                     );
                     assert!(
@@ -588,6 +657,7 @@ mod tests {
                 state: Solo::Off,
                 width: None,
                 height: None,
+                at: Interaction::Normal,
             },
         );
         let on = render_svg(
@@ -596,6 +666,7 @@ mod tests {
                 state: Solo::On,
                 width: None,
                 height: None,
+                at: Interaction::Normal,
             },
         );
         let defeat = render_svg(
@@ -604,10 +675,71 @@ mod tests {
                 state: Solo::Defeat,
                 width: None,
                 height: None,
+                at: Interaction::Normal,
             },
         );
         assert_ne!(off, on);
         assert_ne!(on, defeat);
+    }
+
+    #[test]
+    fn interaction_states_select_different_cells() {
+        // The bug the comparison sheet exposed: a strip drew all three
+        // cells at once. Each interaction must now pick exactly one.
+        let n = render_svg(
+            MuteButton,
+            ToggleProps {
+                on: false,
+                width: None,
+                height: None,
+                at: Interaction::Normal,
+            },
+        );
+        let h = render_svg(
+            MuteButton,
+            ToggleProps {
+                on: false,
+                width: None,
+                height: None,
+                at: Interaction::Hover,
+            },
+        );
+        let p = render_svg(
+            MuteButton,
+            ToggleProps {
+                on: false,
+                width: None,
+                height: None,
+                at: Interaction::Pressed,
+            },
+        );
+        assert_ne!(n, h, "hover drew the same cell as normal");
+        assert_ne!(h, p, "pressed drew the same cell as hover");
+    }
+
+    #[test]
+    fn a_control_draws_one_cell_not_the_whole_strip() {
+        // mcp_mute_off is a 3-cell strip; the viewBox must cover one cell.
+        let art = generated::by_name("mcp_mute_off").expect("mute art");
+        assert!(
+            art.cells > 1,
+            "expected a sprite strip, got {} cells",
+            art.cells
+        );
+        let svg = render_svg(
+            MuteButton,
+            ToggleProps {
+                on: false,
+                width: None,
+                height: None,
+                at: Interaction::Normal,
+            },
+        );
+        let cell_w = art.width as u32 / art.cells;
+        assert!(
+            svg.contains(&format!("viewBox=\"0 0 {cell_w} {}\"", art.height)),
+            "drew the whole strip: {svg}"
+        );
     }
 
     #[test]
@@ -619,6 +751,7 @@ mod tests {
                 on: true,
                 width: Some(120),
                 height: Some(60),
+                at: Interaction::Normal,
             },
         );
         assert!(svg.contains("width=\"120\""), "{svg}");
@@ -628,6 +761,6 @@ mod tests {
     fn a_missing_image_yields_nothing_rather_than_panicking() {
         // Themes are allowed not to ship every image; losing one indicator
         // should not take the mixer down.
-        assert!(art("definitely_not_an_image", None, None).is_ok());
+        assert!(art("definitely_not_an_image", None, None, Interaction::Normal).is_ok());
     }
 }

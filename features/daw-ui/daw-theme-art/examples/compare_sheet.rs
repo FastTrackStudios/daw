@@ -1,18 +1,23 @@
-//! Traced vs vector, side by side, for every state of every control.
+//! The full traced-vs-vector comparison: every state, every interaction.
 //!
 //!     cargo run -p daw-theme-art --example compare_sheet
 //!
-//! Each pair is the **traced** control (pixel-exact with Reapertips, drawn
-//! in our palette) above the **vector** one (redrawn as shapes). Rendered
-//! large on purpose: at native size they are hard to tell apart, and the
-//! differences that matter — proportions, weight, whether a glyph reads —
-//! only show when you zoom, which is the whole reason the vector versions
-//! exist.
+//! One block per control. Within a block, a column per state (off/on/…) and
+//! a row per interaction (normal/hover/pressed), with the **traced** cell
+//! above the **vector** one.
+//!
+//! Rendered large on purpose: at native size the two are hard to tell
+//! apart, and the differences that matter only show when you zoom — which
+//! is the entire reason the vector versions exist.
 
 use daw_theme_art::render::render_svg;
 use daw_theme_art::{mixer_controls as traced, vector_controls as vector};
 
-/// Rasterise SVG to a fixed height, preserving aspect.
+const CELL: u32 = 76;
+const PAD: u32 = 10;
+const LABEL_H: u32 = 22;
+const BG: [u8; 4] = [16, 16, 21, 255];
+
 fn raster(svg: &str, px: u32) -> Option<image::RgbaImage> {
     let mut db = resvg::usvg::fontdb::Database::new();
     db.load_system_fonts();
@@ -34,245 +39,444 @@ fn raster(svg: &str, px: u32) -> Option<image::RgbaImage> {
     Some(daw_theme_art::render::to_rgba(&pixmap))
 }
 
-const CELL: u32 = 110;
-const PAD: u32 = 14;
+/// One control: its state columns, each rendered both ways at each
+/// interaction. `[state][interaction] -> (traced, vector)`.
+struct Block {
+    title: &'static str,
+    states: Vec<&'static str>,
+    /// `[interaction][state]` of `(traced, vector)`.
+    grid: Vec<Vec<(String, String)>>,
+}
+
+const INTERACTIONS: [(traced::Interaction, &str); 3] = [
+    (traced::Interaction::Normal, "normal"),
+    (traced::Interaction::Hover, "hover"),
+    (traced::Interaction::Pressed, "pressed"),
+];
+
+fn vector_at(i: usize) -> vector::Interaction {
+    match i {
+        1 => vector::Interaction::Hover,
+        2 => vector::Interaction::Pressed,
+        _ => vector::Interaction::Normal,
+    }
+}
 
 fn main() {
-    // (label, traced svg, vector svg)
-    let mut rows: Vec<(&str, String, String)> = Vec::new();
+    let mut blocks: Vec<Block> = Vec::new();
 
-    let n = (None, None);
-    for (label, st, vs) in [
-        ("rec off", traced::RecordArm::Off, vector::RecordArm::Off),
-        ("rec on", traced::RecordArm::On, vector::RecordArm::On),
-        (
-            "rec norec",
+    // ── record arm ───────────────────────────────────────────────────
+    {
+        let states = vec!["off", "on", "norec", "auto", "auto-on", "auto-norec"];
+        let ts = [
+            traced::RecordArm::Off,
+            traced::RecordArm::On,
             traced::RecordArm::NoRecord,
+            traced::RecordArm::Auto,
+            traced::RecordArm::AutoOn,
+            traced::RecordArm::AutoNoRecord,
+        ];
+        let vs = [
+            vector::RecordArm::Off,
+            vector::RecordArm::On,
             vector::RecordArm::NoRecord,
-        ),
-        ("rec auto", traced::RecordArm::Auto, vector::RecordArm::Auto),
-    ] {
-        rows.push((
-            label,
-            render_svg(
-                traced::RecordArmButton,
-                traced::RecordArmProps {
-                    state: st,
-                    width: n.0,
-                    height: n.1,
-                },
-            ),
-            render_svg(
-                vector::RecordArmButton,
-                vector::RecordArmProps {
-                    state: vs,
-                    width: n.0,
-                    height: n.1,
-                },
-            ),
-        ));
+            vector::RecordArm::Auto,
+            vector::RecordArm::AutoOn,
+            vector::RecordArm::AutoNoRecord,
+        ];
+        let grid = INTERACTIONS
+            .iter()
+            .enumerate()
+            .map(|(i, (at, _))| {
+                ts.iter()
+                    .zip(vs.iter())
+                    .map(|(t, v)| {
+                        (
+                            render_svg(
+                                traced::RecordArmButton,
+                                traced::RecordArmProps {
+                                    state: *t,
+                                    width: None,
+                                    height: None,
+                                    at: *at,
+                                },
+                            ),
+                            render_svg(
+                                vector::RecordArmButton,
+                                vector::RecordArmProps {
+                                    state: *v,
+                                    width: None,
+                                    height: None,
+                                    at: vector_at(i),
+                                },
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        blocks.push(Block {
+            title: "record arm",
+            states,
+            grid,
+        });
     }
 
-    for (label, on) in [("mute off", false), ("mute on", true)] {
-        rows.push((
-            label,
-            render_svg(
-                traced::MuteButton,
-                traced::ToggleProps {
-                    on,
-                    width: n.0,
-                    height: n.1,
-                },
-            ),
-            render_svg(
-                vector::MuteButton,
-                vector::ToggleProps {
-                    on,
-                    width: n.0,
-                    height: n.1,
-                },
-            ),
-        ));
+    // ── mute ─────────────────────────────────────────────────────────
+    {
+        let states = vec!["off", "on"];
+        let grid = INTERACTIONS
+            .iter()
+            .enumerate()
+            .map(|(i, (at, _))| {
+                [false, true]
+                    .iter()
+                    .map(|on| {
+                        (
+                            render_svg(
+                                traced::MuteButton,
+                                traced::ToggleProps {
+                                    on: *on,
+                                    width: None,
+                                    height: None,
+                                    at: *at,
+                                },
+                            ),
+                            render_svg(
+                                vector::MuteButton,
+                                vector::ToggleProps {
+                                    on: *on,
+                                    width: None,
+                                    height: None,
+                                    at: vector_at(i),
+                                },
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        blocks.push(Block {
+            title: "mute",
+            states,
+            grid,
+        });
     }
 
-    for (label, st, vs) in [
-        ("solo off", traced::Solo::Off, vector::Solo::Off),
-        ("solo on", traced::Solo::On, vector::Solo::On),
-        ("solo defeat", traced::Solo::Defeat, vector::Solo::Defeat),
-    ] {
-        rows.push((
-            label,
-            render_svg(
-                traced::SoloButton,
-                traced::SoloProps {
-                    state: st,
-                    width: n.0,
-                    height: n.1,
-                },
-            ),
-            render_svg(
-                vector::SoloButton,
-                vector::SoloProps {
-                    state: vs,
-                    width: n.0,
-                    height: n.1,
-                },
-            ),
-        ));
+    // ── solo ─────────────────────────────────────────────────────────
+    {
+        let states = vec!["off", "on", "defeat"];
+        let ts = [traced::Solo::Off, traced::Solo::On, traced::Solo::Defeat];
+        let vs = [vector::Solo::Off, vector::Solo::On, vector::Solo::Defeat];
+        let grid = INTERACTIONS
+            .iter()
+            .enumerate()
+            .map(|(i, (at, _))| {
+                ts.iter()
+                    .zip(vs.iter())
+                    .map(|(t, v)| {
+                        (
+                            render_svg(
+                                traced::SoloButton,
+                                traced::SoloProps {
+                                    state: *t,
+                                    width: None,
+                                    height: None,
+                                    at: *at,
+                                },
+                            ),
+                            render_svg(
+                                vector::SoloButton,
+                                vector::SoloProps {
+                                    state: *v,
+                                    width: None,
+                                    height: None,
+                                    at: vector_at(i),
+                                },
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        blocks.push(Block {
+            title: "solo",
+            states,
+            grid,
+        });
     }
 
-    for (label, st, vs) in [
-        ("fx empty", traced::FxChain::Empty, vector::FxChain::Empty),
-        (
-            "fx active",
+    // ── fx ───────────────────────────────────────────────────────────
+    {
+        let states = vec!["empty", "active", "bypassed"];
+        let ts = [
+            traced::FxChain::Empty,
             traced::FxChain::Active,
-            vector::FxChain::Active,
-        ),
-        (
-            "fx byp",
             traced::FxChain::Bypassed,
+        ];
+        let vs = [
+            vector::FxChain::Empty,
+            vector::FxChain::Active,
             vector::FxChain::Bypassed,
-        ),
-    ] {
-        rows.push((
-            label,
-            render_svg(
-                traced::FxButton,
-                traced::FxProps {
-                    state: st,
-                    width: n.0,
-                    height: n.1,
-                },
-            ),
-            render_svg(
-                vector::FxButton,
-                vector::FxProps {
-                    state: vs,
-                    width: n.0,
-                    height: n.1,
-                },
-            ),
-        ));
+        ];
+        let grid = INTERACTIONS
+            .iter()
+            .enumerate()
+            .map(|(i, (at, _))| {
+                ts.iter()
+                    .zip(vs.iter())
+                    .map(|(t, v)| {
+                        (
+                            render_svg(
+                                traced::FxButton,
+                                traced::FxProps {
+                                    state: *t,
+                                    width: None,
+                                    height: None,
+                                    at: *at,
+                                },
+                            ),
+                            render_svg(
+                                vector::FxButton,
+                                vector::FxProps {
+                                    state: *v,
+                                    width: None,
+                                    height: None,
+                                    at: vector_at(i),
+                                },
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        blocks.push(Block {
+            title: "fx",
+            states,
+            grid,
+        });
     }
 
-    for (label, s, r) in [
-        ("route none", false, false),
-        ("route send", true, false),
-        ("route both", true, true),
-    ] {
-        rows.push((
-            label,
-            render_svg(
-                traced::RoutingButton,
-                traced::RoutingProps {
-                    has_sends: s,
-                    has_receives: r,
-                    disabled: false,
-                    width: n.0,
-                    height: n.1,
-                },
-            ),
-            render_svg(
-                vector::RoutingButton,
-                vector::RoutingProps {
-                    has_sends: s,
-                    has_receives: r,
-                    disabled: false,
-                    width: n.0,
-                    height: n.1,
-                },
-            ),
-        ));
+    // ── routing ──────────────────────────────────────────────────────
+    {
+        let states = vec!["none", "sends", "recv", "both", "disabled"];
+        let combos = [
+            (false, false, false),
+            (true, false, false),
+            (false, true, false),
+            (true, true, false),
+            (true, true, true),
+        ];
+        let grid = INTERACTIONS
+            .iter()
+            .enumerate()
+            .map(|(i, (at, _))| {
+                combos
+                    .iter()
+                    .map(|(s, r, d)| {
+                        (
+                            render_svg(
+                                traced::RoutingButton,
+                                traced::RoutingProps {
+                                    has_sends: *s,
+                                    has_receives: *r,
+                                    disabled: *d,
+                                    width: None,
+                                    height: None,
+                                    at: *at,
+                                },
+                            ),
+                            render_svg(
+                                vector::RoutingButton,
+                                vector::RoutingProps {
+                                    has_sends: *s,
+                                    has_receives: *r,
+                                    disabled: *d,
+                                    width: None,
+                                    height: None,
+                                    at: vector_at(i),
+                                },
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        blocks.push(Block {
+            title: "routing",
+            states,
+            grid,
+        });
     }
 
-    for (label, st, vs) in [
-        ("mon off", traced::Monitoring::Off, vector::Monitoring::Off),
-        ("mon on", traced::Monitoring::On, vector::Monitoring::On),
-        (
-            "mon auto",
+    // ── input monitoring ─────────────────────────────────────────────
+    {
+        let states = vec!["off", "on", "auto"];
+        let ts = [
+            traced::Monitoring::Off,
+            traced::Monitoring::On,
             traced::Monitoring::Auto,
+        ];
+        let vs = [
+            vector::Monitoring::Off,
+            vector::Monitoring::On,
             vector::Monitoring::Auto,
-        ),
-    ] {
-        rows.push((
-            label,
-            render_svg(
-                traced::InputMonitorIndicator,
-                traced::MonitoringProps {
-                    state: st,
-                    width: n.0,
-                    height: n.1,
-                },
-            ),
-            render_svg(
-                vector::InputMonitorIndicator,
-                vector::MonitoringProps {
-                    state: vs,
-                    width: n.0,
-                    height: n.1,
-                },
-            ),
-        ));
+        ];
+        let grid = INTERACTIONS
+            .iter()
+            .enumerate()
+            .map(|(i, (at, _))| {
+                ts.iter()
+                    .zip(vs.iter())
+                    .map(|(t, v)| {
+                        (
+                            render_svg(
+                                traced::InputMonitorIndicator,
+                                traced::MonitoringProps {
+                                    state: *t,
+                                    width: None,
+                                    height: None,
+                                    at: *at,
+                                },
+                            ),
+                            render_svg(
+                                vector::InputMonitorIndicator,
+                                vector::MonitoringProps {
+                                    state: *v,
+                                    width: None,
+                                    height: None,
+                                    at: vector_at(i),
+                                },
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        blocks.push(Block {
+            title: "input monitor",
+            states,
+            grid,
+        });
     }
 
-    rows.push((
-        "pan",
-        render_svg(
-            traced::PanningKnob,
-            traced::PanProps {
-                position: 0.0,
-                large: false,
-                width: n.0,
-                height: n.1,
-            },
-        ),
-        render_svg(
-            vector::PanningKnob,
-            vector::PanProps {
-                position: 0.0,
-                large: false,
-                width: n.0,
-                height: n.1,
-            },
-        ),
-    ));
-    rows.push((
-        "fader cap",
-        render_svg(
-            traced::VolumeFaderCap,
-            traced::FaderCapProps {
-                width: n.0,
-                height: n.1,
-            },
-        ),
-        render_svg(
-            vector::VolumeFaderCap,
-            vector::FaderCapProps {
-                accent: None,
-                width: n.0,
-                height: n.1,
-            },
-        ),
-    ));
+    // ── pan + fader (no interaction states; one row) ──────────────────
+    {
+        let states = vec!["L", "centre", "R", "large"];
+        let pans = [(-1.0f32, false), (0.0, false), (1.0, false), (0.0, true)];
+        let grid = vec![
+            pans.iter()
+                .map(|(p, large)| {
+                    (
+                        render_svg(
+                            traced::PanningKnob,
+                            traced::PanProps {
+                                position: *p,
+                                large: *large,
+                                width: None,
+                                height: None,
+                                at: traced::Interaction::Normal,
+                            },
+                        ),
+                        render_svg(
+                            vector::PanningKnob,
+                            vector::PanProps {
+                                position: *p,
+                                large: *large,
+                                width: None,
+                                height: None,
+                            },
+                        ),
+                    )
+                })
+                .collect(),
+        ];
+        blocks.push(Block {
+            title: "pan",
+            states,
+            grid,
+        });
+    }
+    {
+        let states = vec!["cap", "track"];
+        let grid = vec![vec![
+            (
+                render_svg(
+                    traced::VolumeFaderCap,
+                    traced::FaderCapProps {
+                        width: None,
+                        height: None,
+                        at: traced::Interaction::Normal,
+                    },
+                ),
+                render_svg(
+                    vector::VolumeFaderCap,
+                    vector::FaderCapProps {
+                        accent: None,
+                        width: None,
+                        height: None,
+                    },
+                ),
+            ),
+            (
+                render_svg(
+                    traced::VolumeFaderTrack,
+                    traced::FaderCapProps {
+                        width: None,
+                        height: None,
+                        at: traced::Interaction::Normal,
+                    },
+                ),
+                render_svg(
+                    vector::VolumeFaderTrack,
+                    vector::FaderCapProps {
+                        accent: None,
+                        width: None,
+                        height: None,
+                    },
+                ),
+            ),
+        ]];
+        blocks.push(Block {
+            title: "fader",
+            states,
+            grid,
+        });
+    }
 
-    // Two bands: traced on top, vector below, aligned column by column so
-    // the eye compares like with like.
-    let cols = rows.len() as u32;
-    let sheet_w = cols * (CELL + PAD) + PAD;
-    let sheet_h = CELL * 2 + PAD * 3;
-    let mut sheet = image::RgbaImage::from_pixel(sheet_w, sheet_h, image::Rgba([16, 16, 21, 255]));
+    // ── compose ──────────────────────────────────────────────────────
+    // Height: each block is (rows x 2) cells tall plus a title strip.
+    let block_h = |b: &Block| LABEL_H + b.grid.len() as u32 * (CELL * 2 + PAD) + PAD;
+    let sheet_h: u32 = blocks.iter().map(block_h).sum::<u32>() + PAD;
+    let widest = blocks.iter().map(|b| b.states.len()).max().unwrap_or(1) as u32;
+    let sheet_w = PAD + widest * (CELL + PAD);
 
-    for (i, (label, a, b)) in rows.iter().enumerate() {
-        let x = PAD + i as u32 * (CELL + PAD);
-        for (row, svg) in [(0u32, a), (1, b)] {
-            let Some(img) = raster(svg, CELL) else {
-                eprintln!("{label} row {row}: nothing rendered");
-                continue;
-            };
-            // Centre each control in its cell; they have different aspects.
-            let ox = x + CELL.saturating_sub(img.width()) / 2;
-            let oy = PAD + row * (CELL + PAD);
-            image::imageops::overlay(&mut sheet, &img, ox as i64, oy as i64);
+    let mut sheet = image::RgbaImage::from_pixel(sheet_w, sheet_h, image::Rgba(BG));
+    let mut y = PAD;
+
+    for b in &blocks {
+        // A thin rule marks each block, since there is no text rendering
+        // here — the layout has to carry the grouping on its own.
+        for x in 0..sheet_w {
+            sheet.put_pixel(x, y.min(sheet_h - 1), image::Rgba([60, 60, 75, 255]));
+        }
+        y += LABEL_H;
+
+        for row in &b.grid {
+            for (col, (t, v)) in row.iter().enumerate() {
+                let x = PAD + col as u32 * (CELL + PAD);
+                for (half, svg) in [(0u32, t), (1, v)] {
+                    let Some(img) = raster(svg, CELL) else {
+                        continue;
+                    };
+                    let ox = x + CELL.saturating_sub(img.width()) / 2;
+                    let oy = y + half * CELL;
+                    if oy + img.height() <= sheet_h {
+                        image::imageops::overlay(&mut sheet, &img, ox as i64, oy as i64);
+                    }
+                }
+            }
+            y += CELL * 2 + PAD;
         }
     }
 
@@ -280,6 +484,15 @@ fn main() {
     std::fs::create_dir_all(dir).unwrap();
     let path = dir.join("traced-vs-vector.png");
     sheet.save(&path).unwrap();
-    println!("{} controls compared -> {}", rows.len(), path.display());
-    println!("top row: traced (1:1 with Reapertips)   bottom row: vector");
+
+    println!("{} controls -> {}", blocks.len(), path.display());
+    for b in &blocks {
+        println!(
+            "  {:<14} {} states x {} interactions",
+            b.title,
+            b.states.len(),
+            b.grid.len()
+        );
+    }
+    println!("\nwithin each pair: traced above, vector below");
 }

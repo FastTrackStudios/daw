@@ -21,6 +21,36 @@ use image::RgbaImage;
 /// yellow the outer extents.
 pub const MARKERS: [[u8; 4]; 2] = [[255, 0, 255, 255], [255, 255, 0, 255]];
 
+/// How many equal-width cells an image is a sprite strip of.
+///
+/// REAPER packs a control's interaction states side by side: `mcp_solo_off`
+/// is three 21×20 cells — normal, hover, pressed — in one 63×20 file.
+/// Drawing the whole file draws all three, which is right for REAPER (it
+/// blits the cell it wants) and wrong everywhere else.
+///
+/// Detected on the **alpha silhouette** rather than colour, because states
+/// routinely differ completely in hue — solo-off is grey, solo-on amber —
+/// while sharing a shape.
+pub fn sprite_cells(img: &RgbaImage) -> u32 {
+    let (w, h) = (img.width(), img.height());
+    for n in [4u32, 3, 2] {
+        if w % n != 0 || w / n < 4 {
+            continue;
+        }
+        let cw = w / n;
+        let same = (0..h).all(|y| {
+            (0..cw).all(|x| {
+                let a0 = img.get_pixel(x, y).0[3] > 8;
+                (1..n).all(|c| (img.get_pixel(x + c * cw, y).0[3] > 8) == a0)
+            })
+        });
+        if same {
+            return n;
+        }
+    }
+    1
+}
+
 /// The geometry of one theme image, measured from the original.
 #[derive(Clone, PartialEq, Debug)]
 pub struct DerivedSpec {

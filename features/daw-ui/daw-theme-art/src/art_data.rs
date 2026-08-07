@@ -49,6 +49,10 @@ pub struct ArtData {
     pub offset: u32,
     /// How many rects.
     pub count: u32,
+    /// Equal-width sprite cells this image packs — REAPER puts a control's
+    /// normal/hover/pressed states side by side in one file. 1 means the
+    /// image is a single drawing.
+    pub cells: u32,
     /// The blob these rects live in.
     pub blob: &'static [u8],
 }
@@ -110,20 +114,33 @@ pub struct ArtImageProps {
     pub height: Option<u32>,
     #[props(default)]
     pub mode: ColorMode,
+    /// Which sprite cell to show. Out of range clamps to the last rather
+    /// than rendering empty — a control that silently disappears is worse
+    /// than one showing the wrong state.
+    #[props(default)]
+    pub cell: usize,
 }
 
 /// Draw a traced image.
 #[component]
 pub fn ArtImage(props: ArtImageProps) -> Element {
     let art = props.art;
-    let w = props.width.unwrap_or(art.width as u32);
-    let h = props.height.unwrap_or(art.height as u32);
     let ramp = Ramp::for_chrome(&Theme::default());
+
+    // A sprite strip shows one cell: shift the viewBox rather than filter
+    // rects, so a shape straddling a cell edge still clips correctly.
+    let cells = art.cells.max(1);
+    let cell_w = (art.width as u32 / cells).max(1);
+    let cell = (props.cell as u32).min(cells - 1);
+    let vx = cell * cell_w;
+
+    let w = props.width.unwrap_or(cell_w);
+    let h = props.height.unwrap_or(art.height as u32);
 
     rsx! {
         svg {
             width: "{w}", height: "{h}",
-            view_box: "0 0 {art.width} {art.height}",
+            view_box: "{vx} 0 {cell_w} {art.height}",
             // Theme art is pixel-aligned by nature; smoothing it on scale
             // turns a 1px bevel into a blur.
             shape_rendering: "crispEdges",
@@ -172,6 +189,7 @@ mod tests {
         height: 1,
         offset: 0,
         count: 2,
+        cells: 1,
         blob: BLOB,
     };
 
@@ -211,6 +229,7 @@ mod tests {
             height: 1,
             offset: 0,
             count: 9,
+            cells: 1,
             blob: BLOB,
         };
         assert_eq!(SHORT.rects().len(), 2);
@@ -225,6 +244,7 @@ mod tests {
                 width: None,
                 height: None,
                 mode: ColorMode::Themed,
+                cell: 0,
             },
         );
         assert_eq!(svg.matches("<rect").count(), 2, "{svg}");
@@ -241,6 +261,7 @@ mod tests {
                 width: None,
                 height: None,
                 mode: ColorMode::Verbatim,
+                cell: 0,
             },
         );
         assert!(svg.contains("#282828"), "{svg}");
@@ -256,6 +277,7 @@ mod tests {
                 width: None,
                 height: None,
                 mode: ColorMode::Themed,
+                cell: 0,
             },
         );
         assert!(!svg.contains("#282828"), "colour was not themed: {svg}");
@@ -272,6 +294,7 @@ mod tests {
             height: 1,
             offset: 0,
             count: 1,
+            cells: 1,
             blob: SOFT,
         };
         let svg = render_svg(
@@ -281,9 +304,55 @@ mod tests {
                 width: None,
                 height: None,
                 mode: ColorMode::Themed,
+                cell: 0,
             },
         );
         assert!(svg.contains("rgba("), "alpha lost: {svg}");
+    }
+
+    /// A 3-cell strip over the same two-rect blob.
+    const STRIP: ArtData = ArtData {
+        name: "strip",
+        width: 3,
+        height: 1,
+        offset: 0,
+        count: 2,
+        cells: 3,
+        blob: BLOB,
+    };
+
+    #[test]
+    fn a_strip_shows_one_cell() {
+        // The bug the comparison sheet exposed: drawing a 3-cell strip drew
+        // all three buttons and spilled over its neighbours.
+        let svg = render_svg(
+            ArtImage,
+            ArtImageProps {
+                art: STRIP,
+                width: None,
+                height: None,
+                mode: ColorMode::Themed,
+                cell: 1,
+            },
+        );
+        assert!(svg.contains(r#"viewBox="1 0 1 1""#), "{svg}");
+        // And the natural width is one cell, not the whole strip.
+        assert!(svg.contains(r#"width="1""#), "{svg}");
+    }
+
+    #[test]
+    fn an_out_of_range_cell_clamps() {
+        let svg = render_svg(
+            ArtImage,
+            ArtImageProps {
+                art: STRIP,
+                width: None,
+                height: None,
+                mode: ColorMode::Themed,
+                cell: 99,
+            },
+        );
+        assert!(svg.contains(r#"viewBox="2 0 1 1""#), "{svg}");
     }
 
     #[test]
@@ -295,6 +364,7 @@ mod tests {
                 width: Some(30),
                 height: Some(10),
                 mode: ColorMode::Themed,
+                cell: 0,
             },
         );
         assert!(svg.contains("viewBox=\"0 0 3 1\""), "{svg}");
@@ -312,6 +382,7 @@ mod tests {
                 width: Some(30),
                 height: Some(10),
                 mode: ColorMode::Themed,
+                cell: 0,
             },
         );
         assert!(svg.contains("crispEdges"), "{svg}");

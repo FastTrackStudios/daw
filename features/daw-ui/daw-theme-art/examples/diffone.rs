@@ -20,6 +20,7 @@ fn main() {
             width: None,
             height: None,
             mode: ColorMode::Verbatim,
+            cell: 0,
         },
     );
     let mut db = resvg::usvg::fontdb::Database::new();

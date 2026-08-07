@@ -21,7 +21,7 @@
 use daw_theme::{Color, Theme};
 use dioxus::prelude::*;
 
-pub use crate::mixer_controls::{FxChain, Monitoring, RecordArm, Solo};
+pub use crate::mixer_controls::{FxChain, Interaction, Monitoring, RecordArm, Solo};
 
 /// Common sizing props.
 #[derive(Props, Clone, PartialEq, Default)]
@@ -30,6 +30,9 @@ pub struct VectorProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Pointer state — hover lifts the face, pressed sinks it.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 /// A control's palette, resolved once per render.
@@ -41,10 +44,18 @@ struct Ink {
     shadow: Color,
 }
 
-fn ink(lit: Option<Color>) -> Ink {
+fn ink(lit: Option<Color>, at: Interaction) -> Ink {
     let t = Theme::default();
     let c = &t.chrome;
-    let face = lit.unwrap_or_else(|| c.surface_raised.shade(0.06));
+    let base = lit.unwrap_or_else(|| c.surface_raised.shade(0.06));
+    // The original's three sprite cells are the same button lit differently:
+    // hover lifts, pressed sinks. Reproducing that as a shade keeps one
+    // drawing doing the work of three images.
+    let face = match at {
+        Interaction::Normal => base,
+        Interaction::Hover => base.shade(0.12),
+        Interaction::Pressed => base.shade(-0.12),
+    };
     Ink {
         // The originals light from the top: the face is a vertical gradient
         // with the lighter stop above, which is most of what makes them
@@ -69,12 +80,15 @@ pub struct LabelButtonProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Pointer state — hover lifts the face, pressed sinks it.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 /// The shape mute, solo and FX all share.
 #[component]
 pub fn LabelButton(props: LabelButtonProps) -> Element {
-    let k = ink(props.lit);
+    let k = ink(props.lit, props.at);
     // Native proportions of REAPER's button art: 21x20 per sprite cell.
     let (vw, vh) = (21.0f32, 20.0f32);
     let r = vh * 0.18;
@@ -134,6 +148,9 @@ pub struct ToggleProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Pointer state — hover lifts the face, pressed sinks it.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
@@ -143,7 +160,7 @@ pub fn MuteButton(props: ToggleProps) -> Element {
         LabelButton {
             label: "M",
             lit: props.on.then_some(t.signal.mute),
-            width: props.width, height: props.height,
+            width: props.width, height: props.height, at: props.at,
         }
     }
 }
@@ -156,6 +173,9 @@ pub struct SoloProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Pointer state — hover lifts the face, pressed sinks it.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
@@ -169,7 +189,7 @@ pub fn SoloButton(props: SoloProps) -> Element {
         Solo::Defeat => Some(t.chrome.accent),
     };
     rsx! {
-        LabelButton { label: "S", lit, width: props.width, height: props.height }
+        LabelButton { label: "S", lit, width: props.width, height: props.height, at: props.at }
     }
 }
 
@@ -181,6 +201,9 @@ pub struct FxProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Pointer state — hover lifts the face, pressed sinks it.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
@@ -192,7 +215,7 @@ pub fn FxButton(props: FxProps) -> Element {
         FxChain::Bypassed => Some(t.signal.meter_warn.shade(-0.25)),
     };
     rsx! {
-        LabelButton { label: "FX", lit, width: props.width, height: props.height }
+        LabelButton { label: "FX", lit, width: props.width, height: props.height, at: props.at }
     }
 }
 
@@ -206,6 +229,9 @@ pub struct RecordArmProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Pointer state — hover lifts the face, pressed sinks it.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
@@ -292,12 +318,15 @@ pub struct RoutingProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Pointer state — hover lifts the face, pressed sinks it.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
 pub fn RoutingButton(props: RoutingProps) -> Element {
     let t = Theme::default();
-    let k = ink(None);
+    let k = ink(None, props.at);
     let (vw, vh) = (20.0f32, 20.0f32);
     let dim = t.chrome.text_faint;
     // Top bar = receives, bottom = sends. Lit means present, which is the
@@ -352,6 +381,9 @@ pub struct MonitoringProps {
     pub width: Option<u32>,
     #[props(default)]
     pub height: Option<u32>,
+    /// Pointer state — hover lifts the face, pressed sinks it.
+    #[props(default)]
+    pub at: Interaction,
 }
 
 #[component]
@@ -408,7 +440,7 @@ pub struct PanProps {
 #[component]
 pub fn PanningKnob(props: PanProps) -> Element {
     let t = Theme::default();
-    let k = ink(None);
+    let k = ink(None, Interaction::Normal);
     let (vw, vh) = (24.0f32, 24.0f32);
     let (cx, cy) = (vw * 0.5, vh * 0.5);
     let r = vh * (if props.large { 0.42 } else { 0.36 });
@@ -572,6 +604,7 @@ mod tests {
                         on: true,
                         width: w,
                         height: h,
+                        at: Interaction::Normal,
                     },
                 ),
                 render_svg(
@@ -580,6 +613,7 @@ mod tests {
                         state: Solo::Defeat,
                         width: w,
                         height: h,
+                        at: Interaction::Normal,
                     },
                 ),
                 render_svg(
@@ -588,6 +622,7 @@ mod tests {
                         state: FxChain::Active,
                         width: w,
                         height: h,
+                        at: Interaction::Normal,
                     },
                 ),
                 render_svg(
@@ -596,6 +631,7 @@ mod tests {
                         state: RecordArm::NoRecord,
                         width: w,
                         height: h,
+                        at: Interaction::Normal,
                     },
                 ),
                 render_svg(
@@ -606,6 +642,7 @@ mod tests {
                         disabled: false,
                         width: w,
                         height: h,
+                        at: Interaction::Normal,
                     },
                 ),
                 render_svg(
@@ -614,6 +651,7 @@ mod tests {
                         state: Monitoring::On,
                         width: w,
                         height: h,
+                        at: Interaction::Normal,
                     },
                 ),
                 render_svg(
@@ -660,6 +698,7 @@ mod tests {
                 on: false,
                 width: Some(21),
                 height: Some(20),
+                at: Interaction::Normal,
             },
         );
         let large = render_svg(
@@ -668,6 +707,7 @@ mod tests {
                 on: false,
                 width: Some(210),
                 height: Some(200),
+                at: Interaction::Normal,
             },
         );
         // Same geometry, different render size: the viewBox does the work.
@@ -734,6 +774,42 @@ mod tests {
     }
 
     #[test]
+    fn interaction_shifts_the_face() {
+        // Hover and pressed are real states in the original art; a vector
+        // control that ignores them loses feedback the theme had.
+        let n = render_svg(
+            MuteButton,
+            ToggleProps {
+                on: false,
+                width: None,
+                height: None,
+                at: Interaction::Normal,
+            },
+        );
+        let h = render_svg(
+            MuteButton,
+            ToggleProps {
+                on: false,
+                width: None,
+                height: None,
+                at: Interaction::Hover,
+            },
+        );
+        let p = render_svg(
+            MuteButton,
+            ToggleProps {
+                on: false,
+                width: None,
+                height: None,
+                at: Interaction::Pressed,
+            },
+        );
+        assert_ne!(n, h, "hover looks the same as normal");
+        assert_ne!(n, p, "pressed looks the same as normal");
+        assert_ne!(h, p);
+    }
+
+    #[test]
     fn states_stay_visually_distinct() {
         let off = render_svg(
             SoloButton,
@@ -741,6 +817,7 @@ mod tests {
                 state: Solo::Off,
                 width: None,
                 height: None,
+                at: Interaction::Normal,
             },
         );
         let on = render_svg(
@@ -749,6 +826,7 @@ mod tests {
                 state: Solo::On,
                 width: None,
                 height: None,
+                at: Interaction::Normal,
             },
         );
         let defeat = render_svg(
@@ -757,6 +835,7 @@ mod tests {
                 state: Solo::Defeat,
                 width: None,
                 height: None,
+                at: Interaction::Normal,
             },
         );
         assert_ne!(off, on);

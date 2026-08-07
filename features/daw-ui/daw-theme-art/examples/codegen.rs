@@ -36,7 +36,7 @@ fn main() {
     paths.sort();
 
     let mut blob: Vec<u8> = Vec::new();
-    let mut index: BTreeMap<String, (u16, u16, u32, u32)> = BTreeMap::new();
+    let mut index: BTreeMap<String, (u16, u16, u32, u32, u32)> = BTreeMap::new();
 
     for path in &paths {
         let Ok(img) = image::open(path) else { continue };
@@ -52,6 +52,10 @@ fn main() {
             blob.extend_from_slice(&r.h.to_le_bytes());
             blob.extend_from_slice(&r.rgba);
         }
+        // Sprite-cell count is baked in: a consumer showing one state needs
+        // it, and detecting it at render time would mean decoding the image
+        // again on every draw.
+        let cells = daw_theme_art::derive::sprite_cells(&img);
         index.insert(
             name,
             (
@@ -59,6 +63,7 @@ fn main() {
                 img.height() as u16,
                 offset,
                 rects.len() as u32,
+                cells,
             ),
         );
     }
@@ -92,12 +97,12 @@ fn main() {
          pub static BLOB: &[u8] = include_bytes!(\"art.bin\");\n"
     );
 
-    for (name, (w, h, offset, count)) in &index {
+    for (name, (w, h, offset, count, cells)) in &index {
         let ident = to_ident(name);
         let _ = writeln!(
             out,
-            "/// `{name}.png` — {w}x{h}, {count} rects.\n\
-             pub const {ident}: ArtData = ArtData {{ name: {name:?}, width: {w}, height: {h}, offset: {offset}, count: {count}, blob: BLOB }};"
+            "/// `{name}.png` — {w}x{h}, {count} rects, {cells} sprite cell(s).\n\
+             pub const {ident}: ArtData = ArtData {{ name: {name:?}, width: {w}, height: {h}, offset: {offset}, count: {count}, cells: {cells}, blob: BLOB }};"
         );
     }
 

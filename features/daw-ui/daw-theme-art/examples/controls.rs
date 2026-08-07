@@ -54,6 +54,7 @@ fn main() {
                     state: s,
                     width: sz.0,
                     height: sz.1,
+                    at: Default::default(),
                 },
             ),
         );
@@ -67,6 +68,7 @@ fn main() {
                 on: false,
                 width: sz.0,
                 height: sz.1,
+                at: Default::default(),
             },
         ),
     );
@@ -78,6 +80,7 @@ fn main() {
                 on: true,
                 width: sz.0,
                 height: sz.1,
+                at: Default::default(),
             },
         ),
     );
@@ -95,6 +98,7 @@ fn main() {
                     state: s,
                     width: sz.0,
                     height: sz.1,
+                    at: Default::default(),
                 },
             ),
         );
@@ -116,6 +120,7 @@ fn main() {
                     disabled: false,
                     width: sz.0,
                     height: sz.1,
+                    at: Default::default(),
                 },
             ),
         );
@@ -134,6 +139,7 @@ fn main() {
                     state: s,
                     width: sz.0,
                     height: sz.1,
+                    at: Default::default(),
                 },
             ),
         );
@@ -152,6 +158,7 @@ fn main() {
                     state: s,
                     width: sz.0,
                     height: sz.1,
+                    at: Default::default(),
                 },
             ),
         );
@@ -166,6 +173,7 @@ fn main() {
                 large: false,
                 width: sz.0,
                 height: sz.1,
+                at: Default::default(),
             },
         ),
     );
@@ -178,6 +186,7 @@ fn main() {
                 large: true,
                 width: sz.0,
                 height: sz.1,
+                at: Default::default(),
             },
         ),
     );
@@ -188,6 +197,7 @@ fn main() {
             FaderCapProps {
                 width: sz.0,
                 height: sz.1,
+                at: Default::default(),
             },
         ),
     );
@@ -198,6 +208,7 @@ fn main() {
             FaderCapProps {
                 width: sz.0,
                 height: sz.1,
+                at: Default::default(),
             },
         ),
     );

@@ -37,6 +37,7 @@ fn render(art: daw_theme_art::ArtData) -> image::RgbaImage {
             width: None,
             height: None,
             mode: ColorMode::Verbatim,
+            cell: 0,
         },
     );
     let tree = resvg::usvg::Tree::from_str(&svg, &options())
