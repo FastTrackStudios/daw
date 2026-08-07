@@ -63,6 +63,37 @@ pub const SURFACE_INSET: &str = d::SURFACE_INSET;
 pub const BORDER_STRONG: &str = d::BORDER_STRONG;
 /// Emphasised text, above [`TEXT`].
 pub const TEXT_BRIGHT: &str = d::TEXT_BRIGHT;
+/// Faintest text — placeholders, disabled labels.
+pub const TEXT_FAINT: &str = d::TEXT_FAINT;
+/// The deepest surface step, below [`BG`].
+pub const SURFACE_DEEP: &str = d::SURFACE_DEEP;
+/// A well or lane cut into a panel.
+pub const SURFACE_SUNKEN: &str = d::SURFACE_SUNKEN;
+/// Toolbars and status bars.
+pub const SURFACE_BAR: &str = d::SURFACE_BAR;
+/// A selected-but-not-engaged control.
+pub const CONTROL_SELECTED: &str = d::CONTROL_SELECTED;
+/// A control under the pointer.
+pub const CONTROL_HOVER: &str = d::CONTROL_HOVER;
+/// The groove a slider handle runs in.
+pub const CONTROL_GROOVE: &str = d::CONTROL_GROOVE;
+/// A draggable handle — knob pointer, slider thumb.
+pub const HANDLE: &str = d::HANDLE;
+/// White-key labels in the gutter.
+pub const KEY_LABEL: &str = d::KEY_LABEL;
+/// Informational and advisory banner backdrops.
+pub const BANNER_INFO: &str = d::BANNER_INFO;
+pub const BANNER_WARN: &str = d::BANNER_WARN;
+
+/// Multi-tool zone hues — one per transform, so a zone is identifiable
+/// before its label is readable.
+pub const TOOL_COMPRESS: &str = d::TOOL_COMPRESS;
+pub const TOOL_SCALE: &str = d::TOOL_SCALE;
+pub const TOOL_TILT: &str = d::TOOL_TILT;
+pub const TOOL_STRETCH: &str = d::TOOL_STRETCH;
+pub const TOOL_WARP: &str = d::TOOL_WARP;
+pub const TOOL_MOVE: &str = d::TOOL_MOVE;
+pub const TOOL_HISTORY: &str = d::TOOL_HISTORY;
 
 /// Twelve pitch-class hues. Notes are colored by pitch class so a
 /// melodic shape is readable at a glance without reading the piano
@@ -198,5 +229,68 @@ mod tests {
                 "colour defined locally instead of in daw_theme::defaults:\n  {line}"
             );
         }
+    }
+
+    /// No module in this crate may write a colour literal.
+    ///
+    /// The narrower test above only guards `theme.rs`; the drift that
+    /// actually happened was 31 literals scattered through the *other*
+    /// modules, where a `background: #1a1a22` in an rsx style reads as
+    /// perfectly ordinary code. Six near-identical darks had accumulated
+    /// that way, doing the same job under different values.
+    ///
+    /// Every module is listed explicitly rather than walked: a new file
+    /// should have to opt in here, which is a moment to ask whether it
+    /// needs a new named colour or an existing one.
+    #[test]
+    fn no_module_writes_a_hex_literal() {
+        const MODULES: [(&str, &str); 9] = [
+            ("theme.rs", include_str!("theme.rs")),
+            ("lib.rs", include_str!("lib.rs")),
+            ("canvas.rs", include_str!("canvas.rs")),
+            ("drawer.rs", include_str!("drawer.rs")),
+            ("inspector.rs", include_str!("inspector.rs")),
+            ("interaction.rs", include_str!("interaction.rs")),
+            ("multitool_ui.rs", include_str!("multitool_ui.rs")),
+            ("toolbar.rs", include_str!("toolbar.rs")),
+            ("widgets.rs", include_str!("widgets.rs")),
+        ];
+
+        let mut found = Vec::new();
+        for (name, src) in MODULES {
+            for (n, line) in src.lines().enumerate() {
+                let trimmed = line.trim_start();
+                // Doc comments legitimately name colours when explaining a
+                // choice; only real code counts.
+                if trimmed.starts_with("//") {
+                    continue;
+                }
+                if is_hex_literal(line) {
+                    found.push(format!("{name}:{}: {}", n + 1, line.trim()));
+                }
+            }
+        }
+        assert!(
+            found.is_empty(),
+            "hex literals must come from daw_theme::defaults:\n  {}",
+            found.join("\n  ")
+        );
+    }
+
+    /// A `#` followed by exactly 3, 6 or 8 hex digits — a CSS colour.
+    ///
+    /// Deliberately not a regex: SVG path data is full of `#`-free hex-ish
+    /// tokens, and CSS ids would false-positive on a looser rule.
+    fn is_hex_literal(line: &str) -> bool {
+        let bytes = line.as_bytes();
+        for (i, _) in line.match_indices('#') {
+            let rest = &bytes[i + 1..];
+            let n = rest.iter().take_while(|b| b.is_ascii_hexdigit()).count();
+            let terminated = rest.get(n).is_none_or(|b| !b.is_ascii_alphanumeric());
+            if matches!(n, 3 | 6 | 8) && terminated {
+                return true;
+            }
+        }
+        false
     }
 }

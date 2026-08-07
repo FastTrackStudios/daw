@@ -50,7 +50,7 @@ fn Segment(children: Element) -> Element {
         div {
             style: "display: flex; align-items: stretch; \
                     border: 1px solid {theme::PANEL_BORDER}; border-radius: 6px; \
-                    overflow: hidden; background: #16161d;",
+                    overflow: hidden; background: {theme::SURFACE_BAR};",
             {children}
         }
     }
@@ -75,9 +75,9 @@ fn Seg(
     });
     let bg = if active {
         if accent {
-            "#1e3a5f"
+            theme::CONTROL_ACTIVE
         } else {
-            "#2a2a36"
+            theme::CONTROL_HOVER
         }
     } else {
         "transparent"
@@ -400,7 +400,7 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
     rsx! {
         div {
             style: "display: flex; flex: 0 0 auto; align-items: center; gap: 10px; \
-                    height: 30px; padding: 0 10px; background: #12121a; \
+                    height: 30px; padding: 0 10px; background: {theme::SURFACE_BAR}; \
                     border-bottom: 1px solid {theme::PANEL_BORDER}; \
                     font-family: system-ui, sans-serif; overflow: hidden;",
 
@@ -417,7 +417,7 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
                 }
             } else {
                 span {
-                    style: "font-size: 12px; color: #4a4a58; min-width: 88px; flex: 0 0 auto;",
+                    style: "font-size: 12px; color: {theme::TEXT_FAINT}; min-width: 88px; flex: 0 0 auto;",
                     if pitches.len() == 1 { "single note" } else { "—" }
                 }
             }
@@ -429,7 +429,7 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
                     span {
                         key: "cn{i}",
                         style: "font-size: 10px; font-family: ui-monospace, monospace; \
-                                color: {theme::TEXT}; background: #1c1c26; \
+                                color: {theme::TEXT}; background: {theme::CONTROL}; \
                                 border: 1px solid {theme::PANEL_BORDER}; \
                                 border-radius: 3px; padding: 1px 5px; flex: 0 0 auto;",
                         "{n}"

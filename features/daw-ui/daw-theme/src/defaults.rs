@@ -11,12 +11,25 @@
 
 // ── chrome ───────────────────────────────────────────────────────────────
 
-/// The window behind everything.
+/// The window behind everything — the middle of the surface ladder.
+///
+/// Four ordered steps, darkest first, and the order is enforced by a test:
+///
+/// ```text
+/// SURFACE_DEEP  →  SURFACE_SUNKEN  →  SURFACE  →  SURFACE_RAISED
+///    #08080b          #0a0a0e        #0d0d11       #15151c
+/// ```
+///
+/// Reach down the ladder for something recessed and up for something
+/// floating. Keeping it ordered is what makes those words mean anything.
 pub const SURFACE: &str = "#0d0d11";
 /// A panel or strip sitting on `SURFACE`.
 pub const SURFACE_RAISED: &str = "#15151c";
-/// Wells, lanes and troughs cut into a panel.
-pub const SURFACE_SUNKEN: &str = "#101016";
+/// Wells, lanes and troughs cut into a panel — the arrange view, an entry
+/// field. Genuinely below [`SURFACE`]: it was inherited a shade *lighter*,
+/// which made the name a lie and left nothing to reach for when something
+/// needed to read as recessed.
+pub const SURFACE_SUNKEN: &str = "#0a0a0e";
 /// Hairlines between regions.
 pub const BORDER: &str = "#2b2b38";
 /// Primary label text.
@@ -39,6 +52,30 @@ pub const BORDER_STRONG: &str = "#4a4a58";
 pub const TEXT_BRIGHT: &str = "#cfd6e4";
 /// Selection highlight, brighter than the accent.
 pub const SELECTED: &str = "#f0f9ff";
+/// The deepest step — the bottom of the ladder, e.g. behind a piano-roll
+/// gutter. See the ladder note on [`SURFACE`].
+pub const SURFACE_DEEP: &str = "#08080b";
+/// Toolbars and status bars: a bar sitting across a surface.
+pub const SURFACE_BAR: &str = "#16161d";
+/// A control that is selected but not engaged — accent-tinted, quieter
+/// than [`CONTROL_ACTIVE`].
+pub const CONTROL_SELECTED: &str = "#16202c";
+/// A control under the pointer.
+pub const CONTROL_HOVER: &str = "#2a2a36";
+/// The groove a slider or scrollbar handle runs in.
+pub const CONTROL_GROOVE: &str = "#26262f";
+/// A draggable handle — knob pointer, slider thumb.
+pub const HANDLE: &str = "#cfd6e4";
+
+// ── banners ──────────────────────────────────────────────────────────────
+//
+// Tinted strips that carry a message. The tint is the message, so these
+// are deliberately related to `ACCENT` and `MICROTONAL` rather than free.
+
+/// Informational strip — accent family, heavily darkened.
+pub const BANNER_INFO: &str = "#0b1a24";
+/// Advisory strip — the microtonal amber, heavily darkened.
+pub const BANNER_WARN: &str = "#422006";
 
 // ── signal ───────────────────────────────────────────────────────────────
 
@@ -71,6 +108,9 @@ pub const GRID_SUB: &str = "#20202a";
 pub const GUTTER: &str = "#101016";
 pub const KEY_WHITE: &str = "#d8dce6";
 pub const KEY_BLACK: &str = "#26262f";
+/// Note-name labels printed on the white keys — dark enough to read on
+/// [`KEY_WHITE`] without competing with the notes beside it.
+pub const KEY_LABEL: &str = "#33333f";
 /// Structural zones and ambiguity warnings — both mean "there are
 /// boundaries here you must be aware of".
 pub const ZONE: &str = "#ef4444";
@@ -99,6 +139,27 @@ pub const PITCH_CLASSES: [&str; 12] = [
     "#a855f7", // A#
     "#ec4899", // B
 ];
+
+// ── multi-tool zones ─────────────────────────────────────────────────────
+//
+// One hue per transform, so a zone is identifiable before its label is
+// readable. A family like the pitch classes: what matters is that
+// neighbours stay tellable apart, not any individual value.
+
+/// Compress / expand vertically.
+pub const TOOL_COMPRESS: &str = "#f472b6";
+/// Scale from an edge.
+pub const TOOL_SCALE: &str = "#38bdf8";
+/// Tilt around a pivot.
+pub const TOOL_TILT: &str = "#fbbf24";
+/// Stretch in time.
+pub const TOOL_STRETCH: &str = "#a3e635";
+/// Warp along a curve.
+pub const TOOL_WARP: &str = "#c084fc";
+/// Move without reshaping.
+pub const TOOL_MOVE: &str = "#2dd4bf";
+/// Undo / redo — deliberately neutral, since history is not a transform.
+pub const TOOL_HISTORY: &str = "#94a3b8";
 
 // ── per-lane expression curves ───────────────────────────────────────────
 
@@ -137,6 +198,21 @@ mod tests {
             ("SURFACE_INSET", SURFACE_INSET),
             ("BORDER_STRONG", BORDER_STRONG),
             ("TEXT_BRIGHT", TEXT_BRIGHT),
+            ("SURFACE_DEEP", SURFACE_DEEP),
+            ("SURFACE_BAR", SURFACE_BAR),
+            ("CONTROL_SELECTED", CONTROL_SELECTED),
+            ("CONTROL_HOVER", CONTROL_HOVER),
+            ("CONTROL_GROOVE", CONTROL_GROOVE),
+            ("HANDLE", HANDLE),
+            ("BANNER_INFO", BANNER_INFO),
+            ("BANNER_WARN", BANNER_WARN),
+            ("TOOL_COMPRESS", TOOL_COMPRESS),
+            ("TOOL_SCALE", TOOL_SCALE),
+            ("TOOL_TILT", TOOL_TILT),
+            ("TOOL_STRETCH", TOOL_STRETCH),
+            ("TOOL_WARP", TOOL_WARP),
+            ("TOOL_MOVE", TOOL_MOVE),
+            ("TOOL_HISTORY", TOOL_HISTORY),
             ("SELECTED", SELECTED),
             ("METER_SAFE", METER_SAFE),
             ("METER_WARN", METER_WARN),
@@ -155,6 +231,7 @@ mod tests {
             ("GUTTER", GUTTER),
             ("KEY_WHITE", KEY_WHITE),
             ("KEY_BLACK", KEY_BLACK),
+            ("KEY_LABEL", KEY_LABEL),
             ("ZONE", ZONE),
             ("MICROTONAL", MICROTONAL),
             ("RAZOR", RAZOR),
@@ -196,6 +273,48 @@ mod tests {
         for row in [ROW_WHITE, ROW_BLACK, GUTTER] {
             let l = Color::hex(row).unwrap().luminance();
             assert!(l < 0.1, "{row} is too light for a row backdrop ({l})");
+        }
+    }
+
+    fn lum(h: &str) -> f32 {
+        Color::hex(h).unwrap().luminance()
+    }
+
+    #[test]
+    fn tool_hues_are_all_distinct() {
+        // Same reasoning as the pitch classes: two identical hues means two
+        // transforms are indistinguishable before you read the label.
+        let mut tools = vec![
+            TOOL_COMPRESS,
+            TOOL_SCALE,
+            TOOL_TILT,
+            TOOL_STRETCH,
+            TOOL_WARP,
+            TOOL_MOVE,
+            TOOL_HISTORY,
+        ];
+        tools.sort_unstable();
+        let before = tools.len();
+        tools.dedup();
+        assert_eq!(before, tools.len(), "duplicate multi-tool hues");
+    }
+
+    #[test]
+    fn surface_steps_form_a_ladder() {
+        // The named steps must actually be ordered, or "sunken" and "raised"
+        // stop meaning anything and nobody can reason about which to reach
+        // for.
+        assert!(lum(SURFACE_DEEP) < lum(SURFACE_SUNKEN), "DEEP below SUNKEN");
+        assert!(lum(SURFACE_SUNKEN) <= lum(SURFACE), "SUNKEN below SURFACE");
+        assert!(lum(SURFACE) < lum(SURFACE_RAISED), "SURFACE below RAISED");
+    }
+
+    #[test]
+    fn banners_are_dark_enough_to_carry_text() {
+        // A banner is a backdrop for a message; if it drifts bright the text
+        // on it stops being readable.
+        for b in [BANNER_INFO, BANNER_WARN] {
+            assert!(lum(b) < 0.1, "{b} is too light for a banner backdrop");
         }
     }
 
