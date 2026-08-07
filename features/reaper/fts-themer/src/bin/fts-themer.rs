@@ -70,6 +70,11 @@ enum Command {
         /// Show what would change without writing.
         #[arg(long)]
         dry_run: bool,
+        /// Also write libSwell.colortheme into this REAPER resource dir —
+        /// the menu bar, dialogs, buttons and lists, which the .ReaperTheme
+        /// palette cannot reach.
+        #[arg(long)]
+        swell: Option<PathBuf>,
     },
     /// Screenshot a real REAPER wearing this theme, on a private X display.
     Shot {
@@ -179,9 +184,14 @@ fn main() -> Result<()> {
             }
         }
 
-        Command::Apply { from, dry_run } => {
+        Command::Apply {
+            from,
+            dry_run,
+            swell,
+        } => {
             let source = fts_themer::apply::load_theme(from.as_deref())?;
-            let report = fts_themer::apply::apply_theme(&cli.theme, &source, dry_run)?;
+            let report =
+                fts_themer::apply::apply_theme_to(&cli.theme, &source, dry_run, swell.as_deref())?;
             for (key, before, after) in &report.changed {
                 println!("{key:<26} {} -> {}", before.to_hex(), after.to_hex());
             }

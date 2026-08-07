@@ -21,6 +21,8 @@ pub struct ApplyReport {
     pub changed: Vec<(String, Rgb, Rgb)>,
     /// Keys the theme determined that already held that colour.
     pub unchanged: usize,
+    /// Where the SWELL theme was written, if anywhere.
+    pub swell: Option<std::path::PathBuf>,
 }
 
 impl ApplyReport {
@@ -34,6 +36,23 @@ impl ApplyReport {
 /// `dry_run` computes the diff without touching the file — worth having,
 /// because this rewrites a file the user may have hand-edited.
 pub fn apply_theme(dir: &Path, theme: &daw_theme::Theme, dry_run: bool) -> Result<ApplyReport> {
+    apply_theme_to(dir, theme, dry_run, None)
+}
+
+/// As [`apply_theme`], also writing `libSwell.colortheme` into
+/// `resource_dir` when one is given.
+///
+/// SWELL's theme is a separate file in REAPER's *resource* directory, not
+/// in the theme directory, and it paints the menu bar, dialogs, buttons and
+/// list controls — none of which the `.ReaperTheme` palette can reach.
+/// Skipping it is why a "finished" dark theme keeps a grey bar across the
+/// top and grey dialogs throughout.
+pub fn apply_theme_to(
+    dir: &Path,
+    theme: &daw_theme::Theme,
+    dry_run: bool,
+    resource_dir: Option<&Path>,
+) -> Result<ApplyReport> {
     let mut target = ThemeDir::open(dir)?;
     let mut report = ApplyReport::default();
 
@@ -59,6 +78,15 @@ pub fn apply_theme(dir: &Path, theme: &daw_theme::Theme, dry_run: bool) -> Resul
         target
             .save_ini()
             .with_context(|| format!("write {}", target.ini_path().display()))?;
+    }
+
+    if let Some(res) = resource_dir {
+        let path = res.join("libSwell.colortheme");
+        if !dry_run {
+            std::fs::write(&path, theme.swell_colortheme())
+                .with_context(|| format!("write {}", path.display()))?;
+        }
+        report.swell = Some(path);
     }
 
     Ok(report)

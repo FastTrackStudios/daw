@@ -182,20 +182,38 @@ impl VirtualDisplay {
         path: impl AsRef<Path>,
     ) -> std::io::Result<bool> {
         // `--onlyvisible`: an unmapped window matches the title search but
-        // cannot be captured, and `import` fails on it rather than
-        // skipping it. Highest id among the visible ones is the most
-        // recently mapped, i.e. the main window rather than a splash.
-        let Some(id) = self
+        // cannot be captured, and `import` fails on it rather than skipping
+        // it.
+        //
+        // Then take the **largest** window, not the newest. An app's splash
+        // and its main window share a title, and which one is "newest"
+        // depends entirely on how far into startup the capture lands — so
+        // picking by id yields a splash screenshot on a slow boot and the
+        // real thing on a fast one. Area is stable.
+        let ids: Vec<u64> = self
             .xdotool(&["search", "--onlyvisible", "--name", pattern])
             .unwrap_or_default()
             .lines()
             .filter_map(|l| l.trim().parse::<u64>().ok())
-            .max()
-        else {
+            .collect();
+        let Some(id) = ids.into_iter().max_by_key(|id| self.window_area(*id)) else {
             return Ok(false);
         };
         self.capture(&["-window", &format!("0x{id:x}")], path.as_ref())?;
         Ok(true)
+    }
+
+    /// Pixel area of a window, or 0 if it can't be measured.
+    fn window_area(&self, id: u64) -> u64 {
+        let out = self
+            .xdotool(&["getwindowgeometry", "--shell", &id.to_string()])
+            .unwrap_or_default();
+        let field = |name: &str| -> u64 {
+            out.lines()
+                .find_map(|l| l.strip_prefix(name)?.parse::<u64>().ok())
+                .unwrap_or(0)
+        };
+        field("WIDTH=") * field("HEIGHT=")
     }
 
     /// X window id of the first window matching a geometry.

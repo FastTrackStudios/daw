@@ -34,7 +34,9 @@ pub mod color;
 pub mod defaults;
 pub mod palette;
 pub mod reaper_export;
+pub mod swell_export;
 
 pub use color::Color;
 pub use palette::{Chrome, Editor, Metrics, Signal, Theme};
 pub use reaper_export::Assignment;
+pub use swell_export::SwellSetting;

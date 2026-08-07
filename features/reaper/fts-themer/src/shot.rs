@@ -132,6 +132,14 @@ impl Overrides {
     pub fn for_screenshot() -> Vec<(&'static str, String)> {
         vec![
             // The expensive one: a few hundred VSTs, behind a modal dialog.
+            //
+            // `vst_noscan` is the switch that actually works. Blanking the
+            // paths alone is not enough — REAPER treats an empty `vstpath`
+            // as "unset" and scans its defaults, so a profile with no
+            // plugin cache still sat through a full scan. That went
+            // unnoticed for a while because a *warm* profile skips the scan
+            // regardless, so it only reappears on a fresh one.
+            ("vst_noscan", "1".into()),
             ("vstpath", String::new()),
             ("vstpath64", String::new()),
             ("lv2path_linux", String::new()),
@@ -281,6 +289,19 @@ pub fn capture(opts: &ShotOptions) -> Result<PathBuf> {
     let theme_ini = std::fs::canonicalize(theme.ini_path())?;
     values.push(("lastthemefn5", theme_ini.display().to_string()));
     let _guard = Overrides::apply(&ini, &values, restore)?;
+
+    // SWELL's theme lives in the resource dir, not the theme dir, and paints
+    // the menu bar, dialogs and list controls. Writing it here means a shot
+    // shows the whole window rather than a dark REAPER under a grey menu bar.
+    #[cfg(feature = "apply")]
+    {
+        let swell = dir.join("libSwell.colortheme");
+        if !swell.exists()
+            && let Ok(source) = crate::apply::load_theme(None)
+        {
+            let _ = std::fs::write(&swell, source.swell_colortheme());
+        }
+    }
 
     let project = dir.join("fts-themer-shot.rpp");
     std::fs::write(&project, project_rpp(&opts.tracks))?;
