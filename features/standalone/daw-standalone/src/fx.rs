@@ -770,9 +770,9 @@ impl Effects for Standalone {
     fn latency(&self, project: ProjectContext, target: FxTarget) -> Option<FxLatency> {
         if let Some(fx_guid) = resolve_fx_guid(self, &project, &target) {
             let mut plugins = self
-            .plugin_instances
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                .plugin_instances
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
             if let Some(plugin) = plugins.get_mut(&fx_guid) {
                 let samples = plugin.latency() as i32;
                 return Some(FxLatency {

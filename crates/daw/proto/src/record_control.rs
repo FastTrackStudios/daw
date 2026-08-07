@@ -33,7 +33,6 @@ pub use record_control_service::{
     record_control_service_service_descriptor, serve as serve_record_control_service,
 };
 
-
 // ── Actions ─────────────────────────────────────────────────────────────
 
 #[architect::actions(namespace = "FTS_SESSION")]
@@ -98,15 +97,18 @@ mod record_id_tests {
     #[test]
     fn ids_match_pre_move_command_ids() {
         let ids: Vec<_> = RecordActionsActions::all().iter().map(|m| m.id).collect();
-        assert_eq!(ids, vec![
-            "FTS_SESSION_RECORD",
-            "FTS_SESSION_RECORD_STOP",
-            "FTS_SESSION_RECORD_TOGGLE",
-            "FTS_SESSION_ARM_SELECTED",
-            "FTS_SESSION_DISARM_SELECTED",
-            "FTS_SESSION_RECORD_RESTART",
-            "FTS_SESSION_MONITOR_TOGGLE_ON_OFF",
-            "FTS_SESSION_MONITOR_TOGGLE_TAPE_OFF",
-        ]);
+        assert_eq!(
+            ids,
+            vec![
+                "FTS_SESSION_RECORD",
+                "FTS_SESSION_RECORD_STOP",
+                "FTS_SESSION_RECORD_TOGGLE",
+                "FTS_SESSION_ARM_SELECTED",
+                "FTS_SESSION_DISARM_SELECTED",
+                "FTS_SESSION_RECORD_RESTART",
+                "FTS_SESSION_MONITOR_TOGGLE_ON_OFF",
+                "FTS_SESSION_MONITOR_TOGGLE_TAPE_OFF",
+            ]
+        );
     }
 }

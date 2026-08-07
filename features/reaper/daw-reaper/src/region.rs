@@ -243,7 +243,6 @@ impl Regions for crate::Reaper {
 
         Err(not_found_region())
     }
-
 }
 
 impl daw_proto::region::RegionsStreamSource for crate::Reaper {

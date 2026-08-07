@@ -457,8 +457,7 @@ pub struct Standalone {
     /// per-project transport pump publishes state changes + ~30 Hz
     /// position ticks here; the architect `#[subscribe] fn events`
     /// stream layer fans them out. Subscribers filter by `project_guid`.
-    pub(crate) transport_events:
-        architect::PubSub<daw_proto::transport::TransportStreamEvent>,
+    pub(crate) transport_events: architect::PubSub<daw_proto::transport::TransportStreamEvent>,
     /// Cross-domain event-bus hub (`EventBusStreamSource`). Every
     /// per-domain publish site also wraps its event in [`DawEvent`]
     /// and publishes here; per-project transport pumps bridge
@@ -608,9 +607,7 @@ impl Standalone {
             let mut engines = self.transport_engines.lock().expect("engines poisoned");
             match engines.entry(guid.to_string()) {
                 std::collections::hash_map::Entry::Occupied(e) => (e.get().clone(), false),
-                std::collections::hash_map::Entry::Vacant(v) => {
-                    (v.insert(bundle).clone(), true)
-                }
+                std::collections::hash_map::Entry::Vacant(v) => (v.insert(bundle).clone(), true),
             }
         };
         if inserted {

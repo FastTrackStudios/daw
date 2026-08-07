@@ -126,7 +126,15 @@ pub fn seed_media_tracks(
                     Tracks::set_folder_depth(daw, ctx.clone(), TrackRef::Guid(track.clone()), -1);
             }
 
-            seed_audio_item(daw, project_guid, &ctx, &track, stem, position_seconds, length_seconds);
+            seed_audio_item(
+                daw,
+                project_guid,
+                &ctx,
+                &track,
+                stem,
+                position_seconds,
+                length_seconds,
+            );
         }
     }
 
@@ -165,8 +173,7 @@ fn seed_audio_item(
     let ItemRef::Guid(item_guid) = &loc.item else {
         return;
     };
-    let Some(active) =
-        Takes::get_active_take(daw, ctx.clone(), ItemRef::Guid(item_guid.clone()))
+    let Some(active) = Takes::get_active_take(daw, ctx.clone(), ItemRef::Guid(item_guid.clone()))
     else {
         return;
     };

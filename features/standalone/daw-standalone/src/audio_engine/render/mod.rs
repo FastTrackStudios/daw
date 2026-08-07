@@ -615,9 +615,10 @@ impl ProjectRenderer {
                         // panicking plugin must not unwind out of the audio
                         // callback (extern "C" boundary → abort), so it's
                         // caught, logged once, and bypassed from then on.
-                        let prepared = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                            || plugin.prepare(self.sample_rate as f64, frames as u32),
-                        ));
+                        let prepared =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                plugin.prepare(self.sample_rate as f64, frames as u32)
+                            }));
                         match prepared {
                             Ok(Ok(())) => {}
                             Ok(Err(_)) => continue,
@@ -1412,13 +1413,25 @@ mod folder_routing_tests {
         let by = |n: &str| tracks.iter().find(|t| t.name == n).expect(n);
         let vocals = by("Vocals");
         let drums = by("Drums");
-        assert!(vocals.is_folder && vocals.parent_guid.is_none(), "Vocals folder");
-        assert!(drums.is_folder && drums.parent_guid.is_none(), "Drums folder");
+        assert!(
+            vocals.is_folder && vocals.parent_guid.is_none(),
+            "Vocals folder"
+        );
+        assert!(
+            drums.is_folder && drums.parent_guid.is_none(),
+            "Drums folder"
+        );
         assert!(!by("Lead").is_folder);
-        assert_eq!(by("Lead").parent_guid.as_deref(), Some(vocals.guid.as_str()));
+        assert_eq!(
+            by("Lead").parent_guid.as_deref(),
+            Some(vocals.guid.as_str())
+        );
         assert_eq!(by("BGV").parent_guid.as_deref(), Some(vocals.guid.as_str()));
         assert_eq!(by("Kick").parent_guid.as_deref(), Some(drums.guid.as_str()));
-        assert_eq!(by("Snare").parent_guid.as_deref(), Some(drums.guid.as_str()));
+        assert_eq!(
+            by("Snare").parent_guid.as_deref(),
+            Some(drums.guid.as_str())
+        );
         assert_eq!(by("Loop").parent_guid, None);
     }
 
@@ -1486,13 +1499,23 @@ mod folder_routing_tests {
 
         // Reference: mute everything except Kick.
         for n in others {
-            Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(guid_of(&daw, &guid, n)), true)
-                .unwrap();
+            Tracks::set_muted(
+                &daw,
+                ctx.clone(),
+                TrackRef::Guid(guid_of(&daw, &guid, n)),
+                true,
+            )
+            .unwrap();
         }
         let only_kick = renderer.render_block(0, 512);
         for n in others {
-            Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(guid_of(&daw, &guid, n)), false)
-                .unwrap();
+            Tracks::set_muted(
+                &daw,
+                ctx.clone(),
+                TrackRef::Guid(guid_of(&daw, &guid, n)),
+                false,
+            )
+            .unwrap();
         }
 
         // Solo Kick — must isolate to the same output.
@@ -1525,13 +1548,23 @@ mod folder_routing_tests {
         // Reference: mute everything except the vocal children (what soloing the
         // Vocals folder should sound like).
         for n in others {
-            Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(guid_of(&daw, &guid, n)), true)
-                .unwrap();
+            Tracks::set_muted(
+                &daw,
+                ctx.clone(),
+                TrackRef::Guid(guid_of(&daw, &guid, n)),
+                true,
+            )
+            .unwrap();
         }
         let only_vocals = renderer.render_block(0, 512);
         for n in others {
-            Tracks::set_muted(&daw, ctx.clone(), TrackRef::Guid(guid_of(&daw, &guid, n)), false)
-                .unwrap();
+            Tracks::set_muted(
+                &daw,
+                ctx.clone(),
+                TrackRef::Guid(guid_of(&daw, &guid, n)),
+                false,
+            )
+            .unwrap();
         }
         assert!(
             rms(&only_vocals.samples) > 0.01,

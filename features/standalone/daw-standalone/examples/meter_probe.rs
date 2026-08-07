@@ -101,7 +101,10 @@ async fn run() -> eyre::Result<()> {
     let a = next_peak(&mut stream).await?;
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let b = next_peak(&mut stream).await?;
-    assert!((a - b).abs() > 1e-4, "levels move during playback: {a} vs {b}");
+    assert!(
+        (a - b).abs() > 1e-4,
+        "levels move during playback: {a} vs {b}"
+    );
     println!("levels move over time ({a:.3} → {b:.3}) — OK");
     Ok(())
 }

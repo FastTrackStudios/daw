@@ -25,7 +25,9 @@ impl From<ScreensetKindArg> for crate::service::ScreensetKind {
         }
     }
 }
-use crate::cli::cli_values::{OnOff, ToolbarIconKindValue, TrackColor, TrackFolderDepth, TrackName};
+use crate::cli::cli_values::{
+    OnOff, ToolbarIconKindValue, TrackColor, TrackFolderDepth, TrackName,
+};
 use eyre::Result;
 use serde_json::Value;
 
@@ -428,6 +430,16 @@ enum Command {
         #[command(subcommand)]
         command: ActionsCommand,
     },
+    /// Reload REAPER's color theme, applying edits without a restart
+    ///
+    /// With no path this re-opens whatever theme is active — REAPER re-reads
+    /// rtconfig.txt and the image folder on every open, so that *is* a reload.
+    ThemeReload {
+        /// Theme to load (.ReaperTheme). Omit to reload the active one.
+        path: Option<PathBuf>,
+    },
+    /// Show REAPER's resource, ini and active-theme paths
+    ThemePaths,
     /// Return dynamic toolbar availability and tracked buttons
     Toolbar,
     /// Query live REAPER toolbar contents
@@ -978,7 +990,9 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
             print_value(crate::cli::ops::run_batch(daw, &text).await?, json)?
         }
         Command::Fx { ref track } => crate::cli::cmd_fx(daw, track, json).await?,
-        Command::Params { ref track, ref fx } => crate::cli::cmd_params(daw, track, fx, json).await?,
+        Command::Params { ref track, ref fx } => {
+            crate::cli::cmd_params(daw, track, fx, json).await?
+        }
         Command::LastTouchedFx => print_value(crate::cli::ops::last_touched_fx(daw).await?, json)?,
         Command::BypassFx { ref track, ref fx } => print_value(
             crate::cli::ops::fx_set_enabled(daw, track, fx, false).await?,
@@ -1044,10 +1058,14 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
         Command::Transport => crate::cli::cmd_transport(daw, json).await?,
         Command::Play => print_value(crate::cli::ops::transport_control(daw, "play").await?, json)?,
         Command::Stop => print_value(crate::cli::ops::transport_control(daw, "stop").await?, json)?,
-        Command::Pause => print_value(crate::cli::ops::transport_control(daw, "pause").await?, json)?,
-        Command::Record => {
-            print_value(crate::cli::ops::transport_control(daw, "record").await?, json)?
-        }
+        Command::Pause => print_value(
+            crate::cli::ops::transport_control(daw, "pause").await?,
+            json,
+        )?,
+        Command::Record => print_value(
+            crate::cli::ops::transport_control(daw, "record").await?,
+            json,
+        )?,
         Command::PlayPause => print_value(
             crate::cli::ops::transport_control(daw, "play_pause").await?,
             json,
@@ -1062,7 +1080,9 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
         Command::Regions => crate::cli::cmd_regions(daw, json).await?,
 
         Command::Plugins => crate::cli::cmd_plugins(daw, json).await?,
-        Command::LoadedPlugins => print_value(crate::cli::ops::plugin_loader_list(daw).await?, json)?,
+        Command::LoadedPlugins => {
+            print_value(crate::cli::ops::plugin_loader_list(daw).await?, json)?
+        }
         Command::LoadPlugin { ref path } => {
             print_value(crate::cli::ops::plugin_loader_load(daw, path).await?, json)?
         }
@@ -1078,9 +1098,10 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
         Command::SaveAll => print_value(crate::cli::ops::save_all_projects(daw).await?, json)?,
         Command::Undo => print_value(crate::cli::ops::project_undo(daw).await?, json)?,
         Command::Redo => print_value(crate::cli::ops::project_redo(daw).await?, json)?,
-        Command::RunCommand { ref command } => {
-            print_value(crate::cli::ops::project_run_command(daw, command).await?, json)?
-        }
+        Command::RunCommand { ref command } => print_value(
+            crate::cli::ops::project_run_command(daw, command).await?,
+            json,
+        )?,
 
         Command::AddTrack { ref name, at } => {
             crate::cli::cmd_add_track(daw, name.as_deref(), at, json).await?
@@ -1121,7 +1142,10 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
         Command::TrackRename {
             ref track,
             ref name,
-        } => print_value(crate::cli::ops::track_rename(daw, track, &name.0).await?, json)?,
+        } => print_value(
+            crate::cli::ops::track_rename(daw, track, &name.0).await?,
+            json,
+        )?,
         Command::TrackColor { ref track, color } => print_value(
             crate::cli::ops::track_set_color(daw, track, color.0).await?,
             json,
@@ -1160,15 +1184,17 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
         )?,
 
         Command::AudioEngine => print_value(crate::cli::ops::audio_engine(daw).await?, json)?,
-        Command::AudioEngineDo { ref action } => {
-            print_value(crate::cli::ops::audio_engine_control(daw, action).await?, json)?
-        }
+        Command::AudioEngineDo { ref action } => print_value(
+            crate::cli::ops::audio_engine_control(daw, action).await?,
+            json,
+        )?,
         Command::Action { ref action_id } => {
             print_value(crate::cli::ops::action_execute(daw, action_id).await?, json)?
         }
-        Command::ActionLookup { ref command_name } => {
-            print_value(crate::cli::ops::action_lookup(daw, command_name).await?, json)?
-        }
+        Command::ActionLookup { ref command_name } => print_value(
+            crate::cli::ops::action_lookup(daw, command_name).await?,
+            json,
+        )?,
         Command::ActionToggle {
             ref command_name,
             is_on,
@@ -1184,7 +1210,8 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
                 limit,
                 columns,
             } => print_action_list(
-                crate::cli::ops::action_list(daw, filter, section, query.as_deref(), *limit).await?,
+                crate::cli::ops::action_list(daw, filter, section, query.as_deref(), *limit)
+                    .await?,
                 json,
                 columns,
             )?,
@@ -1204,7 +1231,8 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
                 limit,
                 columns,
             } => print_action_list(
-                crate::cli::ops::action_list(daw, "reaper", section, query.as_deref(), *limit).await?,
+                crate::cli::ops::action_list(daw, "reaper", section, query.as_deref(), *limit)
+                    .await?,
                 json,
                 columns,
             )?,
@@ -1231,12 +1259,14 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
                 columns,
             )?,
             ActionsCommand::Aliases => print_value(crate::cli::ops::action_aliases(), json)?,
-            ActionsCommand::ExecAlias { alias } => {
-                print_value(crate::cli::ops::action_execute_alias(daw, alias).await?, json)?
-            }
-            ActionsCommand::Lookup { command_name } => {
-                print_value(crate::cli::ops::action_lookup(daw, command_name).await?, json)?
-            }
+            ActionsCommand::ExecAlias { alias } => print_value(
+                crate::cli::ops::action_execute_alias(daw, alias).await?,
+                json,
+            )?,
+            ActionsCommand::Lookup { command_name } => print_value(
+                crate::cli::ops::action_lookup(daw, command_name).await?,
+                json,
+            )?,
             ActionsCommand::Exec { action_id } => {
                 print_value(crate::cli::ops::action_execute(daw, action_id).await?, json)?
             }
@@ -1248,8 +1278,15 @@ async fn run_rpc_command(daw: &crate::rpc::Daw, command: Command, json: bool) ->
                     .await?,
                 json,
             )?,
-            ActionsCommand::Toolbar => print_value(crate::cli::ops::toolbar_status(daw).await?, json)?,
+            ActionsCommand::Toolbar => {
+                print_value(crate::cli::ops::toolbar_status(daw).await?, json)?
+            }
         },
+        Command::ThemeReload { ref path } => print_value(
+            crate::cli::ops::theme_reload(daw, path.as_deref()).await?,
+            json,
+        )?,
+        Command::ThemePaths => print_value(crate::cli::ops::theme_paths(daw).await?, json)?,
         Command::Toolbar => print_value(crate::cli::ops::toolbar_status(daw).await?, json)?,
         Command::ToolbarLive { target } => print_value(
             crate::cli::ops::toolbar_live(daw, target.as_deref()).await?,

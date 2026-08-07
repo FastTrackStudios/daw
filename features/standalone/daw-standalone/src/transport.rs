@@ -350,5 +350,4 @@ impl Transport for Standalone {
         self.with_project(&guid, |p| p.transport.time_signature)
             .unwrap_or_default()
     }
-
 }

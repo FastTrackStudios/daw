@@ -411,7 +411,6 @@ impl TempoMap for crate::Reaper {
         }
         Ok(())
     }
-
 }
 
 impl daw_proto::transport::service::TransportStreamSource for crate::Reaper {

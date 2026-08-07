@@ -433,7 +433,6 @@ impl Transport for crate::Reaper {
             get_time_signature_for_project(medium, resolve_reaper_project_context(&project));
         TimeSignature::new(num as u32, denom as u32)
     }
-
 }
 
 // Compile-time assertion: `crate::Reaper` must remain Arc-safe so

@@ -22,7 +22,12 @@ use std::time::{Duration, Instant};
 
 /// Window managers tried in order. All are tiny and none need a
 /// session bus, a compositor, or configuration.
-const WINDOW_MANAGERS: [&str; 4] = ["openbox", "fluxbox", "herbstluftwm", "matchbox-window-manager"];
+const WINDOW_MANAGERS: [&str; 4] = [
+    "openbox",
+    "fluxbox",
+    "herbstluftwm",
+    "matchbox-window-manager",
+];
 
 /// An Xvfb plus a window manager, torn down on drop.
 pub struct VirtualDisplay {
@@ -39,7 +44,10 @@ impl VirtualDisplay {
     ///
     /// `geometry` is Xvfb's screen spec, e.g. `"1920x1200x24"`.
     pub fn start(display: &str, geometry: &str) -> std::io::Result<Self> {
-        let socket = PathBuf::from(format!("/tmp/.X11-unix/X{}", display.trim_start_matches(':')));
+        let socket = PathBuf::from(format!(
+            "/tmp/.X11-unix/X{}",
+            display.trim_start_matches(':')
+        ));
         if socket.exists() {
             // Someone else's display: use it, but do not own it.
             let mut vd = Self {
@@ -168,7 +176,9 @@ impl VirtualDisplay {
         if status.success() {
             Ok(())
         } else {
-            Err(std::io::Error::other("import failed — is imagemagick on PATH?"))
+            Err(std::io::Error::other(
+                "import failed — is imagemagick on PATH?",
+            ))
         }
     }
 
@@ -257,7 +267,10 @@ impl Drop for VirtualDisplay {
             let _ = x.kill();
             let _ = x.wait();
         }
-        let _ = std::fs::remove_file(format!("/tmp/.X{}-lock", self.display.trim_start_matches(':')));
+        let _ = std::fs::remove_file(format!(
+            "/tmp/.X{}-lock",
+            self.display.trim_start_matches(':')
+        ));
     }
 }
 
@@ -367,10 +380,15 @@ impl VirtualDisplay {
     /// Called before a screenshot so the capture shows the thing under
     /// test rather than a leftover dialog.
     pub fn close_stray_dialogs(&self) -> usize {
-        ["Actions", "Preferences", "Routing Matrix", "Region/Marker Manager"]
-            .iter()
-            .map(|name| self.close_windows_named(name))
-            .sum()
+        [
+            "Actions",
+            "Preferences",
+            "Routing Matrix",
+            "Region/Marker Manager",
+        ]
+        .iter()
+        .map(|name| self.close_windows_named(name))
+        .sum()
     }
 
     /// Raise and focus a window by title.
@@ -416,8 +434,7 @@ impl VirtualDisplay {
             return false;
         };
         let get = |key: &str| -> Option<i32> {
-            geom.lines()
-                .find_map(|l| l.strip_prefix(key)?.parse().ok())
+            geom.lines().find_map(|l| l.strip_prefix(key)?.parse().ok())
         };
         let (Some(x), Some(y)) = (get("X="), get("Y=")) else {
             return false;
@@ -427,13 +444,7 @@ impl VirtualDisplay {
     }
 
     /// Drag within a window, for gestures a click cannot express.
-    pub fn drag_in_window_sized(
-        &self,
-        w: u32,
-        h: u32,
-        from: (i32, i32),
-        to: (i32, i32),
-    ) -> bool {
+    pub fn drag_in_window_sized(&self, w: u32, h: u32, from: (i32, i32), to: (i32, i32)) -> bool {
         let Some(id) = self.find_window_sized(w, h) else {
             return false;
         };
@@ -441,8 +452,7 @@ impl VirtualDisplay {
             return false;
         };
         let get = |key: &str| -> Option<i32> {
-            geom.lines()
-                .find_map(|l| l.strip_prefix(key)?.parse().ok())
+            geom.lines().find_map(|l| l.strip_prefix(key)?.parse().ok())
         };
         let (Some(ox), Some(oy)) = (get("X="), get("Y=")) else {
             return false;

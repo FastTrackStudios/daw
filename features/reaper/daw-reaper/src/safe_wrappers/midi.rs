@@ -114,12 +114,7 @@ pub struct MidiNoteEdit {
 /// once at the end via [`sort`], not once per note. Sorting per note is
 /// O(n²) over a take and — worse — can renumber the very indices the
 /// caller is still iterating over.
-pub fn set_note(
-    low: &ReaperLow,
-    take: MediaItemTake,
-    index: i32,
-    edit: MidiNoteEdit,
-) -> bool {
+pub fn set_note(low: &ReaperLow, take: MediaItemTake, index: i32, edit: MidiNoteEdit) -> bool {
     // These must outlive the call: the pointers handed to REAPER point
     // into these locals.
     let mut selected = edit.selected.unwrap_or_default();
