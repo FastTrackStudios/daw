@@ -145,7 +145,14 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
                 fill_opacity: "0.9",
             }
             text {
-                x: "{vw * 0.5}", y: "{vh * 0.54}",
+                x: "{vw * 0.5}",
+                // Above the geometric centre, deliberately. The source
+                // glyph occupies rows 6..13 of a 20-row cell — centred on
+                // 9.5, not 10 — and `dominant-baseline: central` centres on
+                // the font's own middle, which put it a further half-pixel
+                // down. Sitting it at 0.54 rendered a full row low in every
+                // one of mute, solo and FX.
+                y: "{vh * 0.49}",
                 text_anchor: "middle", dominant_baseline: "central",
                 font_family: "Fira Sans, DejaVu Sans, sans-serif",
                 // Heavier and larger than the measured glyph height: at
@@ -304,13 +311,21 @@ pub fn FxButton(props: FxProps) -> Element {
             }
             text {
                 x: "{(x + vw) * 0.5}",
-                y: "{top + vh * 0.045 + face_h * 0.5}",
+                // Not the geometric centre of the face. `dominant-baseline:
+                // central` centres on the font's own middle, which lands
+                // the cap half a pixel above where the original sits — so
+                // this carries a measured nudge rather than pretending the
+                // maths comes out even. The source glyphs occupy rows 6..12
+                // of the cell, centred on row 9.
+                y: "{vh * 0.432}",
                 text_anchor: "middle", dominant_baseline: "central",
                 font_family: "Fira Sans, DejaVu Sans, sans-serif",
-                // Lighter than mute's glyph and spread wide — the original
-                // letters are open and airy, not a packed bold pair.
-                font_weight: "500",
-                font_size: "{vh * 0.44}",
+                // Sized so the caps come out 7px in a 22px cell, matching
+                // the source. At 500 weight and 0.44 they rendered 6px and
+                // visibly thinner than the original — light enough that the
+                // button read as disabled in every state.
+                font_weight: "700",
+                font_size: "{vh * 0.51}",
                 letter_spacing: "{vw * 0.025}",
                 fill: "{text.css()}",
                 "FX"

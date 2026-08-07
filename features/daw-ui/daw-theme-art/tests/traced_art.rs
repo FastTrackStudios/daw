@@ -204,3 +204,114 @@ fn lookup_finds_what_the_theme_asks_for() {
     }
     assert!(generated::by_name("definitely_not_a_theme_image").is_none());
 }
+
+
+/// The label on a button sits where the source puts it.
+///
+/// Vertical placement is not something `dominant-baseline: central` gets
+/// right on its own: it centres on the font's own middle, and the source
+/// glyphs are not centred in their cell either — mute's `M` occupies rows
+/// 6..13 of 20, centred on 9.5. The two errors compounded and every label
+/// rendered a full row low, which is easy to miss on one button and
+/// obvious once a strip of them is stacked up.
+///
+/// Compares the rows holding near-white pixels — the glyph — rather than
+/// anything about colour, so it survives the palette being retinted.
+#[test]
+fn button_labels_sit_where_the_source_puts_them() {
+    use daw_theme_art::vector_controls as vector;
+
+    let Some(dir) = source_dir() else { return };
+
+    /// First and last row holding more than one near-white pixel.
+    fn glyph_rows(img: &image::RgbaImage) -> Option<(u32, u32)> {
+        let rows: Vec<u32> = (0..img.height())
+            .filter(|&y| {
+                (0..img.width())
+                    .filter(|&x| {
+                        let [r, g, b, a] = img.get_pixel(x, y).0;
+                        let lo = r.min(g).min(b);
+                        a > 128 && lo > 150 && r.max(g).max(b) - lo < 40
+                    })
+                    .count()
+                    > 1
+            })
+            .collect();
+        Some((*rows.first()?, *rows.last()?))
+    }
+
+    let n = (None, None);
+    let cases: [(&str, u32, String); 3] = [
+        (
+            "mcp_mute_on",
+            0,
+            daw_theme_art::render_svg(
+                vector::MuteButton,
+                vector::ToggleProps {
+                    on: true,
+                    width: n.0,
+                    height: n.1,
+                    at: vector::Interaction::Normal,
+                },
+            ),
+        ),
+        (
+            "mcp_solo_on",
+            0,
+            daw_theme_art::render_svg(
+                vector::SoloButton,
+                vector::SoloProps {
+                    state: vector::Solo::On,
+                    width: n.0,
+                    height: n.1,
+                    at: vector::Interaction::Normal,
+                },
+            ),
+        ),
+        (
+            "mcp_fx_norm",
+            1,
+            daw_theme_art::render_svg(
+                vector::FxButton,
+                vector::FxProps {
+                    state: vector::FxChain::Active,
+                    width: n.0,
+                    height: n.1,
+                    at: vector::Interaction::Normal,
+                },
+            ),
+        ),
+    ];
+
+    for (name, cell, svg) in &cases {
+        let art = generated::by_name(name).expect("art index entry");
+        let src = image::open(dir.join(format!("{name}.png")))
+            .expect("source png")
+            .to_rgba8();
+        let cw = src.width() / art.cells.max(1);
+        let cropped = image::imageops::crop_imm(&src, cell * cw, 0, cw, src.height()).to_image();
+        let want = glyph_rows(&cropped)
+            .unwrap_or_else(|| panic!("{name}: no glyph found in the source"));
+
+        // Rasterise at REAPER's own size — a label can be perfectly placed
+        // at 300px and a row out at 20px, and 20px is where it ships.
+        let tree = resvg::usvg::Tree::from_str(svg, &options()).expect("valid svg");
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(cw, src.height()).expect("pixmap");
+        let (tw, th) = (tree.size().width(), tree.size().height());
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::from_scale(
+                cw as f32 / tw,
+                src.height() as f32 / th,
+            ),
+            &mut pixmap.as_mut(),
+        );
+        let got = glyph_rows(&daw_theme_art::render::to_rgba(&pixmap))
+            .unwrap_or_else(|| panic!("{name}: the vector drew no glyph at all"));
+
+        assert!(
+            want.0.abs_diff(got.0) <= 1 && want.1.abs_diff(got.1) <= 1,
+            "{name}: source glyph spans rows {want:?} but the vector draws it at {got:?}",
+        );
+    }
+}
