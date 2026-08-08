@@ -34,23 +34,36 @@
 //! the point: change the palette or a component and every scale regenerates.
 
 pub mod art_data;
-pub mod compare;
 pub mod components;
-pub mod derive;
 pub mod generated;
 pub mod mixer_controls;
 pub mod primitives;
 pub mod strip;
-pub mod trace;
-pub mod export;
 pub mod vector_controls;
 
+// Everything that reads or writes a bitmap. The components themselves need
+// none of it, and the app that renders them as live SVG should not have to
+// build `image` and `resvg` to do so — which is what `default-features =
+// false` is for, and what these gates make true. Without them the crate
+// only ever compiled one way, and the "just the components" build the
+// manifest advertises did not exist.
+#[cfg(feature = "render")]
+pub mod compare;
+#[cfg(feature = "render")]
+pub mod derive;
+#[cfg(feature = "render")]
+pub mod export;
 #[cfg(feature = "render")]
 pub mod render;
+#[cfg(feature = "render")]
+pub mod trace;
 
 pub use art_data::{ArtData, ArtImage, ColorMode, Rect};
+#[cfg(feature = "render")]
 pub use compare::{Fidelity, compare};
+#[cfg(feature = "render")]
 pub use derive::DerivedSpec;
+#[cfg(feature = "render")]
 pub use trace::trace;
 
 pub use mixer_controls::{
@@ -60,5 +73,6 @@ pub use mixer_controls::{
 pub use primitives::{Button, ControlState, Groove, Meter, Panel, Thumb};
 #[cfg(feature = "render")]
 pub use render::{RenderError, render_for, render_sized, render_svg};
+#[cfg(feature = "render")]
 pub use export::{cell_markup, composite_cells, generatable, render_control};
 pub use strip::{Mixer, MixerStrip};

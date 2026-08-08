@@ -41,6 +41,19 @@ fts-ui = { workspace = true, optional = true }
 # + rtconfig params onto our Theme tokens.
 daw-theme-reaper = { workspace = true, optional = true }
 
+# The vector controls. Every mixer and track-panel control in this crate is
+# one of these components; the same components are rasterised to build the
+# REAPER theme, which is what keeps the two renderings honest.
+#
+# `default-features = false` drops resvg/image/dioxus-ssr: rasterising is the
+# theme generator's job. Here they render as live SVG.
+daw-theme-art = { workspace = true, default-features = false }
+
+[dev-dependencies]
+# Renders a panel to a string so a test can assert it actually mounted.
+# Type-checking a Dioxus component proves nothing about whether it draws.
+dioxus-ssr = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", default-features = false }
+
 [features]
 default = ["web"]
 web = ["dep:dioxus", "dep:tracing", "dock-dioxus/web", "dep:input", "dep:input-dioxus"]

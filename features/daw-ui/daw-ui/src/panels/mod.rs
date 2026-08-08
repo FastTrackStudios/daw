@@ -7,11 +7,16 @@
 //! - [`MixerControlPanel`] — the bottom-third mixer console.
 //! - [`ArrangeView`] — TCP sidebar + scrollable timeline lanes.
 //! - [`DawWorkspace`] — arrange-over-mixer composition of all three.
+//!
+//! Those render a *REAPER theme*: WALTER layout, PNG atlas. The [`native`]
+//! module draws the same controls from the vector components instead — no
+//! WALTER, no bitmaps — starting with [`NativeTransportBar`].
 
 pub mod arrange_view;
 pub mod envcp_row;
 pub mod mcp_strip;
 pub mod mixer_control_panel;
+pub mod native;
 pub mod model;
 pub mod track_control_panel;
 pub mod transport_bar;
@@ -21,6 +26,7 @@ pub use arrange_view::{ArrangeEdit, ArrangeView};
 pub use envcp_row::EnvcpRow;
 pub use mcp_strip::McpStrip;
 pub use mixer_control_panel::MixerControlPanel;
+pub use native::NativeTransportBar;
 pub use model::{
     ClipView, EnvelopeView, LaneDisplay, MarkerView, RegionView, TempoMarkerView, TrackView,
 };
