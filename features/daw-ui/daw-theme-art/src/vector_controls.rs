@@ -1453,7 +1453,6 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
                             fill: "{lit.css()}",
                         }
                         rect {
-                            key: "d{i}",
                             x: "{gx0}", y: "{y + step * 0.5}",
                             width: "{gw}", height: "{step * 0.5}",
                             fill: "{dark.css()}",
