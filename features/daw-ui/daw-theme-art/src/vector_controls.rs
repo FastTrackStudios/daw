@@ -685,8 +685,15 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     let (cx, cy, outer, hole) = if props.housing {
         (vw * 0.486, vh * 0.521, unit * 0.3125, unit * 0.1458)
     } else {
-        (vw * 0.5, vh * 0.5, unit * 0.40, unit * 0.15)
+        // 0.155, not 0.15: at exactly 0.15 the hole's edge lands on the
+        // pixel boundary at x=7 and the rasteriser bleeds a bright fringe
+        // into the first column of the hole, where the source has none.
+        (vw * 0.5, vh * 0.5, unit * 0.41, unit * 0.155)
     };
+    // The barred variant is drawn on a *thinner* ring: its hole measures
+    // radius 4 against the plain ring's 3, which is visible as a wider
+    // dark centre before the X is taken into account at all.
+    let hole = if barred { unit * 0.20 } else { hole };
     // A stroked circle: radius sits mid-band, width is the band.
     let band = outer - hole;
     let r = hole + band / 2.0;
@@ -710,6 +717,20 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     //
     // Without a housing there is nothing behind it, so the hole is a hole.
     let hole_fill = t.chrome.hardware.shade(-0.40);
+    // With a housing, the hole is that housing showing through — #262626
+    // in the source, the same colour as the surround. Without one there
+    // is nothing behind the ring, so the hole is a *hole*: the source's
+    // is fully transparent, and filling it laid a grey disc over the
+    // strip that read as a much thicker ring.
+    let through = if props.housing {
+        hole_fill.css()
+    } else {
+        "none".to_string()
+    };
+    // Cuts need something to cut *with*. Over a housing that is its
+    // colour; over nothing it has to be a mask, since "paint transparent"
+    // does not erase.
+    let notch_id = "recnotch";
 
     rsx! {
         svg {
@@ -717,6 +738,16 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
             height: "{props.height.unwrap_or(vh as u32)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                // The ring is lit from the top, like every other moulded
+                // part here: the source carries #fa4e5e and #e23b53 in
+                // equal measure and this drew only the darker of the two,
+                // which is why it read flat and dull beside the original.
+                linearGradient { id: "recring", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{ring.shade(0.12).css()}" }
+                    stop { offset: "1", stop_color: "{ring.css()}" }
+                }
+            }
             if props.housing {
                 // Traced off `mcp_recarm_on` by **sub-pixel coverage**, not
                 // by thresholding the alpha. Down column 6 the alpha runs
@@ -752,7 +783,7 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
             if auto {
                 circle {
                     cx: "{cx}", cy: "{cy}", r: "{outer}",
-                    fill: "{ring.css()}",
+                    fill: "url(#recring)",
                 }
                 text {
                     x: "{cx}", y: "{cy}",
@@ -765,33 +796,60 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                     "A"
                 }
             } else {
-                circle {
-                    cx: "{cx}", cy: "{cy}", r: "{r}",
-                    fill: "{hole_fill.css()}",
-                    stroke: "{ring.css()}",
-                    stroke_width: "{band}",
-                }
-            }
-            if barred && !auto {
-                // Four radial notches, not two crossing lines: the original
-                // reads as a life-ring, with the cuts running right through
-                // the band to the outer edge.
-                for (i, deg) in [45.0f32, 135.0, 225.0, 315.0].iter().enumerate() {
-                    {
-                        let a = deg.to_radians();
-                        let (dx, dy) = (a.cos(), a.sin());
-                        rsx! {
-                            line {
-                                key: "{i}",
-                                x1: "{cx + dx * (hole - unit * 0.02)}",
-                                y1: "{cy + dy * (hole - unit * 0.02)}",
-                                x2: "{cx + dx * (outer + unit * 0.03)}",
-                                y2: "{cy + dy * (outer + unit * 0.03)}",
-                                stroke: "{hole_fill.css()}",
-                                stroke_width: "{band * 0.85}",
-                                stroke_linecap: "butt",
+                // Four radial notches when barred, not two crossing lines:
+                // the original reads as a life-ring, with the cuts running
+                // through the band to the outer edge. They are a mask so
+                // they cut the ring whether or not anything is behind it.
+                if barred {
+                    defs {
+                        mask { id: "{notch_id}",
+                            rect {
+                                x: "0", y: "0", width: "{vw}", height: "{vh}",
+                                fill: "#ffffff",
+                            }
+                            // Two straight bars, crossing at the
+                            // centre — an **X laid over the whole ring**,
+                            // not four wedges cut out of it.
+                            //
+                            // Both leave four blobs at this size, which is
+                            // why wedges looked plausible, but they are
+                            // not the same shape: a wedge's cut edges
+                            // point at the centre, and the source's are
+                            // parallel. Mapping the pixels shows the top
+                            // blob narrowing from 8 columns to 6 over two
+                            // rows, which is a straight edge crossing it,
+                            // not a radial one.
+                            for (i, deg) in [45.0f32, 135.0].iter().enumerate() {
+                                {
+                                    let a = deg.to_radians();
+                                    let (dx, dy) = (a.cos(), a.sin());
+                                    let far = outer + unit * 0.1;
+                                    rsx! {
+                                        line {
+                                            key: "{i}",
+                                            x1: "{cx - dx * far}", y1: "{cy - dy * far}",
+                                            x2: "{cx + dx * far}", y2: "{cy + dy * far}",
+                                            stroke: "#000000",
+                                            stroke_width: "{unit * 0.145}",
+                                        }
+                                    }
+                                }
                             }
                         }
+                    }
+                    circle {
+                        cx: "{cx}", cy: "{cy}", r: "{r}",
+                        fill: "{through}",
+                        stroke: "url(#recring)",
+                        stroke_width: "{band}",
+                        mask: "url(#{notch_id})",
+                    }
+                } else {
+                    circle {
+                        cx: "{cx}", cy: "{cy}", r: "{r}",
+                        fill: "{through}",
+                        stroke: "url(#recring)",
+                        stroke_width: "{band}",
                     }
                 }
             }
