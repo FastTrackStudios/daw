@@ -1386,7 +1386,10 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
     let edge = t.chrome.hardware_edge.shade(-0.35);
 
     // Fractions of the cell, all measured.
-    let (x0, x1) = (vw * 2.0 / 27.0, vw * 21.0 / 27.0);
+    // x2..x22 *inclusive* — the border pixel at x22 is part of the cap —
+    // so the shape's right edge is at 23, not 21. Reading the last drawn
+    // column as the edge left the body two pixels narrow.
+    let (x0, x1) = (vw * 2.0 / 27.0, vw * 23.0 / 27.0);
     let (top, bot) = (vh * 5.0 / 53.0, vh * 48.0 / 53.0);
     let (gx0, gw) = (vw * 7.0 / 27.0, vw * 11.0 / 27.0);
     let (gy0, gy1) = (vh * 13.0 / 53.0, vh * 40.0 / 53.0);
@@ -1407,7 +1410,7 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
             // The shadow it casts, below the body.
             rect {
                 x: "{x0 + 1.0}", y: "{bot - 1.0}",
-                width: "{x1 - x0 - 2.0}", height: "{vh - bot + 3.0}",
+                width: "{x1 - x0 - 2.0}", height: "{vh - bot - 1.0}",
                 rx: "{vw * 0.1}",
                 fill: "#000000", fill_opacity: "0.20",
             }
