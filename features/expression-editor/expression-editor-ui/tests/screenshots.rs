@@ -312,3 +312,43 @@ async fn shoot_note_handles() {
     }
     shoot(ed, "33-temporary-note").await;
 }
+
+/// The waveform carried to the audio's own pitch.
+///
+/// Five notes on the *same* row, each sung a different amount sharp or
+/// flat. The row never changes, so any vertical separation on screen is
+/// the audio's pitch and nothing else.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_blob_pitch_carry() {
+    use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
+    use expression_editor_core::Mode;
+
+    const PPQ: f64 = 960.0;
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 16.0);
+    for (i, cents) in [-70.0_f64, -35.0, 0.0, 35.0, 70.0].iter().enumerate() {
+        let start = PPQ * 3.0 * i as f64;
+        let len = PPQ * 2.6;
+        let mut n = Note::new(NoteId(i as u64 + 1), start, start + len, 60);
+        n.weight = 0.9;
+        // A steady note, plus a little vibrato so the pitch track has
+        // something to do against the body.
+        const STEPS: usize = 40;
+        for k in 0..STEPS {
+            let f = k as f64 / (STEPS - 1) as f64;
+            let vib = 0.12 * (f * core::f64::consts::TAU * 5.0).sin() * f;
+            n.pitch.set(start + len * f, cents / 100.0 + vib);
+        }
+        n.envelope = (0..180)
+            .map(|k| {
+                let f = k as f64 / 179.0;
+                let shell = (f / 0.05).min(1.0) * (1.0 - f).powf(0.4);
+                let grain = 0.75 + 0.25 * (f * 97.0).sin() * (f * 11.0).cos();
+                (shell * grain).clamp(0.0, 1.0) as f32
+            })
+            .collect();
+        doc.push(n);
+    }
+    let mut ed = Editor::new(doc, Viewport::new(W as f64, CANVAS_H));
+    ed.set_mode(Mode::Audio);
+    shoot(ed, "34-blob-pitch-carry").await;
+}

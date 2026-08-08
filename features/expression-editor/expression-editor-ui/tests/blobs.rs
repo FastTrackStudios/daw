@@ -207,3 +207,40 @@ fn an_unedited_note_still_has_a_body() {
     let thickness = (pts[n_pts - 1].1 - pts[0].1).abs();
     assert!(thickness > 2.0, "got {thickness}px of body");
 }
+
+#[test]
+fn three_notes_on_one_row_separate_by_how_sharp_they_are() {
+    // The whole claim, measured: same row, different centre pitches, so
+    // the only thing that can move the bodies apart is the audio's own
+    // pitch. If these three overlap, the waveform is not being carried
+    // to the pitch and the surface is lying about what was sung.
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 12.0);
+    for (i, offset) in [-0.5_f64, 0.0, 0.5].iter().enumerate() {
+        let start = PPQ * 4.0 * i as f64;
+        let mut n = Note::new(NoteId(i as u64 + 1), start, start + PPQ * 3.0, 60);
+        n.weight = 0.9;
+        n.pitch.set(start, *offset);
+        n.pitch.set(start + PPQ * 3.0, *offset);
+        doc.push(n);
+    }
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
+    ed.set_mode(Mode::Audio);
+
+    let rects = canvas::note_rects(&ed);
+    let cy: Vec<f64> = rects.iter().map(|r| r.blob_center.unwrap()).collect();
+    let half_semitone = 0.5 * ed.camera.px_per_semitone;
+
+    // Flat sits below, sharp sits above, by half a semitone each.
+    assert!(
+        (cy[0] - cy[1] - half_semitone).abs() < half_semitone * 0.1,
+        "50 cents flat draws half a semitone low: {} vs {}",
+        cy[0],
+        cy[1]
+    );
+    assert!(
+        (cy[1] - cy[2] - half_semitone).abs() < half_semitone * 0.1,
+        "50 cents sharp draws half a semitone high"
+    );
+    // And all three are on the same row, so the row is not what moved.
+    assert!(rects.iter().all(|r| r.row == 60));
+}
