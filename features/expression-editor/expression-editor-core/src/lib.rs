@@ -124,6 +124,16 @@ pub struct Editor {
     /// Whether the coarse pitch handle snaps to the tuning. Shift
     /// reverses it per-gesture, as everywhere else on this surface.
     pub snap_pitch: bool,
+    /// Whether the amplitude handle edits only the *unvoiced* spans
+    /// inside a note rather than the whole thing.
+    ///
+    /// A consonant carries no pitch, so it is invisible on the pitch
+    /// track and untouched by any edit that works on notes — yet a
+    /// harsh "s" is exactly the thing that needs riding down. Shift
+    /// reverses it per-gesture, so the other scope is always one key
+    /// away. When armed, the sibilant spans shade in the waveform and
+    /// the amplitude handle draws hollow.
+    pub sibilant_scope: bool,
     /// The temporary note: a range inside a note that the handles
     /// address instead of the whole thing. `None` is the ordinary case.
     ///
@@ -165,6 +175,7 @@ impl Editor {
             clipboard: clipboard::Clipboard::default(),
             refs_to_front: false,
             snap_pitch: true,
+            sibilant_scope: false,
             temp_note: None,
             history: History::new(tracks::HISTORY_LIMIT),
         }
@@ -342,6 +353,67 @@ impl Editor {
                 // scope's midpoint rather than restoring and shifting.
                 let mid = (t0 + t1) * 0.5;
                 let base = drag.base_of(lane).sample(mid, lane.default_value());
+
+                // Sibilant scope: the amplitude handle addresses only
+                // the unvoiced spans inside the scope. Each is written
+                // separately rather than as one range, because the
+                // voiced singing between them must not move.
+                if drag.handle == H::Amplitude && drag.sibilants {
+                    let spans: Vec<(f64, f64)> = self
+                        .doc
+                        .unvoiced
+                        .iter()
+                        .filter(|(a, b)| *b >= t0 && *a <= t1)
+                        .map(|(a, b)| (a.max(t0), b.min(t1)))
+                        .filter(|(a, b)| b > a)
+                        .collect();
+                    // A hairline either side of each span, holding the
+                    // level the note already had.
+                    //
+                    // Without these the edit leaks: a curve holds its
+                    // endpoint value outside the authored range, so on
+                    // a note whose Pressure was never authored, writing
+                    // only the consonant would raise the *whole* note
+                    // to that level — the singing included, which is
+                    // precisely what this scope exists to avoid.
+                    let eps = (t1 - t0) * 1e-3;
+                    let mut any = false;
+                    for (a, b) in spans {
+                        // Restore first: the level is absolute, so a
+                        // span already written this frame has to go
+                        // back before it is written again.
+                        let points = drag.base_of(lane).points().to_vec();
+                        self.apply_live(&Edit::RestoreLane {
+                            note: id,
+                            lane,
+                            t0: a,
+                            t1: b,
+                            points,
+                        });
+                        for (g0, g1) in [(a - eps * 2.0, a - eps), (b + eps, b + eps * 2.0)] {
+                            if g0 > t0 && g1 < t1 {
+                                let held =
+                                    drag.base_of(lane).sample(g0, lane.default_value());
+                                self.apply_live(&Edit::SetLaneLevel {
+                                    note: id,
+                                    lane,
+                                    t0: g0,
+                                    t1: g1,
+                                    value: held,
+                                });
+                            }
+                        }
+                        any |= self.apply_live(&Edit::SetLaneLevel {
+                            note: id,
+                            lane,
+                            t0: a,
+                            t1: b,
+                            value: base + amount,
+                        });
+                    }
+                    return any;
+                }
+
                 self.apply_live(&Edit::SetLaneLevel {
                     note: id,
                     lane,

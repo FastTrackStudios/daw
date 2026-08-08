@@ -560,6 +560,22 @@ pub struct ExpressionDoc {
     /// edits (fret, string) are meaningless without the tuning, and
     /// edits only ever see the document.
     pub row_space: crate::rows::RowSpace,
+    /// The take's own amplitude, 0..1, sampled uniformly across
+    /// `[start, end]`.
+    ///
+    /// The whole recording, including everything *between* notes —
+    /// breaths, consonants, room. Drawn as a backdrop so silence and
+    /// noise are visible as themselves rather than as absence, which is
+    /// how you tell "the tracker missed a note" from "nothing was
+    /// sung". Empty outside the audio domain.
+    pub peaks: Vec<f32>,
+    /// Spans with no detected pitch, in document time.
+    ///
+    /// Sibilants and silence. The pitch track is not drawn across
+    /// these, because there was no pitch — drawing one would invent a
+    /// reading, and a line through a consonant is the single most
+    /// misleading thing this surface could show.
+    pub unvoiced: Vec<(f64, f64)>,
     next_id: u64,
 }
 
@@ -574,6 +590,8 @@ impl ExpressionDoc {
             markers: Vec::new(),
             cc: crate::cc::CcSet::default(),
             row_space: crate::rows::RowSpace::Pitch,
+            peaks: Vec::new(),
+            unvoiced: Vec::new(),
             next_id: 1,
         }
     }

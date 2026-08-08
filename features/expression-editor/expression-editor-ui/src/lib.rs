@@ -104,7 +104,16 @@ pub fn ExpressionEditor(
 /// slopes are the slope they apply, fine pitch is a tick, formant a
 /// bar, amplitude a dot, vibrato a wave. At fourteen pixels there is no
 /// room for a word, and a shape is faster to read than one anyway.
-fn handle_mark(handle: expression_editor_core::Handle, cx: f64, cy: f64, r: f64) -> String {
+/// `hollow` draws the amplitude handle as an empty circle, which is how
+/// the manual signals that a drag will hit only the sibilants rather
+/// than the whole note.
+fn handle_mark(
+    handle: expression_editor_core::Handle,
+    cx: f64,
+    cy: f64,
+    r: f64,
+    hollow: bool,
+) -> String {
     use expression_editor_core::Handle as H;
     match handle {
         H::LeftSlope => format!("M {:.1} {:.1} L {:.1} {:.1}", cx - r, cy + r * 0.5, cx + r, cy - r * 0.5),
@@ -113,7 +122,9 @@ fn handle_mark(handle: expression_editor_core::Handle, cx: f64, cy: f64, r: f64)
         H::Formant => format!("M {:.1} {:.1} L {:.1} {:.1}", cx, cy - r * 0.7, cx, cy + r * 0.7),
         H::Amplitude => {
             // A small circle, drawn as two arcs so it stays one path.
-            let d = r * 0.42;
+            // Larger when hollow, since an outline reads smaller than a
+            // filled dot at this size.
+            let d = if hollow { r * 0.58 } else { r * 0.42 };
             format!(
                 "M {:.1} {:.1} a {:.1} {:.1} 0 1 0 {:.1} 0 a {:.1} {:.1} 0 1 0 {:.1} 0",
                 cx - d,
@@ -215,6 +226,9 @@ fn Canvas(
     let razors = canvas::razor_rects(&ed);
     let refs = canvas::reference_rects(&ed);
     let handle_sets = canvas::note_handles(&ed);
+    let take_wave = canvas::take_waveform(&ed);
+    let sibilants = canvas::sibilant_bands(&ed);
+    let sibilant_scope = ed.sibilant_scope;
     // `R` brings references forward, the way `M` does for the MIDI
     // reference — with several parts on screen the quiet default is
     // sometimes too quiet to read against.
@@ -536,6 +550,45 @@ fn Canvas(
                     }
                 }
 
+                // The take's own waveform, behind everything. Faint on
+                // purpose: it is context, and it covers the full height
+                // of the roll, so at any real strength it would fight
+                // every note on screen.
+                if let Some(wave) = take_wave.as_ref() {
+                    polygon {
+                        points: "{wave}",
+                        fill: theme::REFERENCE,
+                        fill_opacity: "0.13",
+                        pointer_events: "none",
+                    }
+                }
+
+                // Sibilants, shaded while their scope is armed — the
+                // manual's "dark areas in the waveform", and the only
+                // way to see what an amplitude drag is about to hit.
+                for (i, (sx, ex)) in sibilants.iter().enumerate() {
+                    {
+                        let sw = (ex - sx).max(1.0);
+                        rsx! {
+                            // Darkened *and* edged. A dark band over an
+                            // already-dark backdrop is nearly invisible,
+                            // and the whole point is knowing exactly
+                            // which spans an amplitude drag will hit.
+                            rect {
+                                key: "sib{i}",
+                                x: "{sx:.1}", y: "0",
+                                width: "{sw:.1}", height: "{vp.h:.0}",
+                                fill: theme::SURFACE_DEEP,
+                                fill_opacity: "0.72",
+                                stroke: theme::BORDER_STRONG,
+                                stroke_opacity: "0.85",
+                                stroke_width: "1",
+                                pointer_events: "none",
+                            }
+                        }
+                    }
+                }
+
                 // Reference tracks, behind the notes and never on top of
                 // them: a reference you cannot edit must never be the
                 // thing your pointer lands on first.
@@ -825,13 +878,29 @@ fn Canvas(
                                             // mark says which axis the
                                             // handle moves.
                                             {
-                                                let mark = handle_mark(hr.handle, cx, cy, half);
+                                                let hollow = hr.handle
+                                                    == expression_editor_core::Handle::Amplitude
+                                                    && sibilant_scope;
+                                                let mark =
+                                                    handle_mark(hr.handle, cx, cy, half, hollow);
+                                                // Filled unless it is
+                                                // the hollow amplitude
+                                                // circle, whose whole
+                                                // job is to be empty.
+                                                let fill = if hr.handle
+                                                    == expression_editor_core::Handle::Amplitude
+                                                    && !hollow
+                                                {
+                                                    theme::HANDLE
+                                                } else {
+                                                    "none"
+                                                };
                                                 rsx! {
                                                     path {
                                                         d: "{mark}",
                                                         stroke: theme::HANDLE,
                                                         stroke_width: "1.6",
-                                                        fill: "none",
+                                                        fill,
                                                         stroke_linecap: "round",
                                                     }
                                                 }

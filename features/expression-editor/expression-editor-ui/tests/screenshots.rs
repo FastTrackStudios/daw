@@ -352,3 +352,67 @@ async fn shoot_blob_pitch_carry() {
     ed.set_mode(Mode::Audio);
     shoot(ed, "34-blob-pitch-carry").await;
 }
+
+/// The take's waveform behind the roll, unvoiced gaps in the pitch
+/// track, and sibilant bands with the hollow amplitude handle.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_audio_backdrop() {
+    use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
+    use expression_editor_core::Mode;
+
+    const PPQ: f64 = 960.0;
+    let end = PPQ * 16.0;
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, end);
+
+    // Three sung notes with consonants between them.
+    let spans = [(PPQ * 0.6, PPQ * 4.0), (PPQ * 5.2, PPQ * 8.6), (PPQ * 9.8, PPQ * 13.5)];
+    for (i, (s, e)) in spans.iter().enumerate() {
+        let mut n = Note::new(NoteId(i as u64 + 1), *s, *e, 60 + i as i32 * 3);
+        n.weight = 0.85;
+        const STEPS: usize = 48;
+        for k in 0..STEPS {
+            let f = k as f64 / (STEPS - 1) as f64;
+            let vib = 0.15 * (f * core::f64::consts::TAU * 5.0).sin() * f;
+            n.pitch.set(s + (e - s) * f, -0.2 * (1.0 - f).powi(3) + vib);
+        }
+        n.envelope = (0..200)
+            .map(|k| {
+                let f = k as f64 / 199.0;
+                let shell = (f / 0.05).min(1.0) * (1.0 - f).powf(0.4);
+                let grain = 0.75 + 0.25 * (f * 101.0).sin() * (f * 9.0).cos();
+                (shell * grain).clamp(0.0, 1.0) as f32
+            })
+            .collect();
+        doc.push(n);
+    }
+
+    // The consonants: the gaps between notes, plus a hard one inside
+    // the second note.
+    doc.unvoiced = vec![
+        (PPQ * 4.0, PPQ * 5.2),
+        (PPQ * 6.9, PPQ * 7.3),
+        (PPQ * 8.6, PPQ * 9.8),
+    ];
+
+    // The take's waveform, loud in the consonants too — which is the
+    // point of showing it: a sibilant is not silence.
+    doc.peaks = (0..1200)
+        .map(|k| {
+            let t = end * (k as f64 / 1199.0);
+            let voiced = spans.iter().any(|(s, e)| t >= *s && t <= *e);
+            let sib = doc.unvoiced.iter().any(|(a, b)| t >= *a && t <= *b);
+            let base = if voiced { 0.8 } else if sib { 0.45 } else { 0.04 };
+            let grain = 0.7 + 0.3 * (t / PPQ * 30.0).sin() * (t / PPQ * 3.0).cos();
+            (base * grain).clamp(0.0, 1.0) as f32
+        })
+        .collect();
+
+    let mut ed = Editor::new(doc, Viewport::new(W as f64, CANVAS_H));
+    ed.set_mode(Mode::Audio);
+    shoot(ed.clone(), "35-audio-backdrop").await;
+
+    // Sibilant scope armed: bands shade, amplitude handle goes hollow.
+    ed.sibilant_scope = true;
+    ed.selection.notes = ed.doc.notes.iter().map(|n| n.id).collect();
+    shoot(ed, "36-sibilant-scope").await;
+}

@@ -321,6 +321,66 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
 /// rather than a zigzag, few enough that a screen of notes stays cheap.
 const BLOB_SAMPLES: usize = 48;
 
+/// The take's own waveform, drawn full-height behind the roll.
+///
+/// Everything *between* the notes — breaths, consonants, room tone — as
+/// itself rather than as absence. That is the difference between "the
+/// tracker missed a note here" and "nothing was sung here", and without
+/// it the two look identical: empty canvas.
+///
+/// Returns the polygon points, or `None` when the take carries no
+/// waveform (every domain except audio).
+pub fn take_waveform(ed: &Editor) -> Option<String> {
+    if ed.doc.peaks.is_empty() || !ed.mode.draws_blobs() {
+        return None;
+    }
+    let peaks = &ed.doc.peaks;
+    let span = ed.doc.end - ed.doc.start;
+    if span <= 0.0 {
+        return None;
+    }
+    // Mirrored about the middle of the roll, which is where a waveform
+    // display puts zero. It is a backdrop, not a pitch reading, so it
+    // deliberately does *not* follow any note.
+    let mid = ed.viewport.h * 0.5;
+    let max_half = ed.viewport.h * 0.46;
+
+    let count = (ed.viewport.w.ceil() as usize).clamp(2, 2048);
+    let mut top = String::new();
+    let mut bottom = Vec::with_capacity(count);
+    for i in 0..count {
+        let x = ed.viewport.w * (i as f64 / (count - 1) as f64);
+        let t = ed.camera.t_at(x);
+        let f = ((t - ed.doc.start) / span).clamp(0.0, 1.0);
+        let idx = ((f * (peaks.len() - 1) as f64).round() as usize).min(peaks.len() - 1);
+        let half = max_half * (peaks[idx] as f64).clamp(0.0, 1.0);
+        if i > 0 {
+            top.push(' ');
+        }
+        top.push_str(&format!("{:.1},{:.1}", x, mid - half));
+        bottom.push(format!("{:.1},{:.1}", x, mid + half));
+    }
+    bottom.reverse();
+    Some(format!("{top} {}", bottom.join(" ")))
+}
+
+/// Unvoiced spans as pixel rectangles, for shading sibilants.
+///
+/// Only while sibilant editing is armed. Shading them all the time
+/// would put dark bars across a screen that is mostly about pitch.
+pub fn sibilant_bands(ed: &Editor) -> Vec<(f64, f64)> {
+    if !ed.sibilant_scope || !ed.mode.draws_blobs() {
+        return Vec::new();
+    }
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    ed.doc
+        .unvoiced
+        .iter()
+        .filter(|(a, b)| *b >= t0 && *a <= t1)
+        .map(|(a, b)| (ed.camera.x(*a), ed.camera.x(*b)))
+        .collect()
+}
+
 /// A sung note's body: the recorded waveform, drawn as the note.
 ///
 /// This is what makes the audio surface read as audio rather than as
@@ -516,35 +576,72 @@ pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
             if curve.is_empty() {
                 continue;
             }
+            // The pitch track stops where there was no pitch. Drawing a
+            // line across a consonant invents a reading, and a line
+            // through a sibilant is the single most misleading thing
+            // this surface could show — the manual makes the same
+            // point: no pitch track *means* unvoiced.
+            let break_unvoiced = lane == Lane::Pitch && ed.mode.draws_blobs();
             let mut s = String::new();
+            let mut prev_voiced = true;
             for p in curve.points() {
+                if break_unvoiced && is_unvoiced(ed, p.t) {
+                    prev_voiced = false;
+                    continue;
+                }
                 let x = ed.camera.x(p.t);
                 let y = match lane {
                     Lane::Pitch => ed.camera.y(n.row as f64 + p.value, ed.viewport),
                     _ => tools::lane_box_y(&ed.camera, ed.viewport, n.row, p.value),
                 };
+                // A polyline cannot express a gap, so a run that
+                // resumes after silence starts a new path rather than
+                // reaching back across it.
+                if !prev_voiced && !s.is_empty() {
+                    out.push(CurvePath {
+                        note: n.id,
+                        lane,
+                        points: core::mem::take(&mut s),
+                        color: track_color(ed, lane),
+                        active,
+                        selected: ed.selection.contains(n.id),
+                    });
+                }
+                prev_voiced = true;
                 s.push_str(&format!("{x:.1},{y:.1} "));
+            }
+            if s.is_empty() {
+                continue;
             }
             out.push(CurvePath {
                 note: n.id,
                 lane,
                 points: s,
-                // On the audio surface the pitch track is white, not
-                // the lane's hue. It is the one line that has to stay
-                // legible over a body whose colour is already saying
-                // something else — how far out of tune the note is —
-                // and a coloured track competes with that reading.
-                color: if lane == Lane::Pitch && ed.mode.draws_blobs() {
-                    theme::PITCH_TRACK
-                } else {
-                    theme::lane_color(lane)
-                },
+                color: track_color(ed, lane),
                 active,
                 selected: ed.selection.contains(n.id),
             });
         }
     }
     out
+}
+
+/// Whether `t` falls in a span with no detected pitch.
+fn is_unvoiced(ed: &Editor, t: f64) -> bool {
+    ed.doc.unvoiced.iter().any(|(a, b)| t >= *a && t <= *b)
+}
+
+/// On the audio surface the pitch track is white, not the lane's hue.
+///
+/// It is the one line that has to stay legible over a body whose colour
+/// is already saying something else — how far out of tune the note is —
+/// and a coloured track competes with that reading.
+fn track_color(ed: &Editor, lane: Lane) -> &'static str {
+    if lane == Lane::Pitch && ed.mode.draws_blobs() {
+        theme::PITCH_TRACK
+    } else {
+        theme::lane_color(lane)
+    }
 }
 
 /// The editing box Pressure and Timbre are drawn inside.

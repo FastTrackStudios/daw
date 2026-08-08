@@ -603,7 +603,10 @@ fn handle_press(ed: &mut Editor, x: f64, y: f64, mods: Mods, gesture: Gesture) -
     if !scope.is_valid(note) {
         return None;
     }
-    let drag = handles::HandleDrag::begin(handle, note, scope, y);
+    // Captured at press, not read live: releasing Shift mid-drag must
+    // not change which spans a gesture has already started writing.
+    let sibilants = ed.sibilant_scope != mods.shift;
+    let drag = handles::HandleDrag::begin_with(handle, note, scope, y, sibilants);
     ed.begin_gesture();
     Some(Drag::Handle(Box::new(drag)))
 }
@@ -1604,6 +1607,12 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
         ("x", true, _) => ed.run_command(&Command::Cut, None),
         ("c", true, _) => ed.run_command(&Command::Copy, None),
         ("v", true, _) => ed.run_command(&Command::Paste, None),
+        // Arm sibilant editing. Only where there are sibilants: in a
+        // MIDI mode this key would toggle an invisible state.
+        ("i", false, _) if ed.mode.draws_blobs() => {
+            ed.sibilant_scope = !ed.sibilant_scope;
+            true
+        }
         // Shift+R always brings references forward, so the gesture is
         // reachable from every mode including MPE, where bare `R` is
         // spoken for.

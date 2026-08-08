@@ -231,6 +231,12 @@ pub struct HandleDrag {
     pub base_row: i32,
     /// Last amount written, for the readout.
     pub applied: f64,
+    /// Amplitude drags address only the unvoiced spans in the scope.
+    ///
+    /// Captured when the gesture opens rather than read live, so
+    /// releasing Shift mid-drag cannot change which spans a gesture
+    /// already started writing.
+    pub sibilants: bool,
 }
 
 use crate::doc::Curve;
@@ -238,7 +244,19 @@ use crate::doc::Curve;
 impl HandleDrag {
     /// Open a drag on `note`.
     pub fn begin(handle: Handle, note: &Note, scope: Scope, origin_y: f64) -> Self {
+        Self::begin_with(handle, note, scope, origin_y, false)
+    }
+
+    /// As [`HandleDrag::begin`], with the sibilant scope armed.
+    pub fn begin_with(
+        handle: Handle,
+        note: &Note,
+        scope: Scope,
+        origin_y: f64,
+        sibilants: bool,
+    ) -> Self {
         Self {
+            sibilants,
             handle,
             note: note.id,
             scope,

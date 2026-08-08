@@ -244,3 +244,144 @@ fn three_notes_on_one_row_separate_by_how_sharp_they_are() {
     // And all three are on the same row, so the row is not what moved.
     assert!(rects.iter().all(|r| r.row == 60));
 }
+
+// ── backdrop, unvoiced spans and sibilant scope ──────────────────────
+
+use expression_editor_core::handles::{Handle, HandleDrag, Scope};
+use expression_editor_core::Lane;
+
+/// A note spanning a consonant: voiced, unvoiced, voiced.
+fn sibilant_editor() -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let mut n = Note::new(NoteId(1), 0.0, PPQ * 4.0, 60);
+    n.weight = 0.8;
+    for k in 0..64 {
+        let f = k as f64 / 63.0;
+        n.pitch.set(n.start + (n.end - n.start) * f, 0.0);
+    }
+    doc.push(n);
+    doc.unvoiced = vec![(PPQ * 1.5, PPQ * 2.5)];
+    doc.peaks = (0..500).map(|k| ((k % 17) as f32) / 17.0).collect();
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
+    ed.set_mode(Mode::Audio);
+    ed
+}
+
+#[test]
+fn the_take_waveform_is_drawn_only_where_there_is_audio() {
+    assert!(canvas::take_waveform(&sibilant_editor()).is_some());
+
+    // No peaks: nothing to draw.
+    let mut ed = sibilant_editor();
+    ed.doc.peaks.clear();
+    assert!(canvas::take_waveform(&ed).is_none());
+
+    // MIDI: there is no take.
+    let mut ed = sibilant_editor();
+    ed.set_mode(Mode::Midi);
+    assert!(canvas::take_waveform(&ed).is_none());
+}
+
+#[test]
+fn the_pitch_track_stops_where_there_was_no_pitch() {
+    let ed = sibilant_editor();
+    let paths: Vec<_> = canvas::curve_paths(&ed)
+        .into_iter()
+        .filter(|p| p.lane == Lane::Pitch)
+        .collect();
+    assert!(
+        paths.len() >= 2,
+        "one note either side of the consonant, so the track is in two \
+         pieces rather than one line drawn straight through it"
+    );
+
+    // Without the gap it is a single run.
+    let mut whole = sibilant_editor();
+    whole.doc.unvoiced.clear();
+    let joined: Vec<_> = canvas::curve_paths(&whole)
+        .into_iter()
+        .filter(|p| p.lane == Lane::Pitch)
+        .collect();
+    assert_eq!(joined.len(), 1);
+}
+
+#[test]
+fn sibilant_bands_appear_only_while_the_scope_is_armed() {
+    let mut ed = sibilant_editor();
+    assert!(canvas::sibilant_bands(&ed).is_empty());
+    ed.sibilant_scope = true;
+    assert_eq!(canvas::sibilant_bands(&ed).len(), 1);
+
+    // Never in a mode with no sibilants to shade.
+    ed.set_mode(Mode::Midi);
+    assert!(canvas::sibilant_bands(&ed).is_empty());
+}
+
+#[test]
+fn the_sibilant_scope_rides_the_consonant_and_leaves_the_singing() {
+    let mut ed = sibilant_editor();
+    let note = ed.doc.note(NoteId(1)).unwrap().clone();
+    let before_voiced = note
+        .pressure
+        .sample(PPQ * 0.5, Lane::Pressure.default_value());
+
+    let mut d = HandleDrag::begin_with(Handle::Amplitude, &note, Scope::Note, 250.0, true);
+    ed.begin_gesture();
+    ed.drag_handle(&mut d, 150.0, false);
+
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let in_consonant = n.pressure.sample(PPQ * 2.0, Lane::Pressure.default_value());
+    let in_singing = n.pressure.sample(PPQ * 0.5, Lane::Pressure.default_value());
+
+    assert!(
+        in_consonant > before_voiced + 0.05,
+        "the consonant was ridden: {before_voiced} -> {in_consonant}"
+    );
+    assert!(
+        (in_singing - before_voiced).abs() < 0.05,
+        "and the singing either side of it did not move: {in_singing}"
+    );
+}
+
+#[test]
+fn the_whole_note_scope_still_moves_everything() {
+    let mut ed = sibilant_editor();
+    let note = ed.doc.note(NoteId(1)).unwrap().clone();
+    let mut d = HandleDrag::begin_with(Handle::Amplitude, &note, Scope::Note, 250.0, false);
+    ed.begin_gesture();
+    ed.drag_handle(&mut d, 150.0, false);
+
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let a = n.pressure.sample(PPQ * 0.5, Lane::Pressure.default_value());
+    let b = n.pressure.sample(PPQ * 2.0, Lane::Pressure.default_value());
+    assert!((a - b).abs() < 1e-6, "one level across the note: {a} vs {b}");
+}
+
+#[test]
+fn a_sibilant_drag_does_not_compound_across_moves() {
+    let mut ed = sibilant_editor();
+    let note = ed.doc.note(NoteId(1)).unwrap().clone();
+    let mut d = HandleDrag::begin_with(Handle::Amplitude, &note, Scope::Note, 250.0, true);
+    ed.begin_gesture();
+
+    // Out and back: each frame restores the captured lane first, so the
+    // consonant must land exactly where it started.
+    let before = ed
+        .doc
+        .note(NoteId(1))
+        .unwrap()
+        .pressure
+        .sample(PPQ * 2.0, Lane::Pressure.default_value());
+    for step in 1..=8 {
+        ed.drag_handle(&mut d, 250.0 - step as f64 * 10.0, false);
+    }
+    ed.drag_handle(&mut d, 250.0, false);
+
+    let after = ed
+        .doc
+        .note(NoteId(1))
+        .unwrap()
+        .pressure
+        .sample(PPQ * 2.0, Lane::Pressure.default_value());
+    assert!((after - before).abs() < 1e-6, "{before} -> {after}");
+}

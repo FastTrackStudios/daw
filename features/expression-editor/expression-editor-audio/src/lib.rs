@@ -81,21 +81,44 @@ fn from_lane(v: f64, range: f64) -> f64 {
 /// large as a belted one, which is exactly the comparison the display
 /// exists to support.
 pub fn to_doc_with_envelope(pitch: &PitchDoc, frame_rate: f64, rms: &[f32]) -> ExpressionDoc {
+    to_doc_with_audio(pitch, frame_rate, rms, &[])
+}
+
+/// The full audio conversion: notes, waveforms and unvoiced spans.
+///
+/// `f0` is the per-frame detected fundamental, `None` where there was
+/// none. Those gaps become the document's unvoiced spans, which is what
+/// lets the surface break the pitch track across a consonant instead of
+/// drawing a line through it, and what gives sibilant editing something
+/// to aim at.
+pub fn to_doc_with_audio(
+    pitch: &PitchDoc,
+    frame_rate: f64,
+    rms: &[f32],
+    f0: &[Option<f64>],
+) -> ExpressionDoc {
     let mut doc = to_doc(pitch, frame_rate);
     let peak = rms.iter().copied().fold(0.0_f32, f32::max);
-    if peak <= 0.0 {
-        return doc;
-    }
-    for (i, blob) in pitch.blobs.iter().enumerate() {
-        let Some(note) = doc.note_mut(NoteId(i as u64 + 1)) else {
-            continue;
-        };
-        let lo = blob.start_frame.min(rms.len());
-        let hi = (blob.end_frame + 1).min(rms.len());
-        if hi > lo {
-            note.envelope = rms[lo..hi].iter().map(|v| v / peak).collect();
+    if peak > 0.0 {
+        // The take's own waveform, for the backdrop.
+        doc.peaks = rms.iter().map(|v| v / peak).collect();
+        for (i, blob) in pitch.blobs.iter().enumerate() {
+            let Some(note) = doc.note_mut(NoteId(i as u64 + 1)) else {
+                continue;
+            };
+            let lo = blob.start_frame.min(rms.len());
+            let hi = (blob.end_frame + 1).min(rms.len());
+            if hi > lo {
+                note.envelope = rms[lo..hi].iter().map(|v| v / peak).collect();
+            }
         }
     }
+    // Frame index and document time are the same number here, so the
+    // spans need no conversion — see the module docs.
+    doc.unvoiced = spans::unvoiced_spans(f0)
+        .into_iter()
+        .map(|s| (s.start as f64, s.end as f64))
+        .collect();
     doc
 }
 
