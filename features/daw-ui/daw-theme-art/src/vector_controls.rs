@@ -1110,7 +1110,10 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
     let (panel, panel_alpha) = if horizontal {
         ("#000000".to_string(), 0.35)
     } else {
-        (k.face.shade(0.10).css(), 1.0)
+        // #464646 measured, which is 0.04 above the hardware grey — not
+        // the 0.10 this had, which read #565656 and made the mixer's
+        // panel noticeably paler than the track panel's beside it.
+        (k.face.shade(0.04).css(), 1.0)
     };
 
     rsx! {
@@ -1387,9 +1390,6 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
     let (top, bot) = (vh * 5.0 / 53.0, vh * 48.0 / 53.0);
     let (gx0, gw) = (vw * 7.0 / 27.0, vw * 11.0 / 27.0);
     let (gy0, gy1) = (vh * 13.0 / 53.0, vh * 40.0 / 53.0);
-    // One rib per row of the source, so the pitch is the pixel grid — the
-    // detail this is here to preserve.
-    const RIBS: usize = 14;
 
     rsx! {
         svg {
@@ -1436,26 +1436,47 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
                 width: "{x1 - x0 - 4.0}", height: "1.0",
                 fill: "{body.shade(0.16).css()}",
             }
-            // The grip: one rib per source row, alternating and
-            // brightening downward.
-            for i in 0..RIBS {
+            // The silver grip.
+            //
+            // Mapping it row by row shows it is not a comb of full-width
+            // bands, which is what this drew:
+            //
+            //     y15  .....###########.....
+            //     y16  .....###+++++###.....
+            //     y26  .....................
+            //
+            // A light panel spanning x7..x17, and the grooves are *short
+            // centre notches* — x10..x14 — so three columns of silver run
+            // unbroken down each side. y26 is different again: a full
+            // width dark row, the seam between the two halves. Drawing
+            // every groove full width flattened the panel into a grille
+            // and lost both the side rails and the seam.
+            defs {
+                linearGradient { id: "capgrip", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{grip.shade(-0.03).css()}" }
+                    stop { offset: "1", stop_color: "{grip.shade(0.34).css()}" }
+                }
+            }
+            rect {
+                x: "{gx0}", y: "{gy0}",
+                width: "{gw}", height: "{gy1 - gy0}",
+                rx: "{vw * 0.055}",
+                fill: "url(#capgrip)",
+            }
+            // Notches, on alternate rows, skipping the seam.
+            for i in 0..13i32 {
                 {
-                    let step = (gy1 - gy0) / RIBS as f32;
-                    let y = gy0 + step * i as f32;
-                    let down = i as f32 / (RIBS - 1) as f32;
-                    let lit = grip.shade(-0.02 + 0.30 * down);
-                    let dark = grip.shade(-0.52 + 0.10 * down);
+                    let y = gy0 + vh * (3.0 + 2.0 * i as f32) / 53.0;
+                    let seam = i == 6;
+                    let down = i as f32 / 12.0;
                     rsx! {
                         rect {
-                            key: "l{i}",
-                            x: "{gx0}", y: "{y}",
-                            width: "{gw}", height: "{step * 0.5}",
-                            fill: "{lit.css()}",
-                        }
-                        rect {
-                            x: "{gx0}", y: "{y + step * 0.5}",
-                            width: "{gw}", height: "{step * 0.5}",
-                            fill: "{dark.css()}",
+                            key: "{i}",
+                            x: if seam { "{gx0}" } else { "{gx0 + gw * 0.27}" },
+                            y: "{y}",
+                            width: if seam { "{gw}" } else { "{gw * 0.46}" },
+                            height: "{vh / 53.0}",
+                            fill: "{grip.shade(-0.52 + 0.12 * down).css()}",
                         }
                     }
                 }
@@ -1895,8 +1916,9 @@ mod tests {
         // shade just re-broke every time the ramp was retuned. What the
         // caller actually promises is that the accent reaches the grip
         // and nothing else, so check the hue instead of the value.
-        let ribs = svg.matches("<rect").count();
-        assert!(ribs > 20, "expected a rib per row, got {ribs} rects");
+        // Counting rects was a proxy for "it has ribs" and broke the
+        // moment the grip stopped being one rect per row — which was a
+        // correction, not a regression. Only the hue is the promise.
         let greenish = svg
             .match_indices("fill=\"#")
             .filter_map(|(i, _)| svg.get(i + 7..i + 13))
