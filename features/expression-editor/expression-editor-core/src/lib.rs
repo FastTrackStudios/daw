@@ -30,6 +30,7 @@ pub mod cc;
 pub mod chord;
 pub mod clipboard;
 pub mod doc;
+pub mod draft;
 pub mod edit;
 pub mod handles;
 pub mod menu;
@@ -49,6 +50,7 @@ pub use camera::{Bounds, Camera, Content, Viewport};
 pub use cc::{CcDisplay, CcLane, CcSet};
 pub use chord::Chord;
 pub use doc::{Curve, ExpressionDoc, Lane, Marker, Note, NoteId, Point, Target, TimeBase};
+pub use draft::PitchDraft;
 pub use edit::{Edit, History};
 pub use handles::{Handle, Scope};
 pub use shape::Shape;
@@ -215,6 +217,40 @@ impl Editor {
     /// The track being edited.
     pub fn active_track(&self) -> usize {
         self.tracks.active()
+    }
+
+    /// Show a pitch drawing without recording it.
+    pub fn preview_draft(&mut self, draft: &mut draft::PitchDraft) -> bool {
+        let mut any = false;
+        for e in draft.preview_edits() {
+            any |= self.apply_live(&e);
+        }
+        any
+    }
+
+    /// Commit a pitch drawing as **one** step of history.
+    ///
+    /// Rewinds to the captured curve first, without recording, so the
+    /// snapshot the history takes is the state *before* drawing began.
+    /// Skipping that would snapshot the live preview instead, and undo
+    /// would return to the drawing rather than to what was sung — which
+    /// is the whole promise of an explicit apply.
+    pub fn apply_draft(&mut self, draft: &draft::PitchDraft) -> bool {
+        let Some(commit) = draft.apply_edit() else {
+            return false;
+        };
+        if let Some(rewind) = draft.cancel_edit() {
+            self.apply_live(&rewind);
+        }
+        self.apply(&commit)
+    }
+
+    /// Throw a pitch drawing away, restoring exactly what was captured.
+    pub fn dismiss_draft(&mut self, draft: &draft::PitchDraft) -> bool {
+        match draft.cancel_edit() {
+            Some(e) => self.apply_live(&e),
+            None => false,
+        }
     }
 
     /// The scope handles on `note` currently address.

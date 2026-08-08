@@ -3391,3 +3391,210 @@ fn a_strip_handle_outranks_the_body_it_overlaps() {
     );
     assert_eq!(handles::hit(&rects, 500.0, 500.0), None);
 }
+
+// ── pitch drawing ────────────────────────────────────────────────────
+
+use expression_editor_core::draft::{self, PitchDraft};
+
+fn draft_editor() -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let mut n = Note::new(NoteId(1), 0.0, PPQ * 4.0, 60);
+    for k in 0..32 {
+        let f = k as f64 / 31.0;
+        n.pitch.set(n.start + (n.end - n.start) * f, -0.3);
+    }
+    doc.push(n);
+    Editor::new(doc, Viewport::new(900.0, 500.0))
+}
+
+#[test]
+fn a_drawn_line_eases_rather_than_ramping() {
+    // The shape is the point: a voice accelerates out of one pitch and
+    // decelerates into the next. A linear ramp arrives at full speed
+    // and stops dead, which is what a synthesiser glide sounds like.
+    assert!((draft::sine_ease(0.0)).abs() < 1e-12);
+    assert!((draft::sine_ease(1.0) - 1.0).abs() < 1e-12);
+    assert!((draft::sine_ease(0.5) - 0.5).abs() < 1e-12);
+    // Flat at the ends, steep in the middle — the opposite of linear.
+    let near_start = draft::sine_ease(0.1);
+    let near_mid = draft::sine_ease(0.55) - draft::sine_ease(0.45);
+    assert!(near_start < 0.1, "eases in, got {near_start}");
+    assert!(near_mid > 0.1, "steepest at the middle, got {near_mid}");
+}
+
+#[test]
+fn the_drawing_runs_through_its_anchors() {
+    let ed = draft_editor();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(0.0, -1.0);
+    d.add(PPQ * 2.0, 1.0);
+    d.add(PPQ * 4.0, 0.0);
+
+    let curve = draft::as_curve(&d.rendered(0.0, PPQ * 4.0));
+    for (t, want) in [(0.0, -1.0), (PPQ * 2.0, 1.0), (PPQ * 4.0, 0.0)] {
+        let got = curve.sample(t, 0.0);
+        assert!((got - want).abs() < 0.02, "at {t}: wanted {want}, got {got}");
+    }
+}
+
+#[test]
+fn an_anchor_in_an_unvoiced_region_is_allowed() {
+    // Forbidding it would break dragging *through* a consonant, and the
+    // anchor still shapes the voiced line either side of it.
+    let mut ed = draft_editor();
+    ed.doc.unvoiced = vec![(PPQ, PPQ * 2.0)];
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(0.0, 0.0);
+    d.add(PPQ * 1.5, 2.0);
+    d.add(PPQ * 4.0, 0.0);
+    assert_eq!(d.anchors().len(), 3);
+    assert!(!d.rendered(0.0, PPQ * 4.0).is_empty());
+}
+
+#[test]
+fn the_draft_has_its_own_undo_and_the_document_sees_none_of_it() {
+    let mut ed = draft_editor();
+    let before = ed.doc.note(NoteId(1)).unwrap().pitch.clone();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+
+    d.add(0.0, -1.0);
+    d.add(PPQ * 2.0, 1.0);
+    d.add(PPQ * 4.0, 0.5);
+    assert!(d.can_undo());
+
+    // Previews are applied live, so the document changes — but never
+    // records, so the history is untouched.
+    ed.preview_draft(&mut d);
+    assert!(!ed.can_undo(), "a preview is not an undo step");
+
+    d.undo();
+    d.undo();
+    assert_eq!(d.anchors().len(), 1);
+    assert!(d.can_redo());
+    d.redo();
+    assert_eq!(d.anchors().len(), 2);
+
+    // Dismiss puts back exactly what was captured.
+    ed.dismiss_draft(&d);
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().pitch, before);
+}
+
+#[test]
+fn applying_a_whole_drawing_is_one_step_of_history() {
+    let mut ed = draft_editor();
+    let before = ed.doc.note(NoteId(1)).unwrap().pitch.clone();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+
+    // A long session: many anchors, moves and undos.
+    for k in 0..8 {
+        d.add(PPQ * 0.5 * k as f64, (k as f64 * 0.3).sin());
+    }
+    d.begin_move();
+    d.move_to(3, PPQ * 1.6, 1.2);
+    d.undo();
+    d.add(PPQ * 3.7, -0.8);
+    ed.preview_draft(&mut d);
+
+    // Commit through the editor, which rewinds the live preview first
+    // so history snapshots the state before drawing began.
+    assert!(ed.apply_draft(&d));
+    let drawn = ed.doc.note(NoteId(1)).unwrap().pitch.clone();
+    assert_ne!(drawn, before);
+
+    // One undo takes the entire drawing, not its last anchor.
+    assert!(ed.undo());
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().pitch, before);
+    assert!(!ed.can_undo());
+}
+
+#[test]
+fn the_original_stays_available_for_the_whole_session() {
+    let ed = draft_editor();
+    let original: Vec<_> = ed.doc.note(NoteId(1)).unwrap().pitch.points().to_vec();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(0.0, 3.0);
+    d.add(PPQ * 4.0, -3.0);
+    d.undo();
+    d.add(PPQ * 2.0, 1.0);
+
+    assert_eq!(
+        d.original(),
+        original.as_slice(),
+        "the thin line underneath is what was there before drawing began, \
+         and no amount of drawing changes it"
+    );
+}
+
+#[test]
+fn a_drawing_that_covers_half_a_note_leaves_the_rest_alone() {
+    let mut ed = draft_editor();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(0.0, 2.0);
+    d.add(PPQ * 1.5, 2.0);
+    ed.apply_draft(&d);
+
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    assert!((n.pitch.sample(PPQ * 0.7, 0.0) - 2.0).abs() < 0.05, "drawn");
+    assert!(
+        (n.pitch.sample(PPQ * 3.0, 0.0) - -0.3).abs() < 0.05,
+        "and the half that was sung is still as it was sung"
+    );
+}
+
+#[test]
+fn dragging_an_anchor_past_its_neighbour_reorders_rather_than_inverting() {
+    let ed = draft_editor();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(0.0, 0.0);
+    d.add(PPQ, 1.0);
+    d.add(PPQ * 2.0, 2.0);
+
+    d.begin_move();
+    d.move_to(0, PPQ * 3.0, -1.0);
+
+    let times: Vec<f64> = d.anchors().iter().map(|a| a.t).collect();
+    let mut sorted = times.clone();
+    sorted.sort_by(f64::total_cmp);
+    assert_eq!(times, sorted, "anchors stay in time order");
+}
+
+#[test]
+fn a_drag_is_one_draft_step_however_far_the_pointer_travels() {
+    let ed = draft_editor();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(0.0, 0.0);
+    d.add(PPQ * 2.0, 0.0);
+    let depth = d.anchors().to_vec();
+
+    d.begin_move();
+    for k in 1..=20 {
+        d.move_to(1, PPQ * 2.0, k as f64 * 0.1);
+    }
+    // One undo returns to before the drag, not to its previous frame.
+    assert!(d.undo());
+    assert_eq!(d.anchors(), depth.as_slice());
+}
+
+#[test]
+fn an_empty_draft_writes_nothing() {
+    let ed = draft_editor();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    assert!(d.is_empty());
+    assert!(d.apply_edit().is_none());
+    assert!(d.cancel_edit().is_none());
+    assert!(d.preview_edits().is_empty());
+}
+
+#[test]
+fn an_anchor_is_grabbed_by_proximity_in_time() {
+    let ed = draft_editor();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(PPQ, 0.0);
+    d.add(PPQ * 3.0, 0.0);
+
+    assert_eq!(d.anchor_at(PPQ * 1.05, PPQ * 0.2), Some(0));
+    assert_eq!(d.anchor_at(PPQ * 2.9, PPQ * 0.2), Some(1));
+    assert_eq!(d.anchor_at(PPQ * 2.0, PPQ * 0.2), None);
+    // Between two in range, the nearer one wins.
+    assert_eq!(d.anchor_at(PPQ * 1.4, PPQ * 5.0), Some(0));
+}

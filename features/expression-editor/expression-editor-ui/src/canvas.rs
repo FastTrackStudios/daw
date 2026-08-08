@@ -321,6 +321,46 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
 /// rather than a zigzag, few enough that a screen of notes stays cheap.
 const BLOB_SAMPLES: usize = 48;
 
+/// A pitch drawing, ready to draw.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DraftView {
+    /// Anchor handles, in pixels.
+    pub anchors: Vec<(f64, f64)>,
+    /// The drawn line.
+    pub line: String,
+    /// The curve as it was before drawing began — the thin line
+    /// underneath, which is how you can see what you are changing.
+    pub original: String,
+}
+
+/// Geometry for an open pitch drawing.
+pub fn draft_view(ed: &Editor, draft: &expression_editor_core::PitchDraft) -> DraftView {
+    let row = ed.doc.note(draft.note).map(|n| n.row as f64).unwrap_or(60.0);
+    let to_px = |p: &expression_editor_core::Point| {
+        (ed.camera.x(p.t), ed.camera.y(row + p.value, ed.viewport))
+    };
+    let polyline = |pts: &[expression_editor_core::Point]| {
+        pts.iter()
+            .map(|p| {
+                let (x, y) = to_px(p);
+                format!("{x:.1},{y:.1}")
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+
+    let span = draft.dirty_span();
+    let line = match span {
+        Some((t0, t1)) => polyline(&draft.rendered(t0, t1)),
+        None => String::new(),
+    };
+    DraftView {
+        anchors: draft.anchors().iter().map(to_px).collect(),
+        line,
+        original: polyline(draft.original()),
+    }
+}
+
 /// The take's own waveform, drawn full-height behind the roll.
 ///
 /// Everything *between* the notes — breaths, consonants, room tone — as

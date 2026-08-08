@@ -55,12 +55,18 @@ pub fn ExpressionEditor(
     /// that is otherwise only produced by a key press.
     #[props(default)]
     initial_multi: Option<MultiTool>,
+    /// Open a pitch drawing on mount. Same purpose again: restore a
+    /// session, and let the screenshot harness reach a modal state that
+    /// is otherwise only produced by a key press and several clicks.
+    #[props(default)]
+    initial_draft: Option<expression_editor_core::PitchDraft>,
 ) -> Element {
     let drag = use_signal(Drag::default);
     let drawer = use_signal(|| initial_drawer.clone().unwrap_or_default());
     let mut inspector_open = use_signal(|| true);
     let multi = use_signal(|| initial_multi.clone().unwrap_or_default());
     let menu_state = use_signal(ContextMenu::default);
+    let draft = use_signal(|| initial_draft.clone());
     let mut pending = use_signal(|| None::<menu_ui::Pending>);
 
     // Menu items the core could not finish become UI: Properties simply
@@ -88,7 +94,7 @@ pub fn ExpressionEditor(
                 div {
                     style: "display: flex; flex-direction: column; flex: 1 1 auto; \
                             min-width: 0; min-height: 0;",
-                    Canvas { editor, drag, drawer, multi, menu_state, pending }
+                    Canvas { editor, drag, drawer, multi, menu_state, pending, draft }
                     LaneStrip { editor }
                 }
                 inspector::Inspector { editor, open: inspector_open }
@@ -199,12 +205,14 @@ fn Canvas(
     multi: Signal<MultiTool>,
     menu_state: Signal<ContextMenu>,
     pending: Signal<Option<menu_ui::Pending>>,
+    draft: Signal<Option<expression_editor_core::PitchDraft>>,
 ) -> Element {
     let mut multi = multi;
     let mut editor = editor;
     let mut drag = drag;
     let mut drawer = drawer;
     let mut menu_state = menu_state;
+    let mut draft = draft;
     // While the drawer is open its target is locked: editing gestures
     // are blocked, but every navigation path stays live so the preview
     // can be auditioned in context.
@@ -229,6 +237,7 @@ fn Canvas(
     let take_wave = canvas::take_waveform(&ed);
     let sibilants = canvas::sibilant_bands(&ed);
     let sibilant_scope = ed.sibilant_scope;
+    let draft_view = draft.read().as_ref().map(|d| canvas::draft_view(&ed, d));
     // `R` brings references forward, the way `M` does for the MIDI
     // reference — with several parts on screen the quiet default is
     // sometimes too quiet to read against.
@@ -274,6 +283,59 @@ fn Canvas(
             onkeydown: move |e: KeyboardEvent| {
                 let key = e.key().to_string();
                 let m = mods_of(e.modifiers());
+
+                // A pitch drawing is modal, so it takes its keys first
+                // and Ctrl+Z means *its* undo — the document's history
+                // has nothing in it to undo yet, by design.
+                if draft.read().is_some() {
+                    let mut handled = true;
+                    match (key.as_str(), m.ctrl) {
+                        ("Enter", _) => {
+                            let d = draft.read().clone();
+                            if let Some(d) = d {
+                                editor.write().apply_draft(&d);
+                            }
+                            draft.set(None);
+                        }
+                        ("Escape", _) => {
+                            let d = draft.read().clone();
+                            if let Some(d) = d {
+                                editor.write().dismiss_draft(&d);
+                            }
+                            draft.set(None);
+                        }
+                        ("z", true) => {
+                            let mut dw = draft.write();
+                            if let Some(dr) = dw.as_mut() {
+                                if m.shift { dr.redo(); } else { dr.undo(); }
+                                let preview = dr.clone();
+                                drop(dw);
+                                editor.write().preview_draft(&mut { preview });
+                            }
+                        }
+                        _ => handled = false,
+                    }
+                    if handled {
+                        e.prevent_default();
+                        return;
+                    }
+                }
+
+                // Open a drawing on the selected note.
+                if key == "3" && !m.ctrl {
+                    let opened = {
+                        let ed = editor.read();
+                        ed.selection
+                            .notes
+                            .first()
+                            .and_then(|id| expression_editor_core::PitchDraft::open(&ed.doc, *id))
+                    };
+                    if opened.is_some() {
+                        draft.set(opened);
+                        e.prevent_default();
+                        return;
+                    }
+                }
                 // B opens the drawer; Escape closes it. Both work
                 // whether or not it is already open.
                 if key == "b" && !m.ctrl {
@@ -395,6 +457,18 @@ fn Canvas(
                     } else {
                         0
                     };
+                    // A pitch drawing owns the surface while it is up:
+                    // a click is an anchor and nothing else.
+                    if draft.read().is_some() {
+                        let mut dw = draft.write();
+                        let Some(dr) = dw.as_mut() else { return };
+                        let next = interaction::draft_press(&editor.read(), dr, x, y);
+                        let preview = dr.clone();
+                        drop(dw);
+                        editor.write().preview_draft(&mut { preview });
+                        drag.set(next);
+                        return;
+                    }
                     let d = interaction::pointer_down(&mut editor.write(), x, y, m, button);
                     // A right-click resolves to a menu request rather
                     // than a drag. Opening it here — not in `interaction`
@@ -412,6 +486,23 @@ fn Canvas(
                     }
                     let (x, y) = local(&e);
                     let m = mods_of(e.modifiers());
+                    // Read the drag out before touching it: the guard
+                    // would otherwise still be alive when `drag.set`
+                    // wants the mutable borrow.
+                    let current = drag.read().clone();
+                    if let Drag::DraftAnchor { index } = current {
+                        let mut dw = draft.write();
+                        if let Some(dr) = dw.as_mut() {
+                            let moved = interaction::draft_move(&editor.read(), dr, index, x, y);
+                            let preview = dr.clone();
+                            drop(dw);
+                            editor.write().preview_draft(&mut { preview });
+                            if let Some(i) = moved {
+                                drag.set(Drag::DraftAnchor { index: i });
+                            }
+                        }
+                        return;
+                    }
                     let mut d = drag.write();
                     interaction::pointer_move(&mut editor.write(), &mut d, x, y, m);
                 },
@@ -908,6 +999,41 @@ fn Canvas(
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                // The pitch drawing, over everything it edits.
+                if let Some(dv) = draft_view.as_ref() {
+                    g {
+                        pointer_events: "none",
+                        // What was there before, thin and underneath, so
+                        // the change is visible rather than remembered.
+                        if !dv.original.is_empty() {
+                            polyline {
+                                points: "{dv.original}",
+                                fill: "none",
+                                stroke: theme::TEXT_FAINT,
+                                stroke_width: "1",
+                                stroke_opacity: "0.8",
+                            }
+                        }
+                        if !dv.line.is_empty() {
+                            polyline {
+                                points: "{dv.line}",
+                                fill: "none",
+                                stroke: theme::ACCENT,
+                                stroke_width: "2",
+                            }
+                        }
+                        for (i, (ax, ay)) in dv.anchors.iter().enumerate() {
+                            circle {
+                                key: "anch{i}",
+                                cx: "{ax:.1}", cy: "{ay:.1}", r: "4",
+                                fill: theme::BG,
+                                stroke: theme::ACCENT,
+                                stroke_width: "2",
                             }
                         }
                     }

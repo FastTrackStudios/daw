@@ -34,7 +34,12 @@ const CANVAS_H: f64 = 400.0;
 const H: u32 = 700;
 
 #[component]
-fn Harness(seed: Editor, drawer: Option<ModDrawer>, multi: Option<MultiTool>) -> Element {
+fn Harness(
+    seed: Editor,
+    drawer: Option<ModDrawer>,
+    multi: Option<MultiTool>,
+    draft: Option<expression_editor_core::PitchDraft>,
+) -> Element {
     let editor = use_signal(|| seed.clone());
     rsx! {
         style {
@@ -47,6 +52,7 @@ fn Harness(seed: Editor, drawer: Option<ModDrawer>, multi: Option<MultiTool>) ->
                 editor,
                 initial_drawer: drawer.clone(),
                 initial_multi: multi.clone(),
+                initial_draft: draft.clone(),
             }
         }
     }
@@ -64,14 +70,28 @@ fn shots_dir() -> PathBuf {
 }
 
 async fn shoot(ed: Editor, name: &str) {
-    shoot_full(ed, None, None, name).await
+    shoot_full(ed, None, None, None, name).await
 }
 
 async fn shoot_with(ed: Editor, drawer: Option<ModDrawer>, name: &str) {
-    shoot_full(ed, drawer, None, name).await
+    shoot_full(ed, drawer, None, None, name).await
 }
 
-async fn shoot_full(ed: Editor, drawer: Option<ModDrawer>, multi: Option<MultiTool>, name: &str) {
+async fn shoot_with_draft(
+    ed: Editor,
+    draft: expression_editor_core::PitchDraft,
+    name: &str,
+) {
+    shoot_full(ed, None, None, Some(draft), name).await
+}
+
+async fn shoot_full(
+    ed: Editor,
+    drawer: Option<ModDrawer>,
+    multi: Option<MultiTool>,
+    draft: Option<expression_editor_core::PitchDraft>,
+    name: &str,
+) {
     // The canvas measures itself from the mounted element; headless
     // there is no resize event, so state the viewport the shot uses.
     let mut ed = ed;
@@ -83,6 +103,7 @@ async fn shoot_full(ed: Editor, drawer: Option<ModDrawer>, multi: Option<MultiTo
             seed: ed,
             drawer,
             multi,
+            draft,
         },
     );
     let tester = DocumentTester::from_virtual_dom(dom)
@@ -288,7 +309,7 @@ async fn shoot_multitool() {
     // bury the material.
     mt.hover = Some(expression_editor_core::Zone::Warp);
     mt.steep = expression_editor_core::Steepness(1.4);
-    shoot_full(ed, None, Some(mt), "30-multitool").await;
+    shoot_full(ed, None, Some(mt), None, "30-multitool").await;
 }
 
 /// The seven note handles, and the temporary note scoping them.
@@ -415,4 +436,52 @@ async fn shoot_audio_backdrop() {
     ed.sibilant_scope = true;
     ed.selection.notes = ed.doc.notes.iter().map(|n| n.id).collect();
     shoot(ed, "36-sibilant-scope").await;
+}
+
+/// A pitch drawing open: anchors, the sinusoidal line, and the original
+/// underneath.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_pitch_drawing() {
+    use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
+    use expression_editor_core::{Mode, PitchDraft};
+
+    const PPQ: f64 = 960.0;
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let mut n = Note::new(NoteId(1), PPQ * 0.5, PPQ * 7.0, 60);
+    n.weight = 0.85;
+    const STEPS: usize = 64;
+    for k in 0..STEPS {
+        let f = k as f64 / (STEPS - 1) as f64;
+        // Sung wobbly and drifting — something worth redrawing.
+        let drift = -0.7 * f;
+        let wobble = 0.3 * (f * core::f64::consts::TAU * 3.0).sin();
+        n.pitch.set(n.start + (n.end - n.start) * f, drift + wobble);
+    }
+    n.envelope = (0..200)
+        .map(|k| {
+            let f = k as f64 / 199.0;
+            let shell = (f / 0.05).min(1.0) * (1.0 - f).powf(0.4);
+            (shell * (0.75 + 0.25 * (f * 90.0).sin())).clamp(0.0, 1.0) as f32
+        })
+        .collect();
+    doc.push(n);
+
+    let mut ed = Editor::new(doc, Viewport::new(W as f64, CANVAS_H));
+    ed.set_mode(Mode::Audio);
+    ed.selection.notes = vec![NoteId(1)];
+
+    // A drawing: straighten the drift out and put a deliberate vibrato
+    // at the end, which is Tip 1 in the manual.
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(PPQ * 0.6, 0.0);
+    d.add(PPQ * 2.0, 0.05);
+    d.add(PPQ * 3.4, -0.05);
+    d.add(PPQ * 4.4, 0.35);
+    d.add(PPQ * 5.0, -0.35);
+    d.add(PPQ * 5.6, 0.35);
+    d.add(PPQ * 6.2, -0.35);
+    d.add(PPQ * 6.9, 0.0);
+    ed.preview_draft(&mut d);
+
+    shoot_with_draft(ed, d, "37-pitch-drawing").await;
 }

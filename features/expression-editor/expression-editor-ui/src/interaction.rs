@@ -140,6 +140,10 @@ pub enum Drag {
         pivot: f64,
         origin_y: f64,
     },
+    /// Dragging a pitch-drawing anchor.
+    DraftAnchor {
+        index: usize,
+    },
     /// One of the seven note handles.
     Handle(Box<handles::HandleDrag>),
     /// Dragging out a temporary note: a range inside one note that the
@@ -558,6 +562,60 @@ fn run_action(
             None
         }
     }
+}
+
+/// Route a press while a pitch drawing is open.
+///
+/// The draft owns the surface: while it is up, a click is an anchor and
+/// nothing else. That is deliberate — the drawing is a modal state with
+/// an explicit apply, and letting notes be selected or moved underneath
+/// it would make "what does Escape throw away?" unanswerable.
+pub fn draft_press(
+    ed: &Editor,
+    draft: &mut expression_editor_core::PitchDraft,
+    x: f64,
+    y: f64,
+) -> Drag {
+    let t = ed.camera.t_at(x);
+    let Some(note) = ed.doc.note(draft.note) else {
+        return Drag::None;
+    };
+    // Values are semitones from the note's row, the same units the
+    // pitch curve uses.
+    let value = ed.camera.pitch_at(y, ed.viewport) - note.row as f64;
+    let tolerance = ed.camera.units_per_px * expression_editor_core::draft::GRAB_PX;
+
+    match draft.anchor_at(t, tolerance) {
+        Some(i) => {
+            // One checkpoint for the whole drag, not one per move.
+            draft.begin_move();
+            draft.move_to(i, t, value);
+            Drag::DraftAnchor { index: i }
+        }
+        None => {
+            draft.add(t, value);
+            let i = draft.anchor_at(t, tolerance).unwrap_or(0);
+            Drag::DraftAnchor { index: i }
+        }
+    }
+}
+
+/// Continue an anchor drag.
+pub fn draft_move(
+    ed: &Editor,
+    draft: &mut expression_editor_core::PitchDraft,
+    index: usize,
+    x: f64,
+    y: f64,
+) -> Option<usize> {
+    let note = ed.doc.note(draft.note)?;
+    let t = ed.camera.t_at(x);
+    let value = ed.camera.pitch_at(y, ed.viewport) - note.row as f64;
+    draft.move_to(index, t, value);
+    // Re-sorting can move the grabbed anchor, so the caller has to be
+    // told where it went or the next frame drags the wrong one.
+    let tolerance = ed.camera.units_per_px * expression_editor_core::draft::GRAB_PX;
+    draft.anchor_at(t, tolerance.max(1e-9))
 }
 
 /// Resolve a press against the note handles.
@@ -1177,6 +1235,7 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             }
         }
         Drag::Paint { .. } => paint_at(ed, drag, x, y),
+        Drag::DraftAnchor { .. } => {}
         Drag::Handle(h) => {
             // Shift reverses the pitch snap, as everywhere else here.
             let snap = ed.snap_pitch != mods.shift;

@@ -569,6 +569,20 @@ pub struct ExpressionDoc {
     /// how you tell "the tracker missed a note" from "nothing was
     /// sung". Empty outside the audio domain.
     pub peaks: Vec<f32>,
+    /// The analyzed pitch across the whole take, in **absolute** MIDI.
+    ///
+    /// Display-only, and deliberately so. The notes own the editable
+    /// curves; this is what the tracker heard, kept because two things
+    /// need it and neither is an edit:
+    ///
+    /// - the pitch track runs *between* notes as well as through them,
+    ///   and there is no note there to own that stretch;
+    /// - pitch drawing shows the original underneath as a thin line for
+    ///   the whole session, which has to survive the edits made on top.
+    ///
+    /// Absolute rather than row-relative because it spans notes on
+    /// different rows, and no single row is the right origin.
+    pub contour: Curve,
     /// Spans with no detected pitch, in document time.
     ///
     /// Sibilants and silence. The pitch track is not drawn across
@@ -591,6 +605,7 @@ impl ExpressionDoc {
             cc: crate::cc::CcSet::default(),
             row_space: crate::rows::RowSpace::Pitch,
             peaks: Vec::new(),
+            contour: Curve::new(),
             unvoiced: Vec::new(),
             next_id: 1,
         }
