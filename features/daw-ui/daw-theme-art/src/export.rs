@@ -464,6 +464,16 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             )
         };
         let hit = match name {
+            "mcp_folder_on" => Some(slider(S::MixerFolder, (55.0, 15.0))),
+            // `mcp_folder_last` and `mcp_fcomp_*` are not wired here on
+            // purpose. The strip
+            // detector reports three cells of 49, and cell 0 contains two
+            // separate marks — so either the detection is wrong or the
+            // image is not a three-state strip, and drawing it against
+            // either reading before knowing which would be a guess
+            // dressed as a measurement. `mcp_folder_last` reads the same
+            // way: its wedge sits in one cell of three and the other two
+            // are not empty, which no single drawing accounts for.
             "tcp_volbg" => Some(slider(S::VolumeTrough, (19.0, 24.0))),
             "tcp_volthumb" => Some(slider(S::VolumeThumb, (27.0, 29.0))),
             "tcp_panbg" | "tcp_widthbg" => Some(slider(S::PanTrough, (43.0, 11.0))),
@@ -743,6 +753,7 @@ fn states(name: &str) -> usize {
         "folder_off" | "folder_on" | "folder_last" => 1,
         // Backgrounds are one drawing that REAPER stretches, never a
         // strip of states.
+        "folder_on" if name.starts_with("mcp_") => 1,
         "mainbg" | "mainbgsel" | "bg" | "bgsel" | "extmixbg" | "extmixbgsel"
         | "mainextmixbg" | "mainextmixbgsel" | "namebg" | "main_namebg"
         | "main_namebg_sel" | "iconbg" | "iconbgsel" | "idxbg" | "idxbg_sel" => 1,

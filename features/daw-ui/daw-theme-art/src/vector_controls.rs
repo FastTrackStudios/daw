@@ -3269,6 +3269,12 @@ pub enum SliderPart {
     PanTrough,
     /// Their cap: small, bright, with a dark line down the middle.
     PanThumb,
+    /// The mixer's folder mark — a folder on its own, no plus or arrow
+    /// beside it, at half black over the strip.
+    MixerFolder,
+    /// The mixer's "last in folder" mark: a wedge in the bottom-right
+    /// corner, where the track panel puts its on the left.
+    MixerFolderLast,
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -3350,6 +3356,24 @@ pub fn PanelSlider(props: SliderProps) -> Element {
                     rect {
                         x: "1", y: "2", width: "{vw - 2.0}", height: "7",
                         rx: "3.5",
+                        fill: "#000000",
+                    }
+                },
+                SliderPart::MixerFolder => rsx! {
+                    // A tab and a body, x5..x13 and y6..y12, at half
+                    // black. The track panel draws the same folder beside
+                    // two other marks; the mixer draws it alone.
+                    g { fill: "#000000", fill_opacity: "0.50",
+                        path { d: "M 5 6 H 9 V 8 H 5 Z" }
+                        rect { x: "5", y: "8", width: "9", height: "5" }
+                    }
+                },
+                SliderPart::MixerFolderLast => rsx! {
+                    // A right-angled wedge filling the bottom-right
+                    // corner, hypotenuse running from (11, 21) up to
+                    // (21, 11).
+                    path {
+                        d: "M 21 10.5 V 21 H 10.5 Z",
                         fill: "#000000",
                     }
                 },
