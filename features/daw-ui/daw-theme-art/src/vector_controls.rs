@@ -468,6 +468,17 @@ pub enum FxBypass {
 pub struct FxBypassProps {
     #[props(default)]
     pub state: FxBypass,
+    /// Draw the box as a translucent scrim rather than opaque plastic.
+    ///
+    /// The two layout variants are *not* the same drawing at two
+    /// orientations. `track_fx*_h`, which the track panel uses, is #000 at
+    /// 35% like everything else there. `track_fx*_v`, which the mixer
+    /// uses, is opaque — #4c4c4c along its lit top edge down to #404040 —
+    /// so it reads as one continuous control with the FX button beside
+    /// it. Drawing both as scrims put a dark notch in the middle of the
+    /// mixer's FX button.
+    #[props(default = false)]
+    pub scrim: bool,
     /// The cell this replaces: `track_fx*_h` is 50x22 in three, `_v` 56x22.
     #[props(default = (17.0, 22.0))]
     pub cell: (f32, f32),
@@ -507,6 +518,11 @@ pub fn FxBypassToggle(props: FxBypassProps) -> Element {
     // Empty + pointer is the "add FX" affordance, not a lit state.
     let plus = props.state == FxBypass::Empty && props.at != Interaction::Normal;
 
+    let (box_fill, box_alpha) = if props.scrim {
+        ("#000000", 0.35)
+    } else {
+        ("url(#fxbypbody)", 1.0)
+    };
     let (cx, cy) = (vw * 0.5, vh * 0.5);
     let pw = vw * 0.30;
     let ph = vh * 0.52;
@@ -531,14 +547,17 @@ pub fn FxBypassToggle(props: FxBypassProps) -> Element {
             // the source is 16x20 in a 16x22 cell, and filling the cell
             // made the toggle taller than the FX button it sits against.
             //
-            // And a scrim, like the FX button it sits against — #000 at
-            // 35%, measured. An opaque near-black box read as a hole
-            // punched in the strip rather than a control on it.
+            defs {
+                linearGradient { id: "fxbypbody", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{t.chrome.hardware.shade(0.19).css()}" }
+                    stop { offset: "1", stop_color: "{t.chrome.hardware.shade(0.02).css()}" }
+                }
+            }
             rect {
                 x: "0", y: "{vh / 22.0}", width: "{vw}", height: "{vh * 20.0 / 22.0}",
                 rx: "{vh * 0.12}",
-                fill: "#000000",
-                fill_opacity: "0.35",
+                fill: "{box_fill}",
+                fill_opacity: "{box_alpha}",
             }
             // The lit top edge every ReaperTips control has: one row just
             // inside the top, a shade lighter than the face. Measured on

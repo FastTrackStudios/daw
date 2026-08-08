@@ -148,12 +148,13 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
 
     // `track_fx*_h` is 50x22 in three cells, `_v` 56x22 — the track
     // panel's FX bypass toggle, which has no `mcp_` twin at all.
-    let byp = |state, cell| {
+    let byp = |state, cell, scrim| {
         render_svg(
             v::FxBypassToggle,
             v::FxBypassProps {
                 state,
                 cell,
+                scrim,
                 width: n.0,
                 height: n.1,
                 at,
@@ -168,12 +169,12 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         .or_else(|| name.strip_prefix("track_"))?;
 
     Some(match stem {
-        "fxempty_h" => byp(v::FxBypass::Empty, (17.0, 22.0)),
-        "fxon_h" => byp(v::FxBypass::On, (17.0, 22.0)),
-        "fxoff_h" => byp(v::FxBypass::Off, (17.0, 22.0)),
-        "fxempty_v" => byp(v::FxBypass::Empty, (19.0, 22.0)),
-        "fxon_v" => byp(v::FxBypass::On, (19.0, 22.0)),
-        "fxoff_v" => byp(v::FxBypass::Off, (19.0, 22.0)),
+        "fxempty_h" => byp(v::FxBypass::Empty, (17.0, 22.0), true),
+        "fxon_h" => byp(v::FxBypass::On, (17.0, 22.0), true),
+        "fxoff_h" => byp(v::FxBypass::Off, (17.0, 22.0), true),
+        "fxempty_v" => byp(v::FxBypass::Empty, (19.0, 22.0), false),
+        "fxon_v" => byp(v::FxBypass::On, (19.0, 22.0), false),
+        "fxoff_v" => byp(v::FxBypass::Off, (19.0, 22.0), false),
 
         "recarm_off" => rec(v::RecordArm::Off),
         "recarm_on" => rec(v::RecordArm::On),
