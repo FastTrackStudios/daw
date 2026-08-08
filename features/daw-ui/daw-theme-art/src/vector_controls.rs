@@ -549,8 +549,13 @@ pub fn FxControl(props: FxControlProps) -> Element {
                 x: "{p.split * 0.5}", y: "{body_y + body_h * 0.5}",
                 text_anchor: "middle", dominant_baseline: "central",
                 font_family: "Fira Sans, DejaVu Sans, sans-serif",
+                // 0.51, not 0.44. The peak colour is right either way —
+                // what differs is *coverage*: at 0.44 the source has twice
+                // as many bright pixels as ours, so the letters read dim
+                // rather than dark. Sized so the caps come out 7px in a
+                // 22px cell, which the glyph-row test pins.
                 font_weight: "700",
-                font_size: "{p.h * 0.44}",
+                font_size: "{p.h * 0.51}",
                 letter_spacing: "{p.h * 0.03}",
                 fill: "{text.css()}",
                 "FX"
@@ -582,13 +587,19 @@ pub fn FxControl(props: FxControlProps) -> Element {
                     fill: "{c.css()}",
                 }
             } else {
-                // Dormant: #656565, *lighter* than the face — a lens
-                // catching the light, not a hole.
+                // Dormant: a *recessed* lens. Light in the middle —
+                // #656565, brighter than the face — inside a ring that is
+                // darker than the face again. Measured across the source
+                // it goes 65, 58, 102, 102, 58, 65: without the ring it
+                // reads as a flat light blob stuck on rather than a lamp
+                // set into the plastic.
                 rect {
                     x: "{tx - pw * 0.5}", y: "{ty - ph * 0.5}",
                     width: "{pw}", height: "{ph}",
                     rx: "{pw * 0.5}",
                     fill: "{t.chrome.hardware_mark.shade(-0.38).css()}",
+                    stroke: "{t.chrome.hardware.shade(-0.1).css()}",
+                    stroke_width: "{p.h * 0.045}",
                 }
             }
         }
