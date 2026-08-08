@@ -51,6 +51,29 @@ pub struct VectorProps {
     pub at: Interaction,
 }
 
+/// Deepen a colour without dimming it.
+///
+/// Holds the strongest channel and pulls the others down, which is what
+/// ReaperTips' lit buttons actually do from top to bottom: solo runs
+/// #d3a738 to #d0943a — red pinned at 210, green falling 167 to 148 —
+/// and defeat holds its blue at 211 while red drops away.
+///
+/// `shade` cannot express that. It mixes toward black, so it scales all
+/// three channels together and takes the dominant one with it: the face
+/// loses chroma as it descends and the middle of the button reads dull
+/// against the original, which is exactly how this was first noticed.
+fn deepen(c: Color, amount: f32) -> Color {
+    let peak = c.r.max(c.g).max(c.b);
+    let pull = |v: u8| {
+        if v == peak {
+            v
+        } else {
+            (v as f32 * (1.0 - amount)).round().clamp(0.0, 255.0) as u8
+        }
+    };
+    Color::rgb(pull(c.r), pull(c.g), pull(c.b))
+}
+
 /// A control's palette, resolved once per render.
 struct Ink {
     face: Color,
@@ -107,14 +130,12 @@ pub struct LabelButtonProps {
     /// choices, so it comes from the caller rather than from `ink`.
     #[props(default)]
     pub legend: Option<Color>,
-    /// How far the face darkens from top to bottom.
+    /// How far the face deepens from top to bottom — see [`deepen`].
     ///
-    /// Not shared, because the source does not share it. Mute runs
-    /// #bd3b50 to #9e3244 — the same hue, 15% less light. Solo runs
-    /// #d3a738 to #d0943a, which is the *same lightness*: a shift toward
-    /// orange, not a darkening at all. One constant made solo's bottom
-    /// half muddy while mute's was right.
-    #[props(default = 0.14)]
+    /// Not shared, because the source does not share it: mute falls 15%
+    /// in its non-dominant channels over the button's height, solo 11%,
+    /// and blue-defeat more still.
+    #[props(default = 0.15)]
     pub depth: f32,
     /// Face colour when engaged. `None` draws the resting state.
     #[props(default)]
@@ -176,7 +197,7 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
             defs {
                 linearGradient { id: "{id}", x1: "0", y1: "0", x2: "0", y2: "1",
                     stop { offset: "0", stop_color: "{k.face.shade(0.06).css()}" }
-                    stop { offset: "1", stop_color: "{k.face.shade(-props.depth).css()}" }
+                    stop { offset: "1", stop_color: "{deepen(k.face, props.depth).css()}" }
                 }
             }
             // Inset by half the border so the stroke sits inside.
@@ -1403,8 +1424,8 @@ mod tests {
         let n = (None, None);
         let cases: [(&str, String); 7] = [
             ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { cell: (36.0, 24.0), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { depth: 0.14, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_solo_on", render_svg(SoloButton, SoloProps { depth: 0.04, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_solo_on", render_svg(SoloButton, SoloProps { depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_fx_norm", render_svg(FxButton, FxProps { family: Default::default(), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
@@ -1440,7 +1461,7 @@ mod tests {
                 render_svg(
                     MuteButton,
                     ToggleProps {
-                        depth: 0.14,
+                        depth: 0.15,
                         legend: None,
                         body: (0.0, 1.0),
                         cell: (21.0, 20.0),
@@ -1453,7 +1474,7 @@ mod tests {
                 render_svg(
                     SoloButton,
                     SoloProps {
-                        depth: 0.04,
+                        depth: 0.11,
                         legend: None,
                         body: (0.0, 1.0),
                         cell: (21.0, 20.0),
@@ -1549,7 +1570,7 @@ mod tests {
         let small = render_svg(
             MuteButton,
             ToggleProps {
-                depth: 0.14,
+                depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
@@ -1562,7 +1583,7 @@ mod tests {
         let large = render_svg(
             MuteButton,
             ToggleProps {
-                depth: 0.14,
+                depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
@@ -1642,7 +1663,7 @@ mod tests {
         let n = render_svg(
             MuteButton,
             ToggleProps {
-                depth: 0.14,
+                depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
@@ -1655,7 +1676,7 @@ mod tests {
         let h = render_svg(
             MuteButton,
             ToggleProps {
-                depth: 0.14,
+                depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
@@ -1668,7 +1689,7 @@ mod tests {
         let p = render_svg(
             MuteButton,
             ToggleProps {
-                depth: 0.14,
+                depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
@@ -1688,7 +1709,7 @@ mod tests {
         let off = render_svg(
             SoloButton,
             SoloProps {
-                depth: 0.04,
+                depth: 0.11,
                 legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
@@ -1701,7 +1722,7 @@ mod tests {
         let on = render_svg(
             SoloButton,
             SoloProps {
-                depth: 0.04,
+                depth: 0.11,
                 legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
@@ -1714,7 +1735,7 @@ mod tests {
         let defeat = render_svg(
             SoloButton,
             SoloProps {
-                depth: 0.04,
+                depth: 0.11,
                 legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),

@@ -147,7 +147,7 @@ fn main() {
                             render_svg(
                                 vector::MuteButton,
                                 vector::ToggleProps {
-                                    depth: 0.14,
+                                    depth: 0.15,
                                     legend: None,
                                     body: (0.0, 1.0),
                                     cell: (21.0, 20.0),
@@ -194,7 +194,7 @@ fn main() {
                             render_svg(
                                 vector::SoloButton,
                                 vector::SoloProps {
-                                    depth: 0.04,
+                                    depth: 0.11,
                                     legend: None,
                                     body: (0.0, 1.0),
                                     cell: (21.0, 20.0),

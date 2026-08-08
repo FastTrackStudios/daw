@@ -40,7 +40,7 @@ fn main() {
             &render_svg(
                 MuteButton,
                 ToggleProps {
-                    depth: 0.14,
+                    depth: 0.15,
                     legend: None,
                     body: (0.0, 1.0),
                     cell: (21.0, 20.0),
@@ -57,7 +57,7 @@ fn main() {
             &render_svg(
                 MuteButton,
                 ToggleProps {
-                    depth: 0.14,
+                    depth: 0.15,
                     legend: None,
                     body: (0.0, 1.0),
                     cell: (21.0, 20.0),
@@ -74,7 +74,7 @@ fn main() {
             &render_svg(
                 SoloButton,
                 SoloProps {
-                    depth: 0.04,
+                    depth: 0.11,
                     legend: None,
                     body: (0.0, 1.0),
                     cell: (21.0, 20.0),
@@ -91,7 +91,7 @@ fn main() {
             &render_svg(
                 SoloButton,
                 SoloProps {
-                    depth: 0.04,
+                    depth: 0.11,
                     legend: None,
                     body: (0.0, 1.0),
                     cell: (21.0, 20.0),

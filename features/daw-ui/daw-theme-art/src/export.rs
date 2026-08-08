@@ -115,9 +115,8 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 cell: label_cell,
                 body: label_body,
                 legend: label_legend,
-                // Solo shifts hue rather than darkening — see
-                // `LabelButtonProps::depth`.
-                depth: 0.04,
+                // Solo's red is pinned; only its green falls, by 11%.
+                depth: 0.11,
                 width: n.0,
                 height: n.1,
                 at,
