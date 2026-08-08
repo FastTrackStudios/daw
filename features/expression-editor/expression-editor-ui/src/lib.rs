@@ -563,7 +563,32 @@ fn Canvas(
                     g {
                         key: "n{n.id.0}",
                         opacity: "{note_opacity:.2}",
-                        if let Some(head) = n.head.as_ref() {
+                        if let Some(blob) = n.blob.as_ref() {
+                            // A sung note: the body follows the
+                            // amplitude envelope and rides the pitch
+                            // contour, so the shape *is* the reading.
+                            polygon {
+                                points: "{blob}",
+                                fill: n.fill,
+                                fill_opacity: "{n.opacity + 0.25:.2}",
+                                stroke: if n.selected { theme::SELECTED } else { n.fill },
+                                stroke_width: if n.selected { "1.5" } else { "0.75" },
+                            }
+                            // The note's own pitch, as a hairline
+                            // through the body. Without it there is
+                            // nothing to read the wandering pitch track
+                            // *against*, and the whole surface is about
+                            // that difference.
+                            if let Some(cy) = n.blob_center {
+                                line {
+                                    x1: "{n.x:.1}", y1: "{cy:.1}",
+                                    x2: "{n.x + n.w:.1}", y2: "{cy:.1}",
+                                    stroke: theme::TEXT_FAINT,
+                                    stroke_opacity: "0.7",
+                                    stroke_width: "0.75",
+                                }
+                            }
+                        } else if let Some(head) = n.head.as_ref() {
                             polygon {
                                 points: "{head}",
                                 fill: n.fill,

@@ -53,8 +53,37 @@ pub const GUTTER_BG: &str = d::GUTTER;
 /// Razor areas. Distinct from ZONE red — a razor is a region you are
 /// about to operate on, not a warning.
 pub const RAZOR: &str = d::RAZOR;
+/// The tracked pitch contour on the audio surface — white, and the
+/// brightest line there.
+pub const PITCH_TRACK: &str = d::PITCH_TRACK;
+
 /// Notes from another track, drawn behind the active one.
 pub const REFERENCE: &str = d::REFERENCE;
+
+/// How well a sung note matches its target, in tune to out of tune.
+pub const TUNE_RAMP: [&str; 5] = d::TUNE_RAMP;
+
+/// The ramp step for a deviation of `cents`.
+///
+/// Twenty cents is about where a held note starts sounding wrong to a
+/// listener, so that is where the ramp reaches its far end. Below five
+/// it reads as dead on — chasing the last few cents of a sung note is
+/// how vocals end up sounding synthetic.
+pub fn tune_color(cents: f64) -> &'static str {
+    let c = cents.abs();
+    let step = if c < 5.0 {
+        0
+    } else if c < 10.0 {
+        1
+    } else if c < 15.0 {
+        2
+    } else if c < 20.0 {
+        3
+    } else {
+        4
+    };
+    TUNE_RAMP[step]
+}
 
 /// A control's resting surface, and the engaged variant.
 pub const CONTROL: &str = d::CONTROL;

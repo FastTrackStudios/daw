@@ -84,6 +84,21 @@ impl Mode {
         matches!(self, Mode::Audio | Mode::Mpe | Mode::Vocals)
     }
 
+    /// Whether notes draw as amplitude blobs rather than bars.
+    ///
+    /// A sung note is not a rectangle. Its body follows the amplitude
+    /// envelope and rides the pitch contour, which is what makes a
+    /// breathy tail or a hard consonant visible at a glance — and what
+    /// makes the pitch line's excursions readable *against* the note
+    /// instead of inside a box that hides them.
+    ///
+    /// This tracks the mode rather than the row space: an audio editor
+    /// and a MIDI editor are both `RowSpace::Pitch`, and only one of
+    /// them has an envelope to draw.
+    pub fn draws_blobs(&self) -> bool {
+        matches!(self, Mode::Audio | Mode::Vocals)
+    }
+
     /// Whether the note carries the seven drag handles.
     ///
     /// They edit a *contour* — pitch centre, its slopes, its vibrato

@@ -99,6 +99,13 @@ pub struct NoteRect {
     pub badge: Option<&'static str>,
     /// Triangle points, when this space draws heads instead of bars.
     pub head: Option<String>,
+    /// Amplitude-blob polygon, when this mode draws sung notes instead
+    /// of rectangles. Takes precedence over both `head` and the bar.
+    pub blob: Option<String>,
+    /// Y of the blob's centre line — the note's own pitch, drawn as a
+    /// hairline through the body so the pitch track can be read against
+    /// it. `None` when there is no blob.
+    pub blob_center: Option<f64>,
     /// Joined to the next note on its row.
     pub legato: bool,
 }
@@ -264,12 +271,19 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
                     top + size * 0.5,
                 )
             });
+            let blob_shape = ed.mode.draws_blobs().then(|| blob_polygon(ed, n)).flatten();
             // A string roll colours by string, a kit by section; pitch
-            // space keeps its pitch-class hue.
-            let fill = ed
-                .row_space
-                .row_color(n.row)
-                .unwrap_or_else(|| theme::pitch_class_color(n.row));
+            // space keeps its pitch-class hue. A sung note instead
+            // colours by how far out of tune it is, which is the one
+            // thing you are looking for on this surface — pitch class
+            // is already the row.
+            let fill = if blob_shape.is_some() {
+                theme::tune_color(blob_cents(ed, n))
+            } else {
+                ed.row_space
+                    .row_color(n.row)
+                    .unwrap_or_else(|| theme::pitch_class_color(n.row))
+            };
             NoteRect {
                 id: n.id,
                 row: n.row,
@@ -283,14 +297,140 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
                 ambiguous: n.ambiguous,
                 zones,
                 cents,
-                ribbon: note_ribbon(ed, n),
+                // The blob already *is* the amplitude envelope, so the
+                // ribbon would draw the same information twice — and
+                // draw it in the wrong place, since the ribbon sits in
+                // the row while the blob rides the pitch.
+                ribbon: if blob_shape.is_some() {
+                    None
+                } else {
+                    note_ribbon(ed, n)
+                },
                 label,
                 badge,
                 head,
+                blob_center: blob_shape.as_ref().map(|_| blob_center_y(ed, n)),
+                blob: blob_shape,
                 legato: n.legato,
             }
         })
         .collect()
+}
+
+/// Samples across a blob body. Enough that a vibrato reads as a wave
+/// rather than a zigzag, few enough that a screen of notes stays cheap.
+const BLOB_SAMPLES: usize = 48;
+
+/// A sung note's body: the recorded waveform, drawn as the note.
+///
+/// This is what makes the audio surface read as audio rather than as
+/// MIDI with different colours. The body sits **flat**, centred on the
+/// note's own pitch the way a MIDI note sits on its row, and its
+/// vertical extent is the amplitude envelope mirrored about that
+/// centre — a waveform, not a smooth ribbon. A breathy tail visibly
+/// thins, a hard consonant bulges, and the shape of the sound is
+/// legible before you read anything else.
+///
+/// The pitch contour is deliberately **not** folded into this. It is
+/// drawn separately as the white pitch track, which wanders through and
+/// out of the body — and that relationship, between where the note is
+/// and where the voice actually went, is the thing being edited.
+///
+/// Returns the polygon points, or `None` where the note is too small to
+/// be worth the samples.
+fn blob_polygon(ed: &Editor, n: &Note) -> Option<String> {
+    let x0 = ed.camera.x(n.start);
+    let x1 = ed.camera.x(n.end);
+    if x1 - x0 < 2.0 {
+        return None;
+    }
+    let row_h = ed.camera.px_per_semitone;
+    // Half a row at full amplitude, with a floor so a quiet passage
+    // still leaves something to aim at rather than a hairline.
+    let max_half = (row_h * 0.5).max(3.0);
+    let min_half = (row_h * 0.08).max(1.0);
+    let cy = blob_center_y(ed, n);
+
+    // One sample per pixel where the note is wide, so the recorded
+    // envelope's jaggedness survives instead of being smoothed into a
+    // lozenge by too few samples.
+    let count = ((x1 - x0).ceil() as usize).clamp(BLOB_SAMPLES, 1024);
+
+    let mut top = String::new();
+    let mut bottom = Vec::with_capacity(count);
+    for i in 0..count {
+        let f = i as f64 / (count - 1) as f64;
+        let t = n.start + (n.end - n.start) * f;
+        let half = min_half + (max_half - min_half) * note_amplitude(n, f, t);
+        let x = ed.camera.x(t);
+        if i > 0 {
+            top.push(' ');
+        }
+        top.push_str(&format!("{:.1},{:.1}", x, cy - half));
+        bottom.push(format!("{:.1},{:.1}", x, cy + half));
+    }
+    // Down the top edge, back along the bottom: one closed polygon.
+    bottom.reverse();
+    Some(format!("{top} {}", bottom.join(" ")))
+}
+
+/// Where a sung note's body is centred, in pixels.
+///
+/// The note's own pitch — its row plus the contour's centre — so the
+/// body sits where the note *is*, and the pitch track can be read
+/// against it.
+fn blob_center_y(ed: &Editor, n: &Note) -> f64 {
+    let row_h = ed.camera.px_per_semitone;
+    let center = expression_editor_core::blob::decompose(
+        &n.pitch,
+        n.start,
+        n.end,
+        BLOB_SAMPLES,
+        ed.doc.time_base.units_per_second(ed.bpm),
+        0.0,
+    )
+    .center;
+    ed.camera.y(n.row as f64 + center + 0.5, ed.viewport) + row_h * 0.5
+}
+
+/// Amplitude at fraction `f` through the note, 0..1.
+///
+/// The recorded envelope where there is one — that is the waveform, and
+/// no curve of control points could carry its detail. Authored Pressure
+/// where there is not, so an MPE note still shapes. Analysis weight as
+/// the last resort, so a freshly-loaded note is not a hairline.
+fn note_amplitude(n: &Note, f: f64, t: f64) -> f64 {
+    if !n.envelope.is_empty() {
+        let i = ((f * (n.envelope.len() - 1) as f64).round() as usize).min(n.envelope.len() - 1);
+        return (n.envelope[i] as f64).clamp(0.0, 1.0);
+    }
+    if !n.pressure.is_empty() {
+        return n
+            .pressure
+            .sample(t, Lane::Pressure.default_value())
+            .clamp(0.0, 1.0);
+    }
+    n.weight.clamp(0.0, 1.0)
+}
+
+/// How far a blob sits from its target, in cents.
+///
+/// The *centre* of the contour, not its value at any instant — a note
+/// is in or out of tune as a whole, and colouring it from a point that
+/// the vibrato happens to be passing through would make a perfectly
+/// good note flash red twice a second.
+fn blob_cents(ed: &Editor, n: &Note) -> f64 {
+    let center = expression_editor_core::blob::decompose(
+        &n.pitch,
+        n.start,
+        n.end,
+        BLOB_SAMPLES,
+        ed.doc.time_base.units_per_second(ed.bpm),
+        0.0,
+    )
+    .center;
+    let target = ed.tuning.cents(n.row) / 100.0;
+    (center - target) * 100.0
 }
 
 /// How far the note actually sounds from 12-TET, if it does.
@@ -389,7 +529,16 @@ pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
                 note: n.id,
                 lane,
                 points: s,
-                color: theme::lane_color(lane),
+                // On the audio surface the pitch track is white, not
+                // the lane's hue. It is the one line that has to stay
+                // legible over a body whose colour is already saying
+                // something else — how far out of tune the note is —
+                // and a coloured track competes with that reading.
+                color: if lane == Lane::Pitch && ed.mode.draws_blobs() {
+                    theme::PITCH_TRACK
+                } else {
+                    theme::lane_color(lane)
+                },
                 active,
                 selected: ed.selection.contains(n.id),
             });

@@ -167,6 +167,29 @@ pub const MICROTONAL: &str = "#eab308";
 /// Razor areas. Deliberately distinct from [`ZONE`]: a razor is a region you
 /// are about to operate on, not a warning about one.
 pub const RAZOR: &str = "#22d3ee";
+/// How well a sung note matches its target pitch, in tune to out of tune.
+///
+/// Blue reads as correct and red as wrong without needing a legend, and
+/// the ramp runs through violet rather than through grey so no step
+/// looks like "disabled". Five steps, not a continuous gradient: a
+/// singer is deciding whether a note needs fixing, and a handful of
+/// distinguishable states answers that faster than a smooth scale where
+/// every note is a slightly different colour.
+pub const TUNE_RAMP: [&str; 5] = [
+    "#3b82f6", // dead on
+    "#6366f1",
+    "#a855f7",
+    "#e0398a",
+    "#ef4444", // badly out
+];
+
+/// The tracked pitch contour on the audio surface.
+///
+/// White, and the brightest thing on that screen on purpose: it is the
+/// line every edit is aimed at, and it has to stay readable crossing
+/// note bodies whose own colour is already reporting tuning.
+pub const PITCH_TRACK: &str = "#f8fafc";
+
 /// Notes belonging to another track, shown behind the one being edited.
 /// Desaturated on purpose — a reference has to be legible enough to tune
 /// against and quiet enough that it is never mistaken for editable.

@@ -381,6 +381,15 @@ pub struct Note {
     pub ambiguous: bool,
     /// Display weight 0..1 (analysis RMS in the audio domain).
     pub weight: f64,
+    /// Per-frame amplitude across the note, 0..1, for drawing a sung
+    /// note's body as the waveform it actually is.
+    ///
+    /// Deliberately separate from the Pressure lane. Pressure is an
+    /// *edit* — a smooth trim the user applies — where this is what was
+    /// recorded, and it is jagged in a way a curve of control points
+    /// could not represent without thousands of them. Empty outside the
+    /// audio domain, where there is no waveform to show.
+    pub envelope: Vec<f32>,
 }
 
 impl Note {
@@ -405,6 +414,7 @@ impl Note {
             target: Target::WholeNote,
             ambiguous: false,
             weight: 1.0,
+            envelope: Vec::new(),
         }
     }
 

@@ -121,6 +121,24 @@ fn sung_note(id: u64, start: f64, len: f64, row: i32, channel: u8, scoop: f64) -
             .set(t, (0.35 + 0.6 * (f * 3.1).sin().abs()).clamp(0.0, 1.0));
         n.timbre.set(t, (0.2 + 0.7 * f).clamp(0.0, 1.0));
     }
+    // A recorded-looking amplitude envelope, so the audio surface draws
+    // a waveform rather than a smooth lozenge. Deliberately jagged: the
+    // point of showing the waveform is the detail a control-point curve
+    // could not carry, and a demo that smooths it over would make the
+    // rendering look right when it is not.
+    const ENV: usize = 220;
+    n.envelope = (0..ENV)
+        .map(|k| {
+            let f = k as f64 / (ENV - 1) as f64;
+            // Attack, body, release.
+            let shell = (f / 0.06).min(1.0) * (1.0 - f).powf(0.35);
+            // Glottal ripple plus a little noise-ish texture, which is
+            // what gives a vocal envelope its grain.
+            let ripple = 0.72 + 0.28 * (f * 90.0).sin() * (f * 13.0).cos();
+            let grain = 0.9 + 0.1 * (f * 211.0).sin();
+            ((shell * ripple * grain).clamp(0.0, 1.0)) as f32
+        })
+        .collect();
     n
 }
 

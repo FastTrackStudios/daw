@@ -72,6 +72,33 @@ fn from_lane(v: f64, range: f64) -> f64 {
     (v - 0.5) * range * 2.0
 }
 
+/// Convert an analysis into an editable document, with waveform.
+///
+/// `rms` is the per-frame level of the whole take, indexed by the same
+/// frame numbers the blobs use. Each note takes the slice covering it,
+/// normalized against the loudest frame in the take rather than its own
+/// peak — normalizing per note would make a whispered word draw as
+/// large as a belted one, which is exactly the comparison the display
+/// exists to support.
+pub fn to_doc_with_envelope(pitch: &PitchDoc, frame_rate: f64, rms: &[f32]) -> ExpressionDoc {
+    let mut doc = to_doc(pitch, frame_rate);
+    let peak = rms.iter().copied().fold(0.0_f32, f32::max);
+    if peak <= 0.0 {
+        return doc;
+    }
+    for (i, blob) in pitch.blobs.iter().enumerate() {
+        let Some(note) = doc.note_mut(NoteId(i as u64 + 1)) else {
+            continue;
+        };
+        let lo = blob.start_frame.min(rms.len());
+        let hi = (blob.end_frame + 1).min(rms.len());
+        if hi > lo {
+            note.envelope = rms[lo..hi].iter().map(|v| v / peak).collect();
+        }
+    }
+    doc
+}
+
 /// Convert an analysis into an editable document.
 ///
 /// `frame_rate` is `sample_rate / hop` — the rate the blobs' frame
