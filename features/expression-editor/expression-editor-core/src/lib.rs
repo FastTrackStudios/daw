@@ -40,6 +40,7 @@ pub mod razor;
 pub mod rows;
 pub mod shape;
 pub mod tools;
+pub mod tracks;
 pub mod tuning;
 pub mod zoom;
 
@@ -55,6 +56,7 @@ pub use multitool::{Bend, Steepness, Zone};
 pub use razor::{RazorArea, RazorSet};
 pub use rows::{Articulation, DrumMap, NoteShape, RowSpace, StringTuning};
 pub use tools::{Grid, Hit, Mods, Selection, Tool};
+pub use tracks::{RefColor, Track, Workspace};
 pub use tuning::{Temperament, Tuning};
 pub use zoom::{HorizontalMode, SmartZoom, VerticalMode, ZoomModes};
 
@@ -110,6 +112,13 @@ pub struct Editor {
     /// Cut/copy/paste buffer. Editor-local rather than system-wide —
     /// see [`clipboard::Clipboard`].
     pub clipboard: clipboard::Clipboard,
+    /// The other tracks. `doc` above is always the *active* one; the
+    /// workspace holds the rest, each with its own undo stack.
+    pub tracks: Workspace,
+    /// `R` held: reference tracks come forward. A momentary key rather
+    /// than a toggle, because it is used to *check* something mid-edit
+    /// and a mode you can forget you are in is worse than a held key.
+    pub refs_to_front: bool,
     history: History,
 }
 
@@ -117,8 +126,10 @@ impl Editor {
     pub fn new(doc: ExpressionDoc, viewport: Viewport) -> Self {
         let content = content_of(&doc);
         let camera = camera::reset_view(content, viewport, CUSHION, PAD);
+        let tracks = Workspace::single("Track 1", doc.clone());
         Self {
             doc,
+            tracks,
             camera,
             viewport,
             tool: Tool::Curve,
@@ -141,8 +152,45 @@ impl Editor {
             beats_per_bar: 4.0,
             playhead: None,
             clipboard: clipboard::Clipboard::default(),
-            history: History::new(10),
+            refs_to_front: false,
+            history: History::new(tracks::HISTORY_LIMIT),
         }
+    }
+
+    /// Add a track and return its index. It does not become active.
+    pub fn add_track(&mut self, name: impl Into<String>, doc: ExpressionDoc) -> usize {
+        self.tracks.push(tracks::Track::new(name, doc))
+    }
+
+    /// Switch to track `i`, parking the current document and history.
+    ///
+    /// The camera does not move: switching tracks changes what you are
+    /// editing, not where you are looking. The selection *is* cleared,
+    /// because note ids are per-document and a selection carried across
+    /// would point at whatever happened to share those ids.
+    pub fn switch_track(&mut self, i: usize) -> bool {
+        // Validate before moving anything out of the editor, so a
+        // rejected switch cannot leave `doc` and `history` stranded.
+        if i == self.tracks.active() || i >= self.tracks.len() {
+            return false;
+        }
+        let history = core::mem::replace(&mut self.history, History::new(tracks::HISTORY_LIMIT));
+        let Some((doc, history)) = self.tracks.swap_active(i, self.doc.clone(), history) else {
+            return false;
+        };
+        self.doc = doc;
+        self.history = history;
+        // Note ids are per-document, so a carried-over selection would
+        // point at whatever happens to share those ids on the new track.
+        self.selection.clear();
+        self.razor = RazorSet::default();
+        self.cc_edit = None;
+        true
+    }
+
+    /// The track being edited.
+    pub fn active_track(&self) -> usize {
+        self.tracks.active()
     }
 
     /// Apply an edit through the undo stack.

@@ -7,7 +7,7 @@
 
 use expression_editor_core::doc::{Lane, Note, NoteId};
 use expression_editor_core::tools;
-use expression_editor_core::Editor;
+use expression_editor_core::{Editor, RefColor};
 
 use crate::theme;
 
@@ -100,6 +100,65 @@ pub struct NoteRect {
     pub head: Option<String>,
     /// Joined to the next note on its row.
     pub legato: bool,
+}
+
+/// A note belonging to another track, drawn behind the active one.
+///
+/// Deliberately not a [`NoteRect`]: a reference has no zones, no
+/// ribbon, no cents readout and no selection state, and giving it those
+/// fields would invite code that treats it as editable.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RefRect {
+    /// Which track it came from, so a double-click can promote it.
+    pub track: usize,
+    pub id: NoteId,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub stroke: String,
+    /// `None` for outline-only (`RefColor::Shadow`).
+    pub fill: Option<String>,
+    pub label: Option<String>,
+}
+
+/// Notes from every track marked as a reference.
+///
+/// Ordered back-to-front by track index so the overlay is stable: a
+/// reference that jumped in front of another when you switched tracks
+/// would be unreadable.
+pub fn reference_rects(ed: &Editor) -> Vec<RefRect> {
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let h = ed.camera.px_per_semitone;
+    let mut out = Vec::new();
+    for (i, track) in ed.tracks.references() {
+        let Some(doc) = ed.tracks.doc_of(i) else {
+            continue;
+        };
+        // Host colour when asked for and available; the surface's own
+        // reference grey otherwise, so a host that supplies no colours
+        // still renders something legible.
+        let colour = match track.ref_color {
+            RefColor::Host => track.color.clone().unwrap_or_else(|| theme::REFERENCE.into()),
+            RefColor::Default | RefColor::Shadow => theme::REFERENCE.into(),
+        };
+        let fill = (track.ref_color != RefColor::Shadow).then(|| colour.clone());
+        for n in doc.notes.iter().filter(|n| n.end >= t0 && n.start <= t1) {
+            let x = ed.camera.x(n.start);
+            out.push(RefRect {
+                track: i,
+                id: n.id,
+                x,
+                w: (ed.camera.x(n.end) - x).max(2.0),
+                y: ed.camera.y(n.row as f64 + 0.5, ed.viewport),
+                h,
+                stroke: colour.clone(),
+                fill: fill.clone(),
+                label: n.text.clone(),
+            });
+        }
+    }
+    out
 }
 
 pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {

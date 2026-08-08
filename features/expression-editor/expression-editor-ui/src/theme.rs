@@ -53,6 +53,8 @@ pub const GUTTER_BG: &str = d::GUTTER;
 /// Razor areas. Distinct from ZONE red — a razor is a region you are
 /// about to operate on, not a warning.
 pub const RAZOR: &str = d::RAZOR;
+/// Notes from another track, drawn behind the active one.
+pub const REFERENCE: &str = d::REFERENCE;
 
 /// A control's resting surface, and the engaged variant.
 pub const CONTROL: &str = d::CONTROL;

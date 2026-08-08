@@ -2856,3 +2856,179 @@ fn a_measure_command_reads_the_bar_under_the_pointer() {
     assert!(ed.run_command(&Command::CopyMeasure, None));
     assert_eq!(ed.clipboard.len(), 4);
 }
+
+// ── multitrack ───────────────────────────────────────────────────────
+
+use expression_editor_core::tracks::{RefColor, Track};
+
+#[test]
+fn each_track_keeps_its_own_undo_history() {
+    let mut ed = menu_editor();
+    let other = doc_with_notes(2);
+    let b = ed.add_track("Harmony", other);
+
+    // Edit track A, then switch away and back.
+    ed.apply(&Edit::DeleteNotes(vec![NoteId(1)]));
+    assert!(ed.can_undo());
+    let a_notes = ed.doc.notes.len();
+
+    assert!(ed.switch_track(b));
+    assert!(
+        !ed.can_undo(),
+        "a fresh track starts with a clean history — an undo here would \
+         otherwise reach into the track you just left"
+    );
+    assert_eq!(ed.doc.notes.len(), 2);
+
+    // Edit B, then go back to A: A's history is exactly where it was.
+    ed.apply(&Edit::DeleteNotes(vec![NoteId(1)]));
+    assert!(ed.switch_track(0));
+    assert_eq!(ed.doc.notes.len(), a_notes, "A came back as it was left");
+    assert!(ed.can_undo(), "and with its own history intact");
+    ed.undo();
+    assert_eq!(ed.doc.notes.len(), a_notes + 1);
+}
+
+#[test]
+fn switching_parks_edits_rather_than_discarding_them() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+
+    ed.apply(&Edit::DeleteNotes(vec![NoteId(1), NoteId(2)]));
+    let left_with = ed.doc.notes.len();
+    ed.switch_track(b);
+    ed.switch_track(0);
+    assert_eq!(ed.doc.notes.len(), left_with);
+}
+
+#[test]
+fn the_view_does_not_move_when_the_track_does() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+    ed.zoom_in_at(400.0, 200.0, 1.6);
+    let camera = ed.camera;
+
+    ed.switch_track(b);
+    assert_eq!(
+        ed.camera, camera,
+        "switching changes what you edit, not where you are looking"
+    );
+}
+
+#[test]
+fn a_switch_drops_state_that_names_the_old_document() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+    ed.selection.notes = vec![NoteId(1), NoteId(2)];
+    ed.edit_cc(1);
+
+    ed.switch_track(b);
+    assert!(
+        ed.selection.is_empty(),
+        "note ids are per-document; a carried selection points at strangers"
+    );
+    assert!(!ed.cc_editing());
+}
+
+#[test]
+fn the_active_slots_parked_copy_is_never_handed_out() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+
+    assert!(ed.tracks.doc_of(ed.active_track()).is_none());
+    assert!(ed.tracks.doc_of(b).is_some());
+
+    // After a switch the refusal follows the active slot.
+    ed.switch_track(b);
+    assert!(ed.tracks.doc_of(b).is_none());
+    assert!(ed.tracks.doc_of(0).is_some());
+}
+
+#[test]
+fn a_rejected_switch_leaves_the_editor_whole() {
+    let mut ed = menu_editor();
+    let before = ed.doc.clone();
+    ed.apply(&Edit::DeleteNotes(vec![NoteId(1)]));
+
+    assert!(!ed.switch_track(ed.active_track()), "already there");
+    assert!(!ed.switch_track(99), "out of range");
+
+    // The guard runs before anything is moved out, so the document and
+    // its history both survive a refused switch.
+    assert_ne!(ed.doc, before);
+    assert!(ed.can_undo());
+    ed.undo();
+    assert_eq!(ed.doc, before);
+}
+
+#[test]
+fn only_marked_tracks_are_references_and_never_the_active_one() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+    let c = ed.add_track("Bass", doc_with_notes(1));
+
+    assert_eq!(ed.tracks.references().count(), 0);
+    ed.tracks.track_mut(b).unwrap().reference = true;
+    ed.tracks.track_mut(c).unwrap().reference = true;
+    assert_eq!(ed.tracks.references().count(), 2);
+
+    // Switching onto a reference track drops it from the overlay: it is
+    // the thing being edited now, not a backdrop.
+    ed.switch_track(b);
+    let refs: Vec<usize> = ed.tracks.references().map(|(i, _)| i).collect();
+    assert_eq!(refs, vec![c]);
+}
+
+#[test]
+fn removing_a_track_keeps_the_active_index_pointing_at_the_same_track() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+    let _c = ed.add_track("Bass", doc_with_notes(1));
+    ed.switch_track(b);
+    assert_eq!(ed.active_track(), b);
+
+    // Removing a track *before* the active one shifts it down by one.
+    assert!(ed.tracks.remove(0));
+    assert_eq!(ed.active_track(), b - 1);
+    assert_eq!(ed.tracks.len(), 2);
+
+    // And the active track can never be closed from in here.
+    assert!(!ed.tracks.remove(ed.active_track()));
+}
+
+#[test]
+fn a_reference_track_carries_its_own_colour_choice() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+    let t = ed.tracks.track_mut(b).unwrap();
+    t.reference = true;
+    t.ref_color = RefColor::Shadow;
+    t.color = Some("#ff8800".into());
+
+    let (_, track) = ed.tracks.references().next().unwrap();
+    assert_eq!(track.ref_color, RefColor::Shadow);
+    assert_eq!(track.color.as_deref(), Some("#ff8800"));
+}
+
+#[test]
+fn tracks_are_named_and_findable_in_switcher_order() {
+    let mut ed = menu_editor();
+    ed.add_track("Harmony", doc_with_notes(2));
+    ed.add_track("Bass", doc_with_notes(1));
+
+    assert_eq!(ed.tracks.names(), vec!["Track 1", "Harmony", "Bass"]);
+    assert_eq!(ed.tracks.index_of("Bass"), Some(2));
+    assert!(ed.tracks.rename(0, "Lead"));
+    assert_eq!(ed.tracks.names()[0], "Lead");
+    assert_eq!(ed.tracks.index_of("Track 1"), None);
+}
+
+#[test]
+fn a_pushed_track_starts_with_an_empty_history_of_its_own() {
+    let mut ed = menu_editor();
+    let doc = doc_with_notes(2);
+    let b = ed.tracks.push(Track::new("Harmony", doc));
+    ed.switch_track(b);
+    assert!(!ed.can_undo());
+    assert!(!ed.can_redo());
+}

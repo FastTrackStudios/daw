@@ -167,6 +167,10 @@ pub const MICROTONAL: &str = "#eab308";
 /// Razor areas. Deliberately distinct from [`ZONE`]: a razor is a region you
 /// are about to operate on, not a warning about one.
 pub const RAZOR: &str = "#22d3ee";
+/// Notes belonging to another track, shown behind the one being edited.
+/// Desaturated on purpose — a reference has to be legible enough to tune
+/// against and quiet enough that it is never mistaken for editable.
+pub const REFERENCE: &str = "#7c8598";
 
 /// Twelve pitch-class hues, C first.
 ///

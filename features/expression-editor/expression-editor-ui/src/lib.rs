@@ -26,6 +26,7 @@ pub mod inspector;
 pub mod interaction;
 pub mod menu_ui;
 pub mod multitool_ui;
+pub mod switcher;
 pub mod theme;
 pub mod toolbar;
 pub mod widgets;
@@ -80,6 +81,7 @@ pub fn ExpressionEditor(
                     min-height: 0; overflow: hidden; background: {theme::BG}; \
                     color: {theme::TEXT}; font-family: system-ui, sans-serif;",
             toolbar::Toolbar { editor, drag, drawer }
+            switcher::TrackSwitcher { editor }
             toolbar::ChordBox { editor }
             div {
                 style: "display: flex; flex: 1 1 auto; min-height: 0;",
@@ -168,6 +170,11 @@ fn Canvas(
     let marker_flags = canvas::markers(&ed);
     let playhead = ed.playhead.map(|t| ed.camera.x(t));
     let razors = canvas::razor_rects(&ed);
+    let refs = canvas::reference_rects(&ed);
+    // `R` brings references forward, the way `M` does for the MIDI
+    // reference — with several parts on screen the quiet default is
+    // sometimes too quiet to read against.
+    let ref_opacity = if ed.refs_to_front { 0.95 } else { 0.45 };
     let cc_paths = canvas::cc_paths(&ed);
     // Notes recede while a controller is being edited: the roll is that
     // lane's editing surface for the moment, and full-strength notes
@@ -269,6 +276,13 @@ fn Canvas(
                 let d = drag.read().clone();
                 if interaction::key_down(&mut editor.write(), &d, &key, m) {
                     e.prevent_default();
+                }
+            },
+            onkeyup: move |e: KeyboardEvent| {
+                // `R` is momentary: references drop back the instant it
+                // is released, so it can never be left on by accident.
+                if e.key().to_string() == "r" {
+                    editor.write().refs_to_front = false;
                 }
             },
             svg {
@@ -475,6 +489,28 @@ fn Canvas(
                         stroke: theme::lane_color(lane),
                         stroke_opacity: "0.25",
                         stroke_width: "1",
+                    }
+                }
+
+                // Reference tracks, behind the notes and never on top of
+                // them: a reference you cannot edit must never be the
+                // thing your pointer lands on first.
+                for r in refs.iter() {
+                    g {
+                        key: "ref{r.track}-{r.id.0}",
+                        opacity: "{ref_opacity:.2}",
+                        rect {
+                            x: "{r.x:.1}",
+                            y: "{r.y:.1}",
+                            width: "{r.w:.1}",
+                            height: "{r.h:.1}",
+                            rx: "2",
+                            fill: r.fill.clone().unwrap_or_else(|| "none".into()),
+                            fill_opacity: "0.20",
+                            stroke: "{r.stroke}",
+                            stroke_opacity: "0.75",
+                            stroke_width: "1",
+                        }
                     }
                 }
 

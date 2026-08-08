@@ -6,6 +6,7 @@
 
 use expression_editor_core::doc::{Lane, NoteId, Point, Target};
 use expression_editor_core::edit::Edit;
+use expression_editor_core::menu::Command;
 use expression_editor_core::mouse::{Action, Context, Gesture};
 use expression_editor_core::razor::RazorArea;
 use expression_editor_core::tools::{self, Hit, Mods};
@@ -1494,6 +1495,20 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
                 ZoomModes::NOTE_AREA
             };
             ed.smart_zoom(modes, anchor, row);
+            true
+        }
+        // Ctrl+X/C/V go through the same command path the context menu
+        // uses, so a keyboard cut and a menu cut cannot diverge.
+        ("x", true, _) => ed.run_command(&Command::Cut, None),
+        ("c", true, _) => ed.run_command(&Command::Copy, None),
+        ("v", true, _) => ed.run_command(&Command::Paste, None),
+        // Held, not toggled: this is for checking a reference mid-edit,
+        // and a mode you can forget you are in is worse than a held key.
+        //
+        // Shift+R rather than Vovious's bare `R`, which is already
+        // MPE channel reassignment here and is the older binding.
+        ("r", false, true) => {
+            ed.refs_to_front = true;
             true
         }
         ("s", false, _) => set_tool(ed, Tool::Select),
