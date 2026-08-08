@@ -1043,6 +1043,14 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     let ring = match props.at {
         Interaction::Normal => ring,
         Interaction::Hover if props.housing => ring.shade(0.15),
+        // Barred hovers far harder than merely armed: #f44b4e goes to
+        // #fc9b9c, most of the way to white, where a plain armed ring
+        // moves #f94d5d to #fe5b5c and barely shifts. Sharing one amount
+        // left the barred button's hover invisible.
+        // And it mixes toward white rather than scaling: a scale clips
+        // red at the ceiling and leaves green and blue far behind, where
+        // the source's #fc9b9c has all three well up.
+        Interaction::Hover if barred => ring.shade(0.44),
         Interaction::Hover if armed => ring.shade(0.06),
         Interaction::Hover if auto => ring.shade(0.29),
         Interaction::Hover => ring.shade(0.57),
@@ -2279,9 +2287,13 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
     // Traced: down-triangle, ramp, right-triangle, all in the same box.
     let glyph = match props.state {
         FolderCompact::Off => format!(
-            "M {} 3.1 H {} L {} 8.5 Z",
-            vw * 0.29,
-            vw * 0.71,
+            // Top edge at 3.1, not the 2.8 the coverage suggests: at 2.8
+            // the triangle catches a row the source leaves clear, which
+            // costs more in the bounding box than the tenth of a level it
+            // gains in the average.
+            "M {} 3.1 H {} L {} 8.0 Z",
+            vw * 0.288,
+            vw * 0.671,
             vw * 0.5
         ),
         FolderCompact::Small => format!(
@@ -2290,9 +2302,9 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
             vw * 0.71
         ),
         FolderCompact::Tiny => format!(
-            "M {} 1.8 V 8.4 L {} 5.1 Z",
-            vw * 0.32,
-            vw * 0.62
+            "M {} 1.7 V 8.7 L {} 5.2 Z",
+            vw * 0.353,
+            vw * 0.618
         ),
     };
 
@@ -2304,6 +2316,12 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
             xmlns: "http://www.w3.org/2000/svg",
             defs {
                 linearGradient { id: "fcompwash", x1: "0", y1: "0", x2: "0", y2: "1",
+                    // Three stops. The rendered column comes out lumpy —
+                    // 85, 51, 85 down consecutive rows where the source
+                    // decays smoothly — and a clean two-stop white-to-black
+                    // ramp is the obvious fix, but measured it is three
+                    // levels worse across all three images. Left as it is
+                    // until the wash is understood rather than guessed at.
                     stop { offset: "0", stop_color: "#e9e9e9", stop_opacity: "{wash}" }
                     stop { offset: "0.55", stop_color: "#4a4a4a", stop_opacity: "{wash * 0.27}" }
                     stop { offset: "1", stop_color: "#0a0a0a", stop_opacity: "0.008" }
