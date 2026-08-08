@@ -1512,9 +1512,18 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
 }
 
 /// The trough the cap runs in.
+///
+/// Traced off `mcp_volbg`: a **short** groove, x10..x12 and y14..y40 of a
+/// 23x55 cell — three columns of black at alpha 60, 215, 60 — and
+/// nothing else. Everything outside it is WALTER guide, columns 0 and 22
+/// over rows 0..15 and 39..54, which is how REAPER stretches the trough
+/// to whatever height a strip needs.
+///
+/// This drew a full-height line, which is the mistake the guides exist to
+/// prevent: REAPER stretches the middle, so drawing the ends as art makes
+/// them stretch too and the groove grows a solid bar at each end.
 #[component]
 pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
-    let t = Theme::default();
     let (vw, vh) = (23.0f32, 55.0f32);
     rsx! {
         svg {
@@ -1522,11 +1531,13 @@ pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
             height: "{props.height.unwrap_or(55)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
+            // Slightly wider than a pixel and centred on x11.5, which is
+            // what gives the source its soft shoulders at 60 either side
+            // of a 215 core rather than one hard column.
             rect {
-                x: "{vw * 0.45}", y: "0",
-                width: "{vw * 0.1}", height: "{vh}",
-                rx: "{vw * 0.05}",
-                fill: "{t.chrome.surface.shade(-0.5).css()}",
+                x: "{vw * 10.8 / 23.0}", y: "{vh * 14.0 / 55.0}",
+                width: "{vw * 1.4 / 23.0}", height: "{vh * 27.0 / 55.0}",
+                fill: "#000000", fill_opacity: "0.85",
             }
         }
     }

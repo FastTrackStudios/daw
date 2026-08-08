@@ -144,6 +144,12 @@ impl Overrides {
             // cold run scanning 134 plugins. What actually keeps a warm
             // profile quiet is its plugin *cache*, which a throwaway
             // profile by definition does not have.
+            //
+            // This on its own is still not enough: on a cold profile
+            // REAPER appends its own default to whatever we wrote, so the
+            // ini comes back out as `<empty>;~/.vst3` and it scans that.
+            // [`fake_home`] is the other half — it makes `~/.vst3` resolve
+            // somewhere empty too.
             ("vstpath", empty.clone()),
             ("vstpath64", empty.clone()),
             ("lv2path_linux", empty),
@@ -320,7 +326,8 @@ pub fn capture(opts: &ShotOptions) -> Result<PathBuf> {
     }
     let display = VirtualDisplay::start(&opts.display, &opts.geometry)
         .map_err(|e| anyhow::anyhow!("start display {}: {e}", opts.display))?;
-    let mut reaper = launch_reaper(&ini, &project, display.display())?;
+    let home = fake_home(&dir)?;
+    let mut reaper = launch_reaper(&ini, &project, display.display(), &home)?;
 
     // REAPER restores dialogs *after* it starts, so sweep for a while
     // rather than once — the update nag can appear seconds in.
@@ -421,7 +428,20 @@ fn link_force(src: &Path, dst: &Path) -> Result<()> {
 ///
 /// Without it SWELL cannot dlopen its GUI libraries and REAPER dies inside
 /// GDK — which looks exactly like a missing display.
-fn launch_reaper(ini: &Path, project: &Path, display: &str) -> Result<Child> {
+/// A home directory whose plugin folders exist but are empty.
+///
+/// REAPER hardcodes `~/.vst`, `~/.vst3`, `~/.lv2` and `~/.clap` as scan
+/// defaults and re-adds them to `vstpath` behind our back, so the only way
+/// to make those paths cheap is to change what `~` means for the child.
+fn fake_home(under: &Path) -> Result<PathBuf> {
+    let home = under.join("home");
+    for plugins in [".vst", ".vst3", ".lv2", ".clap"] {
+        std::fs::create_dir_all(home.join(plugins))?;
+    }
+    Ok(home)
+}
+
+fn launch_reaper(ini: &Path, project: &Path, display: &str, home: &Path) -> Result<Child> {
     let exe = reaper_binary()?;
     let fhs = reaper_fhs();
 
@@ -445,6 +465,7 @@ fn launch_reaper(ini: &Path, project: &Path, display: &str) -> Result<Child> {
         .args(["-nosplash", "-ignoreerrors"])
         .arg(project)
         .env("DISPLAY", display)
+        .env("HOME", home)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
@@ -536,6 +557,22 @@ mod tests {
         let verchk = out.lines().position(|l| l.starts_with("verchk")).unwrap();
         let tail = out.lines().position(|l| l == "[tail]").unwrap();
         assert!(verchk < tail, "key escaped its section:\n{out}");
+    }
+
+    #[test]
+    fn the_fake_home_has_every_default_plugin_dir() {
+        // Each of these has to *exist* and be empty. A missing directory is
+        // not the same as an empty one — REAPER falls back to its own
+        // default when the path does not resolve, which is the scan we are
+        // trying to avoid.
+        let tmp = std::env::temp_dir().join(format!("fts-shot-home-{}", std::process::id()));
+        let home = fake_home(&tmp).unwrap();
+        for plugins in [".vst", ".vst3", ".lv2", ".clap"] {
+            let dir = home.join(plugins);
+            assert!(dir.is_dir(), "{plugins} must exist");
+            assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0);
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
