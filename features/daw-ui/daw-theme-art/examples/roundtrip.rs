@@ -90,19 +90,19 @@ fn main() {
     groups.push((
         "mute",
         vec![
-            Entry { source: ("mcp_mute_off", 0), svg: render_svg(vector::MuteButton, vector::ToggleProps { depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: false, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_mute_on", 0), svg: render_svg(vector::MuteButton, vector::ToggleProps { depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_mute_on", 1), svg: render_svg(vector::MuteButton, vector::ToggleProps { depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: vector::Interaction::Hover }) },
-            Entry { source: ("mcp_mute_on", 2), svg: render_svg(vector::MuteButton, vector::ToggleProps { depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: vector::Interaction::Pressed }) },
+            Entry { source: ("mcp_mute_off", 0), svg: render_svg(vector::MuteButton, vector::ToggleProps { sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: false, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_mute_on", 0), svg: render_svg(vector::MuteButton, vector::ToggleProps { sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_mute_on", 1), svg: render_svg(vector::MuteButton, vector::ToggleProps { sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: vector::Interaction::Hover }) },
+            Entry { source: ("mcp_mute_on", 2), svg: render_svg(vector::MuteButton, vector::ToggleProps { sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: vector::Interaction::Pressed }) },
         ],
     ));
 
     groups.push((
         "solo",
         vec![
-            Entry { source: ("mcp_solo_off", 0), svg: render_svg(vector::SoloButton, vector::SoloProps { depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: vector::Solo::Off, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_solo_on", 0), svg: render_svg(vector::SoloButton, vector::SoloProps { depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: vector::Solo::On, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_solodefeat_on", 0), svg: render_svg(vector::SoloButton, vector::SoloProps { depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: vector::Solo::Defeat, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_solo_off", 0), svg: render_svg(vector::SoloButton, vector::SoloProps { sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: vector::Solo::Off, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_solo_on", 0), svg: render_svg(vector::SoloButton, vector::SoloProps { sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: vector::Solo::On, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_solodefeat_on", 0), svg: render_svg(vector::SoloButton, vector::SoloProps { sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: vector::Solo::Defeat, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
         ],
     ));
 

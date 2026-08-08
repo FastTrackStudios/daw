@@ -64,6 +64,13 @@ pub struct VectorProps {
 /// against the original, which is exactly how this was first noticed.
 fn deepen(c: Color, amount: f32) -> Color {
     let peak = c.r.max(c.g).max(c.b);
+    // A grey has no non-dominant channel to pull, so holding the peak
+    // would leave it untouched — which silently cost every *unlit* button
+    // both its gradient and its pressed state, since those faces are
+    // neutral. There, deepening is just darkening.
+    if peak == c.r.min(c.g).min(c.b) {
+        return c.shade(-amount);
+    }
     let pull = |v: u8| {
         if v == peak {
             v
@@ -74,6 +81,25 @@ fn deepen(c: Color, amount: f32) -> Color {
     Color::rgb(pull(c.r), pull(c.g), pull(c.b))
 }
 
+/// Brighten a colour by scaling its channels, clamping at the top.
+///
+/// The counterpart to [`deepen`], and what a hover is here: solo goes
+/// #d29e37 to #ffdb59 under the pointer — the same colour turned up, red
+/// running into the ceiling while green and blue climb.
+///
+/// Three models were measured against the art. A wash toward white
+/// (`shade`) moves it a fifth as far and leaves every lit button barely
+/// changed when hovered. An HSL lightness lift looks right on paper —
+/// the source's three buttons all rise about 14 points — but holding
+/// saturation while lightness climbs desaturates in RGB, and defeat's
+/// hover *gains* saturation in the source. Scaling the channels lands
+/// solo and defeat within a few points each; mute's red runs about 8%
+/// hot, which is the price of one rule for three buttons.
+fn lift(c: Color, amount: f32) -> Color {
+    let up = |v: u8| (v as f32 * (1.0 + amount)).round().clamp(0.0, 255.0) as u8;
+    Color::rgb(up(c.r), up(c.g), up(c.b))
+}
+
 /// A control's palette, resolved once per render.
 struct Ink {
     face: Color,
@@ -81,7 +107,13 @@ struct Ink {
     text: Color,
 }
 
-fn ink(lit: Option<Color>, at: Interaction) -> Ink {
+/// `sinks` — does pressing darken the face?
+///
+/// In the mixer it does: `mcp_mute_off` goes #3f3f3f to #363636. In the
+/// track panel it does *not* — `track_mute_off` shows #494949 in both
+/// cells, identical. Assuming either way invents a state one of the two
+/// families does not have.
+fn ink(lit: Option<Color>, at: Interaction, sinks: bool) -> Ink {
     let t = Theme::default();
     let c = &t.chrome;
     // Unlit controls take the neutral control grey, not a shade of the
@@ -89,13 +121,13 @@ fn ink(lit: Option<Color>, at: Interaction) -> Ink {
     // solo and FX button blue-cast and far darker than the art it stands
     // in for.
     let base = lit.unwrap_or(c.hardware);
-    // The original's three sprite cells are the same button lit differently:
-    // hover lifts, pressed sinks. Reproducing that as a shade keeps one
-    // drawing doing the work of three images.
+    // Hover is far stronger than the 12% wash this used: solo lifts to
+    // #ffdb59, with red clipping at the ceiling.
     let face = match at {
         Interaction::Normal => base,
-        Interaction::Hover => base.shade(0.12),
-        Interaction::Pressed => base.shade(-0.12),
+        Interaction::Hover => lift(base, 0.35),
+        Interaction::Pressed if sinks => deepen(base, 0.12),
+        Interaction::Pressed => base,
     };
     Ink {
         // The originals light from the top. The lighter stop is derived at
@@ -130,6 +162,9 @@ pub struct LabelButtonProps {
     /// choices, so it comes from the caller rather than from `ink`.
     #[props(default)]
     pub legend: Option<Color>,
+    /// Does pressing darken the face? See [`ink`].
+    #[props(default = true)]
+    pub sinks: bool,
     /// How far the face deepens from top to bottom — see [`deepen`].
     ///
     /// Not shared, because the source does not share it: mute falls 15%
@@ -168,7 +203,7 @@ pub struct LabelButtonProps {
 /// offset shadow, which read as a bevel at 20px and as a badge at 300px.
 #[component]
 pub fn LabelButton(props: LabelButtonProps) -> Element {
-    let k = ink(props.lit, props.at);
+    let k = ink(props.lit, props.at, props.sinks);
     let (vw, vh) = props.cell;
     let (body_y, body_h) = (vh * props.body.0, vh * props.body.1);
     let id = format!("lb{}", props.label.replace(' ', ""));
@@ -262,6 +297,9 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ToggleProps {
+    /// Does pressing darken the face? See [`ink`].
+    #[props(default = true)]
+    pub sinks: bool,
     /// How far the face darkens — see [`LabelButtonProps::depth`].
     #[props(default = 0.14)]
     pub depth: f32,
@@ -298,7 +336,7 @@ pub fn MuteButton(props: ToggleProps) -> Element {
             label: "M",
             lit: props.on.then_some(t.signal.mute),
             cell: props.cell, body: props.body, legend: props.legend,
-            depth: props.depth,
+            depth: props.depth, sinks: props.sinks,
             width: props.width, height: props.height, at: props.at,
         }
     }
@@ -306,6 +344,9 @@ pub fn MuteButton(props: ToggleProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct SoloProps {
+    /// Does pressing darken the face? See [`ink`].
+    #[props(default = true)]
+    pub sinks: bool,
     /// How far the face darkens — see [`LabelButtonProps::depth`].
     #[props(default = 0.14)]
     pub depth: f32,
@@ -350,7 +391,7 @@ pub fn SoloButton(props: SoloProps) -> Element {
     rsx! {
         LabelButton {
             label: "S", lit, cell: props.cell, body: props.body,
-            legend: props.legend, depth: props.depth,
+            legend: props.legend, depth: props.depth, sinks: props.sinks,
             width: props.width, height: props.height, at: props.at,
         }
     }
@@ -541,7 +582,7 @@ pub struct FxControlProps {
 #[component]
 pub fn FxControl(props: FxControlProps) -> Element {
     let t = Theme::default();
-    let k = ink(None, props.at);
+    let k = ink(None, props.at, true);
     let p = props.family.pill();
     let (win_x, win_w) = props.family.window(props.part);
 
@@ -994,7 +1035,7 @@ pub struct RoutingProps {
 #[component]
 pub fn RoutingButton(props: RoutingProps) -> Element {
     let t = Theme::default();
-    let k = ink(None, props.at);
+    let k = ink(None, props.at, true);
     let (vw, vh) = props.cell;
 
     // Three lanes, not two: the original stacks the track's own output,
@@ -1424,8 +1465,8 @@ mod tests {
         let n = (None, None);
         let cases: [(&str, String); 7] = [
             ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { cell: (36.0, 24.0), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_solo_on", render_svg(SoloButton, SoloProps { depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_solo_on", render_svg(SoloButton, SoloProps { sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_fx_norm", render_svg(FxButton, FxProps { family: Default::default(), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
@@ -1461,6 +1502,7 @@ mod tests {
                 render_svg(
                     MuteButton,
                     ToggleProps {
+                        sinks: true,
                         depth: 0.15,
                         legend: None,
                         body: (0.0, 1.0),
@@ -1474,6 +1516,7 @@ mod tests {
                 render_svg(
                     SoloButton,
                     SoloProps {
+                        sinks: true,
                         depth: 0.11,
                         legend: None,
                         body: (0.0, 1.0),
@@ -1570,6 +1613,7 @@ mod tests {
         let small = render_svg(
             MuteButton,
             ToggleProps {
+                sinks: true,
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
@@ -1583,6 +1627,7 @@ mod tests {
         let large = render_svg(
             MuteButton,
             ToggleProps {
+                sinks: true,
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
@@ -1663,6 +1708,7 @@ mod tests {
         let n = render_svg(
             MuteButton,
             ToggleProps {
+                sinks: true,
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
@@ -1676,6 +1722,7 @@ mod tests {
         let h = render_svg(
             MuteButton,
             ToggleProps {
+                sinks: true,
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
@@ -1689,6 +1736,7 @@ mod tests {
         let p = render_svg(
             MuteButton,
             ToggleProps {
+                sinks: true,
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
@@ -1709,6 +1757,7 @@ mod tests {
         let off = render_svg(
             SoloButton,
             SoloProps {
+                sinks: true,
                 depth: 0.11,
                 legend: None,
                 body: (0.0, 1.0),
@@ -1722,6 +1771,7 @@ mod tests {
         let on = render_svg(
             SoloButton,
             SoloProps {
+                sinks: true,
                 depth: 0.11,
                 legend: None,
                 body: (0.0, 1.0),
@@ -1735,6 +1785,7 @@ mod tests {
         let defeat = render_svg(
             SoloButton,
             SoloProps {
+                sinks: true,
                 depth: 0.11,
                 legend: None,
                 body: (0.0, 1.0),

@@ -101,6 +101,9 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 cell: label_cell,
                 body: label_body,
                 legend: label_legend,
+                // The track panel's pressed cell is identical to its
+                // normal one; the mixer's is darker.
+                sinks: !track,
                 width: n.0,
                 height: n.1,
                 at,
@@ -115,6 +118,9 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 cell: label_cell,
                 body: label_body,
                 legend: label_legend,
+                // The track panel's pressed cell is identical to its
+                // normal one; the mixer's is darker.
+                sinks: !track,
                 // Solo's red is pinned; only its green falls, by 11%.
                 depth: 0.11,
                 width: n.0,
