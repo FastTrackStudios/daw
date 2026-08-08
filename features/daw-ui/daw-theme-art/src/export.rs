@@ -103,7 +103,9 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::ToggleProps {
                 // Mute's hover is the gentlest of the three — see `ink`.
                 hover: 0.25,
-                depth: 0.15,
+                // 0.11, and applied as a scale — measured 0.89 on every
+                // channel from the top of the face to the bottom.
+                depth: 0.11,
                 on,
                 cell: label_cell,
                 body: label_body,

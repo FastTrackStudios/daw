@@ -193,6 +193,15 @@ pub struct LabelButtonProps {
     /// and blue-defeat more still.
     #[props(default = 0.15)]
     pub depth: f32,
+    /// Darken by scaling every channel rather than holding the strongest.
+    ///
+    /// Solo and blue-defeat hold theirs — solo's red sits at 210 top and
+    /// bottom while its green falls and its blue actually *rises* — which
+    /// is what [`deepen`] does. Mute does not: its face runs 184,58,78 to
+    /// 164,51,70, a clean 0.89 on all three. Read as a `deepen` its red
+    /// barely moved and the button came out flat and light.
+    #[props(default = false)]
+    pub scales: bool,
     /// Face colour when engaged. `None` draws the resting state.
     #[props(default)]
     pub lit: Option<Color>,
@@ -243,6 +252,12 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
     // and face — #832d3b where the source still has body colour — and the
     // whole button read a row short.
     let edge = 1.0f32;
+    let floor = if props.scales {
+        lift(k.face, -props.depth)
+    } else {
+        deepen(k.face, props.depth)
+    }
+    .css();
 
     rsx! {
         svg {
@@ -252,8 +267,12 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
             xmlns: "http://www.w3.org/2000/svg",
             defs {
                 linearGradient { id: "{id}", x1: "0", y1: "0", x2: "0", y2: "1",
-                    stop { offset: "0", stop_color: "{k.face.shade(0.06).css()}" }
-                    stop { offset: "1", stop_color: "{deepen(k.face, props.depth).css()}" }
+                    // The face *starts* at the button's own colour —
+                    // mute's top row is 184,58,78 and `signal.mute` is
+                    // #b8394e, the same value. The 6% lift on top of that
+                    // was doubling up with the highlight row below it.
+                    stop { offset: "0", stop_color: "{k.face.css()}" }
+                    stop { offset: "1", stop_color: "{floor}" }
                 }
             }
             // A soft row under the button, where the cell leaves room for
@@ -374,7 +393,7 @@ pub fn MuteButton(props: ToggleProps) -> Element {
             lit: props.on.then_some(t.signal.mute),
             cell: props.cell, body: props.body, legend: props.legend,
             depth: props.depth, sinks: props.sinks, hover: props.hover,
-            shadow: !props.on,
+            shadow: !props.on, scales: true,
             width: props.width, height: props.height, at: props.at,
         }
     }
@@ -706,6 +725,18 @@ pub fn FxControl(props: FxControlProps) -> Element {
         y + h,
     );
 
+    // Bypassing darkens the plate as well as reddening the letters: the
+    // label half runs 77 to 57 normally and 67 to 49 bypassed, a flat
+    // 0.87 on both ends. Changing only the text left the button reading
+    // as active with odd lettering.
+    let dull = if props.chain == FxChain::Bypassed {
+        0.87f32
+    } else {
+        1.0
+    };
+    let plate_top = lift(k.face.shade(0.07), dull - 1.0).css();
+    let plate_bot = lift(k.face.shade(-0.10), dull - 1.0).css();
+
     let (fill, alpha) = if p.scrim {
         ("#000000".to_string(), 0.35)
     } else {
@@ -758,8 +789,8 @@ pub fn FxControl(props: FxControlProps) -> Element {
             xmlns: "http://www.w3.org/2000/svg",
             defs {
                 linearGradient { id: "fxface", x1: "0", y1: "0", x2: "0", y2: "1",
-                    stop { offset: "0", stop_color: "{k.face.shade(0.07).css()}" }
-                    stop { offset: "1", stop_color: "{k.face.shade(-0.10).css()}" }
+                    stop { offset: "0", stop_color: "{plate_top}" }
+                    stop { offset: "1", stop_color: "{plate_bot}" }
                 }
                 clipPath { id: "fxpill",
                     path { d: "{outline}" }
@@ -1424,7 +1455,7 @@ pub fn InputMonitorIndicator(props: MonitoringProps) -> Element {
     let (cx, cy, deg) = if horizontal {
         (3.5f32, 12.0f32, 0.0f32)
     } else {
-        (10.9f32, 4.6f32, 90.0f32)
+        (11.0f32, 4.6f32, 90.0f32)
     };
     let (dot, rings, sw, half) = if horizontal {
         (1.35f32, [4.25f32, 8.3], 1.95f32, 40.0f32)
@@ -1627,6 +1658,10 @@ pub fn PanningKnob(props: PanProps) -> Element {
             // below it also reached two columns either side of it.
             ellipse {
                 cx: "{cx}", cy: "{cy + 1.2}",
+                // 2.15 down, not 1.9: shorter clips the source's own last
+                // row of shadow, and longer adds one it does not have.
+                // What is left is a single row at alpha 7 — the price of
+                // a two-stop gradient standing in for a real blur.
                 rx: "{r + 0.7}", ry: "{r + 2.15}",
                 fill: "url(#pandrop)",
             }
