@@ -259,12 +259,9 @@ pub fn set_velocity(doc: &mut ExpressionDoc, area: RazorArea, velocity: f64) -> 
 
 /// Erase one expression lane across the area, leaving the notes.
 ///
-/// Splices the lane's default in at both edges rather than only
-/// deleting points inside the span. A held note whose curve is defined
-/// by endpoints outside the razor has no points to delete, but the
-/// region still has to *read* as cleared — otherwise the curve just
-/// interpolates straight through the hole and nothing appears to have
-/// happened.
+/// The edge-splicing rule this needs is [`Curve::clear_range`], which is
+/// also what the lane and controller erasers use — the razor was where
+/// it was first got right, not where it belongs.
 pub fn clear_lane(doc: &mut ExpressionDoc, area: RazorArea, lane: Lane) -> bool {
     let ids = peek(doc, area);
     let default = lane.default_value();
@@ -275,10 +272,10 @@ pub fn clear_lane(doc: &mut ExpressionDoc, area: RazorArea, lane: Lane) -> bool 
         if t1 <= t0 {
             continue;
         }
-        let curve = n.lane_mut(lane);
-        curve.remove_range(t0, t1);
-        curve.set(t0, default);
-        curve.set(t1, default);
+        // `ok` tracks that a note was *in* the area, not that its curve
+        // had anything to clear — an already-empty lane inside a razor
+        // is still a successful clear.
+        n.lane_mut(lane).clear_range(t0, t1, default);
         ok = true;
     }
     ok

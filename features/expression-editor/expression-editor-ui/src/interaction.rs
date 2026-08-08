@@ -104,6 +104,40 @@ pub enum Drag {
         /// leaving a staircase.
         last: Option<(f64, f64)>,
     },
+    /// A shaped ramp across a controller lane. Like [`Drag::Curve`] it
+    /// survives release, so the toolbar's shape buttons restyle the
+    /// stroke you just drew instead of the one before it.
+    CcLine {
+        number: u8,
+        start: (f64, f64),
+        current: (f64, f64),
+    },
+    /// Sweeping a controller lane back to its default.
+    CcErase {
+        number: u8,
+        start_t: f64,
+        current_t: f64,
+    },
+    /// Vertical drag scales the swept range's depth about a pivot.
+    ///
+    /// Rebuilt from `base` on every move rather than scaling the live
+    /// curve, because `apply_live` writes straight through and a chain
+    /// of live scales would compound into an exponential.
+    CcScale {
+        number: u8,
+        t0: f64,
+        t1: f64,
+        /// The lane's points as they were when the gesture opened.
+        base: Vec<Point>,
+        /// Widest range the drag has covered, so shrinking it back
+        /// restores what the wider sweep had already scaled.
+        spanned: (f64, f64),
+        /// The value the range is scaled about — its own mean, so a
+        /// factor of 0 flattens it to where it already sat rather than
+        /// slamming it to zero.
+        pivot: f64,
+        origin_y: f64,
+    },
     /// Vertical drag over notes edits velocity.
     Velocity {
         notes: Vec<NoteId>,
@@ -130,9 +164,29 @@ impl Drag {
             _ => None,
         }
     }
+
+    /// The controller ramp the shape buttons target, same contract as
+    /// [`Drag::live_curve`] but for a CC lane.
+    pub fn live_cc_line(&self) -> Option<(u8, f64, f64)> {
+        match self {
+            Drag::CcLine {
+                number,
+                start,
+                current,
+            } => Some((*number, start.0, current.0)),
+            _ => None,
+        }
+    }
 }
 
+/// How close to the drawn controller curve counts as grabbing it.
+const CC_EVENT_PX: f64 = 5.0;
+
 /// Which mouse-modifier context `(x, y)` falls in.
+///
+/// CC edit mode outranks everything: while it is on, the roll *is* that
+/// controller's lane, so the razor and the notes behind it are not what
+/// the pointer is addressing.
 ///
 /// Razor areas outrank notes: once you have drawn a rectangle, dragging
 /// inside it must operate on the region, not on whatever note happens
@@ -140,6 +194,26 @@ impl Drag {
 pub fn context_at(ed: &Editor, x: f64, y: f64) -> Context {
     let t = ed.camera.t_at(x);
     let row = ed.camera.pitch_at(y, ed.viewport).round() as i32;
+
+    if let Some(number) = ed.cc_edit {
+        // Near the existing curve is `CcEvent`, open lane is `CcLane` —
+        // the same distinction REAPER draws, so a mouse map written for
+        // REAPER lands on the right binding without translation.
+        let on_curve = ed
+            .doc
+            .cc
+            .get(number)
+            .map(|l| {
+                let v = l.curve.sample(t, l.default_value());
+                (expression_editor_core::cc::cc_y(v, ed.viewport.h) - y).abs() <= CC_EVENT_PX
+            })
+            .unwrap_or(false);
+        return if on_curve {
+            Context::CcEvent
+        } else {
+            Context::CcLane
+        };
+    }
 
     if let Some((_, area)) = ed.razor.at(t, row) {
         let edge_px = 6.0;
@@ -170,17 +244,6 @@ pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) ->
         1 => Gesture::MiddleClick,
         _ => Gesture::Drag,
     };
-    // CC edit mode takes the roll: while it is on, the surface belongs
-    // to that controller, not to the notes behind it.
-    if let Some(number) = ed.cc_edit {
-        if gesture == Gesture::Drag && !mods.ctrl && !mods.shift {
-            ed.begin_gesture();
-            let mut drag = Drag::CcPen { number, last: None };
-            cc_draw(ed, &mut drag, x, y);
-            return drag;
-        }
-    }
-
     let context = context_at(ed, x, y);
     let action = ed.mouse.resolve(context, gesture, mods);
     if action != Action::None {
@@ -408,6 +471,52 @@ fn run_action(
                 .collect();
             Some(Drag::None)
         }
+        // ── controller lanes ─────────────────────────────────────────
+        // All four need a lane to act on. Outside CC edit mode there is
+        // no active controller, so they fall through to the tool path
+        // rather than inventing one.
+        Action::EditCcEvents => {
+            let number = ed.cc_edit?;
+            let mut drag = Drag::CcPen { number, last: None };
+            cc_draw(ed, &mut drag, x, y);
+            Some(drag)
+        }
+        Action::DrawCcLine => {
+            let number = ed.cc_edit?;
+            Some(Drag::CcLine {
+                number,
+                start: (x, y),
+                current: (x, y),
+            })
+        }
+        Action::EraseCcEvents => {
+            let number = ed.cc_edit?;
+            Some(Drag::CcErase {
+                number,
+                start_t: t,
+                current_t: t,
+            })
+        }
+        Action::ScaleCcEvents => {
+            let number = ed.cc_edit?;
+            // The gesture opens with no width; the range grows as the
+            // drag sweeps sideways while the vertical offset sets depth.
+            Some(Drag::CcScale {
+                number,
+                t0: t,
+                t1: t,
+                base: ed
+                    .doc
+                    .cc
+                    .get(number)
+                    .map(|l| l.curve.points().to_vec())
+                    .unwrap_or_default(),
+                spanned: (t, t),
+                pivot: cc_mean(ed, number, t, t),
+                origin_y: y,
+            })
+        }
+
         // Expression tools and anything unmapped stay with the
         // tool-driven path.
         Action::ActiveTool | Action::PenOverride => None,
@@ -416,6 +525,73 @@ fn run_action(
             None
         }
     }
+}
+
+/// The mean value a controller holds over `[t0, t1]`.
+///
+/// Used as the pivot for [`Drag::CcScale`]: scaling about the range's
+/// own mean is what makes a factor of 0 flatten a swell to its average
+/// level instead of dropping it to silence.
+fn cc_mean(ed: &Editor, number: u8, t0: f64, t1: f64) -> f64 {
+    let Some(lane) = ed.doc.cc.get(number) else {
+        return 0.0;
+    };
+    let default = lane.default_value();
+    if (t1 - t0).abs() < f64::EPSILON {
+        return lane.curve.sample(t0, default);
+    }
+    const STEPS: usize = 32;
+    let sum: f64 = (0..=STEPS)
+        .map(|i| {
+            let f = i as f64 / STEPS as f64;
+            lane.curve.sample(t0 + (t1 - t0) * f, default)
+        })
+        .sum();
+    sum / (STEPS + 1) as f64
+}
+
+/// Write a shaped ramp between the two ends of a [`Drag::CcLine`].
+///
+/// Endpoints snap to the grid unless shift reverses it, which is the
+/// same rule the razor and note gestures follow. The interior is
+/// resampled through the toolbar shape, so switching shape after
+/// release restyles the ramp without redrawing it.
+fn cc_line(ed: &mut Editor, number: u8, start: (f64, f64), current: (f64, f64), mods: Mods) {
+    let snap = ed.grid.enabled && !mods.shift;
+    let raw0 = ed.camera.t_at(start.0);
+    let raw1 = ed.camera.t_at(current.0);
+    let (mut t0, mut t1) = (raw0, raw1);
+    if snap {
+        t0 = ed.snap_time(t0);
+        t1 = ed.snap_time(t1);
+    }
+    let v0 = expression_editor_core::cc::cc_value(start.1, ed.viewport.h);
+    let v1 = expression_editor_core::cc::cc_value(current.1, ed.viewport.h);
+    let (lo, hi, v_lo, v_hi) = if t0 <= t1 {
+        (t0, t1, v0, v1)
+    } else {
+        (t1, t0, v1, v0)
+    };
+    if (hi - lo).abs() < f64::EPSILON {
+        return;
+    }
+    let steps = (((hi - lo) / ed.camera.units_per_px).abs().ceil() as usize).clamp(2, 256);
+    let shape = ed.shape;
+    let points: Vec<Point> = (0..=steps)
+        .map(|i| {
+            let f = i as f64 / steps as f64;
+            Point {
+                t: lo + (hi - lo) * f,
+                value: v_lo + (v_hi - v_lo) * shape.amount(f),
+            }
+        })
+        .collect();
+    ed.apply_live(&Edit::DrawCc {
+        number,
+        t0: lo,
+        t1: hi,
+        points,
+    });
 }
 
 /// Write one controller sample at the pointer.
@@ -917,6 +1093,78 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
         }
         Drag::Paint { .. } => paint_at(ed, drag, x, y),
         Drag::CcPen { .. } => cc_draw(ed, drag, x, y),
+        Drag::CcLine {
+            number,
+            start,
+            current,
+        } => {
+            *current = (x, y);
+            cc_line(ed, *number, *start, *current, mods);
+        }
+        Drag::CcErase {
+            number,
+            start_t,
+            current_t,
+        } => {
+            *current_t = ed.camera.t_at(x);
+            let (t0, t1) = (start_t.min(*current_t), start_t.max(*current_t));
+            ed.apply_live(&Edit::EraseCc {
+                number: *number,
+                t0,
+                t1,
+            });
+        }
+        Drag::CcScale {
+            number,
+            t0,
+            t1,
+            base,
+            spanned,
+            pivot,
+            origin_y,
+        } => {
+            let t = ed.camera.t_at(x);
+            let (lo, hi) = (t0.min(t), t0.max(t));
+            // The pivot is captured the moment the range first has
+            // width and then held — recomputing it as the sweep grows
+            // would move the ground under the vertical drag.
+            if (*t1 - *t0).abs() < f64::EPSILON && (hi - lo).abs() > f64::EPSILON {
+                *pivot = cc_mean(ed, *number, lo, hi);
+            }
+            *t1 = t;
+            spanned.0 = spanned.0.min(lo);
+            spanned.1 = spanned.1.max(hi);
+
+            // A full viewport of travel spans 0x..2x, so the useful
+            // range is reachable without a marathon drag and neutral
+            // stays where the gesture started.
+            let dy = (*origin_y - y) / ed.viewport.h.max(1.0);
+            let factor = (1.0 + dy * 2.0).clamp(0.0, 4.0);
+
+            // Rewrite the whole swept-ever span from the captured
+            // points: scaled inside the current range, verbatim outside
+            // it, so narrowing the sweep puts back what widening it
+            // touched.
+            let (p, s0, s1) = (*pivot, spanned.0, spanned.1);
+            let points: Vec<Point> = base
+                .iter()
+                .filter(|pt| pt.t >= s0 && pt.t <= s1)
+                .map(|pt| Point {
+                    t: pt.t,
+                    value: if pt.t >= lo && pt.t <= hi {
+                        (p + (pt.value - p) * factor).clamp(0.0, 1.0)
+                    } else {
+                        pt.value
+                    },
+                })
+                .collect();
+            ed.apply_live(&Edit::DrawCc {
+                number: *number,
+                t0: s0,
+                t1: s1,
+                points,
+            });
+        }
         Drag::Velocity {
             notes,
             origin_y,
@@ -958,8 +1206,10 @@ pub fn pointer_up(ed: &mut Editor, drag: Drag, x: f64, y: f64, mods: Mods) -> Dr
             }
             Drag::None
         }
-        // The Curve gesture survives release.
-        live @ Drag::Curve { .. } => live,
+        // The Curve gesture survives release, and so does its CC twin —
+        // both stay live so the shape buttons restyle the stroke that
+        // was just drawn.
+        live @ (Drag::Curve { .. } | Drag::CcLine { .. }) => live,
         Drag::RazorCreate { origin, current } => {
             let t0 = ed.camera.t_at(origin.0);
             let t1 = ed.camera.t_at(current.0);

@@ -210,7 +210,8 @@ impl Edit {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                n.lane_mut(*lane).remove_range(lo, hi) > 0
+                let default = lane.default_value();
+                n.lane_mut(*lane).clear_range(lo, hi, default)
             }
             Edit::ReshapeLane {
                 note,
@@ -642,7 +643,8 @@ impl Edit {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                l.curve.remove_range(lo, hi) > 0
+                let default = l.default_value();
+                l.curve.clear_range(lo, hi, default)
             }
             Edit::ShapeCc {
                 number,

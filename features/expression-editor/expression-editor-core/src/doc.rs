@@ -164,6 +164,34 @@ impl Curve {
         before - self.points.len()
     }
 
+    /// Clear `[t0, t1]` so it reads as unauthored.
+    ///
+    /// Deleting the points inside a range is not the same as clearing
+    /// it: the curve holds a straight line between whatever survives on
+    /// either side, so a swell defined by two points *outside* the
+    /// range sails straight through it with nothing to delete. Splicing
+    /// the default in at both edges is what makes the region actually
+    /// read as cleared.
+    ///
+    /// Clearing the whole curve is the exception — there is nothing
+    /// outside to bleed in, so it empties rather than leaving two
+    /// default points behind and calling an untouched lane "authored".
+    ///
+    /// Returns whether anything changed.
+    pub fn clear_range(&mut self, t0: f64, t1: f64, default: f64) -> bool {
+        if self.points.is_empty() {
+            return false;
+        }
+        let covers_all = self.points.iter().all(|p| p.t >= t0 && p.t <= t1);
+        let removed = self.remove_range(t0, t1) > 0;
+        if covers_all {
+            return removed;
+        }
+        self.set(t0, default);
+        self.set(t1, default);
+        true
+    }
+
     /// Linear sample. Before the first / after the last point the curve
     /// holds that endpoint's value — it never falls back to the default
     /// mid-note, which is what stops an authored curve from snapping to

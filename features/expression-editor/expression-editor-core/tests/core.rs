@@ -2259,6 +2259,83 @@ fn erasing_a_controller_leaves_the_notes_alone() {
 }
 
 #[test]
+fn clearing_part_of_a_curve_splices_the_default_in_at_both_edges() {
+    // The case that only deleting interior points cannot handle: the
+    // shape is defined entirely by points *outside* the cleared range,
+    // so there is nothing in it to delete and the curve would sail
+    // straight through untouched.
+    let mut c = Curve::new();
+    c.set(0.0, 0.0);
+    c.set(PPQ * 4.0, 1.0);
+
+    assert!(c.clear_range(PPQ, PPQ * 3.0, 0.0));
+    assert!(
+        c.sample(PPQ * 2.0, 0.0).abs() < 1e-9,
+        "the middle reads as cleared, got {}",
+        c.sample(PPQ * 2.0, 0.0)
+    );
+    assert!(
+        (c.sample(PPQ * 4.0, 0.0) - 1.0).abs() < 1e-9,
+        "and the ramp outside it is untouched"
+    );
+}
+
+#[test]
+fn clearing_a_whole_curve_empties_it_rather_than_authoring_defaults() {
+    // The exception: with nothing outside to bleed in, leaving two
+    // default points behind would call an untouched lane "authored".
+    let mut c = Curve::new();
+    c.set(PPQ, 0.5);
+    c.set(PPQ * 2.0, 0.8);
+
+    assert!(c.clear_range(0.0, PPQ * 4.0, 0.0));
+    assert!(c.is_empty());
+    assert!(
+        !c.clear_range(0.0, PPQ * 4.0, 0.0),
+        "and clearing an already-empty curve changes nothing"
+    );
+}
+
+#[test]
+fn erasing_part_of_a_controller_reads_as_cleared() {
+    let mut doc = doc_with_notes(2);
+    // A swell whose only points are outside the range about to be
+    // erased — the shape EraseCc used to miss entirely.
+    Edit::DrawCc {
+        number: 1,
+        t0: 0.0,
+        t1: PPQ * 4.0,
+        points: vec![
+            Point { t: 0.0, value: 0.0 },
+            Point {
+                t: PPQ * 4.0,
+                value: 1.0,
+            },
+        ],
+    }
+    .apply(&mut doc);
+    assert!(doc.cc.get(1).unwrap().value(PPQ * 2.0) > 60);
+
+    assert!(Edit::EraseCc {
+        number: 1,
+        t0: PPQ,
+        t1: PPQ * 3.0,
+    }
+    .apply(&mut doc));
+
+    assert_eq!(
+        doc.cc.get(1).unwrap().value(PPQ * 2.0),
+        0,
+        "CC1 rests at 0, and the erased range has to read that way"
+    );
+    assert_eq!(
+        doc.cc.get(1).unwrap().value(PPQ * 4.0),
+        127,
+        "outside the erased range the swell stands"
+    );
+}
+
+#[test]
 fn entering_cc_edit_mode_pins_the_lane_it_edits() {
     let mut ed = test_editor();
     assert!(!ed.cc_editing());
