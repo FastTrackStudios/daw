@@ -459,14 +459,33 @@ pub fn render_control(name: &str, spec: &DerivedSpec) -> Result<RgbaImage, Rende
     // width and vanished into the strip.
     let mut spec = spec.clone();
     if spec.cells.len() != states(name) {
+        // `art_x` is the first *drawn* column, which is the cell origin
+        // for every control whose art starts at its own left edge. The
+        // mixer's FX toggle does not: it leaves one empty column as the
+        // seam between the pill's halves, so the first ink is a pixel in
+        // and the fallback put every cell a pixel right.
+        let origin = spec.art_x.saturating_sub(leading_gap(name));
         spec.cells =
-            crate::derive::even_cells(spec.width, states(name) as u32, spec.art_x);
+            crate::derive::even_cells(spec.width, states(name) as u32, origin);
     }
 
     composite_cells(&spec, |i, _w| {
         cell_markup(name, interaction(i))
             .ok_or_else(|| RenderError::Svg(format!("no vector control draws {name}")))
     })
+}
+
+/// Empty columns before a control's art, which `art_x` cannot see past.
+///
+/// Only the mixer's FX toggle has any — the seam its half of the pill
+/// leaves for the label's half to meet. The track panel's toggle abuts
+/// directly and starts at its own edge, which is why this is per name
+/// rather than per family.
+fn leading_gap(name: &str) -> u32 {
+    match name {
+        "track_fxempty_v" | "track_fxoff_v" | "track_fxon_v" => 1,
+        _ => 0,
+    }
 }
 
 /// How many sprite cells a control's image holds.

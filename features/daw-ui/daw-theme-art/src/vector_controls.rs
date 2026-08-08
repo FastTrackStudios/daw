@@ -548,6 +548,14 @@ struct Pill {
     body: (f32, f32),
     /// Translucent over the strip rather than opaque.
     scrim: bool,
+    /// Empty columns between the two halves.
+    ///
+    /// The mixer leaves one; the track panel leaves none, its halves
+    /// abutting directly. Easy to get backwards, because the two families'
+    /// cells start at different origins — the mixer's toggle strip at
+    /// image column 0 and the track panel's at 1 — so reading both from
+    /// column 0 shows the gap in the wrong one.
+    gutter: f32,
 }
 
 impl FxFamily {
@@ -561,6 +569,7 @@ impl FxFamily {
                 split: 28.0,
                 body: (1.0 / 22.0, 18.0 / 22.0),
                 scrim: false,
+                gutter: 1.0,
             },
             // `track_fx_norm` is 20 wide and `track_fxempty_h` 16, rows
             // 1..20 in both.
@@ -570,6 +579,7 @@ impl FxFamily {
                 split: 20.0,
                 body: (1.0 / 22.0, 20.0 / 22.0),
                 scrim: true,
+                gutter: 0.0,
             },
         }
     }
@@ -640,20 +650,34 @@ pub fn FxControl(props: FxControlProps) -> Element {
     let edge = 1.0f32;
     let r = p.h * 0.12;
 
-    // One outline for the whole pill: rounded at both outer ends, and
-    // nothing at all in the middle.
+    // One pill, in two pieces with a one-pixel gutter between them.
     //
-    // The source does leave pill column 28 empty, between the label's art
-    // and the toggle's, and reproducing that gap was tried: split the
-    // outline in two and stroke each half as an open path so no border
-    // runs down the seam. It fixed the mixer's `left -1` and broke the
-    // track panel's, which has no such gap — its two halves abut. Left as
-    // one shape until both families are measured together; a pixel of
-    // face where the mixer has none is the smaller error.
+    // Not a stylistic seam — both families have it. The label half's art
+    // ends one column short of the split and the toggle half's begins one
+    // past it, leaving that column empty, which is what lets REAPER blit
+    // two images side by side and have them read as one shape.
+    //
+    // Everything that spans the pill has to respect it. A first attempt
+    // broke the gutter in the fill only and left the border stroke and
+    // the highlight row running straight across, so the column came back
+    // filled — from the highlight, two rows down, which looked nothing
+    // like the cause.
     let (x, y) = (edge / 2.0, body_y + edge / 2.0);
     let (w, h) = (p.w - edge, body_h - edge);
+    let gut = p.gutter;
+    // The empty column *is* `split`: the label's art runs up to it and
+    // the toggle's begins one past it. Straddling the split instead —
+    // half a pixel either side — left both halves' edges mid-pixel and
+    // the column half covered.
+    let (lhs, rhs) = (p.split, p.split + gut);
     let outline = format!(
-        "M {} {y} H {} A {r} {r} 0 0 1 {} {} V {} A {r} {r} 0 0 1 {} {}          H {} A {r} {r} 0 0 1 {x} {} V {} A {r} {r} 0 0 1 {} {y} Z",
+        "M {} {y} H {lhs} V {} H {} A {r} {r} 0 0 1 {x} {} V {} A {r} {r} 0 0 1 {} {y} Z \
+         M {rhs} {y} H {} A {r} {r} 0 0 1 {} {} V {} A {r} {r} 0 0 1 {} {} H {rhs} Z",
+        x + r,
+        y + h,
+        x + r,
+        y + h - r,
+        y + r,
         x + r,
         x + w - r,
         x + w,
@@ -661,10 +685,25 @@ pub fn FxControl(props: FxControlProps) -> Element {
         y + h - r,
         x + w - r,
         y + h,
+    );
+    // The border, as two *open* paths that stop at the gutter. The halves
+    // meet with no edge between them — that is what makes them one pill —
+    // so stroking the closed outline drew a line down each side of the
+    // seam, half of it landing in the empty column.
+    let frame = format!(
+        "M {lhs} {y} H {} A {r} {r} 0 0 1 {x} {} V {} A {r} {r} 0 0 1 {} {} H {lhs} \
+         M {rhs} {y} H {} A {r} {r} 0 0 1 {} {} V {} A {r} {r} 0 0 1 {} {} H {rhs}",
         x + r,
-        y + h - r,
         y + r,
+        y + h - r,
         x + r,
+        y + h,
+        x + w - r,
+        x + w,
+        y + r,
+        y + h - r,
+        x + w - r,
+        y + h,
     );
 
     let (fill, alpha) = if p.scrim {
@@ -726,6 +765,17 @@ pub fn FxControl(props: FxControlProps) -> Element {
                     path { d: "{outline}" }
                 }
             }
+            // The seam is only truly empty at rest. Under the pointer and
+            // pressed, the source washes it over at about a third alpha —
+            // 97 of 255 bypassed, 59 lit — so the two halves stop reading
+            // as two buttons the moment you touch them.
+            if gut > 0.0 && props.at != Interaction::Normal {
+                rect {
+                    x: "{lhs}", y: "{body_y + edge}",
+                    width: "{gut}", height: "{body_h - edge * 2.0}",
+                    fill: "{k.border.css()}", fill_opacity: "0.30",
+                }
+            }
             path { d: "{outline}", fill: "{fill}", fill_opacity: "{alpha}" }
             // The toggle end is recessed. Reading the two halves down
             // their centres gives 77 to 57 on the label and 64 to 49 on
@@ -733,22 +783,27 @@ pub fn FxControl(props: FxControlProps) -> Element {
             // off it, not a second gradient. One plate for both put the
             // toggle 39 levels light.
             rect {
-                x: "{p.split}", y: "{body_y}",
-                width: "{p.w - p.split}", height: "{body_h}",
+                x: "{rhs}", y: "{body_y}",
+                width: "{p.w - rhs}", height: "{body_h}",
                 fill: "#000000", fill_opacity: "0.16",
                 clip_path: "url(#fxpill)",
             }
             path {
-                d: "{outline}",
+                d: "{frame}",
                 fill: "none",
                 stroke: "{k.border.css()}",
                 stroke_width: "{edge}",
             }
             // The lit row just inside the top, which every ReaperTips
-            // control has — one shape, so it runs the whole pill.
+            // control has — one per half, stopping at the gutter.
             rect {
                 x: "{x + r}", y: "{y + edge}",
-                width: "{w - r * 2.0}", height: "{p.h * 0.045}",
+                width: "{lhs - x - r}", height: "{p.h * 0.045}",
+                fill: "#ffffff", fill_opacity: "0.07",
+            }
+            rect {
+                x: "{rhs}", y: "{y + edge}",
+                width: "{x + w - r - rhs}", height: "{p.h * 0.045}",
                 fill: "#ffffff", fill_opacity: "0.07",
             }
 
@@ -1186,13 +1241,40 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
     //
     // An unlit lane is #6c6c6c — plain grey. It was `text_faint`, a
     // blue-grey, so a track with nothing routed looked faintly lit.
-    let dim = t.chrome.hardware_mark.shade(-0.33);
-    let out = t.chrome.accent;
-    let send = if props.has_sends { t.signal.meter_warn } else { dim };
+    // An unlit lane is grey in both families, but only opaque in one:
+    // the mixer's is a solid #6c6c6c on plastic, the track panel's a
+    // #727272 at half alpha over the strip. Drawing both solid left the
+    // track panel's unrouted lanes reading as lit.
+    let dim = if props.axis == Axis::Horizontal {
+        (t.chrome.hardware_mark.shade(-0.29), 0.49f32)
+    } else {
+        (t.chrome.hardware_mark.shade(-0.33), 1.0)
+    };
+    // Disabled greys the *output* lane and nothing else.
+    //
+    // Compared cell for cell, `mcp_io_s_r` and `mcp_io_s_r_dis` differ in
+    // exactly one place: the top lane goes from #5dc1fe to #6e6e6e. The
+    // plate, the amber send, the red receive and every alpha are
+    // identical. This drew the whole button at 40% instead, which dimmed
+    // things the source leaves alone and left the one thing it does dim
+    // fully blue.
+    let out = if props.disabled {
+        dim
+    } else {
+        (t.chrome.accent, 1.0)
+    };
+    let send = if props.has_sends {
+        (t.signal.meter_warn, 1.0)
+    } else {
+        dim
+    };
     // `meter_danger`, not `rec`: the source uses a brighter #ff5260 for a
     // lit lane than the #e23b53 of the record ring.
-    let recv = if props.has_receives { t.signal.meter_danger } else { dim };
-    let opacity = if props.disabled { "0.4" } else { "1" };
+    let recv = if props.has_receives {
+        (t.signal.meter_danger, 1.0)
+    } else {
+        dim
+    };
 
     // Traced lane geometry, per family. The mixer runs three 11x4 bars
     // down a 23x32 cell at y=6, 13, 20; the track panel runs three 4x10
@@ -1239,7 +1321,6 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
             height: "{props.height.unwrap_or(vh as u32)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
-            opacity: "{opacity}",
             // The panel does not fill its cell. Measured: the mixer's is
             // 21x28 in a 23x32 cell, the track panel's 28x20 in 28x22 —
             // so the inset differs by axis rather than being one margin.
@@ -1271,14 +1352,15 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
                 width: "{vw * box_w - vw * 0.16}", height: "{vh * 0.04}",
                 fill: "#ffffff", fill_opacity: "0.07",
             }
-            for (i, colour) in [out, send, recv].iter().enumerate() {
+            for (i, lane) in [out, send, recv].iter().enumerate() {
                 rect {
                     key: "{i}",
                     x: if horizontal { "{lane_l + lane_t * i as f32}" } else { "{cross}" },
                     y: if horizontal { "{cross}" } else { "{lane_l + lane_t * i as f32}" },
                     width: "{bar_w}", height: "{bar_h}",
                     rx: "{r}",
-                    fill: "{colour.css()}",
+                    fill: "{lane.0.css()}",
+                    fill_opacity: "{lane.1}",
                 }
             }
         }
