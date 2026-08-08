@@ -164,6 +164,14 @@ pub struct LabelButtonProps {
     /// Filling the cell there pushed the button past its own guide.
     #[props(default = (0.0, 1.0))]
     pub body: (f32, f32),
+    /// Draw the soft row under the button.
+    ///
+    /// Every track-panel label has one except the lit mute, which stops
+    /// dead at its bottom border. That is the source's own inconsistency,
+    /// not a rule about lit buttons — the lit solo and the blue defeat
+    /// both keep theirs — so it has to be told rather than derived.
+    #[props(default = true)]
+    pub shadow: bool,
     pub label: String,
     /// The printed letter's colour.
     ///
@@ -246,6 +254,19 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
                 linearGradient { id: "{id}", x1: "0", y1: "0", x2: "0", y2: "1",
                     stop { offset: "0", stop_color: "{k.face.shade(0.06).css()}" }
                     stop { offset: "1", stop_color: "{deepen(k.face, props.depth).css()}" }
+                }
+            }
+            // A soft row under the button, where the cell leaves room for
+            // one. The track panel's labels sit in a 24-row cell with a
+            // 20-row body, and the spare row at the bottom is not empty —
+            // it carries the button's shadow at about a third alpha. The
+            // mixer's fill their cell edge to edge and get none, which is
+            // why this keys off the geometry rather than the family.
+            if props.shadow && body_y + body_h < vh - 0.5 {
+                rect {
+                    x: "{r}", y: "{body_y + body_h}",
+                    width: "{vw - r * 2.0}", height: "1",
+                    fill: "{k.border.css()}", fill_opacity: "0.31",
                 }
             }
             // Inset by half the border so the stroke sits inside.
@@ -353,6 +374,7 @@ pub fn MuteButton(props: ToggleProps) -> Element {
             lit: props.on.then_some(t.signal.mute),
             cell: props.cell, body: props.body, legend: props.legend,
             depth: props.depth, sinks: props.sinks, hover: props.hover,
+            shadow: !props.on,
             width: props.width, height: props.height, at: props.at,
         }
     }
@@ -620,6 +642,14 @@ pub fn FxControl(props: FxControlProps) -> Element {
 
     // One outline for the whole pill: rounded at both outer ends, and
     // nothing at all in the middle.
+    //
+    // The source does leave pill column 28 empty, between the label's art
+    // and the toggle's, and reproducing that gap was tried: split the
+    // outline in two and stroke each half as an open path so no border
+    // runs down the seam. It fixed the mixer's `left -1` and broke the
+    // track panel's, which has no such gap — its two halves abut. Left as
+    // one shape until both families are measured together; a pixel of
+    // face where the mixer has none is the smaller error.
     let (x, y) = (edge / 2.0, body_y + edge / 2.0);
     let (w, h) = (p.w - edge, body_h - edge);
     let outline = format!(
@@ -647,10 +677,19 @@ pub fn FxControl(props: FxControlProps) -> Element {
     // source letters are #9c9c9c empty, #dadada active and a desaturated
     // #c34a54 bypassed — `text_faint` and `text` are the chrome ramp's
     // blues and read as lit indicators rather than print on plastic.
-    let text = match props.chain {
-        FxChain::Empty => t.chrome.hardware_mark,
-        FxChain::Active => t.chrome.hardware_mark.shade(0.35),
-        FxChain::Bypassed => t.signal.mute,
+    // The two families print their letters differently, and it is not one
+    // being a shade of the other: the mixer's are dimmer and fully
+    // opaque, the track panel's brighter but semi-transparent, because
+    // they sit on a scrim rather than on plastic.
+    //
+    //     empty   mixer #9c at 1.00     track #c1 at 0.61
+    //     active  mixer #db at 1.00     track #eb at 0.87
+    let (text, text_alpha) = match (props.chain, p.scrim) {
+        (FxChain::Empty, false) => (t.chrome.hardware_mark.shade(-0.06), 1.0f32),
+        (FxChain::Empty, true) => (t.chrome.hardware_mark.shade(0.33), 0.61),
+        (FxChain::Active, false) => (t.chrome.hardware_mark.shade(0.61), 1.0),
+        (FxChain::Active, true) => (t.chrome.hardware_mark.shade(0.78), 0.87),
+        (FxChain::Bypassed, _) => (t.signal.mute, 1.0),
     };
 
     // The toggle's lamp, in pill coordinates.
@@ -680,11 +719,25 @@ pub fn FxControl(props: FxControlProps) -> Element {
             xmlns: "http://www.w3.org/2000/svg",
             defs {
                 linearGradient { id: "fxface", x1: "0", y1: "0", x2: "0", y2: "1",
-                    stop { offset: "0", stop_color: "{k.face.shade(0.19).css()}" }
-                    stop { offset: "1", stop_color: "{k.face.shade(0.02).css()}" }
+                    stop { offset: "0", stop_color: "{k.face.shade(0.07).css()}" }
+                    stop { offset: "1", stop_color: "{k.face.shade(-0.10).css()}" }
+                }
+                clipPath { id: "fxpill",
+                    path { d: "{outline}" }
                 }
             }
             path { d: "{outline}", fill: "{fill}", fill_opacity: "{alpha}" }
+            // The toggle end is recessed. Reading the two halves down
+            // their centres gives 77 to 57 on the label and 64 to 49 on
+            // the toggle — the same gradient with a constant sixth taken
+            // off it, not a second gradient. One plate for both put the
+            // toggle 39 levels light.
+            rect {
+                x: "{p.split}", y: "{body_y}",
+                width: "{p.w - p.split}", height: "{body_h}",
+                fill: "#000000", fill_opacity: "0.16",
+                clip_path: "url(#fxpill)",
+            }
             path {
                 d: "{outline}",
                 fill: "none",
@@ -712,6 +765,7 @@ pub fn FxControl(props: FxControlProps) -> Element {
                 font_size: "{p.h * 0.51}",
                 letter_spacing: "{p.h * 0.03}",
                 fill: "{text.css()}",
+                fill_opacity: "{text_alpha}",
                 "FX"
             }
 
