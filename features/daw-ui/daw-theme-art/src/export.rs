@@ -53,7 +53,11 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
     // and is proportionally larger for it, its routing lanes sit in a row
     // rather than stacked, and its monitor icon radiates right rather
     // than down. Same components, turned and resized.
-    let track = name.starts_with("track_");
+    // `tcp_` is the track control panel too — REAPER names most of its
+    // controls `track_*` and a handful `tcp_*`, and where both exist for
+    // the same control they are the same drawing: `tcp_solodefeat_on` and
+    // `track_solodefeat_on` are byte-identical.
+    let track = name.starts_with("track_") || name.starts_with("tcp_");
     let axis = if track { v::Axis::Horizontal } else { v::Axis::Vertical };
     // The FX control's two halves are named for their *layout*, not their
     // panel: `track_fx*_h` is the track panel's and `track_fx*_v` the
@@ -343,6 +347,28 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         }
     }
     {
+        use v::SliderPart as S;
+        let slider = |part, cell| {
+            render_svg(
+                v::PanelSlider,
+                v::SliderProps { part, cell, width: n.0, height: n.1, at },
+            )
+        };
+        let hit = match name {
+            "tcp_volbg" => Some(slider(S::VolumeTrough, (19.0, 24.0))),
+            "tcp_volthumb" => Some(slider(S::VolumeThumb, (27.0, 29.0))),
+            "tcp_panbg" | "tcp_widthbg" => Some(slider(S::PanTrough, (43.0, 11.0))),
+            "mcp_panbg" | "mcp_widthbg" => Some(slider(S::PanTrough, (69.0, 11.0))),
+            "tcp_panthumb" | "tcp_widththumb" | "mcp_panthumb" | "mcp_widththumb" => {
+                Some(slider(S::PanThumb, (13.0, 23.0)))
+            }
+            _ => None,
+        };
+        if let Some(markup) = hit {
+            return Some(markup);
+        }
+    }
+    {
         use v::TransportPart as P;
         let part = |part, cell| {
             render_svg(
@@ -375,7 +401,8 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
     // part after the prefix rather than writing every name twice.
     let stem = name
         .strip_prefix("mcp_")
-        .or_else(|| name.strip_prefix("track_"))?;
+        .or_else(|| name.strip_prefix("track_"))
+        .or_else(|| name.strip_prefix("tcp_"))?;
 
     Some(match stem {
         "fxempty_h" => byp(v::FxBypass::Empty),
@@ -595,6 +622,7 @@ fn states(name: &str) -> usize {
     let stem = name
         .strip_prefix("mcp_")
         .or_else(|| name.strip_prefix("track_"))
+        .or_else(|| name.strip_prefix("tcp_"))
         .unwrap_or(name);
     match stem {
         "pan_knob_small" | "pan_knob_large" | "width_knob_small" | "width_knob_large"

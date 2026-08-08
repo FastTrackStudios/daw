@@ -3251,6 +3251,131 @@ pub fn TransportPanel(props: TransportPartProps) -> Element {
     }
 }
 
+// ── panel sliders: the horizontal ones ──────────────────────────────────
+
+/// Which part of a track-panel slider to draw.
+///
+/// The mixer's volume fader runs vertically and has its own components.
+/// Everything here runs across: the track panel's volume, and both panels'
+/// pan and width.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SliderPart {
+    /// The track panel's volume groove — a flat plate with a centre tick.
+    #[default]
+    VolumeTrough,
+    /// Its cap, which is the mixer's fader cap turned on its side.
+    VolumeThumb,
+    /// The pan and width groove — a black slot with rounded ends.
+    PanTrough,
+    /// Their cap: small, bright, with a dark line down the middle.
+    PanThumb,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct SliderProps {
+    #[props(default)]
+    pub part: SliderPart,
+    #[props(default = (19.0, 24.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// A track-panel slider part.
+///
+/// The troughs are nine-slices REAPER stretches along their length, so what
+/// is drawn here is the ends and one row of the middle — the same rule the
+/// mixer's fader trough follows, and for the same reason: art in the part
+/// that stretches gets stretched.
+#[component]
+pub fn PanelSlider(props: SliderProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let h = t.chrome.hardware;
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                // Across, not down: this cap lies on its side, so its
+                // moulding runs left to right with a seam at the middle.
+                linearGradient { id: "slthumb", x1: "0", y1: "0", x2: "1", y2: "0",
+                    stop { offset: "0", stop_color: "{h.shade(0.40).css()}" }
+                    stop { offset: "0.22", stop_color: "{h.shade(0.60).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(0.41).css()}" }
+                }
+                linearGradient { id: "slpan", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{h.shade(0.64).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(0.67).css()}" }
+                }
+            }
+            match props.part {
+                SliderPart::VolumeTrough => rsx! {
+                    rect {
+                        x: "1", y: "1", width: "{vw - 2.0}", height: "{vh - 2.0}",
+                        fill: "{h.shade(-0.40).css()}",
+                    }
+                    // The centre tick, two pixels of it, in the one row
+                    // REAPER does not stretch.
+                    rect {
+                        x: "6", y: "11", width: "2", height: "1",
+                        fill: "#000000",
+                    }
+                },
+                SliderPart::VolumeThumb => rsx! {
+                    rect {
+                        x: "5", y: "6", width: "17", height: "16", rx: "1",
+                        fill: "{t.chrome.hardware_edge.shade(-0.35).css()}",
+                    }
+                    rect {
+                        x: "6", y: "7", width: "15", height: "14",
+                        fill: "url(#slthumb)",
+                    }
+                    // The seam, one column, a little left of centre.
+                    rect {
+                        x: "13", y: "7", width: "1", height: "14",
+                        fill: "{t.chrome.hardware_edge.shade(-0.35).css()}",
+                    }
+                },
+                SliderPart::PanTrough => rsx! {
+                    // A black slot with rounded ends, inset a pixel all
+                    // round: rows 2..8 of eleven, whatever the length.
+                    rect {
+                        x: "1", y: "2", width: "{vw - 2.0}", height: "7",
+                        rx: "3.5",
+                        fill: "#000000",
+                    }
+                },
+                SliderPart::PanThumb => rsx! {
+                    // A marker, not a block: a body eleven wide down to
+                    // row 15, then a tail tapering to seven by row 19.
+                    // The lit face fills only its upper half — rows 7 to
+                    // 14 — and everything below that is the tail.
+                    path {
+                        d: "M 1 6 H 12 V 15 L 10 19 H 3 L 1 15 Z",
+                        fill: "#000000",
+                    }
+                    rect {
+                        x: "2", y: "7", width: "9", height: "8",
+                        fill: "url(#slpan)",
+                    }
+                    rect {
+                        x: "6", y: "7", width: "1", height: "8",
+                        fill: "{h.shade(-0.68).css()}",
+                    }
+                },
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
