@@ -1291,31 +1291,56 @@ pub struct PanProps {
     pub height: Option<u32>,
 }
 
+/// The pan knob — a dark disc with a lit cap sitting proud of it.
+///
+/// Every number here is measured off the source at sub-pixel precision, by
+/// reading alpha coverage per row rather than thresholding to a silhouette:
+///
+/// ```text
+/// small (24x25)   body  centre (12.0, 12.08) r 9.37
+///                 cap   centre (12.0, 12.05) r 4.06
+/// large (28x29)   body  centre (14.0, 14.05) r 11.22
+///                 cap   centre (14.0, 14.05) r 4.80
+/// ```
+///
+/// Note the body is *not* centred in the cell — it sits high, and the space
+/// underneath is a drop shadow, which is why the earlier version's centred
+/// disc read a pixel low.
+///
+/// The face is nearly flat: `#3c` at the top to `#31` at the bottom, over
+/// 19 pixels. The previous version drew a strong radial gradient, which is
+/// what made ours look like a blurred sphere against the source's moulded
+/// disc — and it was light, because it derived from `hardware` unshaded.
 #[component]
 pub fn PanningKnob(props: PanProps) -> Element {
     let t = Theme::default();
-    // `mcp_pan_knob_small` is 24x25 — a hair taller than wide.
-    let (vw, vh) = (24.0f32, 25.0f32);
-    let (cx, cy) = (vw * 0.5, vh * 0.5);
-    // 0.40 of the width, not 0.44: the disc measured two pixels wider
-    // than the source's at the small size.
-    let r = vw * (if props.large { 0.46 } else { 0.40 });
+    let (vw, vh) = if props.large {
+        (28.0f32, 29.0f32)
+    } else {
+        (24.0f32, 25.0f32)
+    };
+    let (cx, cy, r) = if props.large {
+        (14.0f32, 14.05f32, 11.22f32)
+    } else {
+        (12.0f32, 12.08f32, 9.37f32)
+    };
+    let (cap_cy, cap_r) = if props.large {
+        (14.05f32, 4.80f32)
+    } else {
+        (12.05f32, 4.06f32)
+    };
 
-    // Measured off the source: a plain dark disc with a soft light dot,
-    // and at rest the dot is dead centre — not offset, and with no
-    // pointer line anywhere. The first version drew a line to the rim,
-    // which is a different control: this knob shows pan by *sliding* the
-    // dot across, so centre reads as centre.
+    // At rest the cap is dead centre — the knob shows pan by *sliding* it
+    // across, not by pointing at a rim, so centre has to read as centre.
     let pos = props.position.clamp(-1.0, 1.0);
-    let dot_r = r * 0.42;
-    let travel = r - dot_r - vw * 0.04;
-    let dx = pos * travel;
+    let dx = pos * (r - cap_r - 1.0);
 
-    // Both neutral. The dot was `text_dim`, which is a light *blue*-grey
-    // — right for a label on a panel, wrong for a moulded marker on a
-    // knob, where it read as a lit indicator rather than plastic.
-    let disc = t.chrome.hardware.shade(-0.09);
-    let dot = if props.position == 0.0 {
+    // All neutral. The cap was `text_dim`, a light *blue*-grey — right for
+    // a label on a panel, wrong for moulded plastic, where it reads as a
+    // lit indicator rather than a part.
+    let face = t.chrome.hardware;
+    let rim = t.chrome.hardware_edge.shade(-0.45);
+    let cap = if props.position == 0.0 {
         t.chrome.hardware_mark
     } else {
         t.chrome.accent
@@ -1323,20 +1348,51 @@ pub fn PanningKnob(props: PanProps) -> Element {
 
     rsx! {
         svg {
-            width: "{props.width.unwrap_or(24)}",
-            height: "{props.height.unwrap_or(25)}",
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             defs {
-                radialGradient { id: "panface", cx: "0.5", cy: "0.35", r: "0.75",
-                    stop { offset: "0", stop_color: "{disc.shade(0.22).css()}" }
-                    stop { offset: "1", stop_color: "{disc.shade(-0.25).css()}" }
+                linearGradient { id: "panface", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{face.shade(-0.05).css()}" }
+                    stop { offset: "1", stop_color: "{face.shade(-0.29).css()}" }
+                }
+                linearGradient { id: "pancap", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{cap.shade(0.20).css()}" }
+                    stop { offset: "1", stop_color: "{cap.shade(-0.08).css()}" }
+                }
+                // Both shadows are gradients rather than blur filters:
+                // resvg renders these reliably at this size, and a filter
+                // would cost a full offscreen pass per knob.
+                radialGradient { id: "pandrop",
+                    stop { offset: "0.90", stop_color: "#000000", stop_opacity: "0.15" }
+                    stop { offset: "1", stop_color: "#000000", stop_opacity: "0" }
+                }
+                radialGradient { id: "pancapdrop",
+                    stop { offset: "0.55", stop_color: "#000000", stop_opacity: "0.32" }
+                    stop { offset: "1", stop_color: "#000000", stop_opacity: "0" }
                 }
             }
-            circle { cx: "{cx}", cy: "{cy}", r: "{r}", fill: "url(#panface)" }
+            // Sits below the body, so only the part that clears it shows.
+            // An ellipse, not a circle: the source has no shadow at all
+            // beside the knob, and a circle wide enough to reach two rows
+            // below it also reached two columns either side of it.
+            ellipse {
+                cx: "{cx}", cy: "{cy + 1.2}",
+                rx: "{r + 0.7}", ry: "{r + 2.15}",
+                fill: "url(#pandrop)",
+            }
+            // Rim first, face inset — a stroke would centre itself on the
+            // edge and put half the line outside the disc.
+            circle { cx: "{cx}", cy: "{cy}", r: "{r}", fill: "{rim.css()}" }
+            circle { cx: "{cx}", cy: "{cy}", r: "{r - 0.35}", fill: "url(#panface)" }
             circle {
-                cx: "{cx + dx}", cy: "{cy}", r: "{dot_r}",
-                fill: "{dot.css()}",
+                cx: "{cx + dx}", cy: "{cap_cy + 0.9}", r: "{cap_r + 1.1}",
+                fill: "url(#pancapdrop)",
+            }
+            circle {
+                cx: "{cx + dx}", cy: "{cap_cy}", r: "{cap_r}",
+                fill: "url(#pancap)",
             }
         }
     }
