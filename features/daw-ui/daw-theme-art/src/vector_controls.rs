@@ -518,7 +518,11 @@ pub fn FxControl(props: FxControlProps) -> Element {
         FxBypass::Off => Some(t.signal.meter_danger),
     };
     let plus = props.bypass == FxBypass::Empty && props.at != Interaction::Normal;
-    let (tx, ty) = (p.split + (p.w - p.split) * 0.5, body_y + body_h * 0.5);
+    // 8px from the toggle's left edge, not centred in it. The lens sits
+    // at the same offset in both families — which *is* centred in the
+    // 16-wide half and a pixel left of centre in the 18-wide one, so
+    // centring it put the mixer's a pixel too far right.
+    let (tx, ty) = (p.split + p.h * 0.364, body_y + body_h * 0.5);
     // Measured: a 4px pill and an 8x8 plus with 2px arms, in both
     // families — so neither scales with the cell width.
     let (pw, ph) = (p.h * 0.182, body_h * 0.5);
@@ -601,13 +605,27 @@ pub fn FxControl(props: FxControlProps) -> Element {
                 // it goes 65, 58, 102, 102, 58, 65: without the ring it
                 // reads as a flat light blob stuck on rather than a lamp
                 // set into the plastic.
+                // Ring behind, core on top — not a stroke, which
+                // straddles the edge it is drawn on and ate half a pixel
+                // off each side, leaving a 3px core where the source has
+                // 4 (cols 6..9) inside a ring (cols 5 and 10).
+                //
+                // Only on the opaque family: against a scrim the source
+                // puts the lens straight onto the black, with nothing
+                // between.
+                if !p.scrim {
+                    rect {
+                        x: "{tx - pw * 0.5 - 1.0}", y: "{ty - ph * 0.5 - 1.0}",
+                        width: "{pw + 2.0}", height: "{ph + 2.0}",
+                        rx: "{pw * 0.5 + 1.0}",
+                        fill: "{t.chrome.hardware.shade(-0.1).css()}",
+                    }
+                }
                 rect {
                     x: "{tx - pw * 0.5}", y: "{ty - ph * 0.5}",
                     width: "{pw}", height: "{ph}",
                     rx: "{pw * 0.5}",
                     fill: "{t.chrome.hardware_mark.shade(-0.38).css()}",
-                    stroke: "{t.chrome.hardware.shade(-0.1).css()}",
-                    stroke_width: "{p.h * 0.045}",
                 }
             }
         }
