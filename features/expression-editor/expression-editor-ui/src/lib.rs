@@ -98,6 +98,49 @@ pub fn ExpressionEditor(
     }
 }
 
+/// The glyph drawn on a handle, as an SVG path.
+///
+/// Each mark says what the handle *does* rather than naming it: the
+/// slopes are the slope they apply, fine pitch is a tick, formant a
+/// bar, amplitude a dot, vibrato a wave. At fourteen pixels there is no
+/// room for a word, and a shape is faster to read than one anyway.
+fn handle_mark(handle: expression_editor_core::Handle, cx: f64, cy: f64, r: f64) -> String {
+    use expression_editor_core::Handle as H;
+    match handle {
+        H::LeftSlope => format!("M {:.1} {:.1} L {:.1} {:.1}", cx - r, cy + r * 0.5, cx + r, cy - r * 0.5),
+        H::RightSlope => format!("M {:.1} {:.1} L {:.1} {:.1}", cx - r, cy - r * 0.5, cx + r, cy + r * 0.5),
+        H::FinePitch => format!("M {:.1} {:.1} L {:.1} {:.1}", cx - r * 0.6, cy, cx + r * 0.6, cy),
+        H::Formant => format!("M {:.1} {:.1} L {:.1} {:.1}", cx, cy - r * 0.7, cx, cy + r * 0.7),
+        H::Amplitude => {
+            // A small circle, drawn as two arcs so it stays one path.
+            let d = r * 0.42;
+            format!(
+                "M {:.1} {:.1} a {:.1} {:.1} 0 1 0 {:.1} 0 a {:.1} {:.1} 0 1 0 {:.1} 0",
+                cx - d,
+                cy,
+                d,
+                d,
+                d * 2.0,
+                d,
+                d,
+                -d * 2.0
+            )
+        }
+        H::Vibrato => format!(
+            "M {:.1} {:.1} q {:.1} {:.1} {:.1} 0 q {:.1} {:.1} {:.1} 0",
+            cx - r,
+            cy,
+            r * 0.25,
+            -r * 0.9,
+            r,
+            r * 0.25,
+            r * 0.9,
+            r
+        ),
+        H::Pitch => String::new(),
+    }
+}
+
 /// Pointer coordinates in **roll** space — element coordinates minus
 /// the keyboard gutter and timeline ruler.
 ///
@@ -171,6 +214,7 @@ fn Canvas(
     let playhead = ed.playhead.map(|t| ed.camera.x(t));
     let razors = canvas::razor_rects(&ed);
     let refs = canvas::reference_rects(&ed);
+    let handle_sets = canvas::note_handles(&ed);
     // `R` brings references forward, the way `M` does for the MIDI
     // reference — with several parts on screen the quiet default is
     // sometimes too quiet to read against.
@@ -703,6 +747,78 @@ fn Canvas(
                 // Razor areas sit above the notes: they are a
                 // statement about a region, and the region has to be
                 // legible even where it is dense with material.
+                // Note handles, in front of the notes they belong to.
+                // Pointer events stay off: `pointer_down` hit-tests them
+                // from the same layout, so letting the SVG intercept
+                // would give two competing answers.
+                for set in handle_sets.iter() {
+                    g {
+                        key: "hs{set.id.0}",
+                        pointer_events: "none",
+                        // The temporary note, when one is open here.
+                        if let Some((sx, ex)) = set.scope {
+                            {
+                                let body = set.rects.first();
+                                let (ty, th) = body.map(|b| (b.y, b.h)).unwrap_or((0.0, 0.0));
+                                let sw = (ex - sx).abs().max(1.0);
+                                let sxx = sx.min(ex);
+                                rsx! {
+                                    rect {
+                                        x: "{sxx:.1}", y: "{ty:.1}",
+                                        width: "{sw:.1}", height: "{th:.1}",
+                                        fill: theme::ACCENT, fill_opacity: "0.28",
+                                        stroke: theme::ACCENT, stroke_width: "1",
+                                    }
+                                }
+                            }
+                        }
+                        for hr in set.rects.iter() {
+                            {
+                                // The body handle is the note itself and
+                                // needs no chrome; only the strips draw.
+                                let is_body = hr.handle
+                                    == expression_editor_core::Handle::Pitch;
+                                let (cx, cy) = hr.center();
+                                let half = (hr.w * 0.28).min(9.0);
+                                rsx! {
+                                    if !is_body {
+                                        g {
+                                            key: "h{set.id.0}-{hr.handle:?}",
+                                            rect {
+                                                x: "{hr.x:.1}", y: "{hr.y:.1}",
+                                                width: "{hr.w:.1}", height: "{hr.h:.1}",
+                                                rx: "2",
+                                                fill: theme::CONTROL,
+                                                fill_opacity: "0.92",
+                                                stroke: theme::BORDER_STRONG,
+                                                stroke_opacity: "0.9",
+                                                stroke_width: "1",
+                                            }
+                                            // A glyph rather than a
+                                            // label: at this size text
+                                            // is unreadable, and the
+                                            // mark says which axis the
+                                            // handle moves.
+                                            {
+                                                let mark = handle_mark(hr.handle, cx, cy, half);
+                                                rsx! {
+                                                    path {
+                                                        d: "{mark}",
+                                                        stroke: theme::HANDLE,
+                                                        stroke_width: "1.6",
+                                                        fill: "none",
+                                                        stroke_linecap: "round",
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 for (i, r) in razors.iter().enumerate() {
                     g {
                         key: "rz{i}",

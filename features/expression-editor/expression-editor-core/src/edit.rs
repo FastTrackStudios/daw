@@ -62,6 +62,53 @@ pub enum Edit {
         drift_amount: f64,
         modulation_amount: f64,
     },
+    /// Move a lane's values up or down over a span, keeping its shape.
+    ///
+    /// The pitch handles: dragging a note body or its fine-tune handle
+    /// changes where the contour sits without flattening the scoop and
+    /// vibrato that make it sound sung.
+    ShiftLane {
+        note: NoteId,
+        lane: Lane,
+        t0: f64,
+        t1: f64,
+        delta: f64,
+    },
+    /// Hold a lane at one value across a span.
+    ///
+    /// The formant and amplitude handles, which are per-note trims
+    /// rather than contours — there is nothing to preserve the shape
+    /// of, and a drag sets a level.
+    SetLaneLevel {
+        note: NoteId,
+        lane: Lane,
+        t0: f64,
+        t1: f64,
+        value: f64,
+    },
+    /// Tilt one end of a span, pivoting on the other.
+    ///
+    /// The left and right slope handles: `amount` in semitones, applied
+    /// at the anchored end and decaying linearly to zero at the far end,
+    /// so the transition into or out of a note steepens without moving
+    /// the note's body.
+    TiltLane {
+        note: NoteId,
+        lane: Lane,
+        t0: f64,
+        t1: f64,
+        amount: f64,
+        /// Tilt hinges at `t1` and moves `t0` when true.
+        from_start: bool,
+    },
+    /// Fold whole semitones of pitch offset into the note's row.
+    ///
+    /// Keeps the invariant the whole surface depends on: the row is the
+    /// *rounded* pitch centre and the curve carries only the remainder.
+    /// A pitch drag can then work purely on the curve and restore the
+    /// invariant once, on release, rather than juggling both every
+    /// frame.
+    NormalizeRow { notes: Vec<NoteId> },
     /// Add a modulation stack over a span — programmatic vibrato and
     /// swells. `taper` is the fraction of the span eased in and out.
     ApplyModulation {
@@ -181,7 +228,7 @@ pub enum Edit {
 /// How many samples a reshape or reblend writes per second of audio.
 /// Dense enough that instruments which ignore sparse expression still
 /// track the gesture.
-const DEFAULT_SAMPLES: usize = 64;
+pub const DEFAULT_SAMPLES: usize = 64;
 
 impl Edit {
     /// Apply to `doc`. Returns false if the edit could not be applied
@@ -251,6 +298,127 @@ impl Edit {
                     blob::effective_center(n.lane(*lane), lo, hi, DEFAULT_SAMPLES, default);
                 n.lane_mut(*lane).scale_about(lo, hi, pivot, *factor);
                 true
+            }
+            Edit::ShiftLane {
+                note,
+                lane,
+                t0,
+                t1,
+                delta,
+            } => {
+                let Some(n) = doc.note_mut(*note) else {
+                    return false;
+                };
+                let (lo, hi) = ordered(*t0, *t1);
+                if hi - lo <= 0.0 || *delta == 0.0 {
+                    return false;
+                }
+                let default = lane.default_value();
+                // Sample the ends before moving anything: a partial
+                // shift has to leave the values *outside* the span
+                // where they were, and the only way to hold them is to
+                // pin the boundary explicitly.
+                let (v0, v1) = {
+                    let c = n.lane(*lane);
+                    (c.sample(lo, default), c.sample(hi, default))
+                };
+                let lane = *lane;
+                let curve = n.lane_mut(lane);
+                for p in curve.points_mut() {
+                    if p.t >= lo && p.t <= hi {
+                        p.value = lane.clamp(p.value + delta);
+                    }
+                }
+                curve.set(lo, lane.clamp(v0 + delta));
+                curve.set(hi, lane.clamp(v1 + delta));
+                true
+            }
+            Edit::SetLaneLevel {
+                note,
+                lane,
+                t0,
+                t1,
+                value,
+            } => {
+                let Some(n) = doc.note_mut(*note) else {
+                    return false;
+                };
+                let (lo, hi) = ordered(*t0, *t1);
+                if hi - lo <= 0.0 {
+                    return false;
+                }
+                let v = lane.clamp(*value);
+                n.lane_mut(*lane).splice(
+                    lo,
+                    hi,
+                    &[Point { t: lo, value: v }, Point { t: hi, value: v }],
+                );
+                true
+            }
+            Edit::TiltLane {
+                note,
+                lane,
+                t0,
+                t1,
+                amount,
+                from_start,
+            } => {
+                let Some(n) = doc.note_mut(*note) else {
+                    return false;
+                };
+                let (lo, hi) = ordered(*t0, *t1);
+                let span = hi - lo;
+                if span <= 0.0 || *amount == 0.0 {
+                    return false;
+                }
+                let default = lane.default_value();
+                let lane = *lane;
+                // Resample: a tilt is a continuous weighting, and
+                // applying it only to existing points would leave a
+                // sparse curve tilting in straight segments between
+                // them rather than as a slope.
+                let n_samples = DEFAULT_SAMPLES;
+                let curve = n.lane(lane);
+                let pts: Vec<Point> = (0..n_samples)
+                    .map(|i| {
+                        let f = i as f64 / (n_samples - 1) as f64;
+                        let t = lo + span * f;
+                        // Full at the moving end, zero at the hinge.
+                        let w = if *from_start { 1.0 - f } else { f };
+                        Point {
+                            t,
+                            value: lane.clamp(curve.sample(t, default) + amount * w),
+                        }
+                    })
+                    .collect();
+                n.lane_mut(lane).splice(lo, hi, &pts);
+                true
+            }
+            Edit::NormalizeRow { notes } => {
+                let mut any = false;
+                for id in notes {
+                    let Some(n) = doc.note_mut(*id) else { continue };
+                    let (lo, hi) = (n.start, n.end);
+                    if hi <= lo {
+                        continue;
+                    }
+                    let center =
+                        blob::decompose(&n.pitch, lo, hi, DEFAULT_SAMPLES, units_per_second, 0.0)
+                            .center;
+                    let whole = center.round();
+                    if whole == 0.0 {
+                        continue;
+                    }
+                    // The row absorbs the whole semitones and the curve
+                    // gives them up, so the sounding pitch is unchanged
+                    // and only its bookkeeping moves.
+                    n.row = (n.row + whole as i32).clamp(0, 127);
+                    for p in n.pitch.points_mut() {
+                        p.value -= whole;
+                    }
+                    any = true;
+                }
+                any
             }
             Edit::ReblendPitch {
                 note,

@@ -31,6 +31,7 @@ pub mod chord;
 pub mod clipboard;
 pub mod doc;
 pub mod edit;
+pub mod handles;
 pub mod menu;
 pub mod mode;
 pub mod modulation;
@@ -49,6 +50,7 @@ pub use cc::{CcDisplay, CcLane, CcSet};
 pub use chord::Chord;
 pub use doc::{Curve, ExpressionDoc, Lane, Marker, Note, NoteId, Point, Target, TimeBase};
 pub use edit::{Edit, History};
+pub use handles::{Handle, Scope};
 pub use shape::Shape;
 pub use mode::Mode;
 pub use mouse::{Action, MouseMap};
@@ -119,6 +121,15 @@ pub struct Editor {
     /// than a toggle, because it is used to *check* something mid-edit
     /// and a mode you can forget you are in is worse than a held key.
     pub refs_to_front: bool,
+    /// Whether the coarse pitch handle snaps to the tuning. Shift
+    /// reverses it per-gesture, as everywhere else on this surface.
+    pub snap_pitch: bool,
+    /// The temporary note: a range inside a note that the handles
+    /// address instead of the whole thing. `None` is the ordinary case.
+    ///
+    /// Not document data — it is a view onto a note, discarded the
+    /// moment another range is drawn.
+    pub temp_note: Option<(NoteId, f64, f64)>,
     history: History,
 }
 
@@ -153,6 +164,8 @@ impl Editor {
             playhead: None,
             clipboard: clipboard::Clipboard::default(),
             refs_to_front: false,
+            snap_pitch: true,
+            temp_note: None,
             history: History::new(tracks::HISTORY_LIMIT),
         }
     }
@@ -191,6 +204,181 @@ impl Editor {
     /// The track being edited.
     pub fn active_track(&self) -> usize {
         self.tracks.active()
+    }
+
+    /// The scope handles on `note` currently address.
+    ///
+    /// The temporary note if one is open on *this* note, the whole note
+    /// otherwise. Resolving it here rather than at each call site is
+    /// what makes temporary notes free: every handle already takes a
+    /// scope, so nothing else has to know the feature exists.
+    pub fn scope_for(&self, note: NoteId) -> handles::Scope {
+        match self.temp_note {
+            Some((id, t0, t1)) if id == note => handles::Scope::Range { t0, t1 },
+            _ => handles::Scope::Note,
+        }
+    }
+
+    /// Open a temporary note over `[t0, t1]` of `note`.
+    ///
+    /// Dragging a new range always replaces the previous one — there is
+    /// only ever one, and it is discarded rather than accumulated.
+    /// Ranges narrower than a pixel or two are rejected, so a stray
+    /// click does not leave an invisible scope armed on the note.
+    pub fn set_temp_note(&mut self, note: NoteId, t0: f64, t1: f64) -> bool {
+        let Some(n) = self.doc.note(note) else {
+            return false;
+        };
+        let scope = handles::Scope::Range { t0, t1 };
+        if !scope.is_valid(n) {
+            return false;
+        }
+        let (lo, hi) = scope.span(n);
+        if (hi - lo) < self.camera.units_per_px * 3.0 {
+            return false;
+        }
+        self.temp_note = Some((note, lo, hi));
+        true
+    }
+
+    pub fn clear_temp_note(&mut self) {
+        self.temp_note = None;
+    }
+
+    /// Write a handle drag at pointer height `y`.
+    ///
+    /// Always rebuilt from the drag's captured lanes, never from what
+    /// is currently on screen — see [`handles::HandleDrag`]. Call inside
+    /// a gesture opened with [`Editor::begin_gesture`]; this uses
+    /// `apply_live` so the whole drag is one undo step.
+    /// `snap` applies only to the coarse pitch handle. The UI resolves
+    /// it as `ed.snap_pitch != mods.shift`, the same shift-reverses
+    /// rule every other snap on this surface follows.
+    pub fn drag_handle(&mut self, drag: &mut handles::HandleDrag, y: f64, snap: bool) -> bool {
+        use handles::Handle as H;
+        let amount = drag.amount(y, self.viewport.h);
+        drag.applied = amount;
+
+        let Some(note) = self.doc.note(drag.note) else {
+            return false;
+        };
+        let (t0, t1) = drag.scope.span(note);
+        if t1 <= t0 {
+            return false;
+        }
+        let id = drag.note;
+
+        // Restore the captured lane first, so the edit below always
+        // sees the same input it saw on the previous frame.
+        let restore = |ed: &mut Self, lane: Lane| {
+            let points = drag.base_of(lane).points().to_vec();
+            ed.apply_live(&Edit::RestoreLane {
+                note: id,
+                lane,
+                t0,
+                t1,
+                points,
+            });
+        };
+
+        match drag.handle {
+            H::Pitch | H::FinePitch => {
+                restore(self, Lane::Pitch);
+                // Coarse pitch snaps, fine pitch never does — that is
+                // the whole distinction between the two handles. The
+                // row is left alone during the drag and normalized on
+                // release.
+                //
+                // Snapping goes through the temperament rather than
+                // rounding to a semitone, so in a microtonal tuning the
+                // handle lands on the tuning's degrees and not on 12-TET
+                // ones that are not in the scale.
+                let delta = if drag.handle == H::Pitch && snap {
+                    // The note's pitch is its contour's *centre*, not
+                    // its value at the midpoint — that reading carries
+                    // whatever drift and vibrato are passing through,
+                    // and snapping against it lands the note wherever
+                    // the wobble happened to be.
+                    let base = drag.base_row as f64
+                        + blob::decompose(
+                            drag.base_of(Lane::Pitch),
+                            t0,
+                            t1,
+                            edit::DEFAULT_SAMPLES,
+                            self.doc.time_base.units_per_second(self.bpm),
+                            Lane::Pitch.default_value(),
+                        )
+                        .center;
+                    self.tuning.snap(base + amount).pitch - base
+                } else {
+                    amount
+                };
+                self.apply_live(&Edit::ShiftLane {
+                    note: id,
+                    lane: Lane::Pitch,
+                    t0,
+                    t1,
+                    delta,
+                })
+            }
+            H::LeftSlope | H::RightSlope => {
+                restore(self, Lane::Pitch);
+                self.apply_live(&Edit::TiltLane {
+                    note: id,
+                    lane: Lane::Pitch,
+                    t0,
+                    t1,
+                    amount,
+                    from_start: drag.handle == H::LeftSlope,
+                })
+            }
+            H::Formant | H::Amplitude => {
+                let lane = if drag.handle == H::Formant {
+                    Lane::Timbre
+                } else {
+                    Lane::Pressure
+                };
+                // A level, so it reads off the captured value at the
+                // scope's midpoint rather than restoring and shifting.
+                let mid = (t0 + t1) * 0.5;
+                let base = drag.base_of(lane).sample(mid, lane.default_value());
+                self.apply_live(&Edit::SetLaneLevel {
+                    note: id,
+                    lane,
+                    t0,
+                    t1,
+                    value: base + amount,
+                })
+            }
+            H::Vibrato => {
+                restore(self, Lane::Pitch);
+                // 1.0 is as sung; 0 is robotic; above 1 exaggerates.
+                // Drift is held at full so the vibrato handle changes
+                // only the vibrato, which is what it says it does.
+                self.apply_live(&Edit::ReblendPitch {
+                    note: id,
+                    t0,
+                    t1,
+                    drift_amount: 1.0,
+                    modulation_amount: (1.0 + amount).max(0.0),
+                })
+            }
+        }
+    }
+
+    /// Finish a handle drag.
+    ///
+    /// Folds whole semitones back into the row, restoring the invariant
+    /// the surface depends on. Only the pitch handles can break it, so
+    /// only they pay for it.
+    pub fn end_handle_drag(&mut self, drag: &handles::HandleDrag) -> bool {
+        use handles::Handle as H;
+        if !matches!(drag.handle, H::Pitch | H::FinePitch) {
+            return false;
+        }
+        self.apply_live(&Edit::NormalizeRow {
+            notes: vec![drag.note],
+        })
     }
 
     /// Apply an edit through the undo stack.

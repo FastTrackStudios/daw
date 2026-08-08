@@ -3032,3 +3032,362 @@ fn a_pushed_track_starts_with_an_empty_history_of_its_own() {
     assert!(!ed.can_undo());
     assert!(!ed.can_redo());
 }
+
+// ── note handles and the temporary note ──────────────────────────────
+
+use expression_editor_core::handles::{self, Handle, HandleDrag, Scope};
+
+/// One note with a scoop in and a vibrato — enough shape that a handle
+/// which flattens the contour is distinguishable from one that moves it.
+fn handle_editor() -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let mut n = Note::new(NoteId(1), 0.0, PPQ * 4.0, 60);
+    // The note is 4 quarters = 2 s at 120 bpm. Ten cycles across it is
+    // 5 Hz, which is real vibrato; anything under the 3 Hz cutoff would
+    // be classified as drift and the vibrato handle would not see it.
+    for k in 0..256 {
+        let f = k as f64 / 255.0;
+        let t = n.start + (n.end - n.start) * f;
+        let scoop = -1.5 * (1.0 - (f / 0.15_f64).min(1.0)).powi(3);
+        let vib = 0.25 * (f * core::f64::consts::TAU * 10.0).sin();
+        n.pitch.set(t, scoop + vib);
+    }
+    doc.push(n);
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
+    ed.snap_pitch = false;
+    ed
+}
+
+fn sounding(ed: &Editor, t: f64) -> f64 {
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    n.row as f64 + n.pitch.sample(t, 0.0)
+}
+
+fn center_of(ed: &Editor) -> f64 {
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    n.row as f64
+        + expression_editor_core::blob::decompose(
+            &n.pitch,
+            n.start,
+            n.end,
+            128,
+            ed.doc.time_base.units_per_second(ed.bpm),
+            0.0,
+        )
+        .center
+}
+
+fn drag_to(ed: &mut Editor, handle: Handle, scope: Scope, dy: f64) -> HandleDrag {
+    let note = ed.doc.note(NoteId(1)).unwrap().clone();
+    let mut d = HandleDrag::begin(handle, &note, scope, 250.0);
+    ed.begin_gesture();
+    ed.drag_handle(&mut d, 250.0 - dy, ed.snap_pitch);
+    d
+}
+
+#[test]
+fn the_pitch_handle_moves_the_contour_without_flattening_it() {
+    let mut ed = handle_editor();
+    let before_scoop = sounding(&ed, 0.0) - center_of(&ed);
+    let before_center = center_of(&ed);
+
+    // Drag up a fifth of the viewport: 24 semitones of range.
+    let mut d = drag_to(&mut ed, Handle::Pitch, Scope::Note, 100.0);
+    ed.end_handle_drag(&d);
+    d.applied = 0.0;
+
+    let after_center = center_of(&ed);
+    assert!(
+        after_center > before_center + 3.0,
+        "the note moved: {before_center} -> {after_center}"
+    );
+    let after_scoop = sounding(&ed, 0.0) - after_center;
+    assert!(
+        (after_scoop - before_scoop).abs() < 0.05,
+        "the scoop travelled with it rather than being flattened: \
+         {before_scoop} -> {after_scoop}"
+    );
+}
+
+#[test]
+fn a_pitch_drag_leaves_the_row_as_the_rounded_centre() {
+    let mut ed = handle_editor();
+    let d = drag_to(&mut ed, Handle::Pitch, Scope::Note, 100.0);
+    ed.end_handle_drag(&d);
+
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let center_offset = expression_editor_core::blob::decompose(
+        &n.pitch,
+        n.start,
+        n.end,
+        128,
+        ed.doc.time_base.units_per_second(ed.bpm),
+        0.0,
+    )
+    .center;
+    assert!(
+        center_offset.abs() <= 0.5 + 1e-9,
+        "the whole semitones went into the row; the curve keeps only the \
+         remainder, got {center_offset}"
+    );
+}
+
+#[test]
+fn coarse_pitch_snaps_and_fine_pitch_does_not() {
+    let mut ed = handle_editor();
+    ed.snap_pitch = true;
+    let d = drag_to(&mut ed, Handle::Pitch, Scope::Note, 37.0);
+    ed.end_handle_drag(&d);
+    let snapped = center_of(&ed);
+    assert!(
+        (snapped - snapped.round()).abs() < 0.01,
+        "coarse pitch lands on a tuning degree, got {snapped}"
+    );
+
+    // The fine handle has to be able to sit between them.
+    let mut ed = handle_editor();
+    let d = drag_to(&mut ed, Handle::FinePitch, Scope::Note, 37.0);
+    ed.end_handle_drag(&d);
+    let fine = center_of(&ed);
+    assert!(
+        (fine - fine.round()).abs() > 0.01,
+        "fine pitch is cents-resolution, got {fine}"
+    );
+}
+
+#[test]
+fn a_handle_drag_never_compounds_across_moves() {
+    let mut ed = handle_editor();
+    let note = ed.doc.note(NoteId(1)).unwrap().clone();
+    let mut d = HandleDrag::begin(Handle::FinePitch, &note, Scope::Note, 250.0);
+    ed.begin_gesture();
+
+    // Walk the pointer down in steps and back to where it started. A
+    // drag that applied deltas instead of rebuilding from the snapshot
+    // would have drifted badly by now.
+    let before = center_of(&ed);
+    for step in 1..=10 {
+        ed.drag_handle(&mut d, 250.0 - step as f64 * 5.0, false);
+    }
+    for step in (0..10).rev() {
+        ed.drag_handle(&mut d, 250.0 - step as f64 * 5.0, false);
+    }
+    ed.drag_handle(&mut d, 250.0, false);
+
+    let after = center_of(&ed);
+    assert!(
+        (after - before).abs() < 1e-6,
+        "back where it started: {before} -> {after}"
+    );
+}
+
+#[test]
+fn the_slope_handles_hinge_on_the_far_end() {
+    let mut ed = handle_editor();
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let (start, end) = (n.start, n.end);
+    let before_end = sounding(&ed, end);
+    let before_start = sounding(&ed, start);
+
+    drag_to(&mut ed, Handle::LeftSlope, Scope::Note, 60.0);
+
+    assert!(
+        (sounding(&ed, end) - before_end).abs() < 0.01,
+        "the far end is the hinge and must not move"
+    );
+    assert!(
+        sounding(&ed, start) > before_start + 0.5,
+        "and the near end tilted up: {before_start} -> {}",
+        sounding(&ed, start)
+    );
+}
+
+#[test]
+fn the_right_slope_hinges_on_the_start() {
+    let mut ed = handle_editor();
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let (start, end) = (n.start, n.end);
+    let before_start = sounding(&ed, start);
+    let before_end_r = sounding(&ed, end);
+
+    drag_to(&mut ed, Handle::RightSlope, Scope::Note, 60.0);
+
+    assert!((sounding(&ed, start) - before_start).abs() < 0.01);
+    assert!(sounding(&ed, end) > before_end_r + 0.5);
+}
+
+#[test]
+fn the_vibrato_handle_changes_depth_and_leaves_the_centre() {
+    let mut ed = handle_editor();
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let (start, end) = (n.start, n.end);
+    let before_center = center_of(&ed);
+    let before_depth = expression_editor_core::blob::decompose(
+        &ed.doc.note(NoteId(1)).unwrap().pitch,
+        start,
+        end,
+        128,
+        ed.doc.time_base.units_per_second(ed.bpm),
+        0.0,
+    )
+    .modulation_depth();
+
+    // Drag down: flatten the vibrato toward robotic.
+    drag_to(&mut ed, Handle::Vibrato, Scope::Note, -120.0);
+
+    let after_depth = expression_editor_core::blob::decompose(
+        &ed.doc.note(NoteId(1)).unwrap().pitch,
+        start,
+        end,
+        128,
+        ed.doc.time_base.units_per_second(ed.bpm),
+        0.0,
+    )
+    .modulation_depth();
+    assert!(
+        after_depth < before_depth * 0.8,
+        "vibrato shallowed: {before_depth} -> {after_depth}"
+    );
+    assert!(
+        (center_of(&ed) - before_center).abs() < 0.05,
+        "and the note did not move"
+    );
+}
+
+#[test]
+fn the_trim_handles_set_a_level_rather_than_a_contour() {
+    let mut ed = handle_editor();
+    drag_to(&mut ed, Handle::Amplitude, Scope::Note, 60.0);
+
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let a = n.pressure.sample(n.start + 1.0, Lane::Pressure.default_value());
+    let b = n.pressure.sample(n.end - 1.0, Lane::Pressure.default_value());
+    assert!((a - b).abs() < 1e-6, "flat across the note: {a} vs {b}");
+    assert!(a > Lane::Pressure.default_value());
+}
+
+// ── the temporary note ───────────────────────────────────────────────
+
+#[test]
+fn a_temporary_note_scopes_the_handles_to_a_range() {
+    let mut ed = handle_editor();
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let (start, end) = (n.start, n.end);
+    let quarter = start + (end - start) * 0.25;
+    let half = start + (end - start) * 0.5;
+    let before_late = sounding(&ed, end - 1.0);
+
+    assert!(ed.set_temp_note(NoteId(1), quarter, half));
+    assert_eq!(
+        ed.scope_for(NoteId(1)),
+        Scope::Range {
+            t0: quarter,
+            t1: half
+        }
+    );
+
+    let scope = ed.scope_for(NoteId(1));
+    drag_to(&mut ed, Handle::FinePitch, scope, 100.0);
+
+    assert!(
+        sounding(&ed, (quarter + half) * 0.5) > before_late,
+        "inside the range moved"
+    );
+    assert!(
+        (sounding(&ed, end - 1.0) - before_late).abs() < 0.05,
+        "and outside it did not"
+    );
+}
+
+#[test]
+fn drawing_a_new_range_discards_the_previous_one() {
+    let mut ed = handle_editor();
+    assert!(ed.set_temp_note(NoteId(1), 0.0, PPQ));
+    assert!(ed.set_temp_note(NoteId(1), PPQ * 2.0, PPQ * 3.0));
+    assert_eq!(
+        ed.temp_note,
+        Some((NoteId(1), PPQ * 2.0, PPQ * 3.0)),
+        "there is only ever one temporary note"
+    );
+    ed.clear_temp_note();
+    assert_eq!(ed.scope_for(NoteId(1)), Scope::Note);
+}
+
+#[test]
+fn a_temporary_note_is_clipped_to_its_note_and_a_stray_click_is_refused() {
+    let mut ed = handle_editor();
+    // Past both edges: clipped, not rejected.
+    assert!(ed.set_temp_note(NoteId(1), -PPQ, PPQ * 99.0));
+    assert_eq!(ed.temp_note, Some((NoteId(1), 0.0, PPQ * 4.0)));
+
+    // Too narrow to see: refused, so no invisible scope is left armed.
+    ed.clear_temp_note();
+    assert!(!ed.set_temp_note(NoteId(1), PPQ, PPQ + 0.001));
+    assert_eq!(ed.temp_note, None);
+}
+
+#[test]
+fn a_temporary_note_belongs_to_one_note_only() {
+    let mut ed = handle_editor();
+    ed.doc.push(Note::new(NoteId(2), PPQ * 5.0, PPQ * 6.0, 62));
+    ed.set_temp_note(NoteId(1), 0.0, PPQ);
+
+    assert!(matches!(ed.scope_for(NoteId(1)), Scope::Range { .. }));
+    assert_eq!(
+        ed.scope_for(NoteId(2)),
+        Scope::Note,
+        "another note is unaffected by a range open on this one"
+    );
+}
+
+// ── layout ───────────────────────────────────────────────────────────
+
+#[test]
+fn a_wide_note_carries_all_seven_handles() {
+    let rects = handles::layout(100.0, 200.0, 200.0, 20.0);
+    assert_eq!(rects.len(), 7);
+    for h in Handle::ALL {
+        assert!(rects.iter().any(|r| r.handle == h), "{h:?} is laid out");
+    }
+    // The strips sit above and below rather than on the body, so the
+    // body stays one large target.
+    let body = rects.iter().find(|r| r.handle == Handle::Pitch).unwrap();
+    let fine = rects.iter().find(|r| r.handle == Handle::FinePitch).unwrap();
+    assert!(fine.y + fine.h <= body.y + 1e-9);
+}
+
+#[test]
+fn a_narrow_note_drops_handles_rather_than_shrinking_them() {
+    // Six three-pixel targets on a 32nd note is worse than none.
+    let mid = handles::layout(0.0, 0.0, 30.0, 20.0);
+    assert_eq!(mid.len(), 3);
+    assert!(mid.iter().any(|r| r.handle == Handle::FinePitch));
+    assert!(mid.iter().any(|r| r.handle == Handle::Amplitude));
+    assert!(!mid.iter().any(|r| r.handle == Handle::Vibrato));
+
+    let tiny = handles::layout(0.0, 0.0, 10.0, 20.0);
+    assert_eq!(tiny.len(), 1, "the body handle always survives");
+    assert_eq!(tiny[0].handle, Handle::Pitch);
+}
+
+#[test]
+fn a_strip_handle_outranks_the_body_it_overlaps() {
+    let rects = handles::layout(100.0, 200.0, 200.0, 20.0);
+    // In the band above the note: fine pitch, not the body behind it.
+    assert_eq!(
+        handles::hit(&rects, 200.0, 200.0 - handles::STRIP_H * 0.5),
+        Some(Handle::FinePitch)
+    );
+    // In the body: the body.
+    assert_eq!(handles::hit(&rects, 200.0, 210.0), Some(Handle::Pitch));
+    // The corners are where the manual puts them.
+    assert_eq!(
+        handles::hit(&rects, 110.0, 200.0 - 2.0),
+        Some(Handle::LeftSlope)
+    );
+    assert_eq!(
+        handles::hit(&rects, 290.0, 220.0 + 2.0),
+        Some(Handle::Vibrato)
+    );
+    assert_eq!(handles::hit(&rects, 500.0, 500.0), None);
+}

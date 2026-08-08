@@ -290,3 +290,25 @@ async fn shoot_multitool() {
     mt.steep = expression_editor_core::Steepness(1.4);
     shoot_full(ed, None, Some(mt), "30-multitool").await;
 }
+
+/// The seven note handles, and the temporary note scoping them.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_note_handles() {
+    use expression_editor_core::Mode;
+
+    let vp = Viewport::new(W as f64, CANVAS_H);
+
+    // Audio mode is the Melodyne surface: handles on the selection.
+    let mut ed = demo::editor(Scene::Held, vp);
+    ed.set_mode(Mode::Audio);
+    ed.selection.notes = ed.doc.notes.iter().map(|n| n.id).collect();
+    shoot(ed.clone(), "32-note-handles").await;
+
+    // A temporary note shades the range the handles now address.
+    if let Some(n) = ed.doc.notes.first().cloned() {
+        let a = n.start + (n.end - n.start) * 0.25;
+        let b = n.start + (n.end - n.start) * 0.7;
+        assert!(ed.set_temp_note(n.id, a, b), "the range must open");
+    }
+    shoot(ed, "33-temporary-note").await;
+}

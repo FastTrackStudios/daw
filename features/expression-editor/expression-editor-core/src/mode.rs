@@ -84,6 +84,16 @@ impl Mode {
         matches!(self, Mode::Audio | Mode::Mpe | Mode::Vocals)
     }
 
+    /// Whether the note carries the seven drag handles.
+    ///
+    /// They edit a *contour* — pitch centre, its slopes, its vibrato
+    /// depth, plus formant and gain trims. A plain MIDI or drum note
+    /// has none of that, so the handles would be six inert targets
+    /// cluttering every note.
+    pub fn has_handles(&self) -> bool {
+        matches!(self, Mode::Audio | Mode::Vocals)
+    }
+
     /// Whether microtonal tuning targets are worth showing.
     pub fn has_tuning(&self) -> bool {
         !matches!(self, Mode::Drums)

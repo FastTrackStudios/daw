@@ -6,6 +6,7 @@
 //! body about events rather than arithmetic.
 
 use expression_editor_core::doc::{Lane, Note, NoteId};
+use expression_editor_core::handles;
 use expression_editor_core::tools;
 use expression_editor_core::{Editor, RefColor};
 
@@ -100,6 +101,55 @@ pub struct NoteRect {
     pub head: Option<String>,
     /// Joined to the next note on its row.
     pub legato: bool,
+}
+
+/// The handle set for one note, positioned.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NoteHandles {
+    pub id: NoteId,
+    pub rects: Vec<handles::HandleRect>,
+    /// The temporary-note range in pixels, when one is open here.
+    pub scope: Option<(f64, f64)>,
+}
+
+/// Handles for the notes that should carry them.
+///
+/// Only the selected notes, and only in a mode whose notes have a
+/// contour to shape. Handles on every note at once is a wall of
+/// targets — Vovious draws them on what you are working on.
+pub fn note_handles(ed: &Editor) -> Vec<NoteHandles> {
+    if !ed.mode.has_handles() {
+        return Vec::new();
+    }
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let h = ed.camera.px_per_semitone;
+    ed.doc
+        .notes
+        .iter()
+        .filter(|n| n.end >= t0 && n.start <= t1)
+        .filter(|n| ed.selection.notes.contains(&n.id))
+        .map(|n| {
+            let raw_x = ed.camera.x(n.start);
+            let raw_end = ed.camera.x(n.end);
+            // Lay the handles out over the note's *visible* extent, not
+            // its true one. A note longer than the viewport — routine
+            // for a held vocal at working zoom — would otherwise put
+            // its right-hand handles off-screen and leave three of the
+            // seven unreachable until you scrolled.
+            let x = raw_x.max(0.0);
+            let w = (raw_end.min(ed.viewport.w) - x).max(2.0);
+            let y = ed.camera.y(n.row as f64 + 0.5, ed.viewport);
+            let scope = match ed.scope_for(n.id) {
+                handles::Scope::Range { t0, t1 } => Some((ed.camera.x(t0), ed.camera.x(t1))),
+                handles::Scope::Note => None,
+            };
+            NoteHandles {
+                id: n.id,
+                rects: handles::layout(x, y, w, h),
+                scope,
+            }
+        })
+        .collect()
 }
 
 /// A note belonging to another track, drawn behind the active one.

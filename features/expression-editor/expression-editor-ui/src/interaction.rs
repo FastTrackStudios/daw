@@ -6,6 +6,7 @@
 
 use expression_editor_core::doc::{Lane, NoteId, Point, Target};
 use expression_editor_core::edit::Edit;
+use expression_editor_core::handles::{self, Handle};
 use expression_editor_core::menu::Command;
 use expression_editor_core::mouse::{Action, Context, Gesture};
 use expression_editor_core::razor::RazorArea;
@@ -139,6 +140,15 @@ pub enum Drag {
         pivot: f64,
         origin_y: f64,
     },
+    /// One of the seven note handles.
+    Handle(Box<handles::HandleDrag>),
+    /// Dragging out a temporary note: a range inside one note that the
+    /// handles will then address.
+    TempNote {
+        note: NoteId,
+        origin_t: f64,
+        current_t: f64,
+    },
     /// Not a drag at all — the signal that the surface should open a
     /// context menu here. It rides `Drag` because that is already the
     /// one value `pointer_down` hands back to the component, and a
@@ -255,6 +265,16 @@ pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) ->
         1 => Gesture::MiddleClick,
         _ => Gesture::Drag,
     };
+
+    // The note handles sit in front of everything, because they are
+    // drawn in front of everything: a press that visibly lands on a
+    // handle must not fall through to the note or the roll behind it.
+    // Right-click is the exception the manual calls out — on the
+    // amplitude handle it mutes rather than dragging.
+    if let Some(drag) = handle_press(ed, x, y, mods, gesture) {
+        return drag;
+    }
+
     let context = context_at(ed, x, y);
     let action = ed.mouse.resolve(context, gesture, mods);
     if action != Action::None {
@@ -538,6 +558,54 @@ fn run_action(
             None
         }
     }
+}
+
+/// Resolve a press against the note handles.
+///
+/// Returns `None` when the press was not on a handle, so the caller
+/// falls through to the ordinary map-driven path.
+fn handle_press(ed: &mut Editor, x: f64, y: f64, mods: Mods, gesture: Gesture) -> Option<Drag> {
+    if !ed.mode.has_handles() {
+        return None;
+    }
+    let sets = crate::canvas::note_handles(ed);
+    let (id, handle) = sets
+        .iter()
+        .find_map(|s| handles::hit(&s.rects, x, y).map(|h| (s.id, h)))?;
+
+    // A horizontal drag across the *body* draws a temporary note rather
+    // than moving pitch: the range gesture has to start somewhere, and
+    // the body is the only handle wide enough to sweep across.
+    // Committing to it on the first horizontal movement is what keeps a
+    // plain vertical pitch drag from being stolen.
+    if handle == Handle::Pitch && mods.alt {
+        let t = ed.camera.t_at(x);
+        return Some(Drag::TempNote {
+            note: id,
+            origin_t: t,
+            current_t: t,
+        });
+    }
+
+    // Right-click on the amplitude handle mutes, exactly as the manual
+    // has it, and opens no drag.
+    if gesture == Gesture::RightClick {
+        if handle == Handle::Amplitude {
+            ed.begin_gesture();
+            ed.apply(&Edit::ToggleMuted { notes: vec![id] });
+            return Some(Drag::None);
+        }
+        return None;
+    }
+
+    let note = ed.doc.note(id)?;
+    let scope = ed.scope_for(id);
+    if !scope.is_valid(note) {
+        return None;
+    }
+    let drag = handles::HandleDrag::begin(handle, note, scope, y);
+    ed.begin_gesture();
+    Some(Drag::Handle(Box::new(drag)))
 }
 
 /// The mean value a controller holds over `[t0, t1]`.
@@ -1106,6 +1174,22 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             }
         }
         Drag::Paint { .. } => paint_at(ed, drag, x, y),
+        Drag::Handle(h) => {
+            // Shift reverses the pitch snap, as everywhere else here.
+            let snap = ed.snap_pitch != mods.shift;
+            ed.drag_handle(h, y, snap);
+        }
+        Drag::TempNote {
+            note,
+            origin_t,
+            current_t,
+        } => {
+            *current_t = ed.camera.t_at(x);
+            let (n, t0, t1) = (*note, *origin_t, *current_t);
+            // Live, so the shaded range follows the pointer rather than
+            // appearing on release.
+            ed.set_temp_note(n, t0, t1);
+        }
         Drag::CcPen { .. } => cc_draw(ed, drag, x, y),
         Drag::CcLine {
             number,
@@ -1224,6 +1308,24 @@ pub fn pointer_up(ed: &mut Editor, drag: Drag, x: f64, y: f64, mods: Mods) -> Dr
         // both stay live so the shape buttons restyle the stroke that
         // was just drawn.
         live @ (Drag::Curve { .. } | Drag::CcLine { .. }) => live,
+        Drag::Handle(h) => {
+            // Fold whole semitones back into the row, restoring the
+            // invariant the pitch drag was allowed to break while it ran.
+            ed.end_handle_drag(&h);
+            Drag::None
+        }
+        Drag::TempNote {
+            note,
+            origin_t,
+            current_t,
+        } => {
+            // A range too small to see is a click, not a selection, and
+            // leaves no scope armed on the note.
+            if !ed.set_temp_note(note, origin_t, current_t) {
+                ed.clear_temp_note();
+            }
+            Drag::None
+        }
         Drag::RazorCreate { origin, current } => {
             let t0 = ed.camera.t_at(origin.0);
             let t1 = ed.camera.t_at(current.0);
