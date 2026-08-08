@@ -2744,6 +2744,10 @@ pub fn TransportButton(props: TransportProps) -> Element {
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             defs {
+                linearGradient { id: "trcycleedge", x1: "0", y1: "0", x2: "1", y2: "0",
+                    stop { offset: "0", stop_color: "#000000", stop_opacity: "0.15" }
+                    stop { offset: "0.62", stop_color: "#000000", stop_opacity: "0" }
+                }
                 linearGradient { id: "trcycle", x1: "0", y1: "0", x2: "0", y2: "1",
                     // 34 at the top, up to 40 by a fifth of the way down,
                     // back to 34 by four fifths and 29 at the foot.
@@ -2784,9 +2788,24 @@ pub fn TransportButton(props: TransportProps) -> Element {
                 // Its three cells are also identical — the plate never
                 // lifts and the glyph never changes — so `at` does not
                 // reach it.
-                rect {
-                    x: "0", y: "0", width: "{vw}", height: "{vh}",
+                // Rounded on the left, square on the right: this is the
+                // *cap* of the pill, and the readout well continues it.
+                // Drawn as a plain rect it had no left edge at all — the
+                // one thing that tells you where the pill begins.
+                path {
+                    d: "M 4.2 0 H {vw} V {vh} H 4.2
+                        A 4.2 4.2 0 0 1 0 {vh - 4.2} V 4.2
+                        A 4.2 4.2 0 0 1 4.2 0 Z",
                     fill: "url(#trcycle)",
+                }
+                // And an inner shadow down that edge: 34 at x0 against 40
+                // four columns in, which is a black wash at 0.15 fading
+                // out by x3.
+                path {
+                    d: "M 4.2 0 H 6 V {vh} H 4.2
+                        A 4.2 4.2 0 0 1 0 {vh - 4.2} V 4.2
+                        A 4.2 4.2 0 0 1 4.2 0 Z",
+                    fill: "url(#trcycleedge)",
                 }
             } else {
                 rect {
