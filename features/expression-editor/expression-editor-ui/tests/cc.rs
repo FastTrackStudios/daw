@@ -283,3 +283,68 @@ fn the_map_owns_the_bindings_so_a_preset_can_disagree() {
         "shift falls back to the unmodified binding"
     );
 }
+
+// ── mode-dependent keys ──────────────────────────────────────────────
+
+use expression_editor_core::doc::Note;
+use expression_editor_core::Mode;
+
+fn two_track_editor(mode: Mode) -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    for i in 0..3 {
+        let mut n = Note::new(
+            expression_editor_core::NoteId(i + 1),
+            PPQ * i as f64,
+            PPQ * (i as f64 + 0.9),
+            60 + i as i32 * 2,
+        );
+        n.channel = Some(2);
+        doc.push(n);
+    }
+    let mut ed = Editor::new(doc, Viewport::new(W, H));
+    ed.set_mode(mode);
+    let other = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let b = ed.add_track("Harmony", other);
+    ed.tracks.track_mut(b).unwrap().reference = true;
+    ed
+}
+
+#[test]
+fn bare_r_brings_references_forward_wherever_mpe_is_not_using_it() {
+    // Audio and vocal notes have no member channel to assign, so the
+    // key is free and takes Vovious's meaning.
+    for mode in [Mode::Audio, Mode::Vocals, Mode::Midi, Mode::Drums, Mode::Guitar] {
+        let mut ed = two_track_editor(mode);
+        let drag = Drag::None;
+        assert!(
+            interaction::key_down(&mut ed, &drag, "r", NONE),
+            "{mode:?} should handle bare R"
+        );
+        assert!(ed.refs_to_front, "{mode:?} should bring references forward");
+    }
+}
+
+#[test]
+fn in_mpe_bare_r_still_reassigns_channels() {
+    let mut ed = two_track_editor(Mode::Mpe);
+    ed.selection.notes = ed.doc.notes.iter().map(|n| n.id).collect();
+    let before: Vec<Option<u8>> = ed.doc.notes.iter().map(|n| n.channel).collect();
+
+    assert!(interaction::key_down(&mut ed, &Drag::None, "r", NONE));
+    assert!(
+        !ed.refs_to_front,
+        "MPE keeps the older binding — the notes need distinct channels"
+    );
+    let after: Vec<Option<u8>> = ed.doc.notes.iter().map(|n| n.channel).collect();
+    assert_ne!(before, after, "channels were actually reassigned");
+}
+
+#[test]
+fn shift_r_reaches_references_from_every_mode_including_mpe() {
+    let mut ed = two_track_editor(Mode::Mpe);
+    assert!(interaction::key_down(&mut ed, &Drag::None, "r", SHIFT));
+    assert!(
+        ed.refs_to_front,
+        "the gesture stays reachable where bare R is spoken for"
+    );
+}

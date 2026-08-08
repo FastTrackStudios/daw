@@ -244,6 +244,15 @@ preview · `Z` vertical auto-zoom · `F` follow cursor · `E` undo menu ·
 `Q` quick help, `O` overview, `0` sidebar · `←`/`→` scroll by page,
 `↑`/`↓` scroll vertically · `Ctrl ±` horizontal zoom, `Alt ±` vertical.
 
+**`R` is mode-dependent**, and deliberately so. Channel reassignment is
+meaningless outside MPE — an audio or vocal note has no member channel —
+so in every other mode bare `R` takes Vovious's meaning and brings
+reference tracks forward. `Shift+R` does that from any mode, so the
+gesture stays reachable in MPE too. This is the general rule for key
+conflicts here: a binding belongs to whichever meaning the current mode
+can actually use, rather than being globally reserved by the mode that
+claimed it first.
+
 ## Status
 
 **Landed:**

@@ -11,7 +11,7 @@ use expression_editor_core::mouse::{Action, Context, Gesture};
 use expression_editor_core::razor::RazorArea;
 use expression_editor_core::tools::{self, Hit, Mods};
 use expression_editor_core::zoom::ZoomModes;
-use expression_editor_core::{Editor, Shape, Tool};
+use expression_editor_core::{Editor, Mode, Shape, Tool};
 
 /// What the pointer is currently doing. `None` between gestures.
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -1502,11 +1502,9 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
         ("x", true, _) => ed.run_command(&Command::Cut, None),
         ("c", true, _) => ed.run_command(&Command::Copy, None),
         ("v", true, _) => ed.run_command(&Command::Paste, None),
-        // Held, not toggled: this is for checking a reference mid-edit,
-        // and a mode you can forget you are in is worse than a held key.
-        //
-        // Shift+R rather than Vovious's bare `R`, which is already
-        // MPE channel reassignment here and is the older binding.
+        // Shift+R always brings references forward, so the gesture is
+        // reachable from every mode including MPE, where bare `R` is
+        // spoken for.
         ("r", false, true) => {
             ed.refs_to_front = true;
             true
@@ -1545,6 +1543,15 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
                 note: id,
                 t: mouse_t,
             })
+        }
+        // Bare `R` belongs to whichever meaning the current mode can
+        // actually use. Channel reassignment is MPE-only — audio and
+        // vocal notes have no member channel to assign — so everywhere
+        // else the key is free, and goes to Vovious's meaning:
+        // bring references forward, held rather than toggled.
+        ("r", false, _) if ed.mode != Mode::Mpe => {
+            ed.refs_to_front = true;
+            true
         }
         ("r", false, _) => {
             let notes = ed.selection.notes.clone();
