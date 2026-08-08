@@ -86,11 +86,27 @@ pub mod admin {
                 (name, email)
             }
 
-            // Precise path: valid session for THIS org + real membership
-            // rows. A foreign/absent token just falls through (no error).
-            if !token.is_empty()
-                && let Ok(bundle) = self.current_session(CurrentSession { token }).await
-                    && let Some(org_id) = bundle.session.active_organization_id {
+            // A VALID SESSION FOR THIS ORG IS REQUIRED.
+            //
+            // This method is reachable without a session on any lane that
+            // treats `AuthService` as public (Task's org lane does, so the
+            // sign-in path stays usable). The enumerate-everything
+            // fallback below therefore used to answer ANONYMOUS callers:
+            // every user's name, email and id, for every org, over the
+            // internet, even with permission enforcement on. Verified on
+            // production 2026-08-08 with a CLI holding no credentials.
+            //
+            // The fallback itself is still right for its actual purpose —
+            // an org whose users predate membership rows — so it is kept,
+            // but now only behind a session that validates HERE. A
+            // foreign token doesn't (each org has its own auth store), so
+            // this also stops one org's members being read with another
+            // org's session.
+            let Ok(bundle) = self.current_session(CurrentSession { token }).await else {
+                return Err(AuthFlowError::PermissionDenied);
+            };
+            // Precise path: valid session for THIS org + real membership rows.
+            if let Some(org_id) = bundle.session.active_organization_id {
                         let members = self.storage.list_members_by_organization(org_id).await?;
                         if !members.is_empty() {
                             let mut out = Vec::with_capacity(members.len());
@@ -114,8 +130,9 @@ pub mod admin {
                         }
                     }
 
-            // Default: enumerate the org store's users (no membership
-            // rows, or no valid session for this org).
+            // Fallback: a validated session, but this org keeps no
+            // membership rows — enumerate its users. Anonymous callers
+            // never reach here.
             let (users, _total) = self.storage.list_users(0, 1000).await?;
             let out = users
                 .into_iter()
