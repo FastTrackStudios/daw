@@ -1362,21 +1362,34 @@ pub struct FaderCapProps {
 pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
     let t = Theme::default();
     let (vw, vh) = (27.0f32, 53.0f32);
-    // Six ridges per half, matching the source. Deriving the count from
-    // height would thin them at one size and crowd them at another, which
-    // is exactly what drawing this as vector is meant to stop.
-    const RIBS: usize = 6;
 
-    // The grip is light grey plastic in the original, and only REAPER's
-    // colour variants tint it. Painting the panel with the theme accent by
-    // default, as this first did, turned every fader into a coloured slab
-    // and lost the ribbed-plastic read entirely.
-    let grip = props.accent.unwrap_or(t.chrome.hardware_mark.shade(0.22));
-    let body = t.chrome.hardware.shade(-0.25);
+    // Traced off `mcp_volthumb`, row by row down the centre column:
+    //
+    //     y5      #0e0e0e   top border
+    //     y6-7    #696969   bevel, catching the light
+    //     y8-12   #414141   body above the grip
+    //     y13-39  ribs, alternating light and dark every row and
+    //             brightening downward from #9d/#50 to #d9/#64
+    //     y40-46  #2b2b2b   body below
+    //     y47     #0b0b0b   bottom border
+    //     y48-52  a soft drop shadow, fading to nothing
+    //
+    // The previous version drew two floating ribbed blocks with no body,
+    // no border and no bevel — the cap read as a pair of grilles rather
+    // than a moulded thumb, because those three are most of what makes it
+    // look like an object at all.
+    let grip = props.accent.unwrap_or(t.chrome.hardware_mark);
+    let body = t.chrome.hardware;
+    let edge = t.chrome.hardware_edge.shade(-0.35);
 
-    let (px, pw) = (vw * 0.26, vw * 0.48);
-    // Two halves either side of a dark seam across the middle.
-    let halves = [(vh * 0.14, vh * 0.34), (vh * 0.52, vh * 0.34)];
+    // Fractions of the cell, all measured.
+    let (x0, x1) = (vw * 2.0 / 27.0, vw * 21.0 / 27.0);
+    let (top, bot) = (vh * 5.0 / 53.0, vh * 48.0 / 53.0);
+    let (gx0, gw) = (vw * 7.0 / 27.0, vw * 11.0 / 27.0);
+    let (gy0, gy1) = (vh * 13.0 / 53.0, vh * 40.0 / 53.0);
+    // One rib per row of the source, so the pitch is the pixel grid — the
+    // detail this is here to preserve.
+    const RIBS: usize = 14;
 
     rsx! {
         svg {
@@ -1386,46 +1399,64 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
             xmlns: "http://www.w3.org/2000/svg",
             defs {
                 linearGradient { id: "capbody", x1: "0", y1: "0", x2: "0", y2: "1",
-                    stop { offset: "0", stop_color: "{body.shade(0.25).css()}" }
-                    stop { offset: "0.5", stop_color: "{body.css()}" }
-                    stop { offset: "1", stop_color: "{body.shade(-0.35).css()}" }
+                    stop { offset: "0", stop_color: "{body.shade(0.06).css()}" }
+                    stop { offset: "0.65", stop_color: "{body.shade(-0.02).css()}" }
+                    stop { offset: "1", stop_color: "{body.shade(-0.32).css()}" }
                 }
-                linearGradient { id: "capgrip", x1: "0", y1: "0", x2: "1", y2: "0",
-                    stop { offset: "0", stop_color: "{grip.shade(-0.18).css()}" }
-                    stop { offset: "0.35", stop_color: "{grip.shade(0.12).css()}" }
-                    stop { offset: "1", stop_color: "{grip.shade(-0.25).css()}" }
-                }
+            }
+            // The shadow it casts, below the body.
+            rect {
+                x: "{x0 + 1.0}", y: "{bot - 1.0}",
+                width: "{x1 - x0 - 2.0}", height: "{vh - bot + 3.0}",
+                rx: "{vw * 0.1}",
+                fill: "#000000", fill_opacity: "0.20",
+            }
+            // Body, with a one-pixel border drawn as fill beneath it so
+            // the face cannot bleed past the frame.
+            rect {
+                x: "{x0}", y: "{top}",
+                width: "{x1 - x0}", height: "{bot - top}",
+                rx: "{vw * 0.16}",
+                fill: "{edge.css()}",
             }
             rect {
-                x: "{vw * 0.07}", y: "{vh * 0.03}",
-                width: "{vw * 0.86}", height: "{vh * 0.94}",
-                rx: "{vw * 0.26}",
+                x: "{x0 + 1.0}", y: "{top + 1.0}",
+                width: "{x1 - x0 - 2.0}", height: "{bot - top - 2.0}",
+                rx: "{vw * 0.13}",
                 fill: "url(#capbody)",
-                stroke: "{t.chrome.surface_deep().css()}",
-                stroke_width: "{vw * 0.06}",
             }
-            for (i, (y, h)) in halves.iter().enumerate() {
-                rect {
-                    key: "h{i}",
-                    x: "{px}", y: "{y}", width: "{pw}", height: "{h}",
-                    rx: "{vw * 0.09}",
-                    fill: "url(#capgrip)",
-                }
+            // The lit bevel across the top — two rows, the brighter above.
+            rect {
+                x: "{x0 + 2.0}", y: "{top + 1.0}",
+                width: "{x1 - x0 - 4.0}", height: "1.0",
+                fill: "{body.shade(0.28).css()}",
             }
-            // The ridges: dark lines cut across each grip half.
-            for (hi, (y, h)) in halves.iter().enumerate() {
-                for i in 0..RIBS {
-                    {
-                        let step = h / RIBS as f32;
-                        rsx! {
-                            rect {
-                                key: "{hi}-{i}",
-                                x: "{px + vw * 0.03}",
-                                y: "{y + step * (i as f32 + 0.5)}",
-                                width: "{pw - vw * 0.06}",
-                                height: "{vh * 0.018}",
-                                fill: "{grip.shade(-0.55).css()}",
-                            }
+            rect {
+                x: "{x0 + 2.0}", y: "{top + 2.0}",
+                width: "{x1 - x0 - 4.0}", height: "1.0",
+                fill: "{body.shade(0.16).css()}",
+            }
+            // The grip: one rib per source row, alternating and
+            // brightening downward.
+            for i in 0..RIBS {
+                {
+                    let step = (gy1 - gy0) / RIBS as f32;
+                    let y = gy0 + step * i as f32;
+                    let down = i as f32 / (RIBS - 1) as f32;
+                    let lit = grip.shade(-0.02 + 0.30 * down);
+                    let dark = grip.shade(-0.52 + 0.10 * down);
+                    rsx! {
+                        rect {
+                            key: "l{i}",
+                            x: "{gx0}", y: "{y}",
+                            width: "{gw}", height: "{step * 0.5}",
+                            fill: "{lit.css()}",
+                        }
+                        rect {
+                            key: "d{i}",
+                            x: "{gx0}", y: "{y + step * 0.5}",
+                            width: "{gw}", height: "{step * 0.5}",
+                            fill: "{dark.css()}",
                         }
                     }
                 }
@@ -1859,12 +1890,21 @@ mod tests {
                 height: None,
             },
         );
-        // The grip is a gradient of shaded variants, so the accent never
-        // appears verbatim — asserting on its exact hex only passed while
-        // the panel was a flat fill, and would fail any shading change
-        // without anything actually being wrong.
-        assert!(svg.contains(&green.shade(0.12).to_hex()), "{svg}");
-        assert!(svg.contains(&green.shade(-0.55).to_hex()), "ribs: {svg}");
+        // The grip is fourteen ribs of shaded variants, so the accent
+        // never appears verbatim — asserting on its exact hex only passed
+        // while the panel was a flat fill, and pinning any *particular*
+        // shade just re-broke every time the ramp was retuned. What the
+        // caller actually promises is that the accent reaches the grip
+        // and nothing else, so check the hue instead of the value.
+        let ribs = svg.matches("<rect").count();
+        assert!(ribs > 20, "expected a rib per row, got {ribs} rects");
+        let greenish = svg
+            .match_indices("fill=\"#")
+            .filter_map(|(i, _)| svg.get(i + 7..i + 13))
+            .filter_map(|h| Color::hex(&format!("#{h}")))
+            .filter(|c| c.g > c.r && c.g > c.b)
+            .count();
+        assert!(greenish > 10, "the accent did not reach the grip");
 
         let plain = render_svg(
             VolumeFaderCap,
