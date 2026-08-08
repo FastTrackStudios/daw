@@ -827,18 +827,16 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     let (cx, cy, outer, hole) = if props.housing {
         (vw * 0.486, vh * 0.521, unit * 0.3125, unit * 0.1458)
     } else {
-        // Outer exactly 0.40 — radius 8 of 20, which lands the edge on
-        // the pixel boundary at x=2 and x=18 and keeps it crisp. At 0.41
-        // it falls at 8.2, mid-pixel, and the whole rim antialiases into
-        // a dim blur that reads as a square with soft corners rather than
-        // a circle.
+        // Read off the coverage rather than guessed at from a threshold.
+        // Down the widest row the alpha runs 103, 255 ... 255, 102: the
+        // outer edge is 40% into the pixel at x=2, so it stands at 2.60
+        // and the radius is 7.40, not the 8 that a "first lit column"
+        // reading gives. Likewise the hole's rim reads 96 at x=6, putting
+        // its boundary at 6.62 and its radius at 3.38.
         //
-        // The hole is radius 4, not 3. Reading it off a thresholded
-        // silhouette gave 3 — the hole's edge is antialiased, so where
-        // you call its boundary depends on the threshold, and a stricter
-        // one moves it a pixel. Sampled properly both track variants
-        // agree at 6..13 of 20.
-        (vw * 0.5, vh * 0.5, unit * 0.40, unit * 0.20)
+        // Both variants agree on both numbers, which is the check that
+        // they are the shape and not the threshold.
+        (vw * 0.5, vh * 0.5, unit * 0.370, unit * 0.169)
     };
     // The ring is an annulus *path*, not a stroked circle.
     //
@@ -866,10 +864,30 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     } else {
         t.chrome.hardware_mark
     };
+    // The two families ramp completely differently, and the source is the
+    // authority on both. The mixer's housing lifts a little and sinks a
+    // little. The track panel's bare ring does not sink at all — its
+    // pressed cell is the same #a6a6a6 as its normal one — and its hover
+    // goes all the way to #d9d9d9, more than half the way to white, where
+    // the old shared 0.15 lift was invisible at this size. Its `auto` disc
+    // is gentler again (#bfbfbf) and its armed reds gentler still.
     let ring = match props.at {
         Interaction::Normal => ring,
-        Interaction::Hover => ring.shade(0.15),
-        Interaction::Pressed => ring.shade(-0.12),
+        Interaction::Hover if props.housing => ring.shade(0.15),
+        Interaction::Hover if armed => ring.shade(0.06),
+        Interaction::Hover if auto => ring.shade(0.29),
+        Interaction::Hover => ring.shade(0.57),
+        Interaction::Pressed if props.housing => ring.shade(-0.12),
+        Interaction::Pressed => ring,
+    };
+    // Unarmed and unhoused, the source ring is a single flat colour — 104
+    // pixels of exactly #a6a6a6, no gradient anywhere. Only the armed reds
+    // and the moulded mixer ring are lit from above.
+    let flat = !props.housing && !armed;
+    let ring_paint = if flat {
+        ring.css()
+    } else {
+        "url(#recring)".to_string()
     };
     // The hole is not a window onto the surface behind — it is the housing
     // showing through, and in the source both are the same #262626. Filling
@@ -947,19 +965,64 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
             // annulus with a second grey A floating in its hole — two
             // marks where the source has one.
             if auto {
-                circle {
-                    cx: "{cx}", cy: "{cy}", r: "{outer}",
-                    fill: "url(#recring)",
-                }
-                text {
-                    x: "{cx}", y: "{cy}",
-                    text_anchor: "middle", dominant_baseline: "central",
-                    font_family: "Fira Sans, DejaVu Sans, sans-serif",
-                    font_weight: "700", font_size: "{outer * 1.6}",
-                    // The housing colour, so the glyph is a hole through
-                    // the disc rather than ink on top of it.
-                    fill: "{hole_fill.css()}",
-                    "A"
+                if props.housing {
+                    circle {
+                        cx: "{cx}", cy: "{cy}", r: "{outer}",
+                        fill: "{ring_paint}",
+                    }
+                    text {
+                        x: "{cx}", y: "{cy}",
+                        text_anchor: "middle", dominant_baseline: "central",
+                        font_family: "Fira Sans, DejaVu Sans, sans-serif",
+                        font_weight: "700", font_size: "{outer * 1.6}",
+                        // The housing colour, so the glyph is a hole through
+                        // the disc rather than ink on top of it.
+                        fill: "{hole_fill.css()}",
+                        "A"
+                    }
+                } else {
+                    // On the strip there is no housing to show through, so
+                    // the A is a *hole*: fully transparent in the source,
+                    // same as the ring's centre. Painting it any colour
+                    // laid a grey letter on the strip instead of cutting
+                    // one out of the disc, and "paint transparent" does not
+                    // erase — it has to be a mask.
+                    // Drawn, not set. The source's A is far wider for its
+                    // height than any A the font gives — 8 pixels across a
+                    // base 8 tall, with a flat apex two pixels wide — and
+                    // a path does not depend on a font being installed,
+                    // which for art baked at build time matters.
+                    //
+                    // Traced by half-width per row: the outer edge runs
+                    // 1.9 at the top to 4.25 at the base, and the counter
+                    // opens at y10.7 and reaches 2.15, which leaves the
+                    // two-pixel legs the source has.
+                    defs {
+                        mask { id: "recauto",
+                            rect {
+                                x: "0", y: "0", width: "{vw}", height: "{vh}",
+                                fill: "#ffffff",
+                            }
+                            path {
+                                d: "M {cx - outer * 0.257} {cy - outer * 0.730}
+                                    H {cx + outer * 0.257}
+                                    L {cx + outer * 0.574} {cy + outer * 0.419}
+                                    H {cx - outer * 0.574} Z",
+                                fill: "#000000",
+                            }
+                            path {
+                                d: "M {cx} {cy + outer * 0.095}
+                                    L {cx + outer * 0.291} {cy + outer * 0.419}
+                                    H {cx - outer * 0.291} Z",
+                                fill: "#ffffff",
+                            }
+                        }
+                    }
+                    circle {
+                        cx: "{cx}", cy: "{cy}", r: "{outer}",
+                        fill: "{ring_paint}",
+                        mask: "url(#recauto)",
+                    }
                 }
             } else {
                 // Four radial notches when barred, not two crossing lines:
@@ -1011,14 +1074,14 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                     }
                     path {
                         d: "{annulus}",
-                        fill: "url(#recring)",
+                        fill: "{ring_paint}",
                         fill_rule: "evenodd",
                         mask: "url(#{notch_id})",
                     }
                 } else {
                     path {
                         d: "{annulus}",
-                        fill: "url(#recring)",
+                        fill: "{ring_paint}",
                         fill_rule: "evenodd",
                     }
                 }
