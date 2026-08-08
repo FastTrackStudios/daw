@@ -193,12 +193,29 @@ mod tests {
         Ramp::for_chrome(&Theme::default())
     }
 
+    /// A ramp that definitely moves greys.
+    ///
+    /// The default theme currently *is* the source theme's palette, so its
+    /// ramp is near enough the identity on the source's own greys — which
+    /// is the point of holding those values, and which silently turned the
+    /// tests below into assertions that nothing happens. They need a
+    /// palette that differs from the input to test retinting at all.
+    fn contrasting_ramp() -> Ramp {
+        let mut theme = Theme::default();
+        let c = &mut theme.chrome;
+        c.surface = daw_theme::Color::hex("#0d0d11").unwrap();
+        c.surface_raised = daw_theme::Color::hex("#15151c").unwrap();
+        c.surface_sunken = daw_theme::Color::hex("#0a0a0e").unwrap();
+        c.border = daw_theme::Color::hex("#2b2b38").unwrap();
+        Ramp::for_chrome(&theme)
+    }
+
     #[test]
     fn retints_the_mixer_background() {
         // The literal that started this: the mixer strip body, grey in an
         // otherwise fully dark theme.
         let src = "    set mcp_bg_color  theme_version>1 [0 0 0 0 61 61 61] [0 0 0 0 51 51 51]\n";
-        let (out, changes) = retint(src, &ramp());
+        let (out, changes) = retint(src, &contrasting_ramp());
         assert_eq!(changes.len(), 1);
         assert!(!out.contains("61 61 61"), "{out}");
         assert!(!out.contains("51 51 51"), "{out}");
@@ -266,8 +283,8 @@ mod tests {
         // different palette. `retint_file_from` therefore always reads an
         // untouched copy — the same answer `restyle` needs for images.
         let src = "    set mcp_bg_color [0 0 0 0 61 61 61]\n";
-        let (once, _) = retint(src, &ramp());
-        let (twice, _) = retint(&once, &ramp());
+        let (once, _) = retint(src, &contrasting_ramp());
+        let (twice, _) = retint(&once, &contrasting_ramp());
         assert_ne!(once, twice, "if this ever holds, the snapshot is redundant");
     }
 

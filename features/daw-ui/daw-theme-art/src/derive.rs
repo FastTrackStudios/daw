@@ -167,6 +167,39 @@ fn detect_strip(img: &RgbaImage) -> Option<(u32, u32, u32)> {
     None
 }
 
+/// Split `width` into `n` equal cells, placed to leave the guides out.
+///
+/// For strips [`detect_strip`] cannot recognise. It needs every cell to
+/// look like the others, which is true of the usual normal/hover/pressed
+/// trio and false of a control that changes *what* it draws between
+/// states: `track_fxempty_h` is a pill, a plus and a plus, so cell 0
+/// matches neither of the others and correlation says "one drawing".
+///
+/// Relaxing the rule to "some adjacent pair matches" let a 3-cell strip
+/// be read as 4, which is worse. So the count comes from the caller —
+/// which knows how many states it draws — and only the offset is
+/// inferred, from the same guide evidence used everywhere else.
+pub fn even_cells(img: &RgbaImage, n: u32) -> Vec<(u32, u32)> {
+    let w = img.width();
+    let n = n.max(1);
+    let period = w / n;
+    if period < 2 {
+        return vec![(0, w)];
+    }
+    let guides = marker_columns(img);
+    let origin = (0..=(w - n * period).min(3))
+        .min_by_key(|o| {
+            (0..n)
+                .flat_map(|c| {
+                    let a = o + c * period;
+                    (a..a + period).map(|x| guides[x as usize])
+                })
+                .sum::<u32>()
+        })
+        .unwrap_or(0);
+    (0..n).map(|i| (origin + i * period, period)).collect()
+}
+
 /// How many WALTER guide pixels each column holds.
 ///
 /// A count, not a flag. Counting *columns* cannot separate the offsets

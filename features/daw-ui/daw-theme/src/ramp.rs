@@ -39,17 +39,35 @@ impl Ramp {
     /// erasing exactly the bevels this is trying to preserve.
     pub fn for_chrome(theme: &Theme) -> Self {
         let c = &theme.chrome;
+        let mut colours = [
+            c.surface_deep(),
+            c.surface,
+            c.surface_raised,
+            c.border,
+            c.text_faint,
+            c.text_dim,
+            c.text,
+            c.selected,
+        ];
+        // Sorted by lightness, because the *palette* need not be.
+        //
+        // These names ascend in the FTS palette, so listing them in order
+        // was enough. They do not ascend everywhere: ReaperTips' border is
+        // `col_main_3dsh`, a shadow at #323232, which is darker than its
+        // #424242 surfaces — and a ramp whose stops dip maps two different
+        // inputs to the same output and inverts the shading between them.
+        // Sorting keeps every authored colour in the ramp while making
+        // monotonicity a property of the construction rather than a
+        // coincidence of the names.
+        colours.sort_by(|a, b| a.luminance().total_cmp(&b.luminance()));
+
+        // Positions bunch at the dark end because that is where chrome art
+        // actually lives — a mixer strip spans roughly 0.01–0.15 luminance,
+        // and evenly-spaced stops would flatten all of it onto one value,
+        // erasing exactly the bevels this is trying to preserve.
+        let at = [0.000, 0.010, 0.035, 0.080, 0.200, 0.400, 0.700, 1.000];
         Self {
-            stops: vec![
-                (0.000, c.surface_deep()),
-                (0.010, c.surface),
-                (0.035, c.surface_raised),
-                (0.080, c.border),
-                (0.200, c.text_faint),
-                (0.400, c.text_dim),
-                (0.700, c.text),
-                (1.000, c.selected),
-            ],
+            stops: at.into_iter().zip(colours).collect(),
             saturation_guard: 0.18,
         }
     }

@@ -32,7 +32,7 @@ pub struct GenerateReport {
 /// where WALTER expects and only reads magenta as geometry when it lands
 /// where it expects. Getting that wrong renders the guides as visible
 /// magenta in the mixer.
-pub fn generate(theme: &ThemeDir, dry_run: bool) -> Result<GenerateReport> {
+pub fn generate(theme: &ThemeDir, dry_run: bool, vectors_only: bool) -> Result<GenerateReport> {
     let mut report = GenerateReport::default();
 
     for (prefix, _scale) in SCALES {
@@ -78,6 +78,9 @@ pub fn generate(theme: &ThemeDir, dry_run: bool) -> Result<GenerateReport> {
             // A vector control if one draws this image, the trace
             // otherwise. Both stamp the same measured markers back.
             let vector = daw_theme_art::cell_markup(name, Default::default()).is_some();
+            if vectors_only && !vector {
+                continue;
+            }
             let drawn = if vector {
                 daw_theme_art::render_control(name, &measured).map_err(|e| format!("{e}"))
             } else {
@@ -134,7 +137,22 @@ fn render_art(
 ) -> std::result::Result<image::RgbaImage, String> {
     use daw_theme_art::art_data::{ArtImage, ArtImageProps, ColorMode};
 
-    daw_theme_art::composite_cells(spec, |i, w| {
+    // Split by the *trace's* cell count, not the measured one.
+    //
+    // `ArtImage` shifts its viewBox by `cell * (art.width / art.cells)`,
+    // so it can only address the cells the trace knows about. When the two
+    // disagreed — the index built with an older detector, the spec
+    // measured with the current one — every cell index clamped to 0 and
+    // the whole drawing was composited three times side by side, which is
+    // what put three copies of a toolbar icon inside one icon.
+    let mut spec = spec.clone();
+    let n = art.cells.max(1);
+    if spec.cells.len() as u32 != n {
+        let w = spec.width / n;
+        spec.cells = (0..n).map(|i| (i * w, w)).collect();
+    }
+
+    daw_theme_art::composite_cells(&spec, |i, w| {
         Ok(daw_theme_art::render_svg(
             ArtImage,
             ArtImageProps {
@@ -187,7 +205,7 @@ mod tests {
         let d = tmpdir("scales");
         fixture(&d);
         let theme = ThemeDir::open(&d).unwrap();
-        let report = generate(&theme, false).unwrap();
+        let report = generate(&theme, false, false).unwrap();
         assert!(report.failed.is_empty(), "{:?}", report.failed);
 
         // mcp_bg at two scales. mcp_volbg is in the registry but absent from
@@ -205,7 +223,7 @@ mod tests {
         let d = tmpdir("geometry");
         fixture(&d);
         let theme = ThemeDir::open(&d).unwrap();
-        generate(&theme, false).unwrap();
+        generate(&theme, false, false).unwrap();
 
         let img = image::open(d.join("T").join("mcp_bg.png"))
             .unwrap()
@@ -223,7 +241,7 @@ mod tests {
         let d = tmpdir("redraw");
         fixture(&d);
         let theme = ThemeDir::open(&d).unwrap();
-        generate(&theme, false).unwrap();
+        generate(&theme, false, false).unwrap();
         let img = image::open(d.join("T").join("mcp_bg.png"))
             .unwrap()
             .to_rgba8();
@@ -241,7 +259,7 @@ mod tests {
         fixture(&d);
         let theme = ThemeDir::open(&d).unwrap();
         let before = std::fs::read(d.join("T").join("mcp_bg.png")).unwrap();
-        let report = generate(&theme, true).unwrap();
+        let report = generate(&theme, true, false).unwrap();
         assert_eq!(report.written.len(), 2);
         assert_eq!(
             std::fs::read(d.join("T").join("mcp_bg.png")).unwrap(),

@@ -99,6 +99,15 @@ enum Command {
         /// Report what would be written without writing.
         #[arg(long)]
         dry_run: bool,
+        /// Only write images a vector control draws.
+        ///
+        /// The traced path reproduces the inherited art through the theme
+        /// ramp, which is right when the palette differs from the source
+        /// and destructive when it does not: mapping the art onto its own
+        /// colours still rounds through the ramp's stops, and the toolbar
+        /// icons wash out against a palette taken from the same theme.
+        #[arg(long)]
+        vectors_only: bool,
     },
     /// Retint the colour literals inside rtconfig.txt
     ///
@@ -264,8 +273,11 @@ fn main() -> Result<()> {
             }
         }
 
-        Command::Generate { dry_run } => {
-            let report = fts_themer::generate::generate(&theme, dry_run)?;
+        Command::Generate {
+            dry_run,
+            vectors_only,
+        } => {
+            let report = fts_themer::generate::generate(&theme, dry_run, vectors_only)?;
             for (name, err) in &report.failed {
                 eprintln!("FAILED {name}: {err}");
             }

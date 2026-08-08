@@ -301,10 +301,37 @@ pub fn composite_cells(
 /// never authored, because REAPER only reads magenta as geometry when it
 /// lands where the layout expects it.
 pub fn render_control(name: &str, spec: &DerivedSpec) -> Result<RgbaImage, RenderError> {
-    composite_cells(spec, |i, _w| {
+    // Trust the measured split only when it agrees with what this control
+    // actually draws. Detection needs a strip's cells to resemble each
+    // other, which fails on the FX bypass toggle — pill, plus, plus — and
+    // reported it as a single drawing, so it was stretched across its own
+    // width and vanished into the strip.
+    let mut spec = spec.clone();
+    if spec.cells.len() != states(name) {
+        let mut img = RgbaImage::new(spec.width, spec.height);
+        spec.stamp(&mut img);
+        spec.cells = crate::derive::even_cells(&img, states(name) as u32);
+    }
+
+    composite_cells(&spec, |i, _w| {
         cell_markup(name, interaction(i))
             .ok_or_else(|| RenderError::Svg(format!("no vector control draws {name}")))
     })
+}
+
+/// How many sprite cells a control's image holds.
+///
+/// Knowledge, not a measurement: every button here draws normal, hover
+/// and pressed, and the knobs and the fader draw one thing.
+fn states(name: &str) -> usize {
+    let stem = name
+        .strip_prefix("mcp_")
+        .or_else(|| name.strip_prefix("track_"))
+        .unwrap_or(name);
+    match stem {
+        "pan_knob_small" | "pan_knob_large" | "volthumb" | "volbg" => 1,
+        _ => 3,
+    }
 }
 
 #[cfg(test)]

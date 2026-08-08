@@ -8,6 +8,18 @@
 //!
 //! Hex rather than [`crate::Color`] because a `const` can't call a parser,
 //! and because these strings are what a designer reads and edits.
+//!
+//! # These are ReaperTips' colours, on purpose
+//!
+//! The chrome here is the source theme's own palette, decoded from the
+//! `.ReaperTheme` it shipped with — a mid-grey set (`#3e3e3e` surfaces),
+//! not the near-black blue this held before. That is a deliberate,
+//! temporary state: with the palette identical, a generated control and
+//! the art it replaces can differ only in *shape*, so the comparison
+//! sheets and `--example align` measure geometry and nothing else.
+//!
+//! Restyling to an FTS palette is a matter of changing these values back;
+//! nothing downstream assumes greys.
 
 // ── chrome ───────────────────────────────────────────────────────────────
 
@@ -22,56 +34,56 @@
 ///
 /// Reach down the ladder for something recessed and up for something
 /// floating. Keeping it ordered is what makes those words mean anything.
-pub const SURFACE: &str = "#0d0d11";
+pub const SURFACE: &str = "#3e3e3e";
 /// A panel or strip sitting on `SURFACE`.
-pub const SURFACE_RAISED: &str = "#15151c";
+pub const SURFACE_RAISED: &str = "#424242";
 /// Wells, lanes and troughs cut into a panel — the arrange view, an entry
 /// field. Genuinely below [`SURFACE`]: it was inherited a shade *lighter*,
 /// which made the name a lie and left nothing to reach for when something
 /// needed to read as recessed.
-pub const SURFACE_SUNKEN: &str = "#0a0a0e";
+pub const SURFACE_SUNKEN: &str = "#333333";
 /// Hairlines between regions.
-pub const BORDER: &str = "#2b2b38";
+pub const BORDER: &str = "#323232";
 /// Primary label text.
-pub const TEXT: &str = "#c8cede";
+pub const TEXT: &str = "#a0a0a0";
 /// Secondary text — units, inactive labels.
-pub const TEXT_DIM: &str = "#7b8397";
+pub const TEXT_DIM: &str = "#7b7b7b";
 /// Tertiary text — watermark level.
-pub const TEXT_FAINT: &str = "#4a5062";
+pub const TEXT_FAINT: &str = "#5a5a5a";
 /// The one colour meaning "live / selected / yours".
 ///
 /// ReaperTips' own blue, sampled from the routing lanes and the FX bypass
 /// LED. Held here rather than a nearby Tailwind blue so that a generated
 /// control and the art it replaces differ in *shape only* — which is the
 /// whole point of the comparison sheets.
-pub const ACCENT: &str = "#47b9fe";
+pub const ACCENT: &str = "#46b9fe";
 /// A control's resting surface — buttons, selects, entry fields.
-pub const CONTROL: &str = "#1c1c25";
+pub const CONTROL: &str = "#464646";
 /// A control that is engaged: the resting surface pulled toward the accent.
-pub const CONTROL_ACTIVE: &str = "#1e3a5f";
+pub const CONTROL_ACTIVE: &str = "#2f5f7d";
 /// An inset well inside a panel — one step below `SURFACE_RAISED`.
-pub const SURFACE_INSET: &str = "#1a1a22";
+pub const SURFACE_INSET: &str = "#383838";
 /// A divider or handle that needs to read above `BORDER`.
-pub const BORDER_STRONG: &str = "#4a4a58";
+pub const BORDER_STRONG: &str = "#565656";
 /// Emphasised text, above `TEXT`.
-pub const TEXT_BRIGHT: &str = "#cfd6e4";
+pub const TEXT_BRIGHT: &str = "#c2c6ce";
 /// Selection highlight, brighter than the accent.
-pub const SELECTED: &str = "#f0f9ff";
+pub const SELECTED: &str = "#e6f4ff";
 
 /// The deepest step — the bottom of the ladder, e.g. behind a piano-roll
 /// gutter. See the ladder note on [`SURFACE`].
-pub const SURFACE_DEEP: &str = "#08080b";
+pub const SURFACE_DEEP: &str = "#2a2a2a";
 /// Toolbars and status bars: a bar sitting across a surface.
-pub const SURFACE_BAR: &str = "#16161d";
+pub const SURFACE_BAR: &str = "#2d2d2d";
 /// A control that is selected but not engaged — accent-tinted, quieter
 /// than [`CONTROL_ACTIVE`].
-pub const CONTROL_SELECTED: &str = "#16202c";
+pub const CONTROL_SELECTED: &str = "#3a4a52";
 /// A control under the pointer.
-pub const CONTROL_HOVER: &str = "#2a2a36";
+pub const CONTROL_HOVER: &str = "#505050";
 /// The groove a slider or scrollbar handle runs in.
-pub const CONTROL_GROOVE: &str = "#26262f";
+pub const CONTROL_GROOVE: &str = "#2e2e2e";
 /// A draggable handle — knob pointer, slider thumb.
-pub const HANDLE: &str = "#cfd6e4";
+pub const HANDLE: &str = "#c2c6ce";
 
 // ── hardware controls ────────────────────────────────────────────────────
 //

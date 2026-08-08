@@ -389,13 +389,41 @@ pub fn FxButton(props: FxProps) -> Element {
                     stop { offset: "1", stop_color: "{face_lo}" }
                 }
             }
-            // Edge, then the face laid over it. Stroking instead would draw
-            // a line down the right, which is exactly what the source omits.
-            path { d: "{cut(x, top, outer_h, chamfer)}", fill: "{k.border.css()}" }
-            path {
-                d: "{cut(x + vw * 0.036, top + vh * 0.045, face_h, chamfer * 0.75)}",
-                fill: "url(#fxface)",
-                fill_opacity: "{face_alpha}",
+            if props.scrim {
+                // One shape, not two. A scrim is a single wash of #000 at
+                // 35% across the whole button — laying a 35% face over an
+                // opaque edge composites to an opaque button (the track
+                // colour never showed through), and dropping the edge to
+                // fix that shrank the button by the two rows the edge was
+                // drawing.
+                path {
+                    d: "{cut(x, top, outer_h, chamfer)}",
+                    fill: "#000000",
+                    fill_opacity: "0.35",
+                }
+            } else {
+                // Edge, then the face laid over it. Stroking instead would
+                // draw a line down the right, which the source omits.
+                path { d: "{cut(x, top, outer_h, chamfer)}", fill: "{k.border.css()}" }
+                path {
+                    d: "{cut(x + vw * 0.036, top + vh * 0.045, face_h, chamfer * 0.75)}",
+                    fill: "url(#fxface)",
+                    fill_opacity: "{face_alpha}",
+                }
+            }
+            // The lit top edge every ReaperTips control has: one row just
+            // inside the top, a shade lighter than the face. Measured on
+            // `track_fx_norm`, where the body is #000 at a89 and row 2 is
+            // #1d1d1d at a96.
+            //
+            // Drawn as white at low opacity rather than a computed colour
+            // so it works over a scrim and over an opaque face alike —
+            // it lightens whatever is beneath instead of replacing it,
+            // which is what the source is doing.
+            rect {
+                x: "{x + vw * 0.07}", y: "{top + vh * 0.045}",
+                width: "{vw - x - vw * 0.07}", height: "{vh * 0.05}",
+                fill: "#ffffff", fill_opacity: "0.07",
             }
             text {
                 x: "{(x + vw) * 0.5}",
@@ -502,10 +530,29 @@ pub fn FxBypassToggle(props: FxBypassProps) -> Element {
             // Inset by a row top and bottom, like the buttons beside it:
             // the source is 16x20 in a 16x22 cell, and filling the cell
             // made the toggle taller than the FX button it sits against.
+            //
+            // And a scrim, like the FX button it sits against — #000 at
+            // 35%, measured. An opaque near-black box read as a hole
+            // punched in the strip rather than a control on it.
             rect {
                 x: "0", y: "{vh / 22.0}", width: "{vw}", height: "{vh * 20.0 / 22.0}",
                 rx: "{vh * 0.12}",
-                fill: "{k.face.shade(-0.72).css()}",
+                fill: "#000000",
+                fill_opacity: "0.35",
+            }
+            // The lit top edge every ReaperTips control has: one row just
+            // inside the top, a shade lighter than the face. Measured on
+            // `track_fx_norm`, where the body is #000 at a89 and row 2 is
+            // #1d1d1d at a96.
+            //
+            // Drawn as white at low opacity rather than a computed colour
+            // so it works over a scrim and over an opaque face alike —
+            // it lightens whatever is beneath instead of replacing it,
+            // which is what the source is doing.
+            rect {
+                x: "{vw * 0.12}", y: "{vh * 2.0 / 22.0}",
+                width: "{vw * 0.76}", height: "{vh * 0.045}",
+                fill: "#ffffff", fill_opacity: "0.07",
             }
             if plus {
                 // A plus, drawn as two bars so its weight is set here rather
@@ -831,6 +878,11 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
                 fill: "{panel}",
                 fill_opacity: "{panel_alpha}",
                 stroke: "{k.border.css()}", stroke_width: "{edge}",
+            }
+            rect {
+                x: "{vw * box_x + vw * 0.08}", y: "{vh * box_y + edge}",
+                width: "{vw * box_w - vw * 0.16}", height: "{vh * 0.04}",
+                fill: "#ffffff", fill_opacity: "0.07",
             }
             for (i, colour) in [out, send, recv].iter().enumerate() {
                 rect {
