@@ -685,18 +685,38 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     let (cx, cy, outer, hole) = if props.housing {
         (vw * 0.486, vh * 0.521, unit * 0.3125, unit * 0.1458)
     } else {
-        // 0.155, not 0.15: at exactly 0.15 the hole's edge lands on the
-        // pixel boundary at x=7 and the rasteriser bleeds a bright fringe
-        // into the first column of the hole, where the source has none.
-        (vw * 0.5, vh * 0.5, unit * 0.41, unit * 0.155)
+        // Outer exactly 0.40 — radius 8 of 20, which lands the edge on
+        // the pixel boundary at x=2 and x=18 and keeps it crisp. At 0.41
+        // it falls at 8.2, mid-pixel, and the whole rim antialiases into
+        // a dim blur that reads as a square with soft corners rather than
+        // a circle.
+        //
+        // The hole is 0.155 rather than 0.15 for the opposite reason: at
+        // exactly 0.15 its edge lands *on* x=7 and the rasteriser bleeds
+        // a bright fringe into the first column of the hole.
+        (vw * 0.5, vh * 0.5, unit * 0.40, unit * 0.155)
     };
     // The barred variant is drawn on a *thinner* ring: its hole measures
     // radius 4 against the plain ring's 3, which is visible as a wider
     // dark centre before the X is taken into account at all.
     let hole = if barred { unit * 0.20 } else { hole };
-    // A stroked circle: radius sits mid-band, width is the band.
-    let band = outer - hole;
-    let r = hole + band / 2.0;
+    // The ring is an annulus *path*, not a stroked circle.
+    //
+    // A stroke took the gradient as a flat average — the whole ring came
+    // out one value where the source runs 239 to 251 — and it also
+    // straddles its own radius, so the crisp outer edge had to be found
+    // by nudging. A fill with an even-odd hole gradates properly and puts
+    // its boundary exactly where the number says.
+    let annulus = format!(
+        "M {} {cy} A {outer} {outer} 0 1 0 {} {cy} A {outer} {outer} 0 1 0 {} {cy} Z \
+         M {} {cy} A {hole} {hole} 0 1 1 {} {cy} A {hole} {hole} 0 1 1 {} {cy} Z",
+        cx - outer,
+        cx + outer,
+        cx - outer,
+        cx - hole,
+        cx + hole,
+        cx - hole,
+    );
 
     // Neutral when unarmed — the source ring is #a6a6a6, which is
     // `hardware_mark`. It was `text_dim`, a blue-grey that made a disarmed
@@ -716,20 +736,26 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     // it from `surface` punched a blue-black hole through the middle.
     //
     // Without a housing there is nothing behind it, so the hole is a hole.
+    // The ring's lit end, and **not** `shade`: that mixes toward white,
+    // and #e23b53 is already near the top of its red channel, so
+    // `shade(0.14)` moved it by four points and the gradient rendered
+    // flat. The source's highlight is a different red — #fa4e5e — which
+    // is most of the way from `rec` to `meter_danger`, both of which are
+    // measured from this theme already.
+    let ring_hi = if armed {
+        ring.mix(t.signal.meter_danger, 0.8)
+    } else {
+        ring.shade(0.18)
+    };
     let hole_fill = t.chrome.hardware.shade(-0.40);
     // With a housing, the hole is that housing showing through — #262626
-    // in the source, the same colour as the surround. Without one there
-    // is nothing behind the ring, so the hole is a *hole*: the source's
-    // is fully transparent, and filling it laid a grey disc over the
-    // strip that read as a much thicker ring.
-    let through = if props.housing {
-        hole_fill.css()
-    } else {
-        "none".to_string()
-    };
-    // Cuts need something to cut *with*. Over a housing that is its
-    // colour; over nothing it has to be a mask, since "paint transparent"
-    // does not erase.
+    // in the source, the same colour as the surround, so it is painted
+    // *behind* the ring. Without one there is nothing behind: the
+    // source's hole is fully transparent, and filling it laid a grey disc
+    // over the strip that read as a much thicker ring.
+    //
+    // Cuts then need something to cut *with*, and over nothing that has
+    // to be a mask, since "paint transparent" does not erase.
     let notch_id = "recnotch";
 
     rsx! {
@@ -744,7 +770,7 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                 // equal measure and this drew only the darker of the two,
                 // which is why it read flat and dull beside the original.
                 linearGradient { id: "recring", x1: "0", y1: "0", x2: "0", y2: "1",
-                    stop { offset: "0", stop_color: "{ring.shade(0.12).css()}" }
+                    stop { offset: "0", stop_color: "{ring_hi.css()}" }
                     stop { offset: "1", stop_color: "{ring.css()}" }
                 }
             }
@@ -800,6 +826,12 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                 // the original reads as a life-ring, with the cuts running
                 // through the band to the outer edge. They are a mask so
                 // they cut the ring whether or not anything is behind it.
+                if props.housing {
+                    circle {
+                        cx: "{cx}", cy: "{cy}", r: "{hole}",
+                        fill: "{hole_fill.css()}",
+                    }
+                }
                 if barred {
                     defs {
                         mask { id: "{notch_id}",
@@ -837,19 +869,17 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                             }
                         }
                     }
-                    circle {
-                        cx: "{cx}", cy: "{cy}", r: "{r}",
-                        fill: "{through}",
-                        stroke: "url(#recring)",
-                        stroke_width: "{band}",
+                    path {
+                        d: "{annulus}",
+                        fill: "url(#recring)",
+                        fill_rule: "evenodd",
                         mask: "url(#{notch_id})",
                     }
                 } else {
-                    circle {
-                        cx: "{cx}", cy: "{cy}", r: "{r}",
-                        fill: "{through}",
-                        stroke: "url(#recring)",
-                        stroke_width: "{band}",
+                    path {
+                        d: "{annulus}",
+                        fill: "url(#recring)",
+                        fill_rule: "evenodd",
                     }
                 }
             }
