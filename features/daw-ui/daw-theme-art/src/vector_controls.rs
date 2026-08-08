@@ -1926,6 +1926,356 @@ pub fn PhaseButton(props: PhaseProps) -> Element {
     }
 }
 
+// ── track panel: record mode ────────────────────────────────────────────
+
+/// What a track's record-mode button is showing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum RecordMode {
+    /// Disabled — a plain X.
+    #[default]
+    Off,
+    /// Record input: an arrow running into a bracket.
+    Input,
+    /// Record output: a bracket with an arrow running out of it.
+    Output,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct RecordModeProps {
+    #[props(default)]
+    pub mode: RecordMode,
+    #[props(default = (20.0, 20.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The record-mode button.
+///
+/// Input and output are the same drawing mirrored about the centre — an
+/// arrow and a bracket, with the arrow pointing into the bracket for input
+/// and out of it for output. Writing it once and flipping `dir` keeps the
+/// two from drifting apart.
+///
+/// The three states do not share an opacity: the source's plate is 0.25
+/// behind the X and the input arrow but 0.35 behind the output one, and
+/// the glyphs run 0.85, 0.55 and 0.80. Those are measured, not a ramp.
+#[component]
+pub fn RecordModeButton(props: RecordModeProps) -> Element {
+    let (vw, vh) = props.cell;
+    let (cx, cy) = (vw * 0.5, 9.5f32);
+
+    let (plate, glyph) = match props.mode {
+        RecordMode::Off => (0.25f32, 0.85f32),
+        RecordMode::Input => (0.25, 0.55),
+        RecordMode::Output => (0.35, 0.80),
+    };
+    let boost = match props.at {
+        Interaction::Hover => 1.35,
+        _ => 1.0,
+    };
+    // +1 draws the bracket on the right and the arrow flying into it;
+    // -1 mirrors both.
+    let dir = if matches!(props.mode, RecordMode::Input) { 1.0f32 } else { -1.0 };
+    let spine = cx + dir * 5.5;
+    let arm = cx + dir * 1.0;
+    let tip = cx + dir * 1.5;
+    let tail = cx - dir * 6.0;
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            rect {
+                x: "0", y: "0", width: "{vw}", height: "{vh}", rx: "2.4",
+                fill: "#000000", fill_opacity: "{plate}",
+            }
+            g {
+                opacity: "{(glyph * boost).min(1.0)}",
+                stroke: "#ffffff",
+                fill: "none",
+                if matches!(props.mode, RecordMode::Off) {
+                    // Two bars crossing, not four arms from the centre:
+                    // the source's strokes run corner to corner unbroken.
+                    g { stroke_width: "2.0",
+                        line {
+                            x1: "{cx - 4.0}", y1: "{cy - 4.0}",
+                            x2: "{cx + 4.0}", y2: "{cy + 4.0}",
+                        }
+                        line {
+                            x1: "{cx + 4.0}", y1: "{cy - 4.0}",
+                            x2: "{cx - 4.0}", y2: "{cy + 4.0}",
+                        }
+                    }
+                } else {
+                    g { stroke_width: "1.0",
+                        path {
+                            d: "M {arm} {cy - 5.0} H {spine} V {cy + 5.0} H {arm}",
+                        }
+                        line { x1: "{tail}", y1: "{cy}", x2: "{tip}", y2: "{cy}" }
+                        path {
+                            d: "M {tip - dir * 2.4} {cy - 2.4} L {tip} {cy}
+                                L {tip - dir * 2.4} {cy + 2.4}",
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ── track panel: folder compact indicator ───────────────────────────────
+
+/// How compact a folder's child tracks are drawn.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum FolderCompact {
+    /// Full size — a triangle pointing down.
+    #[default]
+    Off,
+    /// Small — a ramp.
+    Small,
+    /// Tiny — a triangle pointing right.
+    Tiny,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct FolderCompactProps {
+    #[props(default)]
+    pub state: FolderCompact,
+    #[props(default = (17.0, 13.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The folder-compact indicator — a small mark over a fading wash.
+///
+/// The wash is the interesting part: it is not a plate but a gradient,
+/// white at 0.15 along the top edge and gone by two thirds down, with a
+/// hard rule near the bottom. Drawing it as a flat plate made the strip
+/// look banded, because the rows either side of it are this same wash at
+/// different strengths.
+#[component]
+pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
+    let (vw, vh) = props.cell;
+    // Hover lifts the wash as well as the mark — the source's top row
+    // goes 38 to 70 — so a version that only brightened the glyph left
+    // the whole strip looking a shade flat next to it.
+    let (ink, wash) = match props.at {
+        Interaction::Hover => (0.69f32, 0.28f32),
+        _ => (0.44, 0.15),
+    };
+
+    // Traced: down-triangle, ramp, right-triangle, all in the same box.
+    let glyph = match props.state {
+        FolderCompact::Off => format!(
+            "M {} 3.1 H {} L {} 8.5 Z",
+            vw * 0.29,
+            vw * 0.71,
+            vw * 0.5
+        ),
+        FolderCompact::Small => format!(
+            "M {} 8.0 H {} V 2.8 Z",
+            vw * 0.26,
+            vw * 0.71
+        ),
+        FolderCompact::Tiny => format!(
+            "M {} 1.8 V 8.4 L {} 5.1 Z",
+            vw * 0.32,
+            vw * 0.62
+        ),
+    };
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                linearGradient { id: "fcompwash", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "#e9e9e9", stop_opacity: "{wash}" }
+                    stop { offset: "0.55", stop_color: "#4a4a4a", stop_opacity: "{wash * 0.27}" }
+                    stop { offset: "1", stop_color: "#0a0a0a", stop_opacity: "0.008" }
+                }
+            }
+            rect { x: "0", y: "0", width: "{vw}", height: "{vh - 3.0}", fill: "url(#fcompwash)" }
+            rect { x: "0", y: "{vh - 2.0}", width: "{vw}", height: "1", fill: "#9a9a9a", fill_opacity: "0.345" }
+            rect { x: "0", y: "{vh - 1.0}", width: "{vw}", height: "1", fill: "#3a3a3a", fill_opacity: "0.094" }
+            path { d: "{glyph}", fill: "#ffffff", fill_opacity: "{ink}" }
+        }
+    }
+}
+
+// ── track panel: input FX ───────────────────────────────────────────────
+
+#[derive(Props, Clone, PartialEq)]
+pub struct FxInProps {
+    /// Something is in the input chain — the lit blue state.
+    #[props(default)]
+    pub loaded: bool,
+    #[props(default = (29.0, 20.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The input-FX button — "FX" on the track panel's usual scrim.
+#[component]
+pub fn FxInButton(props: FxInProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    // #46b9fe is `accent` exactly. Empty is the same wash the rest of the
+    // panel's disabled marks use.
+    let ink = if props.loaded {
+        t.chrome.accent
+    } else {
+        t.chrome.hardware_mark.shade(-0.30)
+    };
+    let ink = match props.at {
+        Interaction::Hover => lift(ink, 0.22),
+        _ => ink,
+    };
+    let solid = if props.loaded { 1.0f32 } else { 0.55 };
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            rect {
+                x: "0", y: "0", width: "{vw}", height: "{vh}", rx: "2.2",
+                fill: "#000000", fill_opacity: "0.35",
+            }
+            text {
+                x: "{vw * 0.5}", y: "{vh * 0.47}",
+                text_anchor: "middle", dominant_baseline: "central",
+                font_family: "Fira Sans, DejaVu Sans, sans-serif",
+                font_weight: "700", font_size: "8.6",
+                fill: "{ink.css()}",
+                fill_opacity: "{solid}",
+                "FX"
+            }
+        }
+    }
+}
+
+// ── track panel: folder state ───────────────────────────────────────────
+
+/// Where a track sits in a folder.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum FolderState {
+    /// Not a folder — a folder icon and two plus signs.
+    #[default]
+    Off,
+    /// A folder — an opaque block from x18 with two double-bar marks.
+    On,
+    /// Last in the folder — a corner wedge and two down arrows.
+    Last,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct FolderProps {
+    #[props(default)]
+    pub state: FolderState,
+    #[props(default = (54.0, 14.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The folder-state strip.
+///
+/// Not a sprite of three pointer states — three marks side by side in one
+/// image, which is why its measured cell is the whole 54 rather than a
+/// third of it.
+///
+/// `On` is the odd one: an opaque #333333 block from x18 to the right
+/// edge, carrying two pairs of lighter bars. It read as blank at first
+/// because its PNG is greyscale-plus-alpha rather than RGBA, and a reader
+/// expecting four channels per pixel silently matched none of it. Worth
+/// remembering — "the source is empty" is a conclusion that deserves a
+/// second look.
+#[component]
+pub fn FolderButton(props: FolderProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let ink = match props.at {
+        Interaction::Hover => 0.46,
+        _ => 0.33,
+    };
+    let last = props.state == FolderState::Last;
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            if props.state == FolderState::On {
+                rect {
+                    x: "18", y: "0", width: "{vw - 18.0}", height: "{vh}",
+                    fill: "{t.chrome.surface.shade(-0.18).css()}",
+                }
+                for (i, at) in [27.9f32, 45.9].iter().enumerate() {
+                    g { key: "on{i}", fill: "{t.chrome.hardware.shade(0.20).css()}",
+                        rect { x: "{at - 2.6}", y: "1.3", width: "5.3", height: "4.2" }
+                        rect { x: "{at - 2.6}", y: "7.3", width: "5.3", height: "4.2" }
+                    }
+                }
+            } else {
+                // The wedge only appears on the last child — it is the
+                // corner that closes the folder's bracket.
+                if last {
+                    path {
+                        d: "M 0 3.6 L 18 13.6 H 0 Z",
+                        fill: "{t.chrome.hardware.shade(-0.22).css()}",
+                    }
+                }
+                g { fill: "#1d1d1d", fill_opacity: "{ink}",
+                    // A folder: a tab, then the body under it.
+                    path { d: "M 5 2 H 9 V 4 H 5 Z" }
+                    rect { x: "5", y: "4", width: "9", height: "5" }
+                    for (i, at) in [27.5f32, 45.5].iter().enumerate() {
+                        g { key: "{i}",
+                            if last {
+                                // A down arrow: a stem over a head.
+                                path {
+                                    d: "M {at - 2.5} 0 H {at + 2.5} V 3 H {at + 5.5}
+                                        L {at} 9.5 L {at - 5.5} 3 H {at - 2.5} Z",
+                                }
+                            } else {
+                                // A plus.
+                                rect { x: "{at - 1.5}", y: "0", width: "3", height: "11" }
+                                rect { x: "{at - 5.5}", y: "4", width: "11", height: "3" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

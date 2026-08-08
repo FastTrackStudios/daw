@@ -223,6 +223,55 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         )
     };
 
+    let recmode = |mode| {
+        render_svg(
+            v::RecordModeButton,
+            v::RecordModeProps {
+                mode,
+                cell: (20.0, 20.0),
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let fcomp = |state| {
+        render_svg(
+            v::FolderCompactButton,
+            v::FolderCompactProps {
+                state,
+                cell: (17.0, 13.0),
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let fx_in = |loaded| {
+        render_svg(
+            v::FxInButton,
+            v::FxInProps {
+                loaded,
+                cell: (29.0, 20.0),
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let folder = |state| {
+        render_svg(
+            v::FolderButton,
+            v::FolderProps {
+                state,
+                cell: (54.0, 14.0),
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+
     // Both families answer to the same eight controls, so match on the
     // part after the prefix rather than writing every name twice.
     let stem = name
@@ -282,6 +331,21 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         "env_touch" => env(v::EnvelopeMode::Touch),
         "env_latch" => env(v::EnvelopeMode::Latch),
         "env_preview" => env(v::EnvelopeMode::Preview),
+
+        "recmode_off" if track => recmode(v::RecordMode::Off),
+        "recmode_in" if track => recmode(v::RecordMode::Input),
+        "recmode_out" if track => recmode(v::RecordMode::Output),
+
+        "fcomp_off" if track => fcomp(v::FolderCompact::Off),
+        "fcomp_small" if track => fcomp(v::FolderCompact::Small),
+        "fcomp_tiny" if track => fcomp(v::FolderCompact::Tiny),
+
+        "fx_in_norm" if track => fx_in(true),
+        "fx_in_empty" if track => fx_in(false),
+
+        "folder_off" if track => folder(v::FolderState::Off),
+        "folder_on" if track => folder(v::FolderState::On),
+        "folder_last" if track => folder(v::FolderState::Last),
 
         "phase_norm" => phase(false),
         "phase_inv" => phase(true),
@@ -417,6 +481,8 @@ fn states(name: &str) -> usize {
     match stem {
         "pan_knob_small" | "pan_knob_large" | "width_knob_small" | "width_knob_large"
         | "volthumb" | "volbg" => 1,
+        // Three marks side by side in one image, not three pointer states.
+        "folder_off" | "folder_on" | "folder_last" => 1,
         _ => 3,
     }
 }
