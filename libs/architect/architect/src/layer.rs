@@ -789,7 +789,7 @@ impl LayerRouter {
 }
 
 /// A lane acceptor that dispatches every incoming lane onto a clone of
-/// `handler` — any vox [`Handler`], whether a [`LayerRouter`] or a wrapper
+/// `handler` — any vox [`vox::Handler`], whether a [`LayerRouter`] or a wrapper
 /// around one (e.g. a snapshot-gating router). The single home for the
 /// `lane_acceptor_fn(|_, conn| conn.handle_with(handler.clone()))` closure
 /// every transport consumer otherwise repeats; [`crate::axum_ws::serve_router`]

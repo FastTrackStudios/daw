@@ -134,7 +134,7 @@ fn session_summary_smoke() {
 #[test]
 fn aufl_audio_filenames() {
     use dawfile_logic::parse::aufl::parse_aufl;
-    use dawfile_logic::types::LogicChunk;
+    
 
     let session = dawfile_logic::read_session(FIXTURE).expect("parse failed");
 
@@ -452,7 +452,6 @@ fn fire_comp_structures() {
     const TAG_GADD: [u8; 4] = *b"ddAG";
     const TAG_AURG: [u8; 4] = *b"gRuA";
     const TAG_MSEQ: [u8; 4] = *b"qeSM";
-    const TAG_TRAK: [u8; 4] = *b"karT";
 
     // --- Clip chunks -----------------------------------------------------------
     println!("\n=== Clip chunks (take-folder candidates) ===");
@@ -718,7 +717,7 @@ fn fire_envi_all_names() {
         let meta4 = u32::from_le_bytes(c.header_meta[4..8].try_into().unwrap_or([0; 4]));
         let seq = meta4 / 262_144;
         // Show first 20 bytes of data
-        let preview: Vec<String> = c
+        let _preview: Vec<String> = c
             .data
             .iter()
             .take(20)
@@ -814,7 +813,6 @@ fn fire_envi_name_hex() {
     use dawfile_logic::read_session;
     let session = read_session(FIRE_FIXTURE).expect("parse failed");
     let chunks = &session.chunks;
-    const TAG_ENVI: [u8; 4] = *b"ivnE";
 
     // chunk[4307] = seq=35 "Kick}" and chunk[4346] = seq=56 "Snare"
     for target_chunk in [4307usize, 4346, 4439] {
@@ -845,7 +843,7 @@ fn fire_envi_name_hex() {
 
 #[test]
 fn fire_envi_seq_range() {
-    use dawfile_logic::LogicChunk;
+    
     let session = dawfile_logic::read_session(FIRE_FIXTURE).expect("parse failed");
     let chunks = &session.chunks;
     const TAG_ENVI: [u8; 4] = *b"ivnE";

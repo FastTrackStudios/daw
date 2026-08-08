@@ -999,9 +999,11 @@ pub fn register_action_in_section_main_thread(
         .insert(id, trigger);
 
     info!(command_name, section_id, id, "Registered action in section");
-    // Held for the process lifetime: dropping a `RegisteredAction`
-    // unregisters it, and these actions live as long as the extension.
-    std::mem::forget(action);
+    // The handle is deliberately not kept: `RegisteredAction` has no
+    // `Drop` impl (unregistering is the explicit `unregister()` call),
+    // so letting it fall out of scope leaves the action registered, and
+    // these live as long as the extension. This used to `mem::forget`
+    // it, which did the same thing while implying the opposite.
     id
 }
 

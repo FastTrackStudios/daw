@@ -165,7 +165,7 @@ where
 }
 
 /// Serve a whole router over an iroh endpoint — the iroh analogue of
-/// [`crate::axum_ws::serve_router`], accepting any vox [`Handler`] and
+/// [`crate::axum_ws::serve_router`], accepting any vox [`vox::Handler`] and
 /// collapsing the `lane_acceptor_fn(|_, conn| conn.handle_with(router.clone()))`
 /// + [`serve_endpoint`] boilerplate to one call.
 #[cfg(not(target_arch = "wasm32"))]

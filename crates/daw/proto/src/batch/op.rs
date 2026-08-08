@@ -337,7 +337,7 @@ pub fn run<B: BatchBackend + ?Sized>(backend: &B, request: BatchRequest) -> Batc
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::batch::program::{BatchInstruction, BatchOptions};
+    use crate::batch::program::BatchInstruction;
 
     /// Lock the JSON wire shape agents use with `daw op` / `daw batch`:
     /// externally-tagged nesting service → method → named args.

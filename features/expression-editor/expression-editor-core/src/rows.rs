@@ -180,8 +180,10 @@ impl DrumMap {
 
 /// What the vertical axis means.
 #[derive(Clone, Debug, PartialEq)]
+#[derive(Default)]
 pub enum RowSpace {
     /// Rows are MIDI pitches. Audio, MPE, plain MIDI, vocals.
+    #[default]
     Pitch,
     /// Rows are drum lanes; `row` indexes [`DrumMap::lanes`].
     Drums(DrumMap),
@@ -189,11 +191,6 @@ pub enum RowSpace {
     Strings(StringTuning),
 }
 
-impl Default for RowSpace {
-    fn default() -> Self {
-        RowSpace::Pitch
-    }
-}
 
 impl RowSpace {
     /// Inclusive row range the roll can show.

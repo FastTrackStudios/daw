@@ -128,18 +128,16 @@ pub fn resolve(defaults: &StateSet, icon: &IconEntry) -> Result<[StateStyle; 3]>
     let mut out = Vec::with_capacity(3);
     for state in ["normal", "hover", "clicked"] {
         let mut st = StateStyle::default();
-        for layer in [
+        for ov in [
             &defaults.all,
             &defaults.normal,
             pick(defaults, state),
             &icon.all,
             &icon.normal,
             pick_icon(icon, state),
-        ] {
-            if let Some(ov) = layer {
-                ov.apply(&mut st)
-                    .with_context(|| format!("icon {:?}, state {state}", icon.file))?;
-            }
+        ].into_iter().flatten() {
+            ov.apply(&mut st)
+                .with_context(|| format!("icon {:?}, state {state}", icon.file))?;
         }
         out.push(st);
     }

@@ -235,10 +235,9 @@ async fn shoot_cc_lanes() {
     shoot(editing.clone(), "23-cc-edit").await;
 
     // And drawing on the roll writes into that lane.
-    let mut drag = expression_editor_ui::Drag::default();
     let vph = editing.viewport.h;
     let x0 = editing.camera.x(demo::PPQ * 1.0);
-    drag = expression_editor_ui::interaction::pointer_down(
+    let mut drag = expression_editor_ui::interaction::pointer_down(
         &mut editing,
         x0,
         vph * 0.8,

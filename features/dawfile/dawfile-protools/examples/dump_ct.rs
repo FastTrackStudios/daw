@@ -2,7 +2,6 @@
 //!
 //! Usage: dump_ct <session.ptx> 0x260d [max_entries]
 
-use dawfile_protools::content_type::ContentType;
 use dawfile_protools::raw_block::RawBlock;
 
 fn main() {

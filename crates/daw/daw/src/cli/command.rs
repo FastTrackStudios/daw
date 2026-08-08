@@ -1486,7 +1486,7 @@ fn default_resources() -> std::path::PathBuf {
 }
 
 /// Run a `reaper-config` subcommand.
-pub fn run_reaper_config(action: &ReaperConfigCommand) -> std::io::Result<()> {
+fn run_reaper_config(action: &ReaperConfigCommand) -> std::io::Result<()> {
     use crate::reaper_config;
     let repo = reaper_config_dir();
     match action {

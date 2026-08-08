@@ -77,11 +77,10 @@ pub fn to_doc(snapshot: &MidiTakeSnapshot, bend_range: f64) -> ExpressionDoc {
             .collect();
         // More than one owner is the ambiguity the core already models;
         // writing to both would be a guess, so leave it to be flagged.
-        if owners.len() == 1 {
-            if let Some(n) = doc.note_mut(owners[0]) {
+        if owners.len() == 1
+            && let Some(n) = doc.note_mut(owners[0]) {
                 n.pitch.set(pb.position_ppq, semitones);
             }
-        }
     }
 
     // Channel pressure and CC74 are the MPE expression dimensions.

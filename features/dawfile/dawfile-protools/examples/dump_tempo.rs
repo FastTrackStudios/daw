@@ -1,4 +1,4 @@
-use dawfile_protools::{block, decrypt};
+use dawfile_protools::block;
 
 fn find_first(blocks: &[block::Block], raw: u16) -> Option<block::Block> {
     for b in blocks {
@@ -12,8 +12,8 @@ fn find_first(blocks: &[block::Block], raw: u16) -> Option<block::Block> {
     None
 }
 
-fn dump_session(path: &str, data: &[u8]) {
-    let mut d = data.to_vec();
+fn dump_session(_path: &str, data: &[u8]) {
+    let d = data.to_vec();
     let is_be = d.get(0x11).copied().unwrap_or(0) != 0;
     let blocks = block::parse_blocks(&d, is_be);
 

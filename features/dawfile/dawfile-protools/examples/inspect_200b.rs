@@ -2,7 +2,6 @@
 //! Align 0x200b blocks with their parent track. 0x200b is per-colored-track,
 //! living inside 0x261c (which is also per-colored-track, missing folders).
 
-use dawfile_protools::content_type::ContentType;
 use dawfile_protools::raw_block::RawBlock;
 
 fn main() {

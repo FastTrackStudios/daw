@@ -26,8 +26,7 @@
 #![allow(
     clippy::field_reassign_with_default,
     clippy::manual_clamp,
-    clippy::needless_range_loop,
-    dead_code
+    clippy::needless_range_loop
 )]
 
 mod action_registry;

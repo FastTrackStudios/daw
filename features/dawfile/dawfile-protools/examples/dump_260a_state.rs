@@ -2,7 +2,7 @@
 //! the suspicious +8 flag and the UID-like +19..+22 region.
 
 use dawfile_protools::content_type::ContentType;
-use dawfile_protools::raw_block::{RawBlock, RawSession};
+use dawfile_protools::raw_block::RawBlock;
 use std::collections::HashSet;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
