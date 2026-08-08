@@ -113,7 +113,7 @@ struct Ink {
 /// track panel it does *not* — `track_mute_off` shows #494949 in both
 /// cells, identical. Assuming either way invents a state one of the two
 /// families does not have.
-fn ink(lit: Option<Color>, at: Interaction, sinks: bool) -> Ink {
+fn ink(lit: Option<Color>, at: Interaction, sinks: bool, hover: f32) -> Ink {
     let t = Theme::default();
     let c = &t.chrome;
     // Unlit controls take the neutral control grey, not a shade of the
@@ -123,9 +123,19 @@ fn ink(lit: Option<Color>, at: Interaction, sinks: bool) -> Ink {
     let base = lit.unwrap_or(c.hardware);
     // Hover is far stronger than the 12% wash this used: solo lifts to
     // #ffdb59, with red clipping at the ceiling.
+    //
+    // How far is per button, because the source's is. Measured as the
+    // per-channel ratio from normal to hover:
+    //
+    //     mute    x1.25  x1.56  x1.52
+    //     solo    x1.21  x1.39  x1.62
+    //     defeat  x1.85  x1.43  x1.21
+    //
+    // Mute's is the gentlest and the flattest; a single amount tuned to
+    // solo drove mute's red to 238 against the source's 220.
     let face = match at {
         Interaction::Normal => base,
-        Interaction::Hover => lift(base, 0.35),
+        Interaction::Hover => lift(base, hover),
         Interaction::Pressed if sinks => deepen(base, 0.12),
         Interaction::Pressed => base,
     };
@@ -165,6 +175,9 @@ pub struct LabelButtonProps {
     /// Does pressing darken the face? See [`ink`].
     #[props(default = true)]
     pub sinks: bool,
+    /// How far the face lifts under the pointer — see [`ink`].
+    #[props(default = 0.35)]
+    pub hover: f32,
     /// How far the face deepens from top to bottom — see [`deepen`].
     ///
     /// Not shared, because the source does not share it: mute falls 15%
@@ -203,7 +216,7 @@ pub struct LabelButtonProps {
 /// offset shadow, which read as a bevel at 20px and as a badge at 300px.
 #[component]
 pub fn LabelButton(props: LabelButtonProps) -> Element {
-    let k = ink(props.lit, props.at, props.sinks);
+    let k = ink(props.lit, props.at, props.sinks, props.hover);
     let (vw, vh) = props.cell;
     let (body_y, body_h) = (vh * props.body.0, vh * props.body.1);
     let id = format!("lb{}", props.label.replace(' ', ""));
@@ -300,6 +313,9 @@ pub struct ToggleProps {
     /// Does pressing darken the face? See [`ink`].
     #[props(default = true)]
     pub sinks: bool,
+    /// How far the face lifts under the pointer — see [`ink`].
+    #[props(default = 0.35)]
+    pub hover: f32,
     /// How far the face darkens — see [`LabelButtonProps::depth`].
     #[props(default = 0.14)]
     pub depth: f32,
@@ -336,7 +352,7 @@ pub fn MuteButton(props: ToggleProps) -> Element {
             label: "M",
             lit: props.on.then_some(t.signal.mute),
             cell: props.cell, body: props.body, legend: props.legend,
-            depth: props.depth, sinks: props.sinks,
+            depth: props.depth, sinks: props.sinks, hover: props.hover,
             width: props.width, height: props.height, at: props.at,
         }
     }
@@ -347,6 +363,9 @@ pub struct SoloProps {
     /// Does pressing darken the face? See [`ink`].
     #[props(default = true)]
     pub sinks: bool,
+    /// How far the face lifts under the pointer — see [`ink`].
+    #[props(default = 0.35)]
+    pub hover: f32,
     /// How far the face darkens — see [`LabelButtonProps::depth`].
     #[props(default = 0.14)]
     pub depth: f32,
@@ -392,6 +411,7 @@ pub fn SoloButton(props: SoloProps) -> Element {
         LabelButton {
             label: "S", lit, cell: props.cell, body: props.body,
             legend: props.legend, depth: props.depth, sinks: props.sinks,
+            hover: props.hover,
             width: props.width, height: props.height, at: props.at,
         }
     }
@@ -582,7 +602,7 @@ pub struct FxControlProps {
 #[component]
 pub fn FxControl(props: FxControlProps) -> Element {
     let t = Theme::default();
-    let k = ink(None, props.at, true);
+    let k = ink(None, props.at, true, 0.35);
     let p = props.family.pill();
     let (win_x, win_w) = props.family.window(props.part);
 
@@ -1035,7 +1055,7 @@ pub struct RoutingProps {
 #[component]
 pub fn RoutingButton(props: RoutingProps) -> Element {
     let t = Theme::default();
-    let k = ink(None, props.at, true);
+    let k = ink(None, props.at, true, 0.35);
     let (vw, vh) = props.cell;
 
     // Three lanes, not two: the original stacks the track's own output,
@@ -1465,8 +1485,8 @@ mod tests {
         let n = (None, None);
         let cases: [(&str, String); 7] = [
             ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { cell: (36.0, 24.0), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_solo_on", render_svg(SoloButton, SoloProps { sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { hover: 0.35, sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_solo_on", render_svg(SoloButton, SoloProps { hover: 0.35, sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_fx_norm", render_svg(FxButton, FxProps { family: Default::default(), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
@@ -1502,6 +1522,7 @@ mod tests {
                 render_svg(
                     MuteButton,
                     ToggleProps {
+                        hover: 0.35,
                         sinks: true,
                         depth: 0.15,
                         legend: None,
@@ -1516,6 +1537,7 @@ mod tests {
                 render_svg(
                     SoloButton,
                     SoloProps {
+                        hover: 0.35,
                         sinks: true,
                         depth: 0.11,
                         legend: None,
@@ -1613,6 +1635,7 @@ mod tests {
         let small = render_svg(
             MuteButton,
             ToggleProps {
+                hover: 0.35,
                 sinks: true,
                 depth: 0.15,
                 legend: None,
@@ -1627,6 +1650,7 @@ mod tests {
         let large = render_svg(
             MuteButton,
             ToggleProps {
+                hover: 0.35,
                 sinks: true,
                 depth: 0.15,
                 legend: None,
@@ -1708,6 +1732,7 @@ mod tests {
         let n = render_svg(
             MuteButton,
             ToggleProps {
+                hover: 0.35,
                 sinks: true,
                 depth: 0.15,
                 legend: None,
@@ -1722,6 +1747,7 @@ mod tests {
         let h = render_svg(
             MuteButton,
             ToggleProps {
+                hover: 0.35,
                 sinks: true,
                 depth: 0.15,
                 legend: None,
@@ -1736,6 +1762,7 @@ mod tests {
         let p = render_svg(
             MuteButton,
             ToggleProps {
+                hover: 0.35,
                 sinks: true,
                 depth: 0.15,
                 legend: None,
@@ -1757,6 +1784,7 @@ mod tests {
         let off = render_svg(
             SoloButton,
             SoloProps {
+                hover: 0.35,
                 sinks: true,
                 depth: 0.11,
                 legend: None,
@@ -1771,6 +1799,7 @@ mod tests {
         let on = render_svg(
             SoloButton,
             SoloProps {
+                hover: 0.35,
                 sinks: true,
                 depth: 0.11,
                 legend: None,
@@ -1785,6 +1814,7 @@ mod tests {
         let defeat = render_svg(
             SoloButton,
             SoloProps {
+                hover: 0.35,
                 sinks: true,
                 depth: 0.11,
                 legend: None,

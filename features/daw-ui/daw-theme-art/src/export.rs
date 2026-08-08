@@ -96,7 +96,9 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         render_svg(
             v::MuteButton,
             v::ToggleProps {
-                depth: 0.14,
+                // Mute's hover is the gentlest of the three — see `ink`.
+                hover: 0.25,
+                depth: 0.15,
                 on,
                 cell: label_cell,
                 body: label_body,
@@ -114,6 +116,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         render_svg(
             v::SoloButton,
             v::SoloProps {
+                hover: 0.35,
                 state,
                 cell: label_cell,
                 body: label_body,

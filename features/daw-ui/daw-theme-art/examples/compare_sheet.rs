@@ -147,6 +147,7 @@ fn main() {
                             render_svg(
                                 vector::MuteButton,
                                 vector::ToggleProps {
+                                    hover: 0.35,
                                     sinks: true,
                                     depth: 0.15,
                                     legend: None,
@@ -195,6 +196,7 @@ fn main() {
                             render_svg(
                                 vector::SoloButton,
                                 vector::SoloProps {
+                                    hover: 0.35,
                                     sinks: true,
                                     depth: 0.11,
                                     legend: None,

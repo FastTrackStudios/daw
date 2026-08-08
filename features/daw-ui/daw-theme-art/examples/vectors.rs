@@ -40,6 +40,7 @@ fn main() {
             &render_svg(
                 MuteButton,
                 ToggleProps {
+                    hover: 0.35,
                     sinks: true,
                     depth: 0.15,
                     legend: None,
@@ -58,6 +59,7 @@ fn main() {
             &render_svg(
                 MuteButton,
                 ToggleProps {
+                    hover: 0.35,
                     sinks: true,
                     depth: 0.15,
                     legend: None,
@@ -76,6 +78,7 @@ fn main() {
             &render_svg(
                 SoloButton,
                 SoloProps {
+                    hover: 0.35,
                     sinks: true,
                     depth: 0.11,
                     legend: None,
@@ -94,6 +97,7 @@ fn main() {
             &render_svg(
                 SoloButton,
                 SoloProps {
+                    hover: 0.35,
                     sinks: true,
                     depth: 0.11,
                     legend: None,
