@@ -234,7 +234,10 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         "monitor_auto" => mon(v::Monitoring::Auto),
 
         // Mixer-only: the knobs and the fader live in one panel.
-        "pan_knob_small" => render_svg(
+        //
+        // Pan and width share art — the two source PNGs are byte-identical,
+        // because REAPER labels the control and the knob itself is generic.
+        "pan_knob_small" | "width_knob_small" => render_svg(
             v::PanningKnob,
             v::PanProps {
                 position: 0.0,
@@ -243,7 +246,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 height: n.1,
             },
         ),
-        "pan_knob_large" => render_svg(
+        "pan_knob_large" | "width_knob_large" => render_svg(
             v::PanningKnob,
             v::PanProps {
                 position: 0.0,
@@ -355,7 +358,8 @@ fn states(name: &str) -> usize {
         .or_else(|| name.strip_prefix("track_"))
         .unwrap_or(name);
     match stem {
-        "pan_knob_small" | "pan_knob_large" | "volthumb" | "volbg" => 1,
+        "pan_knob_small" | "pan_knob_large" | "width_knob_small" | "width_knob_large"
+        | "volthumb" | "volbg" => 1,
         _ => 3,
     }
 }
