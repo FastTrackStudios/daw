@@ -1711,6 +1711,221 @@ pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
     }
 }
 
+// ── track panel: envelope mode ──────────────────────────────────────────
+
+/// Which automation mode an envelope button is showing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum EnvelopeMode {
+    #[default]
+    Off,
+    Read,
+    Write,
+    Touch,
+    Latch,
+    Preview,
+}
+
+impl EnvelopeMode {
+    /// The letter REAPER puts in the corner. `Off` has none.
+    fn letter(self) -> Option<&'static str> {
+        match self {
+            Self::Off => None,
+            Self::Read => Some("R"),
+            Self::Write => Some("W"),
+            Self::Touch => Some("T"),
+            Self::Latch => Some("L"),
+            Self::Preview => Some("P"),
+        }
+    }
+
+    /// Measured off the source art.
+    ///
+    /// These are REAPER's automation-mode colours, not chrome: a user
+    /// reads green as read and red as write the same way they read a
+    /// traffic light, so they stay put when the rest of the theme is
+    /// retinted. `Off` is the one that follows the palette.
+    fn tint(self, t: &Theme) -> Color {
+        match self {
+            Self::Off => t.chrome.hardware_mark,
+            Self::Read => Color::rgb(0x41, 0xce, 0x7c),
+            Self::Write => Color::rgb(0xdb, 0x35, 0x50),
+            Self::Touch => Color::rgb(0xff, 0xcb, 0x40),
+            Self::Latch => Color::rgb(0xbd, 0x62, 0xdb),
+            Self::Preview => Color::rgb(0x16, 0xa9, 0xfe),
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct EnvelopeProps {
+    #[props(default)]
+    pub mode: EnvelopeMode,
+    #[props(default = (20.0, 20.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The envelope button — a rising automation segment, and its mode letter.
+///
+/// The whole button is one colour at three opacities: a plate at 0.25 when
+/// unlit and 0.35 when lit, a rim a shade under that, and the glyph at
+/// 0.55 unlit and solid lit. Nothing here is a separate grey.
+///
+/// The glyph sits half a pixel lower with no letter than with one — the
+/// unlit button centres its icon, and the lit ones shift up to make room —
+/// so that offset is keyed off the letter rather than off the mode.
+#[component]
+pub fn EnvelopeButton(props: EnvelopeProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let letter = props.mode.letter();
+    let lit = letter.is_some();
+    let tint = props.mode.tint(&t);
+    let tint = match props.at {
+        // Not `shade`: #41ce7c goes to #54e498 on hover, which moves red
+        // by a tenth of its headroom and green by nearly half. That is a
+        // scale, not a mix toward white.
+        Interaction::Hover => lift(tint, 0.15),
+        _ => tint,
+    };
+
+    // The plate is the track panel's usual scrim — flat black at a low
+    // opacity — not a wash of the mode colour. Tinting it made every lit
+    // mode glow, and turned the alpha-weighted mean from #08 into #3e.
+    let plate = if lit { 0.35 } else { 0.25 };
+    let glyph = if lit { 1.0 } else { 0.73 };
+    // Down half a pixel when there is no letter to make room for.
+    let dy = if lit { 0.0 } else { 0.6 };
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            rect {
+                x: "0", y: "0", width: "{vw}", height: "{vh}", rx: "2.4",
+                fill: "#000000", fill_opacity: "{plate * 0.7}",
+            }
+            rect {
+                x: "1", y: "1", width: "{vw - 2.0}", height: "{vh - 2.0}",
+                rx: "1.6",
+                fill: "#000000", fill_opacity: "{plate}",
+            }
+            g { opacity: "{glyph}", fill: "{tint.css()}", stroke: "{tint.css()}",
+                // The run: in flat from the left, up to the right, out
+                // flat again. Thinner than the handles it joins.
+                path {
+                    d: "M 2 {12.5 + dy} H 7 L 13 {5.5 + dy} H 18",
+                    fill: "none",
+                    stroke_width: "1.1",
+                }
+                rect { x: "5.3", y: "{10.3 + dy}", width: "3.4", height: "3.4", rx: "0.3" }
+                rect { x: "11.3", y: "{4.3 + dy}", width: "3.4", height: "3.4", rx: "0.3" }
+            }
+            if let Some(letter) = letter {
+                text {
+                    x: "14.4", y: "13.4",
+                    text_anchor: "middle", dominant_baseline: "central",
+                    font_family: "Fira Sans, DejaVu Sans, sans-serif",
+                    font_weight: "700", font_size: "7.8",
+                    fill: "{tint.css()}",
+                    "{letter}"
+                }
+            }
+        }
+    }
+}
+
+// ── track panel: phase invert ───────────────────────────────────────────
+
+#[derive(Props, Clone, PartialEq)]
+pub struct PhaseProps {
+    /// Inverted — the lit blue state.
+    #[props(default)]
+    pub inverted: bool,
+    #[props(default = (16.0, 20.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The phase button — a slashed circle on a rounded plate.
+///
+/// The plate is nearly round: 16 wide by 15.6 tall with a corner radius of
+/// 6, which at this size reads as a squircle rather than either a circle
+/// or a button. Its rim is the one thing the two states do differently —
+/// unlit it is the plate a shade down, lit it is flat #171717, because a
+/// blue plate shaded down is still blue and the source's is black.
+#[component]
+pub fn PhaseButton(props: PhaseProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+
+    let plate = if props.inverted {
+        Color::rgb(0x16, 0xa9, 0xfe)
+    } else {
+        t.chrome.hardware.shade(-0.05)
+    };
+    let plate = match props.at {
+        Interaction::Hover => plate.shade(if props.inverted { 0.30 } else { 0.13 }),
+        _ => plate,
+    };
+    let rim = if props.inverted {
+        t.chrome.hardware_edge
+    } else {
+        plate.shade(-0.24)
+    };
+    // Bright on the dark plate, dark on the blue one: the glyph is
+    // whichever of the two reads against what is behind it.
+    let ink = if props.inverted {
+        t.chrome.hardware_edge
+    } else {
+        t.chrome.hardware_mark.shade(0.36)
+    };
+
+    // The plate is 15.6 tall and sits 2 up from the bottom of whatever
+    // cell it is in — 2.4 down in the track panel's 20 rows, 0.4 in the
+    // mixer's 18. One number, both families.
+    let top = vh - 17.6;
+    let (cx, cy) = (vw * 0.5, top + 7.4);
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            rect {
+                x: "0", y: "{top}", width: "{vw}", height: "15.6", rx: "7",
+                fill: "{rim.css()}",
+            }
+            rect {
+                x: "0.9", y: "{top + 0.9}", width: "{vw - 1.8}", height: "13.8",
+                rx: "6.1",
+                fill: "{plate.css()}",
+            }
+            circle {
+                cx: "{cx}", cy: "{cy}", r: "3.6",
+                fill: "none", stroke: "{ink.css()}", stroke_width: "1.0",
+            }
+            line {
+                x1: "{cx - 3.3}", y1: "{cy + 3.1}",
+                x2: "{cx + 3.3}", y2: "{cy - 3.1}",
+                stroke: "{ink.css()}", stroke_width: "1.0",
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

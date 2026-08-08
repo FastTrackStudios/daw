@@ -196,6 +196,33 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         )
     };
 
+    // Track-panel-only controls. The mixer strip has no room for these,
+    // so unlike everything above there is no twin to keep in step.
+    let env = |mode| {
+        render_svg(
+            v::EnvelopeButton,
+            v::EnvelopeProps {
+                mode,
+                cell: (20.0, 20.0),
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let phase = |inverted| {
+        render_svg(
+            v::PhaseButton,
+            v::PhaseProps {
+                inverted,
+                cell: if track { (16.0, 20.0) } else { (16.0, 18.0) },
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+
     // Both families answer to the same eight controls, so match on the
     // part after the prefix rather than writing every name twice.
     let stem = name
@@ -236,6 +263,28 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         "io_r_dis" => io(false, true, true),
         "io_s_r" => io(true, true, false),
         "io_s_r_dis" => io(true, true, true),
+
+        // Track-panel only. The mixer's envelope button is a different
+        // control entirely — no plate, and a five-pixel word under the
+        // glyph — and type that small is hinted by hand, not described.
+        // It stays traced for the same reason the large knob's blurred
+        // edge does: a vector version would have to draw the artefact.
+        "env" | "env_read" | "env_write" | "env_touch" | "env_latch"
+        | "env_preview"
+            if !track =>
+        {
+            return None;
+        }
+
+        "env" => env(v::EnvelopeMode::Off),
+        "env_read" => env(v::EnvelopeMode::Read),
+        "env_write" => env(v::EnvelopeMode::Write),
+        "env_touch" => env(v::EnvelopeMode::Touch),
+        "env_latch" => env(v::EnvelopeMode::Latch),
+        "env_preview" => env(v::EnvelopeMode::Preview),
+
+        "phase_norm" => phase(false),
+        "phase_inv" => phase(true),
 
         "monitor_off" => mon(v::Monitoring::Off),
         "monitor_on" => mon(v::Monitoring::On),
