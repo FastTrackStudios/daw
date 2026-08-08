@@ -294,6 +294,55 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         )
     };
 
+    // The transport bar. Its buttons are the one family here with no
+    // mixer/track split — there is only one of it — so they match on the
+    // whole name rather than on a stem.
+    let tr = |glyph, on| {
+        render_svg(
+            v::TransportButton,
+            v::TransportProps {
+                glyph,
+                on,
+                cell: if glyph == v::TransportGlyph::Repeat {
+                    (32.0, 24.0)
+                } else {
+                    (36.0, 26.0)
+                },
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    {
+        use v::TransportGlyph as G;
+        let hit = match name {
+            "transport_home" => Some(tr(G::Home, false)),
+            "transport_previous" => Some(tr(G::Previous, false)),
+            "transport_stop" => Some(tr(G::Stop, false)),
+            "transport_play" => Some(tr(G::Play, false)),
+            "transport_play_on" => Some(tr(G::Play, true)),
+            "transport_pause" => Some(tr(G::Pause, false)),
+            "transport_pause_on" => Some(tr(G::Pause, true)),
+            "transport_next" => Some(tr(G::Next, false)),
+            "transport_end" => Some(tr(G::End, false)),
+            "transport_record" => Some(tr(G::Record, false)),
+            "transport_record_on" => Some(tr(G::Record, true)),
+            "transport_record_item" => Some(tr(G::RecordItem, false)),
+            "transport_record_item_on" => Some(tr(G::RecordItem, true)),
+            "transport_record_loop" => Some(tr(G::RecordLoop, false)),
+            "transport_record_loop_on" => Some(tr(G::RecordLoop, true)),
+            "transport_repeat_off" => Some(tr(G::Repeat, false)),
+            "transport_repeat_on" => Some(tr(G::Repeat, true)),
+            "transport_play_sync" => Some(tr(G::PlaySync, false)),
+            "transport_play_sync_on" => Some(tr(G::PlaySync, true)),
+            _ => None,
+        };
+        if let Some(markup) = hit {
+            return Some(markup);
+        }
+    }
+
     // Both families answer to the same eight controls, so match on the
     // part after the prefix rather than writing every name twice.
     let stem = name

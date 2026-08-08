@@ -782,6 +782,21 @@ pub fn FxControl(props: FxControlProps) -> Element {
         (FxChain::Active, true) => (t.chrome.hardware_mark.shade(0.78), 0.87),
         (FxChain::Bypassed, _) => (t.signal.mute, 1.0),
     };
+    // The letters light with the button. Measured per cell:
+    //
+    //     mcp_fx_norm      219 / 233 / 219
+    //     track_fx_norm    235 / 242 / 221
+    //
+    // so hover lifts about a third of the headroom in both, and pressed
+    // returns to rest in the mixer but sits *below* it in the track
+    // panel. Drawn flat, the hover cell was the one the eye went to and
+    // the one that had not changed.
+    let text = match props.at {
+        Interaction::Normal => text,
+        Interaction::Hover => text.shade(0.35),
+        Interaction::Pressed if p.scrim => text.shade(-0.08),
+        Interaction::Pressed => text,
+    };
 
     // The toggle's lamp, in pill coordinates.
     let lamp = match props.bypass {
@@ -2492,6 +2507,341 @@ pub fn FolderButton(props: FolderProps) -> Element {
             }
         }
     }
+}
+
+// ── transport bar ───────────────────────────────────────────────────────
+
+/// One of the transport bar's buttons.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum TransportGlyph {
+    /// Jump to the start — a bar with a triangle pointing into it.
+    Home,
+    /// Previous marker — `Home` under a flag.
+    Previous,
+    Stop,
+    #[default]
+    Play,
+    Pause,
+    /// Next marker — `End` under a flag.
+    Next,
+    /// Jump to the end.
+    End,
+    /// Arm — a ring.
+    Record,
+    /// Arm for the selected item — a ring struck through.
+    RecordItem,
+    /// Arm for the loop — a ring in brackets.
+    RecordLoop,
+    /// Repeat — two arrows chasing each other.
+    Repeat,
+    /// Locked play — a padlock beside the triangle.
+    PlaySync,
+}
+
+impl TransportGlyph {
+    /// The colour the plate takes when the button is on.
+    ///
+    /// Measured off the `_on` variants. `Repeat` is the odd one: its plate
+    /// never changes and only the arrows light, which is why this is per
+    /// glyph rather than a single "engaged" colour.
+    fn lit(self, _t: &Theme) -> Option<Bevel> {
+        match self {
+            Self::Play | Self::PlaySync => Some(Bevel {
+                rim: Color::rgb(0x7f, 0xd6, 0xfb),
+                rim_bot: Color::rgb(0x47, 0xb8, 0xfb),
+                edge: Color::rgb(0x36, 0x9d, 0xe1),
+                centre: Color::rgb(0x4d, 0xbd, 0xfb),
+            }),
+            Self::Pause => Some(Bevel {
+                rim: Color::rgb(0xf8, 0xb3, 0x12),
+                // Amber alone runs *lighter* along the bottom rim than the
+                // top, where every other plate here runs darker.
+                rim_bot: Color::rgb(0xf9, 0xd7, 0x2e),
+                edge: Color::rgb(0xbd, 0x8e, 0x27),
+                centre: Color::rgb(0xd1, 0xa8, 0x3b),
+            }),
+            Self::Record | Self::RecordItem | Self::RecordLoop => Some(Bevel {
+                rim: Color::rgb(0xf7, 0x4c, 0x5c),
+                rim_bot: Color::rgb(0xe1, 0x3a, 0x51),
+                edge: Color::rgb(0xde, 0x39, 0x39),
+                centre: Color::rgb(0xfc, 0x57, 0x57),
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// The four colours a lit transport plate is built from.
+///
+/// All measured, none derived. The relationship between a rim and the
+/// face inside it is not a constant: record's interior is *brighter* than
+/// its rim in the red channel and pause's is thirty levels darker in all
+/// three, so a single offset cannot serve both.
+struct Bevel {
+    rim: Color,
+    rim_bot: Color,
+    edge: Color,
+    centre: Color,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct TransportProps {
+    #[props(default)]
+    pub glyph: TransportGlyph,
+    /// Engaged — plays, records, repeats.
+    #[props(default)]
+    pub on: bool,
+    /// `transport_*` is 36x26; repeat's pair are 32x24.
+    #[props(default = (36.0, 26.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// A transport button — one plate, twelve glyphs.
+///
+/// The plate is the whole cell rather than an inset shape: a 1px border,
+/// a face falling #3b3b3b to #2e2e2e over the button's height, and a
+/// separator row along the bottom that belongs to the bar rather than to
+/// the button. Corners are square — they read as rounded at 350% because
+/// a one-pixel border does, not because they are.
+///
+/// Repeat sits on a darker plate than the rest (#262626 to #1d1d1d) and
+/// never lights it; only its arrows change colour. Everything else lights
+/// the plate and darkens the glyph, except record, which lights the plate
+/// *and* turns its ring white.
+#[component]
+pub fn TransportButton(props: TransportProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let repeat = props.glyph == TransportGlyph::Repeat;
+    let lit = props.on.then(|| props.glyph.lit(&t)).flatten();
+
+    // The unlit face is nearly flat — 50 down to 47 over twenty rows —
+    // under a single lighter bevel row. The gradient this had was reading
+    // that bevel as the top of the face and running #3b3b3b to #2e2e2e,
+    // four times the actual fall.
+    let (face_top, face_bot) = match () {
+        _ if repeat => (
+            t.chrome.hardware.shade(-0.40),
+            t.chrome.hardware.shade(-0.54),
+        ),
+        _ => (
+            t.chrome.hardware.shade(-0.21),
+            t.chrome.hardware.shade(-0.26),
+        ),
+    };
+    // Hover *adds*, it does not scale: 50/47 goes to 70/67, twenty levels
+    // on both ends, where a proportional lift moves the top three times
+    // as far as the bottom. Pressed takes five back off.
+    let shift = match props.at {
+        Interaction::Hover => 20.0,
+        Interaction::Pressed => -5.0,
+        Interaction::Normal => 0.0,
+    };
+    let (face_top, face_bot) = (offset(face_top, shift), offset(face_bot, shift));
+    let border = t.chrome.hardware_edge.shade(0.05);
+
+    // The glyph reads against whatever is behind it.
+    let ink = match (props.glyph, props.on) {
+        (TransportGlyph::Record | TransportGlyph::RecordItem | TransportGlyph::RecordLoop, false) => {
+            t.signal.rec.shade(-0.10)
+        }
+        (TransportGlyph::Record | TransportGlyph::RecordItem | TransportGlyph::RecordLoop, true) => {
+            t.chrome.hardware_mark.shade(0.94)
+        }
+        (TransportGlyph::Repeat, true) => Color::rgb(0xf8, 0xcf, 0x5e),
+        (_, true) => t.chrome.hardware_edge,
+        (_, false) => t.chrome.hardware_mark.shade(0.32),
+    };
+
+    // Traced boxes, all centred on (18, 13) of a 36x26 cell bar repeat,
+    // which is centred on (16, 12) of its 32x24 one.
+    // Repeat's glyph sits half a pixel above the centre of its cell —
+    // rows 6..17 of 24 — where every other glyph is centred.
+    // Repeat's glyph is the one that is not centred in its cell: rows
+    // 6..17 of 24 and columns 11..22 of 32, so half a pixel up and half
+    // a pixel right of where the rest sit.
+    let (cx, cy) = if repeat {
+        (vw * 0.5 + 0.5, vh * 0.5 - 0.5)
+    } else {
+        (vw * 0.5, vh * 0.5)
+    };
+    let d = match props.glyph {
+        // 8x8, dead centre.
+        TransportGlyph::Stop => format!(
+            "M {} {} h 8 v 8 h -8 z", cx - 4.0, cy - 4.0
+        ),
+        // Two 3px bars with a 2px gap.
+        TransportGlyph::Pause => format!(
+            "M {} {} h 3 v 8 h -3 z M {} {} h 3 v 8 h -3 z",
+            cx - 4.0, cy - 4.0, cx + 1.0, cy - 4.0
+        ),
+        TransportGlyph::Play => format!(
+            "M {} {} V {} L {} {} Z", cx - 4.0, cy - 5.0, cy + 5.0, cx + 4.5, cy
+        ),
+        // A triangle running into a bar, and its mirror.
+        TransportGlyph::End | TransportGlyph::Next => format!(
+            "M {} {} V {} L {} {} Z M {} {} h 2.5 v 10 h -2.5 z",
+            cx - 5.0, cy - 5.0, cy + 5.0, cx + 2.0, cy, cx + 2.0, cy - 5.0
+        ),
+        TransportGlyph::Home | TransportGlyph::Previous => format!(
+            "M {} {} V {} L {} {} Z M {} {} h 2.5 v 10 h -2.5 z",
+            cx + 5.0, cy - 5.0, cy + 5.0, cx - 2.0, cy, cx - 4.5, cy - 5.0
+        ),
+        // A ring, and the same ring struck through or bracketed.
+        TransportGlyph::Record => ring(cx, cy, 6.0, 3.0),
+        TransportGlyph::RecordItem => format!(
+            "{} M {} {} h 8 v 2.4 h -8 z",
+            ring(cx, cy, 8.0, 4.4),
+            cx - 4.0,
+            cy - 1.2
+        ),
+        TransportGlyph::RecordLoop => format!(
+            "{} M {} {} h 4 v 1.6 h -2.4 v 8.8 h 2.4 v 1.6 h -4 z \
+             M {} {} h 4 v 12 h -4 v -1.6 h 2.4 v -8.8 h -2.4 z",
+            ring(cx, cy, 6.0, 3.0),
+            cx - 10.0,
+            cy - 6.0,
+            cx + 6.0,
+            cy - 6.0
+        ),
+        // Two arrowheads; the arcs they cap are stroked separately.
+        //
+        // This is a *vertical* loop — one arrow over the top and one back
+        // under the bottom — not two arrows side by side. Drawn flat it
+        // read as a pair of horizontal arrows, which is a different
+        // symbol entirely.
+        //
+        // The source is not actually arcs. Read pixel by pixel each half
+        // is a hooked band — a straight run across the top with both ends
+        // turning down — closer to a bracket than to a circle, and its
+        // heads are cut into that band rather than added to it. An arc
+        // with heads laid over the ends gets the symbol right and its
+        // weight about a level light; sitting the heads *on* the ends
+        // instead closed the loop into a plain ring, which is worse. Left
+        // as the closer of the two until the band is traced properly.
+        TransportGlyph::Repeat => format!(
+            "M {} {} L {} {} L {} {} Z M {} {} L {} {} L {} {} Z",
+            cx + 1.9, cy - 2.9, cx + 6.3, cy - 2.9, cx + 4.1, cy + 1.1,
+            cx - 1.9, cy + 2.9, cx - 6.3, cy + 2.9, cx - 4.1, cy - 1.1
+        ),
+        // A padlock beside the triangle.
+        TransportGlyph::PlaySync => format!(
+            "M {} {} h 7 v 5.5 h -7 z M {} {} a 2.2 2.2 0 0 1 4.4 0 v 1.6 \
+             h -1.4 v -1.6 a 0.9 0.9 0 0 0 -1.6 0 v 1.6 h -1.4 z \
+             M {} {} V {} L {} {} Z",
+            cx - 9.5, cy, cx - 8.2, cy,
+            cx + 1.0, cy - 5.0, cy + 5.0, cx + 8.5, cy
+        ),
+    };
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                linearGradient { id: "trface", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{face_top.css()}" }
+                    stop { offset: "1", stop_color: "{face_bot.css()}" }
+                }
+                if let Some(b) = &lit {
+                    linearGradient { id: "trlit", x1: "0", y1: "0", x2: "0", y2: "1",
+                        // Four stops, because the source holds its centre
+                        // rather than passing through it: the plateau runs
+                        // from y7 to y18 of twenty rows, and a gradient
+                        // that only touches it at the midpoint averages
+                        // eleven levels dark over the whole button.
+                        stop { offset: "0", stop_color: "{b.edge.css()}" }
+                        stop { offset: "0.22", stop_color: "{b.centre.css()}" }
+                        stop { offset: "0.78", stop_color: "{b.centre.css()}" }
+                        stop { offset: "1", stop_color: "{b.edge.css()}" }
+                    }
+                }
+            }
+            rect {
+                x: "0", y: "1", width: "{vw}", height: "{vh - 2.0}",
+                fill: "{border.css()}",
+            }
+            if let Some(b) = &lit {
+                // A lit plate is a bevel, not a wash. Down its centre the
+                // colour runs #7fd6fb, #369de1, up to #4dbdfb through the
+                // middle, back down to #369de1 and out on #47b8fb: a
+                // bright rim top and bottom with the face inset dark
+                // against it. Painted as one flat field it read as a
+                // sticker rather than a lit button.
+                rect {
+                    x: "1", y: "2", width: "{vw - 2.0}", height: "{vh - 4.0}",
+                    fill: "{b.rim.css()}",
+                }
+                rect {
+                    x: "1", y: "{vh - 3.0}", width: "{vw - 2.0}", height: "1",
+                    fill: "{b.rim_bot.css()}",
+                }
+                rect {
+                    x: "1", y: "3", width: "{vw - 2.0}", height: "{vh - 6.0}",
+                    fill: "url(#trlit)",
+                }
+            } else {
+                // One lighter row under the top border, which every
+                // ReaperTips control has.
+                rect {
+                    x: "1", y: "2", width: "{vw - 2.0}", height: "1",
+                    fill: "{offset(face_top, 9.0).css()}",
+                }
+                rect {
+                    x: "1", y: "3", width: "{vw - 2.0}", height: "{vh - 5.0}",
+                    fill: "url(#trface)",
+                }
+            }
+            // The bar's own separator, not the button's edge — it runs the
+            // full width where the border is inset by a pixel.
+            rect {
+                x: "0", y: "{vh - 1.0}", width: "{vw}", height: "1",
+                fill: "{t.chrome.hardware.shade(-0.11).css()}",
+            }
+            if repeat {
+                path {
+                    d: "M {cx - 4.2} {cy - 0.9} A 4.3 4.3 0 0 1 {cx + 4.2} {cy - 0.9}
+                        M {cx + 4.2} {cy + 0.9} A 4.3 4.3 0 0 1 {cx - 4.2} {cy + 0.9}",
+                    fill: "none",
+                    stroke: "{ink.css()}",
+                    stroke_width: "2.2",
+                }
+            }
+            path { d: "{d}", fill: "{ink.css()}", fill_rule: "evenodd" }
+        }
+    }
+}
+
+/// Shift every channel by a constant number of levels.
+///
+/// Distinct from [`lift`], which scales. Some of this theme's states move
+/// by a fixed amount — the transport's hover adds twenty levels to a face
+/// whose ends are only three apart — and a scale cannot express that.
+fn offset(c: Color, by: f32) -> Color {
+    let one = |v: u8| (v as f32 + by).clamp(0.0, 255.0) as u8;
+    Color::rgb(one(c.r), one(c.g), one(c.b))
+}
+
+/// An annulus as one even-odd path — the shape every record button uses.
+fn ring(cx: f32, cy: f32, outer: f32, inner: f32) -> String {
+    format!(
+        "M {} {cy} A {outer} {outer} 0 1 0 {} {cy} A {outer} {outer} 0 1 0 {} {cy} Z \
+         M {} {cy} A {inner} {inner} 0 1 1 {} {cy} A {inner} {inner} 0 1 1 {} {cy} Z",
+        cx - outer,
+        cx + outer,
+        cx - outer,
+        cx - inner,
+        cx + inner,
+        cx - inner,
+    )
 }
 
 #[cfg(test)]
