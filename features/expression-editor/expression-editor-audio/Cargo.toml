@@ -1,0 +1,14 @@
+[package]
+name = "expression-editor-audio"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+description = "Adapter between the expression editor's document and tune-dsp's analyzed pitch model — the Melodyne surface's data path"
+
+# The audio counterpart of `expression-editor-daw`: one converts a MIDI
+# take, this converts an analysis. Both produce the same
+# `ExpressionDoc`, which is the whole reason one editor serves both.
+[dependencies]
+expression-editor-core = { workspace = true }
+tune-dsp = { workspace = true }
