@@ -479,9 +479,21 @@ pub struct FxBypassProps {
     /// mixer's FX button.
     #[props(default = false)]
     pub scrim: bool,
-    /// The cell this replaces: `track_fx*_h` is 50x22 in three, `_v` 56x22.
-    #[props(default = (17.0, 22.0))]
+    /// The cell this replaces.
+    ///
+    /// Measured, not divided: `track_fx*_h` draws columns 1..48 of 50, so
+    /// its cells are **16** wide with a spare column either side, and
+    /// `_v` draws 1..54 of 56, so 18. Rounding 50/3 to 17 stretched every
+    /// toggle by a pixel.
+    #[props(default = (16.0, 22.0))]
     pub cell: (f32, f32),
+    /// Where the box sits in its cell: `(top, height)` as fractions.
+    ///
+    /// The two variants differ here too — `_h` draws rows 1..20 of 22 and
+    /// `_v` only 1..18 — so a single constant made the mixer's toggle two
+    /// rows taller than the FX button beside it.
+    #[props(default = (1.0 / 22.0, 20.0 / 22.0))]
+    pub body: (f32, f32),
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -518,14 +530,32 @@ pub fn FxBypassToggle(props: FxBypassProps) -> Element {
     // Empty + pointer is the "add FX" affordance, not a lit state.
     let plus = props.state == FxBypass::Empty && props.at != Interaction::Normal;
 
+    let (box_y, box_h) = (vh * props.body.0, vh * props.body.1);
+    let edge = vh * 0.05;
+
+    // Both measured off `track_fxempty_v`, and both were wrong by being
+    // too dark. The dormant pill is #656565 — *lighter* than the #3f3f3f
+    // face, a lens catching the light rather than the hole this was
+    // drawing at shade(-0.25). The plus is #d9d9d9, brighter than the
+    // marker grey used for a knob's dot.
+    let dormant = t.chrome.hardware_mark.shade(-0.38);
+    let plus_ink = t.chrome.hardware_mark.shade(0.33);
     let (box_fill, box_alpha) = if props.scrim {
         ("#000000", 0.35)
     } else {
         ("url(#fxbypbody)", 1.0)
     };
-    let (cx, cy) = (vw * 0.5, vh * 0.5);
-    let pw = vw * 0.30;
-    let ph = vh * 0.52;
+    let (cx, cy) = (vw * 0.5, box_y + box_h * 0.5);
+    // All four measured, and none of them a fraction of the cell *width*:
+    // the pill is 4px in both variants although their cells are 16 and 18
+    // wide, so scaling it by width made the mixer's noticeably fatter than
+    // the track panel's when the art has them identical.
+    let pw = vh * 0.182;
+    let ph = box_h * 0.5;
+    // The plus is its own 8x8 with 2px arms — deriving it from the pill,
+    // as this did, tied two unrelated shapes together and made it squat.
+    let arm = vh * 0.364;
+    let bar = vh * 0.091;
     let id = "fxled";
 
     rsx! {
@@ -548,16 +578,28 @@ pub fn FxBypassToggle(props: FxBypassProps) -> Element {
             // made the toggle taller than the FX button it sits against.
             //
             defs {
+                // From `k.face`, not the bare hardware grey: that is what
+                // carries the pointer state, and hard-coding it left hover
+                // and pressed identical to normal — the source lifts the
+                // face to #4b4b4b under the pointer.
                 linearGradient { id: "fxbypbody", x1: "0", y1: "0", x2: "0", y2: "1",
-                    stop { offset: "0", stop_color: "{t.chrome.hardware.shade(0.19).css()}" }
-                    stop { offset: "1", stop_color: "{t.chrome.hardware.shade(0.02).css()}" }
+                    stop { offset: "0", stop_color: "{k.face.shade(0.19).css()}" }
+                    stop { offset: "1", stop_color: "{k.face.shade(0.02).css()}" }
                 }
             }
+            // A dark edge, inset by half its width so it stays inside the
+            // cell. Without it adjacent cells have nothing between them
+            // and the three states read as one long bar — the source
+            // separates them with the buttons' own edges, not with a gap:
+            // every column of the strip is drawn.
             rect {
-                x: "0", y: "{vh / 22.0}", width: "{vw}", height: "{vh * 20.0 / 22.0}",
+                x: "{edge / 2.0}", y: "{box_y + edge / 2.0}",
+                width: "{vw - edge}", height: "{box_h - edge}",
                 rx: "{vh * 0.12}",
                 fill: "{box_fill}",
                 fill_opacity: "{box_alpha}",
+                stroke: "{t.chrome.hardware_edge.css()}",
+                stroke_width: "{edge}",
             }
             // The lit top edge every ReaperTips control has: one row just
             // inside the top, a shade lighter than the face. Measured on
@@ -569,7 +611,7 @@ pub fn FxBypassToggle(props: FxBypassProps) -> Element {
             // it lightens whatever is beneath instead of replacing it,
             // which is what the source is doing.
             rect {
-                x: "{vw * 0.12}", y: "{vh * 2.0 / 22.0}",
+                x: "{vw * 0.12}", y: "{box_y + vh * 0.045}",
                 width: "{vw * 0.76}", height: "{vh * 0.045}",
                 fill: "#ffffff", fill_opacity: "0.07",
             }
@@ -577,14 +619,14 @@ pub fn FxBypassToggle(props: FxBypassProps) -> Element {
                 // A plus, drawn as two bars so its weight is set here rather
                 // than by whatever font happens to be installed.
                 rect {
-                    x: "{cx - pw * 0.75}", y: "{cy - vh * 0.055}",
-                    width: "{pw * 1.5}", height: "{vh * 0.11}",
-                    fill: "{t.chrome.hardware_mark.css()}",
+                    x: "{cx - arm * 0.5}", y: "{cy - bar * 0.5}",
+                    width: "{arm}", height: "{bar}",
+                    fill: "{plus_ink.css()}",
                 }
                 rect {
-                    x: "{cx - pw * 0.22}", y: "{cy - ph * 0.5}",
-                    width: "{pw * 0.44}", height: "{ph}",
-                    fill: "{t.chrome.hardware_mark.css()}",
+                    x: "{cx - bar * 0.5}", y: "{cy - arm * 0.5}",
+                    width: "{bar}", height: "{arm}",
+                    fill: "{plus_ink.css()}",
                 }
             } else if let Some(c) = lit {
                 // The halo: what separates an LED from a coloured rectangle.
@@ -605,7 +647,7 @@ pub fn FxBypassToggle(props: FxBypassProps) -> Element {
                     x: "{cx - pw * 0.5}", y: "{cy - ph * 0.5}",
                     width: "{pw}", height: "{ph}",
                     rx: "{pw * 0.5}",
-                    fill: "{k.face.shade(-0.25).css()}",
+                    fill: "{dormant.css()}",
                 }
             }
         }

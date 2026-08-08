@@ -148,12 +148,13 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
 
     // `track_fx*_h` is 50x22 in three cells, `_v` 56x22 — the track
     // panel's FX bypass toggle, which has no `mcp_` twin at all.
-    let byp = |state, cell, scrim| {
+    let byp = |state, cell, body, scrim| {
         render_svg(
             v::FxBypassToggle,
             v::FxBypassProps {
                 state,
                 cell,
+                body,
                 scrim,
                 width: n.0,
                 height: n.1,
@@ -162,6 +163,15 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         )
     };
 
+    // Traced off the art rather than divided: `track_fx*_h` draws columns
+    // 1..48 of 50 and rows 1..20 of 22; `_v` draws 1..54 of 56 and rows
+    // 1..18. Neither is 50/3 or 56/3, and neither shares the other's
+    // height.
+    const H: (f32, f32) = (16.0, 22.0);
+    const VE: (f32, f32) = (18.0, 22.0);
+    const H_BODY: (f32, f32) = (1.0 / 22.0, 20.0 / 22.0);
+    const V_BODY: (f32, f32) = (1.0 / 22.0, 18.0 / 22.0);
+
     // Both families answer to the same eight controls, so match on the
     // part after the prefix rather than writing every name twice.
     let stem = name
@@ -169,12 +179,12 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         .or_else(|| name.strip_prefix("track_"))?;
 
     Some(match stem {
-        "fxempty_h" => byp(v::FxBypass::Empty, (17.0, 22.0), true),
-        "fxon_h" => byp(v::FxBypass::On, (17.0, 22.0), true),
-        "fxoff_h" => byp(v::FxBypass::Off, (17.0, 22.0), true),
-        "fxempty_v" => byp(v::FxBypass::Empty, (19.0, 22.0), false),
-        "fxon_v" => byp(v::FxBypass::On, (19.0, 22.0), false),
-        "fxoff_v" => byp(v::FxBypass::Off, (19.0, 22.0), false),
+        "fxempty_h" => byp(v::FxBypass::Empty, H, H_BODY, true),
+        "fxon_h" => byp(v::FxBypass::On, H, H_BODY, true),
+        "fxoff_h" => byp(v::FxBypass::Off, H, H_BODY, true),
+        "fxempty_v" => byp(v::FxBypass::Empty, VE, V_BODY, false),
+        "fxon_v" => byp(v::FxBypass::On, VE, V_BODY, false),
+        "fxoff_v" => byp(v::FxBypass::Off, VE, V_BODY, false),
 
         "recarm_off" => rec(v::RecordArm::Off),
         "recarm_on" => rec(v::RecordArm::On),
