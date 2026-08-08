@@ -9,6 +9,20 @@ description = "Adapter between the expression editor's document and tune-dsp's a
 # The audio counterpart of `expression-editor-daw`: one converts a MIDI
 # take, this converts an analysis. Both produce the same
 # `ExpressionDoc`, which is the whole reason one editor serves both.
+[features]
+default = []
+render = ["tune-dsp/world"]
+# The DAW-facing session. Off by default so a wasm or offline consumer
+# gets the analysis without the facade.
+daw = ["dep:daw"]
+
 [dependencies]
 expression-editor-core = { workspace = true }
 tune-dsp = { workspace = true }
+daw = { workspace = true, optional = true }
+
+[dev-dependencies]
+# The round-trip and session tests render and drive the facade, so the
+# test build always has both.
+expression-editor-audio = { workspace = true, features = ["render", "daw"] }
+daw = { workspace = true }
