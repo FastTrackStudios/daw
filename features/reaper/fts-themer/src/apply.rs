@@ -23,6 +23,16 @@ pub struct ApplyReport {
     pub unchanged: usize,
     /// Where the SWELL theme was written, if anywhere.
     pub swell: Option<std::path::PathBuf>,
+    /// Overridden keys this REAPER theme does not have.
+    ///
+    /// Worth surfacing rather than writing: a key REAPER never reads is a
+    /// typo that looks exactly like a colour that "didn't take".
+    pub unknown: Vec<String>,
+    /// Overridden keys that are not colours — `*_drawmode` and friends.
+    ///
+    /// Writing a colour over a blend mode changes how a layer composites,
+    /// which shows up as a rendering bug a long way from its cause.
+    pub not_a_colour: Vec<String>,
 }
 
 impl ApplyReport {
@@ -30,6 +40,7 @@ impl ApplyReport {
         self.changed.is_empty()
     }
 }
+
 
 /// Write `theme`'s palette into the REAPER theme at `dir`.
 ///
@@ -57,11 +68,31 @@ pub fn apply_theme_to(
     let mut report = ApplyReport::default();
 
     for assignment in theme.reaper_palette() {
+        // Guarded only for overrides, and deliberately so.
+        //
+        // A *derived* key the theme happens not to define is normal — a
+        // theme sets what it cares about and REAPER defaults the rest, so
+        // adding `envcp_bg` to a theme that omits it is the feature, not a
+        // mistake. An *override* naming an unknown key is almost always a
+        // typo, and REAPER ignores it silently, so it looks exactly like a
+        // colour that refused to take effect. Same for a `*_drawmode`:
+        // writing a colour over a blend mode changes how a layer
+        // composites and surfaces a long way from the cause.
+        if theme.overrides.contains_key(assignment.key.as_ref()) {
+            if !target.ini().has(&assignment.key) {
+                report.unknown.push(assignment.key.to_string());
+                continue;
+            }
+            if !crate::groups::is_color(&assignment.key) {
+                report.not_a_colour.push(assignment.key.to_string());
+                continue;
+            }
+        }
         // daw-theme and fts-themer each have their own colour type — one is
         // the authoring vocabulary, the other the REAPER wire format — so
         // convert rather than leaking one into the other's API.
         let want = Rgb::new(assignment.color.r, assignment.color.g, assignment.color.b);
-        match target.ini().color(assignment.key) {
+        match target.ini().color(&assignment.key) {
             Some(have) if have == want => report.unchanged += 1,
             have => {
                 report.changed.push((
@@ -69,7 +100,7 @@ pub fn apply_theme_to(
                     have.unwrap_or(Rgb::new(0, 0, 0)),
                     want,
                 ));
-                target.ini_mut().set_color(assignment.key, want);
+                target.ini_mut().set_color(&assignment.key, want);
             }
         }
     }
@@ -200,5 +231,83 @@ mod tests {
         std::fs::write(&path, theme.to_styx().unwrap()).unwrap();
         assert_eq!(load_theme(Some(&path)).unwrap(), theme);
         std::fs::remove_dir_all(&d).ok();
+    }
+}
+
+#[cfg(test)]
+mod override_tests {
+    use super::*;
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("fts-apply-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("T.ReaperTheme"),
+            "[color theme]\ncol_arrangebg=0\nmcp_bg_drawmode=1\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.join("T")).unwrap();
+        dir
+    }
+
+    /// The whole point: an exact key reaches the ini.
+    #[test]
+    fn an_override_reaches_the_theme_file() {
+        let dir = scratch("ok");
+        let mut theme = daw_theme::Theme::default();
+        theme.overrides.insert(
+            "col_arrangebg".into(),
+            daw_theme::Color::rgb(0x42, 0x42, 0x42),
+        );
+
+        apply_theme(&dir, &theme, false).unwrap();
+        let written = ThemeDir::open(&dir).unwrap();
+        assert_eq!(
+            written.ini().color("col_arrangebg"),
+            Some(Rgb::new(0x42, 0x42, 0x42)),
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// A typo is reported rather than written. REAPER ignores keys it does
+    /// not know, so writing one looks exactly like a colour that refused to
+    /// take effect — the failure has to surface here or nowhere.
+    #[test]
+    fn a_key_this_theme_lacks_is_reported_not_written() {
+        let dir = scratch("unknown");
+        let mut theme = daw_theme::Theme::default();
+        theme
+            .overrides
+            .insert("col_arrangeblag".into(), daw_theme::Color::rgb(1, 2, 3));
+
+        let report = apply_theme(&dir, &theme, false).unwrap();
+        assert!(
+            report.unknown.iter().any(|k| k == "col_arrangeblag"),
+            "not reported: {:?}",
+            report.unknown,
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// And a blend mode is refused: writing a colour over one changes how a
+    /// layer composites, which shows up as a rendering bug far from here.
+    #[test]
+    fn a_non_colour_key_is_refused() {
+        let dir = scratch("mode");
+        let mut theme = daw_theme::Theme::default();
+        theme
+            .overrides
+            .insert("mcp_bg_drawmode".into(), daw_theme::Color::rgb(1, 2, 3));
+
+        let report = apply_theme(&dir, &theme, false).unwrap();
+        assert!(
+            report.not_a_colour.iter().any(|k| k == "mcp_bg_drawmode"),
+            "not reported: {:?}",
+            report.not_a_colour,
+        );
+        let written = ThemeDir::open(&dir).unwrap();
+        assert_eq!(written.ini().int("mcp_bg_drawmode"), Some(1), "was written");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

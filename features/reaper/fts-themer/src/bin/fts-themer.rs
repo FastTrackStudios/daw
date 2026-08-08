@@ -70,6 +70,15 @@ enum Command {
         /// Show what would change without writing.
         #[arg(long)]
         dry_run: bool,
+        /// Override one REAPER key exactly: `col_arrangebg=#424242`.
+        ///
+        /// The theme derives ~200 keys from twenty authored colours, which
+        /// is what keeps the parts nobody thought about from drifting
+        /// grey. This reaches the rest: anything set here is applied last
+        /// and wins, so all ~420 of REAPER's keys are addressable without
+        /// hand-authoring 420 colours. Repeatable.
+        #[arg(long = "set", value_name = "KEY=#RRGGBB")]
+        set: Vec<String>,
         /// Also write libSwell.colortheme into this REAPER resource dir —
         /// the menu bar, dialogs, buttons and lists, which the .ReaperTheme
         /// palette cannot reach.
@@ -231,13 +240,32 @@ fn main() -> Result<()> {
         Command::Apply {
             from,
             dry_run,
+            set,
             swell,
         } => {
-            let source = fts_themer::apply::load_theme(from.as_deref())?;
+            let mut source = fts_themer::apply::load_theme(from.as_deref())?;
+            for pair in &set {
+                let (key, value) = pair
+                    .split_once('=')
+                    .with_context(|| format!("expected KEY=#rrggbb, got {pair:?}"))?;
+                let rgb = Rgb::parse_hex(value).with_context(|| format!("colour for {key}"))?;
+                source
+                    .overrides
+                    .insert(key.to_string(), daw_theme::Color::rgb(rgb.r, rgb.g, rgb.b));
+            }
+
             let report =
                 fts_themer::apply::apply_theme_to(&cli.theme, &source, dry_run, swell.as_deref())?;
             for (key, before, after) in &report.changed {
                 println!("{key:<26} {} -> {}", before.to_hex(), after.to_hex());
+            }
+            // Reported, not written: see `ApplyReport`. Both are silent
+            // failures in REAPER, so they have to be loud here.
+            for key in &report.unknown {
+                eprintln!("SKIPPED {key}: this theme has no such key");
+            }
+            for key in &report.not_a_colour {
+                eprintln!("SKIPPED {key}: not a colour (blend mode or flag)");
             }
             println!(
                 "\n{} changed, {} already correct{}",

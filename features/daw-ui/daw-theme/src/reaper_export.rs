@@ -30,15 +30,21 @@ use crate::color::Color;
 use crate::palette::Theme;
 
 /// One REAPER palette assignment.
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Assignment {
     /// `[color theme]` key.
-    pub key: &'static str,
+    ///
+    /// Borrowed for the derived set, which is entirely `&'static str`, and
+    /// owned for [`Theme::overrides`], whose keys come from a file.
+    pub key: std::borrow::Cow<'static, str>,
     pub color: Color,
 }
 
 const fn a(key: &'static str, color: Color) -> Assignment {
-    Assignment { key, color }
+    Assignment {
+        key: std::borrow::Cow::Borrowed(key),
+        color,
+    }
 }
 
 impl Theme {
@@ -346,6 +352,20 @@ impl Theme {
             }
         }
 
+        // Last, so an explicit key always wins: replace a derived
+        // assignment in place, or append one the derivation never emits.
+        // Replacing in place rather than appending keeps the output free
+        // of duplicate keys, which `emits_no_duplicate_keys` pins.
+        for (key, color) in &self.overrides {
+            match out.iter_mut().find(|x| x.key == key.as_str()) {
+                Some(existing) => existing.color = *color,
+                None => out.push(Assignment {
+                    key: std::borrow::Cow::Owned(key.clone()),
+                    color: *color,
+                }),
+            }
+        }
+
         out
     }
 }
@@ -459,11 +479,66 @@ mod tests {
         }
     }
 
+    /// An override replaces the derived value for a key.
+    #[test]
+    fn an_override_wins_over_the_derivation() {
+        let derived = palette()
+            .into_iter()
+            .find(|x| x.key == "col_arrangebg")
+            .expect("col_arrangebg is derived");
+
+        let mut theme = Theme::default();
+        let want = Color::rgb(0x42, 0x42, 0x42);
+        theme
+            .overrides
+            .insert("col_arrangebg".into(), want);
+
+        let got = theme
+            .reaper_palette()
+            .into_iter()
+            .find(|x| x.key == "col_arrangebg")
+            .expect("still emitted");
+        assert_eq!(got.color, want);
+        assert_ne!(got.color, derived.color, "the test colour must differ");
+    }
+
+    /// And reaches keys the derivation never emits — the point of it.
+    #[test]
+    fn an_override_can_add_a_key_the_derivation_never_touches() {
+        let key = "col_vugrid";
+        assert!(
+            !palette().iter().any(|x| x.key == key),
+            "{key} is derived after all — pick another for this test",
+        );
+
+        let mut theme = Theme::default();
+        theme.overrides.insert(key.into(), Color::rgb(1, 2, 3));
+        let got = theme.reaper_palette();
+        assert_eq!(
+            got.iter().filter(|x| x.key == key).count(),
+            1,
+            "expected exactly one {key}",
+        );
+    }
+
+    /// Overriding must not leave two lines for one key: REAPER reads the
+    /// last, so a duplicate is a value that silently depends on order.
+    #[test]
+    fn overriding_does_not_duplicate_a_key() {
+        let mut theme = Theme::default();
+        theme
+            .overrides
+            .insert("col_arrangebg".into(), Color::rgb(9, 9, 9));
+        let got = theme.reaper_palette();
+        let n = got.iter().filter(|x| x.key == "col_arrangebg").count();
+        assert_eq!(n, 1, "col_arrangebg emitted {n} times");
+    }
+
     #[test]
     fn emits_no_duplicate_keys() {
         // A duplicate means one assignment silently wins — usually not the
         // one the author expected.
-        let mut keys: Vec<&str> = palette().iter().map(|x| x.key).collect();
+        let mut keys: Vec<String> = palette().iter().map(|x| x.key.to_string()).collect();
         keys.sort_unstable();
         let before = keys.len();
         keys.dedup();

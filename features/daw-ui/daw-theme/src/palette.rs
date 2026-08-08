@@ -130,6 +130,20 @@ pub struct Theme {
     pub signal: Signal,
     pub editor: Editor,
     pub metrics: Metrics,
+    /// Exact REAPER keys that win over the derivation.
+    ///
+    /// The twenty authored colours above fan out into ~200 keys, which is
+    /// what stops the parts nobody thought about drifting grey — but it
+    /// left the other ~220 unreachable and gave no way to say "this one
+    /// key, this exact value". Anything here is applied last: it replaces
+    /// a derived assignment or adds a key the derivation never emits, so
+    /// all 420 of REAPER's keys are addressable without hand-authoring
+    /// 420 colours.
+    ///
+    /// Keyed by REAPER's own name (`col_arrangebg`), so it round-trips
+    /// through styx as a plain map.
+    #[facet(default)]
+    pub overrides: std::collections::BTreeMap<String, Color>,
 }
 
 impl Theme {
@@ -193,6 +207,7 @@ impl Default for Theme {
                 playhead: hex(d::PLAYHEAD),
                 neutral_track: hex(d::NEUTRAL_TRACK),
             },
+            overrides: Default::default(),
             editor: Editor {
                 row_white: hex(d::ROW_WHITE),
                 row_black: hex(d::ROW_BLACK),
