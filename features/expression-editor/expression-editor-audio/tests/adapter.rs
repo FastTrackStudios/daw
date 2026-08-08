@@ -268,3 +268,60 @@ fn a_frame_finds_the_span_it_is_in() {
     assert_eq!(spans::span_at(&all, 9), Some(Span { start: 5, end: 9 }));
     assert_eq!(spans::span_at(&all, 12), None);
 }
+
+// ── warp markers from timing edits ───────────────────────────────────
+
+#[test]
+fn moving_a_note_produces_the_warp_that_gets_it_there() {
+    let (pitch, mut doc) = doc_of(vec![blob(0, 99, 60.0), blob(200, 299, 62.0)]);
+    // Slide the second note ten frames late, as a timing drag would.
+    let n = doc.note_mut(NoteId(2)).unwrap();
+    n.start += 10.0;
+    n.end += 10.0;
+
+    let markers = expression_editor_audio::warp_markers(&doc, &pitch);
+    assert_eq!(markers.len(), 4, "one per note edge");
+
+    // The untouched note warps by nothing.
+    assert!(markers[0].d_time.abs() < 1e-9);
+    assert!(markers[1].d_time.abs() < 1e-9);
+    // The moved one carries the offset, in samples.
+    let hop = HOP as f64;
+    assert!((markers[2].d_time - 10.0 * hop).abs() < 1e-6);
+    assert!((markers[3].d_time - 10.0 * hop).abs() < 1e-6);
+    // Anchored at the analyzed positions, not the edited ones — the
+    // warp maps *from* the recording.
+    assert!((markers[2].sample - 200.0 * hop).abs() < 1e-6);
+}
+
+#[test]
+fn stretching_a_note_maps_its_interior_rather_than_shifting_it() {
+    let (pitch, mut doc) = doc_of(vec![blob(0, 99, 60.0)]);
+    // Twice as long, anchored at the start.
+    doc.note_mut(NoteId(1)).unwrap().end = 199.0;
+
+    let markers = expression_editor_audio::warp_markers(&doc, &pitch);
+    assert_eq!(markers.len(), 2);
+    assert!(markers[0].d_time.abs() < 1e-9, "the start stayed put");
+    assert!(
+        markers[1].d_time > 0.0,
+        "and the end moved later, so everything between is stretched"
+    );
+}
+
+#[test]
+fn abutting_notes_do_not_leave_a_doubled_marker() {
+    // Two blobs sharing an edge: a marker list with a repeated sample
+    // has an undefined slope there.
+    let (pitch, doc) = doc_of(vec![blob(0, 99, 60.0), blob(99, 199, 62.0)]);
+    let markers = expression_editor_audio::warp_markers(&doc, &pitch);
+
+    let mut samples: Vec<f64> = markers.iter().map(|m| m.sample).collect();
+    let before = samples.len();
+    samples.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+    assert_eq!(samples.len(), before, "no repeated anchor");
+    // And they come out sorted, which the piecewise map assumes.
+    let mut sorted = samples.clone();
+    sorted.sort_by(f64::total_cmp);
+    assert_eq!(samples, sorted);
+}

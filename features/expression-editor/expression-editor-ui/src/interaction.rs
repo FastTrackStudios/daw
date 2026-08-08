@@ -144,6 +144,13 @@ pub enum Drag {
     DraftAnchor {
         index: usize,
     },
+    /// Dragging a timing separator. The law is captured at press, from
+    /// where on the line the grab landed — reading it live would let the
+    /// gesture change meaning halfway through.
+    Separator {
+        sep: expression_editor_core::Separator,
+        law: expression_editor_core::StretchLaw,
+    },
     /// One of the seven note handles.
     Handle(Box<handles::HandleDrag>),
     /// Dragging out a temporary note: a range inside one note that the
@@ -269,6 +276,12 @@ pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) ->
         1 => Gesture::MiddleClick,
         _ => Gesture::Drag,
     };
+
+    // Timing separators outrank the notes they sit between: in timing
+    // mode the boundary is what the pointer is addressing.
+    if let Some(drag) = separator_press(ed, x, y, gesture) {
+        return drag;
+    }
 
     // The note handles sit in front of everything, because they are
     // drawn in front of everything: a press that visibly lands on a
@@ -562,6 +575,41 @@ fn run_action(
             None
         }
     }
+}
+
+/// Resolve a press against the timing separators.
+///
+/// Returns `None` when the press was not on one, so the caller falls
+/// through to the ordinary path.
+fn separator_press(ed: &mut Editor, x: f64, y: f64, gesture: Gesture) -> Option<Drag> {
+    if !ed.timing_mode {
+        return None;
+    }
+    let grab = crate::canvas::SEPARATOR_GRAB_PX;
+    let line = crate::canvas::separators(ed)
+        .into_iter()
+        .find(|s| (s.x - x).abs() <= grab)?;
+
+    // Double-click puts the boundary on the beat, which is the fastest
+    // way to fix a phrase that drifted.
+    if gesture == Gesture::DoubleClick {
+        let step = ed.grid.step(ed.units_per_beat());
+        let to = expression_editor_core::timing::snap_to_beat(line.sep.t, ed.doc.start, step);
+        ed.begin_gesture();
+        for e in expression_editor_core::timing::plan(
+            &ed.doc,
+            line.sep,
+            to,
+            expression_editor_core::StretchLaw::BothStretch,
+        ) {
+            ed.apply_live(&e);
+        }
+        return Some(Drag::None);
+    }
+
+    let law = expression_editor_core::StretchLaw::at(y, ed.viewport.h);
+    ed.begin_gesture();
+    Some(Drag::Separator { sep: line.sep, law })
 }
 
 /// Route a press while a pitch drawing is open.
@@ -1236,6 +1284,20 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
         }
         Drag::Paint { .. } => paint_at(ed, drag, x, y),
         Drag::DraftAnchor { .. } => {}
+        Drag::Separator { sep, law } => {
+            // Rebuilt from the separator captured at press, so the
+            // stretch is computed from the original layout every frame
+            // rather than compounding on the last one.
+            let to = if ed.grid.enabled && !mods.shift {
+                ed.snap_time(ed.camera.t_at(x))
+            } else {
+                ed.camera.t_at(x)
+            };
+            let edits = expression_editor_core::timing::plan(&ed.doc, *sep, to, *law);
+            for e in edits {
+                ed.apply_live(&e);
+            }
+        }
         Drag::Handle(h) => {
             // Shift reverses the pitch snap, as everywhere else here.
             let snap = ed.snap_pitch != mods.shift;
@@ -1666,6 +1728,18 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
         ("x", true, _) => ed.run_command(&Command::Cut, None),
         ("c", true, _) => ed.run_command(&Command::Copy, None),
         ("v", true, _) => ed.run_command(&Command::Paste, None),
+        // Timing mode. The manual's `2`, and free here.
+        ("2", false, true) => {
+            ed.timing_mode = !ed.timing_mode;
+            true
+        }
+        // Hold to bring the MIDI reference forward, the manual's `M`.
+        // Momentary for the same reason `Shift+R` is: it is a thing you
+        // check mid-edit, not a mode to be left in.
+        ("m", false, _) if ed.reference.is_some() => {
+            ed.reference_to_front = true;
+            true
+        }
         // Arm sibilant editing. Only where there are sibilants: in a
         // MIDI mode this key would toggle an invisible state.
         ("i", false, _) if ed.mode.draws_blobs() => {

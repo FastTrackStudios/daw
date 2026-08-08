@@ -238,6 +238,9 @@ fn Canvas(
     let sibilants = canvas::sibilant_bands(&ed);
     let sibilant_scope = ed.sibilant_scope;
     let draft_view = draft.read().as_ref().map(|d| canvas::draft_view(&ed, d));
+    let sep_lines = canvas::separators(&ed);
+    let midi_ref = canvas::midi_reference_rects(&ed);
+    let midi_ref_front = ed.reference_to_front;
     // `R` brings references forward, the way `M` does for the MIDI
     // reference — with several parts on screen the quiet default is
     // sometimes too quiet to read against.
@@ -401,8 +404,10 @@ fn Canvas(
             onkeyup: move |e: KeyboardEvent| {
                 // `R` is momentary: references drop back the instant it
                 // is released, so it can never be left on by accident.
-                if e.key().to_string() == "r" {
-                    editor.write().refs_to_front = false;
+                match e.key().to_string().as_str() {
+                    "r" => editor.write().refs_to_front = false,
+                    "m" => editor.write().reference_to_front = false,
+                    _ => {}
                 }
             },
             svg {
@@ -677,6 +682,25 @@ fn Canvas(
                                 pointer_events: "none",
                             }
                         }
+                    }
+                }
+
+                // The MIDI reference, behind the sung notes: outlines
+                // rather than fills, because it is a target to agree
+                // with and must never be mistaken for something the
+                // pointer can grab.
+                for (i, r) in midi_ref.iter().enumerate() {
+                    rect {
+                        key: "mref{i}",
+                        x: "{r.x:.1}", y: "{r.y:.1}",
+                        width: "{r.w:.1}", height: "{r.h:.1}",
+                        rx: "2",
+                        fill: theme::SURFACE_DEEP,
+                        fill_opacity: if midi_ref_front { "0.85" } else { "0.5" },
+                        stroke: theme::TEXT_BRIGHT,
+                        stroke_opacity: if midi_ref_front { "0.95" } else { "0.45" },
+                        stroke_width: "1",
+                        pointer_events: "none",
                     }
                 }
 
@@ -1035,6 +1059,30 @@ fn Canvas(
                                 stroke: theme::ACCENT,
                                 stroke_width: "2",
                             }
+                        }
+                    }
+                }
+
+                // Timing separators, over everything: in timing mode
+                // the boundary is what the pointer is addressing.
+                for (i, s) in sep_lines.iter().enumerate() {
+                    g {
+                        key: "sep{i}",
+                        pointer_events: "none",
+                        line {
+                            x1: "{s.x:.1}", y1: "0",
+                            x2: "{s.x:.1}", y2: "{vp.h:.0}",
+                            stroke: s.color,
+                            stroke_width: "2",
+                        }
+                        // The tick that splits the two drag laws. Above
+                        // it the left side stretches and the rest
+                        // slides; below it both sides stretch.
+                        line {
+                            x1: "{s.x - 6.0:.1}", y1: "{s.tick_y:.1}",
+                            x2: "{s.x + 6.0:.1}", y2: "{s.tick_y:.1}",
+                            stroke: theme::SELECTED,
+                            stroke_width: "2",
                         }
                     }
                 }

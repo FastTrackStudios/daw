@@ -321,6 +321,90 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
 /// rather than a zigzag, few enough that a screen of notes stays cheap.
 const BLOB_SAMPLES: usize = 48;
 
+/// A timing separator, positioned.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SeparatorLine {
+    pub sep: expression_editor_core::Separator,
+    pub x: f64,
+    /// Y of the tick that splits the two drag laws.
+    pub tick_y: f64,
+    /// Colour by how far off the beat the boundary sits.
+    pub color: &'static str,
+}
+
+/// Where the tick sits on a separator, as a fraction of roll height.
+pub const SEPARATOR_TICK: f64 = 0.5;
+/// How close to a separator counts as grabbing it.
+pub const SEPARATOR_GRAB_PX: f64 = 6.0;
+
+/// Separators for the visible boundaries.
+///
+/// Only in timing mode: a full-height line at every note join would be
+/// a picket fence across a screen that is otherwise about pitch.
+pub fn separators(ed: &Editor) -> Vec<SeparatorLine> {
+    if !ed.timing_mode {
+        return Vec::new();
+    }
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let step = ed.grid.step(ed.units_per_beat());
+    expression_editor_core::timing::separators(&ed.doc, ed.camera.units_per_px * 2.0)
+        .into_iter()
+        .filter(|s| s.t >= t0 && s.t <= t1)
+        .map(|sep| {
+            // Deviation as a fraction of half a division: dead on at
+            // zero, worst when it sits between two divisions.
+            let dev = expression_editor_core::timing::beat_deviation(sep.t, ed.doc.start, step);
+            let off = if step > 0.0 {
+                (dev.abs() / (step * 0.5)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            SeparatorLine {
+                sep,
+                x: ed.camera.x(sep.t),
+                tick_y: ed.viewport.h * SEPARATOR_TICK,
+                // The same ramp the notes use, so "off" means the same
+                // thing everywhere on this surface — just measured
+                // against the beat instead of against a pitch.
+                color: theme::TUNE_RAMP[(off * 4.0).round() as usize % 5],
+            }
+        })
+        .collect()
+}
+
+/// A MIDI reference note, positioned.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RefNoteRect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// The loaded MIDI reference, as outlines behind the sung notes.
+pub fn midi_reference_rects(ed: &Editor) -> Vec<RefNoteRect> {
+    let Some(r) = ed.reference.as_ref() else {
+        return Vec::new();
+    };
+    if !r.visible || r.is_empty() {
+        return Vec::new();
+    }
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let h = ed.camera.px_per_semitone;
+    r.notes()
+        .filter(|n| n.end >= t0 && n.start <= t1)
+        .map(|n| {
+            let x = ed.camera.x(n.start);
+            RefNoteRect {
+                x,
+                w: (ed.camera.x(n.end) - x).max(2.0),
+                y: ed.camera.y(n.row as f64 + 0.5, ed.viewport),
+                h,
+            }
+        })
+        .collect()
+}
+
 /// A pitch drawing, ready to draw.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DraftView {

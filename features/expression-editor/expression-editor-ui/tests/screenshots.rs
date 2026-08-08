@@ -485,3 +485,62 @@ async fn shoot_pitch_drawing() {
 
     shoot_with_draft(ed, d, "37-pitch-drawing").await;
 }
+
+/// Timing separators, and the MIDI reference behind the sung notes.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_timing_and_reference() {
+    use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
+    use expression_editor_core::{Mode, MidiReference, RefNote};
+
+    const PPQ: f64 = 960.0;
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 16.0);
+    // Four abutting notes, deliberately drifting off the beat so the
+    // separator colours have something to report.
+    let bounds = [
+        (0.0, PPQ * 3.7),
+        (PPQ * 3.7, PPQ * 8.0),
+        (PPQ * 8.0, PPQ * 11.4),
+        (PPQ * 11.4, PPQ * 15.0),
+    ];
+    for (i, (s, e)) in bounds.iter().enumerate() {
+        let mut n = Note::new(NoteId(i as u64 + 1), *s, *e, 60 + (i as i32 % 3) * 2);
+        n.weight = 0.85;
+        const STEPS: usize = 40;
+        for k in 0..STEPS {
+            let f = k as f64 / (STEPS - 1) as f64;
+            n.pitch
+                .set(s + (e - s) * f, 0.18 * (f * core::f64::consts::TAU * 4.0).sin());
+        }
+        n.envelope = (0..160)
+            .map(|k| {
+                let f = k as f64 / 159.0;
+                let shell = (f / 0.06).min(1.0) * (1.0 - f).powf(0.4);
+                (shell * (0.75 + 0.25 * (f * 83.0).sin())).clamp(0.0, 1.0) as f32
+            })
+            .collect();
+        doc.push(n);
+    }
+
+    let mut ed = Editor::new(doc, Viewport::new(W as f64, CANVAS_H));
+    ed.set_mode(Mode::Audio);
+
+    // A reference part on the beat, showing where the phrase should be.
+    let mut r = MidiReference::new(
+        "Vocal.mid",
+        vec!["Track 1".into(), "Track 2".into()],
+        (0..4)
+            .map(|i| RefNote {
+                start: PPQ * 4.0 * i as f64,
+                end: PPQ * 4.0 * i as f64 + PPQ * 3.6,
+                row: 60 + (i % 3) * 2,
+            })
+            .collect(),
+    );
+    r.bpm = Some(120.0);
+    r.beats_per_bar = Some(4.0);
+    ed.reference = Some(r);
+    shoot(ed.clone(), "38-midi-reference").await;
+
+    ed.timing_mode = true;
+    shoot(ed, "39-timing-separators").await;
+}

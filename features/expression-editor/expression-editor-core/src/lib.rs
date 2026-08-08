@@ -39,8 +39,10 @@ pub mod modulation;
 pub mod multitool;
 pub mod mouse;
 pub mod razor;
+pub mod reference;
 pub mod rows;
 pub mod shape;
+pub mod timing;
 pub mod tools;
 pub mod tracks;
 pub mod tuning;
@@ -58,6 +60,8 @@ pub use mode::Mode;
 pub use mouse::{Action, MouseMap};
 pub use multitool::{Bend, Steepness, Zone};
 pub use razor::{RazorArea, RazorSet};
+pub use reference::{MidiReference, RefNote, SnapSource};
+pub use timing::{Separator, StretchLaw};
 pub use rows::{Articulation, DrumMap, NoteShape, RowSpace, StringTuning};
 pub use tools::{Grid, Hit, Mods, Selection, Tool};
 pub use tracks::{RefColor, Track, Workspace};
@@ -136,6 +140,17 @@ pub struct Editor {
     /// away. When armed, the sibilant spans shade in the waveform and
     /// the amplitude handle draws hollow.
     pub sibilant_scope: bool,
+    /// Timing mode: separators draw and take the pointer.
+    ///
+    /// A mode rather than always-on, because a full-height line at
+    /// every note join is a picket fence across a screen that is
+    /// otherwise about pitch.
+    pub timing_mode: bool,
+    /// A MIDI part loaded as a tuning target, drawn behind the notes.
+    pub reference: Option<MidiReference>,
+    /// `M` held: the reference comes forward, as with `Shift+R` for
+    /// reference tracks. Momentary for the same reason.
+    pub reference_to_front: bool,
     /// The temporary note: a range inside a note that the handles
     /// address instead of the whole thing. `None` is the ordinary case.
     ///
@@ -178,6 +193,9 @@ impl Editor {
             refs_to_front: false,
             snap_pitch: true,
             sibilant_scope: false,
+            timing_mode: false,
+            reference: None,
+            reference_to_front: false,
             temp_note: None,
             history: History::new(tracks::HISTORY_LIMIT),
         }

@@ -35,7 +35,7 @@
 //! the whole path is testable with no audio, no DSP and no UI.
 
 use expression_editor_core::doc::{ExpressionDoc, Lane, Note, NoteId, TimeBase};
-use tune_dsp::model::{NoteBlob, PitchDoc};
+use tune_dsp::model::{NoteBlob, PitchDoc, WarpMarker};
 
 pub mod spans;
 
@@ -235,6 +235,46 @@ pub fn apply_to(doc: &ExpressionDoc, pitch: &mut PitchDoc) -> usize {
         applied += 1;
     }
     applied
+}
+
+/// Derive warp markers from where the notes have been moved to.
+///
+/// Timing edits are expressed as note moves and resizes on the
+/// document, deliberately: the same gesture then works on a MIDI take,
+/// where there is nothing to warp and moving the notes *is* the whole
+/// edit. The audio domain gets its warp by comparing where a note now
+/// sits against where its blob was analyzed.
+///
+/// One marker per note edge, so a stretched note maps its whole
+/// interior linearly and the material between notes takes up the slack.
+/// `WarpMarker::d_time` is the offset from the analyzed position, which
+/// is what `render_world_warped` reads.
+pub fn warp_markers(doc: &ExpressionDoc, pitch: &PitchDoc) -> Vec<WarpMarker> {
+    let hop = pitch.hop.max(1) as f64;
+    let mut out = Vec::new();
+    for (i, blob) in pitch.blobs.iter().enumerate() {
+        let Some(note) = doc.note(NoteId(i as u64 + 1)) else {
+            continue;
+        };
+        for (analyzed_frame, now) in [
+            (blob.start_frame as f64, note.start),
+            (blob.end_frame as f64, note.end),
+        ] {
+            let d_frames = now - analyzed_frame;
+            // Markers are sample-anchored, and frame index times the
+            // hop is the sample the frame began at.
+            out.push(WarpMarker {
+                sample: analyzed_frame * hop,
+                d_time: d_frames * hop,
+                pitch_bend: 0.0,
+            });
+        }
+    }
+    // Sorted and deduplicated: two notes that abut share an edge, and a
+    // marker list with a repeated sample has an undefined slope there.
+    out.sort_by(|a, b| a.sample.total_cmp(&b.sample));
+    out.dedup_by(|a, b| (a.sample - b.sample).abs() < 1e-9);
+    out
 }
 
 /// Push the drift and vibrato blend back onto the analysis.

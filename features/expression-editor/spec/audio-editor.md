@@ -257,28 +257,32 @@ claimed it first.
 
 **Landed:**
 
-1. **`Workspace` + per-track `History`** — `tracks.rs`. Reference tracks
-   render behind the active one, `Shift+R` brings them forward, and the
-   switcher bar hides itself at one track. Done first on purpose:
-   per-track undo is a property of where the history lives.
-2. **`PitchDoc` ↔ `ExpressionDoc` adapter** — `expression-editor-audio`.
-   `to_doc` / `apply_to`, with formant and gain trims round-tripping
-   exactly and the sung drift/vibrato never rewritten.
-4. **Unvoiced spans** — `expression_editor_audio::spans`. The data half
-   of sibilant scope; the UI half is not built.
+1. **`Workspace` + per-track `History`** — `tracks.rs`, with reference
+   tracks and the switcher bar.
+2. **`PitchDoc` ↔ `ExpressionDoc` adapter** — `expression-editor-audio`,
+   including the take waveform, per-note envelopes and unvoiced spans.
+3. **The seven note handles + `TimeScope`** — `handles.rs`, and the
+   temporary note came nearly free from it.
+4. **Sibilant scope** — armed with `I`, Shift-reversed per gesture,
+   spans shaded and the amplitude handle hollow.
+5. **Pitch drawing** — `draft.rs`: anchors, raised-cosine interpolation,
+   the original underneath, its own undo, one history step on apply.
+6. **Timing separators** — `timing.rs`: the two drag laws split by grab
+   height, clamped to ⅛×–4×, double-click to the beat, coloured by beat
+   deviation. Expressed as note moves and resizes so the same gesture
+   works on MIDI; the audio domain derives warp markers from the result.
+7. **MIDI reference** — `reference.rs`, sharing one `SnapSource`
+   interface with the chromatic grid and the scale, since all three
+   answer *what pitch should this note be?* Only the reference depends
+   on time, which is the sole real difference between them.
 
-**Next, in order:**
+**Sung notes draw as the waveform they are** — the body is the recorded
+amplitude mirrored about the note's own pitch, carried up and down to
+wherever the audio actually sits, with the white pitch track wandering
+through it and breaking across unvoiced spans.
 
-3. **note handles + `TimeScope`** — the seven-handle set, scoped to a
-   note or to a range, which gets temporary notes nearly free
-4. **sibilant scope in the UI** — hollow amplitude handle, dark
-   waveform shading, Shift reversing the scope per-gesture
-5. **pitch drawing draft layer** — anchors, sinusoidal interpolation,
-   the original visible behind, and one history step on apply
-6. **timing separators over `WarpMarker`** — the two drag laws, split by
-   grab height, clamped ⅛×–4×
-7. **MIDI reference as a target-pitch source**, shared with the scale
-   and chromatic grid so all three snap through one interface
-
-Then the chrome: views, note assignment, harmony, auto-correct, scale
-detection, the undo timeline, overview, preview/auto-cycle.
+**Next — the chrome**, none of it structural: views (note/pitch),
+note assignment (split/merge), harmony voices, the auto-correct panel
+(the maths is `tune_dsp::correct_notes` plus `plan_corrections`), scale
+detection, the undo timeline, the overview strip, and
+preview/auto-cycle.

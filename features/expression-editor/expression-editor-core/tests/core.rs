@@ -3598,3 +3598,265 @@ fn an_anchor_is_grabbed_by_proximity_in_time() {
     // Between two in range, the nearer one wins.
     assert_eq!(d.anchor_at(PPQ * 1.4, PPQ * 5.0), Some(0));
 }
+
+// ── timing separators ────────────────────────────────────────────────
+
+use expression_editor_core::timing::{self, StretchLaw};
+
+/// Three abutting notes, one bar each.
+fn timing_editor() -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 12.0);
+    for i in 0..3u64 {
+        let s = PPQ * 4.0 * i as f64;
+        doc.push(Note::new(NoteId(i + 1), s, s + PPQ * 4.0, 60 + i as i32));
+    }
+    Editor::new(doc, Viewport::new(900.0, 500.0))
+}
+
+fn span(ed: &Editor, id: u64) -> (f64, f64) {
+    let n = ed.doc.note(NoteId(id)).unwrap();
+    (n.start, n.end)
+}
+
+#[test]
+fn separators_sit_only_where_notes_actually_meet() {
+    let ed = timing_editor();
+    let seps = timing::separators(&ed.doc, 1.0);
+    assert_eq!(seps.len(), 2);
+    assert!((seps[0].t - PPQ * 4.0).abs() < 1e-9);
+    assert_eq!(seps[0].left, Some(NoteId(1)));
+    assert_eq!(seps[0].right, Some(NoteId(2)));
+
+    // A gap of silence is not a draggable boundary: there is nothing on
+    // one side of it whose length would change.
+    let mut ed = timing_editor();
+    ed.doc.note_mut(NoteId(2)).unwrap().start = PPQ * 6.0;
+    assert_eq!(timing::separators(&ed.doc, 1.0).len(), 1);
+}
+
+#[test]
+fn grabbing_above_the_tick_stretches_left_and_slides_the_rest() {
+    let mut ed = timing_editor();
+    let sep = timing::separators(&ed.doc, 1.0)[0];
+    assert_eq!(
+        StretchLaw::at(10.0, 100.0),
+        StretchLaw::LeftStretchRightMoves
+    );
+
+    for e in timing::plan(&ed.doc, sep, PPQ * 5.0, StretchLaw::LeftStretchRightMoves) {
+        ed.apply(&e);
+    }
+
+    assert_eq!(span(&ed, 1), (0.0, PPQ * 5.0), "the left note grew");
+    assert_eq!(
+        span(&ed, 2),
+        (PPQ * 5.0, PPQ * 9.0),
+        "the right note kept its length and slid"
+    );
+    assert_eq!(
+        span(&ed, 3),
+        (PPQ * 9.0, PPQ * 13.0),
+        "and so did everything after it"
+    );
+}
+
+#[test]
+fn grabbing_below_the_tick_stretches_both_sides() {
+    let mut ed = timing_editor();
+    let sep = timing::separators(&ed.doc, 1.0)[0];
+    assert_eq!(StretchLaw::at(90.0, 100.0), StretchLaw::BothStretch);
+
+    for e in timing::plan(&ed.doc, sep, PPQ * 5.0, StretchLaw::BothStretch) {
+        ed.apply(&e);
+    }
+
+    assert_eq!(span(&ed, 1), (0.0, PPQ * 5.0));
+    assert_eq!(
+        span(&ed, 2),
+        (PPQ * 5.0, PPQ * 8.0),
+        "the right note absorbed the change instead of moving"
+    );
+    assert_eq!(
+        span(&ed, 3),
+        (PPQ * 8.0, PPQ * 12.0),
+        "so nothing after the pair moved at all"
+    );
+}
+
+#[test]
+fn a_stretch_past_the_limits_refuses_rather_than_degrading() {
+    let ed = timing_editor();
+    let sep = timing::separators(&ed.doc, 1.0)[0];
+
+    // Four times is the ceiling: the left note is 4 beats, so a
+    // boundary at 16 beats is exactly 4x and allowed...
+    assert!(!timing::plan(&ed.doc, sep, PPQ * 16.0, StretchLaw::LeftStretchRightMoves).is_empty());
+    // ...and anything beyond it produces nothing at all.
+    assert!(timing::plan(&ed.doc, sep, PPQ * 17.0, StretchLaw::LeftStretchRightMoves).is_empty());
+
+    // An eighth is the floor.
+    assert!(!timing::plan(&ed.doc, sep, PPQ * 0.5, StretchLaw::LeftStretchRightMoves).is_empty());
+    assert!(timing::plan(&ed.doc, sep, PPQ * 0.4, StretchLaw::LeftStretchRightMoves).is_empty());
+}
+
+#[test]
+fn both_stretch_refuses_when_only_the_far_side_would_break() {
+    let mut ed = timing_editor();
+    // Make the right note short, so a modest drag over-compresses it
+    // even though the left side is well within range.
+    ed.doc.note_mut(NoteId(2)).unwrap().end = PPQ * 4.0 + PPQ * 0.5;
+    ed.doc.note_mut(NoteId(3)).unwrap().start = PPQ * 4.5;
+    let sep = timing::separators(&ed.doc, 1.0)[0];
+
+    let edits = timing::plan(&ed.doc, sep, PPQ * 4.49, StretchLaw::BothStretch);
+    assert!(
+        edits.is_empty(),
+        "the whole gesture refuses; a half-applied stretch would leave \
+         the left side moved and the right side not"
+    );
+}
+
+#[test]
+fn a_boundary_reports_how_far_off_the_beat_it_is() {
+    let step = PPQ;
+    assert!(timing::beat_deviation(PPQ * 2.0, 0.0, step).abs() < 1e-9);
+    assert!((timing::beat_deviation(PPQ * 2.25, 0.0, step) - PPQ * 0.25).abs() < 1e-9);
+    // Past halfway it reads as early against the *next* beat, not late
+    // against the last one.
+    assert!(timing::beat_deviation(PPQ * 2.75, 0.0, step) < 0.0);
+}
+
+#[test]
+fn double_clicking_a_boundary_puts_it_on_the_beat() {
+    assert!((timing::snap_to_beat(PPQ * 2.3, 0.0, PPQ) - PPQ * 2.0).abs() < 1e-9);
+    assert!((timing::snap_to_beat(PPQ * 2.7, 0.0, PPQ) - PPQ * 3.0).abs() < 1e-9);
+    // A disabled grid leaves it where it is rather than snapping to zero.
+    assert!((timing::snap_to_beat(PPQ * 2.3, 0.0, 0.0) - PPQ * 2.3).abs() < 1e-9);
+}
+
+// ── MIDI reference ───────────────────────────────────────────────────
+
+use expression_editor_core::reference::{self, MidiReference, RefNote, SnapSource};
+
+fn reference() -> MidiReference {
+    MidiReference::new(
+        "Vocal.mid",
+        vec!["Track 1".into(), "Track 2".into()],
+        vec![
+            RefNote { start: 0.0, end: PPQ * 2.0, row: 60 },
+            RefNote { start: PPQ * 2.0, end: PPQ * 4.0, row: 64 },
+            RefNote { start: PPQ * 4.0, end: PPQ * 6.0, row: 67 },
+        ],
+    )
+}
+
+#[test]
+fn the_reference_answers_what_is_sounding_now() {
+    let r = reference();
+    assert_eq!(r.at(PPQ, 60.0).map(|n| n.row), Some(60));
+    assert_eq!(r.at(PPQ * 3.0, 60.0).map(|n| n.row), Some(64));
+    assert_eq!(
+        r.at(PPQ * 20.0, 60.0),
+        None,
+        "nothing sounding is not the same as the nearest note"
+    );
+}
+
+#[test]
+fn transposing_is_non_destructive() {
+    let mut r = reference();
+    r.transpose = 3;
+    assert_eq!(r.at(PPQ, 60.0).map(|n| n.row), Some(63));
+    r.transpose = 0;
+    assert_eq!(
+        r.at(PPQ, 60.0).map(|n| n.row),
+        Some(60),
+        "nudged into key and back out with no accumulated error"
+    );
+}
+
+#[test]
+fn a_chord_in_the_reference_tunes_each_voice_to_its_own_part() {
+    let r = MidiReference::new(
+        "chord.mid",
+        vec!["Track 1".into()],
+        vec![
+            RefNote { start: 0.0, end: PPQ, row: 60 },
+            RefNote { start: 0.0, end: PPQ, row: 64 },
+            RefNote { start: 0.0, end: PPQ, row: 67 },
+        ],
+    );
+    // A singer near the fifth must not be dragged to the root just
+    // because the root is listed first.
+    assert_eq!(r.at(PPQ * 0.5, 66.6).map(|n| n.row), Some(67));
+    assert_eq!(r.at(PPQ * 0.5, 60.2).map(|n| n.row), Some(60));
+}
+
+#[test]
+fn the_scale_and_the_reference_present_the_same_way() {
+    let tuning = Tuning::default();
+    let r = reference();
+
+    // Both answer "what should this be?", and the caller cannot tell
+    // which kind it holds.
+    let sources = [SnapSource::Tuning(&tuning), SnapSource::Reference(&r)];
+    for s in sources {
+        assert!(s.is_available());
+        assert!(s.target(PPQ, 60.3).is_some());
+    }
+
+    // Only the reference is time-dependent, which is the one real
+    // difference between them.
+    assert_eq!(
+        SnapSource::Tuning(&tuning).target(PPQ * 99.0, 60.3),
+        SnapSource::Tuning(&tuning).target(PPQ, 60.3)
+    );
+    assert!(SnapSource::Reference(&r).target(PPQ * 99.0, 60.3).is_none());
+}
+
+#[test]
+fn an_empty_reference_is_not_available_as_a_target() {
+    let empty = MidiReference::default();
+    assert!(!SnapSource::Reference(&empty).is_available());
+    assert!(SnapSource::Reference(&empty).target(0.0, 60.0).is_none());
+}
+
+#[test]
+fn correction_blends_rather_than_pinning() {
+    let r = reference();
+    let src = SnapSource::Reference(&r);
+    // Sung a semitone under the reference's E.
+    let notes = [(NoteId(1), PPQ * 3.0, 63.0)];
+
+    let half = reference::plan_corrections(src, notes.iter().copied(), 0.5);
+    assert_eq!(half.len(), 1);
+    assert!((half[0].delta - 0.5).abs() < 1e-9, "halfway there");
+
+    let full = reference::plan_corrections(src, notes.iter().copied(), 1.0);
+    assert!((full[0].delta - 1.0).abs() < 1e-9);
+
+    // Zero is a no-op, not a correction of zero.
+    assert!(reference::plan_corrections(src, notes.iter().copied(), 0.0).is_empty());
+}
+
+#[test]
+fn a_note_with_nothing_to_tune_to_is_left_alone() {
+    let r = reference();
+    let src = SnapSource::Reference(&r);
+    // Well past the end of the reference part.
+    let notes = [(NoteId(1), PPQ * 50.0, 63.0)];
+    assert!(
+        reference::plan_corrections(src, notes.iter().copied(), 1.0).is_empty(),
+        "inventing a target would drag the note to a bar it does not \
+         belong to"
+    );
+}
+
+#[test]
+fn selecting_another_track_swaps_the_notes() {
+    let mut r = reference();
+    assert!(r.set_track(1, vec![RefNote { start: 0.0, end: PPQ, row: 72 }]));
+    assert_eq!(r.active, 1);
+    assert_eq!(r.at(PPQ * 0.5, 60.0).map(|n| n.row), Some(72));
+    assert!(!r.set_track(9, Vec::new()), "no such track in the file");
+}
