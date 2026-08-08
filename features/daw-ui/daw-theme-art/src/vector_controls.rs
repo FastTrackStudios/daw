@@ -3456,6 +3456,91 @@ pub fn PanelPlate(props: PlateProps) -> Element {
     }
 }
 
+// ── list rows: the FX and send lists ────────────────────────────────────
+
+/// One pill of a list strip: `(top, bottom, alpha)`.
+///
+/// Flat where top and bottom are equal, which most of them are — only the
+/// FX list's normal state carries a gradient.
+pub type ListPill = (Color, Color, f32);
+
+#[derive(Props, Clone, PartialEq)]
+pub struct ListStripProps {
+    /// The three pills, top to bottom: normal, hover, pressed.
+    pub pills: Vec<ListPill>,
+    /// Cell size.
+    pub cell: (f32, f32),
+    /// First pill's top row, and the pitch between them.
+    #[props(default = (2.0, 17.0))]
+    pub rows: (f32, f32),
+    /// Pill height.
+    #[props(default = 15.0)]
+    pub pill: f32,
+    /// Columns of margin each side. The FX list insets by one and the
+    /// send list does not, which is the sort of thing that only shows up
+    /// as a whole family scoring 0.95 when it had been scoring 1.0.
+    #[props(default = 1.0)]
+    pub inset: f32,
+    /// A line along each pill's foot — the MIDI hardware send's blue.
+    #[props(default)]
+    pub edge: Option<Color>,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// A list strip — three states stacked *vertically*.
+///
+/// Which is the thing to know about these: every other sprite in this
+/// theme lays its states out side by side, and the cell detector only
+/// looks for horizontal periods, so it reports one cell of the full width
+/// and is right to. The three pills are one drawing.
+#[component]
+pub fn ListStrip(props: ListStripProps) -> Element {
+    let (vw, vh) = props.cell;
+    let (top, pitch) = props.rows;
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                for (i, pill) in props.pills.iter().enumerate() {
+                    linearGradient { key: "g{i}", id: "pill{i}",
+                        x1: "0", y1: "0", x2: "0", y2: "1",
+                        stop { offset: "0", stop_color: "{pill.0.css()}" }
+                        stop { offset: "1", stop_color: "{pill.1.css()}" }
+                    }
+                }
+            }
+            for (i, pill) in props.pills.iter().enumerate() {
+                g { key: "{i}",
+                    rect {
+                        x: "{props.inset}", y: "{top + pitch * i as f32}",
+                        width: "{vw - props.inset * 2.0}", height: "{props.pill}",
+                        rx: "5",
+                        fill: "url(#pill{i})",
+                        fill_opacity: "{pill.2}",
+                    }
+                    if let Some(edge) = props.edge {
+                        rect {
+                            x: "{props.inset}",
+                            y: "{top + pitch * i as f32 + props.pill - 1.0}",
+                            width: "{vw - props.inset * 2.0}", height: "1",
+                            rx: "0.5",
+                            fill: "{edge.css()}",
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

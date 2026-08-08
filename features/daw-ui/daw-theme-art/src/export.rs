@@ -346,6 +346,128 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             return Some(markup);
         }
     }
+    // The FX and send lists. Three pills stacked vertically, measured
+    // top to bottom; the value beside each shade is what it is today.
+    {
+        let g = |v: f32| theme.chrome.hardware.shade(v);
+        let flat = |c: daw_theme::Color, a: f32| (c, c, a);
+        let strip = |pills: Vec<v::ListPill>, cell, rows, pill, edge, inset| {
+            render_svg(
+                v::ListStrip,
+                v::ListStripProps {
+                    pills,
+                    cell,
+                    rows,
+                    pill,
+                    edge,
+                    inset,
+                    width: n.0,
+                    height: n.1,
+                    at,
+                },
+            )
+        };
+        let fx = (38.0, 53.0);
+        let send = (38.0, 50.0);
+        let hit = match name {
+            "mcp_fxlist_norm" => Some(strip(
+                // The one gradient in the set: #575757 down to #434343,
+                // and each state a shade lighter than the last.
+                vec![
+                    (g(0.09), g(-0.10), 1.0),
+                    (g(0.20), g(0.13), 1.0),
+                    (g(0.55), g(0.37), 1.0),
+                ],
+                fx,
+                (2.0, 17.0),
+                15.0,
+                None,
+                1.0,
+            )),
+            // Bypassed and offline are the same drawing.
+            "mcp_fxlist_byp" | "mcp_fxlist_off" => Some(strip(
+                vec![
+                    flat(g(-0.40), 1.0), // #262626
+                    flat(g(-0.19), 1.0), // #333333
+                    flat(g(-0.40), 1.0),
+                ],
+                fx,
+                (2.0, 17.0),
+                15.0,
+                None,
+                1.0,
+            )),
+            "mcp_fxlist_empty" => Some(strip(
+                vec![
+                    flat(g(-0.70), 0.149), // #131313
+                    flat(g(1.0), 0.137),
+                    flat(g(1.0), 0.204),
+                ],
+                fx,
+                (2.0, 17.0),
+                15.0,
+                None,
+                1.0,
+            )),
+            "mcp_sendlist_norm" => Some(strip(
+                vec![
+                    flat(g(-0.40), 1.0), // #262626
+                    flat(g(-0.32), 1.0), // #2b2b2b
+                    flat(g(-0.48), 1.0), // #212121
+                ],
+                send,
+                (2.0, 16.0),
+                14.0,
+                None,
+                0.0,
+            )),
+            // A muted send is not a shade of `mute` — it is the mute red
+            // mixed most of the way into the plate, which desaturates it
+            // as well as darkening it. Shaded, the red stayed pure and
+            // came out twice as saturated as the art.
+            "mcp_sendlist_mute" => Some(strip(
+                vec![
+                    flat(theme.signal.mute.mix(g(-0.40), 0.66), 1.0), // #54363c
+                    flat(theme.signal.mute.mix(g(-0.40), 0.60), 1.0), // #5f3d44
+                    flat(theme.signal.mute.mix(g(-0.40), 0.66), 1.0),
+                ],
+                send,
+                (2.0, 16.0),
+                14.0,
+                None,
+                0.0,
+            )),
+            "mcp_sendlist_empty" => Some(strip(
+                vec![
+                    flat(g(-1.0), 0.098),
+                    flat(g(1.0), 0.137),
+                    flat(g(-1.0), 0.098),
+                ],
+                send,
+                (2.0, 16.0),
+                14.0,
+                None,
+                0.0,
+            )),
+            "mcp_sendlist_midihw" => Some(strip(
+                vec![
+                    flat(g(-0.35), 1.0), // #292929
+                    flat(g(-0.22), 1.0), // #313131
+                    flat(g(-0.35), 1.0),
+                ],
+                send,
+                (2.0, 16.0),
+                14.0,
+                Some(theme.chrome.accent.shade(-0.42)), // #01659f
+                0.0,
+            )),
+            _ => None,
+        };
+        if let Some(markup) = hit {
+            return Some(markup);
+        }
+    }
+
     // The panel backgrounds. Measured value beside each shade, because the
     // shade is what retints and the value is what it has to match today.
     {
@@ -754,6 +876,10 @@ fn states(name: &str) -> usize {
         // Backgrounds are one drawing that REAPER stretches, never a
         // strip of states.
         "folder_on" if name.starts_with("mcp_") => 1,
+        // Three states stacked vertically: one drawing, not three cells.
+        "fxlist_norm" | "fxlist_byp" | "fxlist_off" | "fxlist_empty"
+        | "sendlist_norm" | "sendlist_mute" | "sendlist_empty"
+        | "sendlist_midihw" => 1,
         "mainbg" | "mainbgsel" | "bg" | "bgsel" | "extmixbg" | "extmixbgsel"
         | "mainextmixbg" | "mainextmixbgsel" | "namebg" | "main_namebg"
         | "main_namebg_sel" | "iconbg" | "iconbgsel" | "idxbg" | "idxbg_sel" => 1,
