@@ -247,7 +247,7 @@ fn button_labels_sit_where_the_source_puts_them() {
             0,
             daw_theme_art::render_svg(
                 vector::MuteButton,
-                vector::ToggleProps {
+                vector::ToggleProps { unlit: None,
                     hover: 0.35,
                     sinks: true,
                     depth: 0.15,
@@ -266,7 +266,7 @@ fn button_labels_sit_where_the_source_puts_them() {
             0,
             daw_theme_art::render_svg(
                 vector::SoloButton,
-                vector::SoloProps {
+                vector::SoloProps { unlit: None,
                     hover: 0.35,
                     sinks: true,
                     depth: 0.11,

@@ -39,7 +39,7 @@ fn main() {
             &format!("mute-off-{tag}"),
             &render_svg(
                 MuteButton,
-                ToggleProps {
+                ToggleProps { unlit: None,
                     hover: 0.35,
                     sinks: true,
                     depth: 0.15,
@@ -58,7 +58,7 @@ fn main() {
             &format!("mute-on-{tag}"),
             &render_svg(
                 MuteButton,
-                ToggleProps {
+                ToggleProps { unlit: None,
                     hover: 0.35,
                     sinks: true,
                     depth: 0.15,
@@ -77,7 +77,7 @@ fn main() {
             &format!("solo-on-{tag}"),
             &render_svg(
                 SoloButton,
-                SoloProps {
+                SoloProps { unlit: None,
                     hover: 0.35,
                     sinks: true,
                     depth: 0.11,
@@ -96,7 +96,7 @@ fn main() {
             &format!("solo-defeat-{tag}"),
             &render_svg(
                 SoloButton,
-                SoloProps {
+                SoloProps { unlit: None,
                     hover: 0.35,
                     sinks: true,
                     depth: 0.11,

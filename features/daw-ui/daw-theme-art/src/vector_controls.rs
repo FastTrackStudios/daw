@@ -330,7 +330,7 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
                 // the font's own middle, which put it a further half-pixel
                 // down. Sitting it at 0.54 rendered a full row low in every
                 // one of mute, solo and FX.
-                y: "{body_y + body_h * 0.49}",
+                y: "{body_y + body_h * 0.515}",
                 text_anchor: "middle", dominant_baseline: "central",
                 font_family: "Fira Sans, DejaVu Sans, sans-serif",
                 // Heavier and larger than the measured glyph height: at
@@ -340,6 +340,11 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
                 // original, which is the trap in measuring geometry
                 // without checking how it renders.
                 font_weight: "900",
+                // Scaled with the *cell*, which is not obviously right —
+                // both families draw a 20-row body and only the cell
+                // differs, 20 against 24 — but sizing off the body made
+                // both track-panel labels measurably worse. The source's
+                // track-panel letters really are the larger pair.
                 font_size: "{vh * 0.58}",
                 fill: "{props.legend.unwrap_or(k.text).css()}",
                 "{props.label}"
@@ -350,6 +355,14 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ToggleProps {
+    /// The resting face, when nothing is engaged.
+    ///
+    /// Not `hardware` in either family, and not the same in both: the
+    /// mixer's unlit button runs #464646 down to #3e3e3e and the track
+    /// panel's #4e4e4e down to #444444. Taking the plain hardware grey
+    /// left the mixer eight levels dark and the track panel sixteen.
+    #[props(default)]
+    pub unlit: Option<Color>,
     /// Does pressing darken the face? See [`ink`].
     #[props(default = true)]
     pub sinks: bool,
@@ -390,7 +403,7 @@ pub fn MuteButton(props: ToggleProps) -> Element {
     rsx! {
         LabelButton {
             label: "M",
-            lit: props.on.then_some(t.signal.mute),
+            lit: props.on.then_some(t.signal.mute).or(props.unlit),
             cell: props.cell, body: props.body, legend: props.legend,
             depth: props.depth, sinks: props.sinks, hover: props.hover,
             shadow: !props.on, scales: true,
@@ -401,6 +414,14 @@ pub fn MuteButton(props: ToggleProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct SoloProps {
+    /// The resting face, when nothing is engaged.
+    ///
+    /// Not `hardware` in either family, and not the same in both: the
+    /// mixer's unlit button runs #464646 down to #3e3e3e and the track
+    /// panel's #4e4e4e down to #444444. Taking the plain hardware grey
+    /// left the mixer eight levels dark and the track panel sixteen.
+    #[props(default)]
+    pub unlit: Option<Color>,
     /// Does pressing darken the face? See [`ink`].
     #[props(default = true)]
     pub sinks: bool,
@@ -839,7 +860,15 @@ pub fn FxControl(props: FxControlProps) -> Element {
             }
 
             text {
-                x: "{p.split * 0.5}", y: "{body_y + body_h * 0.5}",
+                // Centred on the label half, plus two.
+                //
+                // `text-anchor: middle` centres the string's *advance*,
+                // which includes the trailing letter-space and both side
+                // bearings — none of which the source's hand-set letters
+                // carry. Measured against the F's stem, a plain centre
+                // lands the pair two columns left of where the art puts
+                // them in both families.
+                x: "{p.split * 0.5 + 1.5}", y: "{body_y + body_h * 0.5}",
                 text_anchor: "middle", dominant_baseline: "central",
                 font_family: "Fira Sans, DejaVu Sans, sans-serif",
                 // 0.51, not 0.44. The peak colour is right either way —
@@ -2477,8 +2506,8 @@ mod tests {
         let n = (None, None);
         let cases: [(&str, String); 7] = [
             ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { cell: (36.0, 24.0), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { hover: 0.35, sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_solo_on", render_svg(SoloButton, SoloProps { hover: 0.35, sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_solo_on", render_svg(SoloButton, SoloProps { unlit: None, hover: 0.35, sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_fx_norm", render_svg(FxButton, FxProps { family: Default::default(), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
@@ -2513,7 +2542,7 @@ mod tests {
             let cases = [
                 render_svg(
                     MuteButton,
-                    ToggleProps {
+                    ToggleProps { unlit: None,
                         hover: 0.35,
                         sinks: true,
                         depth: 0.15,
@@ -2528,7 +2557,7 @@ mod tests {
                 ),
                 render_svg(
                     SoloButton,
-                    SoloProps {
+                    SoloProps { unlit: None,
                         hover: 0.35,
                         sinks: true,
                         depth: 0.11,
@@ -2626,7 +2655,7 @@ mod tests {
         // so scaling the box must scale the drawing.
         let small = render_svg(
             MuteButton,
-            ToggleProps {
+            ToggleProps { unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.15,
@@ -2641,7 +2670,7 @@ mod tests {
         );
         let large = render_svg(
             MuteButton,
-            ToggleProps {
+            ToggleProps { unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.15,
@@ -2723,7 +2752,7 @@ mod tests {
         // control that ignores them loses feedback the theme had.
         let n = render_svg(
             MuteButton,
-            ToggleProps {
+            ToggleProps { unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.15,
@@ -2738,7 +2767,7 @@ mod tests {
         );
         let h = render_svg(
             MuteButton,
-            ToggleProps {
+            ToggleProps { unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.15,
@@ -2753,7 +2782,7 @@ mod tests {
         );
         let p = render_svg(
             MuteButton,
-            ToggleProps {
+            ToggleProps { unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.15,
@@ -2775,7 +2804,7 @@ mod tests {
     fn states_stay_visually_distinct() {
         let off = render_svg(
             SoloButton,
-            SoloProps {
+            SoloProps { unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.11,
@@ -2790,7 +2819,7 @@ mod tests {
         );
         let on = render_svg(
             SoloButton,
-            SoloProps {
+            SoloProps { unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.11,
@@ -2805,7 +2834,7 @@ mod tests {
         );
         let defeat = render_svg(
             SoloButton,
-            SoloProps {
+            SoloProps { unlit: None,
                 hover: 0.35,
                 sinks: true,
                 depth: 0.11,
