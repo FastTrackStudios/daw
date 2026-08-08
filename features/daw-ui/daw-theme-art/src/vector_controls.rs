@@ -2722,10 +2722,17 @@ pub fn TransportButton(props: TransportProps) -> Element {
         // right pointing down, the lower band's on the left pointing up.
         // Drawn as two symmetric arcs with heads laid over both ends it
         // closed into a plain ring.
+        //
+        // The band also widens where it meets its head, which a stroke of
+        // constant width cannot do — so the flare has to come from how far
+        // the head overlaps the band's end. Ten combinations of base width
+        // and reach were measured; this one wins by half a level over its
+        // nearest rival and by a full level over a head large enough to
+        // look right on its own.
         TransportGlyph::Repeat => format!(
             "M {} {} L {} {} L {} {} Z M {} {} L {} {} L {} {} Z",
-            cx + 1.8, cy - 0.6, cx + 6.4, cy - 0.6, cx + 4.1, cy - 4.9,
-            cx - 1.8, cy + 0.6, cx - 6.4, cy + 0.6, cx - 4.1, cy + 4.9
+            cx + 1.80, cy - 0.90, cx + 6.40, cy - 0.90, cx + 4.10, cy - 4.60,
+            cx - 1.80, cy + 0.90, cx - 6.40, cy + 0.90, cx - 4.10, cy + 4.60
         ),
         // A padlock beside the triangle.
         TransportGlyph::PlaySync => format!(
@@ -3023,16 +3030,20 @@ pub fn TransportPanel(props: TransportPartProps) -> Element {
                     // makes it read as cut into the bar.
                     rect {
                         x: "1", y: "1", width: "{vw - 2.0}", height: "{vh - 2.0}",
-                        rx: "3",
+                        rx: "1.5",
                         fill: "{h.shade(-0.48).css()}",
                     }
                     rect {
                         x: "1", y: "1", width: "{vw - 3.0}", height: "{vh - 3.0}",
-                        rx: "3",
+                        rx: "1.5",
                         fill: "url(#trwell)",
                     }
+                    // The lit column runs rows 5 to 22 and stops: the
+                    // last three rows are the well's dark floor, and
+                    // taking the highlight through them put a bright line
+                    // down the whole seam where the source ends it.
                     rect {
-                        x: "1", y: "5", width: "1", height: "{vh - 7.0}",
+                        x: "1", y: "5", width: "1", height: "18",
                         fill: "{h.shade(0.00).css()}",
                     }
                 },
