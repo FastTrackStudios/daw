@@ -2619,6 +2619,7 @@ pub fn TransportButton(props: TransportProps) -> Element {
     let t = Theme::default();
     let (vw, vh) = props.cell;
     let repeat = props.glyph == TransportGlyph::Repeat;
+    let h = t.chrome.hardware;
     let lit = props.on.then(|| props.glyph.lit(&t)).flatten();
 
     // The unlit face is nearly flat — 50 down to 47 over twenty rows —
@@ -2666,8 +2667,10 @@ pub fn TransportButton(props: TransportProps) -> Element {
     // Repeat's glyph is the one that is not centred in its cell: rows
     // 6..17 of 24 and columns 11..22 of 32, so half a pixel up and half
     // a pixel right of where the rest sit.
+    // Repeat's glyph is centred half a pixel right of its cell's middle
+    // and level with it: rows 6..17 of 24 and columns 11..22 of 32.
     let (cx, cy) = if repeat {
-        (vw * 0.5 + 0.5, vh * 0.5 - 0.5)
+        (vw * 0.5 + 0.5, vh * 0.5)
     } else {
         (vw * 0.5, vh * 0.5)
     };
@@ -2710,25 +2713,19 @@ pub fn TransportButton(props: TransportProps) -> Element {
             cx + 6.0,
             cy - 6.0
         ),
-        // Two arrowheads; the arcs they cap are stroked separately.
+        // Two arrowheads. The bands they cap are stroked separately.
         //
-        // This is a *vertical* loop — one arrow over the top and one back
-        // under the bottom — not two arrows side by side. Drawn flat it
-        // read as a pair of horizontal arrows, which is a different
-        // symbol entirely.
-        //
-        // The source is not actually arcs. Read pixel by pixel each half
-        // is a hooked band — a straight run across the top with both ends
-        // turning down — closer to a bracket than to a circle, and its
-        // heads are cut into that band rather than added to it. An arc
-        // with heads laid over the ends gets the symbol right and its
-        // weight about a level light; sitting the heads *on* the ends
-        // instead closed the loop into a plain ring, which is worse. Left
-        // as the closer of the two until the band is traced properly.
+        // Traced off the lit variant, where the amber separates cleanly
+        // from the plate in the green channel. Each half is a band of
+        // about 135 degrees — not the half turn a first reading suggests
+        // — and the head sits at one end only: the upper band's is on the
+        // right pointing down, the lower band's on the left pointing up.
+        // Drawn as two symmetric arcs with heads laid over both ends it
+        // closed into a plain ring.
         TransportGlyph::Repeat => format!(
             "M {} {} L {} {} L {} {} Z M {} {} L {} {} L {} {} Z",
-            cx + 1.9, cy - 2.9, cx + 6.3, cy - 2.9, cx + 4.1, cy + 1.1,
-            cx - 1.9, cy + 2.9, cx - 6.3, cy + 2.9, cx - 4.1, cy - 1.1
+            cx + 1.8, cy - 0.6, cx + 6.4, cy - 0.6, cx + 4.1, cy - 4.9,
+            cx - 1.8, cy + 0.6, cx - 6.4, cy + 0.6, cx - 4.1, cy + 4.9
         ),
         // A padlock beside the triangle.
         TransportGlyph::PlaySync => format!(
@@ -2747,11 +2744,20 @@ pub fn TransportButton(props: TransportProps) -> Element {
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             defs {
+                linearGradient { id: "trcycle", x1: "0", y1: "0", x2: "0", y2: "1",
+                    // 34 at the top, up to 40 by a fifth of the way down,
+                    // back to 34 by four fifths and 29 at the foot.
+                    stop { offset: "0", stop_color: "{h.shade(-0.46).css()}" }
+                    stop { offset: "0.22", stop_color: "{h.shade(-0.37).css()}" }
+                    stop { offset: "0.83", stop_color: "{h.shade(-0.46).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(-0.54).css()}" }
+                }
                 linearGradient { id: "trface", x1: "0", y1: "0", x2: "0", y2: "1",
                     stop { offset: "0", stop_color: "{face_top.css()}" }
                     stop { offset: "1", stop_color: "{face_bot.css()}" }
                 }
-                if let Some(b) = &lit {
+                if repeat {
+            } else if let Some(b) = &lit {
                     linearGradient { id: "trlit", x1: "0", y1: "0", x2: "0", y2: "1",
                         // Four stops, because the source holds its centre
                         // rather than passing through it: the plateau runs
@@ -2765,11 +2771,31 @@ pub fn TransportButton(props: TransportProps) -> Element {
                     }
                 }
             }
-            rect {
-                x: "0", y: "1", width: "{vw}", height: "{vh - 2.0}",
-                fill: "{border.css()}",
+            if repeat {
+                // The cycle button is the left end of a pill, not a
+                // button in its own right: it fills its cell edge to edge
+                // with no border, no bevel row and no separator, because
+                // the readout well butts straight up against it and the
+                // two read as one shape. Given the standard transport
+                // plate it came out two rows short at the top and one at
+                // the bottom, sitting in the bar like a tile instead of
+                // running into its neighbour.
+                //
+                // Its three cells are also identical — the plate never
+                // lifts and the glyph never changes — so `at` does not
+                // reach it.
+                rect {
+                    x: "0", y: "0", width: "{vw}", height: "{vh}",
+                    fill: "url(#trcycle)",
+                }
+            } else {
+                rect {
+                    x: "0", y: "1", width: "{vw}", height: "{vh - 2.0}",
+                    fill: "{border.css()}",
+                }
             }
-            if let Some(b) = &lit {
+            if repeat {
+            } else if let Some(b) = &lit {
                 // A lit plate is a bevel, not a wash. Down its centre the
                 // colour runs #7fd6fb, #369de1, up to #4dbdfb through the
                 // middle, back down to #369de1 and out on #47b8fb: a
@@ -2802,16 +2828,24 @@ pub fn TransportButton(props: TransportProps) -> Element {
             }
             // The bar's own separator, not the button's edge — it runs the
             // full width where the border is inset by a pixel.
-            rect {
-                x: "0", y: "{vh - 1.0}", width: "{vw}", height: "1",
-                fill: "{t.chrome.hardware.shade(-0.11).css()}",
+            if !repeat {
+                rect {
+                    x: "0", y: "{vh - 1.0}", width: "{vw}", height: "1",
+                    fill: "{t.chrome.hardware.shade(-0.11).css()}",
+                }
             }
             if repeat {
                 path {
-                    d: "M {cx - 4.2} {cy - 0.9} A 4.3 4.3 0 0 1 {cx + 4.2} {cy - 0.9}
-                        M {cx + 4.2} {cy + 0.9} A 4.3 4.3 0 0 1 {cx - 4.2} {cy + 0.9}",
+                    // 195 to 330 degrees over the top, and the same
+                    // turned through half a circle underneath.
+                    d: "M {cx - 4.51} {cy - 1.64} A 4.8 4.8 0 0 1 {cx + 3.93} {cy - 2.75}
+                        M {cx + 4.51} {cy + 1.64} A 4.8 4.8 0 0 1 {cx - 3.93} {cy + 2.75}",
                     fill: "none",
                     stroke: "{ink.css()}",
+                    // 2.2 measured against 2.5, 2.8 and 3.1:
+                    // the source's band looks thicker than it is
+                    // because its ends are squared off, not because
+                    // the stroke is wide.
                     stroke_width: "2.2",
                 }
             }
