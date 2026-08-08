@@ -314,9 +314,8 @@ pub fn render_control(name: &str, spec: &DerivedSpec) -> Result<RgbaImage, Rende
     // width and vanished into the strip.
     let mut spec = spec.clone();
     if spec.cells.len() != states(name) {
-        let mut img = RgbaImage::new(spec.width, spec.height);
-        spec.stamp(&mut img);
-        spec.cells = crate::derive::even_cells(&img, states(name) as u32);
+        spec.cells =
+            crate::derive::even_cells(spec.width, states(name) as u32, spec.art_x);
     }
 
     composite_cells(&spec, |i, _w| {
@@ -349,6 +348,7 @@ mod tests {
     #[test]
     fn markers_land_exactly_where_the_source_had_them() {
         let spec = DerivedSpec {
+            art_x: 0,
             width: 63,
             height: 20,
             markers: vec![
@@ -387,6 +387,7 @@ mod tests {
     fn an_image_no_vector_control_draws_is_reported_not_guessed() {
         assert!(cell_markup("mcp_bg", v::Interaction::Normal).is_none());
         let spec = DerivedSpec {
+            art_x: 0,
             width: 4,
             height: 4,
             markers: vec![],

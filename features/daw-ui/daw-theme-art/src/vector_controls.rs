@@ -465,7 +465,15 @@ pub fn FxControl(props: FxControlProps) -> Element {
     let (win_x, win_w) = props.family.window(props.part);
 
     let (body_y, body_h) = (p.h * p.body.0, p.h * p.body.1);
-    let edge = p.h * 0.05;
+    // Exactly one pixel, on the pixel grid.
+    //
+    // The viewBox is in the source's own pixels, so `1.0` here is one
+    // output pixel — and offsetting the path by half of it puts the
+    // stroke inside a single column instead of straddling two. At
+    // `p.h * 0.05` it was 1.1px centred on an integer, which antialiases
+    // across two columns and reads as a soft gradient rather than an
+    // edge.
+    let edge = 1.0f32;
     let r = p.h * 0.12;
 
     // One outline for the whole pill: rounded at both outer ends, and

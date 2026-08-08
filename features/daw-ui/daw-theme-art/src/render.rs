@@ -180,6 +180,7 @@ mod tests {
         // rather than reconstructing is what makes this correct without
         // having to model WALTER's semantics.
         let spec = DerivedSpec {
+            art_x: 0,
             width: 4,
             height: 4,
             markers: vec![(0, 0, [255, 0, 255, 255]), (3, 3, [255, 0, 255, 255])],
@@ -198,6 +199,7 @@ mod tests {
     #[test]
     fn an_unsliced_source_gets_no_markers_invented() {
         let spec = DerivedSpec {
+            art_x: 0,
             width: 8,
             height: 8,
             markers: vec![],

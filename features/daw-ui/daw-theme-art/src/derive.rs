@@ -179,24 +179,22 @@ fn detect_strip(img: &RgbaImage) -> Option<(u32, u32, u32)> {
 /// be read as 4, which is worse. So the count comes from the caller —
 /// which knows how many states it draws — and only the offset is
 /// inferred, from the same guide evidence used everywhere else.
-pub fn even_cells(img: &RgbaImage, n: u32) -> Vec<(u32, u32)> {
-    let w = img.width();
+pub fn even_cells(width: u32, n: u32, art_x: u32) -> Vec<(u32, u32)> {
+    let w = width;
     let n = n.max(1);
     let period = w / n;
     if period < 2 {
         return vec![(0, w)];
     }
-    let guides = marker_columns(img);
-    let origin = (0..=(w - n * period).min(3))
-        .min_by_key(|o| {
-            (0..n)
-                .flat_map(|c| {
-                    let a = o + c * period;
-                    (a..a + period).map(|x| guides[x as usize])
-                })
-                .sum::<u32>()
-        })
-        .unwrap_or(0);
+    // Start where the art starts — `art_x`, not an inferred offset.
+    //
+    // Counting swallowed guides works when the guides mark the gaps
+    // between cells and fails when they do anything else:
+    // `track_fxempty_v` carries a block of them down its whole right-hand
+    // third, which swamps the count so every offset scores alike and the
+    // tie-break picks 0. That put every cell a pixel left of the art and
+    // left a stray column of the next one showing.
+    let origin = art_x.min(w - n * period);
     (0..n).map(|i| (origin + i * period, period)).collect()
 }
 
@@ -231,6 +229,13 @@ pub struct DerivedSpec {
     /// Where each sprite cell sits, as `(x, width)` — measured, not
     /// divided. See [`cell_bounds`].
     pub cells: Vec<(u32, u32)>,
+    /// The first column holding art rather than a guide.
+    ///
+    /// Carried on the spec because the only other place to get it is the
+    /// source image, and by the time a strip is being laid out that has
+    /// been reduced to this. It is where an evenly-divided strip starts —
+    /// see [`even_cells`].
+    pub art_x: u32,
 }
 
 impl DerivedSpec {
@@ -247,6 +252,14 @@ impl DerivedSpec {
             height: img.height(),
             markers,
             cells: cell_bounds(img),
+            art_x: (0..img.width())
+                .find(|&x| {
+                    (0..img.height()).any(|y| {
+                        let px = img.get_pixel(x, y).0;
+                        px[3] > 40 && !MARKERS.contains(&px)
+                    })
+                })
+                .unwrap_or(0),
         }
     }
 
@@ -323,6 +336,7 @@ mod tests {
         // A component that renders at the wrong size shouldn't take the
         // whole generate run down; the size mismatch is reported elsewhere.
         let spec = DerivedSpec {
+            art_x: 0,
             width: 10,
             height: 10,
             markers: vec![(9, 9, [255, 0, 255, 255])],
