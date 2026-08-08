@@ -245,9 +245,7 @@ fn main() {
                             render_svg(
                                 vector::FxButton,
                                 vector::FxProps {
-                                    scrim: false,
-                                    body: 18.0 / 22.0,
-                                    cell: (28.0, 22.0),
+                                    family: Default::default(),
                                     state: *v,
                                     width: None,
                                     height: None,

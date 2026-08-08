@@ -275,183 +275,6 @@ pub fn SoloButton(props: SoloProps) -> Element {
     }
 }
 
-#[derive(Props, Clone, PartialEq)]
-pub struct FxProps {
-    #[props(default)]
-    pub state: FxChain,
-    /// The cell this replaces: `mcp_fx_*` is 28x22, `track_fx_*` 20x22.
-    #[props(default = (28.0, 22.0))]
-    pub cell: (f32, f32),
-    /// Draw the face as a translucent scrim rather than an opaque grey.
-    ///
-    /// A family-wide difference, not a shade: every track-panel control is
-    /// black at about 35% over the strip, so the track colour shows
-    /// through it, while the mixer's are opaque plastic. Painting both
-    /// opaque made the track buttons sit *on* the strip instead of in it.
-    #[props(default = false)]
-    pub scrim: bool,
-    /// How much of the cell's height the button body occupies.
-    ///
-    /// Not a constant: the mixer's button is 18 rows of 22 and the track
-    /// panel's is 20 of the same 22. Same shape, different proportion, so
-    /// one number cannot serve both and the track button came out two
-    /// rows short.
-    #[props(default = 18.0 / 22.0)]
-    pub body: f32,
-    #[props(default)]
-    pub width: Option<u32>,
-    #[props(default)]
-    pub height: Option<u32>,
-    /// Pointer state — hover lifts the face, pressed sinks it.
-    #[props(default)]
-    pub at: Interaction,
-}
-
-/// The FX-chain button.
-///
-/// Not a [`LabelButton`] with a different word on it, in two ways.
-///
-/// **Colour.** In all three source images the *face is the same dark
-/// grey* — empty, active and bypassed are told apart entirely by the
-/// colour of the letters (grey, white, red). Lighting the face instead
-/// produced coloured slabs that read as toggles.
-///
-/// **Shape.** Mute and solo are symmetric: a 1px border all the way
-/// round a 21x20 cell with 1px corners. FX is not. Tracing cell 0 of
-/// `mcp_fx_norm` row by row gives a left edge at x=3, 2, 1, 1 … 1, 2, 3
-/// and a right edge that never moves — so the corners are **chamfered**,
-/// a straight two-pixel diagonal cut, and only on the left. The right
-/// side runs flush off the cell with no border and no corner at all,
-/// because these butt against what follows them in the strip.
-///
-/// The shape spans y=1..18 of a 22-tall cell, and the lit face stops at
-/// y=15 — the three dark rows under it are the bottom edge, not a
-/// separate shadow. Drawing rounded corners on a shorter body made a
-/// button that was both too small and the wrong silhouette.
-#[component]
-pub fn FxButton(props: FxProps) -> Element {
-    let t = Theme::default();
-    // `lit: None` — the face never takes a state colour, only the pointer
-    // shading every button gets.
-    let k = ink(None, props.at);
-    let (vw, vh) = (28.0f32, 22.0f32);
-
-    // Neutral, like everything else on a hardware control. The source
-    // letters are #9c9c9c empty, #dadada active and a desaturated #c34a54
-    // bypassed — so `text_faint` (a dark blue-grey) and `text` (blue-white)
-    // both read as lit indicators rather than printing on plastic, and
-    // `rec` was far too bright for a chain that is switched *off*.
-    let text = match props.state {
-        FxChain::Empty => t.chrome.hardware_mark,
-        FxChain::Active => t.chrome.hardware_mark.shade(0.35),
-        FxChain::Bypassed => t.signal.mute,
-    };
-
-    // Chamfered down the left, square down the right, flush to `vw`.
-    let cut = |x: f32, y: f32, h: f32, c: f32| {
-        format!(
-            "M {} {y} H {vw} V {} H {} L {x} {} V {} Z",
-            x + c,
-            y + h,
-            x + c,
-            y + h - c,
-            y + c,
-        )
-    };
-
-    // No left inset: cell boundaries are measured from the art now, so a
-    // cell *starts* at the button. Keeping the old 1px offset — from when
-    // cells were assumed to start at x=0 — shifted every FX button right
-    // and clipped a column off its left edge.
-    let x = 0.0f32;
-    let top = vh * 0.045;
-    let (face_hi, face_lo, face_alpha) = if props.scrim {
-        ("#000000".to_string(), "#000000".to_string(), 0.35)
-    } else {
-        (k.face.shade(0.10).css(), k.face.shade(-0.12).css(), 1.0)
-    };
-    // The outer shape starts a row in and runs `body` of the height; the
-    // lit face stops short of it, and the dark rows beneath are the
-    // button's bottom edge rather than a shadow under it.
-    let outer_h = vh * props.body;
-    let face_h = outer_h - vh * 0.182;
-    let chamfer = vh * 0.091;
-
-    rsx! {
-        svg {
-            width: "{props.width.unwrap_or(vw as u32)}",
-            height: "{props.height.unwrap_or(vh as u32)}",
-            view_box: "0 0 {vw} {vh}",
-            xmlns: "http://www.w3.org/2000/svg",
-            defs {
-                linearGradient { id: "fxface", x1: "0", y1: "0", x2: "0", y2: "1",
-                    stop { offset: "0", stop_color: "{face_hi}" }
-                    stop { offset: "1", stop_color: "{face_lo}" }
-                }
-            }
-            if props.scrim {
-                // One shape, not two. A scrim is a single wash of #000 at
-                // 35% across the whole button — laying a 35% face over an
-                // opaque edge composites to an opaque button (the track
-                // colour never showed through), and dropping the edge to
-                // fix that shrank the button by the two rows the edge was
-                // drawing.
-                path {
-                    d: "{cut(x, top, outer_h, chamfer)}",
-                    fill: "#000000",
-                    fill_opacity: "0.35",
-                }
-            } else {
-                // Edge, then the face laid over it. Stroking instead would
-                // draw a line down the right, which the source omits.
-                path { d: "{cut(x, top, outer_h, chamfer)}", fill: "{k.border.css()}" }
-                path {
-                    d: "{cut(x + vw * 0.036, top + vh * 0.045, face_h, chamfer * 0.75)}",
-                    fill: "url(#fxface)",
-                    fill_opacity: "{face_alpha}",
-                }
-            }
-            // The lit top edge every ReaperTips control has: one row just
-            // inside the top, a shade lighter than the face. Measured on
-            // `track_fx_norm`, where the body is #000 at a89 and row 2 is
-            // #1d1d1d at a96.
-            //
-            // Drawn as white at low opacity rather than a computed colour
-            // so it works over a scrim and over an opaque face alike —
-            // it lightens whatever is beneath instead of replacing it,
-            // which is what the source is doing.
-            rect {
-                x: "{x + vw * 0.07}", y: "{top + vh * 0.045}",
-                width: "{vw - x - vw * 0.07}", height: "{vh * 0.05}",
-                fill: "#ffffff", fill_opacity: "0.07",
-            }
-            text {
-                x: "{(x + vw) * 0.5}",
-                // Not the geometric centre of the face. `dominant-baseline:
-                // central` centres on the font's own middle, which lands
-                // the cap half a pixel above where the original sits — so
-                // this carries a measured nudge rather than pretending the
-                // maths comes out even. The source glyphs occupy rows 6..12
-                // of the cell, centred on row 9.
-                y: "{vh * 0.432}",
-                text_anchor: "middle", dominant_baseline: "central",
-                font_family: "Fira Sans, DejaVu Sans, sans-serif",
-                // Sized so the caps come out 7px in a 22px cell, matching
-                // the source. At 500 weight and 0.44 they rendered 6px and
-                // visibly thinner than the original — light enough that the
-                // button read as disabled in every state.
-                font_weight: "700",
-                font_size: "{vh * 0.51}",
-                letter_spacing: "{vw * 0.025}",
-                fill: "{text.css()}",
-                "FX"
-            }
-        }
-    }
-}
-
-// ── FX bypass: a glowing pill ────────────────────────────────────────────
-
 /// What the FX chain is doing, as the bypass toggle reports it.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum FxBypass {
@@ -465,35 +288,11 @@ pub enum FxBypass {
 }
 
 #[derive(Props, Clone, PartialEq)]
-pub struct FxBypassProps {
+pub struct FxProps {
     #[props(default)]
-    pub state: FxBypass,
-    /// Draw the box as a translucent scrim rather than opaque plastic.
-    ///
-    /// The two layout variants are *not* the same drawing at two
-    /// orientations. `track_fx*_h`, which the track panel uses, is #000 at
-    /// 35% like everything else there. `track_fx*_v`, which the mixer
-    /// uses, is opaque — #4c4c4c along its lit top edge down to #404040 —
-    /// so it reads as one continuous control with the FX button beside
-    /// it. Drawing both as scrims put a dark notch in the middle of the
-    /// mixer's FX button.
-    #[props(default = false)]
-    pub scrim: bool,
-    /// The cell this replaces.
-    ///
-    /// Measured, not divided: `track_fx*_h` draws columns 1..48 of 50, so
-    /// its cells are **16** wide with a spare column either side, and
-    /// `_v` draws 1..54 of 56, so 18. Rounding 50/3 to 17 stretched every
-    /// toggle by a pixel.
-    #[props(default = (16.0, 22.0))]
-    pub cell: (f32, f32),
-    /// Where the box sits in its cell: `(top, height)` as fractions.
-    ///
-    /// The two variants differ here too — `_h` draws rows 1..20 of 22 and
-    /// `_v` only 1..18 — so a single constant made the mixer's toggle two
-    /// rows taller than the FX button beside it.
-    #[props(default = (1.0 / 22.0, 20.0 / 22.0))]
-    pub body: (f32, f32),
+    pub state: FxChain,
+    #[props(default)]
+    pub family: FxFamily,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -503,151 +302,293 @@ pub struct FxBypassProps {
     pub at: Interaction,
 }
 
-/// The FX bypass toggle — the lit pill beside the FX button.
-///
-/// This one is easy to miss entirely: it lives in the `track_*` family,
-/// not `mcp_*`, so nothing that replaced the mixer artwork touched it and
-/// it kept REAPER's inherited look while everything around it changed.
-///
-/// Three states, and the empty one is not a dimmer version of the others:
-/// with no FX loaded the source shows a dark pill at rest and swaps to a
-/// **plus** under the pointer, because there the control means "add"
-/// rather than "toggle". Loaded, it is a lit capsule — blue running, red
-/// bypassed — with a bright core and a soft halo, which is what makes it
-/// read as an LED rather than as a filled rectangle.
+/// The labelled half of [`FxControl`], as its own image.
+#[component]
+pub fn FxButton(props: FxProps) -> Element {
+    rsx! {
+        FxControl {
+            chain: props.state,
+            family: props.family,
+            part: FxPart::Label,
+            width: props.width,
+            height: props.height,
+            at: props.at,
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct FxBypassProps {
+    #[props(default)]
+    pub state: FxBypass,
+    #[props(default)]
+    pub family: FxFamily,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    /// Pointer state — hover lifts the face, pressed sinks it.
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The lit half of [`FxControl`], as its own image.
 #[component]
 pub fn FxBypassToggle(props: FxBypassProps) -> Element {
-    let t = Theme::default();
-    let (vw, vh) = props.cell;
-    let k = ink(None, props.at);
+    rsx! {
+        FxControl {
+            bypass: props.state,
+            family: props.family,
+            part: FxPart::Toggle,
+            width: props.width,
+            height: props.height,
+            at: props.at,
+        }
+    }
+}
 
-    let lit = match props.state {
+// ── FX: one pill, blitted as two images ──────────────────────────────────
+
+/// Which panel's FX control this is.
+///
+/// The two are the same control at different sizes with different
+/// materials, and every dimension differs, so the table below is the one
+/// place those numbers live.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum FxFamily {
+    /// `mcp_fx_*` + `track_fx*_v`: opaque plastic, 28 + 18 wide.
+    #[default]
+    Mixer,
+    /// `track_fx_*` + `track_fx*_h`: a translucent scrim, 20 + 16 wide.
+    TrackPanel,
+}
+
+/// Which half of the pill an image wants.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum FxPart {
+    /// The labelled end — the `FX` button.
+    #[default]
+    Label,
+    /// The lit end — the bypass toggle.
+    Toggle,
+}
+
+/// The measured geometry of one family's FX control.
+struct Pill {
+    /// Whole pill, both halves.
+    w: f32,
+    h: f32,
+    /// Where the toggle begins.
+    split: f32,
+    /// Body top and height, as fractions of `h`.
+    body: (f32, f32),
+    /// Translucent over the strip rather than opaque.
+    scrim: bool,
+}
+
+impl FxFamily {
+    fn pill(self) -> Pill {
+        match self {
+            // `mcp_fx_norm` draws a 28-wide cell and `track_fxempty_v` an
+            // 18-wide one, rows 1..18 of 22 in both.
+            Self::Mixer => Pill {
+                w: 46.0,
+                h: 22.0,
+                split: 28.0,
+                body: (1.0 / 22.0, 18.0 / 22.0),
+                scrim: false,
+            },
+            // `track_fx_norm` is 20 wide and `track_fxempty_h` 16, rows
+            // 1..20 in both.
+            Self::TrackPanel => Pill {
+                w: 36.0,
+                h: 22.0,
+                split: 20.0,
+                body: (1.0 / 22.0, 20.0 / 22.0),
+                scrim: true,
+            },
+        }
+    }
+
+    /// `(x, width)` of `part` within the pill.
+    fn window(self, part: FxPart) -> (f32, f32) {
+        let p = self.pill();
+        match part {
+            FxPart::Label => (0.0, p.split),
+            FxPart::Toggle => (p.split, p.w - p.split),
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct FxControlProps {
+    /// What the chain is doing — drives the label's colour.
+    #[props(default)]
+    pub chain: FxChain,
+    /// What the toggle is showing.
+    #[props(default)]
+    pub bypass: FxBypass,
+    #[props(default)]
+    pub family: FxFamily,
+    /// Which half to emit.
+    #[props(default)]
+    pub part: FxPart,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    /// Pointer state — hover lifts the face, pressed sinks it.
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The FX control: a labelled button and a lit toggle, as **one pill**.
+///
+/// REAPER blits these as two images, which is why they were built as two
+/// components — and every seam between them then had to be maintained by
+/// hand. The toggle's inner corners had to be squared because the button
+/// runs flush there; the edge down that side had to be suppressed because
+/// there is no edge in the middle of a shape; the two had to be given the
+/// same body rows and the same material. Each was found separately, after
+/// looking wrong.
+///
+/// Drawing it as one shape and *windowing* the viewBox for each image
+/// makes those relationships structural: the pill is rounded at both outer
+/// ends and continuous through the middle because it is one path, and the
+/// two images cannot disagree about height or material because neither
+/// knows it is an image.
+#[component]
+pub fn FxControl(props: FxControlProps) -> Element {
+    let t = Theme::default();
+    let k = ink(None, props.at);
+    let p = props.family.pill();
+    let (win_x, win_w) = props.family.window(props.part);
+
+    let (body_y, body_h) = (p.h * p.body.0, p.h * p.body.1);
+    let edge = p.h * 0.05;
+    let r = p.h * 0.12;
+
+    // One outline for the whole pill: rounded at both outer ends, and
+    // nothing at all in the middle.
+    let (x, y) = (edge / 2.0, body_y + edge / 2.0);
+    let (w, h) = (p.w - edge, body_h - edge);
+    let outline = format!(
+        "M {} {y} H {} A {r} {r} 0 0 1 {} {} V {} A {r} {r} 0 0 1 {} {}          H {} A {r} {r} 0 0 1 {x} {} V {} A {r} {r} 0 0 1 {} {y} Z",
+        x + r,
+        x + w - r,
+        x + w,
+        y + r,
+        y + h - r,
+        x + w - r,
+        y + h,
+        x + r,
+        y + h - r,
+        y + r,
+        x + r,
+    );
+
+    let (fill, alpha) = if p.scrim {
+        ("#000000".to_string(), 0.35)
+    } else {
+        ("url(#fxface)".to_string(), 1.0)
+    };
+
+    // Neutral, like everything else printed on a hardware control. The
+    // source letters are #9c9c9c empty, #dadada active and a desaturated
+    // #c34a54 bypassed — `text_faint` and `text` are the chrome ramp's
+    // blues and read as lit indicators rather than print on plastic.
+    let text = match props.chain {
+        FxChain::Empty => t.chrome.hardware_mark,
+        FxChain::Active => t.chrome.hardware_mark.shade(0.35),
+        FxChain::Bypassed => t.signal.mute,
+    };
+
+    // The toggle's lamp, in pill coordinates.
+    let lamp = match props.bypass {
         FxBypass::Empty => None,
         FxBypass::On => Some(t.chrome.accent),
-        // The same lit red as a routing lane, not the record ring's.
         FxBypass::Off => Some(t.signal.meter_danger),
     };
-    // Empty + pointer is the "add FX" affordance, not a lit state.
-    let plus = props.state == FxBypass::Empty && props.at != Interaction::Normal;
-
-    let (box_y, box_h) = (vh * props.body.0, vh * props.body.1);
-    let edge = vh * 0.05;
-
-    // Both measured off `track_fxempty_v`, and both were wrong by being
-    // too dark. The dormant pill is #656565 — *lighter* than the #3f3f3f
-    // face, a lens catching the light rather than the hole this was
-    // drawing at shade(-0.25). The plus is #d9d9d9, brighter than the
-    // marker grey used for a knob's dot.
-    let dormant = t.chrome.hardware_mark.shade(-0.38);
-    let plus_ink = t.chrome.hardware_mark.shade(0.33);
-    let (box_fill, box_alpha) = if props.scrim {
-        ("#000000", 0.35)
-    } else {
-        ("url(#fxbypbody)", 1.0)
-    };
-    let (cx, cy) = (vw * 0.5, box_y + box_h * 0.5);
-    // All four measured, and none of them a fraction of the cell *width*:
-    // the pill is 4px in both variants although their cells are 16 and 18
-    // wide, so scaling it by width made the mixer's noticeably fatter than
-    // the track panel's when the art has them identical.
-    let pw = vh * 0.182;
-    let ph = box_h * 0.5;
-    // The plus is its own 8x8 with 2px arms — deriving it from the pill,
-    // as this did, tied two unrelated shapes together and made it squat.
-    let arm = vh * 0.364;
-    let bar = vh * 0.091;
-    let id = "fxled";
+    let plus = props.bypass == FxBypass::Empty && props.at != Interaction::Normal;
+    let (tx, ty) = (p.split + (p.w - p.split) * 0.5, body_y + body_h * 0.5);
+    // Measured: a 4px pill and an 8x8 plus with 2px arms, in both
+    // families — so neither scales with the cell width.
+    let (pw, ph) = (p.h * 0.182, body_h * 0.5);
+    let (arm, bar) = (p.h * 0.364, p.h * 0.091);
 
     rsx! {
         svg {
-            width: "{props.width.unwrap_or(vw as u32)}",
-            height: "{props.height.unwrap_or(vh as u32)}",
-            view_box: "0 0 {vw} {vh}",
+            width: "{props.width.unwrap_or(win_w as u32)}",
+            height: "{props.height.unwrap_or(p.h as u32)}",
+            // The window is the only thing that differs between the two
+            // images: same drawing, different slice of it.
+            view_box: "{win_x} 0 {win_w} {p.h}",
             xmlns: "http://www.w3.org/2000/svg",
             defs {
-                if let Some(c) = lit {
-                    linearGradient { id: "{id}", x1: "0", y1: "0", x2: "1", y2: "0",
-                        stop { offset: "0", stop_color: "{c.shade(-0.25).css()}" }
-                        stop { offset: "0.4", stop_color: "{c.shade(0.30).css()}" }
-                        stop { offset: "1", stop_color: "{c.shade(-0.30).css()}" }
-                    }
-                }
-            }
-            // Inset by a row top and bottom, like the buttons beside it:
-            // the source is 16x20 in a 16x22 cell, and filling the cell
-            // made the toggle taller than the FX button it sits against.
-            //
-            defs {
-                // From `k.face`, not the bare hardware grey: that is what
-                // carries the pointer state, and hard-coding it left hover
-                // and pressed identical to normal — the source lifts the
-                // face to #4b4b4b under the pointer.
-                linearGradient { id: "fxbypbody", x1: "0", y1: "0", x2: "0", y2: "1",
+                linearGradient { id: "fxface", x1: "0", y1: "0", x2: "0", y2: "1",
                     stop { offset: "0", stop_color: "{k.face.shade(0.19).css()}" }
                     stop { offset: "1", stop_color: "{k.face.shade(0.02).css()}" }
                 }
             }
-            // A dark edge, inset by half its width so it stays inside the
-            // cell. Without it adjacent cells have nothing between them
-            // and the three states read as one long bar — the source
-            // separates them with the buttons' own edges, not with a gap:
-            // every column of the strip is drawn.
-            rect {
-                x: "{edge / 2.0}", y: "{box_y + edge / 2.0}",
-                width: "{vw - edge}", height: "{box_h - edge}",
-                rx: "{vh * 0.12}",
-                fill: "{box_fill}",
-                fill_opacity: "{box_alpha}",
-                stroke: "{t.chrome.hardware_edge.css()}",
+            path { d: "{outline}", fill: "{fill}", fill_opacity: "{alpha}" }
+            path {
+                d: "{outline}",
+                fill: "none",
+                stroke: "{k.border.css()}",
                 stroke_width: "{edge}",
             }
-            // The lit top edge every ReaperTips control has: one row just
-            // inside the top, a shade lighter than the face. Measured on
-            // `track_fx_norm`, where the body is #000 at a89 and row 2 is
-            // #1d1d1d at a96.
-            //
-            // Drawn as white at low opacity rather than a computed colour
-            // so it works over a scrim and over an opaque face alike —
-            // it lightens whatever is beneath instead of replacing it,
-            // which is what the source is doing.
+            // The lit row just inside the top, which every ReaperTips
+            // control has — one shape, so it runs the whole pill.
             rect {
-                x: "{vw * 0.12}", y: "{box_y + vh * 0.045}",
-                width: "{vw * 0.76}", height: "{vh * 0.045}",
+                x: "{x + r}", y: "{y + edge}",
+                width: "{w - r * 2.0}", height: "{p.h * 0.045}",
                 fill: "#ffffff", fill_opacity: "0.07",
             }
+
+            text {
+                x: "{p.split * 0.5}", y: "{body_y + body_h * 0.5}",
+                text_anchor: "middle", dominant_baseline: "central",
+                font_family: "Fira Sans, DejaVu Sans, sans-serif",
+                font_weight: "700",
+                font_size: "{p.h * 0.44}",
+                letter_spacing: "{p.h * 0.03}",
+                fill: "{text.css()}",
+                "FX"
+            }
+
             if plus {
-                // A plus, drawn as two bars so its weight is set here rather
-                // than by whatever font happens to be installed.
                 rect {
-                    x: "{cx - arm * 0.5}", y: "{cy - bar * 0.5}",
+                    x: "{tx - arm * 0.5}", y: "{ty - bar * 0.5}",
                     width: "{arm}", height: "{bar}",
-                    fill: "{plus_ink.css()}",
+                    fill: "{t.chrome.hardware_mark.shade(0.33).css()}",
                 }
                 rect {
-                    x: "{cx - bar * 0.5}", y: "{cy - arm * 0.5}",
+                    x: "{tx - bar * 0.5}", y: "{ty - arm * 0.5}",
                     width: "{bar}", height: "{arm}",
-                    fill: "{plus_ink.css()}",
+                    fill: "{t.chrome.hardware_mark.shade(0.33).css()}",
                 }
-            } else if let Some(c) = lit {
-                // The halo: what separates an LED from a coloured rectangle.
+            } else if let Some(c) = lamp {
+                // The halo is what separates an LED from a coloured slab.
                 rect {
-                    x: "{cx - pw * 0.85}", y: "{cy - ph * 0.62}",
+                    x: "{tx - pw * 0.85}", y: "{ty - ph * 0.62}",
                     width: "{pw * 1.7}", height: "{ph * 1.24}",
                     rx: "{pw * 0.85}",
                     fill: "{c.css()}", fill_opacity: "0.22",
                 }
                 rect {
-                    x: "{cx - pw * 0.5}", y: "{cy - ph * 0.5}",
+                    x: "{tx - pw * 0.5}", y: "{ty - ph * 0.5}",
                     width: "{pw}", height: "{ph}",
                     rx: "{pw * 0.5}",
-                    fill: "url(#{id})",
+                    fill: "{c.css()}",
                 }
             } else {
+                // Dormant: #656565, *lighter* than the face — a lens
+                // catching the light, not a hole.
                 rect {
-                    x: "{cx - pw * 0.5}", y: "{cy - ph * 0.5}",
+                    x: "{tx - pw * 0.5}", y: "{ty - ph * 0.5}",
                     width: "{pw}", height: "{ph}",
                     rx: "{pw * 0.5}",
-                    fill: "{dormant.css()}",
+                    fill: "{t.chrome.hardware_mark.shade(-0.38).css()}",
                 }
             }
         }
@@ -1281,7 +1222,7 @@ mod tests {
             ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { cell: (36.0, 24.0), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_mute_on", render_svg(MuteButton, ToggleProps { cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_solo_on", render_svg(SoloButton, SoloProps { cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_fx_norm", render_svg(FxButton, FxProps { cell: (28.0, 22.0), scrim: false, body: 18.0 / 22.0, state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_fx_norm", render_svg(FxButton, FxProps { family: Default::default(), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, width: n.0, height: n.1 })),
@@ -1338,9 +1279,7 @@ mod tests {
                 render_svg(
                     FxButton,
                     FxProps {
-                        scrim: false,
-                        body: 18.0 / 22.0,
-                        cell: (28.0, 22.0),
+                        family: Default::default(),
                         state: FxChain::Active,
                         width: w,
                         height: h,

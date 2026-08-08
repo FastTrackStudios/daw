@@ -100,9 +100,7 @@ fn main() {
             &render_svg(
                 FxButton,
                 FxProps {
-                    scrim: false,
-                    body: 18.0 / 22.0,
-                    cell: (28.0, 22.0),
+                    family: Default::default(),
                     state: FxChain::Active,
                     width: None,
                     height: None,

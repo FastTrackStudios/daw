@@ -109,9 +109,9 @@ fn main() {
     groups.push((
         "fx",
         vec![
-            Entry { source: ("mcp_fx_empty", 0), svg: render_svg(vector::FxButton, vector::FxProps { cell: (28.0, 22.0), scrim: false, body: 18.0 / 22.0, state: vector::FxChain::Empty, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_fx_norm", 0), svg: render_svg(vector::FxButton, vector::FxProps { cell: (28.0, 22.0), scrim: false, body: 18.0 / 22.0, state: vector::FxChain::Active, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_fx_dis", 0), svg: render_svg(vector::FxButton, vector::FxProps { cell: (28.0, 22.0), scrim: false, body: 18.0 / 22.0, state: vector::FxChain::Bypassed, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_fx_empty", 0), svg: render_svg(vector::FxButton, vector::FxProps { family: Default::default(), state: vector::FxChain::Empty, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_fx_norm", 0), svg: render_svg(vector::FxButton, vector::FxProps { family: Default::default(), state: vector::FxChain::Active, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_fx_dis", 0), svg: render_svg(vector::FxButton, vector::FxProps { family: Default::default(), state: vector::FxChain::Bypassed, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
         ],
     ));
 

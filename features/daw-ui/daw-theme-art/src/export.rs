@@ -55,6 +55,14 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
     // than down. Same components, turned and resized.
     let track = name.starts_with("track_");
     let axis = if track { v::Axis::Horizontal } else { v::Axis::Vertical };
+    // The FX control's two halves are named for their *layout*, not their
+    // panel: `track_fx*_h` is the track panel's and `track_fx*_v` the
+    // mixer's, despite both carrying the `track_` prefix.
+    let family = if name.ends_with("_v") || !track {
+        v::FxFamily::Mixer
+    } else {
+        v::FxFamily::TrackPanel
+    };
 
     let rec = |state| {
         render_svg(
@@ -108,9 +116,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::FxButton,
             v::FxProps {
                 state,
-                cell: if track { (20.0, 22.0) } else { (28.0, 22.0) },
-                body: if track { 20.0 / 22.0 } else { 18.0 / 22.0 },
-                scrim: track,
+                family,
                 width: n.0,
                 height: n.1,
                 at,
@@ -148,29 +154,18 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
 
     // `track_fx*_h` is 50x22 in three cells, `_v` 56x22 — the track
     // panel's FX bypass toggle, which has no `mcp_` twin at all.
-    let byp = |state, cell, body, scrim| {
+    let byp = |state| {
         render_svg(
             v::FxBypassToggle,
             v::FxBypassProps {
                 state,
-                cell,
-                body,
-                scrim,
+                family,
                 width: n.0,
                 height: n.1,
                 at,
             },
         )
     };
-
-    // Traced off the art rather than divided: `track_fx*_h` draws columns
-    // 1..48 of 50 and rows 1..20 of 22; `_v` draws 1..54 of 56 and rows
-    // 1..18. Neither is 50/3 or 56/3, and neither shares the other's
-    // height.
-    const H: (f32, f32) = (16.0, 22.0);
-    const VE: (f32, f32) = (18.0, 22.0);
-    const H_BODY: (f32, f32) = (1.0 / 22.0, 20.0 / 22.0);
-    const V_BODY: (f32, f32) = (1.0 / 22.0, 18.0 / 22.0);
 
     // Both families answer to the same eight controls, so match on the
     // part after the prefix rather than writing every name twice.
@@ -179,12 +174,12 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         .or_else(|| name.strip_prefix("track_"))?;
 
     Some(match stem {
-        "fxempty_h" => byp(v::FxBypass::Empty, H, H_BODY, true),
-        "fxon_h" => byp(v::FxBypass::On, H, H_BODY, true),
-        "fxoff_h" => byp(v::FxBypass::Off, H, H_BODY, true),
-        "fxempty_v" => byp(v::FxBypass::Empty, VE, V_BODY, false),
-        "fxon_v" => byp(v::FxBypass::On, VE, V_BODY, false),
-        "fxoff_v" => byp(v::FxBypass::Off, VE, V_BODY, false),
+        "fxempty_h" => byp(v::FxBypass::Empty),
+        "fxon_h" => byp(v::FxBypass::On),
+        "fxoff_h" => byp(v::FxBypass::Off),
+        "fxempty_v" => byp(v::FxBypass::Empty),
+        "fxon_v" => byp(v::FxBypass::On),
+        "fxoff_v" => byp(v::FxBypass::Off),
 
         "recarm_off" => rec(v::RecordArm::Off),
         "recarm_on" => rec(v::RecordArm::On),
