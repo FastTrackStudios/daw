@@ -2844,6 +2844,269 @@ fn ring(cx: f32, cy: f32, outer: f32, inner: f32) -> String {
     )
 }
 
+// ── transport bar: the panels behind the buttons ────────────────────────
+
+/// Which piece of transport furniture to draw.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum TransportPart {
+    /// The bar itself — a rounded panel the buttons sit on.
+    #[default]
+    Panel,
+    /// The readout's recessed well.
+    Status,
+    /// The same well when the engine is in trouble: a flat red.
+    StatusError,
+    /// The tempo readout's pair of wells.
+    Bpm,
+    /// The play-rate slider's groove.
+    SpeedTrack,
+    /// The play-rate slider's thumb.
+    SpeedThumb,
+    /// The ring around the play-rate knob.
+    KnobRing,
+    /// The timebase toggle showing beats — a barrel.
+    TimebaseBeat,
+    /// The timebase toggle showing time — a clock.
+    TimebaseTime,
+    /// Three of REAPER's images are wholly transparent. Drawing nothing
+    /// is the faithful answer, and saying so here is better than leaving
+    /// them traced and wondering later why they trace to nothing.
+    Empty,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct TransportPartProps {
+    #[props(default)]
+    pub part: TransportPart,
+    #[props(default = (200.0, 67.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The transport bar's panels, wells and slider parts.
+///
+/// These are nine-slices: REAPER stretches them, so what matters is the
+/// edges and the first row or two inside them, not the middle. The panel
+/// is the clearest case — a two-row dark band, a two-row bevel, then a
+/// face that falls three levels over sixty rows and would be flat if the
+/// bevel had not been mistaken for its top.
+#[component]
+pub fn TransportPanel(props: TransportPartProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let h = t.chrome.hardware;
+    let tb_plate = if props.at == Interaction::Hover {
+        h.shade(0.03)
+    } else {
+        h.shade(-0.19)
+    }
+    .css();
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                linearGradient { id: "trpanel", x1: "0", y1: "0", x2: "0", y2: "1",
+                    // The bevel is the first two rows, not the top of the
+                    // face: #4b4b4b for two rows, then #414141 settling to
+                    // #3e3e3e over the remaining sixty.
+                    stop { offset: "0", stop_color: "{h.shade(0.19).css()}" }
+                    stop { offset: "0.045", stop_color: "{h.shade(0.03).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(-0.02).css()}" }
+                }
+                linearGradient { id: "trwell", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{h.shade(-0.44).css()}" }
+                    stop { offset: "0.12", stop_color: "{h.shade(-0.37).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(-0.40).css()}" }
+                }
+                linearGradient { id: "trknobband", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{h.shade(0.58).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(0.26).css()}" }
+                }
+                linearGradient { id: "trknobwell", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{h.shade(-0.13).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(-0.25).css()}" }
+                }
+                linearGradient { id: "trthumb", x1: "0", y1: "0", x2: "0", y2: "1",
+                    // 167 at the top, dipping to 143 a quarter of the way
+                    // down, then back to 175 — a shallow trough, not the
+                    // bright-dark-bright of a moulded cap. Read as the
+                    // latter it averaged twenty levels light.
+                    // A bevel row at 167, then 136 climbing steadily to
+                    // 175 at the foot. Read as a trough — bright, dark,
+                    // bright — it came out twenty levels light and lit
+                    // from the wrong end.
+                    stop { offset: "0", stop_color: "{h.shade(0.54).css()}" }
+                    stop { offset: "0.09", stop_color: "{h.shade(0.38).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(0.58).css()}" }
+                }
+            }
+            match props.part {
+                TransportPart::Empty => rsx! {},
+                TransportPart::Panel => rsx! {
+                    // Guides live at x0 and y0, so the panel starts at 1.
+                    rect {
+                        x: "1", y: "1", width: "{vw - 2.0}", height: "{vh - 2.0}",
+                        rx: "5",
+                        fill: "{h.shade(-0.27).css()}",
+                    }
+                    rect {
+                        x: "1", y: "3", width: "{vw - 2.0}", height: "{vh - 4.0}",
+                        rx: "4",
+                        fill: "url(#trpanel)",
+                    }
+                },
+                TransportPart::Status => rsx! {
+                    // A well, not a panel: lit down its left and top-inner
+                    // and darker along its right and bottom, which is what
+                    // makes it read as cut into the bar.
+                    rect {
+                        x: "1", y: "1", width: "{vw - 2.0}", height: "{vh - 2.0}",
+                        rx: "3",
+                        fill: "{h.shade(-0.48).css()}",
+                    }
+                    rect {
+                        x: "1", y: "1", width: "{vw - 3.0}", height: "{vh - 3.0}",
+                        rx: "3",
+                        fill: "url(#trwell)",
+                    }
+                    rect {
+                        x: "1", y: "5", width: "1", height: "{vh - 7.0}",
+                        fill: "{h.shade(0.00).css()}",
+                    }
+                },
+                TransportPart::StatusError => rsx! {
+                    rect {
+                        x: "0", y: "0", width: "{vw}", height: "{vh}",
+                        fill: "{t.signal.mute.shade(-0.36).css()}",
+                    }
+                },
+                TransportPart::Bpm => rsx! {
+                    // Two wells side by side in the right two thirds of
+                    // the cell — x32..x61 and x62..x89 of 92, rows 3..22 —
+                    // with the left one lighter. The left third is empty;
+                    // spreading them across the whole cell put twenty
+                    // columns of well where the source has nothing.
+                    rect {
+                        x: "32", y: "3", width: "30", height: "20",
+                        fill: "{h.shade(0.00).css()}",
+                    }
+                    rect {
+                        x: "33", y: "4", width: "28", height: "18",
+                        fill: "{h.shade(0.03).css()}",
+                    }
+                    rect {
+                        x: "62", y: "3", width: "28", height: "20",
+                        fill: "{h.shade(-0.19).css()}",
+                    }
+                },
+                TransportPart::SpeedTrack => rsx! {
+                    // Two rows of groove in a 21-row cell, the rest guide.
+                    // The same shape as the mixer's fader trough, and the
+                    // same reason: REAPER stretches the middle.
+                    rect {
+                        x: "2", y: "11", width: "1", height: "2",
+                        fill: "{h.shade(-0.32).css()}",
+                    }
+                },
+                TransportPart::SpeedThumb => rsx! {
+                    // x5..x16, y5..y21 of a 22x28 cell — narrower and
+                    // taller than a proportional guess makes it.
+                    // A soft black surround, not a border: the frame
+                    // columns read alpha 51 with 16 outside them, so it
+                    // is a shadow at a fifth strength over two pixels.
+                    // Drawn solid it was the heaviest thing in the cell.
+                    rect {
+                        x: "4", y: "4", width: "14", height: "18", rx: "2",
+                        fill: "#000000", fill_opacity: "0.07",
+                    }
+                    rect {
+                        x: "5", y: "5", width: "12", height: "16", rx: "1.5",
+                        fill: "#000000", fill_opacity: "0.20",
+                    }
+                    rect {
+                        x: "6", y: "6", width: "10", height: "14", rx: "1",
+                        fill: "url(#trthumb)",
+                    }
+                },
+                TransportPart::TimebaseBeat | TransportPart::TimebaseTime => rsx! {
+                    // No plate at rest; hover and pressed each get one,
+                    // and they are the only thing the three cells differ
+                    // by. Both glyphs are 11 by 11 at #adadad, centred on
+                    // (16, 10) of a 33-wide cell.
+                    if props.at != Interaction::Normal {
+                        rect {
+                            x: "0", y: "1", width: "{vw}", height: "{vh - 2.0}",
+                            rx: "3",
+                            fill: "{tb_plate}",
+                        }
+                    }
+                    if props.part == TransportPart::TimebaseTime {
+                        circle {
+                            cx: "16.5", cy: "10.5", r: "5",
+                            fill: "none",
+                            stroke: "{h.shade(0.58).css()}",
+                            stroke_width: "1.2",
+                        }
+                        path {
+                            d: "M 16.5 7.3 V 10.9 H 19.2",
+                            fill: "none",
+                            stroke: "{h.shade(0.58).css()}",
+                            stroke_width: "1.2",
+                        }
+                    } else {
+                        // A barrel: a filled cap top and bottom with four
+                        // staves between them, which is why rows 10 to 12
+                        // show only four columns of ink.
+                        g { fill: "{h.shade(0.58).css()}",
+                            ellipse { cx: "16.5", cy: "7.6", rx: "5.5", ry: "2.5" }
+                            ellipse { cx: "16.5", cy: "14.3", rx: "5.5", ry: "2.0" }
+                            for (i, x) in [11.5f32, 14.5, 18.5, 21.5].iter().enumerate() {
+                                rect {
+                                    key: "{i}",
+                                    x: "{x - 0.55}", y: "7",
+                                    width: "1.1", height: "7",
+                                }
+                            }
+                        }
+                    }
+                },
+                TransportPart::KnobRing => rsx! {
+                    // Centred half a pixel below the middle of its cell,
+                    // which is what a 34-row cell holding a 27-row ring
+                    // works out to.
+                    // A wide bright band round a dark well, both lit from
+                    // above: the band runs 174 down to 113 over the ring's
+                    // height and the interior 55 down to 47. Drawn as a
+                    // thin flat stroke it was a third of the width and a
+                    // single value.
+                    //
+                    // The band is a filled annulus rather than a stroke
+                    // because resvg flattens a gradient on a stroke to its
+                    // average — the same reason the record ring is one.
+                    circle {
+                        cx: "15.9", cy: "15.4", r: "11.0",
+                        fill: "url(#trknobwell)",
+                    }
+                    path {
+                        d: "{ring(15.9, 15.4, 12.2, 9.9)}",
+                        fill: "url(#trknobband)",
+                        fill_rule: "evenodd",
+                    }
+                },
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

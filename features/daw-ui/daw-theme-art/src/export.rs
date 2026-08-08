@@ -342,6 +342,34 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             return Some(markup);
         }
     }
+    {
+        use v::TransportPart as P;
+        let part = |part, cell| {
+            render_svg(
+                v::TransportPanel,
+                v::TransportPartProps { part, cell, width: n.0, height: n.1, at },
+            )
+        };
+        let hit = match name {
+            "transport_timebase_beat" => Some(part(P::TimebaseBeat, (33.0, 22.0))),
+            "transport_timebase_time" => Some(part(P::TimebaseTime, (33.0, 22.0))),
+            "transport_bg" => Some(part(P::Panel, (200.0, 67.0))),
+            "transport_status_bg" => Some(part(P::Status, (32.0, 28.0))),
+            "transport_status_bg_err" => Some(part(P::StatusError, (6.0, 10.0))),
+            "transport_bpm" => Some(part(P::Bpm, (92.0, 26.0))),
+            "transport_playspeedbg" => Some(part(P::SpeedTrack, (6.0, 21.0))),
+            "transport_playspeedthumb" => Some(part(P::SpeedThumb, (22.0, 28.0))),
+            "transport_knob_bg_large" => Some(part(P::KnobRing, (32.0, 34.0))),
+            // Wholly transparent in the source, all three of them.
+            "transport_bpm_bg" => Some(part(P::Empty, (6.0, 10.0))),
+            "transport_edit_bg" => Some(part(P::Empty, (11.0, 11.0))),
+            "transport_group_bg" => Some(part(P::Empty, (11.0, 11.0))),
+            _ => None,
+        };
+        if let Some(markup) = hit {
+            return Some(markup);
+        }
+    }
 
     // Both families answer to the same eight controls, so match on the
     // part after the prefix rather than writing every name twice.
@@ -573,6 +601,14 @@ fn states(name: &str) -> usize {
         | "volthumb" | "volbg" => 1,
         // Three marks side by side in one image, not three pointer states.
         "folder_off" | "folder_on" | "folder_last" => 1,
+        // The transport's furniture is drawn once and stretched. Left at
+        // the default of three, each panel was rendered into a third of
+        // its own width and repeated across it — which reads, in the
+        // audit, as the drawing being twenty columns too far left.
+        "transport_bg" | "transport_bpm" | "transport_bpm_bg"
+        | "transport_edit_bg" | "transport_group_bg" | "transport_status_bg"
+        | "transport_status_bg_err" | "transport_playspeedbg"
+        | "transport_playspeedthumb" | "transport_knob_bg_large" => 1,
         _ => 3,
     }
 }
