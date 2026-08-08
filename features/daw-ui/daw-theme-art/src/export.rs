@@ -96,6 +96,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         render_svg(
             v::MuteButton,
             v::ToggleProps {
+                depth: 0.14,
                 on,
                 cell: label_cell,
                 body: label_body,
@@ -114,6 +115,9 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 cell: label_cell,
                 body: label_body,
                 legend: label_legend,
+                // Solo shifts hue rather than darkening — see
+                // `LabelButtonProps::depth`.
+                depth: 0.04,
                 width: n.0,
                 height: n.1,
                 at,

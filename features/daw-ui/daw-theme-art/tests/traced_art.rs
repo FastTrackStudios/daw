@@ -248,6 +248,7 @@ fn button_labels_sit_where_the_source_puts_them() {
             daw_theme_art::render_svg(
                 vector::MuteButton,
                 vector::ToggleProps {
+                    depth: 0.14,
                     legend: None,
                     body: (0.0, 1.0),
                     cell: (21.0, 20.0),
@@ -264,6 +265,7 @@ fn button_labels_sit_where_the_source_puts_them() {
             daw_theme_art::render_svg(
                 vector::SoloButton,
                 vector::SoloProps {
+                    depth: 0.04,
                     legend: None,
                     body: (0.0, 1.0),
                     cell: (21.0, 20.0),
