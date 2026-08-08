@@ -1463,12 +1463,16 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
                 rx: "{vw * 0.055}",
                 fill: "url(#capgrip)",
             }
-            // Notches, on alternate rows, skipping the seam.
-            for i in 0..13i32 {
+            // Five notches, the seam, five more: eleven rows on alternate
+            // lines from y16 to y36, with y26 the full-width split. This
+            // ran to thirteen with the seam at the seventh, which put the
+            // split a row late and carried two phantom notches past the
+            // bottom of the panel.
+            for i in 0..11i32 {
                 {
                     let y = gy0 + vh * (3.0 + 2.0 * i as f32) / 53.0;
-                    let seam = i == 6;
-                    let down = i as f32 / 12.0;
+                    let seam = i == 5;
+                    let down = i as f32 / 10.0;
                     rsx! {
                         rect {
                             key: "{i}",
