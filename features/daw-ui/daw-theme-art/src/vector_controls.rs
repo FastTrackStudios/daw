@@ -3376,6 +3376,62 @@ pub fn PanelSlider(props: SliderProps) -> Element {
     }
 }
 
+// ── panel plates: the nine-slices behind everything ─────────────────────
+
+/// One horizontal band of a plate: `(y, height, fill, alpha)`.
+///
+/// Every background in the mixer, track panel and envelope panel is a
+/// stack of these — a few rows of one colour over a few rows of another,
+/// which REAPER stretches vertically and horizontally to fill whatever it
+/// is behind. None of them is a gradient; they are all flat bands, and the
+/// ones that look like gradients are two bands a few levels apart.
+pub type Band = (f32, f32, Color, f32);
+
+#[derive(Props, Clone, PartialEq)]
+pub struct PlateProps {
+    /// Bands, top to bottom, in cell rows.
+    pub bands: Vec<Band>,
+    /// Cell size.
+    pub cell: (f32, f32),
+    /// Columns of transparent margin each side.
+    #[props(default = 0.0)]
+    pub inset: f32,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// A panel background.
+///
+/// Drawing these as components rather than shipping the bitmaps is what
+/// lets the panel follow the palette: every colour below is a shade of the
+/// theme's `hardware` grey, and the measured value it came from is written
+/// beside it in the table that feeds this.
+#[component]
+pub fn PanelPlate(props: PlateProps) -> Element {
+    let (vw, vh) = props.cell;
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            for (i, band) in props.bands.iter().enumerate() {
+                rect {
+                    key: "{i}",
+                    x: "{props.inset}", y: "{band.0}",
+                    width: "{vw - props.inset * 2.0}", height: "{band.1}",
+                    fill: "{band.2.css()}",
+                    fill_opacity: "{band.3}",
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

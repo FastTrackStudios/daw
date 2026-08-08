@@ -346,6 +346,115 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             return Some(markup);
         }
     }
+    // The panel backgrounds. Measured value beside each shade, because the
+    // shade is what retints and the value is what it has to match today.
+    {
+        let g = |v: f32| theme.chrome.hardware.shade(v);
+        let plate = |bands: Vec<v::Band>, cell, inset| {
+            render_svg(
+                v::PanelPlate,
+                v::PlateProps { bands, cell, inset, width: n.0, height: n.1, at },
+            )
+        };
+        let sunk = g(-0.19); // #333333
+        let lit = g(0.09); // #515151
+        let deep = g(-0.40); // #262626
+        let hit = match name {
+            "mcp_mainbg" => Some(plate(vec![(0.0, 6.0, sunk, 1.0)], (6.0, 6.0), 0.0)),
+            "mcp_mainbgsel" => Some(plate(vec![(0.0, 6.0, lit, 1.0)], (6.0, 6.0), 0.0)),
+            "mcp_bg" => Some(plate(vec![(1.0, 2.0, sunk, 1.0)], (4.0, 4.0), 1.0)),
+            "mcp_bgsel" => Some(plate(vec![(1.0, 1.0, sunk, 1.0)], (4.0, 3.0), 1.0)),
+            "mcp_extmixbg" => Some(plate(vec![(0.0, 3.0, sunk, 1.0)], (3.0, 3.0), 0.0)),
+            "mcp_extmixbgsel" => {
+                Some(plate(vec![(1.0, 1.0, sunk, 0.88)], (3.0, 3.0), 1.0))
+            }
+            "mcp_mainextmixbg" => {
+                Some(plate(vec![(1.0, 6.0, sunk, 1.0)], (9.0, 8.0), 1.0))
+            }
+            "mcp_mainextmixbgsel" => Some(plate(
+                vec![(1.0, 1.0, sunk, 1.0), (2.0, 5.0, g(0.005), 1.0)],
+                (9.0, 8.0),
+                1.0,
+            )),
+            "mcp_main_namebg" => Some(plate(
+                vec![
+                    (0.0, 1.0, sunk, 1.0),
+                    (1.0, 2.0, deep, 1.0),
+                    (3.0, 4.0, sunk, 1.0),
+                    (7.0, 1.0, deep, 1.0),
+                    (8.0, 1.0, sunk, 1.0),
+                ],
+                (8.0, 9.0),
+                0.0,
+            )),
+            "mcp_main_namebg_sel" => Some(plate(
+                vec![
+                    (0.0, 1.0, sunk, 1.0),
+                    (1.0, 2.0, g(0.93), 1.0), // #eeeeee
+                    (3.0, 1.0, deep, 1.0),
+                    (4.0, 3.0, lit, 1.0),
+                    (7.0, 1.0, deep, 1.0),
+                    (8.0, 1.0, sunk, 1.0),
+                ],
+                (8.0, 9.0),
+                0.0,
+            )),
+            "mcp_iconbg" => Some(plate(
+                vec![
+                    (1.0, 3.0, sunk, 1.0),
+                    (4.0, 4.0, g(-0.03), 1.0), // #3d3d3d
+                    (8.0, 2.0, sunk, 1.0),
+                ],
+                (6.0, 11.0),
+                1.0,
+            )),
+            "mcp_iconbgsel" => Some(plate(
+                vec![
+                    (1.0, 2.0, g(1.0), 1.0), // #ffffff
+                    (3.0, 1.0, sunk, 1.0),
+                    (4.0, 4.0, g(0.32), 0.416), // #797979 at 106
+                    (8.0, 2.0, sunk, 1.0),
+                ],
+                (6.0, 11.0),
+                1.0,
+            )),
+            "tcp_mainbg" => Some(plate(vec![(0.0, 9.0, sunk, 1.0)], (22.0, 9.0), 0.0)),
+            "tcp_mainbgsel" => Some(plate(vec![(0.0, 9.0, lit, 1.0)], (22.0, 9.0), 0.0)),
+            "tcp_iconbg" => Some(plate(
+                vec![(1.0, 10.0, deep, 1.0), (11.0, 1.0, g(-0.52), 1.0)],
+                (11.0, 13.0),
+                1.0,
+            )),
+            "tcp_iconbgsel" => Some(plate(
+                vec![(1.0, 10.0, g(-0.06), 1.0), (11.0, 1.0, deep, 1.0)],
+                (11.0, 13.0),
+                1.0,
+            )),
+            "envcp_bg" => Some(plate(
+                vec![(0.0, 10.0, sunk, 1.0), (10.0, 1.0, g(-0.51), 1.0)],
+                (48.0, 12.0),
+                0.0,
+            )),
+            "envcp_bgsel" => Some(plate(
+                vec![(0.0, 10.0, g(0.005), 1.0), (10.0, 1.0, g(-0.43), 1.0)],
+                (48.0, 12.0),
+                0.0,
+            )),
+            "envcp_namebg" => {
+                Some(plate(vec![(1.0, 22.0, g(-0.56), 1.0)], (22.0, 24.0), 1.0))
+            }
+            // Drawn by REAPER, not by the theme: every pixel is
+            // transparent, so an empty band list is the whole truth.
+            "mcp_namebg" | "mcp_idxbg" | "mcp_idxbg_sel" | "tcp_namebg"
+            | "tcp_main_namebg_sel" | "tcp_idxbg" | "tcp_idxbg_sel" => {
+                Some(plate(vec![], (4.0, 4.0), 0.0))
+            }
+            _ => None,
+        };
+        if let Some(markup) = hit {
+            return Some(markup);
+        }
+    }
     {
         use v::SliderPart as S;
         let slider = |part, cell| {
@@ -619,6 +728,9 @@ fn leading_gap(name: &str) -> u32 {
 /// Knowledge, not a measurement: every button here draws normal, hover
 /// and pressed, and the knobs and the fader draw one thing.
 fn states(name: &str) -> usize {
+    if name.starts_with("envcp_") {
+        return 1;
+    }
     let stem = name
         .strip_prefix("mcp_")
         .or_else(|| name.strip_prefix("track_"))
@@ -629,6 +741,11 @@ fn states(name: &str) -> usize {
         | "volthumb" | "volbg" => 1,
         // Three marks side by side in one image, not three pointer states.
         "folder_off" | "folder_on" | "folder_last" => 1,
+        // Backgrounds are one drawing that REAPER stretches, never a
+        // strip of states.
+        "mainbg" | "mainbgsel" | "bg" | "bgsel" | "extmixbg" | "extmixbgsel"
+        | "mainextmixbg" | "mainextmixbgsel" | "namebg" | "main_namebg"
+        | "main_namebg_sel" | "iconbg" | "iconbgsel" | "idxbg" | "idxbg_sel" => 1,
         // The transport's furniture is drawn once and stretched. Left at
         // the default of three, each panel was rendered into a third of
         // its own width and repeated across it — which reads, in the
@@ -687,7 +804,11 @@ mod tests {
 
     #[test]
     fn an_image_no_vector_control_draws_is_reported_not_guessed() {
-        assert!(cell_markup("mcp_bg", v::Interaction::Normal).is_none());
+        // A name no component will ever draw, rather than one that
+        // happens not to be drawn yet: this test named `mcp_bg` and broke
+        // the day `mcp_bg` gained a component, which is a test failing at
+        // progress rather than at a bug.
+        assert!(cell_markup("mcp_not_a_real_image", v::Interaction::Normal).is_none());
         let spec = DerivedSpec {
             art_x: 0,
             width: 4,
@@ -695,7 +816,7 @@ mod tests {
             markers: vec![],
             cells: vec![(0, 4)],
         };
-        assert!(render_control("mcp_bg", &spec).is_err());
+        assert!(render_control("mcp_not_a_real_image", &spec).is_err());
     }
 
     /// Everything the mixer draws should be generatable, or the theme has
