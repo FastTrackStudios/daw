@@ -412,6 +412,23 @@ impl Note {
         self.end - self.start
     }
 
+    /// Move the note and everything anchored to its timeline.
+    ///
+    /// The curves and zone splits live in document time, so shifting
+    /// the rectangle alone would leave a note's own expression behind —
+    /// exactly the bug a bare `start += delta` produces.
+    pub fn shift_time(&mut self, delta: f64) {
+        let (s, e) = (self.start, self.end);
+        self.start += delta;
+        self.end += delta;
+        for split in self.splits.iter_mut() {
+            *split += delta;
+        }
+        for lane in Lane::ALL {
+            self.lane_mut(lane).shift_time(s, e, delta);
+        }
+    }
+
     pub fn lane(&self, lane: Lane) -> &Curve {
         match lane {
             Lane::Pitch => &self.pitch,

@@ -28,8 +28,10 @@ pub mod blob;
 pub mod camera;
 pub mod cc;
 pub mod chord;
+pub mod clipboard;
 pub mod doc;
 pub mod edit;
+pub mod menu;
 pub mod mode;
 pub mod modulation;
 pub mod multitool;
@@ -105,6 +107,9 @@ pub struct Editor {
     pub beats_per_bar: f64,
     /// Transport position, when the host supplies one.
     pub playhead: Option<f64>,
+    /// Cut/copy/paste buffer. Editor-local rather than system-wide —
+    /// see [`clipboard::Clipboard`].
+    pub clipboard: clipboard::Clipboard,
     history: History,
 }
 
@@ -135,6 +140,7 @@ impl Editor {
             smart_zoom: SmartZoom::default(),
             beats_per_bar: 4.0,
             playhead: None,
+            clipboard: clipboard::Clipboard::default(),
             history: History::new(10),
         }
     }
@@ -316,6 +322,166 @@ impl Editor {
     /// Snap a time to the local grid.
     pub fn snap_time(&self, t: f64) -> f64 {
         self.grid.snap(t, self.doc.start, self.units_per_beat())
+    }
+
+    /// Notes a discrete command acts on.
+    ///
+    /// A right-click on an unselected note targets *that* note. Menus
+    /// that quietly act on a selection somewhere else on screen are how
+    /// the wrong bar gets deleted.
+    pub fn command_targets(&self, under: Option<NoteId>) -> Vec<NoteId> {
+        match under {
+            Some(id) if !self.selection.notes.contains(&id) => vec![id],
+            Some(id) => {
+                if self.selection.notes.is_empty() {
+                    vec![id]
+                } else {
+                    self.selection.notes.clone()
+                }
+            }
+            None => self.selection.notes.clone(),
+        }
+    }
+
+    /// Note ids inside the bar containing `t`.
+    pub fn notes_in_measure(&self, t: f64) -> Vec<NoteId> {
+        let bar = self.units_per_bar();
+        let i = ((t - self.doc.start) / bar).floor();
+        let (lo, hi) = (self.doc.start + i * bar, self.doc.start + (i + 1.0) * bar);
+        self.doc
+            .notes
+            .iter()
+            .filter(|n| n.start < hi && n.end > lo)
+            .map(|n| n.id)
+            .collect()
+    }
+
+    /// Run a context-menu command.
+    ///
+    /// Commands the core cannot complete on its own — the ones that
+    /// need a text field or a submenu — return `false` so the UI knows
+    /// to open something rather than assuming the edit happened.
+    pub fn run_command(&mut self, cmd: &menu::Command, under: Option<NoteId>) -> bool {
+        use menu::Command as C;
+        let targets = self.command_targets(under);
+        match cmd {
+            C::Copy => self.clipboard.copy_from(&self.doc, &targets),
+            C::Cut => {
+                if !self.clipboard.copy_from(&self.doc, &targets) {
+                    return false;
+                }
+                self.apply(&Edit::DeleteNotes(targets))
+            }
+            C::Paste => {
+                // Paste lands at the playhead when there is one, and
+                // back where it came from otherwise — never silently at
+                // zero, which puts the phrase off-screen.
+                let t = self.playhead.unwrap_or(self.doc.start);
+                let notes = self.clipboard.placed(t, self.clipboard.origin_row());
+                self.apply(&Edit::PasteNotes(notes))
+            }
+            C::Delete => self.apply(&Edit::DeleteNotes(targets)),
+            C::SelectAll => {
+                self.selection.notes = self.doc.notes.iter().map(|n| n.id).collect();
+                true
+            }
+            C::SelectMeasure => {
+                let t = self
+                    .playhead
+                    .or_else(|| targets.first().and_then(|id| self.doc.note(*id)).map(|n| n.start))
+                    .unwrap_or(self.doc.start);
+                self.selection.notes = self.notes_in_measure(t);
+                !self.selection.notes.is_empty()
+            }
+            C::CopyMeasure => {
+                let t = self
+                    .playhead
+                    .or_else(|| targets.first().and_then(|id| self.doc.note(*id)).map(|n| n.start))
+                    .unwrap_or(self.doc.start);
+                let ids = self.notes_in_measure(t);
+                self.clipboard.copy_from(&self.doc, &ids)
+            }
+            C::ClearExpression => {
+                let lane = self.lane;
+                let spans: Vec<(NoteId, f64, f64)> = targets
+                    .iter()
+                    .filter_map(|id| self.doc.note(*id).map(|n| (*id, n.start, n.end)))
+                    .collect();
+                let mut any = false;
+                for (id, t0, t1) in spans {
+                    any |= self.apply(&Edit::EraseLane {
+                        note: id,
+                        lane,
+                        t0,
+                        t1,
+                    });
+                }
+                any
+            }
+            C::ToggleMute => self.apply(&Edit::ToggleMuted { notes: targets }),
+            C::AssignChannels => self.apply(&Edit::AssignChannels {
+                notes: targets,
+                seed: 0,
+            }),
+            C::CycleString(id) => {
+                let Some(n) = self.doc.note(*id) else {
+                    return false;
+                };
+                self.apply(&Edit::SetString {
+                    note: *id,
+                    string: n.row + 1,
+                })
+            }
+            C::ToggleLegato(id) => {
+                let Some(n) = self.doc.note(*id) else {
+                    return false;
+                };
+                let gap = if n.legato { 0.0 } else { 1.0 };
+                self.apply(&Edit::Legato {
+                    notes: vec![*id],
+                    gap,
+                })
+            }
+            C::SplitNote(id, t) => self.apply(&Edit::SplitNote {
+                note: *id,
+                t: *t,
+            }),
+            C::MergeNotes(id) => self.merge_with_next(*id),
+            // These need UI: a text field, a submenu, a panel.
+            C::EditLyric(_) | C::SetArticulation(_) | C::Properties => false,
+        }
+    }
+
+    /// Absorb the next note on the same row into `id`.
+    ///
+    /// The audio editor's note-assignment merge, and the same operation
+    /// a MIDI editor wants for a note split by mistake. The survivor
+    /// keeps its own expression and simply extends — re-deriving a
+    /// merged curve from two would discard whichever was edited.
+    fn merge_with_next(&mut self, id: NoteId) -> bool {
+        let Some(n) = self.doc.note(id) else {
+            return false;
+        };
+        let (row, end) = (n.row, n.end);
+        let next = self
+            .doc
+            .notes
+            .iter()
+            .filter(|o| o.row == row && o.start >= end && o.id != id)
+            .min_by(|a, b| a.start.total_cmp(&b.start))
+            .map(|o| (o.id, o.end));
+        let Some((next_id, next_end)) = next else {
+            return false;
+        };
+        let Some(n) = self.doc.note(id) else {
+            return false;
+        };
+        let start = n.start;
+        self.apply(&Edit::Resize {
+            note: id,
+            start,
+            end: next_end,
+        }) && self.apply(&Edit::DeleteNotes(vec![next_id]))
     }
 
     /// Switch mode, re-applying its preset.

@@ -24,6 +24,7 @@ pub mod demo;
 pub mod drawer;
 pub mod inspector;
 pub mod interaction;
+pub mod menu_ui;
 pub mod multitool_ui;
 pub mod theme;
 pub mod toolbar;
@@ -32,6 +33,7 @@ pub mod widgets;
 pub use drawer::ModDrawer;
 pub use expression_editor_core as core;
 pub use interaction::Drag;
+pub use menu_ui::ContextMenu;
 pub use multitool_ui::MultiTool;
 
 /// The editor: toolbar over canvas.
@@ -55,8 +57,18 @@ pub fn ExpressionEditor(
 ) -> Element {
     let drag = use_signal(Drag::default);
     let drawer = use_signal(|| initial_drawer.clone().unwrap_or_default());
-    let inspector_open = use_signal(|| true);
+    let mut inspector_open = use_signal(|| true);
     let multi = use_signal(|| initial_multi.clone().unwrap_or_default());
+    let menu_state = use_signal(ContextMenu::default);
+    let mut pending = use_signal(|| None::<menu_ui::Pending>);
+
+    // Menu items the core could not finish become UI: Properties simply
+    // opens the inspector, which is where the note's fields already
+    // live. The rest are picked up by the panels that own them.
+    if matches!(*pending.read(), Some(menu_ui::Pending::Properties)) {
+        inspector_open.set(true);
+        pending.set(None);
+    }
 
     rsx! {
         div {
@@ -74,7 +86,7 @@ pub fn ExpressionEditor(
                 div {
                     style: "display: flex; flex-direction: column; flex: 1 1 auto; \
                             min-width: 0; min-height: 0;",
-                    Canvas { editor, drag, drawer, multi }
+                    Canvas { editor, drag, drawer, multi, menu_state, pending }
                     LaneStrip { editor }
                 }
                 inspector::Inspector { editor, open: inspector_open }
@@ -129,11 +141,14 @@ fn Canvas(
     drag: Signal<Drag>,
     drawer: Signal<ModDrawer>,
     multi: Signal<MultiTool>,
+    menu_state: Signal<ContextMenu>,
+    pending: Signal<Option<menu_ui::Pending>>,
 ) -> Element {
     let mut multi = multi;
     let mut editor = editor;
     let mut drag = drag;
     let mut drawer = drawer;
+    let mut menu_state = menu_state;
     // While the drawer is open its target is locked: editing gestures
     // are blocked, but every navigation path stays live so the preview
     // can be auditioned in context.
@@ -309,6 +324,14 @@ fn Canvas(
                         0
                     };
                     let d = interaction::pointer_down(&mut editor.write(), x, y, m, button);
+                    // A right-click resolves to a menu request rather
+                    // than a drag. Opening it here — not in `interaction`
+                    // — keeps the core pointer path free of UI state.
+                    if let Drag::ContextMenu { x, y, under, t } = d {
+                        menu_state.write().show(x, y, under, t);
+                        return;
+                    }
+                    menu_state.write().close();
                     drag.set(d);
                 },
                 onpointermove: move |e: PointerEvent| {
@@ -812,6 +835,8 @@ fn Canvas(
             }
 
             multitool_ui::MultiToolOverlay { editor, tool: multi }
+
+            menu_ui::ContextMenuOverlay { editor, menu_state, pending }
 
             drawer::ModulationDrawer { editor, drawer }
 

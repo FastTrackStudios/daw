@@ -2652,3 +2652,207 @@ fn switching_modes_is_reversible() {
     assert_eq!(ed.overlays, vec![Lane::Pitch]);
     assert_eq!(ed.mouse.name, "REAPER-like");
 }
+
+// ── clipboard and the context menu ───────────────────────────────────
+
+use expression_editor_core::menu::{self, Command};
+
+/// An editor with four notes, each carrying real expression, so a copy
+/// that drops curves is distinguishable from one that keeps them.
+fn menu_editor() -> Editor {
+    let mut doc = doc_with_notes(4);
+    for n in doc.notes.iter_mut() {
+        n.pitch.set(n.start, -0.5);
+        n.pitch.set(n.end, 0.25);
+    }
+    Editor::new(doc, Viewport::new(900.0, 500.0))
+}
+
+#[test]
+fn a_copied_note_brings_its_curves_and_its_spacing() {
+    let mut ed = menu_editor();
+    let picked = vec![NoteId(2), NoteId(3)];
+    assert!(ed.clipboard.copy_from(&ed.doc, &picked));
+
+    // Normalized to the earliest note, so the phrase can land anywhere.
+    let placed = ed.clipboard.placed(PPQ * 10.0, 60);
+    assert_eq!(placed.len(), 2);
+    assert!((placed[0].start - PPQ * 10.0).abs() < 1e-9);
+    // The gap between the two notes is preserved, not flattened.
+    let gap = placed[1].start - placed[0].start;
+    assert!((gap - PPQ).abs() < 1e-9, "spacing survived: {gap}");
+    // And the curve travelled with the note it belongs to.
+    assert!(
+        !placed[0].pitch.is_empty(),
+        "a copied note is the whole note, not a rectangle"
+    );
+    assert!(
+        (placed[0].pitch.points()[0].t - placed[0].start).abs() < 1e-9,
+        "the curve moved with the note rather than staying behind"
+    );
+}
+
+#[test]
+fn pasting_mints_fresh_ids_so_a_double_paste_is_two_phrases() {
+    let mut ed = menu_editor();
+    ed.clipboard.copy_from(&ed.doc, &[NoteId(1)]);
+    let before = ed.doc.notes.len();
+
+    ed.apply(&Edit::PasteNotes(ed.clipboard.placed(PPQ * 8.0, 60)));
+    ed.apply(&Edit::PasteNotes(ed.clipboard.placed(PPQ * 12.0, 60)));
+
+    assert_eq!(ed.doc.notes.len(), before + 2);
+    let all: Vec<NoteId> = ids(&ed.doc);
+    let mut uniq = all.clone();
+    uniq.sort_by_key(|i| i.0);
+    uniq.dedup();
+    assert_eq!(all.len(), uniq.len(), "every pasted note got its own id");
+}
+
+#[test]
+fn cut_copies_before_it_deletes() {
+    let mut ed = menu_editor();
+    ed.selection.notes = vec![NoteId(1), NoteId(2)];
+    let before = ed.doc.notes.len();
+
+    assert!(ed.run_command(&Command::Cut, None));
+    assert_eq!(ed.doc.notes.len(), before - 2);
+    assert_eq!(ed.clipboard.len(), 2, "and what was cut is pasteable");
+
+    assert!(ed.run_command(&Command::Paste, None));
+    assert_eq!(ed.doc.notes.len(), before);
+}
+
+#[test]
+fn a_command_on_an_unselected_note_acts_on_that_note() {
+    let mut ed = menu_editor();
+    ed.selection.notes = vec![NoteId(1)];
+
+    // Right-clicking note 3 while note 1 is selected must not delete
+    // note 1 — the classic "menu ate the wrong thing" bug.
+    assert_eq!(ed.command_targets(Some(NoteId(3))), vec![NoteId(3)]);
+    assert!(ed.run_command(&Command::Delete, Some(NoteId(3))));
+    assert!(ed.doc.note(NoteId(1)).is_some());
+    assert!(ed.doc.note(NoteId(3)).is_none());
+
+    // But right-clicking *inside* the selection acts on all of it.
+    ed.selection.notes = vec![NoteId(1), NoteId(2)];
+    assert_eq!(ed.command_targets(Some(NoteId(1))).len(), 2);
+}
+
+#[test]
+fn a_failed_copy_leaves_the_clipboard_alone() {
+    let mut ed = menu_editor();
+    ed.clipboard.copy_from(&ed.doc, &[NoteId(1)]);
+    assert_eq!(ed.clipboard.len(), 1);
+
+    // Copying nothing must not destroy what was already held.
+    assert!(!ed.clipboard.copy_from(&ed.doc, &[]));
+    assert_eq!(ed.clipboard.len(), 1);
+}
+
+#[test]
+fn the_menu_greys_items_out_rather_than_hiding_them() {
+    let mut ed = menu_editor();
+    ed.selection.clear();
+    let empty = menu::note_menu(&ed, None, 0.0);
+
+    let paste = empty.iter().find(|i| i.command == Command::Paste).unwrap();
+    assert!(!paste.enabled, "nothing on the clipboard yet");
+    let copy = empty.iter().find(|i| i.command == Command::Copy).unwrap();
+    assert!(!copy.enabled, "nothing selected");
+
+    ed.selection.notes = vec![NoteId(1)];
+    ed.run_command(&Command::Copy, None);
+    let ready = menu::note_menu(&ed, None, 0.0);
+    assert_eq!(
+        ready.len(),
+        empty.len(),
+        "a menu whose shape moves with the selection is one you cannot learn"
+    );
+    assert!(ready.iter().find(|i| i.command == Command::Paste).unwrap().enabled);
+}
+
+#[test]
+fn the_menu_offers_what_the_mode_can_actually_carry() {
+    let mut ed = menu_editor();
+
+    ed.set_mode(Mode::Midi);
+    let midi = menu::note_menu(&ed, Some(NoteId(1)), 0.0);
+    assert!(!midi.iter().any(|i| matches!(i.command, Command::EditLyric(_))));
+
+    ed.set_mode(Mode::Vocals);
+    let vocals = menu::note_menu(&ed, Some(NoteId(1)), 0.0);
+    assert!(vocals.iter().any(|i| matches!(i.command, Command::EditLyric(_))));
+
+    ed.set_mode(Mode::Guitar);
+    let guitar = menu::note_menu(&ed, Some(NoteId(1)), 0.0);
+    assert!(guitar.iter().any(|i| matches!(i.command, Command::CycleString(_))));
+    assert!(guitar.iter().any(|i| matches!(i.command, Command::ToggleLegato(_))));
+
+    ed.set_mode(Mode::Audio);
+    let audio = menu::note_menu(&ed, Some(NoteId(1)), 0.0);
+    assert!(audio.iter().any(|i| matches!(i.command, Command::SplitNote(_, _))));
+
+    // Mode-specific items need a concrete note; clicking empty canvas
+    // offers only what works without one.
+    let nowhere = menu::note_menu(&ed, None, 0.0);
+    assert!(!nowhere.iter().any(|i| matches!(i.command, Command::SplitNote(_, _))));
+}
+
+#[test]
+fn commands_needing_a_panel_report_that_they_did_not_run() {
+    let mut ed = menu_editor();
+    ed.set_mode(Mode::Vocals);
+    // The core cannot invent a syllable, so it must say so rather than
+    // return true and leave the UI thinking a lyric was set.
+    assert!(!ed.run_command(&Command::EditLyric(NoteId(1)), Some(NoteId(1))));
+    assert!(!ed.run_command(&Command::Properties, Some(NoteId(1))));
+}
+
+#[test]
+fn merging_extends_the_survivor_instead_of_rebuilding_it() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let mut a = Note::new(NoteId(1), 0.0, PPQ, 60);
+    a.pitch.set(0.0, -0.4);
+    doc.push(a);
+    doc.push(Note::new(NoteId(2), PPQ, PPQ * 2.0, 60));
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
+
+    assert!(ed.run_command(&Command::MergeNotes(NoteId(1)), Some(NoteId(1))));
+    assert!(ed.doc.note(NoteId(2)).is_none());
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    assert!((n.end - PPQ * 2.0).abs() < 1e-9, "the survivor covers both");
+    assert!(
+        !n.pitch.is_empty(),
+        "and keeps its own expression rather than being re-derived"
+    );
+}
+
+#[test]
+fn clearing_expression_keeps_the_notes() {
+    let mut ed = menu_editor();
+    ed.selection.notes = vec![NoteId(1), NoteId(2)];
+    let before = ed.doc.notes.len();
+
+    assert!(ed.run_command(&Command::ClearExpression, None));
+    assert_eq!(ed.doc.notes.len(), before);
+    assert!(ed.doc.note(NoteId(1)).unwrap().pitch.is_empty());
+    assert!(
+        !ed.doc.note(NoteId(3)).unwrap().pitch.is_empty(),
+        "and only the selection"
+    );
+}
+
+#[test]
+fn a_measure_command_reads_the_bar_under_the_pointer() {
+    let mut ed = menu_editor();
+    // doc_with_notes puts one note per quarter at rows 60.., so bar 1
+    // (4 beats at PPQ each) holds all four.
+    let in_bar_1 = ed.notes_in_measure(PPQ * 0.5);
+    assert_eq!(in_bar_1.len(), 4);
+
+    ed.playhead = Some(PPQ * 0.5);
+    assert!(ed.run_command(&Command::CopyMeasure, None));
+    assert_eq!(ed.clipboard.len(), 4);
+}

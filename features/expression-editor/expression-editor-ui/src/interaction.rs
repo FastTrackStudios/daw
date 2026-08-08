@@ -138,6 +138,16 @@ pub enum Drag {
         pivot: f64,
         origin_y: f64,
     },
+    /// Not a drag at all — the signal that the surface should open a
+    /// context menu here. It rides `Drag` because that is already the
+    /// one value `pointer_down` hands back to the component, and a
+    /// second return channel for one gesture is not worth the churn.
+    ContextMenu {
+        x: f64,
+        y: f64,
+        under: Option<NoteId>,
+        t: f64,
+    },
     /// Vertical drag over notes edits velocity.
     Velocity {
         notes: Vec<NoteId>,
@@ -517,6 +527,8 @@ fn run_action(
             })
         }
 
+        Action::ContextMenu => Some(Drag::ContextMenu { x, y, under, t }),
+
         // Expression tools and anything unmapped stay with the
         // tool-driven path.
         Action::ActiveTool | Action::PenOverride => None,
@@ -885,7 +897,8 @@ fn begin_new_note(ed: &mut Editor, x: f64, y: f64, mods: Mods) -> Drag {
 /// Continue a gesture.
 pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods) {
     match drag {
-        Drag::None => {}
+        // Not a drag; the menu is already open and owns the pointer.
+        Drag::None | Drag::ContextMenu { .. } => {}
         Drag::Pan { last } => {
             ed.pan_px(x - last.0, y - last.1);
             *last = (x, y);

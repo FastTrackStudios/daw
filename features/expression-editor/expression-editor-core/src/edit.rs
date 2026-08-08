@@ -134,6 +134,11 @@ pub enum Edit {
     SetString { note: NoteId, string: i32 },
     SetFret { notes: Vec<NoteId>, fret: u8 },
     AddNote(Box<Note>),
+    /// Insert clipboard contents, minting fresh ids. The notes arrive
+    /// already positioned — [`crate::clipboard::Clipboard::placed`] does
+    /// the placing, so paste-at-pointer and paste-in-place are the same
+    /// edit with different arguments.
+    PasteNotes(Vec<Note>),
     DeleteNotes(Vec<NoteId>),
     SplitNote { note: NoteId, t: f64 },
     /// Q zones.
@@ -338,15 +343,7 @@ impl Edit {
                 let mut any = false;
                 for id in notes {
                     if let Some(n) = doc.note_mut(*id) {
-                        let (s, e) = (n.start, n.end);
-                        n.start += delta;
-                        n.end += delta;
-                        for s2 in n.splits.iter_mut() {
-                            *s2 += delta;
-                        }
-                        for lane in Lane::ALL {
-                            n.lane_mut(lane).shift_time(s, e, *delta);
-                        }
+                        n.shift_time(*delta);
                         any = true;
                     }
                 }
@@ -572,6 +569,17 @@ impl Edit {
             }
             Edit::AddNote(note) => {
                 doc.push((**note).clone());
+                true
+            }
+            Edit::PasteNotes(notes) => {
+                if notes.is_empty() {
+                    return false;
+                }
+                for n in notes {
+                    let mut c = n.clone();
+                    c.id = doc.mint_id();
+                    doc.push(c);
+                }
                 true
             }
             Edit::DeleteNotes(ids) => {
