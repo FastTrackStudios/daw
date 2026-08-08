@@ -246,18 +246,30 @@ preview · `Z` vertical auto-zoom · `F` follow cursor · `E` undo menu ·
 
 ## Status
 
-Nothing here is built yet. `Mode::Audio` exists as a preset and the DSP
-backing (`tune_dsp`: `PitchDoc`, `NoteBlob`, `WarpMarker`, WORLD
-resynthesis with warp) exists and is tested — but no adapter connects
-them, which is the same "domain adapters" gap [`design.md`](design.md)
-already names as the next real work.
+**Landed:**
 
-Build order:
+1. **`Workspace` + per-track `History`** — `tracks.rs`. Reference tracks
+   render behind the active one, `Shift+R` brings them forward, and the
+   switcher bar hides itself at one track. Done first on purpose:
+   per-track undo is a property of where the history lives.
+2. **`PitchDoc` ↔ `ExpressionDoc` adapter** — `expression-editor-audio`.
+   `to_doc` / `apply_to`, with formant and gain trims round-tripping
+   exactly and the sung drift/vibrato never rewritten.
+4. **Unvoiced spans** — `expression_editor_audio::spans`. The data half
+   of sibilant scope; the UI half is not built.
 
-1. `Workspace` + per-track `History` (cheapest now, expensive later)
-2. `PitchDoc` ↔ `ExpressionDoc` adapter — the gap that blocks everything
-3. note handles + `TimeScope` (gets temporary notes nearly free)
-4. unvoiced spans → sibilant scope
-5. pitch drawing draft layer
-6. timing separators over `WarpMarker`
-7. MIDI reference as a target-pitch source, shared with scale/chromatic
+**Next, in order:**
+
+3. **note handles + `TimeScope`** — the seven-handle set, scoped to a
+   note or to a range, which gets temporary notes nearly free
+4. **sibilant scope in the UI** — hollow amplitude handle, dark
+   waveform shading, Shift reversing the scope per-gesture
+5. **pitch drawing draft layer** — anchors, sinusoidal interpolation,
+   the original visible behind, and one history step on apply
+6. **timing separators over `WarpMarker`** — the two drag laws, split by
+   grab height, clamped ⅛×–4×
+7. **MIDI reference as a target-pitch source**, shared with the scale
+   and chromatic grid so all three snap through one interface
+
+Then the chrome: views, note assignment, harmony, auto-correct, scale
+detection, the undo timeline, overview, preview/auto-cycle.
