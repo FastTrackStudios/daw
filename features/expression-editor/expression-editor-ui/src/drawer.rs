@@ -202,7 +202,6 @@ pub fn ModulationDrawer(editor: Signal<Editor>, drawer: Signal<ModDrawer>) -> El
     let selected = d.selected_row;
     let rows = d.stack.rows.clone();
 
-
     rsx! {
         div {
             style: "position: absolute; top: 0; right: 0; bottom: 0; width: 268px; \
@@ -228,7 +227,7 @@ pub fn ModulationDrawer(editor: Signal<Editor>, drawer: Signal<ModDrawer>) -> El
                 style: "padding: 8px 10px; border-bottom: 1px solid {theme::PANEL_BORDER};",
                 svg {
                     view_box: "0 0 240 54",
-                    style: "width: 100%; height: 54px; background: #0e0e13; \
+                    style: "width: 100%; height: 54px; background: {theme::BG}; \
                             border: 1px solid {theme::PANEL_BORDER}; border-radius: 4px;",
                     line {
                         x1: "0", y1: "27", x2: "240", y2: "27",
@@ -254,7 +253,7 @@ pub fn ModulationDrawer(editor: Signal<Editor>, drawer: Signal<ModDrawer>) -> El
                             "border: 1px solid {}; border-radius: 5px; padding: 6px; \
                              background: {}; cursor: pointer;",
                             if selected == Some(i) { theme::ACCENT } else { theme::PANEL_BORDER },
-                            if selected == Some(i) { "#16202c" } else { "#1a1a22" },
+                            if selected == Some(i) { theme::CONTROL_SELECTED } else { theme::SURFACE_INSET },
                         ),
                         onclick: move |_| drawer.write().selected_row = Some(i),
 

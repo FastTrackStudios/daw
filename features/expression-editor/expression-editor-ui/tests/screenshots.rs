@@ -22,6 +22,7 @@ use dioxus::prelude::*;
 use dioxus_test::DocumentTester;
 use expression_editor_core::{Editor, Viewport};
 use expression_editor_ui::demo::{self, Scene};
+use expression_editor_ui::theme;
 use expression_editor_ui::{ExpressionEditor, ModDrawer, MultiTool};
 
 const W: u32 = 1100;
@@ -38,7 +39,7 @@ fn Harness(seed: Editor, drawer: Option<ModDrawer>, multi: Option<MultiTool>) ->
     rsx! {
         style {
             "html, body {{ width: 100%; height: 100%; margin: 0; padding: 0; \
-              overflow: hidden; background: #0d0d11; }}"
+              overflow: hidden; background: {theme::BG}; }}"
         }
         div {
             style: "width: 100%; height: 100%;",
@@ -70,12 +71,7 @@ async fn shoot_with(ed: Editor, drawer: Option<ModDrawer>, name: &str) {
     shoot_full(ed, drawer, None, name).await
 }
 
-async fn shoot_full(
-    ed: Editor,
-    drawer: Option<ModDrawer>,
-    multi: Option<MultiTool>,
-    name: &str,
-) {
+async fn shoot_full(ed: Editor, drawer: Option<ModDrawer>, multi: Option<MultiTool>, name: &str) {
     // The canvas measures itself from the mounted element; headless
     // there is no resize event, so state the viewport the shot uses.
     let mut ed = ed;

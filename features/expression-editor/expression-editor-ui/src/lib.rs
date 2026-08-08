@@ -15,22 +15,22 @@
 
 use dioxus::prelude::*;
 use dioxus_elements::input_data::MouseButton;
-use keyboard_types::Modifiers;
 use expression_editor_core::tools::Mods;
 use expression_editor_core::{Editor, Lane, Viewport};
+use keyboard_types::Modifiers;
 
 pub mod canvas;
 pub mod demo;
 pub mod drawer;
 pub mod inspector;
-pub mod multitool_ui;
 pub mod interaction;
+pub mod multitool_ui;
 pub mod theme;
 pub mod toolbar;
 pub mod widgets;
 
-pub use expression_editor_core as core;
 pub use drawer::ModDrawer;
+pub use expression_editor_core as core;
 pub use interaction::Drag;
 pub use multitool_ui::MultiTool;
 
@@ -45,11 +45,13 @@ pub fn ExpressionEditor(
     /// Open the modulation drawer on mount. Hosts normally leave this
     /// alone — it exists so a caller can restore a session, and so the
     /// screenshot harness can shoot the drawer through the real path.
-    #[props(default)] initial_drawer: Option<ModDrawer>,
+    #[props(default)]
+    initial_drawer: Option<ModDrawer>,
     /// Arm the Multi Tool on mount. Same purpose as `initial_drawer`:
     /// restore a session, and let the screenshot harness reach a state
     /// that is otherwise only produced by a key press.
-    #[props(default)] initial_multi: Option<MultiTool>,
+    #[props(default)]
+    initial_multi: Option<MultiTool>,
 ) -> Element {
     let drag = use_signal(Drag::default);
     let drawer = use_signal(|| initial_drawer.clone().unwrap_or_default());
@@ -105,11 +107,7 @@ fn chrome_at(ed: &Editor, x: f64, y: f64) -> Chrome {
     if y < canvas::RULER_H {
         Chrome::Ruler(ed.camera.t_at(x - canvas::GUTTER_W))
     } else if x < canvas::GUTTER_W {
-        Chrome::Key(
-            ed.camera
-                .pitch_at(y - canvas::RULER_H, ed.viewport)
-                .round() as i32,
-        )
+        Chrome::Key(ed.camera.pitch_at(y - canvas::RULER_H, ed.viewport).round() as i32)
     } else {
         Chrome::Roll
     }
@@ -533,7 +531,7 @@ fn Canvas(
                             text {
                                 x: "{n.x + 4.0:.1}",
                                 y: "{n.y + n.h * 0.5 + 4.0:.1}",
-                                fill: "#fff",
+                                fill: theme::SELECTED,
                                 font_size: "12",
                                 pointer_events: "none",
                                 "⚠"
@@ -554,7 +552,7 @@ fn Canvas(
                                 // Dark on the body: these labels sit on
                                 // a saturated fill, and light text on a
                                 // yellow string is unreadable.
-                                fill: "#0b0b10",
+                                fill: theme::SURFACE_DEEP,
                                 fill_opacity: "0.85",
                                 font_size: "10",
                                 font_weight: "600",
@@ -778,7 +776,7 @@ fn Canvas(
                                 x: "{canvas::GUTTER_W - 4.0:.0}",
                                 y: "{k.y + k.h * 0.5 + 3.0:.1}",
                                 text_anchor: "end",
-                                fill: if k.black { theme::TEXT_DIM } else { "#33333f" },
+                                fill: if k.black { theme::TEXT_DIM } else { theme::KEY_LABEL },
                                 font_size: "9",
                                 "{label}"
                             }
@@ -823,7 +821,7 @@ fn Canvas(
             if let Some(number) = cc_editing {
                 div {
                     style: "position: absolute; top: 6px; left: 60px; display: flex; \
-                            align-items: center; gap: 8px; background: #0b1a24; \
+                            align-items: center; gap: 8px; background: {theme::BANNER_INFO}; \
                             border: 1px solid {theme::ACCENT}; border-radius: 4px; \
                             color: {theme::ACCENT}; font-size: 10px; padding: 3px 9px;",
                     span { "CC edit — CC{number}" }
@@ -839,7 +837,7 @@ fn Canvas(
             if microtonal {
                 div {
                     style: "position: absolute; top: 6px; right: 8px; \
-                            background: #422006; border: 1px solid {theme::GOLD}; \
+                            background: {theme::BANNER_WARN}; border: 1px solid {theme::GOLD}; \
                             border-radius: 4px; color: {theme::GOLD}; \
                             font-size: 10px; padding: 2px 7px; pointer-events: none;",
                     "{temperament_name}"
@@ -913,12 +911,10 @@ fn LaneStrip(editor: Signal<Editor>) -> Element {
     let per_note = ed.strip_lane.is_per_note();
     drop(ed);
 
-
-
     rsx! {
         div {
             style: "position: relative; flex: 0 0 auto; height: {h}px; \
-                    background: #101017; border-top: 1px solid {theme::PANEL_BORDER};",
+                    background: {theme::SURFACE_BAR}; border-top: 1px solid {theme::PANEL_BORDER};",
             svg {
                 style: "display: block; width: 100%; height: 100%; \
                         touch-action: none; user-select: none; cursor: ns-resize;",

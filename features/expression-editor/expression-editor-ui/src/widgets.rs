@@ -22,7 +22,8 @@ pub fn Slider(
     max: f64,
     #[props(default = 96.0)] width: f64,
     /// Rendered next to the handle. Defaults to the raw value.
-    #[props(default)] readout: Option<String>,
+    #[props(default)]
+    readout: Option<String>,
     on_change: EventHandler<f64>,
 ) -> Element {
     let mut dragging = use_signal(|| false);
@@ -69,7 +70,7 @@ pub fn Slider(
                     width: "{track_w:.1}",
                     height: "4",
                     rx: "2",
-                    fill: "#26262f",
+                    fill: theme::CONTROL_GROOVE,
                 }
                 rect {
                     x: "{H * 0.5:.1}",
@@ -83,8 +84,8 @@ pub fn Slider(
                     cx: "{cx:.1}",
                     cy: "{H * 0.5:.1}",
                     r: "5",
-                    fill: if dragging() { theme::SELECTED } else { "#cfd6e4" },
-                    stroke: "#0d0d11",
+                    fill: if dragging() { theme::SELECTED } else { theme::HANDLE },
+                    stroke: theme::BG,
                     stroke_width: "1",
                 }
             }
@@ -158,7 +159,7 @@ pub fn CenterSlider(
                     width: "{track_w:.1}",
                     height: "4",
                     rx: "2",
-                    fill: "#26262f",
+                    fill: theme::CONTROL_GROOVE,
                 }
                 rect {
                     x: "{x0:.1}",
@@ -181,8 +182,8 @@ pub fn CenterSlider(
                     cx: "{cx:.1}",
                     cy: "{H * 0.5:.1}",
                     r: "5",
-                    fill: if dragging() { theme::SELECTED } else { "#cfd6e4" },
-                    stroke: "#0d0d11",
+                    fill: if dragging() { theme::SELECTED } else { theme::HANDLE },
+                    stroke: theme::BG,
                     stroke_width: "1",
                 }
             }

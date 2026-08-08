@@ -50,7 +50,7 @@ fn Segment(children: Element) -> Element {
         div {
             style: "display: flex; align-items: stretch; \
                     border: 1px solid {theme::PANEL_BORDER}; border-radius: 6px; \
-                    overflow: hidden; background: #16161d;",
+                    overflow: hidden; background: {theme::SURFACE_BAR};",
             {children}
         }
     }
@@ -74,7 +74,11 @@ fn Seg(
         }
     });
     let bg = if active {
-        if accent { "#1e3a5f" } else { "#2a2a36" }
+        if accent {
+            theme::CONTROL_ACTIVE
+        } else {
+            theme::CONTROL_HOVER
+        }
     } else {
         "transparent"
     };
@@ -105,11 +109,7 @@ fn divider() -> Element {
 // ── top bar ──────────────────────────────────────────────────────────
 
 #[component]
-pub fn Toolbar(
-    editor: Signal<Editor>,
-    drag: Signal<Drag>,
-    drawer: Signal<ModDrawer>,
-) -> Element {
+pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDrawer>) -> Element {
     let mut editor = editor;
     let mut drawer = drawer;
 
@@ -379,9 +379,7 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
     let single = ed.selection.notes.first().copied();
     let analysis = single.and_then(|id| ed.doc.note(id)).map(|n| {
         let ups = ed.doc.time_base.units_per_second(ed.bpm);
-        let d = expression_editor_core::blob::decompose(
-            &n.pitch, n.start, n.end, 64, ups, 0.0,
-        );
+        let d = expression_editor_core::blob::decompose(&n.pitch, n.start, n.end, 64, ups, 0.0);
         (
             expression_editor_core::tuning::note_name(n.row),
             n.channel,
@@ -402,7 +400,7 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
     rsx! {
         div {
             style: "display: flex; flex: 0 0 auto; align-items: center; gap: 10px; \
-                    height: 30px; padding: 0 10px; background: #12121a; \
+                    height: 30px; padding: 0 10px; background: {theme::SURFACE_BAR}; \
                     border-bottom: 1px solid {theme::PANEL_BORDER}; \
                     font-family: system-ui, sans-serif; overflow: hidden;",
 
@@ -419,7 +417,7 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
                 }
             } else {
                 span {
-                    style: "font-size: 12px; color: #4a4a58; min-width: 88px; flex: 0 0 auto;",
+                    style: "font-size: 12px; color: {theme::TEXT_FAINT}; min-width: 88px; flex: 0 0 auto;",
                     if pitches.len() == 1 { "single note" } else { "—" }
                 }
             }
@@ -431,7 +429,7 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
                     span {
                         key: "cn{i}",
                         style: "font-size: 10px; font-family: ui-monospace, monospace; \
-                                color: {theme::TEXT}; background: #1c1c26; \
+                                color: {theme::TEXT}; background: {theme::CONTROL}; \
                                 border: 1px solid {theme::PANEL_BORDER}; \
                                 border-radius: 3px; padding: 1px 5px; flex: 0 0 auto;",
                         "{n}"

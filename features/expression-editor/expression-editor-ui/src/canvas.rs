@@ -136,10 +136,7 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
                 // clipped lyric is worse than none.
                 l.len() <= 2 || (w > l.len() as f64 * 6.5 + 8.0 && h >= 12.0)
             });
-            let badge = n
-                .articulation
-                .map(|a| a.glyph())
-                .filter(|g| !g.is_empty());
+            let badge = n.articulation.map(|a| a.glyph()).filter(|g| !g.is_empty());
             let head = matches!(
                 ed.row_space.note_shape(),
                 expression_editor_core::NoteShape::Triangle
@@ -376,8 +373,7 @@ pub fn zone_guides(ed: &Editor) -> Vec<ZoneGuide> {
             continue;
         }
         for (a, b) in n.zones() {
-            let center =
-                expression_editor_core::blob::effective_center(&n.pitch, a, b, 48, 0.0);
+            let center = expression_editor_core::blob::effective_center(&n.pitch, a, b, 48, 0.0);
             out.push(ZoneGuide {
                 x0: ed.camera.x(a),
                 x1: ed.camera.x(b),
@@ -488,7 +484,6 @@ pub fn markers(ed: &Editor) -> Vec<MarkerFlag> {
         .collect()
 }
 
-
 /// A razor area in pixels.
 pub struct RazorRect {
     pub x: f64,
@@ -543,10 +538,7 @@ pub struct Stem {
 pub fn stems(ed: &Editor, h: f64) -> Vec<Stem> {
     use expression_editor_core::StripLane;
     let (t0, t1) = ed.camera.time_span(ed.viewport);
-    let per_note = matches!(
-        ed.strip_lane,
-        StripLane::Velocity | StripLane::OffVelocity
-    );
+    let per_note = matches!(ed.strip_lane, StripLane::Velocity | StripLane::OffVelocity);
     if !per_note {
         return Vec::new();
     }

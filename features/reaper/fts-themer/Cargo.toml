@@ -18,19 +18,29 @@ required-features = ["cli"]
 [features]
 default = ["cli"]
 # The CLI implies the filesystem half.
-cli = ["dep:clap", "fs", "shot"]
+cli = ["dep:clap", "fs", "shot", "apply", "generate"]
 # Filesystem + image work: reading a theme directory, recoloring artwork.
 # Off by default for wasm consumers, which edit the ini as a string and get
 # their preview from `ReaperTheme::from_sources` — no disk, no image decode.
 fs = ["dep:image"]
+# Painting a REAPER theme from the canonical FTS theme.
+apply = ["fs", "dep:daw-theme"]
+# Component-drawn artwork: render the Dioxus art components into the theme.
+generate = ["apply", "dep:daw-theme-art", "dep:dioxus"]
 # Screenshotting a real REAPER on a private X display (Linux/X11).
-shot = ["fs"]
+shot = ["fs", "dep:daw", "daw/test-harness"]
 
 [dependencies]
 anyhow = { workspace = true }
 serde = { workspace = true }
 palette = { workspace = true }
+# The canonical FTS theme — `fts-themer apply` paints REAPER from it.
+daw-theme = { workspace = true, optional = true }
+daw-theme-art = { workspace = true, optional = true, features = ["render"] }
+dioxus = { workspace = true, optional = true, features = ["lib"] }
 image = { workspace = true, optional = true }
+# The shared REAPER test harness (VirtualDisplay: Xvfb + WM + capture).
+daw = { workspace = true, optional = true }
 clap = { workspace = true, optional = true }
 
 [lints]

@@ -1,0 +1,655 @@
+//! Components → REAPER sprite strips, markers and all.
+//!
+//! [`crate::render::render_for`] already stamps a source image's marker
+//! pixels back after rasterising, but it only accepts components taking
+//! [`crate::components::ArtProps`]. The vector controls take their own
+//! props — a mute button has an `on`, a routing button has sends and
+//! receives — so nothing connected them to a themeable PNG.
+//!
+//! Two things have to happen that do not for a single drawing:
+//!
+//! **Cells.** REAPER packs a control's interaction states side by side:
+//! `mcp_mute_on` is three 21×20 buttons in one 63×20 file. Each cell is
+//! rendered separately and composited, because one component draws one
+//! button — drawing the strip would mean the component knowing it is
+//! being exported, which is exactly the coupling the vector rewrite was
+//! for. [`composite_cells`] is shared with the traced path, which needs
+//! it for the same reason.
+//!
+//! **Markers.** The magenta and yellow pixels are WALTER geometry, not
+//! art: magenta bounds the region that must not stretch, yellow the outer
+//! extent. A rasteriser antialiases, and a marker one shade off pure
+//! magenta stops being a marker — REAPER silently gives up on slicing and
+//! the image smears when the panel resizes. So they are never drawn and
+//! never interpolated: they are copied from the source verbatim, after
+//! compositing.
+
+use image::RgbaImage;
+
+use crate::derive::DerivedSpec;
+use crate::generated;
+use crate::render::{RenderError, rasterise, render_svg};
+use crate::vector_controls as v;
+
+/// The pointer state a strip's nth cell shows.
+fn interaction(cell: usize) -> v::Interaction {
+    match cell {
+        1 => v::Interaction::Hover,
+        2 => v::Interaction::Pressed,
+        _ => v::Interaction::Normal,
+    }
+}
+
+/// One cell of `name`, as SVG markup, or `None` if no vector control
+/// draws that image yet.
+///
+/// The inverse of the mapping in [`crate::mixer_controls`], which goes
+/// from a control's state to the image REAPER blits.
+pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
+    let n = (None, None);
+
+    // Cell sizes, measured from the art. The two families are *not* the
+    // same drawings at two sizes: the track panel's ring has no housing
+    // and is proportionally larger for it, its routing lanes sit in a row
+    // rather than stacked, and its monitor icon radiates right rather
+    // than down. Same components, turned and resized.
+    let track = name.starts_with("track_");
+    let axis = if track { v::Axis::Horizontal } else { v::Axis::Vertical };
+    // The FX control's two halves are named for their *layout*, not their
+    // panel: `track_fx*_h` is the track panel's and `track_fx*_v` the
+    // mixer's, despite both carrying the `track_` prefix.
+    let family = if name.ends_with("_v") || !track {
+        v::FxFamily::Mixer
+    } else {
+        v::FxFamily::TrackPanel
+    };
+
+    let rec = |state| {
+        render_svg(
+            v::RecordArmButton,
+            v::RecordArmProps {
+                state,
+                cell: if track { (20.0, 20.0) } else { (36.0, 24.0) },
+                housing: !track,
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    // Measured, not assumed: the track panel's label cells are 21 wide
+    // starting at x1, not 22 starting at x0. A viewBox one unit wider
+    // than the cell it lands in squeezes every coordinate inward, which
+    // is a fraction of a pixel at the edges and a whole one at the far
+    // side — the source of the last stubborn `bottom -1`.
+    let label_cell = if track { (21.0, 24.0) } else { (21.0, 20.0) };
+    // Traced: the track panel's buttons occupy rows 1..20 of a 24-row
+    // cell; the mixer's fill theirs.
+    // The legend is not one grey. It brightens when the button lights,
+    // and the track panel swings much further than the mixer:
+    //
+    //     mixer   mute 204/204   solo 204/217   defeat 217
+    //     track   mute 183/242   solo 203/255   defeat 255
+    //
+    // Read as a single #f2f2f2 the track panel's unlit buttons came out
+    // sixty levels hot, which is most of why they were the worst two
+    // images in the set by pixel error.
+    let theme = daw_theme::Theme::default();
+    // Measured off the `off` cells: #464646 in the mixer, #4e4e4e in the
+    // track panel, both falling about 12% over the button's height.
+    let unlit = Some(theme.chrome.hardware.shade(if track { 0.078 } else { 0.036 }));
+    let legend = |lit: bool, solo: bool| {
+        let up = match (track, lit, solo) {
+            (false, _, false) => 0.45,
+            (false, false, true) => 0.45,
+            (false, true, true) => 0.59,
+            (true, false, false) => 0.23,
+            (true, true, false) => 0.86,
+            (true, false, true) => 0.44,
+            (true, true, true) => 1.0,
+        };
+        Some(theme.chrome.hardware_mark.shade(up))
+    };
+    let label_body = if track {
+        (1.0 / 24.0, 20.0 / 24.0)
+    } else {
+        (0.0, 1.0)
+    };
+    let mute = |on| {
+        render_svg(
+            v::MuteButton,
+            v::ToggleProps {
+                // Mute's hover is the gentlest of the three — see `ink`.
+                hover: 0.25,
+                // 0.11, and applied as a scale — measured 0.89 on every
+                // channel from the top of the face to the bottom.
+                depth: 0.11,
+                on,
+                cell: label_cell,
+                body: label_body,
+                legend: legend(on, false),
+                unlit,
+                // The track panel's pressed cell is identical to its
+                // normal one; the mixer's is darker.
+                sinks: !track,
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let solo = |state| {
+        render_svg(
+            v::SoloButton,
+            v::SoloProps {
+                hover: 0.35,
+                state,
+                cell: label_cell,
+                body: label_body,
+                legend: legend(state != v::Solo::Off, true),
+                unlit,
+                // The track panel's pressed cell is identical to its
+                // normal one; the mixer's is darker.
+                sinks: !track,
+                // Solo's red is pinned; only its green falls, by 11%.
+                depth: 0.11,
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let fx = |state| {
+        render_svg(
+            v::FxButton,
+            v::FxProps {
+                state,
+                family,
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let mon = |state| {
+        render_svg(
+            v::InputMonitorIndicator,
+            v::MonitoringProps {
+                state,
+                // 15, not 16: the measured cell is (origin 1, width 15),
+                // and a 16-wide viewBox squeezed into it puts every
+                // coordinate half a pixel right of where it was measured.
+                cell: if track { (15.0, 24.0) } else { (21.0, 20.0) },
+                axis,
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let io = |has_sends, has_receives, disabled| {
+        render_svg(
+            v::RoutingButton,
+            v::RoutingProps {
+                has_sends,
+                has_receives,
+                disabled,
+                cell: if track { (28.0, 22.0) } else { (23.0, 32.0) },
+                axis,
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+
+    // `track_fx*_h` is 50x22 in three cells, `_v` 56x22 — the track
+    // panel's FX bypass toggle, which has no `mcp_` twin at all.
+    let byp = |state| {
+        render_svg(
+            v::FxBypassToggle,
+            v::FxBypassProps {
+                state,
+                family,
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+
+    // Track-panel-only controls. The mixer strip has no room for these,
+    // so unlike everything above there is no twin to keep in step.
+    let env = |mode| {
+        render_svg(
+            v::EnvelopeButton,
+            v::EnvelopeProps {
+                mode,
+                cell: (20.0, 20.0),
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let phase = |inverted| {
+        render_svg(
+            v::PhaseButton,
+            v::PhaseProps {
+                inverted,
+                cell: if track { (16.0, 20.0) } else { (16.0, 18.0) },
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+
+    let recmode = |mode| {
+        render_svg(
+            v::RecordModeButton,
+            v::RecordModeProps {
+                mode,
+                cell: (20.0, 20.0),
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let fcomp = |state| {
+        render_svg(
+            v::FolderCompactButton,
+            v::FolderCompactProps {
+                state,
+                cell: (17.0, 13.0),
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let fx_in = |loaded| {
+        render_svg(
+            v::FxInButton,
+            v::FxInProps {
+                loaded,
+                cell: (29.0, 20.0),
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    let folder = |state| {
+        render_svg(
+            v::FolderButton,
+            v::FolderProps {
+                state,
+                cell: (54.0, 14.0),
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+
+    // The transport bar. Its buttons are the one family here with no
+    // mixer/track split — there is only one of it — so they match on the
+    // whole name rather than on a stem.
+    let tr = |glyph, on| {
+        render_svg(
+            v::TransportButton,
+            v::TransportProps {
+                glyph,
+                on,
+                cell: if glyph == v::TransportGlyph::Repeat {
+                    (32.0, 24.0)
+                } else {
+                    (36.0, 26.0)
+                },
+                width: n.0,
+                height: n.1,
+                at,
+            },
+        )
+    };
+    {
+        use v::TransportGlyph as G;
+        let hit = match name {
+            "transport_home" => Some(tr(G::Home, false)),
+            "transport_previous" => Some(tr(G::Previous, false)),
+            "transport_stop" => Some(tr(G::Stop, false)),
+            "transport_play" => Some(tr(G::Play, false)),
+            "transport_play_on" => Some(tr(G::Play, true)),
+            "transport_pause" => Some(tr(G::Pause, false)),
+            "transport_pause_on" => Some(tr(G::Pause, true)),
+            "transport_next" => Some(tr(G::Next, false)),
+            "transport_end" => Some(tr(G::End, false)),
+            "transport_record" => Some(tr(G::Record, false)),
+            "transport_record_on" => Some(tr(G::Record, true)),
+            "transport_record_item" => Some(tr(G::RecordItem, false)),
+            "transport_record_item_on" => Some(tr(G::RecordItem, true)),
+            "transport_record_loop" => Some(tr(G::RecordLoop, false)),
+            "transport_record_loop_on" => Some(tr(G::RecordLoop, true)),
+            "transport_repeat_off" => Some(tr(G::Repeat, false)),
+            "transport_repeat_on" => Some(tr(G::Repeat, true)),
+            "transport_play_sync" => Some(tr(G::PlaySync, false)),
+            "transport_play_sync_on" => Some(tr(G::PlaySync, true)),
+            _ => None,
+        };
+        if let Some(markup) = hit {
+            return Some(markup);
+        }
+    }
+
+    // Both families answer to the same eight controls, so match on the
+    // part after the prefix rather than writing every name twice.
+    let stem = name
+        .strip_prefix("mcp_")
+        .or_else(|| name.strip_prefix("track_"))?;
+
+    Some(match stem {
+        "fxempty_h" => byp(v::FxBypass::Empty),
+        "fxon_h" => byp(v::FxBypass::On),
+        "fxoff_h" => byp(v::FxBypass::Off),
+        "fxempty_v" => byp(v::FxBypass::Empty),
+        "fxon_v" => byp(v::FxBypass::On),
+        "fxoff_v" => byp(v::FxBypass::Off),
+
+        "recarm_off" => rec(v::RecordArm::Off),
+        "recarm_on" => rec(v::RecordArm::On),
+        "recarm_norec" => rec(v::RecordArm::NoRecord),
+        "recarm_auto" => rec(v::RecordArm::Auto),
+        "recarm_auto_on" => rec(v::RecordArm::AutoOn),
+        "recarm_auto_norec" => rec(v::RecordArm::AutoNoRecord),
+
+        "mute_off" => mute(false),
+        "mute_on" => mute(true),
+
+        "solo_off" => solo(v::Solo::Off),
+        "solo_on" => solo(v::Solo::On),
+        "solodefeat_on" => solo(v::Solo::Defeat),
+
+        "fx_empty" => fx(v::FxChain::Empty),
+        "fx_norm" => fx(v::FxChain::Active),
+        "fx_dis" => fx(v::FxChain::Bypassed),
+
+        "io" => io(false, false, false),
+        "io_dis" => io(false, false, true),
+        "io_s" => io(true, false, false),
+        "io_s_dis" => io(true, false, true),
+        "io_r" => io(false, true, false),
+        "io_r_dis" => io(false, true, true),
+        "io_s_r" => io(true, true, false),
+        "io_s_r_dis" => io(true, true, true),
+
+        // Track-panel only. The mixer's envelope button is a different
+        // control entirely — no plate, and a five-pixel word under the
+        // glyph — and type that small is hinted by hand, not described.
+        // It stays traced for the same reason the large knob's blurred
+        // edge does: a vector version would have to draw the artefact.
+        "env" | "env_read" | "env_write" | "env_touch" | "env_latch"
+        | "env_preview"
+            if !track =>
+        {
+            return None;
+        }
+
+        "env" => env(v::EnvelopeMode::Off),
+        "env_read" => env(v::EnvelopeMode::Read),
+        "env_write" => env(v::EnvelopeMode::Write),
+        "env_touch" => env(v::EnvelopeMode::Touch),
+        "env_latch" => env(v::EnvelopeMode::Latch),
+        "env_preview" => env(v::EnvelopeMode::Preview),
+
+        "recmode_off" if track => recmode(v::RecordMode::Off),
+        "recmode_in" if track => recmode(v::RecordMode::Input),
+        "recmode_out" if track => recmode(v::RecordMode::Output),
+
+        "fcomp_off" if track => fcomp(v::FolderCompact::Off),
+        "fcomp_small" if track => fcomp(v::FolderCompact::Small),
+        "fcomp_tiny" if track => fcomp(v::FolderCompact::Tiny),
+
+        "fx_in_norm" if track => fx_in(true),
+        "fx_in_empty" if track => fx_in(false),
+
+        "folder_off" if track => folder(v::FolderState::Off),
+        "folder_on" if track => folder(v::FolderState::On),
+        "folder_last" if track => folder(v::FolderState::Last),
+
+        "phase_norm" => phase(false),
+        "phase_inv" => phase(true),
+
+        "monitor_off" => mon(v::Monitoring::Off),
+        "monitor_on" => mon(v::Monitoring::On),
+        "monitor_auto" => mon(v::Monitoring::Auto),
+
+        // Mixer-only: the knobs and the fader live in one panel.
+        //
+        // Pan and width share art — the two source PNGs are byte-identical,
+        // because REAPER labels the control and the knob itself is generic.
+        "pan_knob_small" | "width_knob_small" => render_svg(
+            v::PanningKnob,
+            v::PanProps {
+                position: 0.0,
+                large: false,
+                width: n.0,
+                height: n.1,
+            },
+        ),
+        "pan_knob_large" | "width_knob_large" => render_svg(
+            v::PanningKnob,
+            v::PanProps {
+                position: 0.0,
+                large: true,
+                width: n.0,
+                height: n.1,
+            },
+        ),
+        "volthumb" => render_svg(
+            v::VolumeFaderCap,
+            v::FaderCapProps {
+                accent: None,
+                width: n.0,
+                height: n.1,
+            },
+        ),
+        "volbg" => render_svg(
+            v::VolumeFaderTrack,
+            v::FaderCapProps {
+                accent: None,
+                width: n.0,
+                height: n.1,
+            },
+        ),
+        _ => return None,
+    })
+}
+
+/// Which theme images the vector controls can generate.
+pub fn generatable() -> Vec<&'static str> {
+    generated::ALL
+        .iter()
+        .map(|a| a.name)
+        .filter(|n| cell_markup(n, v::Interaction::Normal).is_some())
+        .collect()
+}
+
+/// Images a vector control *should* draw but none does yet.
+///
+/// The `track_*` family is the track panel's own set — its own sizes, its
+/// own drawings — and replacing the `mcp_*` mixer art leaves all of it
+/// untouched. That is invisible in a mixer screenshot and obvious in the
+/// track panel, so it is worth being able to ask.
+pub fn missing_twins() -> Vec<&'static str> {
+    generated::ALL
+        .iter()
+        .map(|a| a.name)
+        .filter(|n| n.starts_with("track_") && cell_markup(n, v::Interaction::Normal).is_none())
+        .collect()
+}
+
+/// Lay a strip out cell by cell, then stamp the source's markers back.
+///
+/// `markup(i, width)` draws cell `i` at `width` x `spec.height`, at the
+/// cell positions **measured from the source** — see
+/// [`crate::derive::cell_bounds`], because they are not an even division
+/// of the file width.
+///
+/// Callers need this even when they are not vector controls: rendering a
+/// strip from one drawing scaled to the full width stretches a single
+/// state across every cell, which looks like a blurry button rather than
+/// like the wrong cell count, so it survives review.
+pub fn composite_cells(
+    spec: &DerivedSpec,
+    markup: impl Fn(usize, u32) -> Result<String, RenderError>,
+) -> Result<RgbaImage, RenderError> {
+    let mut out = RgbaImage::new(spec.width, spec.height);
+    for (i, &(x, w)) in spec.cells.iter().enumerate() {
+        let cell = rasterise(&markup(i, w)?, w, spec.height)?;
+        image::imageops::overlay(&mut out, &cell, x as i64, 0);
+    }
+    // Last, and never drawn: see the module note. Stamping before the
+    // composite would let a later cell paint over a marker.
+    spec.stamp(&mut out);
+    Ok(out)
+}
+
+/// Draw `name` as REAPER expects it: every cell, at the source's exact
+/// size, with the source's marker pixels stamped back.
+///
+/// `spec` carries the geometry measured from the image being replaced —
+/// never authored, because REAPER only reads magenta as geometry when it
+/// lands where the layout expects it.
+pub fn render_control(name: &str, spec: &DerivedSpec) -> Result<RgbaImage, RenderError> {
+    // Trust the measured split only when it agrees with what this control
+    // actually draws. Detection needs a strip's cells to resemble each
+    // other, which fails on the FX bypass toggle — pill, plus, plus — and
+    // reported it as a single drawing, so it was stretched across its own
+    // width and vanished into the strip.
+    let mut spec = spec.clone();
+    if spec.cells.len() != states(name) {
+        // `art_x` is the first *drawn* column, which is the cell origin
+        // for every control whose art starts at its own left edge. The
+        // mixer's FX toggle does not: it leaves one empty column as the
+        // seam between the pill's halves, so the first ink is a pixel in
+        // and the fallback put every cell a pixel right.
+        let origin = spec.art_x.saturating_sub(leading_gap(name));
+        spec.cells =
+            crate::derive::even_cells(spec.width, states(name) as u32, origin);
+    }
+
+    composite_cells(&spec, |i, _w| {
+        cell_markup(name, interaction(i))
+            .ok_or_else(|| RenderError::Svg(format!("no vector control draws {name}")))
+    })
+}
+
+/// Empty columns before a control's art, which `art_x` cannot see past.
+///
+/// Only the mixer's FX toggle has any — the seam its half of the pill
+/// leaves for the label's half to meet. The track panel's toggle abuts
+/// directly and starts at its own edge, which is why this is per name
+/// rather than per family.
+fn leading_gap(name: &str) -> u32 {
+    match name {
+        "track_fxempty_v" | "track_fxoff_v" | "track_fxon_v" => 1,
+        _ => 0,
+    }
+}
+
+/// How many sprite cells a control's image holds.
+///
+/// Knowledge, not a measurement: every button here draws normal, hover
+/// and pressed, and the knobs and the fader draw one thing.
+fn states(name: &str) -> usize {
+    let stem = name
+        .strip_prefix("mcp_")
+        .or_else(|| name.strip_prefix("track_"))
+        .unwrap_or(name);
+    match stem {
+        "pan_knob_small" | "pan_knob_large" | "width_knob_small" | "width_knob_large"
+        | "volthumb" | "volbg" => 1,
+        // Three marks side by side in one image, not three pointer states.
+        "folder_off" | "folder_on" | "folder_last" => 1,
+        _ => 3,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::derive::MARKERS;
+
+    /// Markers are copied, never rendered — the whole point of the module.
+    #[test]
+    fn markers_land_exactly_where_the_source_had_them() {
+        let spec = DerivedSpec {
+            art_x: 0,
+            width: 63,
+            height: 20,
+            markers: vec![
+                (0, 0, MARKERS[0]),
+                (62, 19, MARKERS[1]),
+                // Deliberately mid-button: a stamped marker must win over
+                // whatever the component drew there.
+                (10, 10, MARKERS[0]),
+            ],
+            cells: vec![(0, 21), (21, 21), (42, 21)],
+        };
+        let img = render_control("mcp_mute_on", &spec).expect("render");
+        assert_eq!(img.dimensions(), (63, 20));
+        for (x, y, rgba) in &spec.markers {
+            assert_eq!(
+                img.get_pixel(*x, *y).0,
+                *rgba,
+                "marker at {x},{y} was not stamped back"
+            );
+        }
+    }
+
+    /// The three cells of a strip are the three pointer states, not one
+    /// button repeated.
+    #[test]
+    fn a_strip_carries_distinct_interaction_states() {
+        let a = cell_markup("mcp_mute_on", v::Interaction::Normal).unwrap();
+        let b = cell_markup("mcp_mute_on", v::Interaction::Hover).unwrap();
+        let c = cell_markup("mcp_mute_on", v::Interaction::Pressed).unwrap();
+        assert_ne!(a, b);
+        assert_ne!(b, c);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn an_image_no_vector_control_draws_is_reported_not_guessed() {
+        assert!(cell_markup("mcp_bg", v::Interaction::Normal).is_none());
+        let spec = DerivedSpec {
+            art_x: 0,
+            width: 4,
+            height: 4,
+            markers: vec![],
+            cells: vec![(0, 4)],
+        };
+        assert!(render_control("mcp_bg", &spec).is_err());
+    }
+
+    /// Everything the mixer draws should be generatable, or the theme has
+    /// a hole in it that only shows up as an un-retinted button.
+    #[test]
+    fn the_whole_mixer_strip_can_be_generated() {
+        let have = generatable();
+        for want in [
+            "mcp_mute_on",
+            "mcp_solo_on",
+            "mcp_fx_norm",
+            "mcp_recarm_on",
+            "mcp_io_s_r",
+            "mcp_monitor_on",
+            "mcp_pan_knob_small",
+            "mcp_volthumb",
+        ] {
+            assert!(have.contains(&want), "{want} has no vector control");
+        }
+    }
+}

@@ -33,9 +33,9 @@ use std::path::{Path, PathBuf};
 /// recursively, subject to [`EXCLUDED_DIRS`].
 pub const TRACKED: &[&str] = &[
     // Input: the three that define how REAPER feels.
-    "reaper-kb.ini",       // keybindings + custom actions
-    "reaper-menu.ini",     // toolbars and menus
-    "reaper-mouse.ini",    // mouse modifiers
+    "reaper-kb.ini",    // keybindings + custom actions
+    "reaper-menu.ini",  // toolbars and menus
+    "reaper-mouse.ini", // mouse modifiers
     // Organisation.
     "reaper-fxtags.ini",
     "reaper-fxfolders.ini",
@@ -90,9 +90,7 @@ pub const EXCLUDED_DIRS: &[&str] = &["__pycache__", ".git", "cache"];
 /// `Default_*.ReaperTheme*` are REAPER's own stock themes — ~25 MB
 /// each, and every install already has them. Any *other* theme in
 /// `ColorThemes/` is one you added, so it travels.
-pub const EXCLUDED_FILES: &[&str] = &[
-    ".bak", ".log", ".dat", ".tmp", "~", ".pyc", ".DS_Store",
-];
+pub const EXCLUDED_FILES: &[&str] = &[".bak", ".log", ".dat", ".tmp", "~", ".pyc", ".DS_Store"];
 
 /// Filename prefixes never versioned.
 pub const EXCLUDED_PREFIXES: &[&str] = &["Default_"];
@@ -261,7 +259,12 @@ pub fn filter_reaper_ini(contents: &str) -> String {
             out.push('\n');
             continue;
         }
-        let key = trimmed.split('=').next().unwrap_or("").trim().to_ascii_lowercase();
+        let key = trimmed
+            .split('=')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
         if MACHINE_KEYS.iter().any(|m| key.starts_with(m)) {
             continue;
         }
@@ -393,7 +396,12 @@ pub fn merge_reaper_ini(existing: &str, incoming: &str) -> String {
             out.push('\n');
             continue;
         }
-        let key = t.split('=').next().unwrap_or("").trim().to_ascii_lowercase();
+        let key = t
+            .split('=')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
         // Machine keys always survive; anything the repo also sets is
         // dropped here and re-added from the repo below.
         if MACHINE_KEYS.iter().any(|m| key.starts_with(m)) || !incoming_keys.contains(&key) {

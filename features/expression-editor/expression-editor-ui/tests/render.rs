@@ -73,7 +73,10 @@ fn the_editor_renders_its_toolbar_canvas_and_status_bar() {
         let label = expression_editor_ui::theme::lane_label(lane);
         assert!(html.contains(label), "missing lane control: {label}");
     }
-    assert!(html.contains("1/16"), "the grid readout, now in the status bar");
+    assert!(
+        html.contains("1/16"),
+        "the grid readout, now in the status bar"
+    );
 }
 
 #[test]
@@ -101,7 +104,11 @@ fn the_top_bar_follows_the_mode() {
     );
     // The mode switcher itself is always present.
     for mode in Mode::ALL {
-        assert!(midi_html.contains(mode.label()), "missing mode: {}", mode.label());
+        assert!(
+            midi_html.contains(mode.label()),
+            "missing mode: {}",
+            mode.label()
+        );
     }
 }
 

@@ -74,9 +74,9 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
     let is_strings = matches!(space, RowSpace::Strings(_));
     drop(ed);
 
-    let decomposition = note.as_ref().map(|n| {
-        blob::decompose(&n.pitch, n.start, n.end, 64, ups, 0.0)
-    });
+    let decomposition = note
+        .as_ref()
+        .map(|n| blob::decompose(&n.pitch, n.start, n.end, 64, ups, 0.0));
 
     rsx! {
         div {
@@ -157,7 +157,7 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                     Blend { editor, label: "Vibrato".to_string(), drift: false }
                     button {
                         style: "margin-top: 6px; width: 100%; height: 22px; \
-                                background: #1c1c26; border: 1px solid {theme::PANEL_BORDER}; \
+                                background: {theme::CONTROL}; border: 1px solid {theme::PANEL_BORDER}; \
                                 border-radius: 5px; color: {theme::TEXT}; font-size: 10px; \
                                 cursor: pointer;",
                         title: "Flatten drift and vibrato",
@@ -195,7 +195,7 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                                      border-radius: 4px; cursor: pointer; \
                                      border: 1px solid {}; background: {}; color: {};",
                                     if n.articulation == Some(a) { theme::ACCENT } else { theme::PANEL_BORDER },
-                                    if n.articulation == Some(a) { "#1e3a5f" } else { "#1a1a22" },
+                                    if n.articulation == Some(a) { theme::CONTROL_ACTIVE } else { theme::SURFACE_INSET },
                                     theme::TEXT,
                                 ),
                                 title: "{a.label()}",
@@ -255,7 +255,7 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                              border: 1px solid {}; border-radius: 5px; padding: 4px 6px; \
                              background: {};",
                             if cc_edit == Some(lane.number) { theme::ACCENT } else { theme::PANEL_BORDER },
-                            if cc_edit == Some(lane.number) { "#16202c" } else { "#1a1a22" },
+                            if cc_edit == Some(lane.number) { theme::CONTROL_SELECTED } else { theme::SURFACE_INSET },
                         ),
                         // The colour swatch is how a background curve is
                         // matched to its lane, so it has to be here.
@@ -274,7 +274,7 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                             style: format!(
                                 "background: none; border: none; cursor: pointer; \
                                  font-size: 11px; color: {};",
-                                if lane.pinned { theme::ACCENT } else { "#4a4a58" },
+                                if lane.pinned { theme::ACCENT } else { theme::BORDER_STRONG },
                             ),
                             title: "Pin behind the roll",
                             onclick: {
@@ -314,7 +314,7 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                         key: "add{number}",
                         style: "height: 20px; padding: 0 6px; font-size: 9px; \
                                 border: 1px solid {theme::PANEL_BORDER}; border-radius: 4px; \
-                                background: #1a1a22; color: {theme::TEXT_DIM}; cursor: pointer;",
+                                background: {theme::SURFACE_INSET}; color: {theme::TEXT_DIM}; cursor: pointer;",
                         title: "Add CC{number} ({standard_name(number)})",
                         onclick: move |_| { editor.write().doc.cc.ensure(number); },
                         "+CC{number}"

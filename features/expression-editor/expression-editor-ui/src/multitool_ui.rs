@@ -243,8 +243,14 @@ pub fn MultiToolOverlay(editor: Signal<Editor>, tool: Signal<MultiTool>) -> Elem
     // than the canvas paints over the inspector.
     let x0 = ed.camera.x(t0).clamp(0.0, vp.w);
     let x1 = ed.camera.x(t1).clamp(0.0, vp.w);
-    let y_top = ed.camera.y(row_hi as f64 + 0.5, ed.viewport).clamp(0.0, vp.h);
-    let y_bot = ed.camera.y(row_lo as f64 - 0.5, ed.viewport).clamp(0.0, vp.h);
+    let y_top = ed
+        .camera
+        .y(row_hi as f64 + 0.5, ed.viewport)
+        .clamp(0.0, vp.h);
+    let y_bot = ed
+        .camera
+        .y(row_lo as f64 - 0.5, ed.viewport)
+        .clamp(0.0, vp.h);
     drop(ed);
 
     // A floor on the box: a single short note would otherwise give
@@ -332,7 +338,7 @@ pub fn MultiToolOverlay(editor: Signal<Editor>, tool: Signal<MultiTool>) -> Elem
                                         x: "{px + pw * 0.5:.1}",
                                         y: "{py + ph * 0.5 + 3.0:.1}",
                                         text_anchor: "middle",
-                                        fill: "#ffffff",
+                                        fill: theme::SELECTED,
                                         font_size: "10",
                                         font_weight: "600",
                                         "{z.label()}"
@@ -347,7 +353,7 @@ pub fn MultiToolOverlay(editor: Signal<Editor>, tool: Signal<MultiTool>) -> Elem
             // The readout: what is running, and how it is shaped.
             div {
                 style: "position: absolute; left: 0; top: -22px; display: flex; gap: 8px; \
-                        align-items: center; background: #10101a; \
+                        align-items: center; background: {theme::SURFACE_SUNKEN}; \
                         border: 1px solid {theme::ACCENT}; border-radius: 4px; \
                         padding: 2px 8px; color: {theme::TEXT}; font-size: 10px; \
                         font-family: ui-monospace, monospace; white-space: nowrap;",
@@ -368,7 +374,7 @@ pub fn MultiToolOverlay(editor: Signal<Editor>, tool: Signal<MultiTool>) -> Elem
                 }
                 span {
                     style: if mt.steep.is_neutral() {
-                        "color: #4a4a58;"
+                        "color: {theme::TEXT_FAINT};"
                     } else {
                         "color: {theme::GOLD};"
                     },
@@ -385,13 +391,13 @@ pub fn MultiToolOverlay(editor: Signal<Editor>, tool: Signal<MultiTool>) -> Elem
 
 fn zone_color(z: Zone) -> &'static str {
     match z {
-        Zone::CompressTop | Zone::CompressBottom => "#f472b6",
-        Zone::ScaleTop | Zone::ScaleBottom => "#38bdf8",
-        Zone::TiltLeft | Zone::TiltRight => "#fbbf24",
-        Zone::StretchLeft | Zone::StretchRight => "#a3e635",
-        Zone::Warp => "#c084fc",
-        Zone::Move => "#2dd4bf",
-        Zone::Undo | Zone::Redo => "#94a3b8",
+        Zone::CompressTop | Zone::CompressBottom => theme::TOOL_COMPRESS,
+        Zone::ScaleTop | Zone::ScaleBottom => theme::TOOL_SCALE,
+        Zone::TiltLeft | Zone::TiltRight => theme::TOOL_TILT,
+        Zone::StretchLeft | Zone::StretchRight => theme::TOOL_STRETCH,
+        Zone::Warp => theme::TOOL_WARP,
+        Zone::Move => theme::TOOL_MOVE,
+        Zone::Undo | Zone::Redo => theme::TOOL_HISTORY,
     }
 }
 
