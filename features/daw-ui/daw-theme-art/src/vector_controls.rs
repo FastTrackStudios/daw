@@ -1189,44 +1189,76 @@ pub struct MonitoringProps {
     pub at: Interaction,
 }
 
+/// The input-monitor icon — a source with waves coming off it.
+///
+/// The two families are different drawings, not one drawing at two sizes,
+/// so every number here is measured per family. Radial alpha profiles,
+/// taken in a cone about the direction of travel:
+///
+/// ```text
+/// mixer  (21x20)  origin (10.9,  4.6)  dot 1.5  rings 4.85, 9.15  stroke 2.2
+/// track  (15x24)  origin ( 3.5, 12.0)  dot 1.35 rings 4.25, 8.30  stroke 1.95
+///
+/// Both span the same arc. The outer ring's angular profile is flat from
+/// -47 to +47 degrees and gone by 50 — but that is the *painted* extent,
+/// which a round cap widens by the cap radius over the ring radius, about
+/// seven degrees here. The path itself runs to +-40.
+/// ```
+///
+/// The mixer icon also carries a soft black halo, which is most of what
+/// gives it weight — the earlier version had none and read as a flat
+/// stencil. The track icon has none: it is a thin line drawing.
+///
+/// `off` is not the icon dimmed. It is a *dim* icon under a *bright*
+/// slash, the slash being the lit element — #5a under #a6 in the mixer,
+/// #4c under #c0 in the track panel — which is why the previous version's
+/// same-colour slash-on-icon read as a scribble.
 #[component]
 pub fn InputMonitorIndicator(props: MonitoringProps) -> Element {
     let t = Theme::default();
     let (vw, vh) = props.cell;
+    let mark = t.chrome.hardware_mark;
 
-    // The original is a source radiating away from a filled dot: dot at
-    // the top with arcs opening upward beneath it in the mixer, dot at the
-    // left with arcs opening leftward in the track panel. This first drew
-    // arcs *above* a dot at the bottom, which is the same parts assembled
-    // into a different icon — it read as wifi, not as a monitored input.
-    // Neutral: the lit icon is #a6a6a6 in the source, and `chrome.text` is
-    // the panel blue-white — on a mixer strip that reads as backlit.
-    let colour = match props.state {
-        Monitoring::Off => t.chrome.hardware_mark.shade(-0.3),
-        Monitoring::On => t.chrome.hardware_mark,
-        Monitoring::Auto => t.signal.rec,
-    };
-    let colour = match props.at {
-        Interaction::Normal => colour,
-        Interaction::Hover => colour.shade(0.18),
-        Interaction::Pressed => colour.shade(-0.12),
-    };
-
-    // One drawing, turned. `origin` is where the dot sits and `deg` the
-    // direction the waves travel, so the arc maths below is written once.
+    // Mixer radiates downward from a dot near the top; the track panel
+    // radiates rightward from a dot near the left.
     let horizontal = props.axis == Axis::Horizontal;
-    let unit = vw.min(vh);
     let (cx, cy, deg) = if horizontal {
-        (vw * 0.22, vh * 0.5, 0.0f32)
+        (3.5f32, 12.0f32, 0.0f32)
     } else {
-        (vw * 0.5, vh * 0.24, 90.0f32)
+        (10.9f32, 4.6f32, 90.0f32)
     };
-    let sw = unit * 0.10;
-    let dot = unit * 0.09;
+    let (dot, rings, sw, half) = if horizontal {
+        (1.35f32, [4.25f32, 8.3], 1.95f32, 40.0f32)
+    } else {
+        (1.5f32, [4.85f32, 9.15], 2.2f32, 40.0f32)
+    };
 
-    // Arc endpoints at ±55° either side of the travel direction.
+    // Hover brightens hard — the mixer's lit icon goes #a6 to #e6, half
+    // again as bright. The old ramp lifted it by 0.18, which at this size
+    // is invisible.
+    let lift = match props.at {
+        Interaction::Hover => {
+            if horizontal {
+                0.28
+            } else {
+                0.65
+            }
+        }
+        _ => 0.0,
+    };
+    let dim = if horizontal { -0.53 } else { -0.44 };
+    let (ink, slash) = match props.state {
+        Monitoring::On => (mark.shade(lift), None),
+        // #ff5260 exactly — `signal.rec` is a different red.
+        Monitoring::Auto => (t.signal.meter_danger.shade(lift * 0.45), None),
+        Monitoring::Off => (
+            mark.shade(dim + lift * 0.8),
+            Some(mark.shade(if horizontal { 0.20 } else { lift })),
+        ),
+    };
+
     let arc = |r: f32| {
-        let (a, b) = ((deg - 55.0).to_radians(), (deg + 55.0).to_radians());
+        let (a, b) = ((deg - half).to_radians(), (deg + half).to_radians());
         format!(
             "M {} {} A {r} {r} 0 0 1 {} {}",
             cx + a.cos() * r,
@@ -1235,6 +1267,15 @@ pub fn InputMonitorIndicator(props: MonitoringProps) -> Element {
             cy + b.sin() * r,
         )
     };
+    // Bottom-left to top-right, traced off the lit pixels in the `off`
+    // cells. The endpoints are pulled in by the cap radius so the round
+    // caps land where the source's ends do rather than half a pixel past.
+    let (sx0, sy0, sx1, sy1) = if horizontal {
+        (3.6f32, 18.8f32, 11.9f32, 4.5f32)
+    } else {
+        (3.9f32, 16.6f32, 17.2f32, 2.9f32)
+    };
+    let slash_w = if horizontal { 1.45f32 } else { 1.7 };
 
     rsx! {
         svg {
@@ -1242,33 +1283,41 @@ pub fn InputMonitorIndicator(props: MonitoringProps) -> Element {
             height: "{props.height.unwrap_or(vh as u32)}",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
-            circle { cx: "{cx}", cy: "{cy}", r: "{dot}", fill: "{colour.css()}" }
-            for (i, rad) in [unit * 0.26, unit * 0.44].iter().enumerate() {
+            // The halo, in two passes: the source's falls off over about
+            // three pixels, and one flat ring reads as an outline instead.
+            if !horizontal {
+                for (i, spread) in [(3.0f32, 0.15f32), (1.5, 0.24)].iter().enumerate() {
+                    g { key: "halo{i}", opacity: "{spread.1}",
+                        circle { cx: "{cx}", cy: "{cy}", r: "{dot + spread.0 * 0.5}", fill: "#000000" }
+                        for (j, r) in rings.iter().enumerate() {
+                            path {
+                                key: "{j}",
+                                d: "{arc(*r)}",
+                                fill: "none",
+                                stroke: "#000000",
+                                stroke_width: "{sw + spread.0}",
+                                stroke_linecap: "round",
+                            }
+                        }
+                    }
+                }
+            }
+            circle { cx: "{cx}", cy: "{cy}", r: "{dot}", fill: "{ink.css()}" }
+            for (i, r) in rings.iter().enumerate() {
                 path {
                     key: "{i}",
-                    d: "{arc(*rad)}",
+                    d: "{arc(*r)}",
                     fill: "none",
-                    stroke: "{colour.css()}",
+                    stroke: "{ink.css()}",
                     stroke_width: "{sw}",
                     stroke_linecap: "round",
                 }
             }
-            if matches!(props.state, Monitoring::Off) {
-                // Struck through corner to corner. The dark casing under it
-                // is what makes the slash read as *cutting* the arcs rather
-                // than sitting on top of them at 20px.
+            if let Some(slash) = slash {
                 line {
-                    x1: "{vw * 0.12}", y1: "{vh * 0.88}",
-                    x2: "{vw * 0.88}", y2: "{vh * 0.12}",
-                    stroke: "{t.chrome.surface.css()}",
-                    stroke_width: "{sw * 2.4}",
-                    stroke_linecap: "round",
-                }
-                line {
-                    x1: "{vw * 0.12}", y1: "{vh * 0.88}",
-                    x2: "{vw * 0.88}", y2: "{vh * 0.12}",
-                    stroke: "{colour.css()}",
-                    stroke_width: "{sw}",
+                    x1: "{sx0}", y1: "{sy0}", x2: "{sx1}", y2: "{sy1}",
+                    stroke: "{slash.css()}",
+                    stroke_width: "{slash_w}",
                     stroke_linecap: "round",
                 }
             }

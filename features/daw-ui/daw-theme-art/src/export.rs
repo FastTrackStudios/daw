@@ -77,7 +77,12 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             },
         )
     };
-    let label_cell = if track { (22.0, 24.0) } else { (21.0, 20.0) };
+    // Measured, not assumed: the track panel's label cells are 21 wide
+    // starting at x1, not 22 starting at x0. A viewBox one unit wider
+    // than the cell it lands in squeezes every coordinate inward, which
+    // is a fraction of a pixel at the edges and a whole one at the far
+    // side — the source of the last stubborn `bottom -1`.
+    let label_cell = if track { (21.0, 24.0) } else { (21.0, 20.0) };
     // Traced: the track panel's buttons occupy rows 1..20 of a 24-row
     // cell; the mixer's fill theirs.
     // #cccccc in the mixer, #f2f2f2 in the track panel — measured.
@@ -149,7 +154,10 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::InputMonitorIndicator,
             v::MonitoringProps {
                 state,
-                cell: if track { (16.0, 24.0) } else { (21.0, 20.0) },
+                // 15, not 16: the measured cell is (origin 1, width 15),
+                // and a 16-wide viewBox squeezed into it puts every
+                // coordinate half a pixel right of where it was measured.
+                cell: if track { (15.0, 24.0) } else { (21.0, 20.0) },
                 axis,
                 width: n.0,
                 height: n.1,
@@ -164,7 +172,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 has_sends,
                 has_receives,
                 disabled,
-                cell: if track { (29.0, 22.0) } else { (23.0, 32.0) },
+                cell: if track { (28.0, 22.0) } else { (23.0, 32.0) },
                 axis,
                 width: n.0,
                 height: n.1,
