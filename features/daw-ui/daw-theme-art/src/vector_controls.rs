@@ -691,15 +691,13 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
         // a dim blur that reads as a square with soft corners rather than
         // a circle.
         //
-        // The hole is 0.155 rather than 0.15 for the opposite reason: at
-        // exactly 0.15 its edge lands *on* x=7 and the rasteriser bleeds
-        // a bright fringe into the first column of the hole.
-        (vw * 0.5, vh * 0.5, unit * 0.40, unit * 0.155)
+        // The hole is radius 4, not 3. Reading it off a thresholded
+        // silhouette gave 3 — the hole's edge is antialiased, so where
+        // you call its boundary depends on the threshold, and a stricter
+        // one moves it a pixel. Sampled properly both track variants
+        // agree at 6..13 of 20.
+        (vw * 0.5, vh * 0.5, unit * 0.40, unit * 0.20)
     };
-    // The barred variant is drawn on a *thinner* ring: its hole measures
-    // radius 4 against the plain ring's 3, which is visible as a wider
-    // dark centre before the X is taken into account at all.
-    let hole = if barred { unit * 0.20 } else { hole };
     // The ring is an annulus *path*, not a stroked circle.
     //
     // A stroke took the gradient as a flat average — the whole ring came
