@@ -80,6 +80,13 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
     let label_cell = if track { (22.0, 24.0) } else { (21.0, 20.0) };
     // Traced: the track panel's buttons occupy rows 1..20 of a 24-row
     // cell; the mixer's fill theirs.
+    // #cccccc in the mixer, #f2f2f2 in the track panel — measured.
+    let theme = daw_theme::Theme::default();
+    let label_legend = Some(if track {
+        theme.chrome.hardware_mark.shade(0.86)
+    } else {
+        theme.chrome.hardware_mark.shade(0.42)
+    });
     let label_body = if track {
         (1.0 / 24.0, 20.0 / 24.0)
     } else {
@@ -92,6 +99,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 on,
                 cell: label_cell,
                 body: label_body,
+                legend: label_legend,
                 width: n.0,
                 height: n.1,
                 at,
@@ -105,6 +113,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 state,
                 cell: label_cell,
                 body: label_body,
+                legend: label_legend,
                 width: n.0,
                 height: n.1,
                 at,

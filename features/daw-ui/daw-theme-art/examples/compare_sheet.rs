@@ -147,6 +147,7 @@ fn main() {
                             render_svg(
                                 vector::MuteButton,
                                 vector::ToggleProps {
+                                    legend: None,
                                     body: (0.0, 1.0),
                                     cell: (21.0, 20.0),
                                     on: *on,
@@ -192,6 +193,7 @@ fn main() {
                             render_svg(
                                 vector::SoloButton,
                                 vector::SoloProps {
+                                    legend: None,
                                     body: (0.0, 1.0),
                                     cell: (21.0, 20.0),
                                     state: *v,

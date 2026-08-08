@@ -100,6 +100,13 @@ pub struct LabelButtonProps {
     #[props(default = (0.0, 1.0))]
     pub body: (f32, f32),
     pub label: String,
+    /// The printed letter's colour.
+    ///
+    /// Brighter in the track panel than in the mixer — #f2f2f2 against
+    /// #cccccc — which is not a shade of one value but two different
+    /// choices, so it comes from the caller rather than from `ink`.
+    #[props(default)]
+    pub legend: Option<Color>,
     /// Face colour when engaged. `None` draws the resting state.
     #[props(default)]
     pub lit: Option<Color>,
@@ -135,10 +142,19 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
     let (vw, vh) = props.cell;
     let (body_y, body_h) = (vh * props.body.0, vh * props.body.1);
     let id = format!("lb{}", props.label.replace(' ', ""));
-    // Corners are barely rounded in the original — a large radius is what
-    // makes a redraw look like a generic UI kit rather than this theme.
-    let r = vh * 0.10;
-    let edge = vh * 0.05;
+    // One pixel. "Barely rounded" was already the intent, but `vh * 0.10`
+    // is 2.4 at this size, which pulls the border into a curve: the top
+    // border fades out over three columns and the left one never reaches
+    // full alpha. The source's frame is square to within a single corner
+    // pixel — alpha 62 there, 203 either side of it, 255 everywhere else
+    // — so the radius has to be a pixel, not a fraction of the height.
+    let r = 1.0f32;
+    // Exactly one pixel, offset half of one, so the border lands inside a
+    // single row rather than straddling two. At `vh * 0.05` it was 1.2px
+    // centred on an integer: the bottom row came out a blend of border
+    // and face — #832d3b where the source still has body colour — and the
+    // whole button read a row short.
+    let edge = 1.0f32;
 
     rsx! {
         svg {
@@ -149,22 +165,25 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
             defs {
                 linearGradient { id: "{id}", x1: "0", y1: "0", x2: "0", y2: "1",
                     stop { offset: "0", stop_color: "{k.face.shade(0.06).css()}" }
-                    stop { offset: "1", stop_color: "{k.face.shade(-0.10).css()}" }
+                    stop { offset: "1", stop_color: "{k.face.shade(-0.14).css()}" }
                 }
             }
             // Inset by half the border so the stroke sits inside.
             rect {
-                x: "{edge / 2.0}", y: "{body_y + edge / 2.0}",
-                width: "{vw - edge}", height: "{body_h - edge}",
+                x: "0.5", y: "{body_y + 0.5}",
+                width: "{vw - 1.0}", height: "{body_h - 1.0}",
                 rx: "{r}",
                 fill: "url(#{id})",
                 stroke: "{k.border.css()}",
                 stroke_width: "{edge}",
             }
-            // The highlight row just inside the top edge.
+            // The lit row immediately inside the top border — exactly one
+            // row, at y=2 of the source's 1..20 button. A 1.2px band
+            // starting at 2.24 spilled into row 3 and left row 2 dark,
+            // which put the highlight a row low.
             rect {
-                x: "{vw * 0.1}", y: "{body_y + edge + vh * 0.01}",
-                width: "{vw * 0.8}", height: "{vh * 0.05}",
+                x: "{vw * 0.1}", y: "{body_y + 1.0}",
+                width: "{vw * 0.8}", height: "1.0",
                 fill: "{k.face.shade(0.22).css()}",
                 fill_opacity: "0.9",
             }
@@ -187,7 +206,7 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
                 // without checking how it renders.
                 font_weight: "900",
                 font_size: "{vh * 0.58}",
-                fill: "{k.text.css()}",
+                fill: "{props.legend.unwrap_or(k.text).css()}",
                 "{props.label}"
             }
         }
@@ -196,6 +215,9 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct ToggleProps {
+    /// The printed letter's colour — see [`LabelButtonProps::legend`].
+    #[props(default)]
+    pub legend: Option<Color>,
     /// Where the button sits in its cell: `(top, height)` as fractions.
     ///
     /// The mixer's buttons fill their cell; the track panel's are inset a
@@ -225,7 +247,7 @@ pub fn MuteButton(props: ToggleProps) -> Element {
         LabelButton {
             label: "M",
             lit: props.on.then_some(t.signal.mute),
-            cell: props.cell, body: props.body,
+            cell: props.cell, body: props.body, legend: props.legend,
             width: props.width, height: props.height, at: props.at,
         }
     }
@@ -233,6 +255,9 @@ pub fn MuteButton(props: ToggleProps) -> Element {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct SoloProps {
+    /// The printed letter's colour — see [`LabelButtonProps::legend`].
+    #[props(default)]
+    pub legend: Option<Color>,
     /// Where the button sits in its cell: `(top, height)` as fractions.
     ///
     /// The mixer's buttons fill their cell; the track panel's are inset a
@@ -270,6 +295,7 @@ pub fn SoloButton(props: SoloProps) -> Element {
     rsx! {
         LabelButton {
             label: "S", lit, cell: props.cell, body: props.body,
+            legend: props.legend,
             width: props.width, height: props.height, at: props.at,
         }
     }
@@ -1343,8 +1369,8 @@ mod tests {
         let n = (None, None);
         let cases: [(&str, String); 7] = [
             ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { cell: (36.0, 24.0), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_solo_on", render_svg(SoloButton, SoloProps { cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_solo_on", render_svg(SoloButton, SoloProps { legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_fx_norm", render_svg(FxButton, FxProps { family: Default::default(), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
@@ -1380,6 +1406,7 @@ mod tests {
                 render_svg(
                     MuteButton,
                     ToggleProps {
+                        legend: None,
                         body: (0.0, 1.0),
                         cell: (21.0, 20.0),
                         on: true,
@@ -1391,6 +1418,7 @@ mod tests {
                 render_svg(
                     SoloButton,
                     SoloProps {
+                        legend: None,
                         body: (0.0, 1.0),
                         cell: (21.0, 20.0),
                         state: Solo::Defeat,
@@ -1485,6 +1513,7 @@ mod tests {
         let small = render_svg(
             MuteButton,
             ToggleProps {
+                legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 on: false,
@@ -1496,6 +1525,7 @@ mod tests {
         let large = render_svg(
             MuteButton,
             ToggleProps {
+                legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 on: false,
@@ -1574,6 +1604,7 @@ mod tests {
         let n = render_svg(
             MuteButton,
             ToggleProps {
+                legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 on: false,
@@ -1585,6 +1616,7 @@ mod tests {
         let h = render_svg(
             MuteButton,
             ToggleProps {
+                legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 on: false,
@@ -1596,6 +1628,7 @@ mod tests {
         let p = render_svg(
             MuteButton,
             ToggleProps {
+                legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 on: false,
@@ -1614,6 +1647,7 @@ mod tests {
         let off = render_svg(
             SoloButton,
             SoloProps {
+                legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 state: Solo::Off,
@@ -1625,6 +1659,7 @@ mod tests {
         let on = render_svg(
             SoloButton,
             SoloProps {
+                legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 state: Solo::On,
@@ -1636,6 +1671,7 @@ mod tests {
         let defeat = render_svg(
             SoloButton,
             SoloProps {
+                legend: None,
                 body: (0.0, 1.0),
                 cell: (21.0, 20.0),
                 state: Solo::Defeat,
