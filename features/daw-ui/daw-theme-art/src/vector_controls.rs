@@ -2646,6 +2646,40 @@ pub fn TransportButton(props: TransportProps) -> Element {
     };
     let (face_top, face_bot) = (offset(face_top, shift), offset(face_bot, shift));
     let border = t.chrome.hardware_edge.shade(0.05);
+    // Record is the last button of the transport cluster, and its lit art
+    // caps the group: square on the left, rounded on the right, with the
+    // corners beyond it transparent. Play, pause and locked play do not
+    // do this — they are in the middle of the row — so it is per glyph
+    // rather than a property of being lit.
+    let end_cap = lit.is_some()
+        && matches!(
+            props.glyph,
+            TransportGlyph::Record | TransportGlyph::RecordItem | TransportGlyph::RecordLoop
+        );
+
+    // One plate layer: square on the left, rounded on the right by `cap`
+    // where this button ends the cluster. A clip-path round the whole
+    // group was the obvious way to do it and resvg dropped the group,
+    // plate and all; building the radius into each shape renders.
+    let cap = if end_cap { 3.5f32 } else { 0.0 };
+    let plate = |x: f32, y: f32, h: f32| {
+        // Inset on the right by as much as on the left, which the first
+        // version forgot: every layer ran to the full width and each one
+        // overhung the border by a column.
+        let right = vw - x;
+        if cap <= 0.0 {
+            return format!("M {x} {y} H {right} V {} H {x} Z", y + h);
+        }
+        let r = (cap - x).max(0.5);
+        format!(
+            "M {x} {y} H {} A {r} {r} 0 0 1 {right} {} V {} A {r} {r} 0 0 1 {} {} H {x} Z",
+            right - r,
+            y + r,
+            y + h - r,
+            right - r,
+            y + h,
+        )
+    };
 
     // The glyph reads against whatever is behind it.
     let ink = match (props.glyph, props.on) {
@@ -2660,6 +2694,16 @@ pub fn TransportButton(props: TransportProps) -> Element {
         (_, false) => t.chrome.hardware_mark.shade(0.32),
     };
 
+    // A lit ring throws a soft light inside itself: the plate reads
+    // #ff5f5f outside a lit record button and #ff7272 within its ring,
+    // which is white at an eighth over the red. The unlit variants differ
+    // by one level, so it is the lamp and not the moulding.
+    let halo = match (props.glyph, props.on) {
+        (TransportGlyph::Record | TransportGlyph::RecordLoop, true) => Some(3.0f32),
+        (TransportGlyph::RecordItem, true) => Some(6.0),
+        _ => None,
+    };
+
     // Traced boxes, all centred on (18, 13) of a 36x26 cell bar repeat,
     // which is centred on (16, 12) of its 32x24 one.
     // Repeat's glyph sits half a pixel above the centre of its cell —
@@ -2669,6 +2713,14 @@ pub fn TransportButton(props: TransportProps) -> Element {
     // a pixel right of where the rest sit.
     // Repeat's glyph is centred half a pixel right of its cell's middle
     // and level with it: rows 6..17 of 24 and columns 11..22 of 32.
+    // Precomputed, because an rsx attribute takes an identifier or a
+    // simple expression — a call with arithmetic in its arguments parses
+    // but does not come out the other side.
+    let plate_border = plate(0.0, 1.0, vh - 2.0);
+    let plate_rim = plate(1.0, 2.0, vh - 4.0);
+    let plate_rim_bot = plate(1.0, vh - 3.0, 1.0);
+    let plate_face = plate(1.0, 3.0, vh - 6.0);
+
     let (cx, cy) = if repeat {
         (vw * 0.5 + 0.5, vh * 0.5)
     } else {
@@ -2698,19 +2750,32 @@ pub fn TransportButton(props: TransportProps) -> Element {
         ),
         // A ring, and the same ring struck through or bracketed.
         TransportGlyph::Record => ring(cx, cy, 6.0, 3.0),
+        // A two-pixel band, not a four: outer 8 and inner 6, with an
+        // 8 by 4 bar through the middle. Read off the lit variant, where
+        // the white separates from the red cleanly — the band came out
+        // twice its width and the bar half its height.
         TransportGlyph::RecordItem => format!(
-            "{} M {} {} h 8 v 2.4 h -8 z",
-            ring(cx, cy, 8.0, 4.4),
+            "{} M {} {} h 8 v 4 h -8 z",
+            ring(cx, cy, 8.0, 6.0),
             cx - 4.0,
-            cy - 1.2
+            cy - 2.0
         ),
+        // The brackets have a top arm only, and it is chamfered rather
+        // than square: a one-pixel stem twelve rows tall with a triangle
+        // at its head running down and inward. Drawn with arms top *and*
+        // bottom — which is what `[o]` looks like, and what the icon reads
+        // as at a glance — it carried a whole flange the source does not.
         TransportGlyph::RecordLoop => format!(
-            "{} M {} {} h 4 v 1.6 h -2.4 v 8.8 h 2.4 v 1.6 h -4 z \
-             M {} {} h 4 v 12 h -4 v -1.6 h 2.4 v -8.8 h -2.4 z",
+            "{} M {} {} h 1.2 v 12 h -1.2 z M {} {} h 3.6 l -3.6 3.6 z \
+             M {} {} h 1.2 v 12 h -1.2 z M {} {} h -3.6 l 3.6 3.6 z",
             ring(cx, cy, 6.0, 3.0),
             cx - 10.0,
             cy - 6.0,
-            cx + 6.0,
+            cx - 10.0,
+            cy - 6.0,
+            cx + 8.8,
+            cy - 6.0,
+            cx + 10.0,
             cy - 6.0
         ),
         // Two arrowheads. The bands they cap are stroked separately.
@@ -2735,12 +2800,25 @@ pub fn TransportButton(props: TransportProps) -> Element {
             cx - 1.80, cy + 0.90, cx - 6.40, cy + 0.90, cx - 4.10, cy + 4.60
         ),
         // A padlock beside the triangle.
+        //
+        // The shackle is a proper arch standing clear above the body, not
+        // a bump on top of it: five columns wide with a one-pixel wall,
+        // rising four rows from the body's shoulder. Drawn as a small arc
+        // tucked into the body it sat three rows too low and read as a
+        // smudge — the one part of this glyph that says "locked".
+        //
+        // Body x8..x14 and y12..y16 of a 36x26 cell; shackle x9..x13 from
+        // y8; triangle x19..x27 over y8..y17.
         TransportGlyph::PlaySync => format!(
-            "M {} {} h 7 v 5.5 h -7 z M {} {} a 2.2 2.2 0 0 1 4.4 0 v 1.6 \
-             h -1.4 v -1.6 a 0.9 0.9 0 0 0 -1.6 0 v 1.6 h -1.4 z \
+            "M {} {} h 7 v 5 h -7 z \
+             M {} {} V {} A 2.5 2.5 0 0 1 {} {} V {} H {} V {} \
+             A 1.5 1.5 0 0 0 {} {} V {} Z \
              M {} {} V {} L {} {} Z",
-            cx - 9.5, cy, cx - 8.2, cy,
-            cx + 1.0, cy - 5.0, cy + 5.0, cx + 8.5, cy
+            cx - 10.0, cy - 1.0,
+            cx - 9.0, cy - 1.0, cy - 2.5, cx - 4.0, cy - 2.5, cy - 1.0,
+            cx - 5.0, cy - 2.5,
+            cx - 8.0, cy - 2.5, cy - 1.0,
+            cx + 1.0, cy - 5.0, cy + 5.0, cx + 9.5, cy
         ),
     };
 
@@ -2751,6 +2829,15 @@ pub fn TransportButton(props: TransportProps) -> Element {
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             defs {
+                if end_cap {
+                    clipPath { id: "trcap",
+                        path {
+                            d: "M 0 1 H {vw - 3.5} A 3.5 3.5 0 0 1 {vw} 4.5
+                                V {vh - 4.5} A 3.5 3.5 0 0 1 {vw - 3.5} {vh - 1.0}
+                                H 0 Z",
+                        }
+                    }
+                }
                 linearGradient { id: "trcycleedge", x1: "0", y1: "0", x2: "1", y2: "0",
                     stop { offset: "0", stop_color: "#000000", stop_opacity: "0.15" }
                     stop { offset: "0.62", stop_color: "#000000", stop_opacity: "0" }
@@ -2767,8 +2854,7 @@ pub fn TransportButton(props: TransportProps) -> Element {
                     stop { offset: "0", stop_color: "{face_top.css()}" }
                     stop { offset: "1", stop_color: "{face_bot.css()}" }
                 }
-                if repeat {
-            } else if let Some(b) = &lit {
+                if let Some(b) = &lit {
                     linearGradient { id: "trlit", x1: "0", y1: "0", x2: "0", y2: "1",
                         // Four stops, because the source holds its centre
                         // rather than passing through it: the plateau runs
@@ -2815,10 +2901,7 @@ pub fn TransportButton(props: TransportProps) -> Element {
                     fill: "url(#trcycleedge)",
                 }
             } else {
-                rect {
-                    x: "0", y: "1", width: "{vw}", height: "{vh - 2.0}",
-                    fill: "{border.css()}",
-                }
+                path { d: "{plate_border}", fill: "{border.css()}" }
             }
             if repeat {
             } else if let Some(b) = &lit {
@@ -2828,18 +2911,9 @@ pub fn TransportButton(props: TransportProps) -> Element {
                 // bright rim top and bottom with the face inset dark
                 // against it. Painted as one flat field it read as a
                 // sticker rather than a lit button.
-                rect {
-                    x: "1", y: "2", width: "{vw - 2.0}", height: "{vh - 4.0}",
-                    fill: "{b.rim.css()}",
-                }
-                rect {
-                    x: "1", y: "{vh - 3.0}", width: "{vw - 2.0}", height: "1",
-                    fill: "{b.rim_bot.css()}",
-                }
-                rect {
-                    x: "1", y: "3", width: "{vw - 2.0}", height: "{vh - 6.0}",
-                    fill: "url(#trlit)",
-                }
+                path { d: "{plate_rim}", fill: "{b.rim.css()}" }
+                path { d: "{plate_rim_bot}", fill: "{b.rim_bot.css()}" }
+                path { d: "{plate_face}", fill: "url(#trlit)" }
             } else {
                 // One lighter row under the top border, which every
                 // ReaperTips control has.
@@ -2873,6 +2947,12 @@ pub fn TransportButton(props: TransportProps) -> Element {
                     // because its ends are squared off, not because
                     // the stroke is wide.
                     stroke_width: "2.2",
+                }
+            }
+            if let Some(r) = halo {
+                circle {
+                    cx: "{cx}", cy: "{cy}", r: "{r}",
+                    fill: "#ffffff", fill_opacity: "0.12",
                 }
             }
             path { d: "{d}", fill: "{ink.css()}", fill_rule: "evenodd" }
