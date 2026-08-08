@@ -1457,6 +1457,16 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
                     stop { offset: "1", stop_color: "{grip.shade(0.34).css()}" }
                 }
             }
+            // The panel sits in a recess, so a ring of shadow runs round
+            // it: the body reads ~63 elsewhere but 36 to 40 in the column
+            // and row immediately outside the silver. Without it the grip
+            // looks stuck on the front rather than set into the moulding.
+            rect {
+                x: "{gx0 - 1.0}", y: "{gy0 - 1.0}",
+                width: "{gw + 2.0}", height: "{gy1 - gy0 + 2.0}",
+                rx: "{vw * 0.09}",
+                fill: "{body.shade(-0.43).css()}",
+            }
             rect {
                 x: "{gx0}", y: "{gy0}",
                 width: "{gw}", height: "{gy1 - gy0}",
@@ -1473,6 +1483,15 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
                     let y = gy0 + vh * (3.0 + 2.0 * i as f32) / 53.0;
                     let seam = i == 5;
                     let down = i as f32 / 10.0;
+                    // The seam is a good deal darker than the notches —
+                    // 51 against their 85 and 96 — so it reads as the
+                    // join between two halves rather than one more
+                    // groove.
+                    let ink_line = if seam {
+                        grip.shade(-0.69)
+                    } else {
+                        grip.shade(-0.52 + 0.12 * down)
+                    };
                     rsx! {
                         rect {
                             key: "{i}",
@@ -1480,7 +1499,7 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
                             y: "{y}",
                             width: if seam { "{gw}" } else { "{gw * 0.46}" },
                             height: "{vh / 53.0}",
-                            fill: "{grip.shade(-0.52 + 0.12 * down).css()}",
+                            fill: "{ink_line.css()}",
                         }
                     }
                 }
