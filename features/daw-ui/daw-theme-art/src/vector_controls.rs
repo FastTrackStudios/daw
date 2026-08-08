@@ -142,13 +142,15 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
     let (vw, vh) = props.cell;
     let (body_y, body_h) = (vh * props.body.0, vh * props.body.1);
     let id = format!("lb{}", props.label.replace(' ', ""));
-    // One pixel. "Barely rounded" was already the intent, but `vh * 0.10`
-    // is 2.4 at this size, which pulls the border into a curve: the top
-    // border fades out over three columns and the left one never reaches
-    // full alpha. The source's frame is square to within a single corner
-    // pixel — alpha 62 there, 203 either side of it, 255 everywhere else
-    // — so the radius has to be a pixel, not a fraction of the height.
-    let r = 1.0f32;
+    // The radius was never the problem — the stroke was.
+    //
+    // With a stroked border the corner looked far too round, and shrinking
+    // the radius to a pixel was the obvious fix. It was the wrong one: a
+    // stroke covers only half its path, so what actually showed at the
+    // corner was the *face* bleeding past it. With a filled frame the
+    // original 0.10 of height lands within a few points of the source at
+    // every corner pixel.
+    let r = vh * 0.10;
     // Exactly one pixel, offset half of one, so the border lands inside a
     // single row rather than straddling two. At `vh * 0.05` it was 1.2px
     // centred on an integer: the bottom row came out a blend of border
@@ -169,13 +171,28 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
                 }
             }
             // Inset by half the border so the stroke sits inside.
+            // Border as a *filled* shape with the face inset on top of
+            // it, not a stroke around the face.
+            //
+            // A stroke is centred on the path it follows, so it covers
+            // only half of the fill's antialiased edge — and at a rounded
+            // corner the rest of that edge shows past it. The corner
+            // pixels came out a blend of border and face (R=54 where the
+            // source is a clean R=23 at reduced alpha), which reads as
+            // the colour leaking out of the corner rather than being held
+            // by the frame. Filled and inset, the face cannot reach the
+            // outside: there is a solid pixel of border in the way.
             rect {
-                x: "0.5", y: "{body_y + 0.5}",
-                width: "{vw - 1.0}", height: "{body_h - 1.0}",
+                x: "0", y: "{body_y}",
+                width: "{vw}", height: "{body_h}",
                 rx: "{r}",
+                fill: "{k.border.css()}",
+            }
+            rect {
+                x: "{edge}", y: "{body_y + edge}",
+                width: "{vw - edge * 2.0}", height: "{body_h - edge * 2.0}",
+                rx: "{(r - edge).max(0.0)}",
                 fill: "url(#{id})",
-                stroke: "{k.border.css()}",
-                stroke_width: "{edge}",
             }
             // The lit row immediately inside the top border — exactly one
             // row, at y=2 of the source's 1..20 button. A 1.2px band
