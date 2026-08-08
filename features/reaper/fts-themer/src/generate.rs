@@ -78,6 +78,9 @@ pub fn generate(theme: &ThemeDir, dry_run: bool, vectors_only: bool) -> Result<G
             // A vector control if one draws this image, the trace
             // otherwise. Both stamp the same measured markers back.
             let vector = daw_theme_art::cell_markup(name, Default::default()).is_some();
+            // The traced half rewrites art nothing here authored, through
+            // a ramp built from the theme's own palette. Skipping it is
+            // the default; see the `--traced` flag for why.
             if vectors_only && !vector {
                 continue;
             }

@@ -108,15 +108,22 @@ enum Command {
         /// Report what would be written without writing.
         #[arg(long)]
         dry_run: bool,
-        /// Only write images a vector control draws.
+        /// Also rewrite every image a vector control does *not* draw.
         ///
-        /// The traced path reproduces the inherited art through the theme
-        /// ramp, which is right when the palette differs from the source
-        /// and destructive when it does not: mapping the art onto its own
-        /// colours still rounds through the ramp's stops, and the toolbar
-        /// icons wash out against a palette taken from the same theme.
+        /// Off by default, and it should stay off while the theme carries
+        /// the palette it inherited. The traced path reproduces the
+        /// inherited art through the theme's luminance ramp, which is
+        /// right when the palette differs from the source and destructive
+        /// when it does not: mapping the art onto its own colours still
+        /// rounds through the ramp's stops. One run of it lifted
+        /// `tcp_mainbg` from #333333 to #3d3d3d and washed out the toolbar
+        /// icons, across 2547 images, with nothing in the output to say
+        /// so — which is exactly why it is no longer the default.
+        ///
+        /// Recovering from it is `rsync -a --existing .source-art/ ./`
+        /// inside the theme directory, then a plain `generate`.
         #[arg(long)]
-        vectors_only: bool,
+        traced: bool,
     },
     /// Retint the colour literals inside rtconfig.txt
     ///
@@ -303,9 +310,9 @@ fn main() -> Result<()> {
 
         Command::Generate {
             dry_run,
-            vectors_only,
+            traced,
         } => {
-            let report = fts_themer::generate::generate(&theme, dry_run, vectors_only)?;
+            let report = fts_themer::generate::generate(&theme, dry_run, !traced)?;
             for (name, err) in &report.failed {
                 eprintln!("FAILED {name}: {err}");
             }
