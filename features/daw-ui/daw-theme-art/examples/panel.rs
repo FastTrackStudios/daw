@@ -385,10 +385,17 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
             },
         ),
     ));
-    let mon_y = arm_y + 20.0;
-    let mute_y = mon_y + 19.0;
-    let solo_y = mute_y + 21.0;
-    let io_y = solo_y + 23.0;
+    // The offsets `rtconfig` writes — 20, 19, 21, 23 — are the *nominal*
+    // ones: every line in that chain also carries `+ [0 padding]`, and
+    // the padding is what actually spaces them. Scanning column 62 of a
+    // strip gives the rows REAPER lands on — arm 45, monitor 70, mute 88,
+    // solo 111, io 136 — which is 25, 18, 23, 25. Using the nominal
+    // numbers put the routing button eight rows high, and it is the one
+    // furthest down the chain so it collects every error above it.
+    let mon_y = arm_y + 25.0;
+    let mute_y = mon_y + 18.0;
+    let solo_y = mute_y + 23.0;
+    let io_y = solo_y + 25.0;
     s.push_str(&at(
         x + COL - 10.5,
         mon_y,
