@@ -41,20 +41,26 @@ pub mod align;
 pub mod analyze;
 pub mod dynamics;
 pub mod frames;
+pub mod lanes;
 #[cfg(feature = "daw")]
 pub mod retime;
 #[cfg(feature = "daw")]
 pub mod session;
+#[cfg(feature = "daw")]
+pub mod write_dynamics;
 pub mod spans;
 
 pub use align::{align, AlignConfig, Alignment};
 pub use analyze::{analyze_take, to_mono, Analysis, TakeConfig};
 pub use dynamics::{Detection, Dynamics, DynamicsConfig, GainPoint, Region};
 pub use frames::{frame_features, FrameFeature};
+pub use lanes::{DynamicsLane, Lanes};
 #[cfg(feature = "daw")]
 pub use retime::{stretch_markers, TakePlacement};
 #[cfg(feature = "daw")]
 pub use session::{AudioSession, AudioTakeLocation, WriteError, WriteOutcome};
+#[cfg(feature = "daw")]
+pub use write_dynamics::DynamicsWritten;
 pub use spans::{unvoiced_spans, Span};
 
 /// How a per-note trim is stored in a lane.
