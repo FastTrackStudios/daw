@@ -235,3 +235,148 @@ fn read_all<D: AudioAccessors>(daw: &D, accessor: &str, length_secs: f64) -> Rea
         channels,
     }
 }
+
+/// Why a write-back could not complete.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WriteError {
+    /// The take no longer reports a source file — it was replaced or
+    /// removed underneath the session.
+    NoSource,
+    /// The rendered audio could not be written next to the original.
+    Io(String),
+    /// The host refused to repoint the take.
+    Host(String),
+}
+
+impl core::fmt::Display for WriteError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            WriteError::NoSource => write!(f, "the take has no source file"),
+            WriteError::Io(e) => write!(f, "writing the rendered take: {e}"),
+            WriteError::Host(e) => write!(f, "pointing the take at the render: {e}"),
+        }
+    }
+}
+
+#[cfg(feature = "render")]
+impl AudioSession {
+    /// Render the edits and repoint the take at the result.
+    ///
+    /// **A new file beside the original, never over it.** Two reasons,
+    /// and both are the difference between a tool you can trust with a
+    /// vocal and one you cannot: the recording is the only copy of a
+    /// performance, and WORLD is lossy analysis-resynthesis, so
+    /// overwriting would make every edit permanent *and* degrade the
+    /// source that later edits read from. The original stays on disk
+    /// and the take is simply pointed elsewhere, which is undoable by
+    /// pointing it back.
+    ///
+    /// Returns the path written.
+    pub fn write_back<D: daw::service::Takes>(&mut self, daw: &D) -> Result<String, WriteError> {
+        let source = self
+            .current_source(daw)
+            .ok_or(WriteError::NoSource)?;
+        let out = next_render_path(&source);
+
+        let audio = self.render();
+        write_wav_f32(&out, &audio, self.sample_rate)
+            .map_err(|e| WriteError::Io(e.to_string()))?;
+
+        daw.set_source_file(
+            self.location.project.clone(),
+            self.location.item.clone(),
+            self.location.take.clone(),
+            out.clone(),
+        )
+        .map_err(|e| WriteError::Host(format!("{e:?}")))?;
+
+        // The document now describes what is on disk, so a second write
+        // with no further edits is correctly a no-op.
+        self.baseline = self.editor.doc.clone();
+        Ok(out)
+    }
+}
+
+impl AudioSession {
+    /// The take's source path as the host currently reports it.
+    fn current_source<D: daw::service::Takes>(&self, daw: &D) -> Option<String> {
+        let takes = daw.get_takes(self.location.project.clone(), self.location.item.clone());
+        let index = match &self.location.take {
+            TakeRef::Active => takes.iter().position(|t| t.is_active).unwrap_or(0),
+            TakeRef::Index(i) => *i as usize,
+            TakeRef::Guid(g) => takes.iter().position(|t| t.guid == *g)?,
+        };
+        takes.get(index)?.source_file_path.clone()
+    }
+}
+
+/// A render path beside `source` that does not exist yet.
+///
+/// Numbered rather than timestamped so a directory of them sorts in the
+/// order they were made, and so a second edit of the same take is
+/// visibly the next version of it rather than an unrelated file.
+fn next_render_path(source: &str) -> String {
+    let p = std::path::Path::new(source);
+    let dir = p.parent().unwrap_or_else(|| std::path::Path::new("."));
+    let raw = p.file_stem().and_then(|s| s.to_str()).unwrap_or("take");
+    // A second edit reads the take's *current* source, which after the
+    // first write is already a render. Without stripping the suffix the
+    // names compound — `vox-fts-001-fts-001` and worse — and the chain
+    // stops being readable at exactly the point it matters.
+    let stem = strip_render_suffix(raw);
+    for n in 1..10_000 {
+        let candidate = dir.join(format!("{stem}-fts-{n:03}.wav"));
+        if !candidate.exists() {
+            return candidate.to_string_lossy().into_owned();
+        }
+    }
+    dir.join(format!("{stem}-fts.wav"))
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Drop a trailing `-fts-NNN`, if there is one.
+fn strip_render_suffix(stem: &str) -> &str {
+    let Some((head, tail)) = stem.rsplit_once("-fts-") else {
+        return stem;
+    };
+    if !tail.is_empty() && tail.bytes().all(|b| b.is_ascii_digit()) {
+        head
+    } else {
+        stem
+    }
+}
+
+/// Write mono 32-bit float WAV.
+///
+/// Float rather than 16- or 24-bit int because this is an intermediate
+/// a later edit will read back: there is no headroom decision to make,
+/// nothing to dither, and a round trip costs nothing.
+fn write_wav_f32(path: &str, samples: &[f64], sample_rate: f64) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let rate = sample_rate.max(1.0) as u32;
+    let bytes = samples.len() as u32 * 4;
+    let mut out = Vec::with_capacity(44 + bytes as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + bytes).to_le_bytes());
+    out.extend_from_slice(b"WAVE");
+    out.extend_from_slice(b"fmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    // 3 = IEEE float.
+    out.extend_from_slice(&3u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&rate.to_le_bytes());
+    out.extend_from_slice(&(rate * 4).to_le_bytes());
+    out.extend_from_slice(&4u16.to_le_bytes());
+    out.extend_from_slice(&32u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&bytes.to_le_bytes());
+    for &s in samples {
+        out.extend_from_slice(&(s as f32).to_le_bytes());
+    }
+
+    let mut f = std::fs::File::create(path)?;
+    f.write_all(&out)?;
+    f.sync_all()
+}

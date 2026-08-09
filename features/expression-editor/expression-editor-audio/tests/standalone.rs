@@ -220,3 +220,80 @@ fn a_standalone_take_renders_at_its_edited_pitch() {
         "and at the pitch it was moved to"
     );
 }
+
+#[cfg(feature = "render")]
+#[test]
+fn writing_back_renders_beside_the_original_and_never_over_it() {
+    // The property that makes this safe to point at a vocal: the
+    // recording is the only copy of a performance, and WORLD is lossy,
+    // so overwriting would make every edit permanent *and* degrade what
+    // later edits read from.
+    let (daw, item, secs, dir) = project(60.0, 0.8);
+    let original = dir.0.join("vox.wav");
+    let before = std::fs::read(&original).expect("source exists");
+
+    let mut s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
+    s.editor.doc.note_mut(NoteId(1)).unwrap().row = 64;
+    let written = s.write_back(&daw).expect("wrote");
+
+    assert_ne!(written, original.to_string_lossy(), "a new file");
+    assert!(std::path::Path::new(&written).exists());
+    assert_eq!(
+        std::fs::read(&original).unwrap(),
+        before,
+        "the recording is untouched"
+    );
+
+    // The take now points at the render...
+    let takes = Takes::get_takes(&daw, ProjectContext::Current, item.clone());
+    let active = takes.iter().find(|t| t.is_active).unwrap();
+    assert_eq!(active.source_file_path.as_deref(), Some(written.as_str()));
+
+    // ...and opening the take again reads the edited pitch back.
+    let again = open(&daw, item, secs, 1.0).expect("reloaded");
+    assert_eq!(
+        again.editor.doc.note(NoteId(1)).unwrap().row,
+        64,
+        "the edit survived the round trip through the host"
+    );
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn a_second_write_makes_the_next_numbered_render() {
+    let (daw, item, secs, _dir) = project(60.0, 0.6);
+    let mut s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
+
+    s.editor.doc.note_mut(NoteId(1)).unwrap().row = 62;
+    let first = s.write_back(&daw).expect("wrote");
+    assert!(!s.is_dirty(), "the document now describes what is on disk");
+
+    s.editor.doc.note_mut(NoteId(1)).unwrap().row = 65;
+    let second = s.write_back(&daw).expect("wrote again");
+
+    assert_ne!(first, second, "a second edit is a new version, not a clobber");
+    assert!(std::path::Path::new(&first).exists(), "and the first survives");
+    assert!(first.ends_with("-fts-001.wav"), "got {first}");
+    assert!(second.ends_with("-fts-002.wav"), "got {second}");
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn writing_back_a_take_with_no_source_says_so() {
+    let (daw, item, secs, _dir) = project(60.0, 0.5);
+    let mut s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
+
+    // Drop the source out from under the session.
+    daw.write_project("p", |p| {
+        for tl in p.takes.values_mut() {
+            for t in tl.takes.iter_mut() {
+                t.source_file_path = None;
+            }
+        }
+    });
+
+    assert_eq!(
+        s.write_back(&daw),
+        Err(expression_editor_audio::WriteError::NoSource)
+    );
+}

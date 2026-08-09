@@ -46,7 +46,7 @@ pub mod spans;
 pub use align::{align, AlignConfig, Alignment};
 pub use analyze::{analyze_take, to_mono, Analysis, TakeConfig};
 #[cfg(feature = "daw")]
-pub use session::{AudioSession, AudioTakeLocation};
+pub use session::{AudioSession, AudioTakeLocation, WriteError};
 pub use spans::{unvoiced_spans, Span};
 
 /// How a per-note trim is stored in a lane.
