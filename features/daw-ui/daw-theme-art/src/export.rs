@@ -24,6 +24,7 @@
 //! never interpolated: they are copied from the source verbatim, after
 //! compositing.
 
+use daw_theme::Color;
 use image::RgbaImage;
 
 use crate::derive::DerivedSpec;
@@ -472,40 +473,32 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
     // shade is what retints and the value is what it has to match today.
     {
         let g = |v: f32| theme.chrome.hardware.shade(v);
-        let plate = |bands: Vec<v::Band>, cell, inset| {
+        let full = |bands: Vec<v::Band>, stripes: Vec<v::Stripe>, cell, inset| {
             render_svg(
                 v::PanelPlate,
-                v::PlateProps {
-                    bands,
-                    stripes: vec![],
-                    cell,
-                    inset,
-                    width: n.0,
-                    height: n.1,
-                    at,
-                },
+                v::PlateProps { bands, stripes, cell, inset, width: n.0, height: n.1, at },
             )
+        };
+        let plate = |bands: Vec<v::Band>, cell, inset: f32| {
+            full(bands, vec![], cell, (inset, inset))
         };
         let marked = |bands: Vec<v::Band>, stripes: Vec<v::Stripe>, cell| {
-            render_svg(
-                v::PanelPlate,
-                v::PlateProps {
-                    bands,
-                    stripes,
-                    cell,
-                    inset: 0.0,
-                    width: n.0,
-                    height: n.1,
-                    at,
-                },
-            )
+            full(bands, stripes, cell, (0.0, 0.0))
         };
         let sunk = g(-0.19); // #333333
-        let lit = g(0.09); // #515151
+        // #515151, and it has to round to 81 rather than 80 — at 0.09 the
+        // shade landed a level low on every selected background at once.
+        let lit = g(0.094);
         let deep = g(-0.40); // #262626
         let hit = match name {
             "mcp_mainbg" => Some(plate(vec![(0.0, 6.0, sunk, 1.0)], (6.0, 6.0), 0.0)),
-            "mcp_mainbgsel" => Some(plate(vec![(0.0, 6.0, lit, 1.0)], (6.0, 6.0), 0.0)),
+            // A rule down column 1 — the mark that says *selected*, and
+            // the only difference from `mcp_mainbg` other than the shade.
+            "mcp_mainbgsel" => Some(marked(
+                vec![(0.0, 6.0, lit, 1.0)],
+                vec![(1.0, 1.0, 1.0, 4.0, g(-0.20))], // #323232
+                (6.0, 6.0),
+            )),
             "mcp_bg" => Some(plate(vec![(1.0, 2.0, sunk, 1.0)], (4.0, 4.0), 1.0)),
             "mcp_bgsel" => Some(plate(vec![(1.0, 1.0, sunk, 1.0)], (4.0, 3.0), 1.0)),
             "mcp_extmixbg" => Some(plate(vec![(0.0, 3.0, sunk, 1.0)], (3.0, 3.0), 0.0)),
@@ -520,7 +513,11 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 (9.0, 8.0),
                 1.0,
             )),
-            "mcp_main_namebg" => Some(plate(
+            // The name plate's first and last columns stay `#333333`
+            // whatever the rows do — a frame, not a band. Drawn full
+            // width the selected one painted its white row right out to
+            // the edge, 191 levels off in that column.
+            "mcp_main_namebg" => Some(full(
                 vec![
                     (0.0, 1.0, sunk, 1.0),
                     (1.0, 2.0, deep, 1.0),
@@ -528,39 +525,46 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     (7.0, 1.0, deep, 1.0),
                     (8.0, 1.0, sunk, 1.0),
                 ],
+                vec![(0.0, 1.0, 0.0, 9.0, sunk), (7.0, 1.0, 0.0, 9.0, sunk)],
                 (8.0, 9.0),
-                0.0,
+                (0.0, 0.0),
             )),
-            "mcp_main_namebg_sel" => Some(plate(
+            "mcp_main_namebg_sel" => Some(full(
                 vec![
                     (0.0, 1.0, sunk, 1.0),
-                    (1.0, 2.0, g(0.93), 1.0), // #eeeeee
+                    (1.0, 2.0, g(0.911), 1.0), // #eeeeee
                     (3.0, 1.0, deep, 1.0),
                     (4.0, 3.0, lit, 1.0),
                     (7.0, 1.0, deep, 1.0),
                     (8.0, 1.0, sunk, 1.0),
                 ],
+                vec![(0.0, 1.0, 0.0, 9.0, sunk), (7.0, 1.0, 0.0, 9.0, sunk)],
                 (8.0, 9.0),
-                0.0,
+                (0.0, 0.0),
             )),
-            "mcp_iconbg" => Some(plate(
+            // Both icon backgrounds keep column 1 as a plain `#333333`
+            // rule and leave column 5 bare, so their bands run x2..x5 —
+            // one column narrower on each side than they look.
+            "mcp_iconbg" => Some(full(
                 vec![
                     (1.0, 3.0, sunk, 1.0),
                     (4.0, 4.0, g(-0.03), 1.0), // #3d3d3d
                     (8.0, 2.0, sunk, 1.0),
                 ],
+                vec![(1.0, 1.0, 1.0, 9.0, sunk)],
                 (6.0, 11.0),
-                1.0,
+                (2.0, 1.0),
             )),
-            "mcp_iconbgsel" => Some(plate(
+            "mcp_iconbgsel" => Some(full(
                 vec![
                     (1.0, 2.0, g(1.0), 1.0), // #ffffff
                     (3.0, 1.0, sunk, 1.0),
                     (4.0, 4.0, g(0.32), 0.416), // #797979 at 106
                     (8.0, 2.0, sunk, 1.0),
                 ],
+                vec![(1.0, 1.0, 1.0, 9.0, sunk)],
                 (6.0, 11.0),
-                1.0,
+                (2.0, 1.0),
             )),
             "tcp_mainbg" => Some(plate(vec![(0.0, 9.0, sunk, 1.0)], (22.0, 9.0), 0.0)),
             "tcp_mainbgsel" => Some(plate(vec![(0.0, 9.0, lit, 1.0)], (22.0, 9.0), 0.0)),
@@ -605,12 +609,33 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             "envcp_namebg" => {
                 Some(plate(vec![(1.0, 22.0, g(-0.56), 1.0)], (22.0, 24.0), 1.0))
             }
+            // The track panel's index strip: a `#313131` rule down
+            // column 1 and a mark on the right that says whether the
+            // track is selected — a 1px black tick, or a white block
+            // between two black ones. It had been filed with the empty
+            // plates below, which was wrong and invisible while the
+            // audits were scoring its markers.
+            "tcp_idxbg" => Some(marked(
+                vec![],
+                vec![
+                    (1.0, 1.0, 1.0, 4.0, g(-0.222)), // #313131
+                    (19.0, 1.0, 2.0, 2.0, Color::rgba(0, 0, 0, 63)),
+                ],
+                (23.0, 6.0),
+            )),
+            "tcp_idxbg_sel" => Some(marked(
+                vec![],
+                vec![
+                    (1.0, 1.0, 1.0, 4.0, g(-0.222)),
+                    (19.0, 5.0, 2.0, 2.0, Color::rgba(0, 0, 0, 63)),
+                    (20.0, 3.0, 2.0, 2.0, Color::rgba(255, 255, 255, 217)),
+                ],
+                (25.0, 6.0),
+            )),
             // Drawn by REAPER, not by the theme: every pixel is
             // transparent, so an empty band list is the whole truth.
             "mcp_namebg" | "mcp_idxbg" | "mcp_idxbg_sel" | "tcp_namebg"
-            | "tcp_main_namebg_sel" | "tcp_idxbg" | "tcp_idxbg_sel" => {
-                Some(plate(vec![], (4.0, 4.0), 0.0))
-            }
+            | "tcp_main_namebg_sel" => Some(plate(vec![], (4.0, 4.0), 0.0)),
             _ => None,
         };
         if let Some(markup) = hit {

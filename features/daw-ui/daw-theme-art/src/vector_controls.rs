@@ -3430,9 +3430,11 @@ pub struct PlateProps {
     pub stripes: Vec<Stripe>,
     /// Cell size.
     pub cell: (f32, f32),
-    /// Columns of transparent margin each side.
-    #[props(default = 0.0)]
-    pub inset: f32,
+    /// Columns of margin, left and right. Asymmetric because some of
+    /// these plates are: the mixer's selected icon background leaves one
+    /// column for a rule on the left and one bare column on the right.
+    #[props(default = (0.0, 0.0))]
+    pub inset: (f32, f32),
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -3459,8 +3461,8 @@ pub fn PanelPlate(props: PlateProps) -> Element {
             for (i, band) in props.bands.iter().enumerate() {
                 rect {
                     key: "{i}",
-                    x: "{props.inset}", y: "{band.0}",
-                    width: "{vw - props.inset * 2.0}", height: "{band.1}",
+                    x: "{props.inset.0}", y: "{band.0}",
+                    width: "{vw - props.inset.0 - props.inset.1}", height: "{band.1}",
                     fill: "{band.2.css()}",
                     fill_opacity: "{band.3}",
                 }
