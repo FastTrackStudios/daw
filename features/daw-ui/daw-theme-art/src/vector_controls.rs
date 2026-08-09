@@ -2704,11 +2704,26 @@ pub fn TransportButton(props: TransportProps) -> Element {
     // group was the obvious way to do it and resvg dropped the group,
     // plate and all; building the radius into each shape renders.
     let cap = if end_cap { 3.5f32 } else { 0.0 };
+    let open_left = lit.is_some()
+        && matches!(
+            props.glyph,
+            TransportGlyph::RecordItem | TransportGlyph::RecordLoop
+        );
     let plate = |x: f32, y: f32, h: f32| {
         // Inset on the right by as much as on the left, which the first
         // version forgot: every layer ran to the full width and each one
         // overhung the border by a column.
         let right = vw - x;
+        // Except on the left of the two that carry no border there: the
+        // lit `record_item` and `record_loop` run their face out to
+        // column 0, because the button to their left continues into
+        // them. Drawing the border there put a dark rule down the side —
+        // a hundred levels, every row, about a fifth of the image's error.
+        //
+        // Plain lit `record` is *not* one of them, despite capping the
+        // group on the right exactly as they do. Grouping it with them
+        // by end-cap alone made it worse by two.
+        let x = if open_left { (x - 1.0).max(0.0) } else { x };
         if cap <= 0.0 {
             return format!("M {x} {y} H {right} V {} H {x} Z", y + h);
         }
@@ -2761,7 +2776,11 @@ pub fn TransportButton(props: TransportProps) -> Element {
     let plate_border = plate(0.0, 1.0, vh - 2.0);
     let plate_rim = plate(1.0, 2.0, vh - 4.0);
     let plate_rim_bot = plate(1.0, vh - 3.0, 1.0);
-    let plate_face = plate(1.0, 3.0, vh - 6.0);
+    // Inset from the rim on *both* axes. It had been inset only
+    // vertically, so the rim's bright left and right columns were painted
+    // straight over by the face — the source keeps a full-height column
+    // of `#7ed5fa` down each side of a lit button and this covered them.
+    let plate_face = plate(2.0, 3.0, vh - 6.0);
 
     let (cx, cy) = if repeat {
         (vw * 0.5 + 0.5, vh * 0.5)
@@ -2908,6 +2927,17 @@ pub fn TransportButton(props: TransportProps) -> Element {
                         stop { offset: "0.78", stop_color: "{b.centre.css()}" }
                         stop { offset: "1", stop_color: "{b.edge.css()}" }
                     }
+                    // The lit face is bevelled *across* as well as down —
+                    // 226 at each side column against 255 three columns
+                    // in, the same fall the vertical stops carry. Drawn
+                    // with the vertical ramp alone the button read as a
+                    // lit strip rather than a lit key.
+                    linearGradient { id: "trlitside", x1: "0", y1: "0", x2: "1", y2: "0",
+                        stop { offset: "0", stop_color: "#000000", stop_opacity: "0.114" }
+                        stop { offset: "{3.0 / vw}", stop_color: "#000000", stop_opacity: "0" }
+                        stop { offset: "{1.0 - 3.0 / vw}", stop_color: "#000000", stop_opacity: "0" }
+                        stop { offset: "1", stop_color: "#000000", stop_opacity: "0.114" }
+                    }
                 }
             }
             if repeat {
@@ -2956,6 +2986,7 @@ pub fn TransportButton(props: TransportProps) -> Element {
                 path { d: "{plate_rim}", fill: "{b.rim.css()}" }
                 path { d: "{plate_rim_bot}", fill: "{b.rim_bot.css()}" }
                 path { d: "{plate_face}", fill: "url(#trlit)" }
+                path { d: "{plate_face}", fill: "url(#trlitside)" }
             } else {
                 // One lighter row under the top border, which every
                 // ReaperTips control has.
