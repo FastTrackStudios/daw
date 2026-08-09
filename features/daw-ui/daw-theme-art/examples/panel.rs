@@ -164,7 +164,10 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
         y + 3.0,
         &render_svg(
             v::PanningKnob,
-            v::PanProps { position: -0.3, large: false, indicator: true, width: NONE.0, height: NONE.1 },
+            // Centred, like every track in the reference shot. A panned
+            // knob here is honest demo data and reads as a broken
+            // pointer, which is not what this render is for.
+            v::PanProps { position: 0.0, large: false, indicator: true, width: NONE.0, height: NONE.1 },
         ),
     ));
     s.push_str(&meter(214.0, y + 8.0, 5.0, 15.0, 0.7));
@@ -277,8 +280,8 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
         ),
     ));
     s.push_str(&at(
-        x + 40.0,
-        26.0,
+        x + 58.0,
+        24.0,
         &render_svg(
             v::RecordArmButton,
             v::RecordArmProps {
@@ -292,8 +295,8 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
         ),
     ));
     s.push_str(&at(
-        x + 60.0,
-        26.0,
+        x + 58.0,
+        50.0,
         &render_svg(
             v::InputMonitorIndicator,
             v::MonitoringProps {
@@ -345,15 +348,15 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
             v::FaderCapProps { accent: None, full: false, width: Some(27), height: Some(53) },
         ),
     ));
-    s.push_str(&meter(x + 49.0, 54.0, 5.0, 104.0, 0.62));
-    s.push_str(&meter(x + 55.0, 54.0, 5.0, 104.0, 0.55));
+    s.push_str(&meter(x + 46.0, 54.0, 5.0, 104.0, 0.62));
+    s.push_str(&meter(x + 52.0, 54.0, 5.0, 104.0, 0.55));
 
     // Mute, solo, and the routing button under them.
-    s.push_str(&at(x + 62.0, 54.0, &mute((21.0, 20.0), (0.0, 1.0), false, tk.muted)));
-    s.push_str(&at(x + 62.0, 76.0, &solo((21.0, 20.0), (0.0, 1.0), false, tk.soloed)));
+    s.push_str(&at(x + 60.0, 74.0, &mute((21.0, 20.0), (0.0, 1.0), false, tk.muted)));
+    s.push_str(&at(x + 60.0, 96.0, &solo((21.0, 20.0), (0.0, 1.0), false, tk.soloed)));
     s.push_str(&at(
-        x + 62.0,
-        100.0,
+        x + 60.0,
+        120.0,
         &render_svg(
             v::RoutingButton,
             v::RoutingProps {
