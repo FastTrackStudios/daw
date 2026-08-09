@@ -296,8 +296,12 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
             },
         ),
     ));
+    // 49, not 50. `mcp.fxbyp` starts exactly where `mcp.fx` ends, but the
+    // toggle's own art leaves a seam column at its left — that is what
+    // `leading_gap` exists for on the export side — so placed at the
+    // arithmetic join the two halves show a bare pixel between them.
     s.push_str(&at(
-        x + 50.0,
+        x + 49.0,
         7.0,
         &render_svg(
             v::FxControl,
@@ -336,6 +340,20 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
             },
         ),
     ));
+    // Everything in the right-hand column shares one axis and one chain
+    // of offsets, which is how `rtconfig` writes it:
+    //
+    //     mcp.recmon = mcp.recarm + [7 20 21 20]
+    //     mcp.mute   = mcp.recmon + [0 19 21 20]
+    //     mcp.solo   = mcp.mute   + [0 21 21 20]
+    //     mcp.io     = mcp.solo   + [-1 23 23 30]
+    //
+    // Each is anchored to the last, so placing them at absolute offsets
+    // from the section — which is what this did — lets them drift apart
+    // one at a time. `COL` is the axis they centre on; the arm's ring
+    // sits at 0.486 of its 36-wide cell rather than in the middle, so it
+    // is the one that cannot be centred by halving its width.
+    const COL: f32 = 66.0;
     // The arm sits low enough that the tint's foot crosses its housing at
     // the *flares* rather than at the straight sides below them. The
     // housing's base corners run 45 degrees out between 0.592 and 0.717
@@ -343,15 +361,57 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     // land in there. Three rows higher and the tint cut across the
     // vertical sides, which reads as two upright lines coming out of the
     // colour instead of a shape emerging from it.
+    let arm_y = pan_y + 12.3;
     s.push_str(&at(
-        x + 49.5,
-        pan_y + 12.3,
+        x + COL - 36.0 * 0.486,
+        arm_y,
         &render_svg(
             v::RecordArmButton,
             v::RecordArmProps {
                 state: if tk.armed { v::RecordArm::On } else { v::RecordArm::Off },
                 cell: (36.0, 24.0),
                 housing: true,
+                width: NONE.0,
+                height: NONE.1,
+                at: v::Interaction::Normal,
+            },
+        ),
+    ));
+    let mon_y = arm_y + 20.0;
+    let mute_y = mon_y + 19.0;
+    let solo_y = mute_y + 21.0;
+    let io_y = solo_y + 23.0;
+    s.push_str(&at(
+        x + COL - 10.5,
+        mon_y,
+        &render_svg(
+            v::InputMonitorIndicator,
+            v::MonitoringProps {
+                state: if tk.armed { v::Monitoring::On } else { v::Monitoring::Off },
+                cell: (21.0, 20.0),
+                axis: v::Axis::Vertical,
+                width: NONE.0,
+                height: NONE.1,
+                at: v::Interaction::Normal,
+            },
+        ),
+    ));
+    s.push_str(&at(x + COL - 10.5, mute_y, &mute((21.0, 20.0), (0.0, 1.0), false, tk.muted)));
+    s.push_str(&at(x + COL - 10.5, solo_y, &solo((21.0, 20.0), (0.0, 1.0), false, tk.soloed)));
+    s.push_str(&at(
+        x + COL - 11.5,
+        io_y,
+        &render_svg(
+            v::RoutingButton,
+            v::RoutingProps {
+                // Unlit: the reference track has no sends, and lighting
+                // the lane put a yellow bar in the button where REAPER
+                // shows grey.
+                has_sends: false,
+                has_receives: false,
+                disabled: false,
+                axis: v::Axis::Vertical,
+                cell: (23.0, 30.0),
                 width: NONE.0,
                 height: NONE.1,
                 at: v::Interaction::Normal,
@@ -401,44 +461,6 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
         &render_svg(
             v::VolumeFaderCap,
             v::FaderCapProps { accent: None, full: false, width: Some(21), height: Some(44) },
-        ),
-    ));
-
-    // recmon, mute, solo, io, env — the order and the pitch `rtconfig`
-    // gives, each anchored to the last, running down the right.
-    let col = x + 56.0;
-    s.push_str(&at(
-        col,
-        stretch_y + 2.0,
-        &render_svg(
-            v::InputMonitorIndicator,
-            v::MonitoringProps {
-                state: if tk.armed { v::Monitoring::On } else { v::Monitoring::Off },
-                cell: (21.0, 20.0),
-                axis: v::Axis::Vertical,
-                width: NONE.0,
-                height: NONE.1,
-                at: v::Interaction::Normal,
-            },
-        ),
-    ));
-    s.push_str(&at(col, stretch_y + 24.0, &mute((21.0, 20.0), (0.0, 1.0), false, tk.muted)));
-    s.push_str(&at(col, stretch_y + 46.0, &solo((21.0, 20.0), (0.0, 1.0), false, tk.soloed)));
-    s.push_str(&at(
-        col - 1.0,
-        stretch_y + 72.0,
-        &render_svg(
-            v::RoutingButton,
-            v::RoutingProps {
-                has_sends: true,
-                has_receives: false,
-                disabled: false,
-                axis: v::Axis::Vertical,
-                cell: (23.0, 30.0),
-                width: NONE.0,
-                height: NONE.1,
-                at: v::Interaction::Normal,
-            },
         ),
     ));
 
