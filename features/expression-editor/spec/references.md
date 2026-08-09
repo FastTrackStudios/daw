@@ -70,6 +70,13 @@ method for source format would still be tidier.
 
 ### Worth reading before building the chrome
 
+- `mpl_Peak follower tools.lua` gave us the one thing no header
+  documents: **there is no API to create a take envelope.** You bring
+  one into existence by running the action a user would — `40693` for
+  volume, `41612` for pitch, both verified in the wild — on the
+  *selected* item, then re-enumerating to find it. The pan and mute
+  ids are not attested anywhere we read, so the backend declines rather
+  than guessing an id that would silently do something else.
 - `waveform_rendering.cpp` — peak + RMS at a dB scale with a
   zero-crossing line. Our backdrop is a plain peak envelope; theirs is
   what a mastering engineer expects to see.
