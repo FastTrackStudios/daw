@@ -44,9 +44,11 @@ already fixed:
    an item with the fader down would have had every frame below it and
    produced no sibilant spans at all.
 
-   We apply the item's gain. **Take volume we cannot**: the `daw`
-   facade's take service has `set_volume` and no getter. That is a gap
-   worth closing, and until it is, a take-level trim is unaccounted for.
+   We apply the item's gain. Take volume is *available* — `Take` in
+   the proto carries `volume` and `Takes::get_takes` returns it, so an
+   earlier note here claiming otherwise was wrong — but is not applied
+   yet, because `AudioSession::load` takes the gain as a parameter and
+   only the item's is threaded through. A small follow-up.
 
 2. **Chunk size.** 64 k frames per `GetAudioAccessorSamples` call, which
    we now match. There is no reason to differ from a number already
@@ -57,9 +59,14 @@ already fixed:
 SneakPeak asks the `PCM_source` directly — `GetSampleRate()`,
 `GetNumChannels()` — rather than probing the accessor, and clamps
 channels to two. Our `read_all` probes with a one-sample read instead,
-because the facade exposes the accessor and not the source. Asking the
-source is the better answer and wants a facade method; the probe is a
-workaround, and is marked as one.
+because the facade exposes the accessor and not the source.
+
+The probe is now a real part of the contract rather than a guess: a
+zero `sample_rate` or `num_channels` in a `GetSamplesRequest` means
+"tell me what you have", which the standalone impl honours and a test
+pins. That matters because *naming* a rate makes a host resample, and
+edits made against a resampled take land in the wrong place. A facade
+method for source format would still be tidier.
 
 ### Worth reading before building the chrome
 

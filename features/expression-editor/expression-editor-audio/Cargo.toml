@@ -25,4 +25,7 @@ daw = { workspace = true, optional = true }
 # The round-trip and session tests render and drive the facade, so the
 # test build always has both.
 expression-editor-audio = { workspace = true, features = ["render", "daw"] }
-daw = { workspace = true }
+# The standalone backend, so the whole load → analyse → edit loop runs
+# through the real `AudioAccessors` trait with no DAW. That is the point
+# of the facade: one session, two hosts.
+daw = { workspace = true, features = ["standalone-audio"] }

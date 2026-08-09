@@ -1,0 +1,222 @@
+//! The whole path against the standalone backend, with no DAW running.
+//!
+//! Everything else in this crate tests the session against a fake host.
+//! This one uses a real one, reached through the same `daw` facade the
+//! REAPER build uses — which is the claim the facade exists to make and
+//! the only way to check it: one `AudioSession`, two hosts, no
+//! host-specific code anywhere in the editor.
+
+#![cfg(feature = "daw")]
+
+use daw::service::midi::Midi;
+use daw::service::{ItemRef, ProjectContext, TakeRef, Takes, TrackRef, Tracks};
+use daw::standalone::sync::Standalone;
+use expression_editor_audio::{AudioSession, AudioTakeLocation, TakeConfig};
+use expression_editor_core::doc::NoteId;
+use expression_editor_core::{Mode, Viewport};
+
+const SR: u32 = 44_100;
+
+fn midi_to_hz(m: f64) -> f64 {
+    440.0 * 2f64.powf((m - 69.0) / 12.0)
+}
+
+/// A mono 16-bit WAV of a sung note, with harmonics so YIN has a
+/// period to find.
+fn sung_wav(midi: f64, secs: f64) -> Vec<u8> {
+    let n = (SR as f64 * secs) as usize;
+    let mut d = Vec::with_capacity(44 + n * 2);
+    d.extend_from_slice(b"RIFF");
+    d.extend_from_slice(&(36 + n as u32 * 2).to_le_bytes());
+    d.extend_from_slice(b"WAVE");
+    d.extend_from_slice(b"fmt ");
+    d.extend_from_slice(&16u32.to_le_bytes());
+    d.extend_from_slice(&1u16.to_le_bytes());
+    d.extend_from_slice(&1u16.to_le_bytes());
+    d.extend_from_slice(&SR.to_le_bytes());
+    d.extend_from_slice(&(SR * 2).to_le_bytes());
+    d.extend_from_slice(&2u16.to_le_bytes());
+    d.extend_from_slice(&16u16.to_le_bytes());
+    d.extend_from_slice(b"data");
+    d.extend_from_slice(&(n as u32 * 2).to_le_bytes());
+    let mut phase = 0.0f64;
+    for i in 0..n {
+        let t = i as f64 / SR as f64;
+        phase += core::f64::consts::TAU * midi_to_hz(midi) / SR as f64;
+        let s = phase.sin() + 0.5 * (phase * 2.0).sin() + 0.3 * (phase * 3.0).sin();
+        let env = (t / 0.02).min(1.0) * ((secs - t) / 0.05).clamp(0.0, 1.0);
+        d.extend_from_slice(&((s * env * 0.25 * i16::MAX as f64) as i16).to_le_bytes());
+    }
+    d
+}
+
+struct TempDir(std::path::PathBuf);
+
+impl TempDir {
+    fn new() -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "ee-standalone-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        Self(dir)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// A standalone project holding one sung audio item.
+fn project(midi: f64, secs: f64) -> (Standalone, ItemRef, f64, TempDir) {
+    let dir = TempDir::new();
+    let path = dir.0.join("vox.wav");
+    std::fs::write(&path, sung_wav(midi, secs)).expect("write wav");
+
+    let daw = Standalone::new();
+    let guid = daw.seed_project(daw::service::ProjectInfo {
+        guid: "p".into(),
+        name: "p".into(),
+        path: String::new(),
+    });
+    let ctx = ProjectContext::Current;
+    let track = Tracks::add(&daw, ctx.clone(), "Vox", None).unwrap();
+    let loc =
+        Midi::create_midi_item(&daw, ctx.clone(), TrackRef::Guid(track), 0.0, secs).expect("item");
+    let item_guid = match &loc.item {
+        ItemRef::Guid(g) => g.clone(),
+        _ => panic!("expected a guid"),
+    };
+    let active =
+        Takes::get_active_take(&daw, ctx, ItemRef::Guid(item_guid.clone())).expect("take");
+
+    daw.write_project(&guid, |p| {
+        for tl in p.takes.values_mut() {
+            for t in tl.takes.iter_mut() {
+                if t.guid == active.guid {
+                    t.source_file_path = Some(path.to_string_lossy().into_owned());
+                    t.is_midi = false;
+                    t.source_type = daw::service::item::SourceType::Audio;
+                }
+            }
+        }
+    });
+
+    (daw, ItemRef::Guid(item_guid), secs, dir)
+}
+
+fn open(daw: &Standalone, item: ItemRef, secs: f64, volume: f64) -> Option<AudioSession> {
+    AudioSession::load(
+        daw,
+        AudioTakeLocation {
+            project: ProjectContext::Current,
+            item,
+            take: TakeRef::Active,
+        },
+        secs,
+        volume,
+        Viewport::new(900.0, 500.0),
+        TakeConfig::default(),
+    )
+}
+
+#[test]
+fn a_standalone_take_loads_into_the_audio_editor() {
+    // The claim: the editor's session, unchanged, over a host that is
+    // not REAPER.
+    let (daw, item, secs, _dir) = project(60.0, 1.0);
+    let s = open(&daw, item, secs, 1.0).expect("the take loaded");
+
+    assert_eq!(s.editor.mode, Mode::Audio);
+    assert!(!s.editor.doc.notes.is_empty(), "the vocal was analysed");
+    assert_eq!(
+        s.editor.doc.note(NoteId(1)).unwrap().row,
+        60,
+        "and came back at the pitch that was written to disk"
+    );
+    assert!(!s.editor.doc.peaks.is_empty(), "with its waveform");
+    assert!((s.sample_rate() - SR as f64).abs() < 1e-9);
+}
+
+#[test]
+fn the_pitch_is_recovered_across_the_range_through_the_backend() {
+    for midi in [50.0, 60.0, 72.0] {
+        let (daw, item, secs, _dir) = project(midi, 0.8);
+        let s = open(&daw, item, secs, 1.0).expect("loaded");
+        assert_eq!(
+            s.editor.doc.note(NoteId(1)).unwrap().row,
+            midi as i32,
+            "midi {midi} through the standalone accessor"
+        );
+    }
+}
+
+#[test]
+fn the_items_gain_reaches_the_analysis_through_the_facade() {
+    let (daw, item, secs, _dir) = project(60.0, 0.8);
+    let full = open(&daw, item.clone(), secs, 1.0).expect("loaded");
+    let quiet = open(&daw, item, secs, 0.25).expect("loaded");
+
+    let peak = |s: &AudioSession| s.source().iter().fold(0.0_f64, |a, b| a.max(b.abs()));
+    assert!((peak(&quiet) / peak(&full) - 0.25).abs() < 1e-9);
+}
+
+#[test]
+fn a_midi_take_is_declined_rather_than_opened_as_silence() {
+    // The item exists but has no audio source. An editor opened on it
+    // would show an empty roll and no reason why.
+    let daw = Standalone::new();
+    daw.seed_project(daw::service::ProjectInfo {
+        guid: "p".into(),
+        name: "p".into(),
+        path: String::new(),
+    });
+    let ctx = ProjectContext::Current;
+    let track = Tracks::add(&daw, ctx.clone(), "Keys", None).unwrap();
+    let loc =
+        Midi::create_midi_item(&daw, ctx.clone(), TrackRef::Guid(track), 0.0, 1.0).expect("item");
+
+    assert!(open(&daw, loc.item, 1.0, 1.0).is_none());
+}
+
+#[test]
+fn editing_and_re_analysing_behave_the_same_as_against_any_host() {
+    let (daw, item, secs, _dir) = project(60.0, 0.8);
+    let mut s = open(&daw, item, secs, 1.0).expect("loaded");
+
+    s.editor.doc.note_mut(NoteId(1)).unwrap().row = 64;
+    assert!(s.is_dirty());
+    s.commit();
+    assert!((s.analysis().pitch.blobs[0].center_midi - 64.0).abs() < 0.35);
+
+    s.reanalyze(TakeConfig::default());
+    assert!(!s.is_dirty());
+    assert_eq!(s.editor.doc.note(NoteId(1)).unwrap().row, 60);
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn a_standalone_take_renders_at_its_edited_pitch() {
+    // The full loop with a real backend at the front: read a file
+    // through the facade, analyse, transpose, render, and measure the
+    // audio that comes out.
+    let (daw, item, secs, _dir) = project(60.0, 1.0);
+    let mut s = open(&daw, item, secs, 1.0).expect("loaded");
+
+    s.editor.doc.note_mut(NoteId(1)).unwrap().row = 63;
+    let out = s.render();
+    assert_eq!(out.len(), s.source().len());
+
+    let again = expression_editor_audio::analyze_take(&out, SR as f64, TakeConfig::default());
+    assert!(!again.doc.notes.is_empty(), "the render still sings");
+    assert_eq!(
+        again.doc.note(NoteId(1)).unwrap().row,
+        63,
+        "and at the pitch it was moved to"
+    );
+}
