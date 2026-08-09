@@ -138,7 +138,7 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
     // The track colour is the row: REAPER tints the whole panel, not a
     // stripe on it.
     s.push_str(&rect(0.0, y, 296.0, 70.0, &tk.tint.css()));
-    s.push_str(&rect(0.0, y + 70.0, 296.0, 1.0, &t.chrome.surface.shade(-0.5).css()));
+    s.push_str(&rect(0.0, y + 70.0, 296.0, 1.0, &t.chrome.hardware.shade(-0.72).css()));
     s.push_str(&label(9.0, y + 44.0, 11.0, &t.chrome.hardware_mark.shade(0.1).css(), &n.to_string()));
 
     // Row one: arm, name, pan, meter, FX, IN.
@@ -157,14 +157,14 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
             },
         ),
     ));
-    s.push_str(&rect(50.0, y + 7.0, 130.0, 17.0, &t.chrome.hardware_edge.shade(0.28).css()));
+    s.push_str(&rect(50.0, y + 7.0, 130.0, 17.0, &t.chrome.hardware.shade(-0.40).css()));
     s.push_str(&label(56.0, y + 20.0, 11.5, &t.chrome.hardware_mark.shade(0.62).css(), tk.name));
     s.push_str(&at(
         186.0,
         y + 3.0,
         &render_svg(
             v::PanningKnob,
-            v::PanProps { position: -0.3, large: false, width: NONE.0, height: NONE.1 },
+            v::PanProps { position: -0.3, large: false, indicator: true, width: NONE.0, height: NONE.1 },
         ),
     ));
     s.push_str(&meter(214.0, y + 8.0, 5.0, 15.0, 0.7));
@@ -215,10 +215,10 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
             },
         ),
     ));
-    s.push_str(&rect(56.0, y + 34.0, 34.0, 17.0, &t.chrome.hardware_edge.shade(0.28).css()));
+    s.push_str(&rect(56.0, y + 34.0, 34.0, 17.0, &t.chrome.hardware.shade(-0.40).css()));
     s.push_str(&label(62.0, y + 47.0, 10.0, &t.chrome.hardware_mark.shade(-0.1).css(), "FX"));
     // The input combo: no component, so a rectangle and a caret.
-    s.push_str(&rect(94.0, y + 34.0, 186.0, 17.0, &t.chrome.hardware_edge.shade(0.28).css()));
+    s.push_str(&rect(94.0, y + 34.0, 186.0, 17.0, &t.chrome.hardware.shade(-0.40).css()));
     s.push_str(&label(100.0, y + 47.0, 11.0, &t.chrome.hardware_mark.shade(0.5).css(), "Input 1"));
     s.push_str(&format!(
         "<path d=\"M {} {} h 7 l -3.5 4 z\" fill=\"{}\"/>",
@@ -228,7 +228,7 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
     ));
 
     // Mute and solo live outside the tint, stacked.
-    s.push_str(&rect(296.0, y, 44.0, 71.0, &t.chrome.surface.shade(-0.18).css()));
+    s.push_str(&rect(296.0, y, 44.0, 71.0, &t.chrome.hardware.shade(-0.40).css()));
     s.push_str(&at(306.0, y + 4.0, &mute((21.0, 24.0), (1.0 / 24.0, 20.0 / 24.0), true, tk.muted)));
     s.push_str(&at(306.0, y + 36.0, &solo((21.0, 24.0), (1.0 / 24.0, 20.0 / 24.0), true, tk.soloed)));
     s
@@ -239,7 +239,7 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
     let g = |v: f32| t.chrome.hardware.shade(v);
     let mut s = String::new();
 
-    s.push_str(&rect(x, 0.0, 84.0, 212.0, &t.chrome.surface.shade(-0.18).css()));
+    s.push_str(&rect(x, 0.0, 84.0, 212.0, &t.chrome.hardware.shade(-0.40).css()));
     // REAPER tints the top of the strip with the track colour, behind the
     // pan row, and repeats it in the number band at the foot.
     s.push_str(&rect(x, 22.0, 84.0, 28.0, &tk.tint.css()));
@@ -273,7 +273,7 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
         26.0,
         &render_svg(
             v::PanningKnob,
-            v::PanProps { position: 0.2, large: false, width: NONE.0, height: NONE.1 },
+            v::PanProps { position: 0.0, large: false, indicator: true, width: NONE.0, height: NONE.1 },
         ),
     ));
     s.push_str(&at(
@@ -329,7 +329,12 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
         54.0,
         &render_svg(
             v::VolumeFaderTrack,
-            v::FaderCapProps { accent: None, width: Some(23), height: Some(104) },
+            v::FaderCapProps {
+                accent: None,
+                full: true,
+                width: Some(23),
+                height: Some(104),
+            },
         ),
     ));
     s.push_str(&at(
@@ -337,7 +342,7 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
         84.0,
         &render_svg(
             v::VolumeFaderCap,
-            v::FaderCapProps { accent: None, width: Some(27), height: Some(53) },
+            v::FaderCapProps { accent: None, full: false, width: Some(27), height: Some(53) },
         ),
     ));
     s.push_str(&meter(x + 49.0, 54.0, 5.0, 104.0, 0.62));
@@ -389,12 +394,16 @@ fn main() {
     ];
 
     let (w, h) = (760.0f32, 600.0f32);
-    let mut body = rect(0.0, 0.0, w, h, &t.chrome.surface.css());
+    // #333333, sampled from the arrange background. `surface` is
+    // #3e3e3e, which is the *toolbar*, and using it made every
+    // ground in this panel eleven levels light.
+    let ground = t.chrome.hardware.shade(-0.19);
+    let mut body = rect(0.0, 0.0, w, h, &ground.css());
     for (i, tk) in tracks.iter().enumerate() {
         body.push_str(&track_row(i as f32 * 71.0, i as u32 + 1, tk));
     }
     // The transport, in the bar under the track panel, as REAPER has it.
-    body.push_str(&rect(0.0, 360.0, w, 34.0, &t.chrome.surface.shade(-0.12).css()));
+    body.push_str(&rect(0.0, 360.0, w, 34.0, &t.chrome.hardware.shade(-0.38).css()));
     for (i, glyph) in [
         v::TransportGlyph::Home,
         v::TransportGlyph::End,
@@ -437,11 +446,11 @@ fn main() {
             },
         ),
     ));
-    body.push_str(&rect(270.0, 365.0, 190.0, 24.0, &t.chrome.hardware.shade(-0.60).css()));
+    body.push_str(&rect(270.0, 365.0, 190.0, 24.0, &t.chrome.hardware.shade(-0.40).css()));
     body.push_str(&label(280.0, 381.0, 13.0, &t.chrome.hardware_mark.shade(0.5).css(), "1.1.00 / 0:00.000"));
 
     // And the mixer along the bottom.
-    body.push_str(&rect(0.0, 400.0, w, 222.0, &t.chrome.surface.shade(-0.30).css()));
+    body.push_str(&rect(0.0, 400.0, w, 222.0, &ground.css()));
     for (i, tk) in tracks.iter().enumerate() {
         let strip = mixer_strip(i as f32 * 86.0 + 4.0, i as u32 + 1, tk);
         body.push_str(&format!("<g transform=\"translate(0 400)\">{strip}</g>"));

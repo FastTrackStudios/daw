@@ -869,6 +869,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         "pan_knob_small" | "width_knob_small" => render_svg(
             v::PanningKnob,
             v::PanProps {
+                indicator: false,
                 position: 0.0,
                 large: false,
                 width: n.0,
@@ -878,6 +879,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         "pan_knob_large" | "width_knob_large" => render_svg(
             v::PanningKnob,
             v::PanProps {
+                indicator: false,
                 position: 0.0,
                 large: true,
                 width: n.0,
@@ -888,6 +890,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::VolumeFaderCap,
             v::FaderCapProps {
                 accent: None,
+                full: false,
                 width: n.0,
                 height: n.1,
             },
@@ -896,6 +899,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::VolumeFaderTrack,
             v::FaderCapProps {
                 accent: None,
+                full: false,
                 width: n.0,
                 height: n.1,
             },

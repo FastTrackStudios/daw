@@ -400,6 +400,7 @@ fn main() {
                         render_svg(
                             vector::PanningKnob,
                             vector::PanProps {
+                                indicator: false,
                                 position: *p,
                                 large: *large,
                                 width: None,
@@ -432,6 +433,7 @@ fn main() {
                     vector::VolumeFaderCap,
                     vector::FaderCapProps {
                         accent: None,
+                        full: false,
                         width: None,
                         height: None,
                     },
@@ -450,6 +452,7 @@ fn main() {
                     vector::VolumeFaderTrack,
                     vector::FaderCapProps {
                         accent: None,
+                        full: false,
                         width: None,
                         height: None,
                     },

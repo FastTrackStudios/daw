@@ -207,6 +207,7 @@ fn main() {
             &render_svg(
                 PanningKnob,
                 PanProps {
+                    indicator: false,
                     position: -0.7,
                     large: false,
                     width: None,
@@ -220,6 +221,7 @@ fn main() {
             &render_svg(
                 PanningKnob,
                 PanProps {
+                    indicator: false,
                     position: 0.0,
                     large: false,
                     width: None,
@@ -234,6 +236,7 @@ fn main() {
                 VolumeFaderCap,
                 FaderCapProps {
                     accent: None,
+                    full: false,
                     width: None,
                     height: None,
                 },

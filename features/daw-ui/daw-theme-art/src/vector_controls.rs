@@ -1646,6 +1646,20 @@ pub struct PanProps {
     pub position: f32,
     #[props(default)]
     pub large: bool,
+    /// Draw the pointer REAPER draws for itself.
+    ///
+    /// The theme's `*_pan_knob_*` bitmaps have no pointer in them at all —
+    /// they are a disc and a cap, and REAPER paints the indicator line
+    /// over the top from the parameter's value. A panel that is not
+    /// REAPER has to draw it, so it is a prop rather than part of the art:
+    /// off, the exported PNGs stay exactly as they are audited; on, the
+    /// knob reads as a knob.
+    ///
+    /// With the pointer on, the cap stays centred and the *pointer*
+    /// carries the value — which is what REAPER does. The cap only slides
+    /// when there is no pointer to do the work.
+    #[props(default)]
+    pub indicator: bool,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -1694,7 +1708,16 @@ pub fn PanningKnob(props: PanProps) -> Element {
     // At rest the cap is dead centre — the knob shows pan by *sliding* it
     // across, not by pointing at a rim, so centre has to read as centre.
     let pos = props.position.clamp(-1.0, 1.0);
-    let dx = pos * (r - cap_r - 1.0);
+    let dx = if props.indicator { 0.0 } else { pos * (r - cap_r - 1.0) };
+    // The pointer sweeps 135° each way from straight up, which is the
+    // throw REAPER gives a pan control. Measured off a rendered knob: two
+    // pixels wide on a 24-pixel body, running from just inside the rim
+    // down to the cap, peaking at `#b3b3b3`.
+    let sweep = pos * 135.0;
+    let point_w = vw * 0.083;
+    let point_top = cy - r + vh * 0.045;
+    let point_bot = cy - cap_r - vh * 0.01;
+    let point = t.chrome.hardware_mark.shade(0.11);
 
     // All neutral. The cap was `text_dim`, a light *blue*-grey — right for
     // a label on a panel, wrong for moulded plastic, where it reads as a
@@ -1756,6 +1779,15 @@ pub fn PanningKnob(props: PanProps) -> Element {
                 cx: "{cx + dx}", cy: "{cap_cy + 0.9}", r: "{cap_r + 1.1}",
                 fill: "url(#pancapdrop)",
             }
+            if props.indicator {
+                rect {
+                    x: "{cx - point_w * 0.5}", y: "{point_top}",
+                    width: "{point_w}", height: "{point_bot - point_top}",
+                    rx: "{point_w * 0.5}",
+                    fill: "{point.css()}",
+                    transform: "rotate({sweep} {cx} {cy})",
+                }
+            }
             circle {
                 cx: "{cx + dx}", cy: "{cap_cy}", r: "{cap_r}",
                 fill: "url(#pancap)",
@@ -1771,6 +1803,17 @@ pub struct FaderCapProps {
     /// Track accent, which the cap picks up in REAPER's colour variants.
     #[props(default)]
     pub accent: Option<Color>,
+    /// Run the rail the whole height rather than the source's middle band.
+    ///
+    /// `mcp_volbg` is a nine-slice: its line occupies rows 14..41 of 55
+    /// because that is the stretchy middle, and REAPER repeats that band
+    /// to whatever length the fader needs. Scaled naively to a taller box
+    /// the line scales with it and leaves bare gaps top and bottom, which
+    /// is what a panel drawing the component at full fader height gets.
+    /// Off for export, so the exported PNG keeps the geometry its markers
+    /// describe.
+    #[props(default)]
+    pub full: bool,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -1947,6 +1990,11 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
 #[component]
 pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
     let (vw, vh) = (23.0f32, 55.0f32);
+    let (rail_y, rail_h) = if props.full {
+        (0.0, vh)
+    } else {
+        (vh * 14.0 / 55.0, vh * 27.0 / 55.0)
+    };
     rsx! {
         svg {
             width: "{props.width.unwrap_or(23)}",
@@ -1957,8 +2005,10 @@ pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
             // what gives the source its soft shoulders at 60 either side
             // of a 215 core rather than one hard column.
             rect {
-                x: "{vw * 10.8 / 23.0}", y: "{vh * 14.0 / 55.0}",
-                width: "{vw * 1.4 / 23.0}", height: "{vh * 27.0 / 55.0}",
+                x: "{vw * 10.8 / 23.0}",
+                y: "{rail_y}",
+                width: "{vw * 1.4 / 23.0}",
+                height: "{rail_h}",
                 fill: "#000000", fill_opacity: "0.85",
             }
         }
@@ -4271,7 +4321,7 @@ mod tests {
             ("mcp_fx_norm", render_svg(FxButton, FxProps { family: Default::default(), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, width: n.0, height: n.1 })),
+            ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, full: false, width: n.0, height: n.1 })),
         ];
 
         for (name, svg) in &cases {
@@ -4378,6 +4428,7 @@ mod tests {
                 render_svg(
                     PanningKnob,
                     PanProps {
+                        indicator: false,
                         position: -0.5,
                         large: true,
                         width: w,
@@ -4388,6 +4439,7 @@ mod tests {
                     VolumeFaderCap,
                     FaderCapProps {
                         accent: None,
+                        full: false,
                         width: w,
                         height: h,
                     },
@@ -4396,6 +4448,7 @@ mod tests {
                     VolumeFaderTrack,
                     FaderCapProps {
                         accent: None,
+                        full: false,
                         width: w,
                         height: h,
                     },
@@ -4462,6 +4515,7 @@ mod tests {
         let a = render_svg(
             PanningKnob,
             PanProps {
+                indicator: false,
                 position: -1.0,
                 large: false,
                 width: None,
@@ -4471,6 +4525,7 @@ mod tests {
         let b = render_svg(
             PanningKnob,
             PanProps {
+                indicator: false,
                 position: -0.99,
                 large: false,
                 width: None,
@@ -4480,6 +4535,7 @@ mod tests {
         let c = render_svg(
             PanningKnob,
             PanProps {
+                indicator: false,
                 position: 1.0,
                 large: false,
                 width: None,
@@ -4496,6 +4552,7 @@ mod tests {
             let svg = render_svg(
                 PanningKnob,
                 PanProps {
+                    indicator: false,
                     position: p,
                     large: false,
                     width: None,
@@ -4620,6 +4677,7 @@ mod tests {
                 VolumeFaderCap,
                 FaderCapProps {
                     accent: None,
+                    full: false,
                     width: None,
                     height: Some(h),
                 },
@@ -4636,6 +4694,7 @@ mod tests {
             VolumeFaderCap,
             FaderCapProps {
                 accent: Some(green),
+                full: false,
                 width: None,
                 height: None,
             },
@@ -4661,6 +4720,7 @@ mod tests {
             VolumeFaderCap,
             FaderCapProps {
                 accent: None,
+                full: false,
                 width: None,
                 height: None,
             },
