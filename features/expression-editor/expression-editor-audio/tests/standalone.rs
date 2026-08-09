@@ -396,3 +396,180 @@ fn a_pitch_edit_renders_without_baking_the_timing_in() {
         n.start
     );
 }
+
+// ── dynamics: lanes summed into the take volume envelope ─────────────
+
+#[cfg(feature = "render")]
+#[test]
+fn the_lane_sum_lands_on_the_takes_volume_envelope() {
+    use daw::service::automation::Automation;
+    use daw::service::{EnvelopeLocation, EnvelopeRef, TakeEnvelopeKind};
+    use expression_editor_audio::dynamics::GainPoint;
+    use expression_editor_audio::lanes::take_volume_to_db;
+    use expression_editor_audio::{DynamicsLane, Lanes};
+
+    let (daw, item, secs, _dir) = project(60.0, 1.0);
+    let s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
+    let frames = s.analysis().frames.frames.len();
+
+    // Two lanes, known values, so the sum is checkable.
+    let mut lanes = Lanes::from_dynamics(&Default::default(), frames);
+    lanes.set(
+        DynamicsLane::Gate,
+        (0..frames).map(|f| GainPoint { frame: f, db: -3.0 }).collect(),
+    );
+    lanes.set(
+        DynamicsLane::Sibilance,
+        (0..frames).map(|f| GainPoint { frame: f, db: -5.0 }).collect(),
+    );
+
+    let written = s.write_dynamics(&daw, &lanes, &Default::default(), false);
+    assert!(written.points >= 2, "got {}", written.points);
+    assert!(
+        written.points < frames / 4,
+        "thinned: {} points for {frames} frames",
+        written.points
+    );
+
+    let env = EnvelopeLocation {
+        track: daw::service::TrackRef::Index(0),
+        envelope: EnvelopeRef::Take {
+            item_guid: match &item {
+                daw::service::ItemRef::Guid(g) => g.clone(),
+                _ => panic!(),
+            },
+            take_guid: String::new(),
+            kind: TakeEnvelopeKind::Volume,
+        },
+    };
+    let points = daw.points(ProjectContext::Current, env);
+    assert_eq!(points.len(), written.points);
+    // -3 and -5 make -8, and the envelope holds a linear multiplier.
+    let db = take_volume_to_db(points[0].value);
+    assert!((db + 8.0).abs() < 0.3, "wanted -8 dB, envelope holds {db}");
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn switching_every_lane_off_removes_the_envelope_rather_than_flattening_it() {
+    use daw::service::automation::Automation;
+    use daw::service::{EnvelopeLocation, EnvelopeRef, TakeEnvelopeKind};
+    use expression_editor_audio::dynamics::GainPoint;
+    use expression_editor_audio::{DynamicsLane, Lanes};
+
+    let (daw, item, secs, _dir) = project(60.0, 0.8);
+    let s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
+    let frames = s.analysis().frames.frames.len();
+    let env = EnvelopeLocation {
+        track: daw::service::TrackRef::Index(0),
+        envelope: EnvelopeRef::Take {
+            item_guid: match &item {
+                daw::service::ItemRef::Guid(g) => g.clone(),
+                _ => panic!(),
+            },
+            take_guid: String::new(),
+            kind: TakeEnvelopeKind::Volume,
+        },
+    };
+
+    let mut lanes = Lanes::from_dynamics(&Default::default(), frames);
+    lanes.set(
+        DynamicsLane::Gate,
+        (0..frames).map(|f| GainPoint { frame: f, db: -4.0 }).collect(),
+    );
+    s.write_dynamics(&daw, &lanes, &Default::default(), false);
+    assert!(!daw.points(ProjectContext::Current, env.clone()).is_empty());
+
+    // Off. Not flat at unity — gone.
+    lanes.clear(DynamicsLane::Gate);
+    let written = s.write_dynamics(&daw, &lanes, &Default::default(), false);
+    assert_eq!(written.points, 0);
+    assert!(
+        daw.points(ProjectContext::Current, env).is_empty(),
+        "dead automation is the user's problem to delete, so do not leave any"
+    );
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn rewriting_replaces_the_envelope_instead_of_stacking_on_it() {
+    use daw::service::automation::Automation;
+    use daw::service::{EnvelopeLocation, EnvelopeRef, TakeEnvelopeKind};
+    use expression_editor_audio::dynamics::GainPoint;
+    use expression_editor_audio::lanes::take_volume_to_db;
+    use expression_editor_audio::{DynamicsLane, Lanes};
+
+    let (daw, item, secs, _dir) = project(60.0, 0.8);
+    let s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
+    let frames = s.analysis().frames.frames.len();
+    let env = EnvelopeLocation {
+        track: daw::service::TrackRef::Index(0),
+        envelope: EnvelopeRef::Take {
+            item_guid: match &item {
+                daw::service::ItemRef::Guid(g) => g.clone(),
+                _ => panic!(),
+            },
+            take_guid: String::new(),
+            kind: TakeEnvelopeKind::Volume,
+        },
+    };
+
+    let mut lanes = Lanes::from_dynamics(&Default::default(), frames);
+    let write = |db: f64, lanes: &mut Lanes| {
+        lanes.set(
+            DynamicsLane::Gate,
+            (0..frames).map(|f| GainPoint { frame: f, db }).collect(),
+        );
+        s.write_dynamics(&daw, lanes, &Default::default(), false)
+    };
+
+    write(-4.0, &mut lanes);
+    write(-4.0, &mut lanes);
+    let points = daw.points(ProjectContext::Current, env);
+    let db = take_volume_to_db(points[0].value);
+    assert!(
+        (db + 4.0).abs() < 0.3,
+        "the envelope is derived, so writing twice is still -4 dB, got {db}"
+    );
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn detections_are_marked_on_the_item_even_when_nothing_is_ducked() {
+    use daw::service::Takes;
+    use expression_editor_audio::dynamics::{Detection, Dynamics, Region};
+    use expression_editor_audio::Lanes;
+
+    let (daw, item, secs, _dir) = project(60.0, 0.8);
+    let s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
+
+    // A found breath and a found sibilant, neither being reduced.
+    let dynamics = Dynamics {
+        regions: vec![
+            Region {
+                kind: Detection::Breath,
+                start: 10,
+                end: 20,
+                peak: 0.01,
+            },
+            Region {
+                kind: Detection::Sibilance,
+                start: 40,
+                end: 50,
+                peak: 0.2,
+            },
+        ],
+        ..Default::default()
+    };
+    let lanes = Lanes::default();
+
+    let written = s.write_dynamics(&daw, &lanes, &dynamics, true);
+    assert_eq!(written.points, 0, "nothing was ducked");
+    assert_eq!(written.markers, 2);
+
+    let markers = daw.get_take_markers(ProjectContext::Current, item, TakeRef::Active);
+    assert_eq!(markers.len(), 2);
+    let names: Vec<&str> = markers.iter().map(|m| m.name.as_str()).collect();
+    assert!(names.contains(&"breath"));
+    assert!(names.contains(&"sibilance"));
+}

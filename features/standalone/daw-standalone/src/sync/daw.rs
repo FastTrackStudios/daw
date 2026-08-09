@@ -269,6 +269,12 @@ pub struct ProjectState {
     pub stretch_markers: HashMap<String, Vec<daw_proto::StretchMarker>>,
     /// Per-take stretch algorithm.
     pub stretch_modes: HashMap<String, daw_proto::StretchMode>,
+    /// Take markers per take guid, kept sorted by source position.
+    ///
+    /// Annotations on the audio itself — a breath here, a sibilant
+    /// there, a rating on a comp take. Anchored in *source* time so
+    /// they stay on the sound when the item is trimmed or moved.
+    pub take_markers: HashMap<String, Vec<daw_proto::TakeMarker>>,
     /// Per-take channel-pressure (mono aftertouch) events.
     pub midi_channel_pressures: HashMap<String, Vec<daw_proto::midi::MidiChannelPressure>>,
     /// Per-take poly-pressure (per-note aftertouch) events.
@@ -357,6 +363,7 @@ impl ProjectState {
             midi_sysex: HashMap::new(),
             stretch_markers: HashMap::new(),
             stretch_modes: HashMap::new(),
+            take_markers: HashMap::new(),
             midi_channel_pressures: HashMap::new(),
             midi_poly_pressures: HashMap::new(),
             midi_note_expressions: HashMap::new(),
