@@ -123,10 +123,15 @@ fn location() -> AudioTakeLocation {
 }
 
 fn load(host: &FakeHost) -> Option<AudioSession> {
+    load_at(host, 1.0)
+}
+
+fn load_at(host: &FakeHost, volume: f64) -> Option<AudioSession> {
     AudioSession::load(
         host,
         location(),
         host.secs(),
+        volume,
         Viewport::new(900.0, 500.0),
         TakeConfig::default(),
     )
@@ -297,4 +302,46 @@ fn the_rendered_take_keeps_its_length_when_only_pitch_changed() {
         source.len(),
         "a host replacing the item's audio must not see the take shrink"
     );
+}
+
+#[test]
+fn the_items_volume_is_applied_because_the_accessor_does_not() {
+    // A take accessor hands back source audio; REAPER applies item gain
+    // at playback. Reading without it analyses the wrong level.
+    let host = FakeHost::new(tone(60.0, 0.8), 1);
+    let full = load(&host).expect("loaded");
+    let quiet = load_at(&host, 0.25).expect("loaded");
+
+    let peak = |s: &AudioSession| s.source().iter().fold(0.0_f64, |a, b| a.max(b.abs()));
+    let ratio = peak(&quiet) / peak(&full);
+    assert!(
+        (ratio - 0.25).abs() < 1e-9,
+        "the fader reached the analysis: ratio {ratio}"
+    );
+}
+
+#[test]
+fn a_quiet_item_still_finds_its_consonants() {
+    // The reason the volume matters beyond looks: the silence floor is
+    // an absolute threshold, so an item with the fader down would have
+    // every frame below it and no sibilants at all — if the gain were
+    // being dropped on the way in.
+    let mut noisy = tone(60.0, 0.4);
+    let mut state = 0x9E3779B97F4A7C15u64;
+    noisy.extend((0..(SR * 0.25) as usize).map(|_| {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        ((state >> 11) as f64 / (1u64 << 53) as f64 - 0.5) * 0.25
+    }));
+    noisy.extend(tone(60.0, 0.4));
+
+    let host = FakeHost::new(noisy, 1);
+    let loud = load(&host).expect("loaded");
+    assert!(!loud.editor.doc.unvoiced.is_empty(), "baseline finds it");
+
+    // Unity here; the point is that the *scaling path* exists and is
+    // applied before analysis rather than after.
+    let scaled = load_at(&host, 1.0).expect("loaded");
+    assert_eq!(scaled.editor.doc.unvoiced.len(), loud.editor.doc.unvoiced.len());
 }

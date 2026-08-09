@@ -48,12 +48,14 @@ pub struct AudioSession {
     baseline: expression_editor_core::ExpressionDoc,
 }
 
-/// How much audio one read pulls.
+/// How much audio one read pulls, in samples per channel.
 ///
 /// Accessors are read in chunks because a five-minute stereo take at 48
 /// kHz is a third of a gigabyte in `f64`, and asking for it in one call
-/// makes the host allocate all of it before returning any.
-const CHUNK_SAMPLES: u32 = 1 << 18;
+/// makes the host allocate all of it before returning any. 64 k frames
+/// is what SneakPeak uses against the same REAPER API, and there is no
+/// reason to differ from a number already proven against real takes.
+const CHUNK_SAMPLES: u32 = 1 << 16;
 
 impl AudioSession {
     /// Load the first selected item as audio.
@@ -73,14 +75,29 @@ impl AudioSession {
             item: ItemRef::Guid(item.guid.clone()),
             take: TakeRef::Active,
         };
-        Self::load(daw, location, item.length.as_seconds(), viewport, cfg)
+        Self::load(
+            daw,
+            location,
+            item.length.as_seconds(),
+            item.volume,
+            viewport,
+            cfg,
+        )
     }
 
     /// Load a specific take.
+    ///
+    /// `volume` is the item's gain, which a take accessor does **not**
+    /// apply — it hands back the source audio. Analysing without it
+    /// would read a quiet item at the wrong level, which matters for
+    /// more than looks: the silence floor separating consonants from
+    /// gaps is an absolute threshold, so a fader-down item would have
+    /// every frame below it and no sibilants at all.
     pub fn load<D: AudioAccessors>(
         daw: &D,
         location: AudioTakeLocation,
         length_secs: f64,
+        volume: f64,
         viewport: Viewport,
         cfg: TakeConfig,
     ) -> Option<Self> {
@@ -92,9 +109,14 @@ impl AudioSession {
         let read = read_all(daw, &accessor, length_secs);
         daw.destroy_accessor(&accessor);
 
-        let source = to_mono(&read.samples, read.channels.max(1) as usize);
+        let mut source = to_mono(&read.samples, read.channels.max(1) as usize);
         if source.is_empty() {
             return None;
+        }
+        if volume != 1.0 && volume > 0.0 {
+            for s in &mut source {
+                *s *= volume;
+            }
         }
         let analysis = analyze_take(&source, read.sample_rate, cfg);
 
