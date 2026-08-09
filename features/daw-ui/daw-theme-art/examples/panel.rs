@@ -283,7 +283,17 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     let stretch_h = bot_y - stretch_y;
 
     s.push_str(&rect(x, 0.0, W, h, &g(-0.40).css()));
-    s.push_str(&rect(x, pan_y, W, stretch_y - pan_y, &tk.tint.css()));
+    // 14 rows, measured — *not* the 28 that `mcp.custom.bg` computes.
+    //
+    // That expression is `pan_sec` extended by `in_sec`'s height, which
+    // at this height is 6 + 22, and the shot plainly shows the band
+    // running 33..47. I have not worked out which term collapses it and
+    // am not going to guess: the measurement is what the panel has to
+    // match, and drawing the full 28 put the band's foot fourteen rows
+    // low, so the record arm met it in the wrong place and everything
+    // below read as misaligned.
+    const TINT_H: f32 = 14.0;
+    s.push_str(&rect(x, pan_y, W, TINT_H, &tk.tint.css()));
     // `mcp.custom.bg_hl_t` — one row of `hl_color` along the tint's top
     // edge. REAPER prints `b0526b` there against the band's `a8415c`, and
     // without it the band starts flat where the source starts lit.
@@ -373,7 +383,7 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     // land in there. Three rows higher and the tint cut across the
     // vertical sides, which reads as two upright lines coming out of the
     // colour instead of a shape emerging from it.
-    let arm_y = pan_y + 12.3;
+    let arm_y = 45.0;
     s.push_str(&at(
         x + COL - 36.0 * 0.486,
         arm_y,
