@@ -596,6 +596,12 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 },
             )
         };
+        let furniture = |part, cell| {
+            render_svg(
+                v::EnvcpPanel,
+                v::EnvcpPanelProps { part, cell, width: n.0, height: n.1, at },
+            )
+        };
         let hit = match name {
             "envcp_learn" => Some(plate(G::Learn, false)),
             "envcp_learn_on" => Some(plate(G::Learn, true)),
@@ -615,6 +621,10 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     at,
                 },
             )),
+            "envcp_faderbg" => Some(furniture(v::EnvcpPart::FaderTrack, (19.0, 24.0))),
+            "custom_envcp_arm_bg" => Some(furniture(v::EnvcpPart::ArmField, (22.0, 22.0))),
+            "envcp_knob_small" => Some(furniture(v::EnvcpPart::Knob, (25.0, 26.0))),
+            "envcp_fader" => Some(furniture(v::EnvcpPart::FaderCap, (23.0, 29.0))),
             "envcp_bypass_off" | "envcp_bypass_on" => Some(render_svg(
                 v::EnvcpBypassButton,
                 v::EnvcpBypassProps {
@@ -941,6 +951,9 @@ fn states(name: &str) -> usize {
         "fxlist_norm" | "fxlist_byp" | "fxlist_off" | "fxlist_empty"
         | "sendlist_norm" | "sendlist_mute" | "sendlist_empty"
         | "sendlist_midihw" => 1,
+        // Named for the panel it customises, not with the panel's prefix,
+        // so the `envcp_` shortcut above never sees it.
+        "custom_envcp_arm_bg" => 1,
         "mainbg" | "mainbgsel" | "bg" | "bgsel" | "extmixbg" | "extmixbgsel"
         | "mainextmixbg" | "mainextmixbgsel" | "namebg" | "main_namebg"
         | "main_namebg_sel" | "iconbg" | "iconbgsel" | "idxbg" | "idxbg_sel" => 1,

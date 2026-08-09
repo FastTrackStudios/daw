@@ -3932,6 +3932,176 @@ pub fn EnvcpBypassButton(props: EnvcpBypassProps) -> Element {
     }
 }
 
+/// A piece of the envelope panel's furniture.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum EnvcpPart {
+    /// The fader's track — a slab with a notch at its middle.
+    #[default]
+    FaderTrack,
+    /// The field behind the arm button: a half-disc, flat on its right.
+    ArmField,
+    /// The envelope knob's body.
+    Knob,
+    /// The fader's cap — the one piece here with a drop shadow.
+    FaderCap,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct EnvcpPanelProps {
+    #[props(default)]
+    pub part: EnvcpPart,
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The envelope panel's furniture — track, knob, cap and arm field.
+///
+/// Three of these round only their *right* corners and leave the left
+/// square, which is not a style choice: they butt against the panel's
+/// left edge, so REAPER never shows the corner that would be square.
+#[component]
+pub fn EnvcpPanel(props: EnvcpPanelProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let g = |v: f32| t.chrome.hardware.shade(v);
+    let slab = g(-0.56); // #1c1c1c
+
+    // The cap's body is a cylinder lit from its left of centre: the
+    // colour ramps #222222 up to #797979 at x9, hits an opaque
+    // grey/blue/grey triple at the middle, then falls back to #222222.
+    // Its *alpha* ramps too, 0.745 to 0.816, independently of the
+    // colour — so the stops carry both.
+    let cap: Vec<(f32, &str, f32)> = vec![
+        (0.000, "#222222", 0.745),
+        (0.029, "#222222", 0.745),
+        (0.088, "#3f3f3f", 0.757),
+        (0.147, "#464646", 0.765),
+        (0.206, "#4a4a4a", 0.749),
+        (0.265, "#575757", 0.757),
+        (0.324, "#656565", 0.769),
+        (0.382, "#797979", 0.804),
+        (0.618, "#626262", 0.773),
+        (0.676, "#5c5c5c", 0.757),
+        (0.735, "#5b5b5b", 0.765),
+        (0.794, "#585858", 0.773),
+        (0.853, "#595959", 0.804),
+        (0.912, "#545454", 0.816),
+        (0.971, "#222222", 0.745),
+        (1.000, "#222222", 0.745),
+    ];
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                linearGradient { id: "envcap", x1: "0", y1: "0", x2: "1", y2: "0",
+                    for (i, (at, hex, a)) in cap.iter().enumerate() {
+                        stop {
+                            key: "c{i}", offset: "{at}",
+                            stop_color: "{hex}", stop_opacity: "{a}",
+                        }
+                    }
+                }
+                // The knob's face falls fast for its first three rows and
+                // then slowly: 97 at the top, 81 three rows down, 63 at
+                // the bottom. One straight ramp between the ends misses
+                // the highlight by fifteen levels.
+                linearGradient { id: "envknob", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{g(0.208).css()}" }
+                    stop { offset: "0.11", stop_color: "{g(0.177).css()}" }
+                    stop { offset: "0.26", stop_color: "{g(0.094).css()}" }
+                    stop { offset: "1", stop_color: "{g(-0.032).css()}" }
+                }
+                radialGradient { id: "envshadow",
+                    cx: "11.5", cy: "20.5", r: "9.5",
+                    gradient_units: "userSpaceOnUse",
+                    stop { offset: "0.45", stop_color: "#000000", stop_opacity: "0.30" }
+                    stop { offset: "1", stop_color: "#000000", stop_opacity: "0" }
+                }
+                linearGradient { id: "envcapgloss", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "#ffffff", stop_opacity: "0.13" }
+                    stop { offset: "1", stop_color: "#ffffff", stop_opacity: "0" }
+                }
+            }
+            match props.part {
+                EnvcpPart::FaderTrack => rsx! {
+                    // Square on the left, rounded on the right, with a
+                    // hard black notch at the middle row.
+                    path {
+                        d: "M 1 2 H 15.5 A 2.5 2.5 0 0 1 18 4.5 V 19.5
+                            A 2.5 2.5 0 0 1 15.5 22 H 1 Z",
+                        fill: "{slab.css()}",
+                    }
+                    rect { x: "6", y: "11", width: "7", height: "1", fill: "#000000" }
+                },
+                EnvcpPart::ArmField => rsx! {
+                    // A disc of r 10 about (11, 11) with a square block
+                    // filling out its right half — *not* a semicircle
+                    // whose chord is the right edge. Written that way the
+                    // two endpoints sat on x 21, which puts the circle's
+                    // centre there too and bulges the arc off the canvas.
+                    path {
+                        d: "M 11 1 A 10 10 0 0 0 11 21 H 21 V 1 Z",
+                        fill: "{slab.css()}",
+                    }
+                },
+                EnvcpPart::Knob => rsx! {
+                    // The slab behind the knob is not a rounded rect: its
+                    // right edge is an arc concentric with the knob, 0.9
+                    // outside the rim. It reaches x 23.9 at the middle
+                    // row and x 17.7 at the top, which no corner radius
+                    // does — same rect-plus-disc as the arm field.
+                    rect { x: "1", y: "2", width: "12.5", height: "20",
+                        fill: "{slab.css()}" }
+                    circle { cx: "13.5", cy: "12", r: "10.25", fill: "{slab.css()}" }
+                    circle { cx: "13.5", cy: "12", r: "9.5", fill: "{g(-0.60).css()}" }
+                    circle { cx: "13.5", cy: "12", r: "8.2", fill: "url(#envknob)" }
+                },
+                EnvcpPart::FaderCap => rsx! {
+                    // The shadow goes first and the cap covers all of it
+                    // that is not below the cap — which is how the source
+                    // has it, and cheaper than a blur resvg may not run.
+                    ellipse { cx: "11.5", cy: "20.5", rx: "9.2", ry: "6.8",
+                        fill: "url(#envshadow)" }
+                    rect { x: "2", y: "10", width: "1", height: "12",
+                        fill: "#000000", fill_opacity: "0.125" }
+                    rect { x: "20", y: "10", width: "1", height: "12",
+                        fill: "#000000", fill_opacity: "0.125" }
+                    // Top and bottom row are rims, not body: the source's
+                    // row 5 is a flat `#262626` at 0.66 and its row 21 a
+                    // flat `#222222` at 0.745, both of them a good sixty
+                    // levels below the cylinder they cap.
+                    rect { x: "3", y: "5", width: "17", height: "1", rx: "1",
+                        fill: "#262626", fill_opacity: "0.66" }
+                    rect {
+                        x: "3", y: "6", width: "17", height: "15",
+                        fill: "url(#envcap)",
+                    }
+                    rect { x: "3", y: "21", width: "17", height: "1", rx: "1",
+                        fill: "#222222", fill_opacity: "0.745" }
+                    rect { x: "3", y: "6", width: "17", height: "2.5",
+                        fill: "url(#envcapgloss)" }
+                    rect { x: "10", y: "6", width: "1", height: "15",
+                        fill: "{g(0.10).css()}" }
+                    rect { x: "12", y: "6", width: "1", height: "15",
+                        fill: "{g(0.10).css()}" }
+                    // The one saturated mark on the whole panel.
+                    rect { x: "11", y: "6", width: "1", height: "15",
+                        fill: "#16a9fe" }
+                },
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
