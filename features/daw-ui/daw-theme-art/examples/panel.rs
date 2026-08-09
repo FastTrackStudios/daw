@@ -123,14 +123,24 @@ fn solo(cell: (f32, f32), body: (f32, f32), track: bool, on: bool) -> String {
     )
 }
 
-/// A meter. **No component draws this yet** — the one thing in the panel
-/// still assembled out of rectangles, and the largest single gap.
-fn meter(x: f32, y: f32, w: f32, h: f32, level: f32) -> String {
-    let t = daw_theme::Theme::default();
-    let lit = h * level;
-    let mut s = rect(x, y, w, h, "#101010");
-    s.push_str(&rect(x, y + h - lit, w, lit, &t.signal.meter_safe.css()));
-    s
+/// A meter, placed. `Meter` draws the bars, the well and the scale.
+fn meter(x: f32, y: f32, w: f32, h: f32, levels: Vec<f32>, marks: &[&str]) -> String {
+    at(
+        x,
+        y,
+        &render_svg(
+            v::Meter,
+            v::MeterProps {
+                levels,
+                cell: (w, h),
+                scale: !marks.is_empty(),
+                marks: marks.iter().map(|m| m.to_string()).collect(),
+                width: Some(w as u32),
+                height: Some(h as u32),
+                at: v::Interaction::Normal,
+            },
+        ),
+    )
 }
 
 fn track_row(y: f32, n: u32, tk: &Track) -> String {
@@ -172,9 +182,7 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
             v::PanProps { position: 0.0, large: false, indicator: true, width: NONE.0, height: NONE.1 },
         ),
     ));
-    s.push_str(&meter(214.0, y + 8.0, 5.0, 15.0, 0.7));
-    s.push_str(&meter(221.0, y + 8.0, 5.0, 15.0, 0.5));
-    s.push_str(&meter(228.0, y + 8.0, 5.0, 15.0, 0.6));
+    s.push_str(&meter(214.0, y + 8.0, 20.0, 15.0, vec![0.7, 0.5, 0.6], &[]));
     s.push_str(&at(
         242.0,
         y + 6.0,
@@ -424,24 +432,14 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     // *scale as well as the bars*, which is why the numbers have nowhere
     // else to go. Fader 28..49, button column 55..76.
     let scale_h = stretch_h - 8.0;
-    s.push_str(&label(
-        x + 3.0,
-        stretch_y + 12.0,
-        8.0,
-        &t.chrome.hardware_mark.shade(-0.35).css(),
-        "-inf",
+    s.push_str(&meter(
+        x + 4.0,
+        stretch_y + 4.0,
+        24.0,
+        scale_h,
+        vec![0.0, 0.0],
+        &["-inf", "-6-", "-18-", "-30-", "-42-", "-54-"],
     ));
-    for (i, db) in ["-6-", "-18-", "-30-", "-42-", "-54-"].iter().enumerate() {
-        s.push_str(&label(
-            x + 3.0,
-            stretch_y + 30.0 + i as f32 * (scale_h - 34.0) / 4.0,
-            8.0,
-            &t.chrome.hardware_mark.shade(-0.35).css(),
-            db,
-        ));
-    }
-    s.push_str(&meter(x + 18.0, stretch_y + 4.0, 4.0, scale_h, 0.0));
-    s.push_str(&meter(x + 23.0, stretch_y + 4.0, 4.0, scale_h, 0.0));
     s.push_str(&at(
         x + 28.0,
         stretch_y + 4.0,

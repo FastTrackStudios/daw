@@ -4116,6 +4116,113 @@ pub fn EnvcpBypassButton(props: EnvcpBypassProps) -> Element {
     }
 }
 
+// ── meters ──────────────────────────────────────────────────────────────
+
+#[derive(Props, Clone, PartialEq)]
+pub struct MeterProps {
+    /// One value per bar, 0 at silence and 1 at the top of the scale.
+    pub levels: Vec<f32>,
+    /// Cell size. `mcp.meter` is `[4 4 22 -4]` of the stretch section and
+    /// two wider again in wide mode, so 24 by whatever is left.
+    pub cell: (f32, f32),
+    /// Print the dB scale down the left of the meter.
+    ///
+    /// It belongs *inside* the meter and not beside it: `mcp.meter` is one
+    /// rect covering both, and REAPER draws the numbers as part of the
+    /// widget. Laid out as a separate column the bars had nowhere to go
+    /// but under the button stack.
+    #[props(default = true)]
+    pub scale: bool,
+    /// The scale's marks, top to bottom.
+    #[props(default)]
+    pub marks: Vec<String>,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// A level meter — bars, and the scale that belongs to them.
+///
+/// The one control here REAPER draws entirely itself: there is no
+/// `mcp_meter*` bitmap to measure, only `mcp.meter.scale.color.*` and the
+/// VU division in `rtconfig`. So this is the theme's own reading of it
+/// rather than a trace, and the two places it departs from REAPER are
+/// deliberate: the bars sit on a dark well, which REAPER leaves bare, and
+/// the ladder runs green to amber to red rather than one colour lit and
+/// unlit.
+#[component]
+pub fn Meter(props: MeterProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    // The scale takes four-fifths of the block and the bars share the
+    // rest, which is why REAPER's meters are as thin as they are: "-18-"
+    // at nine pixels is most of a 24-wide `mcp.meter`. At two-thirds the
+    // marks ran off their own left edge and rendered as "18-".
+    let bars_x = if props.scale { vw * 0.80 } else { 0.0 };
+    let bars_w = vw - bars_x;
+    let n = props.levels.len().max(1) as f32;
+    let gap = 1.0f32;
+    let bar_w = ((bars_w - gap * (n - 1.0)) / n).max(1.0);
+    let text = t.chrome.hardware_mark.shade(-0.35);
+    let well = t.chrome.hardware.shade(-0.72);
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                // Green until it is loud, amber approaching the top, red
+                // at it — read bottom-up, so the stops are reversed.
+                linearGradient { id: "mtr", x1: "0", y1: "1", x2: "0", y2: "0",
+                    stop { offset: "0", stop_color: "{t.signal.meter_safe.css()}" }
+                    stop { offset: "0.62", stop_color: "{t.signal.meter_safe.css()}" }
+                    stop { offset: "0.82", stop_color: "{t.signal.meter_warn.css()}" }
+                    stop { offset: "1", stop_color: "{t.signal.meter_danger.css()}" }
+                }
+            }
+            if props.scale {
+                for (i, mark) in props.marks.iter().enumerate() {
+                    text {
+                        key: "m{i}",
+                        x: "{bars_x - 2.0}",
+                        y: "{vh * (i as f32 + 0.5) / props.marks.len().max(1) as f32}",
+                        text_anchor: "end", dominant_baseline: "central",
+                        font_family: "Fira Sans, DejaVu Sans, sans-serif",
+                        font_size: "{(vw * 0.36).min(8.6)}",
+                        fill: "{text.css()}",
+                        "{mark}"
+                    }
+                }
+            }
+            for (i, level) in props.levels.iter().enumerate() {
+                {
+                    let x = bars_x + i as f32 * (bar_w + gap);
+                    let lit = vh * level.clamp(0.0, 1.0);
+                    rsx! {
+                        g { key: "b{i}",
+                            rect {
+                                x: "{x}", y: "0", width: "{bar_w}", height: "{vh}",
+                                rx: "{bar_w * 0.25}",
+                                fill: "{well.css()}",
+                            }
+                            rect {
+                                x: "{x}", y: "{vh - lit}", width: "{bar_w}", height: "{lit}",
+                                rx: "{bar_w * 0.25}",
+                                fill: "url(#mtr)",
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// A piece of the envelope panel's furniture.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum EnvcpPart {
