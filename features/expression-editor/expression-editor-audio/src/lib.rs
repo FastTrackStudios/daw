@@ -39,6 +39,8 @@ use tune_dsp::model::{NoteBlob, PitchDoc, WarpMarker};
 
 pub mod align;
 pub mod analyze;
+pub mod dynamics;
+pub mod frames;
 #[cfg(feature = "daw")]
 pub mod retime;
 #[cfg(feature = "daw")]
@@ -47,6 +49,8 @@ pub mod spans;
 
 pub use align::{align, AlignConfig, Alignment};
 pub use analyze::{analyze_take, to_mono, Analysis, TakeConfig};
+pub use dynamics::{Detection, Dynamics, DynamicsConfig, GainPoint, Region};
+pub use frames::{frame_features, FrameFeature};
 #[cfg(feature = "daw")]
 pub use retime::{stretch_markers, TakePlacement};
 #[cfg(feature = "daw")]
