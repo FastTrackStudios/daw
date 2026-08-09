@@ -124,10 +124,14 @@ pub fn load_selected() -> bool {
 
 /// Write the panel's document back to the take it came from.
 ///
-/// MIDI is rewritten in place — the take *is* the document. Audio is
-/// rendered to a new file beside the original and the take repointed at
-/// it, because a recording is the only copy of a performance and the
-/// resynthesis is lossy. See `AudioSession::write_back`.
+/// MIDI is rewritten in place — the take *is* the document.
+///
+/// Audio splits by what changed. Timing always goes to the host as
+/// stretch markers, losslessly and reversibly. Only a pitch, formant or
+/// gain edit renders, and then to a new file beside the original rather
+/// than over it, because a recording is the only copy of a performance
+/// and the resynthesis is lossy. A take that was only retimed is never
+/// resynthesised at all.
 pub fn write_back() -> bool {
     let reaper = daw::reaper::Reaper;
     let mut guard = session().lock().unwrap();
@@ -148,8 +152,18 @@ pub fn write_back() -> bool {
             true
         }
         Loaded::Audio(s) => match s.write_back(&reaper) {
-            Ok(path) => {
-                tracing::info!(%path, "rendered audio take");
+            Ok(expression_editor_audio::WriteOutcome::Unchanged) => {
+                tracing::info!("no edits to write");
+                true
+            }
+            // The good case: the host carries the warp and the
+            // recording is untouched.
+            Ok(expression_editor_audio::WriteOutcome::Retimed { markers }) => {
+                tracing::info!(markers, "retimed take with stretch markers");
+                true
+            }
+            Ok(expression_editor_audio::WriteOutcome::Rendered { path, markers }) => {
+                tracing::info!(%path, markers, "rendered audio take");
                 true
             }
             Err(e) => {

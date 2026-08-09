@@ -11,7 +11,8 @@
 use daw::service::midi::Midi;
 use daw::service::{ItemRef, ProjectContext, TakeRef, Takes, TrackRef, Tracks};
 use daw::standalone::sync::Standalone;
-use expression_editor_audio::{AudioSession, AudioTakeLocation, TakeConfig};
+use expression_editor_audio::{AudioSession, AudioTakeLocation, TakeConfig, WriteOutcome};
+use daw::service::StretchMarkers;
 use expression_editor_core::doc::NoteId;
 use expression_editor_core::{Mode, Viewport};
 
@@ -234,7 +235,9 @@ fn writing_back_renders_beside_the_original_and_never_over_it() {
 
     let mut s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
     s.editor.doc.note_mut(NoteId(1)).unwrap().row = 64;
-    let written = s.write_back(&daw).expect("wrote");
+    let WriteOutcome::Rendered { path: written, .. } = s.write_back(&daw).expect("wrote") else {
+        panic!("a pitch edit must render");
+    };
 
     assert_ne!(written, original.to_string_lossy(), "a new file");
     assert!(std::path::Path::new(&written).exists());
@@ -265,11 +268,16 @@ fn a_second_write_makes_the_next_numbered_render() {
     let mut s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
 
     s.editor.doc.note_mut(NoteId(1)).unwrap().row = 62;
-    let first = s.write_back(&daw).expect("wrote");
+    let WriteOutcome::Rendered { path: first, .. } = s.write_back(&daw).expect("wrote") else {
+        panic!("expected a render");
+    };
     assert!(!s.is_dirty(), "the document now describes what is on disk");
 
     s.editor.doc.note_mut(NoteId(1)).unwrap().row = 65;
-    let second = s.write_back(&daw).expect("wrote again");
+    let WriteOutcome::Rendered { path: second, .. } = s.write_back(&daw).expect("wrote again")
+    else {
+        panic!("expected a render");
+    };
 
     assert_ne!(first, second, "a second edit is a new version, not a clobber");
     assert!(std::path::Path::new(&first).exists(), "and the first survives");
@@ -282,6 +290,8 @@ fn a_second_write_makes_the_next_numbered_render() {
 fn writing_back_a_take_with_no_source_says_so() {
     let (daw, item, secs, _dir) = project(60.0, 0.5);
     let mut s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
+    // An edit, so the write is not short-circuited as unchanged.
+    s.editor.doc.note_mut(NoteId(1)).unwrap().row = 62;
 
     // Drop the source out from under the session.
     daw.write_project("p", |p| {
@@ -295,5 +305,94 @@ fn writing_back_a_take_with_no_source_says_so() {
     assert_eq!(
         s.write_back(&daw),
         Err(expression_editor_audio::WriteError::NoSource)
+    );
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn a_timing_only_edit_never_touches_the_audio() {
+    // The whole point of routing timing through the host: moving a note
+    // must not cost a generation of resynthesis, and must leave the
+    // recording exactly where it was.
+    let (daw, item, secs, dir) = project(60.0, 1.0);
+    let original = dir.0.join("vox.wav");
+    let before = std::fs::read(&original).expect("source");
+
+    let mut s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
+    let n = s.editor.doc.note_mut(NoteId(1)).unwrap();
+    n.start += 10.0;
+    n.end += 10.0;
+
+    let out = s.write_back(&daw).expect("wrote");
+    match out {
+        WriteOutcome::Retimed { markers } => assert!(markers >= 2, "got {markers}"),
+        other => panic!("timing alone must not render, got {other:?}"),
+    }
+
+    assert_eq!(
+        std::fs::read(&original).unwrap(),
+        before,
+        "the recording is untouched"
+    );
+    // No new render appeared beside it.
+    let renders: Vec<_> = std::fs::read_dir(&dir.0)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().contains("-fts-"))
+        .collect();
+    assert!(renders.is_empty(), "no audio was written");
+
+    // And the host has the warp.
+    let markers = daw.get_stretch_markers(ProjectContext::Current, item, TakeRef::Active);
+    assert!(!markers.is_empty());
+    for pair in markers.windows(2) {
+        assert!(pair[1].position > pair[0].position, "sorted, no repeats");
+    }
+}
+
+#[test]
+fn an_unchanged_take_writes_nothing_at_all() {
+    let (daw, item, secs, _dir) = project(60.0, 0.6);
+    let mut s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
+    assert_eq!(s.write_back(&daw).expect("wrote"), WriteOutcome::Unchanged);
+    assert!(
+        daw.get_stretch_markers(ProjectContext::Current, item, TakeRef::Active)
+            .is_empty(),
+        "opening a take must not give it a warp"
+    );
+}
+
+#[cfg(feature = "render")]
+#[test]
+fn a_pitch_edit_renders_without_baking_the_timing_in() {
+    // Both kinds at once. The render must carry the pitch and *not* the
+    // warp, or the timing lands twice — once in the audio and again
+    // from the markers on top.
+    let (daw, item, secs, _dir) = project(60.0, 1.0);
+    let mut s = open(&daw, item.clone(), secs, 1.0).expect("loaded");
+    {
+        let n = s.editor.doc.note_mut(NoteId(1)).unwrap();
+        n.row = 64;
+        n.start += 8.0;
+        n.end += 8.0;
+    }
+
+    let out = s.write_back(&daw).expect("wrote");
+    let WriteOutcome::Rendered { path, markers } = out else {
+        panic!("a pitch edit renders");
+    };
+    assert!(markers >= 2, "and the timing still went to the host");
+
+    // The rendered audio sits where it was analysed, not where it was
+    // moved to — the markers do the moving.
+    let rendered = std::fs::read(&path).expect("render exists");
+    assert!(rendered.len() > 44);
+    let reopened = open(&daw, item, secs, 1.0).expect("reload");
+    let n = reopened.editor.doc.note(NoteId(1)).unwrap();
+    assert_eq!(n.row, 64, "the pitch edit is in the audio");
+    assert!(
+        n.start < 5.0,
+        "and the note is still at its analysed position, got {}",
+        n.start
     );
 }

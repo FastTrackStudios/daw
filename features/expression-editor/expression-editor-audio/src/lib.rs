@@ -40,13 +40,17 @@ use tune_dsp::model::{NoteBlob, PitchDoc, WarpMarker};
 pub mod align;
 pub mod analyze;
 #[cfg(feature = "daw")]
+pub mod retime;
+#[cfg(feature = "daw")]
 pub mod session;
 pub mod spans;
 
 pub use align::{align, AlignConfig, Alignment};
 pub use analyze::{analyze_take, to_mono, Analysis, TakeConfig};
 #[cfg(feature = "daw")]
-pub use session::{AudioSession, AudioTakeLocation, WriteError};
+pub use retime::{stretch_markers, TakePlacement};
+#[cfg(feature = "daw")]
+pub use session::{AudioSession, AudioTakeLocation, WriteError, WriteOutcome};
 pub use spans::{unvoiced_spans, Span};
 
 /// How a per-note trim is stored in a lane.
@@ -69,6 +73,22 @@ const CENTER_SAMPLES: usize = 128;
 /// only a fallback for a tick-based document, which the audio path does
 /// not produce.
 const REFERENCE_BPM: f64 = 120.0;
+
+/// The formant trim a note carries, in semitones.
+pub fn formant_of(note: &Note, t: f64) -> f64 {
+    from_lane(
+        note.timbre.sample(t, Lane::Timbre.default_value()),
+        FORMANT_RANGE,
+    )
+}
+
+/// The gain trim a note carries, in dB.
+pub fn gain_of(note: &Note, t: f64) -> f64 {
+    from_lane(
+        note.pressure.sample(t, Lane::Pressure.default_value()),
+        GAIN_RANGE_DB,
+    )
+}
 
 /// Encode a signed value into a 0..1 lane position.
 fn to_lane(v: f64, range: f64) -> f64 {

@@ -152,9 +152,36 @@ impl AudioSession {
     }
 
     /// Reconcile the analysis with the edited document.
+    ///
+    /// Pitch only. Timing is *not* folded into the analysis, because it
+    /// leaves as stretch markers and a render that also applied the
+    /// warp would apply the timing twice — once baked in, once by the
+    /// markers on top. See [`crate::retime`].
     pub fn commit(&mut self) {
         self.analysis.doc = self.editor.doc.clone();
-        self.analysis.commit();
+        crate::apply_to(&self.analysis.doc, &mut self.analysis.pitch);
+        self.analysis.pitch.markers.clear();
+    }
+
+    /// Where the take sits, for converting document time to marker
+    /// coordinates.
+    pub fn placement<D: daw::service::Takes + daw::service::item::Items>(
+        &self,
+        daw: &D,
+    ) -> crate::TakePlacement {
+        let item = daw.get_item(self.location.project.clone(), self.location.item.clone());
+        let takes = daw.get_takes(self.location.project.clone(), self.location.item.clone());
+        let take = match &self.location.take {
+            TakeRef::Active => takes.iter().find(|t| t.is_active),
+            TakeRef::Index(i) => takes.get(*i as usize),
+            TakeRef::Guid(g) => takes.iter().find(|t| t.guid == *g),
+        };
+        crate::TakePlacement {
+            item_position: item.map(|i| i.position.as_seconds()).unwrap_or(0.0),
+            start_offset: take.map(|t| t.start_offset.as_seconds()).unwrap_or(0.0),
+            play_rate: take.map(|t| t.play_rate).unwrap_or(1.0),
+            frame_rate: self.analysis.frame_rate,
+        }
     }
 
     /// Render the edited take from the **original** recording.
@@ -236,6 +263,20 @@ fn read_all<D: AudioAccessors>(daw: &D, accessor: &str, length_secs: f64) -> Rea
     }
 }
 
+/// What a write-back did.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WriteOutcome {
+    /// Nothing had changed.
+    Unchanged,
+    /// Only timing changed, so the audio was left alone entirely and
+    /// the warp went to the host as stretch markers. The good case: no
+    /// resynthesis, nothing to undo but a marker list.
+    Retimed { markers: usize },
+    /// Pitch changed, so the take was resynthesised. Any timing still
+    /// went to markers rather than being baked into the render.
+    Rendered { path: String, markers: usize },
+}
+
 /// Why a write-back could not complete.
 #[derive(Clone, Debug, PartialEq)]
 pub enum WriteError {
@@ -272,12 +313,44 @@ impl AudioSession {
     /// pointing it back.
     ///
     /// Returns the path written.
-    pub fn write_back<D: daw::service::Takes>(&mut self, daw: &D) -> Result<String, WriteError> {
-        let source = self
-            .current_source(daw)
-            .ok_or(WriteError::NoSource)?;
-        let out = next_render_path(&source);
+    pub fn write_back<D>(&mut self, daw: &D) -> Result<WriteOutcome, WriteError>
+    where
+        D: daw::service::Takes
+            + daw::service::item::Items
+            + daw::service::StretchMarkers,
+    {
+        if !self.is_dirty() {
+            return Ok(WriteOutcome::Unchanged);
+        }
+        // Asked before `commit`, which rewrites the blobs to match the
+        // document and would make the answer always "no".
+        let needs_render =
+            crate::retime::pitch_changed(&self.baseline, &self.editor.doc);
+        self.commit();
 
+        // Timing first, and always as markers.
+        let placement = self.placement(daw);
+        let markers = crate::stretch_markers(&self.analysis.doc, &self.analysis.pitch, placement);
+        let location = daw::service::StretchTakeRef::new(
+            self.location.project.clone(),
+            self.location.item.clone(),
+            self.location.take.clone(),
+        );
+        daw.set_stretch_markers(location, markers.clone())
+            .map_err(|e| WriteError::Host(format!("{e:?}")))?;
+
+        // A take whose pitch is untouched is never resynthesised: that
+        // would cost a generation of quality for an edit the host can
+        // do losslessly.
+        if !needs_render {
+            self.baseline = self.editor.doc.clone();
+            return Ok(WriteOutcome::Retimed {
+                markers: markers.len(),
+            });
+        }
+
+        let source = self.current_source(daw).ok_or(WriteError::NoSource)?;
+        let out = next_render_path(&source);
         let audio = self.render();
         write_wav_f32(&out, &audio, self.sample_rate)
             .map_err(|e| WriteError::Io(e.to_string()))?;
@@ -293,7 +366,10 @@ impl AudioSession {
         // The document now describes what is on disk, so a second write
         // with no further edits is correctly a no-op.
         self.baseline = self.editor.doc.clone();
-        Ok(out)
+        Ok(WriteOutcome::Rendered {
+            path: out,
+            markers: markers.len(),
+        })
     }
 }
 
