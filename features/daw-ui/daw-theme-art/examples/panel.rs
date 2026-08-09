@@ -284,6 +284,10 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
 
     s.push_str(&rect(x, 0.0, W, h, &g(-0.40).css()));
     s.push_str(&rect(x, pan_y, W, stretch_y - pan_y, &tk.tint.css()));
+    // `mcp.custom.bg_hl_t` — one row of `hl_color` along the tint's top
+    // edge. REAPER prints `b0526b` there against the band's `a8415c`, and
+    // without it the band starts flat where the source starts lit.
+    s.push_str(&rect(x, pan_y, W, 1.0, &tk.tint.shade(0.13).css()));
 
     // fx_sec holds the FX button and its bypass, not a list: `mcp.fx` is
     // [7 7 43 20] of the section and `mcp.fxbyp` [0 0 29 20] butted onto
@@ -335,8 +339,8 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     // 9.5 and the arm at 49.5 — which also lines the arm up with the
     // monitor, mute and solo column beneath it, whose centre is 66.5.
     s.push_str(&at(
-        x + 9.5,
-        pan_y + 1.0,
+        x + 10.0,
+        pan_y + 0.5,
         &render_svg(
             v::PanningKnob,
             v::PanProps {
