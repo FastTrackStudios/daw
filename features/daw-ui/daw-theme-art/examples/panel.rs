@@ -239,64 +239,86 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
     s
 }
 
-fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
+fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     let t = daw_theme::Theme::default();
     let g = |v: f32| t.chrome.hardware.shade(v);
     let mut s = String::new();
 
-    // Sections straight out of `rtconfig.txt`, at scale 1 in wide mode:
+    // Sections from `rtconfig.txt`, at scale 1 in wide mode, and they are
+    // a *function of height* — which is the thing to know about this
+    // panel. `mcp_w` is 86 and `mcp_h` 371, but:
     //
-    //     mcp_w 86   mcp_h 371
-    //     fx_sec      [0   0  86  33]
-    //     pan_sec     [0  33  86  50]
-    //     in_sec      [0  83  86  54]
-    //     stretch_sec [0 137  86 187]     h - fx - pan - in - bot
-    //     bot_sec     [0 324  86  47]     label_sec 26 of it
+    //     fx_sec  33 always
+    //     pan_sec  h < hide_pan   (260) ?  6 : 33
+    //     in_sec   h < hide_input (350) ? 22 : h < hide_inputFX (400) ? 42 : 54
+    //     bot_sec 47, of which label_sec is 26
+    //     stretch  whatever is left
     //
-    // and `mcp.custom.bg` — the track tint — is `pan_sec` extended by
-    // `in_sec`'s height, so it covers 33..137 rather than the 29 rows the
-    // screenshot shows. That screenshot is the *compressed* layout: its
-    // mixer is short enough to trip `h<hide_pan_s` and `h<hide_input_s`,
-    // which collapse pan_sec to 6 and in_sec to 22. Matching the picture
-    // would have meant copying a degraded layout, so this is the full one.
+    // and the track tint, `mcp.custom.bg`, is `pan_sec` extended by
+    // `in_sec`'s height. At REAPER's docked 235 that is 6 + 22 = 28 rows,
+    // which is exactly the band the screenshot shows — the mixer there is
+    // in its compressed form, not its full one.
     const W: f32 = 86.0;
-    const FX_H: f32 = 33.0;
-    const PAN_Y: f32 = 33.0;
-    const IN_Y: f32 = 83.0;
-    const STRETCH_Y: f32 = 137.0;
-    const BOT_Y: f32 = 324.0;
-    const H: f32 = 371.0;
+    let fx_h = 33.0f32;
+    let pan_h = if h < 260.0 { 6.0 } else { 33.0 };
+    let in_h = if h < 350.0 {
+        22.0
+    } else if h < 400.0 {
+        42.0
+    } else {
+        54.0
+    };
+    let bot_h = 47.0f32;
+    let pan_y = fx_h;
+    let stretch_y = fx_h + pan_h + in_h;
+    let bot_y = h - bot_h;
+    let stretch_h = bot_y - stretch_y;
 
-    s.push_str(&rect(x, 0.0, W, H, &g(-0.40).css()));
-    s.push_str(&rect(x, PAN_Y, W, STRETCH_Y - PAN_Y, &tk.tint.css()));
+    s.push_str(&rect(x, 0.0, W, h, &g(-0.40).css()));
+    s.push_str(&rect(x, pan_y, W, stretch_y - pan_y, &tk.tint.css()));
 
-    // fx_sec: the FX list, inset by `mcp.fxlist.margin` [2 0 2 0].
+    // fx_sec holds the FX button and its bypass, not a list: `mcp.fx` is
+    // [7 7 43 20] of the section and `mcp.fxbyp` [0 0 29 20] butted onto
+    // its right. Drawn as a list strip this read as one long empty pill.
     s.push_str(&at(
-        x + 2.0,
-        8.0,
+        x + 7.0,
+        7.0,
         &render_svg(
-            v::ListStrip,
-            v::ListStripProps {
-                pills: vec![(g(0.09), g(-0.10), 1.0)],
-                cell: (38.0, 19.0),
-                rows: (2.0, 17.0),
-                pill: 15.0,
-                inset: 1.0,
-                edge: None,
-                width: Some((W - 4.0) as u32),
-                height: Some(19),
+            v::FxControl,
+            v::FxControlProps {
+                part: v::FxPart::Label,
+                chain: v::FxChain::Empty,
+                bypass: v::FxBypass::Empty,
+                family: v::FxFamily::Mixer,
+                width: Some(43),
+                height: Some(20),
                 at: v::Interaction::Normal,
             },
         ),
     ));
-    let _ = FX_H;
-
-    // pan_sec: `mcp.pan` is [33 4 20 20] within it. The knob's art is
-    // 24 by 25, so it is placed on that box's centre rather than its
-    // corner.
     s.push_str(&at(
-        x + 31.0,
-        PAN_Y + 4.0,
+        x + 50.0,
+        7.0,
+        &render_svg(
+            v::FxControl,
+            v::FxControlProps {
+                part: v::FxPart::Toggle,
+                chain: v::FxChain::Empty,
+                bypass: v::FxBypass::Empty,
+                family: v::FxFamily::Mixer,
+                width: Some(29),
+                height: Some(20),
+                at: v::Interaction::Normal,
+            },
+        ),
+    ));
+
+    // Compressed, `mcp.pan` is re-anchored off `mcp.recmode` and both it
+    // and the record arm sit inside the band — pan at its left, arm at
+    // its right, which is where the shot has them.
+    s.push_str(&at(
+        x + 4.0,
+        pan_y + 1.0,
         &render_svg(
             v::PanningKnob,
             v::PanProps {
@@ -308,78 +330,12 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
             },
         ),
     ));
-
-    // in_sec: the input FX button and the input's own label row.
+    // The arm sits low enough that its housing straddles the foot of the
+    // tint — which is what makes it read as blending into the dark below
+    // rather than as a plate laid on the colour.
     s.push_str(&at(
-        x + 6.0,
-        IN_Y + 6.0,
-        &render_svg(
-            v::FxInButton,
-            v::FxInProps {
-                loaded: n % 2 == 0,
-                cell: (29.0, 20.0),
-                width: NONE.0,
-                height: NONE.1,
-                at: v::Interaction::Normal,
-            },
-        ),
-    ));
-    s.push_str(&rect(x + 40.0, IN_Y + 6.0, 40.0, 17.0, &g(-0.55).css()));
-    s.push_str(&label(
-        x + 44.0,
-        IN_Y + 18.0,
-        9.0,
-        &t.chrome.hardware_mark.shade(-0.05).css(),
-        "In 1",
-    ));
-
-    // stretch_sec, across: `mcp.meter` is [4 4 22 -4] of it and two wider
-    // in wide mode, so the meter block is x 4..28 — and that block is the
-    // *scale as well as the bars*, which is why the numbers have nowhere
-    // else to go. The fader then runs 28..49 and the button column 55..76,
-    // both read off the shot. Packed any tighter than this the cap, the
-    // monitor and the mute button sit on top of one another.
-    let scale_h = BOT_Y - STRETCH_Y - 8.0;
-    for (i, db) in ["-6", "-18", "-30", "-42", "-54"].iter().enumerate() {
-        s.push_str(&label(
-            x + 3.0,
-            STRETCH_Y + 34.0 + i as f32 * 30.0,
-            8.0,
-            &t.chrome.hardware_mark.shade(-0.35).css(),
-            db,
-        ));
-    }
-    s.push_str(&meter(x + 18.0, STRETCH_Y + 4.0, 4.0, scale_h, 0.62));
-    s.push_str(&meter(x + 23.0, STRETCH_Y + 4.0, 4.0, scale_h, 0.55));
-    s.push_str(&at(
-        x + 28.0,
-        STRETCH_Y + 4.0,
-        &render_svg(
-            v::VolumeFaderTrack,
-            v::FaderCapProps {
-                accent: None,
-                full: true,
-                width: Some(21),
-                height: Some(scale_h as u32),
-            },
-        ),
-    ));
-    s.push_str(&at(
-        x + 28.0,
-        STRETCH_Y + 26.0,
-        &render_svg(
-            v::VolumeFaderCap,
-            v::FaderCapProps { accent: None, full: false, width: Some(21), height: Some(44) },
-        ),
-    ));
-
-    // `mcp.recarm` 36x24, then recmon, mute, solo, io and env stacked
-    // under it at 21 wide and roughly 20 apart — the order and the pitch
-    // `rtconfig` gives, each one anchored to the last.
-    let col = x + 52.0;
-    s.push_str(&at(
-        col - 4.0,
-        STRETCH_Y + 8.0,
+        x + 46.0,
+        pan_y + 9.0,
         &render_svg(
             v::RecordArmButton,
             v::RecordArmProps {
@@ -392,9 +348,58 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
             },
         ),
     ));
+
+    // stretch_sec, across: `mcp.meter` is [4 4 22 -4] and two wider in
+    // wide mode, so the meter block is x 4..28 — and that block is the
+    // *scale as well as the bars*, which is why the numbers have nowhere
+    // else to go. Fader 28..49, button column 55..76.
+    let scale_h = stretch_h - 8.0;
+    s.push_str(&label(
+        x + 3.0,
+        stretch_y + 12.0,
+        8.0,
+        &t.chrome.hardware_mark.shade(-0.35).css(),
+        "-inf",
+    ));
+    for (i, db) in ["-6-", "-18-", "-30-", "-42-", "-54-"].iter().enumerate() {
+        s.push_str(&label(
+            x + 3.0,
+            stretch_y + 30.0 + i as f32 * (scale_h - 34.0) / 4.0,
+            8.0,
+            &t.chrome.hardware_mark.shade(-0.35).css(),
+            db,
+        ));
+    }
+    s.push_str(&meter(x + 18.0, stretch_y + 4.0, 4.0, scale_h, 0.0));
+    s.push_str(&meter(x + 23.0, stretch_y + 4.0, 4.0, scale_h, 0.0));
     s.push_str(&at(
-        col + 4.0,
-        STRETCH_Y + 34.0,
+        x + 28.0,
+        stretch_y + 4.0,
+        &render_svg(
+            v::VolumeFaderTrack,
+            v::FaderCapProps {
+                accent: None,
+                full: true,
+                width: Some(21),
+                height: Some(scale_h as u32),
+            },
+        ),
+    ));
+    s.push_str(&at(
+        x + 28.0,
+        stretch_y + 22.0,
+        &render_svg(
+            v::VolumeFaderCap,
+            v::FaderCapProps { accent: None, full: false, width: Some(21), height: Some(44) },
+        ),
+    ));
+
+    // recmon, mute, solo, io, env — the order and the pitch `rtconfig`
+    // gives, each anchored to the last, running down the right.
+    let col = x + 56.0;
+    s.push_str(&at(
+        col,
+        stretch_y + 2.0,
         &render_svg(
             v::InputMonitorIndicator,
             v::MonitoringProps {
@@ -407,11 +412,11 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
             },
         ),
     ));
-    s.push_str(&at(col + 4.0, STRETCH_Y + 56.0, &mute((21.0, 20.0), (0.0, 1.0), false, tk.muted)));
-    s.push_str(&at(col + 4.0, STRETCH_Y + 78.0, &solo((21.0, 20.0), (0.0, 1.0), false, tk.soloed)));
+    s.push_str(&at(col, stretch_y + 24.0, &mute((21.0, 20.0), (0.0, 1.0), false, tk.muted)));
+    s.push_str(&at(col, stretch_y + 46.0, &solo((21.0, 20.0), (0.0, 1.0), false, tk.soloed)));
     s.push_str(&at(
-        col + 3.0,
-        STRETCH_Y + 102.0,
+        col - 1.0,
+        stretch_y + 72.0,
         &render_svg(
             v::RoutingButton,
             v::RoutingProps {
@@ -426,31 +431,17 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
             },
         ),
     ));
-    s.push_str(&at(
-        col + 4.0,
-        STRETCH_Y + 136.0,
-        &render_svg(
-            v::EnvelopeButton,
-            v::EnvelopeProps {
-                mode: v::EnvelopeMode::Off,
-                cell: (21.0, 22.0),
-                width: NONE.0,
-                height: NONE.1,
-                at: v::Interaction::Normal,
-            },
-        ),
-    ));
 
     // bot_sec: the name over the number band.
     s.push_str(&label(
         x + 26.0,
-        BOT_Y + 17.0,
+        bot_y + 17.0,
         11.0,
         &t.chrome.hardware_mark.shade(0.5).css(),
         tk.name,
     ));
-    s.push_str(&rect(x + 1.0, BOT_Y + 26.0, W - 2.0, 20.0, &tk.tint.css()));
-    s.push_str(&label(x + 40.0, BOT_Y + 40.0, 11.0, "#f0f0f0", &n.to_string()));
+    s.push_str(&rect(x + 1.0, bot_y + 26.0, W - 2.0, 20.0, &tk.tint.css()));
+    s.push_str(&label(x + 40.0, bot_y + 40.0, 11.0, "#f0f0f0", &n.to_string()));
     s
 }
 
@@ -465,7 +456,7 @@ fn main() {
         Track { name: "Gtr", tint: hex(0x2e, 0x8e, 0xc4), armed: false, muted: false, soloed: false },
     ];
 
-    let (w, h) = (760.0f32, 800.0f32);
+    let (w, h) = (760.0f32, 660.0f32);
     // #333333, sampled from the arrange background. `surface` is
     // #3e3e3e, which is the *toolbar*, and using it made every
     // ground in this panel eleven levels light.
@@ -522,9 +513,10 @@ fn main() {
     body.push_str(&label(280.0, 381.0, 13.0, &t.chrome.hardware_mark.shade(0.5).css(), "1.1.00 / 0:00.000"));
 
     // And the mixer along the bottom.
-    body.push_str(&rect(0.0, 400.0, w, 380.0, &ground.css()));
+    body.push_str(&rect(0.0, 400.0, w, 245.0, &ground.css()));
     for (i, tk) in tracks.iter().enumerate() {
-        let strip = mixer_strip(i as f32 * 88.0 + 4.0, i as u32 + 1, tk);
+        // REAPER's docked mixer measures 235 in the reference shot.
+        let strip = mixer_strip(i as f32 * 88.0 + 4.0, i as u32 + 1, tk, 235.0);
         body.push_str(&format!("<g transform=\"translate(0 400)\">{strip}</g>"));
     }
 
