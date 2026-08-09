@@ -316,8 +316,14 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     // Compressed, `mcp.pan` is re-anchored off `mcp.recmode` and both it
     // and the record arm sit inside the band — pan at its left, arm at
     // its right, which is where the shot has them.
+    // Both are placed on the *centres* the shot gives, not on a corner:
+    // scanning row 565 across a strip puts the pan cap on local x 22 and
+    // the arm's hole on 67, and the arm's ring sits at 0.486 of its own
+    // 36-wide cell rather than in the middle of it. So the knob starts at
+    // 9.5 and the arm at 49.5 — which also lines the arm up with the
+    // monitor, mute and solo column beneath it, whose centre is 66.5.
     s.push_str(&at(
-        x + 4.0,
+        x + 9.5,
         pan_y + 1.0,
         &render_svg(
             v::PanningKnob,
@@ -334,7 +340,7 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     // tint — which is what makes it read as blending into the dark below
     // rather than as a plate laid on the colour.
     s.push_str(&at(
-        x + 46.0,
+        x + 49.5,
         pan_y + 9.0,
         &render_svg(
             v::RecordArmButton,
