@@ -259,6 +259,18 @@ impl DawModule for ExpressionEditorModule {
                     reload();
                 },
             ),
+            // Write a known gain ride to the selected take's volume
+            // envelope. The test binary is a separate process and
+            // cannot see this extension's memory, so the only way to
+            // prove the take-envelope path works is to make a change
+            // REAPER itself then reports back.
+            ActionDef::new(
+                "FTS_EXPRESSION_EDITOR_TEST_DYNAMICS",
+                "FTS: Expression Editor — write test dynamics envelope (test)",
+                || {
+                    write_test_dynamics();
+                },
+            ),
             // An edit the integration test can trigger from outside the
             // process. The test binary talks to REAPER over a socket and
             // cannot see this extension's memory, so "did the editor
@@ -387,6 +399,51 @@ fn empty_editor() -> expression_editor_core::Editor {
         ExpressionDoc::new(TimeBase::Ppq { ppq: 960.0 }, 0.0, 960.0 * 8.0),
         Viewport::new(1100.0, 520.0),
     )
+}
+
+/// Write a known two-lane gain ride to the loaded audio take.
+///
+/// Exists for the REAPER integration test. The values are fixed so the
+/// test can assert exact numbers: a gate at -3 dB and a sibilance lane
+/// at -5 dB sum to -8, which is 0.398 as the linear multiplier a take
+/// volume envelope holds.
+pub fn write_test_dynamics() -> bool {
+    use expression_editor_audio::dynamics::GainPoint;
+    use expression_editor_audio::{DynamicsLane, Lanes};
+
+    let reaper = daw::reaper::Reaper;
+    let mut guard = session().lock().unwrap();
+    let Some(Loaded::Audio(s)) = guard.as_mut() else {
+        tracing::warn!("no audio take loaded");
+        return false;
+    };
+    let frames = s.analysis().frames.frames.len();
+    // Logged because a zero here is the difference between "the write
+    // path is broken" and "nothing was loaded to write about", and the
+    // test binary cannot see either.
+    tracing::info!(
+        frames,
+        samples = s.source().len(),
+        rate = s.sample_rate(),
+        "test dynamics: analysed take"
+    );
+    if frames == 0 {
+        return false;
+    }
+    let flat = |db: f64| -> Vec<GainPoint> {
+        (0..frames).map(|frame| GainPoint { frame, db }).collect()
+    };
+    let mut lanes = Lanes::from_dynamics(&Default::default(), frames);
+    lanes.set(DynamicsLane::Gate, flat(-3.0));
+    lanes.set(DynamicsLane::Sibilance, flat(-5.0));
+
+    let written = s.write_dynamics(&reaper, &lanes, &Default::default(), true);
+    tracing::info!(
+        points = written.points,
+        markers = written.markers,
+        "wrote test dynamics"
+    );
+    written.points > 0
 }
 
 /// Run a closure against the loaded editor.

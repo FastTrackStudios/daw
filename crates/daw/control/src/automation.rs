@@ -8,6 +8,7 @@ use daw_proto::{
     ProjectContext,
     automation::{
         AddPointParams, Envelope, EnvelopeLocation, EnvelopePoint, EnvelopeRef, EnvelopeShape,
+        TakeEnvelopeKind,
         EnvelopeType, SetPointParams, TimeRangeParams,
     },
     primitives::{AutomationMode, PositionInSeconds},
@@ -102,6 +103,80 @@ impl Envelopes {
             self.project_id.clone(),
             self.clients.clone(),
         )
+    }
+}
+
+/// A take's own envelopes.
+///
+/// Separate from [`Envelopes`], which is track-scoped, because a take
+/// envelope has no track: the item and take carry the whole context and
+/// `EnvelopeLocation.track` is documented as ignored for them. Reaching
+/// them through a track handle would mean asking a caller to supply a
+/// value that is then discarded.
+#[derive(Clone)]
+pub struct TakeEnvelopes {
+    item_guid: String,
+    take_guid: String,
+    project_id: String,
+    clients: Arc<DawClients>,
+}
+
+impl TakeEnvelopes {
+    pub(crate) fn new(
+        item_guid: String,
+        take_guid: String,
+        project_id: String,
+        clients: Arc<DawClients>,
+    ) -> Self {
+        Self {
+            item_guid,
+            take_guid,
+            project_id,
+            clients,
+        }
+    }
+
+    /// A take envelope of the given kind.
+    pub fn of_kind(&self, kind: TakeEnvelopeKind) -> EnvelopeHandle {
+        EnvelopeHandle::new(
+            // Ignored downstream, and passed only because the location
+            // struct has the field.
+            String::new(),
+            EnvelopeRef::Take {
+                item_guid: self.item_guid.clone(),
+                take_guid: self.take_guid.clone(),
+                kind,
+            },
+            self.project_id.clone(),
+            self.clients.clone(),
+        )
+    }
+
+    /// Take volume — the per-item gain, and where a dynamics pass
+    /// writes.
+    pub fn volume(&self) -> EnvelopeHandle {
+        self.of_kind(TakeEnvelopeKind::Volume)
+    }
+
+    pub fn pan(&self) -> EnvelopeHandle {
+        self.of_kind(TakeEnvelopeKind::Pan)
+    }
+
+    pub fn mute(&self) -> EnvelopeHandle {
+        self.of_kind(TakeEnvelopeKind::Mute)
+    }
+
+    pub fn pitch(&self) -> EnvelopeHandle {
+        self.of_kind(TakeEnvelopeKind::Pitch)
+    }
+}
+
+impl std::fmt::Debug for TakeEnvelopes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TakeEnvelopes")
+            .field("item_guid", &self.item_guid)
+            .field("take_guid", &self.take_guid)
+            .finish()
     }
 }
 

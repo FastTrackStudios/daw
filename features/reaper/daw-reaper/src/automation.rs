@@ -84,11 +84,28 @@ const TRACK_ENVELOPE_TYPES: &[EnvelopeType] = &[
     EnvelopeType::Mute,
 ];
 
+/// Whether a lookup may bring the envelope into existence.
+///
+/// Only take envelopes can be created by a lookup at all — track
+/// envelopes are always present — but the distinction has to be made
+/// here because the *creation* is a side effect of resolving. Reading
+/// an envelope must never conjure one: a caller asking what points a
+/// take has would otherwise leave a new envelope behind on every take
+/// it looked at, and the undo history to match.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IfMissing {
+    /// Run the action that makes it. For writes only.
+    Create,
+    /// Report `None`.
+    Decline,
+}
+
 /// Resolve a `TrackEnvelope*` from a [`EnvelopeLocation`]. Must be called
 /// on the REAPER main thread.
 fn resolve_envelope(
     project_ctx: &ProjectContext,
     location: &EnvelopeLocation,
+    if_missing: IfMissing,
 ) -> Option<*mut TrackEnvelope> {
     let project = resolve_project(project_ctx)?;
     let low = Reaper::get().medium_reaper().low();
@@ -104,7 +121,7 @@ fn resolve_envelope(
         kind,
     } = &location.envelope
     {
-        return resolve_take_envelope(item_guid, take_guid, *kind);
+        return resolve_take_envelope(item_guid, take_guid, *kind, if_missing);
     }
 
     let track = resolve_track(&project, &location.track)?;
@@ -210,6 +227,7 @@ fn resolve_take_envelope(
     item_guid: &str,
     take_guid: &str,
     kind: TakeEnvelopeKind,
+    if_missing: IfMissing,
 ) -> Option<*mut TrackEnvelope> {
     let item = ReaperItem::resolve_item(
         &ItemRef::Guid(item_guid.to_string()),
@@ -226,6 +244,13 @@ fn resolve_take_envelope(
         return Some(env);
     }
 
+    if if_missing == IfMissing::Decline {
+        return None;
+    }
+
+    // Note this is a *toggle*. It is only reached when the envelope was
+    // not found, so it can only turn one on — but that is why the
+    // `find` above is not merely an optimisation.
     let action = take_envelope_toggle_action(kind)?;
     let medium = Reaper::get().medium_reaper();
     let low = medium.low();
@@ -350,7 +375,7 @@ impl Automation for crate::Reaper {
 
     fn envelope(&self, project: ProjectContext, location: EnvelopeLocation) -> Option<Envelope> {
         debug!("Reaper::envelope");
-        let env = resolve_envelope(&project, &location)?;
+        let env = resolve_envelope(&project, &location, IfMissing::Decline)?;
         let proj = resolve_project(&project)?;
         let track = resolve_track(&proj, &location.track)?;
         let track_guid = track.guid().to_string_without_braces();
@@ -380,7 +405,7 @@ impl Automation for crate::Reaper {
 
     fn points(&self, project: ProjectContext, location: EnvelopeLocation) -> Vec<EnvelopePoint> {
         debug!("Reaper::points");
-        let Some(env) = resolve_envelope(&project, &location) else {
+        let Some(env) = resolve_envelope(&project, &location, IfMissing::Decline) else {
             return Vec::new();
         };
         collect_points(env)
@@ -412,7 +437,7 @@ impl Automation for crate::Reaper {
     ) -> f64 {
         debug!("Reaper::value_at");
         (|| -> Option<f64> {
-            let env = resolve_envelope(&project, &location)?;
+            let env = resolve_envelope(&project, &location, IfMissing::Decline)?;
             let low = Reaper::get().medium_reaper().low();
             let (value, _, _, _) =
                 env_sw::evaluate_envelope(low, env, time.as_seconds(), 44100.0, 1)?;
@@ -429,7 +454,10 @@ impl Automation for crate::Reaper {
     ) -> u32 {
         debug!("Reaper::add_point");
         (|| -> Option<u32> {
-            let env = resolve_envelope(&project, &location)?;
+            // The one lookup allowed to create: adding a point to a
+            // take envelope is exactly the moment the envelope should
+            // start existing.
+            let env = resolve_envelope(&project, &location, IfMissing::Create)?;
             let low = Reaper::get().medium_reaper().low();
             let ok = env_sw::insert_envelope_point(
                 low,
@@ -466,7 +494,7 @@ impl Automation for crate::Reaper {
 
     fn delete_point(&self, project: ProjectContext, location: EnvelopeLocation, index: u32) {
         debug!("Reaper::delete_point index={index}");
-        if let Some(env) = resolve_envelope(&project, &location) {
+        if let Some(env) = resolve_envelope(&project, &location, IfMissing::Decline) {
             let low = Reaper::get().medium_reaper().low();
             let _ = env_sw::delete_envelope_point(low, env, index);
         }
@@ -479,7 +507,7 @@ impl Automation for crate::Reaper {
         params: SetPointParams,
     ) {
         debug!("Reaper::set_point index={}", params.index);
-        if let Some(env) = resolve_envelope(&project, &location) {
+        if let Some(env) = resolve_envelope(&project, &location, IfMissing::Decline) {
             let low = Reaper::get().medium_reaper().low();
             let _ = env_sw::set_envelope_point(
                 low,
@@ -502,7 +530,7 @@ impl Automation for crate::Reaper {
         range: TimeRangeParams,
     ) {
         debug!("Reaper::delete_points_in_range");
-        if let Some(env) = resolve_envelope(&project, &location) {
+        if let Some(env) = resolve_envelope(&project, &location, IfMissing::Decline) {
             let low = Reaper::get().medium_reaper().low();
             let _ = env_sw::delete_envelope_points_in_range(
                 low,

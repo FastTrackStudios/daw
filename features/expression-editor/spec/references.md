@@ -63,10 +63,22 @@ because the facade exposes the accessor and not the source.
 
 The probe is now a real part of the contract rather than a guess: a
 zero `sample_rate` or `num_channels` in a `GetSamplesRequest` means
-"tell me what you have", which the standalone impl honours and a test
-pins. That matters because *naming* a rate makes a host resample, and
-edits made against a resampled take land in the wrong place. A facade
-method for source format would still be tidier.
+"tell me what you have". That matters because *naming* a rate makes a
+host resample, and edits made against a resampled take land in the
+wrong place.
+
+REAPER honours it the way SneakPeak gets its format — by asking the
+`PCM_source`, captured when the accessor is created, because the
+accessor genuinely cannot be asked. Until the REAPER take-envelope
+tests went in, only the standalone impl honoured it and the REAPER one
+echoed the zero straight back.
+
+Those tests also caught the reason a real take read as almost nothing:
+**`GetAudioAccessorSamples` returns 0 or 1, not a sample count.** The
+backend was treating the 1 as "one frame" and truncating every read to
+a single sample per channel, which presents as a take containing no
+audio rather than as a bug. A facade method for source format would
+still be tidier than the probe.
 
 ### Worth reading before building the chrome
 

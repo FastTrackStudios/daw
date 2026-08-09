@@ -589,6 +589,25 @@ pub fn delete_take_marker(low: &reaper_low::Reaper, take: MediaItemTake, index: 
     unsafe { low.DeleteTakeMarker(take.as_ptr(), index as i32) }
 }
 
+/// A take's source format: sample rate and channel count.
+///
+/// Read from the `PCM_source`, not from the audio accessor, because the
+/// accessor has no way to report it — which is why a caller wanting to
+/// read a take at its native rate has to be told separately.
+pub fn get_take_source_format(
+    medium: &reaper_medium::Reaper,
+    take: MediaItemTake,
+) -> Option<(f64, u32)> {
+    let source = unsafe { medium.get_media_item_take_source(take)? };
+    let low = medium.low();
+    let rate = unsafe { low.GetMediaSourceSampleRate(source.as_ptr()) };
+    let channels = unsafe { low.GetMediaSourceNumChannels(source.as_ptr()) };
+    if rate <= 0 || channels <= 0 {
+        return None;
+    }
+    Some((rate as f64, channels as u32))
+}
+
 /// Get the source file path for a take (returns None for MIDI/empty takes).
 pub fn get_take_source_file_path(
     medium: &reaper_medium::Reaper,
