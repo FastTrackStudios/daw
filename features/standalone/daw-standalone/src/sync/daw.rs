@@ -261,6 +261,14 @@ pub struct ProjectState {
     pub midi_program_changes: HashMap<String, Vec<daw_proto::midi::MidiProgramChange>>,
     /// Per-take MIDI System Exclusive events (full F0..F7 frames).
     pub midi_sysex: HashMap<String, Vec<daw_proto::midi::MidiSysEx>>,
+    /// Stretch markers per take guid, kept sorted by position.
+    ///
+    /// Keyed by take rather than item because a take is what carries
+    /// timing: two takes of one item are two performances and warp
+    /// independently.
+    pub stretch_markers: HashMap<String, Vec<daw_proto::StretchMarker>>,
+    /// Per-take stretch algorithm.
+    pub stretch_modes: HashMap<String, daw_proto::StretchMode>,
     /// Per-take channel-pressure (mono aftertouch) events.
     pub midi_channel_pressures: HashMap<String, Vec<daw_proto::midi::MidiChannelPressure>>,
     /// Per-take poly-pressure (per-note aftertouch) events.
@@ -347,6 +355,8 @@ impl ProjectState {
             midi_pitch_bends: HashMap::new(),
             midi_program_changes: HashMap::new(),
             midi_sysex: HashMap::new(),
+            stretch_markers: HashMap::new(),
+            stretch_modes: HashMap::new(),
             midi_channel_pressures: HashMap::new(),
             midi_poly_pressures: HashMap::new(),
             midi_note_expressions: HashMap::new(),

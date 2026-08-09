@@ -24,6 +24,7 @@
 pub mod action_registry;
 pub mod actions;
 pub mod audio_accessor;
+pub mod stretch_marker;
 pub mod audio_engine;
 pub mod automation;
 pub mod batch;
@@ -84,6 +85,7 @@ pub use action_registry::{
 };
 pub use actions::*;
 pub use audio_accessor::*;
+pub use stretch_marker::*;
 pub use audio_engine::*;
 pub use automation::*;
 pub use batch::*;
