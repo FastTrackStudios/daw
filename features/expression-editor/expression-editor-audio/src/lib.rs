@@ -38,30 +38,36 @@ use expression_editor_core::doc::{ExpressionDoc, Lane, Note, NoteId, TimeBase};
 use tune_dsp::model::{NoteBlob, PitchDoc, WarpMarker};
 
 pub mod align;
+pub mod align_hits;
 pub mod analyze;
 pub mod dynamics;
 pub mod frames;
 pub mod lanes;
+pub mod onsets;
+pub mod percussive;
 #[cfg(feature = "daw")]
 pub mod retime;
 #[cfg(feature = "daw")]
 pub mod session;
+pub mod spans;
 #[cfg(feature = "daw")]
 pub mod write_dynamics;
-pub mod spans;
 
-pub use align::{align, AlignConfig, Alignment};
-pub use analyze::{analyze_take, to_mono, Analysis, TakeConfig};
+pub use align::{AlignConfig, Alignment, align};
+pub use align_hits::{HitAlignConfig, align_hits, pair_hits};
+pub use analyze::{Analysis, TakeConfig, analyze_take, to_mono};
 pub use dynamics::{Detection, Dynamics, DynamicsConfig, GainPoint, Region};
-pub use frames::{frame_features, FrameFeature};
+pub use frames::{FrameFeature, frame_features};
 pub use lanes::{DynamicsLane, Lanes};
+pub use onsets::{Onset, OnsetConfig, detect as detect_onsets};
+pub use percussive::{Percussion, PercussiveConfig, analyze_percussive, looks_percussive};
 #[cfg(feature = "daw")]
-pub use retime::{stretch_markers, TakePlacement};
+pub use retime::{TakePlacement, stretch_markers};
 #[cfg(feature = "daw")]
 pub use session::{AudioSession, AudioTakeLocation, WriteError, WriteOutcome};
+pub use spans::{Span, unvoiced_spans};
 #[cfg(feature = "daw")]
 pub use write_dynamics::DynamicsWritten;
-pub use spans::{unvoiced_spans, Span};
 
 /// How a per-note trim is stored in a lane.
 ///
@@ -210,8 +216,16 @@ pub fn blob_to_note(id: NoteId, blob: &NoteBlob) -> Note {
         note.pitch.set(end, offset);
     }
 
-    set_flat(&mut note, Lane::Timbre, to_lane(blob.formant_shift, FORMANT_RANGE));
-    set_flat(&mut note, Lane::Pressure, to_lane(blob.gain_db, GAIN_RANGE_DB));
+    set_flat(
+        &mut note,
+        Lane::Timbre,
+        to_lane(blob.formant_shift, FORMANT_RANGE),
+    );
+    set_flat(
+        &mut note,
+        Lane::Pressure,
+        to_lane(blob.gain_db, GAIN_RANGE_DB),
+    );
     note
 }
 

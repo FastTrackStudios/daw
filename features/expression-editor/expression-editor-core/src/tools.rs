@@ -338,7 +338,11 @@ impl Grid {
     /// Grid step in document units.
     pub fn step(&self, units_per_beat: f64) -> f64 {
         let beats = self.division * 4.0;
-        let beats = if self.triplet { beats * 2.0 / 3.0 } else { beats };
+        let beats = if self.triplet {
+            beats * 2.0 / 3.0
+        } else {
+            beats
+        };
         beats * units_per_beat
     }
 

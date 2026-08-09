@@ -78,8 +78,14 @@ fn each_lane_is_readable_on_its_own() {
 #[test]
 fn db_converts_to_the_linear_multiplier_a_volume_envelope_wants() {
     assert!((db_to_take_volume(0.0) - 1.0).abs() < 1e-12, "unity");
-    assert!((db_to_take_volume(-6.0) - 0.5011).abs() < 1e-3, "about half");
-    assert!((db_to_take_volume(6.0) - 1.9953).abs() < 1e-3, "about double");
+    assert!(
+        (db_to_take_volume(-6.0) - 0.5011).abs() < 1e-3,
+        "about half"
+    );
+    assert!(
+        (db_to_take_volume(6.0) - 1.9953).abs() < 1e-3,
+        "about double"
+    );
     // Round trip.
     for db in [-24.0, -6.0, -0.5, 0.0, 3.0] {
         assert!((take_volume_to_db(db_to_take_volume(db)) - db).abs() < 1e-9);

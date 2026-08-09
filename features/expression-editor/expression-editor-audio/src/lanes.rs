@@ -40,7 +40,12 @@ pub enum DynamicsLane {
 }
 
 impl DynamicsLane {
-    pub const ALL: [DynamicsLane; 4] = [DynamicsLane::Gate, DynamicsLane::Compressor, DynamicsLane::Breath, DynamicsLane::Sibilance];
+    pub const ALL: [DynamicsLane; 4] = [
+        DynamicsLane::Gate,
+        DynamicsLane::Compressor,
+        DynamicsLane::Breath,
+        DynamicsLane::Sibilance,
+    ];
 
     pub fn label(&self) -> &'static str {
         match self {

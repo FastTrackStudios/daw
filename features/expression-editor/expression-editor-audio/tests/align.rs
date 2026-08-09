@@ -5,7 +5,7 @@
 //! stretch, a different pitch. That is the only way to assert that an
 //! alignment is *correct* rather than merely plausible.
 
-use expression_editor_audio::{align, analyze_take, AlignConfig, Analysis, TakeConfig};
+use expression_editor_audio::{AlignConfig, Analysis, TakeConfig, align, analyze_take};
 
 const SR: f64 = 44100.0;
 
@@ -80,8 +80,7 @@ fn a_late_dub_is_pulled_back_by_how_late_it_is() {
     let mut dub = gap(0.12);
     dub.extend(phrase(LINE, 0.0, 1.0));
 
-    let a = align(&analyse(&reference), &analyse(&dub), AlignConfig::default())
-        .expect("aligned");
+    let a = align(&analyse(&reference), &analyse(&dub), AlignConfig::default()).expect("aligned");
 
     // Mid-phrase, the map should point about 120 ms earlier.
     let s = shift_at(&a, 0.6);
@@ -98,8 +97,7 @@ fn a_dub_sung_slower_is_compressed_progressively() {
     // is what a constant offset cannot fix and alignment must.
     let dub = phrase(LINE, 0.0, 1.15);
 
-    let a = align(&analyse(&reference), &analyse(&dub), AlignConfig::default())
-        .expect("aligned");
+    let a = align(&analyse(&reference), &analyse(&dub), AlignConfig::default()).expect("aligned");
 
     let early = shift_at(&a, 0.2);
     let late = shift_at(&a, 1.4);
@@ -122,8 +120,7 @@ fn a_harmony_at_a_different_pitch_still_aligns_on_timing() {
     let mut dub = gap(0.1);
     dub.extend(phrase(LINE, 4.0, 1.0));
 
-    let a = align(&analyse(&reference), &analyse(&dub), AlignConfig::default())
-        .expect("aligned");
+    let a = align(&analyse(&reference), &analyse(&dub), AlignConfig::default()).expect("aligned");
     let s = shift_at(&a, 0.7);
     assert!(
         (s + 0.1).abs() < 0.07,

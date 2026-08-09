@@ -36,8 +36,8 @@ pub mod handles;
 pub mod menu;
 pub mod mode;
 pub mod modulation;
-pub mod multitool;
 pub mod mouse;
+pub mod multitool;
 pub mod razor;
 pub mod reference;
 pub mod rows;
@@ -55,14 +55,14 @@ pub use doc::{Curve, ExpressionDoc, Lane, Marker, Note, NoteId, Point, Target, T
 pub use draft::PitchDraft;
 pub use edit::{Edit, History};
 pub use handles::{Handle, Scope};
-pub use shape::Shape;
 pub use mode::Mode;
 pub use mouse::{Action, MouseMap};
 pub use multitool::{Bend, Steepness, Zone};
 pub use razor::{RazorArea, RazorSet};
 pub use reference::{MidiReference, RefNote, SnapSource};
-pub use timing::{Separator, StretchLaw};
 pub use rows::{Articulation, DrumMap, NoteShape, RowSpace, StringTuning};
+pub use shape::Shape;
+pub use timing::{Separator, StretchLaw};
 pub use tools::{Grid, Hit, Mods, Selection, Tool};
 pub use tracks::{RefColor, Track, Workspace};
 pub use tuning::{Temperament, Tuning};
@@ -229,6 +229,13 @@ impl Editor {
         self.selection.clear();
         self.razor = RazorSet::default();
         self.cc_edit = None;
+        // The new track brings its own surface with it. Without this a
+        // vocal switched to from a kit would be edited on a slice strip
+        // — the document changed and nothing else did.
+        let mode = self.tracks.mode();
+        if mode != self.mode {
+            self.set_mode(mode);
+        }
         true
     }
 
@@ -446,8 +453,7 @@ impl Editor {
                         });
                         for (g0, g1) in [(a - eps * 2.0, a - eps), (b + eps, b + eps * 2.0)] {
                             if g0 > t0 && g1 < t1 {
-                                let held =
-                                    drag.base_of(lane).sample(g0, lane.default_value());
+                                let held = drag.base_of(lane).sample(g0, lane.default_value());
                                 self.apply_live(&Edit::SetLaneLevel {
                                     note: id,
                                     lane,
@@ -576,9 +582,14 @@ impl Editor {
         base.zoom_pitch_about(anchor_pitch, factor, self.viewport);
 
         let mut influences = Vec::new();
-        if let Some(edge) =
-            camera::edge_magnet(base, anchor_t, content, self.viewport, EDGE_DEAD_ZONE, EDGE_WHITESPACE)
-        {
+        if let Some(edge) = camera::edge_magnet(
+            base,
+            anchor_t,
+            content,
+            self.viewport,
+            EDGE_DEAD_ZONE,
+            EDGE_WHITESPACE,
+        ) {
             influences.push(edge);
         }
         influences.extend(camera::pitch_focus(
@@ -750,7 +761,12 @@ impl Editor {
             C::SelectMeasure => {
                 let t = self
                     .playhead
-                    .or_else(|| targets.first().and_then(|id| self.doc.note(*id)).map(|n| n.start))
+                    .or_else(|| {
+                        targets
+                            .first()
+                            .and_then(|id| self.doc.note(*id))
+                            .map(|n| n.start)
+                    })
                     .unwrap_or(self.doc.start);
                 self.selection.notes = self.notes_in_measure(t);
                 !self.selection.notes.is_empty()
@@ -758,7 +774,12 @@ impl Editor {
             C::CopyMeasure => {
                 let t = self
                     .playhead
-                    .or_else(|| targets.first().and_then(|id| self.doc.note(*id)).map(|n| n.start))
+                    .or_else(|| {
+                        targets
+                            .first()
+                            .and_then(|id| self.doc.note(*id))
+                            .map(|n| n.start)
+                    })
                     .unwrap_or(self.doc.start);
                 let ids = self.notes_in_measure(t);
                 self.clipboard.copy_from(&self.doc, &ids)
@@ -804,10 +825,7 @@ impl Editor {
                     gap,
                 })
             }
-            C::SplitNote(id, t) => self.apply(&Edit::SplitNote {
-                note: *id,
-                t: *t,
-            }),
+            C::SplitNote(id, t) => self.apply(&Edit::SplitNote { note: *id, t: *t }),
             C::MergeNotes(id) => self.merge_with_next(*id),
             // These need UI: a text field, a submenu, a panel.
             C::EditLyric(_) | C::SetArticulation(_) | C::Properties => false,
@@ -852,8 +870,22 @@ impl Editor {
     /// afterwards. Switching back re-applies.
     pub fn set_mode(&mut self, mode: Mode) {
         self.mode = mode;
-        self.row_space = mode.default_row_space();
-        self.doc.row_space = self.row_space.clone();
+        // The track owns the mode; `Editor::mode` is the active one's.
+        // Writing both keeps a stack drawn from the workspace agreeing
+        // with the surface the user is looking at.
+        if let Some(track) = self.tracks.track_mut(self.tracks.active()) {
+            track.set_mode(mode);
+        }
+        // A mode preset supplies a row space, but never overwrites one
+        // of the same kind: the document's own may have been tuned —
+        // band splits moved, a guitar retuned — and re-applying a preset
+        // (which switching tracks does) must not silently undo that.
+        if self.doc.row_space.same_kind(&mode.default_row_space()) {
+            self.row_space = self.doc.row_space.clone();
+        } else {
+            self.row_space = mode.default_row_space();
+            self.doc.row_space = self.row_space.clone();
+        }
         self.mouse = mode.default_mouse();
         self.overlays = mode.default_overlays();
         self.strip_lane = mode.default_strip();

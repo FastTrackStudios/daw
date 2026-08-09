@@ -490,7 +490,12 @@ impl MouseMap {
         let mut m = Self::reaper_like();
         m.name = "Riffer (Ample)";
         m.set(C::PianoRoll, G::Click, ModKey::NONE, A::InsertNote);
-        m.set(C::PianoRoll, G::Drag, ModKey::NONE, A::InsertNoteDragToExtend);
+        m.set(
+            C::PianoRoll,
+            G::Drag,
+            ModKey::NONE,
+            A::InsertNoteDragToExtend,
+        );
         m.set(C::Note, G::Click, ModKey::NONE, A::SelectNote);
         m.set(C::Note, G::DoubleClick, ModKey::NONE, A::EraseNote);
         m.set(C::Note, G::Drag, ModKey::NONE, A::MoveNoteVertically);

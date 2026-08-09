@@ -15,6 +15,7 @@
 //! per-track: switching tracks changes what you are editing, not where
 //! you are looking. Only the document and its history swap.
 
+use crate::Mode;
 use crate::doc::ExpressionDoc;
 use crate::edit::History;
 
@@ -47,6 +48,27 @@ pub struct Track {
     /// exactly this reason.
     doc: ExpressionDoc,
     history: History,
+    /// How this track is edited and drawn.
+    ///
+    /// On the *track*, not on the editor, because a workspace holding a
+    /// vocal, its reference MIDI, a guitar and a kit needs all four
+    /// surfaces at once — which is the whole point of showing them
+    /// stacked. The editor's mode is a view of the active track's.
+    ///
+    /// Inferred when the track is loaded and the user's from then on: no
+    /// threshold gets a whispered vocal and a melodic tom fill both
+    /// right, so a wrong guess has to be one click to correct.
+    pub mode: Mode,
+    /// Height weight in a stacked view, relative to the other tracks.
+    ///
+    /// Defaults to what the mode needs — a slice strip wants three
+    /// bands, a vocal two octaves, a string roll six rows — because
+    /// splitting the height evenly gives the guitar the same room as
+    /// the kit and neither ends up readable.
+    pub weight: f32,
+    /// Hidden tracks stay in the workspace and keep their history; they
+    /// are simply not drawn. Distinct from removing.
+    pub hidden: bool,
     /// Colour the host assigned, for [`RefColor::Host`].
     pub color: Option<String>,
     /// Drawn behind the active track, read-only.
@@ -60,11 +82,45 @@ impl Track {
             name: name.into(),
             doc,
             history: History::new(HISTORY_LIMIT),
+            mode: Mode::default(),
+            weight: Mode::default().stack_weight(),
+            hidden: false,
             color: None,
             reference: false,
             ref_color: RefColor::default(),
         }
     }
+
+    /// The same, in a known mode — and taking the mode's natural height
+    /// with it, which is the pairing a caller almost always wants.
+    pub fn in_mode(name: impl Into<String>, doc: ExpressionDoc, mode: Mode) -> Self {
+        let mut t = Self::new(name, doc);
+        t.set_mode(mode);
+        t
+    }
+
+    /// Change mode, and the height with it.
+    ///
+    /// Only while the weight is still the mode's default: once a user
+    /// has sized a lane by hand, switching modes must not silently undo
+    /// that.
+    pub fn set_mode(&mut self, mode: Mode) {
+        if (self.weight - self.mode.stack_weight()).abs() < f32::EPSILON {
+            self.weight = mode.stack_weight();
+        }
+        self.mode = mode;
+    }
+}
+
+/// One track's slot in a stacked layout.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StackRow {
+    /// Index into [`Workspace::tracks`].
+    pub track: usize,
+    /// Top edge, in the same units as the height passed to
+    /// [`Workspace::stack`].
+    pub y: f32,
+    pub height: f32,
 }
 
 /// The set of tracks behind one editor.
@@ -135,6 +191,94 @@ impl Workspace {
             return None;
         }
         self.tracks.get(i).map(|t| &t.doc)
+    }
+
+    /// Tracks that appear in a stacked view, in order, with indices.
+    ///
+    /// Unlike [`Workspace::references`] this *includes* the active
+    /// track: a stack shows everything, and the active one is simply
+    /// the row you are editing.
+    pub fn visible(&self) -> impl Iterator<Item = (usize, &Track)> {
+        self.tracks.iter().enumerate().filter(|(_, t)| !t.hidden)
+    }
+
+    /// The active track's mode.
+    pub fn mode(&self) -> Mode {
+        self.tracks
+            .get(self.active)
+            .map(|t| t.mode)
+            .unwrap_or_default()
+    }
+
+    /// Lay the visible tracks out over `height`, in order.
+    ///
+    /// Proportional to each track's weight, with a floor: a lane
+    /// squeezed to nothing is a lane that cannot be clicked to select,
+    /// so a user cannot get out of the state they fell into.
+    ///
+    /// `active_boost` gives the row being edited extra weight — you are
+    /// working in it and it should have the room. `1.0` divides purely
+    /// by weight.
+    pub fn stack(&self, height: f32, active_boost: f32, min_row: f32) -> Vec<StackRow> {
+        let rows: Vec<(usize, f32)> = self
+            .visible()
+            .map(|(i, t)| {
+                let boost = if i == self.active { active_boost } else { 1.0 };
+                (i, (t.weight.max(0.01)) * boost.max(0.01))
+            })
+            .collect();
+        if rows.is_empty() || height <= 0.0 {
+            return Vec::new();
+        }
+
+        // The floor can want more than there is. Rather than overflow
+        // the viewport, fall back to an even split — at that point the
+        // honest answer is that nothing fits well and every lane should
+        // at least be equally bad.
+        let min_row = min_row.max(0.0);
+        let n = rows.len() as f32;
+        if min_row * n >= height {
+            let each = height / n;
+            let mut y = 0.0;
+            return rows
+                .iter()
+                .map(|&(track, _)| {
+                    let row = StackRow {
+                        track,
+                        y,
+                        height: each,
+                    };
+                    y += each;
+                    row
+                })
+                .collect();
+        }
+
+        // Hand every lane its floor first, then share what is left by
+        // weight. Sharing the whole height by weight and clamping
+        // afterwards would overflow by however much the clamping added.
+        let spare = height - min_row * n;
+        let total: f32 = rows.iter().map(|(_, w)| w).sum();
+        let mut y = 0.0;
+        rows.iter()
+            .map(|&(track, w)| {
+                let h = min_row + spare * (w / total);
+                let row = StackRow {
+                    track,
+                    y,
+                    height: h,
+                };
+                y += h;
+                row
+            })
+            .collect()
+    }
+
+    /// Which stacked row a y coordinate falls in.
+    pub fn row_at(rows: &[StackRow], y: f32) -> Option<usize> {
+        rows.iter()
+            .find(|r| y >= r.y && y < r.y + r.height)
+            .map(|r| r.track)
     }
 
     /// Parked tracks marked as references, with their indices.

@@ -7,7 +7,7 @@
 //! close enough to a voice for YIN — it is a period detector, and a
 //! periodic signal is a periodic signal.
 
-use expression_editor_audio::{analyze_take, to_mono, TakeConfig};
+use expression_editor_audio::{TakeConfig, analyze_take, to_mono};
 use expression_editor_core::doc::NoteId;
 
 const SR: f64 = 44100.0;
@@ -83,10 +83,7 @@ fn a_sung_note_comes_back_at_the_pitch_it_was_sung() {
 
     assert!(!a.doc.notes.is_empty(), "the note was found at all");
     let pitch = sounding(&a.doc, NoteId(1));
-    assert!(
-        (pitch - 69.0).abs() < 0.25,
-        "wanted A4 (69), got {pitch}"
-    );
+    assert!((pitch - 69.0).abs() < 0.25, "wanted A4 (69), got {pitch}");
     assert_eq!(a.doc.note(NoteId(1)).unwrap().row, 69);
 }
 
@@ -162,7 +159,10 @@ fn the_take_waveform_and_the_note_envelopes_are_filled() {
     let audio = cat(&[tone(60.0, 0.4, 0.0), silence(0.2), tone(64.0, 0.4, 0.0)]);
     let a = analyze_take(&audio, SR, TakeConfig::default());
 
-    assert!(!a.doc.peaks.is_empty(), "the backdrop has something to draw");
+    assert!(
+        !a.doc.peaks.is_empty(),
+        "the backdrop has something to draw"
+    );
     assert!(
         a.doc.peaks.iter().any(|&v| v > 0.5),
         "and it is normalized against the loudest frame"
@@ -196,12 +196,12 @@ fn a_consonant_reads_as_unvoiced_and_silence_does_not() {
     // The trailing silence must not be shaded as a consonant: it is
     // nothing at all, and calling it a sibilant makes the bands
     // meaningless.
-    let in_silence = a
-        .doc
-        .unvoiced
-        .iter()
-        .any(|(s, _)| *s / fr > 1.1);
-    assert!(!in_silence, "silence is not a sibilant: {:?}", a.doc.unvoiced);
+    let in_silence = a.doc.unvoiced.iter().any(|(s, _)| *s / fr > 1.1);
+    assert!(
+        !in_silence,
+        "silence is not a sibilant: {:?}",
+        a.doc.unvoiced
+    );
 }
 
 #[test]
@@ -275,7 +275,10 @@ fn a_transposed_note_renders_at_its_new_pitch() {
 
     assert_eq!(out.len(), audio.len(), "the render keeps the take's length");
     let again = analyze_take(&out, SR, TakeConfig::default());
-    assert!(!again.doc.notes.is_empty(), "the rendered audio still sings");
+    assert!(
+        !again.doc.notes.is_empty(),
+        "the rendered audio still sings"
+    );
     let got = sounding(&again.doc, NoteId(1));
     assert!(
         (got - 64.0).abs() < 0.5,

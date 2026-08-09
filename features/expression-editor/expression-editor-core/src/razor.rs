@@ -92,9 +92,9 @@ fn slice_at(doc: &mut ExpressionDoc, t: f64, row_lo: i32, row_hi: i32) -> Vec<No
                 .iter()
                 .map(|n| n.id)
                 .find(|id| !before.contains(id))
-            {
-                created.push(new_id);
-            }
+        {
+            created.push(new_id);
+        }
     }
     created
 }
@@ -170,7 +170,9 @@ pub fn move_contents(
     } else {
         // Non-overlapping destination: clear it, then move. Overlapping
         // (a nudge) must not clear the source out from under itself.
-        if dest.t0 >= area.t1 || dest.t1 <= area.t0 || dest.row_lo > area.row_hi
+        if dest.t0 >= area.t1
+            || dest.t1 <= area.t0
+            || dest.row_lo > area.row_hi
             || dest.row_hi < area.row_lo
         {
             delete_contents(doc, dest);
@@ -196,7 +198,12 @@ pub fn move_contents(
 /// Both note positions and lengths scale, so a bar of sixteenths
 /// razored and stretched becomes a bar of eighths — the rhythmic
 /// rearrangement gesture.
-pub fn stretch_contents(doc: &mut ExpressionDoc, area: RazorArea, new_t0: f64, new_t1: f64) -> bool {
+pub fn stretch_contents(
+    doc: &mut ExpressionDoc,
+    area: RazorArea,
+    new_t0: f64,
+    new_t1: f64,
+) -> bool {
     let ids = carve(doc, area);
     if ids.is_empty() || area.width() <= 0.0 || new_t1 - new_t0 <= 0.0 {
         return false;

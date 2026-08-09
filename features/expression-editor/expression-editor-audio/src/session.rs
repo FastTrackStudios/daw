@@ -21,7 +21,7 @@ use daw::service::item::Items;
 use daw::service::{ItemRef, ProjectContext, TakeRef};
 use expression_editor_core::{Editor, Mode, Viewport};
 
-use crate::analyze::{analyze_take, to_mono, Analysis, TakeConfig};
+use crate::analyze::{Analysis, TakeConfig, analyze_take, to_mono};
 
 /// Where a take's audio lives.
 ///
@@ -315,17 +315,14 @@ impl AudioSession {
     /// Returns the path written.
     pub fn write_back<D>(&mut self, daw: &D) -> Result<WriteOutcome, WriteError>
     where
-        D: daw::service::Takes
-            + daw::service::item::Items
-            + daw::service::StretchMarkers,
+        D: daw::service::Takes + daw::service::item::Items + daw::service::StretchMarkers,
     {
         if !self.is_dirty() {
             return Ok(WriteOutcome::Unchanged);
         }
         // Asked before `commit`, which rewrites the blobs to match the
         // document and would make the answer always "no".
-        let needs_render =
-            crate::retime::pitch_changed(&self.baseline, &self.editor.doc);
+        let needs_render = crate::retime::pitch_changed(&self.baseline, &self.editor.doc);
         self.commit();
 
         // Timing first, and always as markers.
@@ -352,8 +349,7 @@ impl AudioSession {
         let source = self.current_source(daw).ok_or(WriteError::NoSource)?;
         let out = next_render_path(&source);
         let audio = self.render();
-        write_wav_f32(&out, &audio, self.sample_rate)
-            .map_err(|e| WriteError::Io(e.to_string()))?;
+        write_wav_f32(&out, &audio, self.sample_rate).map_err(|e| WriteError::Io(e.to_string()))?;
 
         daw.set_source_file(
             self.location.project.clone(),

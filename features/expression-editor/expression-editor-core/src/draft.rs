@@ -155,7 +155,8 @@ impl PitchDraft {
     pub fn undo(&mut self) -> bool {
         match self.past.pop() {
             Some(prev) => {
-                self.future.push(core::mem::replace(&mut self.anchors, prev));
+                self.future
+                    .push(core::mem::replace(&mut self.anchors, prev));
                 true
             }
             None => false,
@@ -183,7 +184,10 @@ impl PitchDraft {
         }
         if self.anchors.len() == 1 {
             let a = self.anchors[0];
-            return vec![Point { t: a.t, value: a.value }];
+            return vec![Point {
+                t: a.t,
+                value: a.value,
+            }];
         }
         let mut out = Vec::with_capacity(self.anchors.len() * SAMPLES_PER_SPAN);
         for pair in self.anchors.windows(2) {

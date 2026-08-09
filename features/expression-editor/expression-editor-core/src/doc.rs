@@ -489,7 +489,11 @@ impl Note {
     pub fn target_span(&self) -> (f64, f64) {
         match self.target {
             Target::WholeNote => (self.start, self.end),
-            Target::Zone(i) => self.zones().get(i).copied().unwrap_or((self.start, self.end)),
+            Target::Zone(i) => self
+                .zones()
+                .get(i)
+                .copied()
+                .unwrap_or((self.start, self.end)),
         }
     }
 
@@ -499,15 +503,14 @@ impl Note {
         if t <= self.start || t >= self.end || self.splits.iter().any(|&s| (s - t).abs() < 1e-6) {
             return false;
         }
-        let i = self
-            .splits
-            .partition_point(|&s| s < t);
+        let i = self.splits.partition_point(|&s| s < t);
         self.splits.insert(i, t);
         // A split inserted before the active zone shifts its index.
         if let Target::Zone(z) = self.target
-            && i <= z {
-                self.target = Target::Zone(z + 1);
-            }
+            && i <= z
+        {
+            self.target = Target::Zone(z + 1);
+        }
         true
     }
 

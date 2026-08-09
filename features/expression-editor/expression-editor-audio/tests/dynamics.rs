@@ -7,10 +7,9 @@
 //! nothing else in the analysis tells them apart.
 
 use expression_editor_audio::dynamics::{
-    analyse, BreathConfig, CompressorConfig, Detection, DynamicsConfig, GateConfig,
-    SibilanceConfig,
+    BreathConfig, CompressorConfig, Detection, DynamicsConfig, GateConfig, SibilanceConfig, analyse,
 };
-use expression_editor_audio::frames::{frame_features, FrameFeature};
+use expression_editor_audio::frames::{FrameFeature, frame_features};
 
 const SR: f64 = 44100.0;
 const WINDOW: usize = 1024;
@@ -136,7 +135,12 @@ fn silence_reports_no_brightness_rather_than_maximum() {
 fn nothing_is_detected_unless_it_is_switched_on() {
     // Opening a take must not silently give it four processors.
     let t = take(&cat(&[vowel(0.3, 0.4), sibilant(0.2, 0.3)]), &[(0.0, 0.3)]);
-    let d = analyse(&t.features, &t.voiced, frame_rate(), &DynamicsConfig::default());
+    let d = analyse(
+        &t.features,
+        &t.voiced,
+        frame_rate(),
+        &DynamicsConfig::default(),
+    );
     assert!(d.gate.is_empty() && d.compressor.is_empty());
     assert!(d.breath.is_empty() && d.sibilance.is_empty());
     assert!(d.regions.is_empty());

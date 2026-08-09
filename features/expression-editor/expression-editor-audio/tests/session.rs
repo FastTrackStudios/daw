@@ -72,12 +72,7 @@ impl AudioAccessors for FakeHost {
         None
     }
 
-    fn create_take_accessor(
-        &self,
-        _p: ProjectContext,
-        _i: ItemRef,
-        _t: TakeRef,
-    ) -> Option<String> {
+    fn create_take_accessor(&self, _p: ProjectContext, _i: ItemRef, _t: TakeRef) -> Option<String> {
         let id = format!("acc{}", self.accessors.borrow().len());
         self.accessors.borrow_mut().push(id.clone());
         Some(id)
@@ -204,7 +199,11 @@ fn a_stereo_take_is_summed_to_one_signal_for_analysis() {
     let host = FakeHost::new(mono.clone(), 2);
     let s = load(&host).expect("loaded");
 
-    assert_eq!(s.source().len(), mono.len(), "one sample per frame, not two");
+    assert_eq!(
+        s.source().len(),
+        mono.len(),
+        "one sample per frame, not two"
+    );
     assert!(!s.editor.doc.notes.is_empty());
     assert_eq!(s.editor.doc.note(NoteId(1)).unwrap().row, 60);
 }
@@ -343,5 +342,8 @@ fn a_quiet_item_still_finds_its_consonants() {
     // Unity here; the point is that the *scaling path* exists and is
     // applied before analysis rather than after.
     let scaled = load_at(&host, 1.0).expect("loaded");
-    assert_eq!(scaled.editor.doc.unvoiced.len(), loud.editor.doc.unvoiced.len());
+    assert_eq!(
+        scaled.editor.doc.unvoiced.len(),
+        loud.editor.doc.unvoiced.len()
+    );
 }

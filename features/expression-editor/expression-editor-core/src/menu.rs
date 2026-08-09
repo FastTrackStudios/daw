@@ -10,9 +10,9 @@
 //! offers is testable without a browser and cannot drift between the
 //! standalone, plugin and REAPER-embedded surfaces.
 
+use crate::Editor;
 use crate::doc::NoteId;
 use crate::mode::Mode;
-use crate::Editor;
 
 /// What a menu entry does when chosen.
 ///
@@ -132,6 +132,13 @@ pub fn note_menu(ed: &Editor, under: Option<NoteId>, t: f64) -> Vec<MenuItem> {
                 true,
             )],
             Mode::Audio => vec![
+                MenuItem::new("Split Here", Command::SplitNote(id, t), true),
+                MenuItem::new("Merge With Next", Command::MergeNotes(id), true),
+            ],
+            // Splitting and merging slices is the same edit as for a
+            // sung note — where one hit ends and the next begins is
+            // exactly what onset detection gets wrong.
+            Mode::Percussive => vec![
                 MenuItem::new("Split Here", Command::SplitNote(id, t), true),
                 MenuItem::new("Merge With Next", Command::MergeNotes(id), true),
             ],

@@ -321,15 +321,15 @@ pub fn analyse(
                 let over = l - c.threshold_db;
                 // Soft knee: a hard corner is audible on a vocal as the
                 // level crosses it back and forth.
-                let effective = if c.knee_db > 0.0 && over > -c.knee_db / 2.0 && over < c.knee_db / 2.0
-                {
-                    let x = over + c.knee_db / 2.0;
-                    x * x / (2.0 * c.knee_db)
-                } else if over > 0.0 {
-                    over
-                } else {
-                    0.0
-                };
+                let effective =
+                    if c.knee_db > 0.0 && over > -c.knee_db / 2.0 && over < c.knee_db / 2.0 {
+                        let x = over + c.knee_db / 2.0;
+                        x * x / (2.0 * c.knee_db)
+                    } else if over > 0.0 {
+                        over
+                    } else {
+                        0.0
+                    };
                 -(effective - effective / ratio)
             })
             .collect();
@@ -370,7 +370,10 @@ pub fn analyse(
                     continue;
                 }
             }
-            if cfg.breath.is_some_and(|b| ms >= b.min_ms && peak_db <= b.max_level_db) {
+            if cfg
+                .breath
+                .is_some_and(|b| ms >= b.min_ms && peak_db <= b.max_level_db)
+            {
                 {
                     out.regions.push(Region {
                         kind: Detection::Breath,

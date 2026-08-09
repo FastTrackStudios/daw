@@ -8,11 +8,11 @@
 
 #![cfg(feature = "daw")]
 
+use daw::service::StretchMarkers;
 use daw::service::midi::Midi;
 use daw::service::{ItemRef, ProjectContext, TakeRef, Takes, TrackRef, Tracks};
 use daw::standalone::sync::Standalone;
 use expression_editor_audio::{AudioSession, AudioTakeLocation, TakeConfig, WriteOutcome};
-use daw::service::StretchMarkers;
 use expression_editor_core::doc::NoteId;
 use expression_editor_core::{Mode, Viewport};
 
@@ -93,8 +93,7 @@ fn project(midi: f64, secs: f64) -> (Standalone, ItemRef, f64, TempDir) {
         ItemRef::Guid(g) => g.clone(),
         _ => panic!("expected a guid"),
     };
-    let active =
-        Takes::get_active_take(&daw, ctx, ItemRef::Guid(item_guid.clone())).expect("take");
+    let active = Takes::get_active_take(&daw, ctx, ItemRef::Guid(item_guid.clone())).expect("take");
 
     daw.write_project(&guid, |p| {
         for tl in p.takes.values_mut() {
@@ -279,8 +278,14 @@ fn a_second_write_makes_the_next_numbered_render() {
         panic!("expected a render");
     };
 
-    assert_ne!(first, second, "a second edit is a new version, not a clobber");
-    assert!(std::path::Path::new(&first).exists(), "and the first survives");
+    assert_ne!(
+        first, second,
+        "a second edit is a new version, not a clobber"
+    );
+    assert!(
+        std::path::Path::new(&first).exists(),
+        "and the first survives"
+    );
     assert!(first.ends_with("-fts-001.wav"), "got {first}");
     assert!(second.ends_with("-fts-002.wav"), "got {second}");
 }
@@ -416,11 +421,15 @@ fn the_lane_sum_lands_on_the_takes_volume_envelope() {
     let mut lanes = Lanes::from_dynamics(&Default::default(), frames);
     lanes.set(
         DynamicsLane::Gate,
-        (0..frames).map(|f| GainPoint { frame: f, db: -3.0 }).collect(),
+        (0..frames)
+            .map(|f| GainPoint { frame: f, db: -3.0 })
+            .collect(),
     );
     lanes.set(
         DynamicsLane::Sibilance,
-        (0..frames).map(|f| GainPoint { frame: f, db: -5.0 }).collect(),
+        (0..frames)
+            .map(|f| GainPoint { frame: f, db: -5.0 })
+            .collect(),
     );
 
     let written = s.write_dynamics(&daw, &lanes, &Default::default(), false);
@@ -475,7 +484,9 @@ fn switching_every_lane_off_removes_the_envelope_rather_than_flattening_it() {
     let mut lanes = Lanes::from_dynamics(&Default::default(), frames);
     lanes.set(
         DynamicsLane::Gate,
-        (0..frames).map(|f| GainPoint { frame: f, db: -4.0 }).collect(),
+        (0..frames)
+            .map(|f| GainPoint { frame: f, db: -4.0 })
+            .collect(),
     );
     s.write_dynamics(&daw, &lanes, &Default::default(), false);
     assert!(!daw.points(ProjectContext::Current, env.clone()).is_empty());
@@ -537,8 +548,8 @@ fn rewriting_replaces_the_envelope_instead_of_stacking_on_it() {
 #[test]
 fn detections_are_marked_on_the_item_even_when_nothing_is_ducked() {
     use daw::service::Takes;
-    use expression_editor_audio::dynamics::{Detection, Dynamics, Region};
     use expression_editor_audio::Lanes;
+    use expression_editor_audio::dynamics::{Detection, Dynamics, Region};
 
     let (daw, item, secs, _dir) = project(60.0, 0.8);
     let s = open(&daw, item.clone(), secs, 1.0).expect("loaded");

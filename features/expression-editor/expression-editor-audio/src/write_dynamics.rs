@@ -14,7 +14,7 @@ use daw::service::automation::{AddPointParams, Automation, EnvelopeLocation, Env
 use daw::service::{TakeEnvelopeKind, TakeMarkerCreate, Takes, TrackRef};
 
 use crate::dynamics::{Detection, Dynamics};
-use crate::lanes::{db_to_take_volume, thin, Lanes};
+use crate::lanes::{Lanes, db_to_take_volume, thin};
 use crate::session::AudioSession;
 
 /// How much a point may deviate from the line between its neighbours

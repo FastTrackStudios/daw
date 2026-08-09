@@ -130,9 +130,10 @@ impl Camera {
         }
         let visible = vp.w * self.units_per_px;
         let slack = visible * bounds.edge_whitespace;
-        self.t0 = self
-            .t0
-            .clamp(bounds.t_min - slack, (bounds.t_max + slack - visible).max(bounds.t_min - slack));
+        self.t0 = self.t0.clamp(
+            bounds.t_min - slack,
+            (bounds.t_max + slack - visible).max(bounds.t_min - slack),
+        );
 
         self.px_per_semitone = self
             .px_per_semitone

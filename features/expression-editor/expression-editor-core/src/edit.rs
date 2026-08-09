@@ -108,7 +108,9 @@ pub enum Edit {
     /// A pitch drag can then work purely on the curve and restore the
     /// invariant once, on release, rather than juggling both every
     /// frame.
-    NormalizeRow { notes: Vec<NoteId> },
+    NormalizeRow {
+        notes: Vec<NoteId>,
+    },
     /// Add a modulation stack over a span — programmatic vibrato and
     /// swells. `taper` is the fraction of the span eased in and out.
     ApplyModulation {
@@ -130,25 +132,58 @@ pub enum Edit {
         points: Vec<Point>,
     },
     /// Transpose notes. The pitch gesture moves rigidly with the row.
-    Transpose { notes: Vec<NoteId>, semitones: i32 },
+    Transpose {
+        notes: Vec<NoteId>,
+        semitones: i32,
+    },
     /// Move notes in time, carrying their owned expression.
-    MoveTime { notes: Vec<NoteId>, delta: f64 },
+    MoveTime {
+        notes: Vec<NoteId>,
+        delta: f64,
+    },
     /// Resize a note; owned expression stretches to the new bounds.
-    Resize { note: NoteId, start: f64, end: f64 },
+    Resize {
+        note: NoteId,
+        start: f64,
+        end: f64,
+    },
     /// Set a note's sounding pitch offset from its row — how a
     /// microtonal target is stored.
-    SetPitchOffset { note: NoteId, semitones: f64 },
+    SetPitchOffset {
+        note: NoteId,
+        semitones: f64,
+    },
     /// Velocity, 0..1.
-    SetVelocity { notes: Vec<NoteId>, velocity: f64 },
+    SetVelocity {
+        notes: Vec<NoteId>,
+        velocity: f64,
+    },
     /// Nudge velocity — the drag path, so a gesture can accumulate.
-    NudgeVelocity { notes: Vec<NoteId>, delta: f64 },
-    SetOffVelocity { notes: Vec<NoteId>, velocity: f64 },
-    SetMuted { notes: Vec<NoteId>, muted: bool },
-    ToggleMuted { notes: Vec<NoteId> },
+    NudgeVelocity {
+        notes: Vec<NoteId>,
+        delta: f64,
+    },
+    SetOffVelocity {
+        notes: Vec<NoteId>,
+        velocity: f64,
+    },
+    SetMuted {
+        notes: Vec<NoteId>,
+        muted: bool,
+    },
+    ToggleMuted {
+        notes: Vec<NoteId>,
+    },
     /// Step the MPE member channel, wrapping within 2..=16.
-    NudgeChannel { notes: Vec<NoteId>, delta: i32 },
+    NudgeChannel {
+        notes: Vec<NoteId>,
+        delta: i32,
+    },
     /// Scale note lengths about their own starts.
-    ScaleLength { notes: Vec<NoteId>, factor: f64 },
+    ScaleLength {
+        notes: Vec<NoteId>,
+        factor: f64,
+    },
     /// Scale note *positions* about `pivot` — arpeggiate.
     StretchPositions {
         notes: Vec<NoteId>,
@@ -169,17 +204,29 @@ pub enum Edit {
         strength: f64,
     },
     /// Extend each note to meet the next one on its row.
-    Legato { notes: Vec<NoteId>, gap: f64 },
+    Legato {
+        notes: Vec<NoteId>,
+        gap: f64,
+    },
     /// Vocal editor: the syllable carried by the note.
-    SetText { note: NoteId, text: Option<String> },
+    SetText {
+        note: NoteId,
+        text: Option<String>,
+    },
     /// Guitar/bass technique.
     SetArticulation {
         notes: Vec<NoteId>,
         articulation: Option<Articulation>,
     },
     /// Guitar/bass: move to another string, keeping sounding pitch.
-    SetString { note: NoteId, string: i32 },
-    SetFret { notes: Vec<NoteId>, fret: u8 },
+    SetString {
+        note: NoteId,
+        string: i32,
+    },
+    SetFret {
+        notes: Vec<NoteId>,
+        fret: u8,
+    },
     AddNote(Box<Note>),
     /// Insert clipboard contents, minting fresh ids. The notes arrive
     /// already positioned — [`crate::clipboard::Clipboard::placed`] does
@@ -187,15 +234,35 @@ pub enum Edit {
     /// edit with different arguments.
     PasteNotes(Vec<Note>),
     DeleteNotes(Vec<NoteId>),
-    SplitNote { note: NoteId, t: f64 },
+    SplitNote {
+        note: NoteId,
+        t: f64,
+    },
     /// Q zones.
-    AddZoneSplit { note: NoteId, t: f64 },
-    RemoveZoneSplit { note: NoteId, t: f64, tolerance: f64 },
-    MoveZoneSplit { note: NoteId, from: f64, to: f64 },
-    SetTarget { note: NoteId, target: Target },
+    AddZoneSplit {
+        note: NoteId,
+        t: f64,
+    },
+    RemoveZoneSplit {
+        note: NoteId,
+        t: f64,
+        tolerance: f64,
+    },
+    MoveZoneSplit {
+        note: NoteId,
+        from: f64,
+        to: f64,
+    },
+    SetTarget {
+        note: NoteId,
+        target: Target,
+    },
     /// Reassign MPE member channels so overlapping notes never share
     /// one.
-    AssignChannels { notes: Vec<NoteId>, seed: u64 },
+    AssignChannels {
+        notes: Vec<NoteId>,
+        seed: u64,
+    },
     SetBendRange(f64),
     /// Replace a controller's values over `[t0, t1]`.
     DrawCc {
@@ -205,7 +272,11 @@ pub enum Edit {
         points: Vec<Point>,
     },
     /// Erase a controller over `[t0, t1]`.
-    EraseCc { number: u8, t0: f64, t1: f64 },
+    EraseCc {
+        number: u8,
+        t0: f64,
+        t1: f64,
+    },
     /// Restyle `[t0, t1]` between its own endpoints.
     ShapeCc {
         number: u8,
@@ -252,12 +323,7 @@ impl Edit {
                 extend_to_note_edges(n, *lane);
                 true
             }
-            Edit::EraseLane {
-                note,
-                lane,
-                t0,
-                t1,
-            } => {
+            Edit::EraseLane { note, lane, t0, t1 } => {
                 let Some(n) = doc.note_mut(*note) else {
                     return false;
                 };
@@ -294,8 +360,7 @@ impl Edit {
                 };
                 let (lo, hi) = ordered(*t0, *t1);
                 let default = lane.default_value();
-                let pivot =
-                    blob::effective_center(n.lane(*lane), lo, hi, DEFAULT_SAMPLES, default);
+                let pivot = blob::effective_center(n.lane(*lane), lo, hi, DEFAULT_SAMPLES, default);
                 n.lane_mut(*lane).scale_about(lo, hi, pivot, *factor);
                 true
             }
@@ -434,14 +499,7 @@ impl Edit {
                 if hi - lo <= 0.0 {
                     return false;
                 }
-                let d = blob::decompose(
-                    &n.pitch,
-                    lo,
-                    hi,
-                    DEFAULT_SAMPLES,
-                    units_per_second,
-                    0.0,
-                );
+                let d = blob::decompose(&n.pitch, lo, hi, DEFAULT_SAMPLES, units_per_second, 0.0);
                 let rebuilt = d.recompose(d.center, *drift_amount, *modulation_amount);
                 n.pitch.splice(lo, hi, rebuilt.points());
                 true
@@ -552,8 +610,7 @@ impl Edit {
                     // Move the whole gesture rigidly — a microtonal
                     // target shifts the note without reshaping how it
                     // was sung or drawn.
-                    let current =
-                        blob::effective_center(&n.pitch, s, e, DEFAULT_SAMPLES, 0.0);
+                    let current = blob::effective_center(&n.pitch, s, e, DEFAULT_SAMPLES, 0.0);
                     n.pitch.offset(s, e, *semitones - current);
                 }
                 true
@@ -760,11 +817,7 @@ impl Edit {
                 .note_mut(*note)
                 .map(|n| n.add_split(*t))
                 .unwrap_or(false),
-            Edit::RemoveZoneSplit {
-                note,
-                t,
-                tolerance,
-            } => doc
+            Edit::RemoveZoneSplit { note, t, tolerance } => doc
                 .note_mut(*note)
                 .map(|n| n.remove_split_near(*t, *tolerance))
                 .unwrap_or(false),
@@ -772,11 +825,7 @@ impl Edit {
                 let Some(n) = doc.note_mut(*note) else {
                     return false;
                 };
-                let Some(i) = n
-                    .splits
-                    .iter()
-                    .position(|s| (s - from).abs() < 1e-6)
-                else {
+                let Some(i) = n.splits.iter().position(|s| (s - from).abs() < 1e-6) else {
                     return false;
                 };
                 // Keep splits ordered and strictly interior; a boundary
@@ -959,7 +1008,9 @@ fn assign_channels(doc: &mut ExpressionDoc, ids: &[NoteId], seed: u64) -> bool {
                 taken[ch as usize] = true;
             }
         }
-        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        rng = rng
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let offset = (rng >> 33) as usize % 15;
         let chosen = (0..15)
             .map(|k| 2 + ((offset + k) % 15) as u8)

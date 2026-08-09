@@ -50,7 +50,8 @@ impl Decomposition {
                 .enumerate()
                 .map(|(i, &t)| Point {
                     t,
-                    value: center + self.drift[i] * drift_amount
+                    value: center
+                        + self.drift[i] * drift_amount
                         + self.modulation[i] * modulation_amount,
                 })
                 .collect(),
@@ -103,11 +104,7 @@ pub fn decompose(
     let grid_rate = (n - 1) as f64 / span_s;
 
     let drift = zero_phase_lowpass(&residual, DRIFT_CUTOFF_HZ, grid_rate);
-    let modulation: Vec<f64> = residual
-        .iter()
-        .zip(&drift)
-        .map(|(r, d)| r - d)
-        .collect();
+    let modulation: Vec<f64> = residual.iter().zip(&drift).map(|(r, d)| r - d).collect();
 
     Decomposition {
         times,
@@ -168,13 +165,7 @@ fn median(values: &[f64]) -> f64 {
 /// fourth below and settles on the target should scale around the
 /// *target*, which is where the curve dwells. Computed as the mode over
 /// semitone-wide bins, refined by the median of that bin's samples.
-pub fn effective_center(
-    curve: &Curve,
-    t0: f64,
-    t1: f64,
-    sample_count: usize,
-    default: f64,
-) -> f64 {
+pub fn effective_center(curve: &Curve, t0: f64, t1: f64, sample_count: usize, default: f64) -> f64 {
     let n = sample_count.max(2);
     let samples: Vec<f64> = (0..n)
         .map(|i| {

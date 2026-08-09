@@ -119,7 +119,11 @@ pub fn weighted_note_length(spans: &[Span], at: f64, cfg: SmartZoom) -> Option<f
         return None;
     }
     let mut sorted: Vec<Span> = spans.to_vec();
-    sorted.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(core::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| {
+        a.start
+            .partial_cmp(&b.start)
+            .unwrap_or(core::cmp::Ordering::Equal)
+    });
 
     let mut length_sum = 0.0;
     let mut weight_sum = 0.0;

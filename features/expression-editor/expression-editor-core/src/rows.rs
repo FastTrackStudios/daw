@@ -79,11 +79,7 @@ impl StringTuning {
 
     /// Open pitch of a string, capo included.
     pub fn open(&self, string: usize) -> i32 {
-        self.open_pitches
-            .get(string)
-            .copied()
-            .unwrap_or(40)
-            + self.capo as i32
+        self.open_pitches.get(string).copied().unwrap_or(40) + self.capo as i32
     }
 
     /// Sounding pitch of a fingered position.
@@ -179,8 +175,59 @@ impl DrumMap {
 }
 
 /// What the vertical axis means.
+/// The bands a percussive track's hits are sorted into.
+///
+/// Split points are spectral centroids in Hz, ascending, and there is
+/// one more band than there are splits. Three by default — kick low,
+/// snare middle, cymbals high — which is enough to read a kit at a
+/// glance without pretending to identify the drums.
+///
+/// Deliberately not a [`DrumMap`]: this makes no claim to know a kick
+/// from a floor tom, only that one hit is darker than another. Naming
+/// lanes is what [`crate::Mode::Drums`] is for, and that mode has MIDI
+/// note numbers to name them from.
 #[derive(Clone, Debug, PartialEq)]
-#[derive(Default)]
+pub struct SliceBands {
+    /// Ascending centroid boundaries in Hz. `n` splits, `n + 1` bands.
+    pub splits: Vec<f64>,
+    pub names: Vec<String>,
+}
+
+impl Default for SliceBands {
+    fn default() -> Self {
+        Self {
+            // 250 Hz and 2 kHz: below the first is body, above the
+            // second is almost entirely cymbal and snare snap. The
+            // exact numbers matter less than that they are editable —
+            // a shaker track wants both moved up.
+            splits: vec![250.0, 2000.0],
+            names: vec!["Low".into(), "Mid".into(), "High".into()],
+        }
+    }
+}
+
+impl SliceBands {
+    pub fn count(&self) -> usize {
+        self.splits.len() + 1
+    }
+
+    /// Which band a hit with this spectral centroid belongs to.
+    ///
+    /// Banding is a view, not a commitment: a slice keeps its measured
+    /// centroid, so moving a split re-sorts without losing anything.
+    pub fn band_of(&self, centroid_hz: f64) -> usize {
+        self.splits
+            .iter()
+            .position(|&s| centroid_hz < s)
+            .unwrap_or(self.splits.len())
+    }
+
+    pub fn name(&self, band: usize) -> &str {
+        self.names.get(band).map(String::as_str).unwrap_or("")
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Default)]
 pub enum RowSpace {
     /// Rows are MIDI pitches. Audio, MPE, plain MIDI, vocals.
     #[default]
@@ -189,16 +236,30 @@ pub enum RowSpace {
     Drums(DrumMap),
     /// Rows are strings; the note's `fret` completes the position.
     Strings(StringTuning),
+    /// Rows are spectral bands; a note is a percussive hit, not a
+    /// pitch. See [`SliceBands`].
+    Bands(SliceBands),
 }
 
-
 impl RowSpace {
+    /// Whether two row spaces are the same *kind*, ignoring their
+    /// contents.
+    ///
+    /// What re-applying a mode preset needs to know: a document already
+    /// in band space keeps its own splits, because the user may have
+    /// moved them and a preset must not undo that. A document in some
+    /// other space is converted.
+    pub fn same_kind(&self, other: &RowSpace) -> bool {
+        core::mem::discriminant(self) == core::mem::discriminant(other)
+    }
+
     /// Inclusive row range the roll can show.
     pub fn bounds(&self) -> (i32, i32) {
         match self {
             RowSpace::Pitch => (0, 127),
             RowSpace::Drums(m) => (0, m.lanes.len().saturating_sub(1) as i32),
             RowSpace::Strings(t) => (0, t.strings().saturating_sub(1) as i32),
+            RowSpace::Bands(b) => (0, b.count().saturating_sub(1) as i32),
         }
     }
 
@@ -220,6 +281,7 @@ impl RowSpace {
                 // its octave, which is how players refer to them.
                 tuning::pitch_class_name(open).to_string()
             }
+            RowSpace::Bands(b) => b.name(row.max(0) as usize).to_string(),
         }
     }
 
@@ -230,6 +292,8 @@ impl RowSpace {
             RowSpace::Pitch => row.rem_euclid(12) == 0,
             RowSpace::Drums(_) => false,
             RowSpace::Strings(_) => true,
+            // Every band boundary is a real division of the material.
+            RowSpace::Bands(_) => true,
         }
     }
 
@@ -247,6 +311,9 @@ impl RowSpace {
             RowSpace::Pitch => note.row,
             RowSpace::Drums(m) => m.pitch_of_row(note.row.max(0) as usize).unwrap_or(note.row),
             RowSpace::Strings(t) => t.pitch(note.row.max(0) as usize, note.fret.unwrap_or(0)),
+            // A slice has no pitch. Callers that need one for playback
+            // get silence rather than a number that would sound.
+            RowSpace::Bands(_) => 0,
         }
     }
 
@@ -256,6 +323,9 @@ impl RowSpace {
             RowSpace::Pitch => Some(pitch.clamp(0, 127)),
             RowSpace::Drums(m) => m.row_of_pitch(pitch).map(|r| r as i32),
             RowSpace::Strings(t) => t.best_position(pitch, 5).map(|(s, _)| s as i32),
+            // Nothing imports *into* band space by pitch: a band comes
+            // from a measured centroid, and a MIDI note has none.
+            RowSpace::Bands(_) => None,
         }
     }
 
@@ -272,6 +342,9 @@ impl RowSpace {
             RowSpace::Drums(_) => None,
             // The fret number is the whole point of a tab view.
             RowSpace::Strings(_) => Some(note.fret.unwrap_or(0).to_string()),
+            // The band is already the row, and a hit is too narrow to
+            // print in anyway.
+            RowSpace::Bands(_) => None,
         }
     }
 
@@ -279,6 +352,10 @@ impl RowSpace {
     pub fn note_shape(&self) -> NoteShape {
         match self {
             RowSpace::Drums(_) => NoteShape::Triangle,
+            // A hit is an attack with a decay, which is what the
+            // triangle already says — and it puts the flat edge on the
+            // onset, the one part of a slice you align against.
+            RowSpace::Bands(_) => NoteShape::Triangle,
             _ => NoteShape::Bar,
         }
     }
@@ -293,16 +370,20 @@ impl RowSpace {
     pub fn row_color(&self, row: i32) -> Option<&'static str> {
         match self {
             RowSpace::Pitch => None,
-            RowSpace::Strings(_) => {
-                Some(STRING_COLORS[row.max(0) as usize % STRING_COLORS.len()])
-            }
+            RowSpace::Strings(_) => Some(STRING_COLORS[row.max(0) as usize % STRING_COLORS.len()]),
             RowSpace::Drums(m) => {
                 let name = m.lanes.get(row.max(0) as usize)?.name.as_str();
                 Some(drum_color(name))
             }
+            // Dark to bright as the band rises, so a kit reads the way
+            // it sounds without naming a single drum.
+            RowSpace::Bands(_) => Some(BAND_COLORS[row.max(0) as usize % BAND_COLORS.len()]),
         }
     }
 }
+
+/// Band colours, dark to bright as the centroid rises.
+const BAND_COLORS: [&str; 4] = ["#7a5cff", "#3fa9f5", "#4fd1a5", "#ffd166"];
 
 /// How a note body is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -323,13 +404,8 @@ pub enum NoteShape {
 /// so the register reads without counting rows.
 pub const STRING_COLORS: [&str; 8] = [
     "#f97316", // low — orange
-    "#f59e0b",
-    "#eab308",
-    "#84cc16",
-    "#22d3ee",
-    "#60a5fa", // high — blue
-    "#a78bfa",
-    "#f472b6",
+    "#f59e0b", "#eab308", "#84cc16", "#22d3ee", "#60a5fa", // high — blue
+    "#a78bfa", "#f472b6",
 ];
 
 /// Kit-section colour, so a groove reads at a glance.

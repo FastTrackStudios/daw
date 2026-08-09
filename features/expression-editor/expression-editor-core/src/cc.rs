@@ -43,7 +43,9 @@ impl CcLane {
 
     /// The 0..127 value at `t`.
     pub fn value(&self, t: f64) -> u8 {
-        (self.curve.sample(t, self.default_value()) * 127.0).round().clamp(0.0, 127.0) as u8
+        (self.curve.sample(t, self.default_value()) * 127.0)
+            .round()
+            .clamp(0.0, 127.0) as u8
     }
 
     /// Where a lane rests when nothing is authored.

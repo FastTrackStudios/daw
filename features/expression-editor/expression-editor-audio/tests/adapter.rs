@@ -1,9 +1,9 @@
 //! The analysis ↔ document path, exercised with no audio and no DSP.
 
+use expression_editor_audio::{FORMANT_RANGE, GAIN_RANGE_DB, Span, apply_to, spans, to_doc};
 use expression_editor_core::doc::{Lane, NoteId};
-use expression_editor_audio::{apply_to, spans, to_doc, Span, FORMANT_RANGE, GAIN_RANGE_DB};
-use tune_dsp::model::{NoteBlob, PitchDoc};
 use tune_dsp::TrackedNote;
+use tune_dsp::model::{NoteBlob, PitchDoc};
 
 const FRAME_RATE: f64 = 100.0;
 
@@ -66,14 +66,7 @@ fn a_note_sits_on_its_literal_row_with_the_detune_in_the_curve() {
     // The flatness has to be in the curve, not in the row. Read it as
     // the centre of the contour rather than at any single frame —
     // drift and vibrato are passing through at every one of those.
-    let d = expression_editor_core::blob::decompose(
-        &n.pitch,
-        n.start,
-        n.end,
-        128,
-        FRAME_RATE,
-        0.0,
-    );
+    let d = expression_editor_core::blob::decompose(&n.pitch, n.start, n.end, 128, FRAME_RATE, 0.0);
     assert!(
         (d.center - -0.4).abs() < 0.05,
         "the flatness lives in the curve, got {}",
@@ -236,10 +229,7 @@ fn a_single_dropped_frame_is_a_glitch_not_a_consonant() {
 #[test]
 fn an_entirely_unvoiced_take_is_one_span() {
     let f0 = vec![None; 10];
-    assert_eq!(
-        spans::unvoiced_spans(&f0),
-        vec![Span { start: 0, end: 9 }]
-    );
+    assert_eq!(spans::unvoiced_spans(&f0), vec![Span { start: 0, end: 9 }]);
     assert!(spans::unvoiced_spans(&[]).is_empty());
     assert!(spans::unvoiced_spans(&[Some(1.0), Some(2.0)]).is_empty());
 }

@@ -94,9 +94,7 @@ pub const RAST: Temperament = Temperament {
 pub const BAYATI: Temperament = Temperament {
     name: "Maqam Bayati",
     description: "24-EDO approximation (half-flat 2nd)",
-    offsets: [
-        0.0, 0.0, -50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    ],
+    offsets: [0.0, 0.0, -50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
 };
 
 pub const PRESETS: [&Temperament; 6] = [

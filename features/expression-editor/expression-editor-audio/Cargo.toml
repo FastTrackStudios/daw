@@ -19,6 +19,7 @@ daw = ["dep:daw"]
 [dependencies]
 expression-editor-core = { workspace = true }
 tune-dsp = { workspace = true }
+realfft = { workspace = true }
 daw = { workspace = true, optional = true }
 
 [dev-dependencies]
