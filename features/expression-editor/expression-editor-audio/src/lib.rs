@@ -37,11 +37,13 @@
 use expression_editor_core::doc::{ExpressionDoc, Lane, Note, NoteId, TimeBase};
 use tune_dsp::model::{NoteBlob, PitchDoc, WarpMarker};
 
+pub mod align;
 pub mod analyze;
 #[cfg(feature = "daw")]
 pub mod session;
 pub mod spans;
 
+pub use align::{align, AlignConfig, Alignment};
 pub use analyze::{analyze_take, to_mono, Analysis, TakeConfig};
 #[cfg(feature = "daw")]
 pub use session::{AudioSession, AudioTakeLocation};

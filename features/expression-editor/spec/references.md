@@ -114,3 +114,27 @@ analyses, and both halves already exist:
 That is the whole reason this belongs in this editor rather than beside
 it: alignment is the timing feature with its target computed from
 another take instead of from a drag.
+
+### What we built
+
+`align.rs` — banded DTW over per-frame features. Three choices carry
+most of the quality, and each was forced by a test:
+
+- **Energy is the primary cue, pitch a weak one.** A stacked harmony is
+  deliberately at a different pitch and must still align on timing; a
+  test aligns a third to its lead to keep that true.
+- **Silence pairs at zero cost**, so slack collects between phrases and
+  the phrases keep their own rhythm. A long breath in one take then
+  cannot drag the whole alignment.
+- **A tiebreak toward not moving.** Silence being free means the path
+  through a gap is otherwise arbitrary and the map wanders. The bias is
+  measured against *identity*, not against the length-scaled search
+  centre — biasing toward the centre argues for spreading a length
+  difference evenly across the take, when the truth is usually that the
+  dub simply came in late and the correction belongs at the front.
+
+`max_shift_secs` is enforced on the finished map, not just as a search
+band. The band is around the length-scaled diagonal so takes of
+different length can match at all, and a shift inside that band can
+still exceed what the user allowed. Better a partly-corrected take than
+one silently dragged five times further than asked.
