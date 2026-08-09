@@ -462,7 +462,12 @@ pub fn SoloButton(props: SoloProps) -> Element {
     // Defeat is a different thing from solo, not more of it, so it gets a
     // different hue rather than a brighter one.
     let lit = match props.state {
-        Solo::Off => None,
+        // `props.unlit`, not `None`. Dropped, this fell back to the plain
+        // hardware grey and the resting face came out sixteen levels dark
+        // in the track panel and eight in the mixer — which is precisely
+        // what the prop's own doc comment says it exists to prevent.
+        // `MuteButton` has always passed it through; solo never did.
+        Solo::Off => props.unlit,
         Solo::On => Some(t.signal.solo),
         // #3898d3 in the source — its own blue, a clear step below the
         // accent used for a lit routing lane rather than the same one.
@@ -1008,8 +1013,25 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     // The track panel's 20x20 ring is centred and **larger** relative to
     // its cell (radius 8 of 20) because there is no housing competing for
     // the room, so the two fractions differ rather than one being wrong.
-    let (cx, cy, outer, hole) = if props.housing {
-        (vw * 0.486, vh * 0.521, unit * 0.3125, unit * 0.1458)
+    // **The barred ring is not the plain ring with an X over it.** It is
+    // a bigger, thinner band in both families — the mixer's runs 8.46
+    // outside and 4.56 in against 7.45 and 3.67, the track panel's 7.91
+    // and 4.28 against 7.40 and 3.38. Sharing one pair of radii left the
+    // outer edge sixty to eighty levels short all the way round, which
+    // made `track_recarm_norec` the worst image in the set after the
+    // thumbs.
+    // Only the *plain* barred states grow. `AutoNoRecord` keeps the
+    // ordinary radii — measured 7.40 and 3.35 in the track panel, the
+    // same as `off` — so it is the auto disc that governs there, not the
+    // bar. Applying the enlargement to it put that image up from under
+    // ten to fifteen.
+    let wide = barred && !auto;
+    let (cx, cy, outer, hole) = if props.housing && wide {
+        (vw * 0.486, vh * 0.521, unit * 0.3524, unit * 0.1899)
+    } else if props.housing {
+        (vw * 0.486, vh * 0.521, unit * 0.3105, unit * 0.1530)
+    } else if wide {
+        (vw * 0.5, vh * 0.5, unit * 0.3953, unit * 0.2139)
     } else {
         // Read off the coverage rather than guessed at from a threshold.
         // Down the widest row the alpha runs 103, 255 ... 255, 102: the
@@ -1257,7 +1279,15 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                                             x1: "{cx - dx * far}", y1: "{cy - dy * far}",
                                             x2: "{cx + dx * far}", y2: "{cy + dy * far}",
                                             stroke: "#000000",
-                                            stroke_width: "{unit * 0.145}",
+                                            // Scaled off the ring, not the
+                                            // cell. As a fraction of the
+                                            // cell the two families pull
+                                            // in opposite directions —
+                                            // what suits the mixer's 24
+                                            // over-cuts the track panel's
+                                            // 20 — because the notch
+                                            // tracks the band it crosses.
+                                            stroke_width: "{outer * 0.29}",
                                         }
                                     }
                                 }
@@ -2294,9 +2324,20 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
     // Hover lifts the wash as well as the mark — the source's top row
     // goes 38 to 70 — so a version that only brightened the glyph left
     // the whole strip looking a shade flat next to it.
-    let (ink, wash) = match props.at {
-        Interaction::Hover => (0.69f32, 0.28f32),
-        _ => (0.44, 0.15),
+    let ink = match props.at {
+        Interaction::Hover => 0.69f32,
+        _ => 0.44,
+    };
+    // The hover wash is not the resting one turned up. Resting fades to
+    // nothing — `#e9e9e9` at 0.149 down to `#131313` at 0.008, which
+    // composites 35 to 0 — while hover stays bright the whole way and
+    // turns back up at the foot: 67, down to 43, back to 38. Scaled from
+    // one set of stops the hover cell came out a flat 37 levels dark.
+    let hovered = props.at == Interaction::Hover;
+    let wash: [(&str, &str, f32); 3] = if hovered {
+        [("0", "#f4f4f4", 0.275), ("0.40", "#d6d6d6", 0.200), ("1", "#ffffff", 0.149)]
+    } else {
+        [("0", "#e9e9e9", 0.149), ("0.55", "#4a4a4a", 0.043), ("1", "#0a0a0a", 0.008)]
     };
 
     // Traced: down-triangle, ramp, right-triangle, all in the same box.
@@ -2331,20 +2372,21 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
             xmlns: "http://www.w3.org/2000/svg",
             defs {
                 linearGradient { id: "fcompwash", x1: "0", y1: "0", x2: "0", y2: "1",
-                    // Three stops. The rendered column comes out lumpy —
-                    // 85, 51, 85 down consecutive rows where the source
-                    // decays smoothly — and a clean two-stop white-to-black
-                    // ramp is the obvious fix, but measured it is three
-                    // levels worse across all three images. Left as it is
-                    // until the wash is understood rather than guessed at.
-                    stop { offset: "0", stop_color: "#e9e9e9", stop_opacity: "{wash}" }
-                    stop { offset: "0.55", stop_color: "#4a4a4a", stop_opacity: "{wash * 0.27}" }
-                    stop { offset: "1", stop_color: "#0a0a0a", stop_opacity: "0.008" }
+                    for (i, (at, hex, a)) in wash.iter().enumerate() {
+                        stop {
+                            key: "w{i}", offset: "{at}",
+                            stop_color: "{hex}", stop_opacity: "{a}",
+                        }
+                    }
                 }
             }
             rect { x: "0", y: "0", width: "{vw}", height: "{vh - 3.0}", fill: "url(#fcompwash)" }
-            rect { x: "0", y: "{vh - 2.0}", width: "{vw}", height: "1", fill: "#9a9a9a", fill_opacity: "0.345" }
-            rect { x: "0", y: "{vh - 1.0}", width: "{vw}", height: "1", fill: "#3a3a3a", fill_opacity: "0.094" }
+            // Pure black over pure white, both at low alpha — not the
+            // mid-greys these were. `#9a9a9a` at 0.345 composites 53
+            // levels light against the source's `#000000` at the same
+            // alpha, which is the single largest error in the family.
+            rect { x: "0", y: "{vh - 2.0}", width: "{vw}", height: "1", fill: "#000000", fill_opacity: "0.345" }
+            rect { x: "0", y: "{vh - 1.0}", width: "{vw}", height: "1", fill: "#ffffff", fill_opacity: "0.094" }
             path { d: "{glyph}", fill: "#ffffff", fill_opacity: "{ink}" }
         }
     }
