@@ -1701,11 +1701,12 @@ pub fn PanningKnob(props: PanProps) -> Element {
     // lit indicator rather than a part.
     let face = t.chrome.hardware;
     let rim = t.chrome.hardware_edge.shade(-0.45);
-    let cap = if props.position == 0.0 {
-        t.chrome.hardware_mark
-    } else {
-        t.chrome.accent
-    };
+    // Neutral at *every* position, which is what the two lines above
+    // decided and the next three used to contradict: off centre the cap
+    // went accent, so any panned track showed a blue lamp where REAPER
+    // shows the same moulded grey slid across. There is no accent variant
+    // in the art to match — the source draws one cap and moves it.
+    let cap = t.chrome.hardware_mark;
 
     rsx! {
         svg {

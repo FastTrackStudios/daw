@@ -240,6 +240,9 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
     let mut s = String::new();
 
     s.push_str(&rect(x, 0.0, 84.0, 212.0, &t.chrome.surface.shade(-0.18).css()));
+    // REAPER tints the top of the strip with the track colour, behind the
+    // pan row, and repeats it in the number band at the foot.
+    s.push_str(&rect(x, 22.0, 84.0, 28.0, &tk.tint.css()));
 
     // The FX list — a real three-pill strip, drawn at one pill's height.
     s.push_str(&at(
@@ -274,7 +277,22 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
         ),
     ));
     s.push_str(&at(
-        x + 52.0,
+        x + 40.0,
+        26.0,
+        &render_svg(
+            v::RecordArmButton,
+            v::RecordArmProps {
+                state: if tk.armed { v::RecordArm::On } else { v::RecordArm::Off },
+                cell: (20.0, 20.0),
+                housing: false,
+                width: NONE.0,
+                height: NONE.1,
+                at: v::Interaction::Normal,
+            },
+        ),
+    ));
+    s.push_str(&at(
+        x + 60.0,
         26.0,
         &render_svg(
             v::InputMonitorIndicator,
@@ -300,20 +318,26 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
             db,
         ));
     }
-    s.push_str(&rect(x + 24.0, 54.0, 23.0, 104.0, &g(-0.40).css()));
+    // The mixer's fader is its own pair of components — `VolumeFaderTrack`
+    // and `VolumeFaderCap`, which draw `mcp_volbg` and `mcp_volthumb`.
+    // `PanelSlider`'s thumb is the *track panel's* cap: 27 by 29, lying on
+    // its side with a seam down it, where the mixer's is 27 by 53 and
+    // ribbed across. Standing the wrong one in the mixer read as two pale
+    // bars where the cap should be.
+    s.push_str(&at(
+        x + 24.0,
+        54.0,
+        &render_svg(
+            v::VolumeFaderTrack,
+            v::FaderCapProps { accent: None, width: Some(23), height: Some(104) },
+        ),
+    ));
     s.push_str(&at(
         x + 22.0,
-        92.0,
+        84.0,
         &render_svg(
-            v::PanelSlider,
-            v::SliderProps {
-                part: v::SliderPart::VolumeThumb,
-                cell: (27.0, 29.0),
-                drop: 0.0,
-                width: NONE.0,
-                height: NONE.1,
-                at: v::Interaction::Normal,
-            },
+            v::VolumeFaderCap,
+            v::FaderCapProps { accent: None, width: Some(27), height: Some(53) },
         ),
     ));
     s.push_str(&meter(x + 49.0, 54.0, 5.0, 104.0, 0.62));
