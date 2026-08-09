@@ -49,7 +49,9 @@ fn at(x: f32, y: f32, svg: &str) -> String {
     let svg = svg.replace("id=\"", &format!("id=\"u{n}"));
     let svg = svg.replace("url(#", &format!("url(#u{n}"));
     svg.strip_prefix("<svg ")
-        .map(|s| format!("<svg x=\"{x}\" y=\"{y}\" {s}"))
+        .map(|s| {
+            format!("<svg x=\"{x}\" y=\"{y}\" preserveAspectRatio=\"none\" {s}")
+        })
         .unwrap_or_else(|| svg.to_string())
 }
 
@@ -280,14 +282,14 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
         ),
     ));
     s.push_str(&at(
-        x + 58.0,
-        24.0,
+        x + 46.0,
+        22.0,
         &render_svg(
             v::RecordArmButton,
             v::RecordArmProps {
                 state: if tk.armed { v::RecordArm::On } else { v::RecordArm::Off },
-                cell: (20.0, 20.0),
-                housing: false,
+                cell: (36.0, 24.0),
+                housing: true,
                 width: NONE.0,
                 height: NONE.1,
                 at: v::Interaction::Normal,
@@ -295,7 +297,7 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
         ),
     ));
     s.push_str(&at(
-        x + 58.0,
+        x + 56.0,
         50.0,
         &render_svg(
             v::InputMonitorIndicator,
@@ -329,14 +331,14 @@ fn mixer_strip(x: f32, n: u32, tk: &Track) -> String {
     // bars where the cap should be.
     s.push_str(&at(
         x + 24.0,
-        54.0,
+        68.0,
         &render_svg(
             v::VolumeFaderTrack,
             v::FaderCapProps {
                 accent: None,
                 full: true,
                 width: Some(23),
-                height: Some(104),
+                height: Some(97),
             },
         ),
     ));
