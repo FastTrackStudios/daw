@@ -711,7 +711,20 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         let slider = |part, cell| {
             render_svg(
                 v::PanelSlider,
-                v::SliderProps { part, cell, width: n.0, height: n.1, at },
+                v::SliderProps { part, cell, drop: 0.0, width: n.0, height: n.1, at },
+            )
+        };
+        let thumb = |drop| {
+            render_svg(
+                v::PanelSlider,
+                v::SliderProps {
+                    part: v::SliderPart::PanThumb,
+                    cell: (13.0, 23.0),
+                    drop,
+                    width: n.0,
+                    height: n.1,
+                    at,
+                },
             )
         };
         let hit = match name {
@@ -729,9 +742,8 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             "tcp_volthumb" => Some(slider(S::VolumeThumb, (27.0, 29.0))),
             "tcp_panbg" | "tcp_widthbg" => Some(slider(S::PanTrough, (43.0, 11.0))),
             "mcp_panbg" | "mcp_widthbg" => Some(slider(S::PanTrough, (69.0, 11.0))),
-            "tcp_panthumb" | "tcp_widththumb" | "mcp_panthumb" | "mcp_widththumb" => {
-                Some(slider(S::PanThumb, (13.0, 23.0)))
-            }
+            "tcp_panthumb" | "mcp_panthumb" | "mcp_widththumb" => Some(thumb(0.0)),
+            "tcp_widththumb" => Some(thumb(1.0)),
             _ => None,
         };
         if let Some(markup) = hit {
@@ -1010,6 +1022,13 @@ fn states(name: &str) -> usize {
     match stem {
         "pan_knob_small" | "pan_knob_large" | "width_knob_small" | "width_knob_large"
         | "volthumb" | "volbg" => 1,
+        // The pan and width thumbs are one drawing like every other
+        // handle, and were left off this list. Forced into three cells
+        // each rendered a whole marker into a third of its 13 columns and
+        // repeated it — a striped block rather than a pointer, and the
+        // worst four images in the set at 25 to 28 mean levels. The
+        // detector had them right; `states` overrode it.
+        "panthumb" | "widththumb" | "panbg" | "widthbg" => 1,
         // Three marks side by side in one image, not three pointer states.
         "folder_off" | "folder_on" | "folder_last" => 1,
         // Three states stacked vertically: one drawing, not three cells.

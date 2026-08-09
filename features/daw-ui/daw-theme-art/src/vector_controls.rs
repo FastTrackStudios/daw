@@ -3283,6 +3283,11 @@ pub struct SliderProps {
     pub part: SliderPart,
     #[props(default = (19.0, 24.0))]
     pub cell: (f32, f32),
+    /// Rows to shift the pan cap down. `tcp_widththumb` is the same
+    /// drawing as the other three thumbs one row lower — 164 pixels
+    /// different and every one of them that offset.
+    #[props(default = 0.0)]
+    pub drop: f32,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -3317,9 +3322,32 @@ pub fn PanelSlider(props: SliderProps) -> Element {
                     stop { offset: "0.22", stop_color: "{h.shade(0.60).css()}" }
                     stop { offset: "1", stop_color: "{h.shade(0.41).css()}" }
                 }
+                // The pan cap's face and its two edge columns. Both carry
+                // their shoulder rows in the same gradient, as a pair of
+                // stops a fiftieth apart — the top and bottom rows of the
+                // cap are sixty levels down from the face, not a ramp
+                // into it.
                 linearGradient { id: "slpan", x1: "0", y1: "0", x2: "0", y2: "1",
-                    stop { offset: "0", stop_color: "{h.shade(0.64).css()}" }
-                    stop { offset: "1", stop_color: "{h.shade(0.67).css()}" }
+                    stop { offset: "0", stop_color: "{h.shade(-0.095).css()}" }
+                    stop { offset: "0.124", stop_color: "{h.shade(-0.095).css()}" }
+                    stop { offset: "0.126", stop_color: "{h.shade(0.641).css()}" }
+                    stop { offset: "0.874", stop_color: "{h.shade(0.682).css()}" }
+                    stop { offset: "0.876", stop_color: "{h.shade(-0.079).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(-0.079).css()}" }
+                }
+                linearGradient { id: "slpanedge", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "{h.shade(-0.365).css()}" }
+                    stop { offset: "0.124", stop_color: "{h.shade(-0.365).css()}" }
+                    stop { offset: "0.126", stop_color: "{h.shade(0.406).css()}" }
+                    stop { offset: "0.874", stop_color: "{h.shade(0.427).css()}" }
+                    stop { offset: "0.876", stop_color: "{h.shade(-0.365).css()}" }
+                    stop { offset: "1", stop_color: "{h.shade(-0.365).css()}" }
+                }
+                radialGradient { id: "slpanhalo",
+                    cx: "6.5", cy: "12.5", r: "8.4",
+                    gradient_units: "userSpaceOnUse",
+                    stop { offset: "0.62", stop_color: "#000000", stop_opacity: "0.30" }
+                    stop { offset: "1", stop_color: "#000000", stop_opacity: "0" }
                 }
             }
             match props.part {
@@ -3378,21 +3406,31 @@ pub fn PanelSlider(props: SliderProps) -> Element {
                     }
                 },
                 SliderPart::PanThumb => rsx! {
-                    // A marker, not a block: a body eleven wide down to
-                    // row 15, then a tail tapering to seven by row 19.
-                    // The lit face fills only its upper half — rows 7 to
-                    // 14 — and everything below that is the tail.
-                    path {
-                        d: "M 1 6 H 12 V 15 L 10 19 H 3 L 1 15 Z",
-                        fill: "#000000",
-                    }
-                    rect {
-                        x: "2", y: "7", width: "9", height: "8",
-                        fill: "url(#slpan)",
-                    }
-                    rect {
-                        x: "6", y: "7", width: "1", height: "8",
-                        fill: "{h.shade(-0.68).css()}",
+                    // A bright cap with a soft shadow round it — not the
+                    // marker-with-a-tapering-tail it had been drawn as.
+                    // The tail was rows 15 to 20 read as opaque geometry;
+                    // they are black at alpha 0.42 falling to 0.05, which
+                    // is a shadow, and rows 5 and 6 are the same thing
+                    // above.
+                    //
+                    // Left as a tail *and* squeezed into a third of its
+                    // width by `states`, this was the worst image in the
+                    // set at 28 mean levels.
+                    g { transform: "translate(0 {props.drop})",
+                        ellipse { cx: "6.5", cy: "12.5", rx: "6.4", ry: "8.4",
+                            fill: "url(#slpanhalo)" }
+                        rect { x: "0", y: "7", width: "13", height: "8",
+                            fill: "#000000", fill_opacity: "0.07" }
+                        rect { x: "1", y: "7", width: "11", height: "8",
+                            fill: "{h.shade(-0.90).css()}", fill_opacity: "0.81" }
+                        rect { x: "2", y: "7", width: "9", height: "8",
+                            fill: "url(#slpanedge)" }
+                        rect { x: "3", y: "7", width: "7", height: "8",
+                            fill: "url(#slpan)" }
+                        // The seam, dead centre, running the cap's full
+                        // height including both shoulder rows.
+                        rect { x: "6", y: "7", width: "1", height: "8",
+                            fill: "{h.shade(-0.683).css()}" }
                     }
                 },
             }
