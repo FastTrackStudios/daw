@@ -577,6 +577,60 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             return Some(markup);
         }
     }
+    // The envelope panel's controls. Every one of these has a pressed
+    // cell identical to its normal cell — only hover moves — except the
+    // two unlit plates, which gain a fill when pressed that they do not
+    // have at rest.
+    {
+        use v::EnvcpGlyph as G;
+        let plate = |glyph, lit| {
+            render_svg(
+                v::EnvcpPlate,
+                v::EnvcpPlateProps {
+                    glyph,
+                    lit,
+                    cell: (30.0, 20.0),
+                    width: n.0,
+                    height: n.1,
+                    at,
+                },
+            )
+        };
+        let hit = match name {
+            "envcp_learn" => Some(plate(G::Learn, false)),
+            "envcp_learn_on" => Some(plate(G::Learn, true)),
+            "envcp_parammod" => Some(plate(G::ParamMod, false)),
+            "envcp_parammod_on" => Some(plate(G::ParamMod, true)),
+            "envcp_hide" => Some(render_svg(
+                v::EnvcpOptionsButton,
+                v::EnvcpOptionsProps { cell: (36.0, 20.0), width: n.0, height: n.1, at },
+            )),
+            "envcp_arm_off" | "envcp_arm_on" => Some(render_svg(
+                v::EnvcpArmButton,
+                v::EnvcpArmProps {
+                    armed: name.ends_with("_on"),
+                    cell: (20.0, 20.0),
+                    width: n.0,
+                    height: n.1,
+                    at,
+                },
+            )),
+            "envcp_bypass_off" | "envcp_bypass_on" => Some(render_svg(
+                v::EnvcpBypassButton,
+                v::EnvcpBypassProps {
+                    bypassed: name.ends_with("_on"),
+                    cell: (15.0, 20.0),
+                    width: n.0,
+                    height: n.1,
+                    at,
+                },
+            )),
+            _ => None,
+        };
+        if let Some(markup) = hit {
+            return Some(markup);
+        }
+    }
     {
         use v::SliderPart as S;
         let slider = |part, cell| {
@@ -861,7 +915,17 @@ fn leading_gap(name: &str) -> u32 {
 /// and pressed, and the knobs and the fader draw one thing.
 fn states(name: &str) -> usize {
     if name.starts_with("envcp_") {
-        return 1;
+        // The envelope panel's *buttons* are three-state strips like
+        // everyone else's; its furniture — backgrounds, fader, knob — is
+        // one drawing. Blanket-1 was right while only the backgrounds
+        // were wired and renders each button into a third of its width
+        // the moment one is not.
+        return match name {
+            "envcp_arm_off" | "envcp_arm_on" | "envcp_bypass_off" | "envcp_bypass_on"
+            | "envcp_learn" | "envcp_learn_on" | "envcp_parammod" | "envcp_parammod_on"
+            | "envcp_hide" => 3,
+            _ => 1,
+        };
     }
     let stem = name
         .strip_prefix("mcp_")
@@ -873,9 +937,6 @@ fn states(name: &str) -> usize {
         | "volthumb" | "volbg" => 1,
         // Three marks side by side in one image, not three pointer states.
         "folder_off" | "folder_on" | "folder_last" => 1,
-        // Backgrounds are one drawing that REAPER stretches, never a
-        // strip of states.
-        "folder_on" if name.starts_with("mcp_") => 1,
         // Three states stacked vertically: one drawing, not three cells.
         "fxlist_norm" | "fxlist_byp" | "fxlist_off" | "fxlist_empty"
         | "sendlist_norm" | "sendlist_mute" | "sendlist_empty"

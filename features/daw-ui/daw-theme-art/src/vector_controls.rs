@@ -3541,6 +3541,397 @@ pub fn ListStrip(props: ListStripProps) -> Element {
     }
 }
 
+// ── envelope panel ──────────────────────────────────────────────────────
+//
+// The envelope panel's buttons share a habit worth stating once: **their
+// pressed cell is their normal cell.** Every one of `arm`, `bypass`,
+// `hide` and the two lit plates is byte-identical in cells 0 and 2, so
+// only hover moves. The unlit `learn` and `parammod` are the exception —
+// pressed there gains a fill their normal state does not have — which is
+// why `at` is read per control rather than through the shared `ink`.
+
+/// The mark on an envelope-panel plate button.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum EnvcpGlyph {
+    /// Parameter learn — a thick ring cut open across the lower left.
+    #[default]
+    Learn,
+    /// Parameter modulation — one period of a wave.
+    ParamMod,
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct EnvcpPlateProps {
+    #[props(default)]
+    pub glyph: EnvcpGlyph,
+    /// Lit: the mark and the tab go accent, and the plate gains a fill.
+    #[props(default)]
+    pub lit: bool,
+    #[props(default = (30.0, 20.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// A plate button on the envelope panel — learn and parameter-modulation.
+///
+/// One drawing with two marks. The plate is a 1px rounded outline with a
+/// tab hanging off the top edge, and the *unlit normal* state is the only
+/// one with no fill at all: it reads as an outline over whatever the
+/// panel behind it is, which is why cell 0 of `envcp_learn` is 362 pixels
+/// of nothing and cell 2 of the same image is 350 pixels of `#2f2f2f`.
+#[component]
+pub fn EnvcpPlate(props: EnvcpPlateProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let mark = t.chrome.hardware_mark;
+
+    // Measured per cell rather than derived: the two toggle states darken
+    // on press in opposite directions. Unlit goes transparent → #3a3a3a →
+    // #2f2f2f; lit goes #2d2d2d → #373737 → #2d2d2d.
+    let fill = match (props.lit, props.at) {
+        (false, Interaction::Normal) => None,
+        (false, Interaction::Hover) => Some(t.chrome.hardware.shade(-0.086)),
+        (false, Interaction::Pressed) => Some(t.chrome.hardware.shade(-0.254)),
+        (true, Interaction::Hover) => Some(t.chrome.hardware.shade(-0.127)),
+        (true, _) => Some(t.chrome.hardware.shade(-0.286)),
+    };
+    let hovered = props.at == Interaction::Hover;
+    // The outline lifts a few levels under the pointer and nowhere else.
+    let edge = if hovered {
+        t.chrome.hardware_edge.shade(0.032)
+    } else {
+        t.chrome.hardware_edge.shade(0.021)
+    };
+    let (tab, ink) = match (props.lit, hovered) {
+        (true, false) => (t.chrome.accent, t.chrome.accent),
+        (true, true) => (offset(t.chrome.accent, 15.0), offset(t.chrome.accent, 15.0)),
+        (false, false) => (mark.shade(-0.049), mark.shade(-0.068)),
+        (false, true) => (mark.shade(0.161), mark.shade(0.129)),
+    };
+    // Learn is a filled shape, ParamMod a stroked one — flat in both
+    // cases, which is the only reason the stroke is safe here: resvg
+    // averages a gradient on one away.
+    let learn = props.glyph == EnvcpGlyph::Learn;
+    let glyph_fill = if learn { ink.css() } else { "none".to_string() };
+    let glyph_stroke = if learn { 0.0f32 } else { 1.75 };
+    let plate_fill = fill.map(|c| c.css()).unwrap_or_else(|| "none".to_string());
+    let path = match props.glyph {
+        // Not a ring: a solid disc of r 4.90 about (15, 11) with a
+        // diagonal slot knocked out of it, running from near the middle
+        // down to the lower-left rim. Read as a ring first, and drawn
+        // that way it came out a blank blob — a ring's hole and a slot
+        // are the same few dark pixels at this size, and only where they
+        // *stop* tells them apart.
+        //
+        // The slot measures as a round-capped stroke rather than the
+        // arrow it looks like: its width runs 1.9, 3.5, 3.6, 3.3, 1.9
+        // down its length, widest in the middle. An arrowhead would put
+        // the widest part at the tip. So it is drawn as the stadium a
+        // 2.9-wide round-capped line sweeps, spelled out as arcs because
+        // the shape has to be knocked out of the disc by even-odd rather
+        // than painted over it — the plate behind is transparent in the
+        // resting state, so there is no colour to paint the notch in.
+        EnvcpGlyph::Learn => {
+            "M 10.1 11 A 4.9 4.9 0 1 0 19.9 11 A 4.9 4.9 0 1 0 10.1 11 Z \
+             M 13.729 9.745 A 1.45 1.45 0 0 1 16.071 11.455 \
+             L 13.371 15.155 A 1.45 1.45 0 0 1 11.029 13.445 Z"
+        }
+        // One period, ending short of the extremes at both ends: it
+        // leaves (8.1, 12.6) climbing, peaks at (12.0, 7.0), crosses at
+        // (14.7, 11.0), troughs at (17.9, 14.8) and stops at (21.9, 9.4)
+        // still climbing. Read off the three near-vertical strands the
+        // middle rows show, where the curve's centre is legible to a
+        // tenth of a pixel, and the horizontal runs at the peak and
+        // trough. The control points are then solved so each segment's
+        // midpoint lands on the measured extreme rather than eyeballed —
+        // eyeballing put the peak a pixel and a bit left and cost more
+        // than every other error in this glyph combined.
+        EnvcpGlyph::ParamMod => {
+            "M 8.1 12.6 C 10.4 5.4 14 5.4 14.7 11 C 15.4 16.6 20.13 16.07 21.9 9.4"
+        }
+    };
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            rect {
+                x: "0.5", y: "0.5", width: "{vw - 1.0}", height: "{vh - 1.0}",
+                rx: "4.5",
+                fill: "{plate_fill}",
+                stroke: "{edge.css()}", stroke_width: "1",
+            }
+            // The tab: two rows tall, and a pixel narrower at its foot
+            // than at its head. Drawn as the trapezoid it measures as
+            // rather than the arc it probably wants to be — at two pixels
+            // the difference is under a tenth of one.
+            path {
+                d: "M 8 1 H 22 L 20 3 H 10 Z",
+                fill: "{tab.css()}",
+            }
+            path {
+                d: "{path}",
+                fill: "{glyph_fill}",
+                fill_rule: "evenodd",
+                stroke: "{ink.css()}",
+                stroke_width: "{glyph_stroke}",
+                stroke_linecap: "round",
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct EnvcpOptionsProps {
+    #[props(default = (36.0, 20.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The envelope panel's options button — a gear and a drop caret.
+///
+/// Its plate is not the outlined one the other two use: it is a black
+/// scrim at a fifth opacity with a slightly heavier rim, so it darkens
+/// whatever is behind it instead of covering it.
+#[component]
+pub fn EnvcpOptionsButton(props: EnvcpOptionsProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    // The source prints `#b7b7b7` at alpha 0.79 — *instead of* the scrim,
+    // not on top of it. Painted over a fifth of black the same values
+    // composite to `#a5a5a5` at 0.84, which is six levels dark across the
+    // whole mark and was most of this image's error. So the paint is
+    // pre-compensated: lighter and less opaque, chosen to land on the
+    // source's composite rather than to equal its nominal colour.
+    let ink = match props.at {
+        Interaction::Hover => t.chrome.hardware_mark.shade(0.753),
+        _ => t.chrome.hardware_mark.shade(0.366),
+    };
+    // A *six*-tooth gear, which is the whole finding here. Drawn with
+    // eight it painted a tooth at three and nine o'clock — where the
+    // source's widest rows are 4.7 from the middle, a valley — and left
+    // the real teeth at roughly ±68° unpainted. The difference is 144
+    // levels either side and reads, at a glance, as the gear simply being
+    // wrong.
+    //
+    // The rest is measured: teeth reach exactly 6.0 (the mark runs y 4..16
+    // and x 6..18 about (12, 10)), the root sits at 4.7, and the hub is
+    // 2.05 — nearly half the root, much wider than a gear icon usually
+    // draws it.
+    let cx = 12.0f32;
+    let cy = 10.0f32;
+    let teeth: Vec<(f32, f32, f32)> = (0..6)
+        .map(|i| {
+            let a = std::f32::consts::PI / 3.0 * i as f32;
+            (cx + 4.68 * a.sin(), cy - 4.68 * a.cos(), a.to_degrees())
+        })
+        .collect();
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            // The scrim fills the cell edge to edge — it does not sit
+            // inset by half a pixel, which is what a single stroked rect
+            // gives you and what made the whole perimeter a shade light.
+            //
+            // Its rim is barely a rim, and it *fades*: 0.251 at the
+            // outermost row, 0.224 at the next, 0.20 from there in. Alpha
+            // falling inward cannot be stacked layers of black — more
+            // black only ever adds — so it is the base plus two hairlines
+            // carrying the difference.
+            rect {
+                x: "0", y: "0", width: "{vw}", height: "{vh}", rx: "2.8",
+                fill: "#000000", fill_opacity: "0.20",
+            }
+            rect {
+                x: "0.5", y: "0.5", width: "{vw - 1.0}", height: "{vh - 1.0}",
+                rx: "2.4", fill: "none",
+                stroke: "#000000", stroke_opacity: "0.064", stroke_width: "1",
+            }
+            rect {
+                x: "1.5", y: "1.5", width: "{vw - 3.0}", height: "{vh - 3.0}",
+                rx: "1.8", fill: "none",
+                stroke: "#000000", stroke_opacity: "0.030", stroke_width: "1",
+            }
+            g { fill: "{ink.css()}", fill_opacity: "0.74",
+                for (i, (tx, ty, deg)) in teeth.iter().enumerate() {
+                    rect {
+                        key: "t{i}",
+                        x: "{tx - 1.575}", y: "{ty - 1.4}",
+                        width: "3.15", height: "2.8", rx: "0.4",
+                        transform: "rotate({deg} {tx} {ty})",
+                    }
+                }
+                path { d: "{ring(cx, cy, 4.35, 2.05)}", fill_rule: "evenodd" }
+                // The caret, which is a separate mark: it says the button
+                // opens a menu, and it sits clear of the gear's teeth.
+                //
+                // Its rows measure 5.54, 4.34, 3.36, 1.98 and 0.64 wide,
+                // and those are widths at each row's *middle* — taking
+                // the first for the width at y=8 drew the whole triangle
+                // half a row small.
+                path { d: "M 23.42 8 H 29.58 L 26.5 13.02 Z" }
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct EnvcpArmProps {
+    /// Armed — the ring goes accent and the body lifts off black.
+    #[props(default)]
+    pub armed: bool,
+    #[props(default = (20.0, 20.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The envelope arm button — a ring on a disc.
+///
+/// Geometrically the mixer's record button without its housing: body
+/// r 9.90 about the cell's centre, ring 4.90 outside and 2.68 in. Unarmed
+/// it is flat `#1c1c1c` throughout; armed the body picks up a radial
+/// gradient lit from above the top edge, which is the only place in this
+/// family a gradient appears at all.
+#[component]
+pub fn EnvcpArmButton(props: EnvcpArmProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let (cx, cy) = (vw * 0.5, vh * 0.5);
+    let unit = vw.min(vh);
+    let hovered = props.at == Interaction::Hover;
+
+    let ink = match (props.armed, hovered) {
+        (true, false) => t.chrome.accent,
+        // Not the accent offset or scaled: the source's hover runs red up
+        // 58 levels, green up 21 and blue *down* 3, which is a wash
+        // toward white in one channel only. Carried as measured.
+        (true, true) => Color::rgb(0x80, 0xce, 0xfb),
+        (false, false) => t.chrome.hardware.shade(0.214),
+        (false, true) => t.chrome.hardware.shade(0.406),
+    };
+    let bump = if hovered { 4.0 } else { 0.0 };
+    // Unarmed the body is one flat `#1c1c1c`; armed it takes a radial
+    // gradient lit from above the top edge — `#252525` under the light,
+    // `#1f1f1f` two-thirds out, `#181818` at the rim. That gradient is
+    // the only one in this family, and it is genuinely radial: the
+    // brightness falls with distance from a point near (10, 2), not with
+    // height, which a vertical ramp cannot reproduce at the corners.
+    let flat = offset(t.chrome.hardware_edge.shade(0.0216), bump);
+    let glow = offset(t.chrome.hardware_edge.shade(0.0603), bump);
+    let body = offset(t.chrome.hardware_edge.shade(0.0345), bump);
+    let sink = offset(t.chrome.hardware_edge.shade(0.0043), bump);
+    let body_fill = if props.armed { "url(#envarm)".to_string() } else { flat.css() };
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            defs {
+                radialGradient {
+                    id: "envarm",
+                    cx: "{cx}", cy: "{vh * 0.10}", r: "{unit * 0.85}",
+                    gradient_units: "userSpaceOnUse",
+                    stop { offset: "0", stop_color: "{glow.css()}" }
+                    stop { offset: "0.70", stop_color: "{body.css()}" }
+                    stop { offset: "1", stop_color: "{sink.css()}" }
+                }
+            }
+            circle {
+                cx: "{cx}", cy: "{cy}", r: "{unit * 0.495}",
+                fill: "{body_fill}",
+            }
+            path {
+                d: "{ring(cx, cy, unit * 0.245, unit * 0.134)}",
+                fill_rule: "evenodd",
+                fill: "{ink.css()}",
+            }
+        }
+    }
+}
+
+#[derive(Props, Clone, PartialEq)]
+pub struct EnvcpBypassProps {
+    /// Bypassed — the whole button turns red.
+    #[props(default)]
+    pub bypassed: bool,
+    #[props(default = (15.0, 20.0))]
+    pub cell: (f32, f32),
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// The envelope bypass button — a power symbol on a tinted field.
+///
+/// The field is not a shade of the glyph: solved as `base + t·glyph` the
+/// two states want different bases (`#0d0d0d` at t 0.17 for the blue,
+/// `#1c1c1c` at t 0.14 for the red), so they are carried as the two
+/// colours they measure as rather than as one rule bent to fit both.
+#[component]
+pub fn EnvcpBypassButton(props: EnvcpBypassProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = props.cell;
+    let hovered = props.at == Interaction::Hover;
+
+    let ink = match (props.bypassed, hovered) {
+        (false, false) => Color::rgb(0x68, 0xb7, 0xf8),
+        (false, true) => Color::rgb(0x7c, 0xcc, 0xfc),
+        (true, false) => Color::rgb(0xff, 0x52, 0x60),
+        (true, true) => Color::rgb(0xff, 0x63, 0x73),
+    };
+    let field = match (props.bypassed, hovered) {
+        (false, false) => Color::rgb(0x1b, 0x2a, 0x35),
+        (false, true) => Color::rgb(0x22, 0x34, 0x41),
+        (true, false) => Color::rgb(0x3b, 0x24, 0x26),
+        (true, true) => Color::rgb(0x49, 0x2d, 0x2f),
+    };
+    let _ = &t;
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            rect { x: "0", y: "0", width: "{vw}", height: "{vh}", fill: "{field.css()}" }
+            // The arc opens 50° either side of vertical, which is where
+            // the stem passes through it.
+            path {
+                d: "M 4.658 8.128 A 3.71 3.71 0 1 0 10.342 8.128",
+                fill: "none",
+                stroke: "{ink.css()}", stroke_width: "1.44",
+            }
+            rect { x: "7", y: "5.25", width: "1", height: "4.5", fill: "{ink.css()}" }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
