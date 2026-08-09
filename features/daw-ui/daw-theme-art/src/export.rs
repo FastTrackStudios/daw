@@ -475,7 +475,29 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         let plate = |bands: Vec<v::Band>, cell, inset| {
             render_svg(
                 v::PanelPlate,
-                v::PlateProps { bands, cell, inset, width: n.0, height: n.1, at },
+                v::PlateProps {
+                    bands,
+                    stripes: vec![],
+                    cell,
+                    inset,
+                    width: n.0,
+                    height: n.1,
+                    at,
+                },
+            )
+        };
+        let marked = |bands: Vec<v::Band>, stripes: Vec<v::Stripe>, cell| {
+            render_svg(
+                v::PanelPlate,
+                v::PlateProps {
+                    bands,
+                    stripes,
+                    cell,
+                    inset: 0.0,
+                    width: n.0,
+                    height: n.1,
+                    at,
+                },
             )
         };
         let sunk = g(-0.19); // #333333
@@ -552,15 +574,33 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 (11.0, 13.0),
                 1.0,
             )),
+            // Twelve rows, not eleven: the separator at row 10 has the
+            // body colour again *under* it at row 11. That last row hides
+            // beneath the marker row on the right-hand side, which is why
+            // it went unnoticed — the audit was scoring the markers.
             "envcp_bg" => Some(plate(
-                vec![(0.0, 10.0, sunk, 1.0), (10.0, 1.0, g(-0.51), 1.0)],
+                vec![
+                    (0.0, 10.0, sunk, 1.0),
+                    (10.0, 1.0, g(-0.51), 1.0), // #1f1f1f
+                    (11.0, 1.0, sunk, 1.0),
+                ],
                 (48.0, 12.0),
                 0.0,
             )),
-            "envcp_bgsel" => Some(plate(
-                vec![(0.0, 10.0, g(0.005), 1.0), (10.0, 1.0, g(-0.43), 1.0)],
+            // And the selected one carries the accent bar: two columns of
+            // `#46b9fe` at x45, flanked by the separator's own grey, over
+            // the body rows only.
+            "envcp_bgsel" => Some(marked(
+                vec![
+                    (0.0, 10.0, g(0.005), 1.0),  // #404040
+                    (10.0, 1.0, g(-0.43), 1.0),  // #242424
+                    (11.0, 1.0, g(0.005), 1.0),
+                ],
+                vec![
+                    (44.0, 4.0, 0.0, 10.0, g(-0.43)),
+                    (45.0, 2.0, 0.0, 10.0, theme.chrome.accent),
+                ],
                 (48.0, 12.0),
-                0.0,
             )),
             "envcp_namebg" => {
                 Some(plate(vec![(1.0, 22.0, g(-0.56), 1.0)], (22.0, 24.0), 1.0))

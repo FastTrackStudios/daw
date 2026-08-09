@@ -3411,10 +3411,23 @@ pub fn PanelSlider(props: SliderProps) -> Element {
 /// ones that look like gradients are two bands a few levels apart.
 pub type Band = (f32, f32, Color, f32);
 
+/// A vertical mark laid over the bands: `(x, width, y, height, fill)`.
+///
+/// Bands alone cannot say "and there is an accent bar down the right-hand
+/// edge", which is exactly what marks the selected envelope panel — two
+/// columns of `#46b9fe` between two of `#242424`, running the body's
+/// height and stopping short of the separator row. Read as a band-only
+/// plate that stripe simply vanished, and with it the only thing on the
+/// image that says the panel is selected at all.
+pub type Stripe = (f32, f32, f32, f32, Color);
+
 #[derive(Props, Clone, PartialEq)]
 pub struct PlateProps {
     /// Bands, top to bottom, in cell rows.
     pub bands: Vec<Band>,
+    /// Vertical marks drawn over the bands. Empty for all but one plate.
+    #[props(default)]
+    pub stripes: Vec<Stripe>,
     /// Cell size.
     pub cell: (f32, f32),
     /// Columns of transparent margin each side.
@@ -3450,6 +3463,13 @@ pub fn PanelPlate(props: PlateProps) -> Element {
                     width: "{vw - props.inset * 2.0}", height: "{band.1}",
                     fill: "{band.2.css()}",
                     fill_opacity: "{band.3}",
+                }
+            }
+            for (i, s) in props.stripes.iter().enumerate() {
+                rect {
+                    key: "s{i}",
+                    x: "{s.0}", y: "{s.2}", width: "{s.1}", height: "{s.3}",
+                    fill: "{s.4.css()}",
                 }
             }
         }
