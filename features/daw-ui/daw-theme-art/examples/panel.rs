@@ -336,12 +336,16 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
             },
         ),
     ));
-    // The arm sits low enough that its housing straddles the foot of the
-    // tint — which is what makes it read as blending into the dark below
-    // rather than as a plate laid on the colour.
+    // The arm sits low enough that the tint's foot crosses its housing at
+    // the *flares* rather than at the straight sides below them. The
+    // housing's base corners run 45 degrees out between 0.592 and 0.717
+    // of its 24-row cell — rows 14.2 to 17.2 — so the boundary has to
+    // land in there. Three rows higher and the tint cut across the
+    // vertical sides, which reads as two upright lines coming out of the
+    // colour instead of a shape emerging from it.
     s.push_str(&at(
         x + 49.5,
-        pan_y + 9.0,
+        pan_y + 12.3,
         &render_svg(
             v::RecordArmButton,
             v::RecordArmProps {
