@@ -6,6 +6,7 @@
 //! `session-proto` without introducing a dependency between them.
 
 pub mod paths;
+pub mod prefs;
 
 /// Creates a branded string ID type with Display, From, and AsRef impls.
 /// Used for categorical IDs like `RigTypeId` that remain human-readable strings.

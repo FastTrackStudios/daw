@@ -829,7 +829,7 @@ fn cycling_moves_within_the_lane_and_wraps() {
 
 #[test]
 fn cycling_never_leaves_the_lane() {
-    let mut ws = paired_workspace();
+    let ws = paired_workspace();
     // Lane 0 is the vocal pair, lane 1 the kit.
     assert_eq!(ws.active_lane(), Some(0));
     let next = ws.next_in_lane(0, ws.active()).unwrap();
