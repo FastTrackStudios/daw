@@ -80,7 +80,7 @@ struct LivePanel {
     hwnd: raw::HWND,
     view: Option<EmbeddedView>,
     visible: bool,
-    contexts: Vec<Box<dyn FnOnce()>>,
+    contexts: Vec<std::rc::Rc<dyn Fn()>>,
     /// Track failed init attempts to avoid infinite retry spam.
     init_attempts: u32,
     /// Last polled IsWindowVisible state (to log changes only).
@@ -479,7 +479,7 @@ unsafe fn insert_menu_item(menu: raw::HMENU, id: u32, label: &str) {
 
 pub fn register_panel(
     config: DockablePanelConfig,
-    contexts: Vec<Box<dyn FnOnce()>>,
+    contexts: Vec<std::rc::Rc<dyn Fn()>>,
     reaper: &'static Reaper,
     swell: &'static Swell,
 ) {
@@ -740,9 +740,11 @@ pub fn dispatch_event_to_panel(id: PanelId, event: blitz_traits::events::UiEvent
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
         let Some(panel) = panels.get_mut(id) else {
+            tracing::warn!(panel = id, "inject: no such panel");
             return false;
         };
         let Some(view) = panel.view.as_mut() else {
+            tracing::warn!(panel = id, "inject: panel has no view");
             return false;
         };
         view.handle_event(event);
@@ -1066,8 +1068,14 @@ fn show_panel_inner(panel: &mut LivePanel) {
     panel.visible = true;
     panel.init_attempts = 0;
 
-    // Mark dirty so the view renders on the next tick
-    if let Some(view) = &panel.view {
+    // Remount so the panel comes back bound to the project as it is
+    // *now*. The view survives hiding (see `hide_panel_inner`), and with
+    // it the component tree — which for a tool panel holds the take it
+    // resolved when it first mounted. Without this, opening the velocity
+    // tool on one item and later reopening it on another writes to the
+    // first one. See [`EmbeddedView::remount`].
+    if let Some(view) = &mut panel.view {
+        view.remount();
         view.mark_dirty();
     }
 
@@ -1143,7 +1151,7 @@ fn try_init_embedded_view(panel: &mut LivePanel, visibility: InitVisibility) {
         .max(panel.config.default_height);
     tracing::info!(w, h, "Panel '{}' client rect", panel.config.id);
 
-    let contexts = std::mem::take(&mut panel.contexts);
+    let contexts = panel.contexts.clone();
 
     // On Linux, SWELL docked panels don't own a GDK window we can render
     // into directly via wgpu — so we render offscreen and blit via
