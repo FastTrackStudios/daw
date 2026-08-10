@@ -433,3 +433,145 @@ fn lane_membership_survives_a_track_being_inserted_above() {
     assert_eq!(ws.lane_tracks(1), vec![1]);
     assert_eq!(ws.track_by_guid(&kit).map(|t| t.name.as_str()), Some("Kit"));
 }
+
+// ── Auto-pairing ─────────────────────────────────────────────────────
+
+use expression_editor_core::tracks::normalize_track_name as norm;
+
+fn named(ws: &mut Workspace, name: &str, folder: Option<&str>) -> String {
+    let mut t = Track::new(name, doc());
+    t.folder = folder.map(str::to_string);
+    let guid = t.guid.clone();
+    ws.push(t);
+    guid
+}
+
+#[test]
+fn normalization_strips_case_punctuation_and_one_trailing_role() {
+    assert_eq!(norm("Lead Vox"), "leadvox");
+    assert_eq!(norm("lead_vox MIDI"), "leadvox");
+    assert_eq!(norm("Lead Vox (Ref)"), "leadvox");
+    assert_eq!(norm("  LEAD   VOX  "), "leadvox");
+    // Only trailing, and only one: a leading role word is part of the
+    // name, and stripping two would collapse genuinely distinct tracks.
+    assert_ne!(norm("MIDI Lead"), norm("Lead"));
+    assert_eq!(norm("Lead Vox Ref MIDI"), "leadvoxref");
+}
+
+#[test]
+fn a_vocal_and_its_guide_open_in_one_lane() {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    named(&mut ws, "Lead Vox MIDI", None);
+    named(&mut ws, "Kit", None);
+    ws.auto_pair();
+
+    assert_eq!(ws.layout().len(), 2, "the pair merged, the kit did not");
+    assert_eq!(ws.lane_tracks(0).len(), 2);
+    assert_eq!(ws.lane_tracks(1).len(), 1);
+}
+
+#[test]
+fn matching_does_not_cross_folders() {
+    let mut ws = Workspace::single("Anchor", doc());
+    named(&mut ws, "Lead Vox", Some("Band"));
+    named(&mut ws, "Lead Vox", Some("Choir"));
+    ws.auto_pair();
+
+    assert_eq!(
+        ws.layout().len(),
+        3,
+        "same name, different folders, so not a pair"
+    );
+}
+
+#[test]
+fn an_unmatched_track_gets_its_own_lane() {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    named(&mut ws, "Snare Bottom", None);
+    named(&mut ws, "Room Mic", None);
+    ws.auto_pair();
+    assert_eq!(ws.layout().len(), 3);
+}
+
+#[test]
+fn a_hand_arranged_layout_is_never_re_inferred() {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    named(&mut ws, "Lead Vox MIDI", None);
+    ws.layout_mut().mark_arranged();
+    let before = ws.layout().clone();
+
+    ws.auto_pair();
+
+    assert_eq!(&before, ws.layout(), "the matcher left it alone");
+    assert!(ws.layout().is_arranged());
+}
+
+#[test]
+fn an_inferred_layout_is_not_marked_arranged() {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    named(&mut ws, "Lead Vox MIDI", None);
+    ws.auto_pair();
+    assert!(
+        !ws.layout().is_arranged(),
+        "only a human arranging it makes it worth persisting"
+    );
+}
+
+#[test]
+fn a_track_recorded_later_lands_in_the_lane_it_belongs_to() {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    named(&mut ws, "Kit", None);
+    ws.auto_pair();
+    assert_eq!(ws.layout().len(), 2);
+
+    // A new comp on the vocal, arriving after the layout was made.
+    let new = named(&mut ws, "Lead Vox Audio", None);
+    ws.place_new_track(&new);
+
+    assert_eq!(ws.layout().len(), 2, "no new lane was appended");
+    assert_eq!(ws.lane_tracks(0).len(), 2, "it joined the vocal's lane");
+}
+
+#[test]
+fn a_track_matching_nothing_appends_a_lane() {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    ws.auto_pair();
+    let new = named(&mut ws, "Tambourine", None);
+    ws.place_new_track(&new);
+    assert_eq!(ws.layout().len(), 2);
+}
+
+#[test]
+fn a_stale_layout_entry_is_dropped_without_complaint() {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    named(&mut ws, "Kit", None);
+    ws.auto_pair();
+    ws.layout_mut().mark_arranged();
+
+    // A guid nobody has: exactly what a deleted track leaves behind.
+    ws.layout_mut()
+        .lane_mut(0)
+        .unwrap()
+        .tracks
+        .push("{GONE}".into());
+    ws.prune_layout();
+
+    assert_eq!(ws.lane_tracks(0).len(), 1);
+    assert_eq!(ws.layout().len(), 2, "the rest of the layout survived");
+}
+
+#[test]
+fn pairing_places_the_lane_by_first_appearance() {
+    // Stable order, not hash order — otherwise the stack reshuffles
+    // between runs for no reason the user can see.
+    let mut ws = Workspace::single("Zebra", doc());
+    named(&mut ws, "Apple", None);
+    named(&mut ws, "Zebra MIDI", None);
+    ws.auto_pair();
+
+    assert_eq!(ws.lane_tracks(0).len(), 2, "Zebra's lane came first");
+    assert_eq!(
+        ws.track(ws.lane_tracks(1)[0]).unwrap().name,
+        "Apple"
+    );
+}

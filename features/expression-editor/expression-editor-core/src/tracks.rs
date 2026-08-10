@@ -59,6 +59,13 @@ pub struct Track {
     /// [`Workspace::rename`].
     pub guid: String,
     pub name: String,
+    /// The host's folder for this track, when it has one.
+    ///
+    /// Only the matcher reads it, and only to *stop* itself: pairing is
+    /// scoped to a folder, so a "Lead Vox" in the choir bus is never
+    /// paired with a "Lead Vox" in the band bus. Tracks with no folder
+    /// share one root scope.
+    pub folder: Option<String>,
     /// Stale while this track is the active one — the live document
     /// lives in `Editor::doc` and is written back on switch. Reads go
     /// through [`Workspace::doc_of`], which refuses the active slot for
@@ -127,6 +134,7 @@ impl Track {
         Self {
             guid: guid.into(),
             name: name.into(),
+            folder: None,
             doc,
             history: History::new(HISTORY_LIMIT),
             mode: Mode::default(),
@@ -230,6 +238,14 @@ impl Lane {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LaneLayout {
     lanes: Vec<Lane>,
+    /// Whether a human arranged this.
+    ///
+    /// Only an arranged layout is written to the project. An inferred
+    /// one is recomputed on load, which keeps the stored data small,
+    /// makes every stored entry a decision someone made, and means
+    /// improving the matcher later benefits every song nobody touched.
+    /// Same bargain #191 strikes for mode inference.
+    arranged: bool,
 }
 
 impl LaneLayout {
@@ -263,6 +279,18 @@ impl LaneLayout {
         self.lanes.iter().position(|l| l.contains(guid))
     }
 
+    /// Whether a human arranged this layout, and it must be persisted.
+    pub fn is_arranged(&self) -> bool {
+        self.arranged
+    }
+
+    /// Mark the layout as hand-arranged. Called by the gestures that
+    /// rearrange it — merge, split, a dragged height — never by the
+    /// matcher.
+    pub fn mark_arranged(&mut self) {
+        self.arranged = true;
+    }
+
     /// Drop a track from whichever lane holds it, removing the lane if
     /// that empties it. A lane with no tracks is not a lane.
     pub fn forget(&mut self, guid: &str) {
@@ -273,6 +301,45 @@ impl LaneLayout {
             }
         }
     }
+}
+
+/// Reduce a track name to what the matcher compares.
+///
+/// Lower-cased, punctuation and whitespace collapsed, and a trailing
+/// role token removed — so "Lead Vox", "lead_vox MIDI" and "Lead Vox
+/// (Ref)" all reduce to `leadvox` and land in one lane.
+///
+/// Deliberately conservative. A looser matcher pairs two tracks that
+/// merely sound alike, and a wrong pairing hides one track underneath
+/// another — the exact failure lanes exist to prevent. Leaving a track
+/// unmatched costs one merge gesture; mispairing it costs you the
+/// knowledge that you needed to.
+pub fn normalize_track_name(name: &str) -> String {
+    // Only words that name a track's *role*, never its instrument.
+    // "vox" and "gtr" were in this list once and quietly turned
+    // "Lead Vox" into "lead", which pairs a vocal with anything else
+    // called Lead.
+    const ROLE_TOKENS: [&str; 4] = ["midi", "audio", "ref", "reference"];
+
+    let lower = name.to_lowercase();
+    let mut words: Vec<String> = lower
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .map(|w| w.to_string())
+        .collect();
+
+    // Only a *trailing* role token is dropped, and only one. "Vox MIDI"
+    // is a MIDI guide for a vocal; "MIDI Vox" is a track called MIDI
+    // Vox, and guessing otherwise would pair things that are not pairs.
+    if words.len() > 1 {
+        if let Some(last) = words.last() {
+            if ROLE_TOKENS.contains(&last.as_str()) {
+                words.pop();
+            }
+        }
+    }
+
+    words.concat()
 }
 
 /// One lane's slot in a stacked layout.
@@ -371,6 +438,112 @@ impl Workspace {
             .map(|&i| self.tracks[i].mode.stack_weight())
             .fold(0.0_f32, f32::max)
             .max(0.01)
+    }
+
+    /// Group the tracks into lanes by name, discarding any inferred
+    /// layout and leaving a hand-arranged one alone.
+    ///
+    /// One lane per source, except that a track and its own reference
+    /// pair into one — tuning a vocal against its MIDI guide means
+    /// seeing them superimposed. Matching is exact on
+    /// [`normalize_track_name`] and scoped to the folder.
+    ///
+    /// Runs at load and after a track appears, never on a layout the
+    /// user arranged. Lane order follows first appearance, so the result
+    /// is stable rather than depending on hash iteration.
+    pub fn auto_pair(&mut self) {
+        if self.layout.is_arranged() {
+            return;
+        }
+
+        let mut lanes: Vec<Lane> = Vec::new();
+        // Parallel to `lanes`: the (folder, normalized-name) each was
+        // opened for. A Vec rather than a map to keep the order stable
+        // and the dependency count at zero.
+        let mut keys: Vec<(Option<String>, String)> = Vec::new();
+
+        for track in &self.tracks {
+            let key = (track.folder.clone(), normalize_track_name(&track.name));
+            match keys.iter().position(|k| *k == key) {
+                Some(i) => lanes[i].tracks.push(track.guid.clone()),
+                None => {
+                    keys.push(key);
+                    lanes.push(Lane::single(
+                        track.guid.clone(),
+                        track.mode.stack_weight(),
+                    ));
+                }
+            }
+        }
+
+        self.layout = LaneLayout {
+            lanes,
+            arranged: false,
+        };
+        self.refresh_lane_weights();
+    }
+
+    /// Place a track that has appeared since the layout was made.
+    ///
+    /// Not "append a new lane": a take recorded on an existing track
+    /// should land in that track's lane, which is what makes the
+    /// track-level cascade worth having. Falls back to a lane of its own
+    /// when nothing matches — the safe failure.
+    pub fn place_new_track(&mut self, guid: &str) {
+        let Some(track) = self.track_by_guid(guid) else {
+            return;
+        };
+        let key = (track.folder.clone(), normalize_track_name(&track.name));
+        let weight = track.mode.stack_weight();
+
+        // `push` has already given it a lane of its own, so the question
+        // is whether a *different* lane wants it. Identify that lane by
+        // one of its members rather than by index: removing this track
+        // from the lane it arrived in can shift the indices.
+        let anchor: Option<String> = self
+            .layout
+            .lanes()
+            .iter()
+            .flat_map(|lane| lane.tracks.iter())
+            .find(|g| {
+                *g != guid
+                    && self.track_by_guid(g).is_some_and(|t| {
+                        (t.folder.clone(), normalize_track_name(&t.name)) == key
+                    })
+            })
+            .cloned();
+
+        match anchor {
+            Some(anchor) => {
+                self.layout.forget(guid);
+                if let Some(i) = self.layout.lane_of(&anchor) {
+                    if let Some(lane) = self.layout.lane_mut(i) {
+                        lane.tracks.push(guid.to_string());
+                    }
+                }
+            }
+            None if self.layout.lane_of(guid).is_none() => {
+                self.layout.push(Lane::single(guid, weight));
+            }
+            None => {}
+        }
+        self.refresh_lane_weights();
+    }
+
+    /// Drop layout entries whose track no longer exists.
+    ///
+    /// Silent by design: a track someone deleted is not an error worth
+    /// reporting, and a mismatch must never invalidate the whole layout.
+    pub fn prune_layout(&mut self) {
+        let known: Vec<String> = self.tracks.iter().map(|t| t.guid.clone()).collect();
+        for i in (0..self.layout.len()).rev() {
+            if let Some(lane) = self.layout.lane_mut(i) {
+                lane.tracks.retain(|g| known.contains(g));
+            }
+            if self.layout.lane(i).is_some_and(|l| l.tracks.is_empty()) {
+                self.layout.lanes.remove(i);
+            }
+        }
     }
 
     /// Re-apply natural heights after something changed a member's mode.
