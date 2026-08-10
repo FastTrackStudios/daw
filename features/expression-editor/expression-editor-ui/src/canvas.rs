@@ -24,7 +24,7 @@ pub struct Row {
 /// Background rows across the visible pitch span.
 pub fn rows(ed: &Editor) -> Vec<Row> {
     let (lo, hi) = ed.camera.pitch_span(ed.viewport);
-    let h = ed.camera.px_per_semitone;
+    let h = ed.camera.vertical.px_per_row;
     // Clamped to the row space's own bounds, not to 0..127. A six-string
     // roll has six rows and painting a hundred and twenty-two phantom
     // ones above and below them says there is somewhere else to put a
@@ -134,7 +134,7 @@ pub fn note_handles(ed: &Editor) -> Vec<NoteHandles> {
         return Vec::new();
     }
     let (t0, t1) = ed.camera.time_span(ed.viewport);
-    let h = ed.camera.px_per_semitone;
+    let h = ed.camera.vertical.px_per_row;
     ed.doc
         .notes
         .iter()
@@ -191,7 +191,7 @@ pub struct RefRect {
 /// would be unreadable.
 pub fn reference_rects(ed: &Editor) -> Vec<RefRect> {
     let (t0, t1) = ed.camera.time_span(ed.viewport);
-    let h = ed.camera.px_per_semitone;
+    let h = ed.camera.vertical.px_per_row;
     let mut out = Vec::new();
     for (i, track) in ed.tracks.references() {
         let Some(doc) = ed.tracks.doc_of(i) else {
@@ -228,7 +228,7 @@ pub fn reference_rects(ed: &Editor) -> Vec<RefRect> {
 
 pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
     let (t0, t1) = ed.camera.time_span(ed.viewport);
-    let h = ed.camera.px_per_semitone;
+    let h = ed.camera.vertical.px_per_row;
     ed.doc
         .notes
         .iter()
@@ -398,7 +398,7 @@ pub fn midi_reference_rects(ed: &Editor) -> Vec<RefNoteRect> {
         return Vec::new();
     }
     let (t0, t1) = ed.camera.time_span(ed.viewport);
-    let h = ed.camera.px_per_semitone;
+    let h = ed.camera.vertical.px_per_row;
     r.notes()
         .filter(|n| n.end >= t0 && n.start <= t1)
         .map(|n| {
@@ -540,7 +540,7 @@ fn blob_polygon(ed: &Editor, n: &Note) -> Option<String> {
     if x1 - x0 < 2.0 {
         return None;
     }
-    let row_h = ed.camera.px_per_semitone;
+    let row_h = ed.camera.vertical.px_per_row;
     // Half a row at full amplitude, with a floor so a quiet passage
     // still leaves something to aim at rather than a hairline.
     let max_half = (row_h * 0.5).max(3.0);
@@ -576,7 +576,7 @@ fn blob_polygon(ed: &Editor, n: &Note) -> Option<String> {
 /// body sits where the note *is*, and the pitch track can be read
 /// against it.
 fn blob_center_y(ed: &Editor, n: &Note) -> f64 {
-    let row_h = ed.camera.px_per_semitone;
+    let row_h = ed.camera.vertical.px_per_row;
     let center = expression_editor_core::blob::decompose(
         &n.pitch,
         n.start,
@@ -660,7 +660,7 @@ pub fn note_ribbon(ed: &Editor, n: &Note) -> Option<String> {
         return None;
     }
     let top = ed.camera.y(n.row as f64 + 0.5, ed.viewport);
-    let h = ed.camera.px_per_semitone;
+    let h = ed.camera.vertical.px_per_row;
     if h < 6.0 {
         return None;
     }
@@ -910,7 +910,7 @@ pub struct Key {
 
 pub fn keyboard(ed: &Editor) -> Vec<Key> {
     let (lo, hi) = ed.camera.pitch_span(ed.viewport);
-    let h = ed.camera.px_per_semitone;
+    let h = ed.camera.vertical.px_per_row;
     let (rlo, rhi) = ed.row_space.bounds();
     // Named rows always carry their label — a drum lane called nothing
     // is unusable, where an unlabelled piano key can still be counted.
@@ -999,7 +999,7 @@ pub struct RazorRect {
 /// where notes get sliced, so they have to read as exact boundaries
 /// rather than as a soft highlight.
 pub fn razor_rects(ed: &Editor) -> Vec<RazorRect> {
-    let h = ed.camera.px_per_semitone;
+    let h = ed.camera.vertical.px_per_row;
     ed.razor
         .areas
         .iter()

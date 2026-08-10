@@ -166,7 +166,7 @@ async fn shoot_guitar_zoom_ladder() {
     for (i, out) in [2.0_f64, 4.0, 8.0, 16.0].iter().enumerate() {
         let mut ed = base();
         ed.camera.units_per_px *= out;
-        ed.camera.px_per_semitone /= out;
+        ed.camera.vertical.px_per_row /= out;
         // Through the editor's own clamps, so the ladder shows what the
         // real camera would allow rather than an impossible zoom.
         let (b, vp) = (ed.bounds(), ed.viewport);

@@ -1715,7 +1715,7 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
         // local passage, Shift+F frames the whole part.
         ("f", false, shift) => {
             let anchor = ed.playhead.unwrap_or(mouse_t);
-            let row = ed.camera.pitch_center;
+            let row = ed.camera.vertical.center;
             let modes = if shift {
                 ZoomModes::KEYS
             } else {

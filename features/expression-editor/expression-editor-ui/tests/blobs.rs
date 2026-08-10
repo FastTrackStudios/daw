@@ -109,7 +109,7 @@ fn the_body_sits_at_the_notes_own_pitch_not_its_row() {
 
     let flat = canvas::note_rects(&base)[0].blob_center.unwrap();
     let sharp = canvas::note_rects(&sharp_ed)[0].blob_center.unwrap();
-    let expected = 1.5 * base.camera.px_per_semitone;
+    let expected = 1.5 * base.camera.vertical.px_per_row;
     // Up the screen is a smaller y.
     let moved = flat - sharp;
     assert!(
@@ -140,7 +140,7 @@ fn the_recorded_envelope_outranks_an_authored_curve() {
     let pts = points(rects[0].blob.as_ref().unwrap());
     let n_pts = pts.len();
     let thickness = (pts[n_pts - 1].1 - pts[0].1).abs();
-    let quiet = 0.2 * ed.camera.px_per_semitone;
+    let quiet = 0.2 * ed.camera.vertical.px_per_row;
     assert!(
         thickness > quiet * 2.0,
         "the recording won, not the trim: {thickness}px"
@@ -231,7 +231,7 @@ fn three_notes_on_one_row_separate_by_how_sharp_they_are() {
 
     let rects = canvas::note_rects(&ed);
     let cy: Vec<f64> = rects.iter().map(|r| r.blob_center.unwrap()).collect();
-    let half_semitone = 0.5 * ed.camera.px_per_semitone;
+    let half_semitone = 0.5 * ed.camera.vertical.px_per_row;
 
     // Flat sits below, sharp sits above, by half a semitone each.
     assert!(
