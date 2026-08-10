@@ -318,7 +318,7 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     // REAPER's and the right shape, which is the better trade — matching
     // the width wants nine-slice support in this layer, not a scale.
     s.push_str(&at(
-        x + 7.0,
+        x + 4.0,
         6.0,
         &render_svg(
             v::FxControl,
@@ -326,7 +326,7 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
                 part: v::FxPart::Label,
                 // 43 and 29 — `mcp.fx` and `mcp.fxbyp` — reached by
                 // growing the pill's middle, not by scaling it.
-                widen: Some((43.0, 29.0)),
+                widen: Some((43.0, 28.0)),
                 chain: v::FxChain::Empty,
                 bypass: v::FxBypass::Empty,
                 family: v::FxFamily::Mixer,
@@ -340,18 +340,22 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     // toggle's own art leaves a seam column at its left — that is what
     // `leading_gap` exists for on the export side — so placed at the
     // arithmetic join the two halves show a bare pixel between them.
+    // 46, so the toggle covers the gutter column. The gutter is real in
+    // the art — one empty column between the two blits — but REAPER's
+    // output has no gap there, so leaving it open showed the strip
+    // through the middle of the pill.
     s.push_str(&at(
-        x + 50.0,
+        x + 46.0,
         6.0,
         &render_svg(
             v::FxControl,
             v::FxControlProps {
                 part: v::FxPart::Toggle,
-                widen: Some((43.0, 29.0)),
+                widen: Some((43.0, 28.0)),
                 chain: v::FxChain::Empty,
                 bypass: v::FxBypass::Empty,
                 family: v::FxFamily::Mixer,
-                width: Some(29),
+                width: Some(28),
                 height: Some(22),
                 at: v::Interaction::Normal,
             },
