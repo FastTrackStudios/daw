@@ -1960,6 +1960,45 @@ pub mod email_password {
     where
         S: AuthStorage,
     {
+        async fn migrate_user_email(
+            &self,
+            input: auth_proto::service::MigrateUserEmailRequest,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            // Same contract as the vox transport: the session authorizes
+            // the call and names who performed it.
+            let caller = ArchitectAuth::current_session(
+                self,
+                CurrentSession {
+                    token: input.session_token,
+                },
+            )
+            .await?;
+            ArchitectAuth::migrate_user_email(
+                self,
+                MigrateUserEmail {
+                    user_id: input.user_id,
+                    new_email: input.new_email,
+                    changed_by: Some(caller.user.id),
+                    reason: input.reason,
+                },
+            )
+            .await
+        }
+
+        async fn list_email_history(
+            &self,
+            input: auth_proto::service::EmailHistoryRequest,
+        ) -> Result<Vec<auth_proto::email_change::AuthEmailChange>, AuthFlowError> {
+            ArchitectAuth::current_session(
+                self,
+                CurrentSession {
+                    token: input.session_token,
+                },
+            )
+            .await?;
+            ArchitectAuth::list_email_history(self, input.user_id).await
+        }
+
         async fn sign_up_email_password(
             &self,
             input: auth_proto::SignUpEmailPassword,

@@ -772,7 +772,7 @@ pub mod vox {
     use super::CustomSessionTransport;
     use crate::{
         ArchitectAuth, AuthStorage, CreateEmailPasswordUser, CurrentSession, CustomSessionBundle,
-        RefreshSession, SignOut, flows::bearer_tokens,
+        MigrateUserEmail, RefreshSession, SignOut, flows::bearer_tokens,
     };
     use auth_proto::{
         AuthFlowError, AuthService, AuthSessionBundle, AuthUser, OrgMember, SignInEmailPassword,
@@ -844,6 +844,44 @@ pub mod vox {
 
         async fn list_org_members(&self, token: String) -> Result<Vec<OrgMember>, AuthFlowError> {
             self.auth.org_members_for_token(token).await
+        }
+
+        async fn migrate_user_email(
+            &self,
+            input: auth_proto::service::MigrateUserEmailRequest,
+        ) -> Result<AuthUser, AuthFlowError> {
+            // The session is the authorization: it must validate against
+            // THIS org's store. `migrate_user_email` itself takes no
+            // session — it is a storage operation — so the check has to
+            // happen here, at the network edge.
+            let caller = self
+                .auth
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            self.auth
+                .migrate_user_email(MigrateUserEmail {
+                    user_id: input.user_id,
+                    new_email: input.new_email,
+                    // Who did it, from the validated session rather than
+                    // anything the caller supplied.
+                    changed_by: Some(caller.user.id),
+                    reason: input.reason,
+                })
+                .await
+        }
+
+        async fn list_email_history(
+            &self,
+            input: auth_proto::service::EmailHistoryRequest,
+        ) -> Result<Vec<auth_proto::email_change::AuthEmailChange>, AuthFlowError> {
+            self.auth
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            self.auth.list_email_history(input.user_id).await
         }
     }
 
