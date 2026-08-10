@@ -622,6 +622,11 @@ async fn apply_track(
             suppression.suppress(SuppressionKey::track(&resolve(guid), "moved"));
             move_track_to_index(daw, ctx, guid, *new_index).await;
         }
+        // A report, not a mutation: a track's FX count is whatever its
+        // chain contains, and there is nothing to set. The chain itself
+        // syncs through `SyncDomain::Fx`, and applying this would at best
+        // duplicate that and at worst fight it.
+        TrackEvent::FxCountChanged { .. } => {}
     }
 }
 

@@ -510,6 +510,10 @@ pub fn is_event_suppressed(suppression: &SuppressionSet, event: &SyncEvent) -> b
             TrackEvent::Moved { guid, .. } => {
                 suppression.is_suppressed(&SuppressionKey::track(guid, "moved"))
             }
+            // Never suppressed, because it is never applied — see the
+            // matching arm in `apply.rs`. The FX domain carries the change
+            // that caused it.
+            TrackEvent::FxCountChanged { .. } => false,
         },
         SyncDomain::Fx(fe) => {
             // Apply side (apply.rs) suppresses chain-level FX events with

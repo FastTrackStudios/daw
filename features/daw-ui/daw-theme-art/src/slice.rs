@@ -9,9 +9,10 @@
 //! That knowledge used to live in two places at once — implicitly in each
 //! component's viewBox fractions, and explicitly at whichever call site had
 //! last needed a control at a size other than its source's, as a bespoke
-//! prop ([`crate::vector_controls::FaderCapProps::full`],
-//! [`crate::vector_controls::FxControlProps::widen`]). Two controls, two
-//! patches, one call site each. A third would have needed a third.
+//! prop — `FaderCapProps::full`, `FxControlProps::widen`. Two controls, two
+//! patches, one call site each. A third would have needed a third. Both are
+//! gone now; what replaced them is [`NamedArt::stack`] and [`NamedArt::row`],
+//! which hand the question to the layout engine.
 //!
 //! Here it is one value per REAPER image: the box the art was drawn at, and
 //! a [`Slice`] naming the band of each axis that carries the slack.
@@ -148,11 +149,7 @@ impl NamedArt {
     /// middle band does — fixed cap, stretchy run, fixed cap. A vertical
     /// flex stack of these *is* the nine-slice.
     ///
-    /// Only the y axis, because only vertical stretch has a control that
-    /// needs it: the fader rail is the reason the slice model exists. The
-    /// horizontal twin is the same function transposed and arrives with the
-    /// first control that grows sideways — the FX pill, whose `mcp.fx` box
-    /// is 43 wide against 28 of art.
+    /// The horizontal twin is [`NamedArt::row`].
     pub fn stack(&self) -> Vec<Pane> {
         let (w, h) = self.source;
         let whole = |grow| Pane { view: (0.0, 0.0, w, h), grow };
@@ -166,6 +163,31 @@ impl NamedArt {
                 Pane { view: (0.0, lo, w, hi - lo), grow: true },
                 Pane { view: (0.0, hi, w, h - hi), grow: false },
             ],
+        }
+    }
+
+    /// The drawing decomposed along its x axis, left to right.
+    ///
+    /// [`NamedArt::stack`] turned on its side, and what the FX pill needs:
+    /// `mcp.fx` is 43 wide against 28 of art, and only the flat run before
+    /// the seam grows. Scaled whole instead, the rounded end elongates into
+    /// a notch and the `FX` glyph stretches with it.
+    pub fn row(&self) -> Vec<Pane> {
+        let (w, h) = self.source;
+        match self.slice.x {
+            Band::Fixed | Band::All => {
+                vec![Pane { view: (0.0, 0.0, w, h), grow: matches!(self.slice.x, Band::All) }]
+            }
+            // A band that runs to an edge leaves a zero-width pane there,
+            // which is a `<div>` of nothing — dropped rather than rendered.
+            Band::Middle(lo, hi) => [
+                Pane { view: (0.0, 0.0, lo, h), grow: false },
+                Pane { view: (lo, 0.0, hi - lo, h), grow: true },
+                Pane { view: (hi, 0.0, w - hi, h), grow: false },
+            ]
+            .into_iter()
+            .filter(|p| p.view.2 > 0.0)
+            .collect(),
         }
     }
 

@@ -45,6 +45,11 @@ fts-ui = { workspace = true, optional = true }
 # + rtconfig params onto our Theme tokens.
 daw-theme-reaper = { workspace = true, optional = true }
 
+# The palette. Controls that draw a mark of their own — the input-FX dot —
+# take its colour from the same tokens the vector art does, rather than
+# inventing a hex beside it.
+daw-theme = { workspace = true }
+
 # The vector controls. Every mixer and track-panel control in this crate is
 # one of these components; the same components are rasterised to build the
 # REAPER theme, which is what keeps the two renderings honest.
@@ -54,9 +59,6 @@ daw-theme-reaper = { workspace = true, optional = true }
 daw-theme-art = { workspace = true, default-features = false }
 
 [dev-dependencies]
-# The palette, so a test can assert a lit button is the theme's mute red
-# rather than some hex it copied out of the component.
-daw-theme = { workspace = true }
 # Real hit-tested pointer events against blitz-dom — the DOM the REAPER
 # panels render through. Hover cannot be tested any other way: it is a
 # pointer-chain change, not something a synthesized `mouseenter` reproduces.

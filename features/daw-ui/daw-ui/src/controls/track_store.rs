@@ -104,6 +104,13 @@ impl TrackStore {
             TrackEvent::VolumeChanged { .. } => return,
             TrackEvent::PanChanged { guid, pan } => (guid, &|t| t.pan = *pan),
             TrackEvent::ColorChanged { guid, color } => (guid, &|t| t.color = *color),
+            // The event that did not exist until #142: without it a
+            // mixer's FX buttons were right when it opened and wrong from
+            // the first plugin the user added.
+            TrackEvent::FxCountChanged { guid, fx_count, input_fx_count } => (guid, &|t| {
+                t.fx_count = *fx_count;
+                t.input_fx_count = *input_fx_count;
+            }),
             // Moved and the automation/monitor modes: state no control
             // draws yet. Ignored rather than refetched — the next control
             // that renders one adds its arm here.

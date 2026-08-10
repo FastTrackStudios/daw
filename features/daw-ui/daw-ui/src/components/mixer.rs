@@ -8,7 +8,7 @@
 //! - Record arm / monitoring buttons
 //! - Track name + number
 
-use crate::controls::{MuteButton, VolumeFader, VolumeSync, use_daw_tracks, use_track_store};
+use crate::controls::{FxButton, MuteButton, VolumeFader, VolumeSync, use_daw_tracks, use_track_store};
 use crate::prelude::*;
 use daw_control::{FxNodeKind, FxTree};
 use daw_proto::Track;
@@ -242,13 +242,11 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                     },
                     "S"
                 }
-                // FX indicator
-                if track.fx_count > 0 {
-                    span {
-                        class: "w-5 h-4 flex items-center justify-center rounded text-[8px] font-bold bg-green-700 text-green-200",
-                        "FX"
-                    }
-                }
+                // FX — lit from the store, which the FxCountChanged event
+                // keeps current. The old `if track.fx_count > 0` read this
+                // panel's two-second poll of a field no event ever updated,
+                // so it was right on open and wrong from the first plugin.
+                FxButton { track: track.guid.clone() }
             }
 
             // ── Volume Fader ────────────────────────────────────

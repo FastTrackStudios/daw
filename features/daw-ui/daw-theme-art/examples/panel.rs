@@ -32,9 +32,10 @@ use daw_theme_art::vector_controls as v;
 /// records what REAPER ships, measured; a `source` that disagrees with the
 /// art while carrying the art's declared `slice` would be neither, and the
 /// bands are stated in `source`'s units, so the two cannot be mixed. This
-/// says plainly that it is the demo's own box. It goes away with
-/// `FaderCapProps::full` and `FxControlProps::widen`, when the slice
-/// actually drives rendering.
+/// says plainly that it is the demo's own box. `FaderCapProps::full` and
+/// `FxControlProps::widen` have since gone, replaced by the pane
+/// decomposition; this sheet still draws whole art at its own proportions
+/// because it is photographing controls, not laying out a strip.
 const IO_DRAWN_SHORT: v::NamedArt = v::NamedArt {
     name: "mcp_io_s_r, drawn short",
     source: (23.0, 30.0),
@@ -340,10 +341,10 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
         &render_svg(
             v::FxControl,
             v::FxControlProps {
+                pane: None,
                 part: v::FxPart::Label,
                 // 43 and 29 — `mcp.fx` and `mcp.fxbyp` — reached by
                 // growing the pill's middle, not by scaling it.
-                widen: Some((43.0, 28.0)),
                 chain: v::FxChain::Empty,
                 bypass: v::FxBypass::Empty,
                 family: v::FxFamily::Mixer,
@@ -367,8 +368,8 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
         &render_svg(
             v::FxControl,
             v::FxControlProps {
+                pane: None,
                 part: v::FxPart::Toggle,
-                widen: Some((43.0, 28.0)),
                 chain: v::FxChain::Empty,
                 bypass: v::FxBypass::Empty,
                 family: v::FxFamily::Mixer,

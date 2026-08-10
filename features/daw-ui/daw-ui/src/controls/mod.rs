@@ -21,8 +21,8 @@
 //!   No stylesheet is assumed to arrive: these render in Blitz inside a
 //!   REAPER panel, where external CSS does not load reliably.
 //!
-//! Two controls are wired so far — [`MuteButton`] and [`VolumeFader`]. The
-//! rest of the mixer follows the same three moves.
+//! Three controls are wired so far — [`MuteButton`], [`VolumeFader`] and
+//! [`FxButton`]. The rest of the mixer follows the same three moves.
 //!
 //! A continuous control adds a fourth: the value under the pointer is the
 //! UI's, not the engine's, so it never waits on a round trip. That lives in
@@ -30,6 +30,7 @@
 
 mod drafts;
 mod fader;
+mod fx;
 mod mute;
 mod sync;
 mod track_store;
@@ -40,6 +41,7 @@ mod track_store;
 pub use daw_theme_art::dress::Panel;
 pub use drafts::Drafts;
 pub use fader::VolumeFader;
+pub use fx::FxButton;
 pub use mute::MuteButton;
 pub use sync::VolumeSync;
 pub use track_store::{TrackStore, use_daw_tracks, use_track, use_track_store};

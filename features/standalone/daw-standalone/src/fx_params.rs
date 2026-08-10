@@ -98,6 +98,68 @@ impl Standalone {
         Some(plugin.params().len() as u32)
     }
 
+    /// Recount a track's two chains, store the result, and tell the track
+    /// stream.
+    ///
+    /// Chain membership lives in `fx_chains`, but a strip reads
+    /// `Track::fx_count` — and nothing kept the two in step, so a mixer's
+    /// FX buttons were correct when it opened and wrong from the first
+    /// plugin added. The counts are written back onto the stored `Track`
+    /// as well as published, so a bulk read taken afterwards agrees with
+    /// the event.
+    ///
+    /// A no-op for the monitoring chain, which belongs to no track.
+    pub(crate) fn republish_fx_counts(
+        &self,
+        project_guid: &str,
+        chain: &daw_proto::FxChainContext,
+    ) {
+        use daw_proto::FxChainContext;
+
+        let track_guid = match chain {
+            FxChainContext::Track(g) | FxChainContext::Input(g) => g.clone(),
+            FxChainContext::Monitoring => return,
+        };
+
+        let counts = self.with_project_mut(project_guid, |p| {
+            let count = |ctx: FxChainContext| {
+                p.fx_chains
+                    .get(&FxChainKey::from(&ctx))
+                    .map(|c| c.len() as u32)
+                    .unwrap_or(0)
+            };
+            let fx_count = count(FxChainContext::Track(track_guid.clone()));
+            let input_fx_count = count(FxChainContext::Input(track_guid.clone()));
+            let changed = p
+                .tracks
+                .iter_mut()
+                .find(|t| t.guid == track_guid)
+                .map(|t| {
+                    let changed = t.fx_count != fx_count || t.input_fx_count != input_fx_count;
+                    t.fx_count = fx_count;
+                    t.input_fx_count = input_fx_count;
+                    changed
+                })
+                .unwrap_or(false);
+            (changed, fx_count, input_fx_count)
+        });
+
+        let Ok((true, fx_count, input_fx_count)) = counts else {
+            return;
+        };
+        let event = daw_proto::track::TrackStreamEvent {
+            project_guid: project_guid.to_string(),
+            event: daw_proto::track::TrackEvent::FxCountChanged {
+                guid: track_guid,
+                fx_count,
+                input_fx_count,
+            },
+        };
+        self.bus_events
+            .publish(daw_proto::event_bus::DawEvent::Track(event.clone()));
+        self.track_events.publish(event);
+    }
+
     pub(crate) fn publish_fx_event(&self, project_guid: &str, event: FxEvent) {
         // FX has no per-domain stream service yet — events reach
         // consumers via the cross-domain event-bus hub.

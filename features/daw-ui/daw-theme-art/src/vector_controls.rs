@@ -632,14 +632,6 @@ impl FxFamily {
         }
     }
 
-    /// `(x, width)` of `part` within the pill.
-    fn window(self, part: FxPart) -> (f32, f32) {
-        let p = self.pill();
-        match part {
-            FxPart::Label => (0.0, p.split),
-            FxPart::Toggle => (p.split, p.w - p.split),
-        }
-    }
 }
 
 #[derive(Props, Clone, PartialEq)]
@@ -655,16 +647,21 @@ pub struct FxControlProps {
     /// Which half to emit.
     #[props(default)]
     pub part: FxPart,
-    /// Widen the pill to `(label, toggle)` units, keeping its ends.
+    /// Which band of this half to draw, when the caller is drawing the
+    /// pill as a row of bands rather than whole.
     ///
     /// REAPER nine-slices this button: `mcp.fx` is 43 wide and `mcp.fxbyp`
-    /// 29, against art that is 28 and 17, and only the flat middle grows —
-    /// which is why its `FX` reads small in a long pill. Scaling the whole
-    /// thing into those boxes stretches the rounded ends into a notch and
-    /// the letters with them, so the widening belongs here, where the
-    /// geometry is, rather than in whatever is placing it.
+    /// 29, against art that is 28 and 17, and only the flat run before the
+    /// seam grows — which is why its `FX` reads small in a long pill.
+    /// Scaling the whole thing into those boxes stretches the rounded ends
+    /// into a notch and the letters with them.
+    ///
+    /// The window is relative to the half [`FxControlProps::part`] selects,
+    /// so a caller can hand over [`crate::slice::NamedArt::row`]'s panes
+    /// unchanged. `None` draws the half whole, which is what the exporter
+    /// wants.
     #[props(default)]
-    pub widen: Option<(f32, f32)>,
+    pub pane: Option<crate::slice::Pane>,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -693,16 +690,20 @@ pub struct FxControlProps {
 pub fn FxControl(props: FxControlProps) -> Element {
     let t = Theme::default();
     let k = ink(None, props.at, true, 0.35);
-    let mut p = props.family.pill();
-    if let Some((label, toggle)) = props.widen {
-        p.split = label;
-        p.w = label + p.gutter + toggle;
-    }
-    // Computed from the widened pill rather than from `window`, which
-    // reads the family's own untouched geometry.
-    let (win_x, win_w) = match props.part {
+    let p = props.family.pill();
+    // The half this image is. The pill is drawn once, at its own
+    // proportions, and each image is a window onto it — that is what keeps
+    // the two halves from disagreeing about height or material.
+    let (part_x, part_w) = match props.part {
         FxPart::Label => (0.0, p.split),
         FxPart::Toggle => (p.split, p.w - p.split),
+    };
+    // A band *within* that half, when the caller is stretching one. Offset
+    // into the half rather than into the pill, so a caller can pass the
+    // image's own panes without knowing where its half begins.
+    let (win_x, win_w) = match props.pane {
+        Some(pane) => (part_x + pane.view.0, pane.view.2),
+        None => (part_x, part_w),
     };
 
     let (body_y, body_h) = (p.h * p.body.0, p.h * p.body.1);
@@ -851,6 +852,9 @@ pub fn FxControl(props: FxControlProps) -> Element {
 
     rsx! {
         svg {
+            // A stretched band must not letterbox: the flat run is meant to
+            // lengthen, which is the whole reason it is its own band.
+            preserve_aspect_ratio: "none",
             width: "{props.width.unwrap_or(win_w as u32)}",
             height: "{props.height.unwrap_or(p.h as u32)}",
             // The window is the only thing that differs between the two

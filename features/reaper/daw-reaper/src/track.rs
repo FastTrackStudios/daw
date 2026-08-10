@@ -1044,6 +1044,26 @@ pub fn poll_and_broadcast_tracks() {
                             name: track.name.clone(),
                         });
                     }
+                    // The counts this poller has always read and never
+                    // reported. `Track.fx_count` was seeded by the bulk
+                    // read and then went stale the moment a user added a
+                    // plugin, which is what made a mixer's FX buttons
+                    // right on open and wrong forever after.
+                    //
+                    // Both counts ride one event: a strip showing the input
+                    // indicator separately must never see one without the
+                    // other. Diffed here rather than in the chain-diff
+                    // poller because `fx_count()` is one call per chain,
+                    // where that poller enumerates every plugin of every
+                    // chain — and it only runs at all when something is
+                    // subscribed to the FX stream, which the strip is not.
+                    if p.fx_count != track.fx_count || p.input_fx_count != track.input_fx_count {
+                        publish(TrackEvent::FxCountChanged {
+                            guid: guid.clone(),
+                            fx_count: track.fx_count,
+                            input_fx_count: track.input_fx_count,
+                        });
+                    }
                     if p.muted != track.muted {
                         publish(TrackEvent::MuteChanged {
                             guid: guid.clone(),
