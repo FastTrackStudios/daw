@@ -530,6 +530,69 @@ impl Workspace {
         self.refresh_lane_weights();
     }
 
+    /// Merge two lanes into one.
+    ///
+    /// The result takes the **upper** lane's position and the greater of
+    /// the two weights. Upper rather than active, because positional is
+    /// predictable: taking the active lane's position would make the
+    /// same two lanes merge differently depending on which you happened
+    /// to click last.
+    ///
+    /// Marks the layout arranged — a merge is a decision, and decisions
+    /// are what get persisted.
+    pub fn merge_lanes(&mut self, a: usize, b: usize) -> bool {
+        if a == b || a >= self.layout.len() || b >= self.layout.len() {
+            return false;
+        }
+        let (upper, lower) = if a < b { (a, b) } else { (b, a) };
+        let Some(moved) = self.layout.lane(lower).map(|l| l.tracks.clone()) else {
+            return false;
+        };
+        let weight = self
+            .layout
+            .lane(upper)
+            .map(|l| l.weight)
+            .unwrap_or(1.0)
+            .max(self.layout.lane(lower).map(|l| l.weight).unwrap_or(1.0));
+
+        if let Some(lane) = self.layout.lane_mut(upper) {
+            lane.tracks.extend(moved);
+            lane.weight = weight;
+        }
+        self.layout.lanes.remove(lower);
+        self.layout.mark_arranged();
+        true
+    }
+
+    /// Peel one track out of its lane into a new lane directly below.
+    ///
+    /// Peel-one rather than explode-into-N, because it is the reversible
+    /// gesture: splitting a three-track lane into three is one action
+    /// that then needs two merges to undo, and layout undo is a
+    /// different mechanism from document undo.
+    ///
+    /// Splitting the only track in a lane is a no-op — there is nothing
+    /// to separate it from.
+    pub fn split_track_out(&mut self, guid: &str) -> Option<usize> {
+        let from = self.layout.lane_of(guid)?;
+        if self.layout.lane(from)?.tracks.len() < 2 {
+            return None;
+        }
+        let weight = self
+            .track_by_guid(guid)
+            .map(|t| t.mode.stack_weight())
+            .unwrap_or(1.0);
+
+        if let Some(lane) = self.layout.lane_mut(from) {
+            lane.tracks.retain(|g| g != guid);
+        }
+        let at = from + 1;
+        self.layout.lanes.insert(at, Lane::single(guid, weight));
+        self.layout.mark_arranged();
+        self.refresh_lane_weights();
+        Some(at)
+    }
+
     /// Drop layout entries whose track no longer exists.
     ///
     /// Silent by design: a track someone deleted is not an error worth
