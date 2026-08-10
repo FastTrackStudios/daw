@@ -92,14 +92,117 @@ impl Dimension {
     }
 }
 
+/// How a curve travels from one point to the next.
+///
+/// Mirrors `daw_proto::EnvelopeShape` variant for variant. Core cannot
+/// depend on the DAW proto crate, so this is a deliberate copy rather
+/// than a re-export — and it is exact precisely so the conversion at the
+/// boundary is total and lossless. Adding a variant here that the DAW
+/// cannot express would silently degrade on export.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CurveShape {
+    /// Straight line to the next point. What every curve was before
+    /// shapes existed, and still the default, so MIDI and CC are
+    /// unaffected.
+    #[default]
+    Linear,
+    /// Hold, then jump at the next point.
+    ///
+    /// Matters as much as [`CurveShape::Bezier`] for envelopes: a gate is
+    /// on/off with an attack and a release, and forcing that through
+    /// linear interpolation is what makes a decimated curve need far
+    /// more points than the shape it is describing.
+    Square,
+    /// Ease in and out — an S-curve.
+    SlowStartEnd,
+    /// Fast at the start, logarithmic.
+    FastStart,
+    /// Fast at the end, exponential.
+    FastEnd,
+    /// Bezier, bent by the point's `tension`.
+    Bezier,
+}
+
 /// One point on an expression curve.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Point {
     /// Document time, absolute (not note-relative) — keeps edits that
     /// span note boundaries honest.
     pub t: f64,
     /// Dimension-native value. Pitch: semitones from the note row.
     pub value: f64,
+    /// How the curve reaches the *next* point. Trailing points'
+    /// shapes are never read, which matches how the DAW stores it.
+    pub shape: CurveShape,
+    /// Bezier bend, -1.0..=1.0. Read only by [`CurveShape::Bezier`].
+    pub tension: f64,
+}
+
+impl Point {
+    /// A linear point — the overwhelmingly common case.
+    pub fn new(t: f64, value: f64) -> Self {
+        Self {
+            t,
+            value,
+            ..Self::default()
+        }
+    }
+
+    pub fn shaped(t: f64, value: f64, shape: CurveShape) -> Self {
+        Self {
+            t,
+            value,
+            shape,
+            tension: 0.0,
+        }
+    }
+
+    pub fn bezier(t: f64, value: f64, tension: f64) -> Self {
+        Self {
+            t,
+            value,
+            shape: CurveShape::Bezier,
+            tension: tension.clamp(-1.0, 1.0),
+        }
+    }
+}
+
+/// Map linear progress `x` in 0..=1 through a segment's shape.
+///
+/// Returns the fraction of the way from the left value to the right one,
+/// so every shape is expressed as an easing and the caller's lerp is
+/// unchanged. Every shape returns 0 at x=0 and 1 at x=1 except
+/// [`CurveShape::Square`], which holds the left value until it arrives —
+/// that discontinuity is the point of it.
+fn shape_ease(shape: CurveShape, x: f64, tension: f64) -> f64 {
+    let x = x.clamp(0.0, 1.0);
+    match shape {
+        CurveShape::Linear => x,
+        CurveShape::Square => {
+            if x >= 1.0 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        // Smoothstep: zero slope at both ends.
+        CurveShape::SlowStartEnd => x * x * (3.0 - 2.0 * x),
+        // Fast off the mark, easing into the target.
+        CurveShape::FastStart => 1.0 - (1.0 - x) * (1.0 - x),
+        // Slow to leave, arriving quickly.
+        CurveShape::FastEnd => x * x,
+        // Rational bezier bend. Tension 0 is linear; positive pushes the
+        // curve toward the far value early, negative holds it back.
+        CurveShape::Bezier => {
+            let k = tension.clamp(-1.0, 1.0);
+            if k.abs() < f64::EPSILON {
+                x
+            } else {
+                let w = 1.0 + k;
+                (w * x) / (1.0 + (w - 1.0) * x)
+            }
+        }
+    }
 }
 
 /// A sampled expression curve: points sorted by `t`, at most one per
@@ -153,7 +256,7 @@ impl Curve {
     pub fn set(&mut self, t: f64, value: f64) {
         match self.index_of(t) {
             Ok(i) => self.points[i].value = value,
-            Err(i) => self.points.insert(i, Point { t, value }),
+            Err(i) => self.points.insert(i, Point { t, value, ..Point::default() }),
         }
     }
 
@@ -210,7 +313,11 @@ impl Curve {
                 if span <= 0.0 {
                     b.value
                 } else {
-                    a.value + (b.value - a.value) * ((t - a.t) / span)
+                    // The *left* point owns the segment's shape, matching
+                    // how the DAW stores it: a point describes how the
+                    // curve leaves it, not how it arrives.
+                    let x = (t - a.t) / span;
+                    a.value + (b.value - a.value) * shape_ease(a.shape, x, a.tension)
                 }
             }
         }
@@ -259,6 +366,9 @@ impl Curve {
                 Point {
                     t: t0 + (t1 - t0) * x,
                     value: v0 + (v1 - v0) * shape.amount(x),
+                    // The pen bakes its curve into the point *values*,
+                    // so each segment between them is linear.
+                    ..Point::default()
                 }
             })
             .collect();

@@ -9,6 +9,7 @@
 //! zones are just a colourful rectangle.
 
 use dioxus::prelude::*;
+use expression_editor_core::Point;
 use expression_editor_core::multitool::{self, Bend, Capture, Drag as MtDrag, Pt, Steepness, Zone};
 use expression_editor_core::{Editor, Dimension, NoteId};
 
@@ -205,8 +206,7 @@ fn write_back(ed: &mut Editor, id: NoteId, dimension: Dimension, cap: &Capture, 
         .iter()
         .map(|p| expression_editor_core::Point {
             t: p.t,
-            value: dimension.clamp(p.value),
-        })
+            value: dimension.clamp(p.value), ..Point::default() })
         .collect();
     // Splice the union of the original and transformed spans, so a
     // stretch that moved points outside the capture still clears where

@@ -52,8 +52,7 @@ impl Decomposition {
                     t,
                     value: center
                         + self.drift[i] * drift_amount
-                        + self.modulation[i] * modulation_amount,
-                })
+                        + self.modulation[i] * modulation_amount, ..Point::default() })
                 .collect(),
         )
     }

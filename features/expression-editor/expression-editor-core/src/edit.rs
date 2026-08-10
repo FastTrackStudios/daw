@@ -416,7 +416,7 @@ impl Edit {
                 n.curve_mut(*dimension).splice(
                     lo,
                     hi,
-                    &[Point { t: lo, value: v }, Point { t: hi, value: v }],
+                    &[Point { t: lo, value: v, ..Point::default() }, Point { t: hi, value: v, ..Point::default() }],
                 );
                 true
             }
@@ -452,8 +452,7 @@ impl Edit {
                         let w = if *from_start { 1.0 - f } else { f };
                         Point {
                             t,
-                            value: dimension.clamp(curve.sample(t, default) + amount * w),
-                        }
+                            value: dimension.clamp(curve.sample(t, default) + amount * w), ..Point::default() }
                     })
                     .collect();
                 n.curve_mut(dimension).splice(lo, hi, &pts);
@@ -534,8 +533,7 @@ impl Edit {
                     .zip(&values)
                     .map(|(&t, &v)| Point {
                         t,
-                        value: dimension.clamp(v),
-                    })
+                        value: dimension.clamp(v), ..Point::default() })
                     .collect();
                 // Splice, so data outside the target range survives.
                 n.curve_mut(*dimension).splice(lo, hi, &points);

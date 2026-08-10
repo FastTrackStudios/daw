@@ -61,27 +61,23 @@ fn curve_holds_its_endpoints_outside_the_authored_range() {
 #[test]
 fn splice_preserves_points_outside_the_interval() {
     let mut c = Curve::from_points(vec![
-        Point { t: 0.0, value: 0.0 },
+        Point { t: 0.0, value: 0.0, ..Point::default() },
         Point {
             t: 100.0,
-            value: 1.0,
-        },
+            value: 1.0, ..Point::default() },
         Point {
             t: 200.0,
-            value: 2.0,
-        },
+            value: 2.0, ..Point::default() },
         Point {
             t: 300.0,
-            value: 3.0,
-        },
+            value: 3.0, ..Point::default() },
     ]);
     c.splice(
         100.0,
         200.0,
         &[Point {
             t: 150.0,
-            value: 9.0,
-        }],
+            value: 9.0, ..Point::default() }],
     );
     let pts: Vec<(f64, f64)> = c.points().iter().map(|p| (p.t, p.value)).collect();
     assert_eq!(pts, vec![(0.0, 0.0), (150.0, 9.0), (300.0, 3.0)]);
@@ -103,11 +99,10 @@ fn reshape_preserves_endpoints_exactly() {
 #[test]
 fn scale_about_below_zero_inverts_the_gesture() {
     let mut c = Curve::from_points(vec![
-        Point { t: 0.0, value: 0.0 },
+        Point { t: 0.0, value: 0.0, ..Point::default() },
         Point {
             t: 100.0,
-            value: 2.0,
-        },
+            value: 2.0, ..Point::default() },
     ]);
     c.scale_about(0.0, 100.0, 1.0, -1.0);
     assert_eq!(c.sample(0.0, 0.0), 2.0);
@@ -117,11 +112,10 @@ fn scale_about_below_zero_inverts_the_gesture() {
 #[test]
 fn remap_time_stretches_owned_expression_onto_new_bounds() {
     let mut c = Curve::from_points(vec![
-        Point { t: 0.0, value: 0.0 },
+        Point { t: 0.0, value: 0.0, ..Point::default() },
         Point {
             t: 100.0,
-            value: 1.0,
-        },
+            value: 1.0, ..Point::default() },
     ]);
     c.remap_time(0.0, 100.0, 0.0, 400.0);
     assert_eq!(c.points().last().unwrap().t, 400.0);
@@ -213,12 +207,10 @@ fn drawing_extends_to_the_note_edges_so_no_gap_is_left() {
         points: vec![
             Point {
                 t: 500.0,
-                value: 1.0,
-            },
+                value: 1.0, ..Point::default() },
             Point {
                 t: 1000.0,
-                value: 2.0,
-            },
+                value: 2.0, ..Point::default() },
         ],
     };
     assert!(edit.apply(&mut doc));
@@ -237,11 +229,10 @@ fn erasing_one_lane_leaves_the_others_untouched() {
             t0: 0.0,
             t1: 1000.0,
             points: vec![
-                Point { t: 0.0, value: 0.5 },
+                Point { t: 0.0, value: 0.5, ..Point::default() },
                 Point {
                     t: 1000.0,
-                    value: 0.5,
-                },
+                    value: 0.5, ..Point::default() },
             ],
         }
         .apply(&mut doc);
@@ -2326,11 +2317,10 @@ fn cc_edits_are_document_level_not_per_note() {
             t0: 0.0,
             t1: PPQ * 4.0,
             points: vec![
-                Point { t: 0.0, value: 0.2 },
+                Point { t: 0.0, value: 0.2, ..Point::default() },
                 Point {
                     t: PPQ * 4.0,
-                    value: 1.0
-                },
+                    value: 1.0, ..Point::default() },
             ],
         }
         .apply(&mut doc)
@@ -2351,11 +2341,10 @@ fn scaling_a_controller_cannot_push_it_past_the_wire_range() {
         t0: 0.0,
         t1: PPQ * 4.0,
         points: vec![
-            Point { t: 0.0, value: 0.9 },
+            Point { t: 0.0, value: 0.9, ..Point::default() },
             Point {
                 t: PPQ * 4.0,
-                value: 0.1,
-            },
+                value: 0.1, ..Point::default() },
         ],
     }
     .apply(&mut doc);
@@ -2388,7 +2377,7 @@ fn erasing_a_controller_leaves_the_notes_alone() {
         number: 11,
         t0: 0.0,
         t1: PPQ * 4.0,
-        points: vec![Point { t: PPQ, value: 0.5 }],
+        points: vec![Point { t: PPQ, value: 0.5, ..Point::default() }],
     }
     .apply(&mut doc);
     let before = doc.notes.len();
@@ -2453,11 +2442,10 @@ fn erasing_part_of_a_controller_reads_as_cleared() {
         t0: 0.0,
         t1: PPQ * 4.0,
         points: vec![
-            Point { t: 0.0, value: 0.0 },
+            Point { t: 0.0, value: 0.0, ..Point::default() },
             Point {
                 t: PPQ * 4.0,
-                value: 1.0,
-            },
+                value: 1.0, ..Point::default() },
         ],
     }
     .apply(&mut doc);
@@ -4114,4 +4102,101 @@ fn selecting_another_track_swaps_the_notes() {
     assert_eq!(r.active, 1);
     assert_eq!(r.at(PPQ * 0.5, 60.0).map(|n| n.row), Some(72));
     assert!(!r.set_track(9, Vec::new()), "no such track in the file");
+}
+
+// ── Curve shapes ─────────────────────────────────────────────────────
+//
+// Shapes exist for envelopes (#186). The bar they have to clear is that
+// adding them changes nothing for the MIDI and CC curves that were here
+// first — hence the default-is-linear tests as well as the shape ones.
+
+use expression_editor_core::CurveShape;
+
+fn two(a: Point, b: Point) -> Curve {
+    Curve::from_points(vec![a, b])
+}
+
+#[test]
+fn a_point_is_linear_unless_told_otherwise() {
+    let p = Point::new(0.0, 1.0);
+    assert_eq!(p.shape, CurveShape::Linear);
+    assert_eq!(p.tension, 0.0);
+    assert_eq!(Point::default().shape, CurveShape::Linear);
+}
+
+#[test]
+fn a_linear_segment_interpolates_exactly_as_before() {
+    let c = two(Point::new(0.0, 0.0), Point::new(10.0, 10.0));
+    for t in [0.0, 2.5, 5.0, 7.5, 10.0] {
+        assert!((c.sample(t, 0.0) - t).abs() < 1e-9, "linear is unchanged at {t}");
+    }
+}
+
+#[test]
+fn a_square_segment_holds_then_jumps() {
+    let c = two(
+        Point::shaped(0.0, 0.0, CurveShape::Square),
+        Point::new(10.0, 1.0),
+    );
+    assert_eq!(c.sample(0.0, 0.0), 0.0);
+    assert_eq!(c.sample(5.0, 0.0), 0.0, "holds across the segment");
+    assert_eq!(c.sample(9.999, 0.0), 0.0, "still holding just before");
+    assert_eq!(c.sample(10.0, 0.0), 1.0, "and jumps at the point");
+}
+
+#[test]
+fn every_shape_starts_and_ends_where_the_points_say() {
+    // Whatever happens in between, a segment must be pinned at both
+    // ends — otherwise a shape change silently moves authored values.
+    for shape in [
+        CurveShape::Linear,
+        CurveShape::Square,
+        CurveShape::SlowStartEnd,
+        CurveShape::FastStart,
+        CurveShape::FastEnd,
+        CurveShape::Bezier,
+    ] {
+        let c = two(Point::shaped(0.0, 3.0, shape), Point::new(8.0, 9.0));
+        assert!((c.sample(0.0, 0.0) - 3.0).abs() < 1e-9, "{shape:?} start");
+        assert!((c.sample(8.0, 0.0) - 9.0).abs() < 1e-9, "{shape:?} end");
+    }
+}
+
+#[test]
+fn the_eases_bend_the_way_their_names_say() {
+    let mid = |shape| {
+        two(Point::shaped(0.0, 0.0, shape), Point::new(10.0, 1.0)).sample(5.0, 0.0)
+    };
+    let linear = mid(CurveShape::Linear);
+    assert!((linear - 0.5).abs() < 1e-9);
+    // S-curve is symmetric, so it also passes through the middle.
+    assert!((mid(CurveShape::SlowStartEnd) - 0.5).abs() < 1e-9);
+    assert!(mid(CurveShape::FastStart) > linear, "fast start is ahead by halfway");
+    assert!(mid(CurveShape::FastEnd) < linear, "fast end is behind by halfway");
+}
+
+#[test]
+fn bezier_tension_zero_is_linear_and_the_sign_picks_a_direction() {
+    let at = |tension| two(Point::bezier(0.0, 0.0, tension), Point::new(10.0, 1.0)).sample(5.0, 0.0);
+    assert!((at(0.0) - 0.5).abs() < 1e-9, "no tension, no bend");
+    assert!(at(1.0) > 0.5, "positive tension runs ahead");
+    assert!(at(-1.0) < 0.5, "negative tension holds back");
+}
+
+#[test]
+fn tension_is_clamped_to_what_the_daw_can_express() {
+    assert_eq!(Point::bezier(0.0, 0.0, 5.0).tension, 1.0);
+    assert_eq!(Point::bezier(0.0, 0.0, -5.0).tension, -1.0);
+}
+
+#[test]
+fn the_left_point_owns_the_segment() {
+    // A point describes how the curve *leaves* it, which is how the DAW
+    // stores it. Setting the shape on the right-hand point must not
+    // change the segment before it.
+    let c = two(Point::new(0.0, 0.0), Point::shaped(10.0, 1.0, CurveShape::Square));
+    assert!(
+        (c.sample(5.0, 0.0) - 0.5).abs() < 1e-9,
+        "the trailing point's shape is not read"
+    );
 }
