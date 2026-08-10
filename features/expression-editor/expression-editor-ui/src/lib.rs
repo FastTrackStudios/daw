@@ -22,6 +22,7 @@ use keyboard_types::Modifiers;
 pub mod canvas;
 pub mod demo;
 pub mod drawer;
+pub mod envelopes;
 pub mod guitar;
 pub mod inspector;
 pub mod interaction;
