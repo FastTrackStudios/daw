@@ -2,8 +2,8 @@
 
 Two features that only make sense together.
 
-**Percussive** is the mode for audio with no pitch to speak of — drums,
-percussion, noise, most FX. The pitched audio mode (`Mode::Audio`, the
+**UnpitchedAudio** is the mode for audio with no pitch to speak of — drums,
+percussion, noise, most FX. The pitched audio mode (`Mode::PitchedAudio`, the
 Melodyne surface) is built on a pitch contour, and on unpitched material
 that contour is noise: it produces notes that flicker between octaves
 and a blob that jumps around the grid. Better to admit there is no pitch
@@ -113,11 +113,11 @@ no honest way to do that.
 
 `Track::mode`, not `Editor::mode`. The editor's mode becomes a view of
 the active track's, so every existing caller keeps working, and a
-workspace can hold a vocal in `Audio`, its reference in `Midi` and the
-kit in `Percussive` at the same time.
+workspace can hold a vocal in `PitchedAudio`, its reference in `Midi` and the
+kit in `UnpitchedAudio` at the same time.
 
-The mode is *inferred* at load — pitched audio to `Audio`, unpitched to
-`Percussive`, MIDI to `Midi` — and then it is the user's, because
+The mode is *inferred* at load — pitched audio to `PitchedAudio`, unpitched to
+`UnpitchedAudio`, MIDI to `Midi` — and then it is the user's, because
 inference on a whispered vocal or a melodic tom fill will be wrong
 sometimes and a wrong guess must be one click to correct.
 

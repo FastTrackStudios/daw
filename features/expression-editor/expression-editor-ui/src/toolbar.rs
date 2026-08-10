@@ -11,7 +11,7 @@
 
 use dioxus::prelude::*;
 use expression_editor_core::doc::Lane;
-use expression_editor_core::{chord, Editor, Mode, Shape, StripLane, Tool};
+use expression_editor_core::{chord, Editor, ModeFamily, Shape, StripLane, Tool};
 
 use crate::drawer::ModDrawer;
 use crate::interaction::{self, Drag};
@@ -146,29 +146,39 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
 
             // The mode leads: everything after it is conditional on
             // what the editor currently is.
-            Segment {
-                for m in Mode::ALL {
-                    Seg {
-                        key: "m{m:?}",
-                        active: mode == m,
-                        accent: true,
-                        title: format!("{} mode", m.label()),
-                        onclick: move |_| editor.write().set_mode(m),
-                        span {
-                            style: "display: flex; align-items: center; gap: 5px;",
-                            svg {
-                                view_box: "0 0 16 16",
-                                style: "width: 13px; height: 13px; flex: 0 0 auto;",
-                                path {
-                                    d: theme::mode_icon(m),
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "1.3",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
+            //
+            // One segment per family, so the switcher reads as "which
+            // kind of material is this" before "which surface" — the
+            // MIDI-shaped modes on the left, the two analysed-audio
+            // ones on the right.
+            for (i, family) in ModeFamily::ALL.into_iter().enumerate() {
+                if i > 0 {
+                    {divider()}
+                }
+                Segment {
+                    for m in family.modes().iter().copied() {
+                        Seg {
+                            key: "m{m:?}",
+                            active: mode == m,
+                            accent: true,
+                            title: format!("{} mode ({} family)", m.label(), family.label()),
+                            onclick: move |_| editor.write().set_mode(m),
+                            span {
+                                style: "display: flex; align-items: center; gap: 5px;",
+                                svg {
+                                    view_box: "0 0 16 16",
+                                    style: "width: 13px; height: 13px; flex: 0 0 auto;",
+                                    path {
+                                        d: theme::mode_icon(m),
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "1.3",
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                    }
                                 }
+                                "{m.label()}"
                             }
-                            "{m.label()}"
                         }
                     }
                 }

@@ -38,7 +38,7 @@ fn points(s: &str) -> Vec<(f64, f64)> {
 
 #[test]
 fn audio_notes_draw_as_blobs_and_midi_notes_do_not() {
-    let audio = canvas::note_rects(&editor(Mode::Audio, 0.0));
+    let audio = canvas::note_rects(&editor(Mode::PitchedAudio, 0.0));
     assert!(audio[0].blob.is_some(), "a sung note is not a rectangle");
 
     for mode in [Mode::Midi, Mode::Mpe, Mode::Drums, Mode::Guitar] {
@@ -56,7 +56,7 @@ fn audio_notes_draw_as_blobs_and_midi_notes_do_not() {
 
 #[test]
 fn the_body_thickness_follows_the_amplitude() {
-    let rects = canvas::note_rects(&editor(Mode::Audio, 0.0));
+    let rects = canvas::note_rects(&editor(Mode::PitchedAudio, 0.0));
     let pts = points(rects[0].blob.as_ref().unwrap());
     // The polygon is the top edge then the bottom edge reversed, so the
     // pair straddling each x is `i` and `len - 1 - i`.
@@ -76,7 +76,7 @@ fn the_body_thickness_follows_the_amplitude() {
 
 #[test]
 fn the_body_is_flat_and_the_pitch_track_moves_against_it() {
-    let ed = editor(Mode::Audio, 0.0);
+    let ed = editor(Mode::PitchedAudio, 0.0);
     let rects = canvas::note_rects(&ed);
     let pts = points(rects[0].blob.as_ref().unwrap());
     let n = pts.len();
@@ -100,8 +100,8 @@ fn the_body_is_flat_and_the_pitch_track_moves_against_it() {
 fn the_body_sits_at_the_notes_own_pitch_not_its_row() {
     // A note sung a semitone and a half sharp draws where it sounds, so
     // the row it is nearest is still readable underneath it.
-    let base = editor(Mode::Audio, 0.0);
-    let mut sharp_ed = editor(Mode::Audio, 1.5);
+    let base = editor(Mode::PitchedAudio, 0.0);
+    let mut sharp_ed = editor(Mode::PitchedAudio, 1.5);
     // `Editor::new` frames its own content, so the two would otherwise
     // be measured through different cameras and the comparison would be
     // about zoom rather than pitch.
@@ -134,7 +134,7 @@ fn the_recorded_envelope_outranks_an_authored_curve() {
         .collect();
     doc.push(n);
     let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
 
     let rects = canvas::note_rects(&ed);
     let pts = points(rects[0].blob.as_ref().unwrap());
@@ -149,7 +149,7 @@ fn the_recorded_envelope_outranks_an_authored_curve() {
 
 #[test]
 fn a_note_too_narrow_to_shape_gets_no_blob() {
-    let mut ed = editor(Mode::Audio, 0.0);
+    let mut ed = editor(Mode::PitchedAudio, 0.0);
     // Zoom out until the note is a sliver.
     ed.camera.units_per_px = 1e6;
     let rects = canvas::note_rects(&ed);
@@ -159,8 +159,8 @@ fn a_note_too_narrow_to_shape_gets_no_blob() {
 #[test]
 fn colour_reports_how_far_out_of_tune_the_note_is() {
     // Dead on, and badly flat.
-    let in_tune = canvas::note_rects(&editor(Mode::Audio, 0.0))[0].fill;
-    let out = canvas::note_rects(&editor(Mode::Audio, -0.35))[0].fill;
+    let in_tune = canvas::note_rects(&editor(Mode::PitchedAudio, 0.0))[0].fill;
+    let out = canvas::note_rects(&editor(Mode::PitchedAudio, -0.35))[0].fill;
 
     assert_eq!(in_tune, theme::TUNE_RAMP[0]);
     assert_eq!(out, theme::TUNE_RAMP[4]);
@@ -172,7 +172,7 @@ fn vibrato_does_not_make_a_good_note_flash_red() {
     // The note is centred on pitch but swings ±60 cents four times
     // across its length. Colouring from an instant would strobe; the
     // colour comes from the contour's centre, so it stays in tune.
-    let rects = canvas::note_rects(&editor(Mode::Audio, 0.0));
+    let rects = canvas::note_rects(&editor(Mode::PitchedAudio, 0.0));
     assert_eq!(
         rects[0].fill,
         theme::TUNE_RAMP[0],
@@ -182,7 +182,7 @@ fn vibrato_does_not_make_a_good_note_flash_red() {
 
 #[test]
 fn the_ribbon_is_dropped_where_the_blob_already_shows_it() {
-    let audio = canvas::note_rects(&editor(Mode::Audio, 0.0));
+    let audio = canvas::note_rects(&editor(Mode::PitchedAudio, 0.0));
     assert!(
         audio[0].ribbon.is_none(),
         "the blob is the envelope; a ribbon would draw it twice, and in \
@@ -202,7 +202,7 @@ fn an_unedited_note_still_has_a_body() {
     n.weight = 0.9;
     doc.push(n);
     let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
 
     let rects = canvas::note_rects(&ed);
     let pts = points(rects[0].blob.as_ref().unwrap());
@@ -227,7 +227,7 @@ fn three_notes_on_one_row_separate_by_how_sharp_they_are() {
         doc.push(n);
     }
     let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
 
     let rects = canvas::note_rects(&ed);
     let cy: Vec<f64> = rects.iter().map(|r| r.blob_center.unwrap()).collect();
@@ -266,7 +266,7 @@ fn sibilant_editor() -> Editor {
     doc.unvoiced = vec![(PPQ * 1.5, PPQ * 2.5)];
     doc.peaks = (0..500).map(|k| ((k % 17) as f32) / 17.0).collect();
     let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
     ed
 }
 

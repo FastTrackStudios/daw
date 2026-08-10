@@ -55,7 +55,7 @@ pub use doc::{Curve, ExpressionDoc, Lane, Marker, Note, NoteId, Point, Target, T
 pub use draft::PitchDraft;
 pub use edit::{Edit, History};
 pub use handles::{Handle, Scope};
-pub use mode::Mode;
+pub use mode::{Mode, ModeFamily};
 pub use mouse::{Action, MouseMap};
 pub use multitool::{Bend, Steepness, Zone};
 pub use razor::{RazorArea, RazorSet};

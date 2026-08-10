@@ -124,7 +124,7 @@ impl AudioSession {
         // The take is audio, so the surface is the audio one. Setting it
         // here rather than leaving it to the caller means a host cannot
         // load a vocal into the MIDI editor by omission.
-        editor.set_mode(Mode::Audio);
+        editor.set_mode(Mode::PitchedAudio);
         let baseline = editor.doc.clone();
 
         Some(Self {

@@ -1,6 +1,6 @@
 # Audio expression editor — the Vovious interaction model
 
-The `Mode::Audio` surface is a Melodyne competitor. This records the
+The `Mode::PitchedAudio` surface is a Melodyne competitor. This records the
 interaction model it targets, sourced from the **Vovious 1.0.6 user
 manual** (39 pp., `www.vovious.com/download/VoviousManual.pdf`) — a
 shipping, well-reviewed pitch editor whose gesture vocabulary is more

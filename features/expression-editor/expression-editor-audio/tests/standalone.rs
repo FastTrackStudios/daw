@@ -132,7 +132,7 @@ fn a_standalone_take_loads_into_the_audio_editor() {
     let (daw, item, secs, _dir) = project(60.0, 1.0);
     let s = open(&daw, item, secs, 1.0).expect("the take loaded");
 
-    assert_eq!(s.editor.mode, Mode::Audio);
+    assert_eq!(s.editor.mode, Mode::PitchedAudio);
     assert!(!s.editor.doc.notes.is_empty(), "the vocal was analysed");
     assert_eq!(
         s.editor.doc.note(NoteId(1)).unwrap().row,

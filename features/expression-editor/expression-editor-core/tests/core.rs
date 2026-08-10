@@ -2789,11 +2789,42 @@ fn modes_declare_which_controls_apply() {
     assert!(Mode::Vocals.has_lyrics());
     // The blend controls need a contour to decompose; a plain MIDI
     // note's is flat, so they would do nothing.
-    assert!(Mode::Audio.has_pitch_shape());
+    assert!(Mode::PitchedAudio.has_pitch_shape());
     assert!(!Mode::Midi.has_pitch_shape());
     // Tuning targets mean nothing on a drum kit.
     assert!(!Mode::Drums.has_tuning());
     assert!(Mode::Vocals.has_tuning());
+}
+
+/// The switcher groups by family, so every mode must land in exactly one
+/// and the two lists together must be `Mode::ALL`.
+///
+/// The invariant is easy to break by hand: adding a mode compiles fine
+/// while `ModeFamily::modes` still returns the old list, and the only
+/// symptom is a button that never appears.
+#[test]
+fn every_mode_belongs_to_exactly_one_family() {
+    use expression_editor_core::ModeFamily;
+
+    let mut listed: Vec<Mode> = Vec::new();
+    for family in ModeFamily::ALL {
+        for m in family.modes() {
+            assert_eq!(m.family(), family, "{m:?} listed under the wrong family");
+            assert!(!listed.contains(m), "{m:?} listed twice");
+            listed.push(*m);
+        }
+    }
+    assert_eq!(listed, Mode::ALL.to_vec());
+
+    // The split is where the notes came from, and `is_analysed_audio`
+    // must agree with it.
+    assert_eq!(ModeFamily::Audio.modes().len(), 2);
+    assert!(Mode::PitchedAudio.is_analysed_audio());
+    assert!(Mode::UnpitchedAudio.is_analysed_audio());
+    assert!(!Mode::Guitar.is_analysed_audio());
+    // Only the unpitched one gives up pitch editing.
+    assert!(Mode::PitchedAudio.has_pitch());
+    assert!(!Mode::UnpitchedAudio.has_pitch());
 }
 
 #[test]
@@ -2965,7 +2996,7 @@ fn the_menu_offers_what_the_mode_can_actually_carry() {
             .any(|i| matches!(i.command, Command::ToggleLegato(_)))
     );
 
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
     let audio = menu::note_menu(&ed, Some(NoteId(1)), 0.0);
     assert!(
         audio

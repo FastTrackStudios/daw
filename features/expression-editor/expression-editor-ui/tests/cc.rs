@@ -323,7 +323,7 @@ fn bare_r_brings_references_forward_wherever_mpe_is_not_using_it() {
     // Audio and vocal notes have no member channel to assign, so the
     // key is free and takes Vovious's meaning.
     for mode in [
-        Mode::Audio,
+        Mode::PitchedAudio,
         Mode::Vocals,
         Mode::Midi,
         Mode::Drums,

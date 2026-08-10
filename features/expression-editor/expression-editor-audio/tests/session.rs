@@ -139,7 +139,7 @@ fn a_take_loads_into_the_audio_surface_with_notes() {
 
     assert_eq!(
         s.editor.mode,
-        Mode::Audio,
+        Mode::PitchedAudio,
         "a vocal opens in the audio editor, not the MIDI one"
     );
     assert!(!s.editor.doc.notes.is_empty());

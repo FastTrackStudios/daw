@@ -131,14 +131,11 @@ pub fn note_menu(ed: &Editor, under: Option<NoteId>, t: f64) -> Vec<MenuItem> {
                 Command::AssignChannels,
                 true,
             )],
-            Mode::Audio => vec![
-                MenuItem::new("Split Here", Command::SplitNote(id, t), true),
-                MenuItem::new("Merge With Next", Command::MergeNotes(id), true),
-            ],
             // Splitting and merging slices is the same edit as for a
             // sung note — where one hit ends and the next begins is
-            // exactly what onset detection gets wrong.
-            Mode::Percussive => vec![
+            // exactly what onset detection gets wrong — so the whole
+            // audio family shares these two.
+            Mode::PitchedAudio | Mode::UnpitchedAudio => vec![
                 MenuItem::new("Split Here", Command::SplitNote(id, t), true),
                 MenuItem::new("Merge With Next", Command::MergeNotes(id), true),
             ],

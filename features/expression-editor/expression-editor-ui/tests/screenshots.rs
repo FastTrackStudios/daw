@@ -317,7 +317,7 @@ async fn shoot_note_handles() {
 
     // Audio mode is the Melodyne surface: handles on the selection.
     let mut ed = demo::editor(Scene::Held, vp);
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
     ed.selection.notes = ed.doc.notes.iter().map(|n| n.id).collect();
     shoot(ed.clone(), "32-note-handles").await;
 
@@ -366,7 +366,7 @@ async fn shoot_blob_pitch_carry() {
         doc.push(n);
     }
     let mut ed = Editor::new(doc, Viewport::new(W as f64, CANVAS_H));
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
     shoot(ed, "34-blob-pitch-carry").await;
 }
 
@@ -435,7 +435,7 @@ async fn shoot_audio_backdrop() {
         .collect();
 
     let mut ed = Editor::new(doc, Viewport::new(W as f64, CANVAS_H));
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
     shoot(ed.clone(), "35-audio-backdrop").await;
 
     // Sibilant scope armed: bands shade, amplitude handle goes hollow.
@@ -473,7 +473,7 @@ async fn shoot_pitch_drawing() {
     doc.push(n);
 
     let mut ed = Editor::new(doc, Viewport::new(W as f64, CANVAS_H));
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
     ed.selection.notes = vec![NoteId(1)];
 
     // A drawing: straighten the drift out and put a deliberate vibrato
@@ -530,7 +530,7 @@ async fn shoot_timing_and_reference() {
     }
 
     let mut ed = Editor::new(doc, Viewport::new(W as f64, CANVAS_H));
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
 
     // A reference part on the beat, showing where the phrase should be.
     let mut r = MidiReference::new(
@@ -587,7 +587,7 @@ async fn shoot_stack() {
         part(172.265625, &vox, 0.40),
         Viewport::new(W as f64, CANVAS_H),
     );
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
     ed.tracks.rename(0, "Lead Vox");
 
     // The same line as a MIDI reference, dead on the grid.
@@ -628,7 +628,7 @@ async fn shoot_stack() {
     }
     let mut kit = part(86.1328125, &kit_hits, 0.06);
     kit.row_space = RowSpace::Bands(SliceBands::default());
-    ed.tracks.push(Track::in_mode("Kit", kit, Mode::Percussive));
+    ed.tracks.push(Track::in_mode("Kit", kit, Mode::UnpitchedAudio));
 
     ed.camera.t0 = -20.0;
     ed.camera.units_per_px = 0.55;
