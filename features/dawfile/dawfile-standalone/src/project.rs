@@ -168,10 +168,86 @@ impl DawProject {
             }
         }
 
+        // Record the save before writing the manifest, so the manifest
+        // on disk contains its own entry. An entry is a list of hashes,
+        // and the bytes behind an unchanged hash are already in
+        // `objects/` — which is where the autosave win comes from.
+        let seq = self.document.saves.last().map(|s| s.seq).unwrap_or(0) + 1;
+        let referenced = self.document.referenced_objects();
+        self.document.saves.push(crate::document::SaveEntry {
+            seq,
+            objects: referenced,
+        });
+
         self.objects.write_dir(&dir.join(OBJECTS_DIR))?;
         std::fs::write(manifest_path(dir, &self.document.name), self.to_text()?)?;
         self.modified = false;
         Ok(())
+    }
+
+    /// Every object any retained save still points at.
+    pub fn reachable_objects(&self) -> Vec<crate::id::ObjectId> {
+        let mut out = self.document.referenced_objects();
+        for save in &self.document.saves {
+            out.extend(save.objects.iter().cloned());
+        }
+        out.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+        out.dedup();
+        out
+    }
+
+    /// Garbage-collect the object store.
+    ///
+    /// **`compact` is GC, not dedup.** Content-addressing already
+    /// deduplicates at write time, so there is nothing left to collapse
+    /// afterwards; what is left to do is delete what nothing points at.
+    ///
+    /// Walks every retained save, marks the hashes they reach, and drops
+    /// the rest. `keep_saves` optionally trims the history to the last N
+    /// first — dropping a save is what makes its objects unreachable, so
+    /// the two have to happen in that order.
+    ///
+    /// **Explicit and manual, never automatic.** A background process
+    /// deleting bytes near an 800 MB orchestral template is how someone
+    /// loses a session.
+    ///
+    /// Returns how many objects were removed.
+    pub fn compact(&mut self, keep_saves: Option<usize>) -> usize {
+        if let Some(keep) = keep_saves {
+            let len = self.document.saves.len();
+            if keep < len {
+                self.document.saves.drain(..len - keep);
+            }
+        }
+        let reachable = self.reachable_objects();
+        let before = self.objects.len();
+        self.objects.retain(|id| reachable.contains(id));
+        self.modified = true;
+        before - self.objects.len()
+    }
+
+    /// Write the compacted store back over `dir`, removing deleted blobs
+    /// from disk as well as from memory.
+    pub fn compact_on_disk(&mut self, dir: impl AsRef<Path>, keep_saves: Option<usize>) -> DawResult<usize> {
+        let dir = dir.as_ref();
+        let removed = self.compact(keep_saves);
+        let objects_dir = dir.join(OBJECTS_DIR);
+        if objects_dir.exists() {
+            // Only unlink what we know is unreachable; anything we do not
+            // recognise is left alone rather than assumed to be litter.
+            for entry in std::fs::read_dir(&objects_dir)? {
+                let path = entry?.path();
+                let Some(stem) = path.file_name().and_then(|n| n.to_str()) else {
+                    continue;
+                };
+                if !self.objects.ids().any(|id| id.to_string() == stem) {
+                    let _ = std::fs::remove_file(&path);
+                }
+            }
+        }
+        std::fs::write(manifest_path(dir, &self.document.name), self.to_text()?)?;
+        self.modified = false;
+        Ok(removed)
     }
 
     /// Open a project directory.

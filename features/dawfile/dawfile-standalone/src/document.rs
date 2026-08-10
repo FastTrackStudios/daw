@@ -33,6 +33,20 @@ use facet::Facet;
 /// previous reader cannot absorb.
 pub const FORMAT_VERSION: u32 = 1;
 
+/// One save, and the objects it referenced.
+///
+/// Retained so `compact` can tell a blob that is still reachable from an
+/// older save from one nothing points at any more.
+#[derive(Clone, Debug, PartialEq, Facet)]
+pub struct SaveEntry {
+    /// Monotonic counter, oldest = 1. Not a timestamp: clocks move
+    /// backwards across machines and this has to order reliably when a
+    /// project is synced.
+    pub seq: u64,
+    /// The objects this save's manifest referenced.
+    pub objects: Vec<ObjectId>,
+}
+
 /// One project (or, rooted at something smaller, one template — #175).
 #[derive(Clone, Debug, Facet)]
 pub struct DawDocument {
@@ -48,6 +62,19 @@ pub struct DawDocument {
     /// one. Optional on purpose: #159 established that a real session can
     /// mix rates, so nothing may assume one rate per project.
     pub sample_rate: Option<u32>,
+
+    /// One entry per save, oldest first.
+    ///
+    /// This is what makes full version history cost only what actually
+    /// changed: an entry is a list of hashes, and the bytes behind an
+    /// unchanged hash are already in `objects/`. Forty Kontakt instances
+    /// nobody touched cost nothing on save N+1.
+    ///
+    /// Kept in the manifest rather than in `objects/` because it is
+    /// small, textual and mutable — the other side of the invariant that
+    /// puts everything large, immutable and binary in the object store.
+    #[facet(default)]
+    pub saves: Vec<SaveEntry>,
 
     /// Tempo and time-signature map, ordered by position.
     ///
@@ -229,6 +256,7 @@ impl DawDocument {
     /// An empty project.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
+            saves: Vec::new(),
             format_version: FORMAT_VERSION,
             id: EntityId::new(),
             name: name.into(),
