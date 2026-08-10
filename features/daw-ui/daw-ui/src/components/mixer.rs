@@ -188,6 +188,8 @@ pub fn ChannelStripPreview(
 /// thing to know about this panel, and what [`Collapse`] resolves.
 const STRIP_W: f32 = 86.0;
 const FX_SECTION: f32 = 33.0;
+/// Where the pill sits inside the FX section — measured, not nominal.
+const FX_PILL_TOP: f32 = 9.0;
 const BOTTOM_SECTION: f32 = 47.0;
 /// The axis the right-hand column centres on: `mcp.recmon` and everything
 /// anchored to it. The record arm's ring sits at 0.486 of its own 36-wide
@@ -206,6 +208,44 @@ const COLUMN_AXIS: f32 = COLUMN + BUTTON_W / 2.0;
 /// not at 18 — so the cell's left edge is not the axis minus half its width.
 const ARM_CELL_W: f32 = 36.0;
 const ARM_LEFT: f32 = COLUMN_AXIS - ARM_CELL_W * 0.486;
+
+/// The chain `rtconfig` writes down the right-hand column, each step a
+/// `[dx dy w h]` offset from the control above it.
+const RECMON_FROM_ARM: f32 = 20.0;
+const MUTE_FROM_RECMON: f32 = 19.0;
+const SOLO_FROM_MUTE: f32 = 21.0;
+const IO_FROM_SOLO: f32 = 23.0;
+/// Not REAPER's: it anchors `mcp.env` and `mcp.phase` off the *bottom* of
+/// the stretch section, and we do not draw an envelope button yet. The IO
+/// button's own 30 rows is the honest stand-in until we do.
+const PHASE_FROM_IO: f32 = 30.0;
+
+/// One control in the right-hand column.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Stacked {
+    Monitor,
+    Mute,
+    Solo,
+    Io,
+    Phase,
+}
+
+impl Stacked {
+    /// Where the control's own box starts, given the column's left edge.
+    ///
+    /// Everything sits on the column except the IO button, which
+    /// `rtconfig` writes as `mcp.solo + [-1 23 23 30]` — one pixel left and
+    /// two wider than the buttons above it, on purpose.
+    fn left(self, column: f32) -> f32 {
+        match self {
+            Self::Io => column - 1.0,
+            // 16 wide against the column's 21, so it centres rather than
+            // hanging off the left.
+            Self::Phase => column + (BUTTON_W - 16.0) / 2.0,
+            _ => column,
+        }
+    }
+}
 /// `mcp.label` — 26 of the bottom section's 47, above the 20-row index
 /// plate and the row that divides them.
 const NAME_PLATE: u32 = 26;
@@ -311,6 +351,26 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
         54.0
     };
     let band = pan_h + input_h;
+
+    // The button column, resolved on REAPER's chain. `mcp.recmon` hangs off
+    // the record arm, which hangs through the band's floor — so the column's
+    // first row is fixed relative to the arm rather than to the section.
+    let column = {
+        let mut at = ARM_OVERHANG - ARM_CELL_H + RECMON_FROM_ARM;
+        let mut out = vec![(at, Stacked::Monitor)];
+        for (step, control, shown) in [
+            (MUTE_FROM_RECMON, Stacked::Mute, true),
+            (SOLO_FROM_MUTE, Stacked::Solo, true),
+            (IO_FROM_SOLO, Stacked::Io, shape.show_io),
+            (PHASE_FROM_IO, Stacked::Phase, shape.show_phase),
+        ] {
+            at += shape.padding + step;
+            if shown {
+                out.push((at, control));
+            }
+        }
+        out
+    };
     // `mcp.meter` is inset 4 on every side of the stretch section.
     let meter_h = (shape.stretch - 8.0).max(24.0) as u32;
 
@@ -360,7 +420,12 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
             div {
                 class: "relative shrink-0",
                 style: "flex:0 0 auto; position:relative; height:{FX_SECTION}px;",
-                div { style: "position:absolute; left:7px; top:7px;",
+                // 9, not `mcp.fx`'s nominal 7. Measured against REAPER with
+                // the coloured bands aligned: its pill's face runs 11..26 of
+                // the section and ours ran 9..24 — the same 16 rows, two
+                // high. The section carries a top inset the box coordinates
+                // do not mention.
+                div { style: "position:absolute; left:7px; top:{FX_PILL_TOP}px;",
                     FxButton { track: track.guid.clone(), width: 43.0 }
                 }
             }
@@ -459,28 +524,30 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                         },
                     }
                 }
-                // Inline, not only in Tailwind: without the sheet
-                // `flex-col` is inert and the column lays out as a row, so
-                // mute and solo sat side by side and ran off the strip.
-                div {
-                    class: "absolute flex flex-col items-center",
-                    style: "position:absolute; left:{COLUMN}px; top:2px; \
-                            width:{BUTTON_W}px; \
-                            display:flex; flex-direction:column; align-items:center; \
-                            gap:{shape.padding}px;",
-                    // `mcp.recmon` is anchored off the record arm and stays
-                    // in the column at every height — it is `mcp.recmode`,
-                    // the *slot* below the pan section, that gives way when
-                    // pan re-anchors. Gating the monitor on that took the
-                    // glyph off short strips where REAPER still draws it.
-                    MonitorButton { track: track.guid.clone() }
-                    MuteButton { track: track.guid.clone() }
-                    SoloButton { track: track.guid.clone() }
-                    if shape.show_io {
-                        IoButton { track: track.guid.clone() }
-                    }
-                    if shape.show_phase {
-                        PhaseButton { track: track.guid.clone() }
+                // REAPER's own offset chain, not a uniform flex gap.
+                //
+                //     mcp.recmon = mcp.recarm + [7 20 21 20]
+                //     mcp.mute   = mcp.recmon + [0 padding] + [0 19 21 20]
+                //     mcp.solo   = mcp.mute   + [0 padding] + [0 21 21 20]
+                //     mcp.io     = mcp.solo   + [0 padding] + [-1 23 23 30]
+                //
+                // The steps are not equal — 19 against a 20-tall button is a
+                // one-row *overlap* before padding, and the IO button is
+                // deliberately a column left and two wider. A single `gap`
+                // got the first button right and then drifted, five rows by
+                // the time it reached IO.
+                for (top, control) in column {
+                    div {
+                        key: "{control:?}",
+                        style: "position:absolute; left:{control.left(COLUMN)}px; \
+                                top:{top}px;",
+                        match control {
+                            Stacked::Monitor => rsx! { MonitorButton { track: track.guid.clone() } },
+                            Stacked::Mute => rsx! { MuteButton { track: track.guid.clone() } },
+                            Stacked::Solo => rsx! { SoloButton { track: track.guid.clone() } },
+                            Stacked::Io => rsx! { IoButton { track: track.guid.clone() } },
+                            Stacked::Phase => rsx! { PhaseButton { track: track.guid.clone() } },
+                        }
                     }
                 }
             }

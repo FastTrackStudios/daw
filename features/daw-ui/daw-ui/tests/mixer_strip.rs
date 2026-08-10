@@ -249,22 +249,41 @@ fn the_residual_collapses_fire_on_the_stretch_section() {
 }
 
 /// Padding steps down in three stages as the strip shortens.
+///
+/// It is not a flex `gap` any more — the column stands on REAPER's offset
+/// chain, where padding is one of the terms — so the stages are read back
+/// out of the offsets themselves.
 #[test]
 fn padding_steps_down_in_three_stages() {
-    let stages: std::collections::BTreeSet<String> = (120..=800)
+    /// The tops of the boxes on the column's own left edge, in order.
+    fn column_tops(html: &str) -> Vec<f32> {
+        let mut out: Vec<f32> = html
+            .split("position:absolute; left:55px; top:")
+            .skip(1)
+            .filter_map(|rest| rest.split("px").next()?.parse().ok())
+            .collect();
+        out.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        out
+    }
+
+    let steps: std::collections::BTreeSet<String> = (120..=800)
         .step_by(4)
-        .map(|h| {
-            let html = strip_at(h as f32);
-            ["gap:2px", "gap:3px", "gap:4px"]
-                .into_iter()
-                .find(|p| html.contains(p))
-                .unwrap_or("none")
-                .to_string()
+        .filter_map(|h| {
+            let tops = column_tops(&strip_at(h as f32));
+            // Monitor → mute → solo: the first two steps are always drawn,
+            // and each carries one padding.
+            (tops.len() >= 3).then(|| format!("{:.0}", tops[2] - tops[1]))
         })
         .collect();
-    assert_eq!(stages.len(), 3, "padding does not step through three stages: {stages:?}");
-}
 
+    assert_eq!(
+        steps.len(),
+        3,
+        "the mute→solo step does not walk padding's three stages: {steps:?}"
+    );
+    // 21 plus a padding of 2, 3 or 4.
+    assert_eq!(steps, ["23", "24", "25"].map(str::to_string).into_iter().collect());
+}
 
 /// The app's mixer draws vectors and blits nothing — the guarantee #147
 /// exists to make permanent.

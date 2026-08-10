@@ -4358,16 +4358,45 @@ pub fn Meter(props: MeterProps) -> Element {
                 }
             }
             if props.scale {
-                for (i, mark) in props.marks.iter().enumerate() {
-                    text {
-                        key: "m{i}",
-                        x: "{bars_x - 2.0}",
-                        y: "{vh * (i as f32 + 0.5) / props.marks.len().max(1) as f32}",
-                        text_anchor: "end", dominant_baseline: "central",
-                        font_family: "Fira Sans, DejaVu Sans, sans-serif",
-                        font_size: "{(vw * 0.36).min(8.6)}",
-                        fill: "{text.css()}",
-                        "{mark}"
+                {
+                    // The first mark is the peak *readout*, not a scale
+                    // mark. REAPER prints it at the top of the meter and
+                    // spaces the dB marks evenly through what is left —
+                    // measured, its marks step 21.75 in a 118-row meter
+                    // whose readout sits at 10. Spacing all six evenly
+                    // instead put every middle mark eight rows low.
+                    // Two separate anchors, because they are two separate
+                    // things: the readout sits at 0.055 of the meter (6.5
+                    // rows of REAPER's 119) and the marks below it start at
+                    // 0.0914, which is where its 21.75 step lands them.
+                    let head = vh * 0.055;
+                    let top = vh * 0.0914;
+                    let rest = (props.marks.len().max(2) - 1) as f32;
+                    let size = (vw * 0.36).min(8.6);
+                    let x = bars_x - 2.0;
+                    let ink = text.css();
+                    rsx! {
+                        for (i, mark) in props.marks.iter().enumerate() {
+                            {
+                                let y = if i == 0 {
+                                    head
+                                } else {
+                                    top + (i as f32 - 0.5) * (vh - top) / rest
+                                };
+                                rsx! {
+                                    text {
+                                        key: "m{i}",
+                                        x: "{x}", y: "{y}",
+                                        text_anchor: "end",
+                                        dominant_baseline: "central",
+                                        font_family: "Fira Sans, DejaVu Sans, sans-serif",
+                                        font_size: "{size}",
+                                        fill: "{ink}",
+                                        "{mark}"
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

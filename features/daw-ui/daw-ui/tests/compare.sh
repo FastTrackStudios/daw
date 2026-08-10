@@ -32,6 +32,21 @@ python3 "$BANDS" "$OUT/.c-reaper.png"  8 0 694 3.0
 python3 "$BANDS" "$OUT/.c-hand.png"    6 0 470 2.0
 python3 "$BANDS" "$OUT/.c-ours.png"    3 0 228 1.0
 
+# The aligned pixel diff. REAPER's crop starts inside the strip, so the two
+# are registered on the one landmark they share — the top of the coloured
+# band — and everything else is then measurable against it.
+if [ -f "$OUT/.reaper1x.png" ] || magick "$REF" -resize 33.3333% +repage "$OUT/.reaper1x.png"; then
+  MIXER_HEIGHT=235 nix develop /run/media/Development/FastTrackStudio -c \
+    cargo test -q -p daw-ui --test strip_shot -- paint_the_strip >/dev/null 2>&1
+  magick "$OUT/.reaper1x.png" -background "#262626" -splice 0x10 \
+    -crop 85x231+0+0 +repage "$OUT/.ref.png"
+  magick "$OUT/strip-dioxus.png" -crop 85x231+0+0 +repage "$OUT/.aligned.png"
+  echo -n "── differing pixels: "
+  magick compare -metric AE "$OUT/.ref.png" "$OUT/.aligned.png" \
+    -compose src "$OUT/strip-diff.png" 2>&1 | tail -1
+  echo "wrote $OUT/strip-diff.png"
+fi
+
 cap() {
   magick "$1" -filter point -resize x600 -bordercolor "$2" -border 3 \
     -background "#141414" -gravity center -extent 240x612 "$OUT/.x.png"
