@@ -2062,6 +2062,20 @@ pub mod email_password {
     where
         S: AuthStorage,
     {
+        async fn change_email(
+            &self,
+            input: auth_proto::service::ChangeEmailRequest,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            ArchitectAuth::change_email(
+                self,
+                ChangeEmail {
+                    session_token: input.session_token,
+                    new_email: input.new_email,
+                },
+            )
+            .await
+        }
+
         async fn change_password(
             &self,
             input: auth_proto::service::ChangePasswordRequest,

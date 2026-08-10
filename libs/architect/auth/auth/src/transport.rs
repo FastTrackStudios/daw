@@ -772,7 +772,8 @@ pub mod vox {
     use super::CustomSessionTransport;
     use crate::{
         ArchitectAuth, AuthStorage, CreateEmailPasswordUser, CurrentSession, CustomSessionBundle,
-        ChangePassword, MigrateUserEmail, RefreshSession, SignOut, flows::bearer_tokens,
+        ChangeEmail, ChangePassword, MigrateUserEmail, RefreshSession, SignOut,
+        flows::bearer_tokens,
     };
     use auth_proto::{
         AuthFlowError, AuthService, AuthSessionBundle, AuthUser, OrgMember, SignInEmailPassword,
@@ -882,6 +883,20 @@ pub mod vox {
                 })
                 .await?;
             self.auth.list_email_history(input.user_id).await
+        }
+
+        async fn change_email(
+            &self,
+            input: auth_proto::service::ChangeEmailRequest,
+        ) -> Result<AuthUser, AuthFlowError> {
+            // `change_email` validates the session, rejects an address
+            // another account holds, and appends to the history trail.
+            self.auth
+                .change_email(ChangeEmail {
+                    session_token: input.session_token,
+                    new_email: input.new_email,
+                })
+                .await
         }
 
         async fn change_password(
