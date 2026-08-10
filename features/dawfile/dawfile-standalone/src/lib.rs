@@ -78,6 +78,7 @@ pub mod objects;
 pub mod project;
 pub mod rpp;
 pub mod styx;
+pub mod template;
 
 pub use document::{
     DawDocument, EditorState, EnvelopeNode, FORMAT_VERSION, ItemNode, MarkerNode, Provenance,

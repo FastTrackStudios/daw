@@ -110,7 +110,7 @@ fn compact_deletes_what_nothing_points_at() {
 
 #[test]
 fn compact_keeps_what_an_older_save_still_reaches() {
-    let dir = tmp("older");
+    let _dir = tmp("older");
     let mut p = project("Belief");
     let id = p.put_object(b"referenced by save 1".to_vec());
     p.edit(|d| {
