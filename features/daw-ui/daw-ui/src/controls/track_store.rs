@@ -21,6 +21,7 @@ use std::collections::HashMap;
 
 use daw_proto::{Track, TrackEvent};
 
+use crate::controls::Drafts;
 use crate::prelude::*;
 
 /// Every track the UI knows about, by GUID.
@@ -30,13 +31,32 @@ use crate::prelude::*;
 #[derive(Clone, Copy, PartialEq)]
 pub struct TrackStore {
     tracks: Signal<HashMap<String, Track>>,
+    /// The values the UI is holding mid-gesture. Consulted on the way in:
+    /// an inbound change for a held track is the echo of our own write, and
+    /// applying it would fight the finger — see [`crate::controls::Drafts`].
+    drafts: Drafts,
 }
 
 impl TrackStore {
     /// An empty store. Must be called inside a component scope — it owns a
     /// Signal.
     pub fn new() -> Self {
-        Self { tracks: Signal::new(HashMap::new()) }
+        Self { tracks: Signal::new(HashMap::new()), drafts: Drafts::new() }
+    }
+
+    /// The values the UI is holding. A control writes its drag here and
+    /// reads it back the same frame; the sync loop drains it.
+    pub fn drafts(&self) -> Drafts {
+        self.drafts
+    }
+
+    /// What to render for this track's volume: the UI's own in-flight value
+    /// while one exists, the engine's otherwise.
+    pub fn volume(&self, guid: &str) -> f64 {
+        self.drafts
+            .volume(guid)
+            .or_else(|| self.track(guid).map(|t| t.volume))
+            .unwrap_or(0.0)
     }
 
     /// Replace everything with the project's current track list.
@@ -75,7 +95,13 @@ impl TrackStore {
             TrackEvent::SelectionChanged { guid, selected } => {
                 (guid, &|t| t.selected = *selected)
             }
-            TrackEvent::VolumeChanged { guid, volume } => (guid, &|t| t.volume = *volume),
+            // Dropped while the UI holds this track: it is the echo of a
+            // drag still in progress, and obeying it would drag the cap
+            // backwards under the pointer.
+            TrackEvent::VolumeChanged { guid, volume } if !self.drafts.holds(guid) => {
+                (guid, &|t| t.volume = *volume)
+            }
+            TrackEvent::VolumeChanged { .. } => return,
             TrackEvent::PanChanged { guid, pan } => (guid, &|t| t.pan = *pan),
             TrackEvent::ColorChanged { guid, color } => (guid, &|t| t.color = *color),
             // Moved and the automation/monitor modes: state no control

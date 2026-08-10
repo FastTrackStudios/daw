@@ -116,7 +116,59 @@ pub struct NamedArt {
     pub slice: Slice,
 }
 
+/// One band of a sliced drawing, as a thing that can be laid out.
+///
+/// A [`Slice`] says which part of a drawing stretches. A `Pane` is that
+/// answer turned into something a layout engine can execute: the window of
+/// the source viewBox this band shows, and whether it takes the slack.
+///
+/// # Why a decomposition rather than a coordinate mapper
+///
+/// The obvious way to draw a nine-slice is to compute, per shape, where it
+/// lands in the target box — the art asks "how tall am I?" and recalculates.
+/// That means every component reimplements the slice arithmetic, gets it
+/// subtly different, and needs a measured height to draw at all.
+///
+/// Decomposing instead makes the *layout engine* do it. Each band is drawn
+/// at its own source coordinates into its own `<svg>`; the fixed bands are
+/// sized in pixels and the stretch band is `flex: 1`. Taffy stretches it —
+/// identically under Blitz and in a browser — and nothing measures anything.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct Pane {
+    /// The window of the source box this pane shows: `(x, y, w, h)`.
+    pub view: (f32, f32, f32, f32),
+    /// Does this pane absorb the slack? Exactly one pane of a stack does.
+    pub grow: bool,
+}
+
 impl NamedArt {
+    /// The drawing decomposed down its y axis, top to bottom.
+    ///
+    /// One pane for art that does not stretch vertically; three when a
+    /// middle band does — fixed cap, stretchy run, fixed cap. A vertical
+    /// flex stack of these *is* the nine-slice.
+    ///
+    /// Only the y axis, because only vertical stretch has a control that
+    /// needs it: the fader rail is the reason the slice model exists. The
+    /// horizontal twin is the same function transposed and arrives with the
+    /// first control that grows sideways — the FX pill, whose `mcp.fx` box
+    /// is 43 wide against 28 of art.
+    pub fn stack(&self) -> Vec<Pane> {
+        let (w, h) = self.source;
+        let whole = |grow| Pane { view: (0.0, 0.0, w, h), grow };
+        match self.slice.y {
+            // Nothing to decompose: the drawing scales whole, or it is a
+            // plate that stretches everywhere. Either way one pane, and it
+            // takes whatever height it is given.
+            Band::Fixed | Band::All => vec![whole(matches!(self.slice.y, Band::All))],
+            Band::Middle(lo, hi) => vec![
+                Pane { view: (0.0, 0.0, w, lo), grow: false },
+                Pane { view: (0.0, lo, w, hi - lo), grow: true },
+                Pane { view: (0.0, hi, w, h - hi), grow: false },
+            ],
+        }
+    }
+
     const fn new(name: &'static str, source: (f32, f32), slice: Slice) -> Self {
         Self { name, source, slice }
     }
@@ -386,6 +438,40 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Whatever a stack decomposes into must add back up to the source box,
+    /// with no gap and no overlap — a pane boundary off by a row is a seam
+    /// in the middle of a fader.
+    #[test]
+    fn a_stack_tiles_its_source_box_exactly() {
+        for a in MCP_ART {
+            let panes = a.stack();
+            let mut y = 0.0;
+            for p in &panes {
+                assert_eq!(p.view.1, y, "{}: a pane starts off the last one's end", a.name);
+                assert!(p.view.3 >= 0.0, "{}: a pane has negative height", a.name);
+                y += p.view.3;
+            }
+            assert_eq!(y, a.source.1, "{}: the stack does not fill its box", a.name);
+            assert!(
+                panes.iter().filter(|p| p.grow).count() <= 1,
+                "{}: two panes both claim the slack",
+                a.name,
+            );
+        }
+    }
+
+    /// The fader is why this exists: fixed caps, a stretchy run between.
+    #[test]
+    fn the_fader_rail_decomposes_into_cap_run_cap() {
+        let panes = expect_art("mcp_volbg").stack();
+        assert_eq!(panes.len(), 3);
+        assert_eq!(panes[0].view, (0.0, 0.0, 23.0, 16.0));
+        assert_eq!(panes[1].view, (0.0, 16.0, 23.0, 23.0));
+        assert_eq!(panes[2].view, (0.0, 39.0, 23.0, 16.0));
+        assert!(panes[1].grow, "the run between the caps takes the slack");
+        assert!(!panes[0].grow && !panes[2].grow, "the caps hold their size");
     }
 
     #[test]

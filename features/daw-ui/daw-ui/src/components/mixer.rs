@@ -8,7 +8,7 @@
 //! - Record arm / monitoring buttons
 //! - Track name + number
 
-use crate::controls::{MuteButton, use_daw_tracks, use_track_store};
+use crate::controls::{MuteButton, VolumeFader, VolumeSync, use_daw_tracks, use_track_store};
 use crate::prelude::*;
 use daw_control::{FxNodeKind, FxTree};
 use daw_proto::Track;
@@ -105,6 +105,9 @@ pub fn MixerPanel() -> Element {
 
     rsx! {
         div { class: "h-full w-full flex flex-col bg-zinc-900 overflow-hidden",
+            // The single place a fader's drag becomes an engine write.
+            VolumeSync {}
+
             // Header
             div { class: "px-3 py-1.5 border-b border-zinc-700 flex items-center justify-between flex-shrink-0",
                 h2 { class: "text-xs font-semibold text-zinc-300", "Mixer" }
@@ -166,9 +169,6 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
     } else {
         -100.0
     };
-    // Map volume to fader percentage (sqrt scale for better visual)
-    let vol_pct = (track.volume.sqrt() * 100.0).min(100.0);
-
     let pan_label = if track.pan.abs() < 0.01 {
         "C".to_string()
     } else if track.pan < 0.0 {
@@ -252,14 +252,13 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
             }
 
             // ── Volume Fader ────────────────────────────────────
+            //
+            // The vector control, which is the same drawing the REAPER
+            // theme's `mcp_volbg` and `mcp_volthumb` are rasterised from.
+            // It owns the value while a finger is on it, so it does not
+            // wait on this panel's poll or on the engine.
             div { class: "flex-1 flex flex-col items-center px-2 py-1 min-h-0",
-                div { class: "w-2 flex-1 bg-zinc-800 rounded-sm overflow-hidden flex flex-col-reverse relative",
-                    // Green fill
-                    div {
-                        class: "w-full bg-green-500 transition-all duration-100",
-                        style: "height: {vol_pct}%;",
-                    }
-                }
+                VolumeFader { track: track.guid.clone() }
             }
 
             // ── dB + Pan readout ────────────────────────────────

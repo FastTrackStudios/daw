@@ -841,8 +841,8 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::VolumeFaderCap,
             v::FaderCapProps {
                 accent: None,
-                full: false,
-                width: n.0,
+                pane: None,
+                                width: n.0,
                 height: n.1,
             },
         ),
@@ -850,8 +850,8 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::VolumeFaderTrack,
             v::FaderCapProps {
                 accent: None,
-                full: false,
-                width: n.0,
+                pane: None,
+                                width: n.0,
                 height: n.1,
             },
         ),

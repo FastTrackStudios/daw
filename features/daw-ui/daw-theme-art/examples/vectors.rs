@@ -236,8 +236,8 @@ fn main() {
                 VolumeFaderCap,
                 FaderCapProps {
                     accent: None,
-                    full: false,
-                    width: None,
+                    pane: None,
+                                        width: None,
                     height: None,
                 },
             ),

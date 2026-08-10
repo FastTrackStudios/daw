@@ -1838,17 +1838,21 @@ pub struct FaderCapProps {
     /// Track accent, which the cap picks up in REAPER's colour variants.
     #[props(default)]
     pub accent: Option<Color>,
-    /// Run the rail the whole height rather than the source's middle band.
+    /// Which band of the source box to draw, when the caller is drawing
+    /// the art as a stack of bands rather than whole.
     ///
-    /// `mcp_volbg` is a nine-slice: its line occupies rows 14..41 of 55
-    /// because that is the stretchy middle, and REAPER repeats that band
-    /// to whatever length the fader needs. Scaled naively to a taller box
-    /// the line scales with it and leaves bare gaps top and bottom, which
-    /// is what a panel drawing the component at full fader height gets.
-    /// Off for export, so the exported PNG keeps the geometry its markers
-    /// describe.
+    /// `mcp_volbg` is a nine-slice: its rail occupies rows 16..39 of 55
+    /// because that is the stretchy middle, and REAPER lengthens *that*
+    /// band to whatever the strip needs while the caps hold their size.
+    /// Scaled naively to a taller box the whole drawing scales, rail and
+    /// caps alike, which is the mistake the guides exist to prevent.
+    ///
+    /// `None` draws the whole source box — which is what the exporter
+    /// wants, since it rasterises at the source size and the two are the
+    /// same thing there. A panel drawing a 300px fader passes one pane per
+    /// band; see [`crate::slice::NamedArt::stack`].
     #[props(default)]
-    pub full: bool,
+    pub pane: Option<crate::slice::Pane>,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -2025,16 +2029,42 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
 #[component]
 pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
     let (vw, vh) = (23.0f32, 55.0f32);
-    let (rail_y, rail_h) = if props.full {
-        (0.0, vh)
+    // The rail is drawn at its source coordinates, always. Which *part* of
+    // it a given `<svg>` shows is the viewBox's business, not the shape's —
+    // that is what makes a band a window onto one drawing rather than a
+    // second drawing of its own.
+    //
+    // y14..y41, which is where the groove is *traced*, and deliberately not
+    // the 16..39 the magenta guides mark. Those are two different facts: the
+    // guides say which rows REAPER may stretch, the trace says where the
+    // black actually is, and the source's groove runs a couple of rows into
+    // the fixed caps at each end. Snapping the drawing to the guide changes
+    // the exported PNG — it was the first thing this rewrite got wrong.
+    let (rail_y, rail_h) = (vh * 14.0 / 55.0, vh * 27.0 / 55.0);
+    let pane = props.pane.unwrap_or(crate::slice::Pane {
+        view: (0.0, 0.0, vw, vh),
+        grow: false,
+    });
+    let (px, py, pw, ph) = pane.view;
+    // The width the caller asked for sets the scale, so a pane can size
+    // itself without being told twice.
+    let w = props.width.unwrap_or(vw as u32);
+    let scale = w as f32 / vw;
+    // A growing pane hands its height to the layout engine; a fixed one
+    // states it. `preserveAspectRatio: none` because the rail is meant to
+    // lengthen — letterboxing the stretch band is exactly the wrong answer.
+    let sizing = if pane.grow {
+        "flex:1; min-height:0; height:100%".to_string()
     } else {
-        (vh * 14.0 / 55.0, vh * 27.0 / 55.0)
+        format!("flex:0 0 auto; height:{}px", ph * scale)
     };
     rsx! {
         svg {
-            width: "{props.width.unwrap_or(23)}",
-            height: "{props.height.unwrap_or(55)}",
-            view_box: "0 0 {vw} {vh}",
+            width: "{w}",
+            height: "{props.height.unwrap_or((ph * scale).round() as u32)}",
+            view_box: "{px} {py} {pw} {ph}",
+            preserve_aspect_ratio: "none",
+            style: "{sizing}; display:block",
             xmlns: "http://www.w3.org/2000/svg",
             // Slightly wider than a pixel and centred on x11.5, which is
             // what gives the source its soft shoulders at 60 either side
@@ -4475,7 +4505,7 @@ mod tests {
             ("mcp_fx_norm", render_svg(FxButton, FxProps { family: Default::default(), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { art: crate::slice::expect_art("mcp_io_s_r"), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { art: crate::slice::expect_art("mcp_monitor_on"), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, full: false, width: n.0, height: n.1 })),
+            ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, pane: None, width: n.0, height: n.1 })),
         ];
 
         for (name, svg) in &cases {
@@ -4593,8 +4623,8 @@ mod tests {
                     VolumeFaderCap,
                     FaderCapProps {
                         accent: None,
-                        full: false,
-                        width: w,
+                        pane: None,
+                                                width: w,
                         height: h,
                     },
                 ),
@@ -4602,8 +4632,8 @@ mod tests {
                     VolumeFaderTrack,
                     FaderCapProps {
                         accent: None,
-                        full: false,
-                        width: w,
+                        pane: None,
+                                                width: w,
                         height: h,
                     },
                 ),
@@ -4831,8 +4861,8 @@ mod tests {
                 VolumeFaderCap,
                 FaderCapProps {
                     accent: None,
-                    full: false,
-                    width: None,
+                    pane: None,
+                                        width: None,
                     height: Some(h),
                 },
             );
@@ -4848,7 +4878,7 @@ mod tests {
             VolumeFaderCap,
             FaderCapProps {
                 accent: Some(green),
-                full: false,
+                pane: None,
                 width: None,
                 height: None,
             },
@@ -4874,8 +4904,8 @@ mod tests {
             VolumeFaderCap,
             FaderCapProps {
                 accent: None,
-                full: false,
-                width: None,
+                pane: None,
+                                width: None,
                 height: None,
             },
         );

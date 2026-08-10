@@ -21,15 +21,25 @@
 //!   No stylesheet is assumed to arrive: these render in Blitz inside a
 //!   REAPER panel, where external CSS does not load reliably.
 //!
-//! One control is wired so far — [`MuteButton`]. The rest of the mixer
-//! follows the same three moves.
+//! Two controls are wired so far — [`MuteButton`] and [`VolumeFader`]. The
+//! rest of the mixer follows the same three moves.
+//!
+//! A continuous control adds a fourth: the value under the pointer is the
+//! UI's, not the engine's, so it never waits on a round trip. That lives in
+//! [`Drafts`], drained by [`VolumeSync`].
 
+mod drafts;
+mod fader;
 mod mute;
+mod sync;
 mod track_store;
 
 /// Which of REAPER's two control families to draw — re-exported from the
 /// art layer, which owns the distinction because it is a fact about the
 /// images (different boxes, different measurements), not about the wrapper.
 pub use daw_theme_art::dress::Panel;
+pub use drafts::Drafts;
+pub use fader::VolumeFader;
 pub use mute::MuteButton;
+pub use sync::VolumeSync;
 pub use track_store::{TrackStore, use_daw_tracks, use_track, use_track_store};

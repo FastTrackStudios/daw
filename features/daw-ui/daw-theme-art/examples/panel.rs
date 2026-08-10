@@ -506,9 +506,13 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
         stretch_y + 4.0,
         &render_svg(
             v::VolumeFaderTrack,
+            // The whole rail as one pane. The contact sheet draws the art
+            // at its source proportions to photograph it, not to build a
+            // strip — a stretched fader is `slice::NamedArt::stack`, which
+            // is the panel's job and not this sheet's.
             v::FaderCapProps {
                 accent: None,
-                full: true,
+                pane: None,
                 width: Some(21),
                 height: Some(scale_h as u32),
             },
@@ -519,7 +523,7 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
         stretch_y + 22.0,
         &render_svg(
             v::VolumeFaderCap,
-            v::FaderCapProps { accent: None, full: false, width: Some(21), height: Some(44) },
+            v::FaderCapProps { accent: None, pane: None, width: Some(21), height: Some(44) },
         ),
     ));
 

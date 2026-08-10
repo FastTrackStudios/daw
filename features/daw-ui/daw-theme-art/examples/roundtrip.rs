@@ -137,8 +137,8 @@ fn main() {
         "pan + fader",
         vec![
             Entry { source: ("mcp_pan_knob_small", 0), svg: render_svg(vector::PanningKnob, vector::PanProps { indicator: false, position: 0.0, large: false, width: n.0, height: n.1 }) },
-            Entry { source: ("mcp_volthumb", 0), svg: render_svg(vector::VolumeFaderCap, vector::FaderCapProps { accent: None, full: false, width: n.0, height: n.1 }) },
-            Entry { source: ("mcp_volbg", 0), svg: render_svg(vector::VolumeFaderTrack, vector::FaderCapProps { accent: None, full: false, width: n.0, height: n.1 }) },
+            Entry { source: ("mcp_volthumb", 0), svg: render_svg(vector::VolumeFaderCap, vector::FaderCapProps { accent: None, pane: None, width: n.0, height: n.1 }) },
+            Entry { source: ("mcp_volbg", 0), svg: render_svg(vector::VolumeFaderTrack, vector::FaderCapProps { accent: None, pane: None, width: n.0, height: n.1 }) },
         ],
     ));
 

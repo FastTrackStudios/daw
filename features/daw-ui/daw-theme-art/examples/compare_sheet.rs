@@ -433,8 +433,8 @@ fn main() {
                     vector::VolumeFaderCap,
                     vector::FaderCapProps {
                         accent: None,
-                        full: false,
-                        width: None,
+                        pane: None,
+                                                width: None,
                         height: None,
                     },
                 ),
@@ -452,8 +452,8 @@ fn main() {
                     vector::VolumeFaderTrack,
                     vector::FaderCapProps {
                         accent: None,
-                        full: false,
-                        width: None,
+                        pane: None,
+                                                width: None,
                         height: None,
                     },
                 ),
