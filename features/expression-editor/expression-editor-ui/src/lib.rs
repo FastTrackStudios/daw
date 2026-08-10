@@ -32,6 +32,7 @@ pub mod inspector;
 pub mod interaction;
 pub mod menu_ui;
 pub mod multitool_ui;
+pub mod quantize_panel;
 pub mod stack;
 pub mod switcher;
 pub mod theme;
