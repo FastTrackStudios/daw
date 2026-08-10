@@ -112,7 +112,7 @@ fn the_stack_covers_the_height_exactly_and_keeps_track_order() {
     let last = rows.last().unwrap();
     assert!((last.y + last.height - 600.0).abs() < 1e-3);
     assert_eq!(
-        rows.iter().map(|r| r.track).collect::<Vec<_>>(),
+        rows.iter().map(|r| r.lane).collect::<Vec<_>>(),
         vec![0, 1, 2, 3]
     );
 }
@@ -123,8 +123,8 @@ fn a_vocal_lane_gets_more_room_than_a_slice_strip() {
     // two octaves of pitch do not fit where three bands do.
     let ed = band();
     let rows = ed.tracks.stack(600.0, 1.0, 0.0);
-    let vox = rows.iter().find(|r| r.track == 0).unwrap().height;
-    let kit = rows.iter().find(|r| r.track == 3).unwrap().height;
+    let vox = rows.iter().find(|r| r.lane == 0).unwrap().height;
+    let kit = rows.iter().find(|r| r.lane == 3).unwrap().height;
     assert!(vox > kit, "vocal {vox} should be taller than kit {kit}");
 }
 
@@ -134,7 +134,7 @@ fn the_lane_being_edited_can_be_given_extra_room() {
     let plain = ed.tracks.stack(600.0, 1.0, 0.0);
     let boosted = ed.tracks.stack(600.0, 3.0, 0.0);
     let of = |rows: &[expression_editor_core::tracks::StackRow], t: usize| {
-        rows.iter().find(|r| r.track == t).unwrap().height
+        rows.iter().find(|r| r.lane == t).unwrap().height
     };
     assert!(of(&boosted, 0) > of(&plain, 0));
     // And the boost follows the active track rather than the first one.
@@ -183,7 +183,7 @@ fn hidden_tracks_leave_the_stack_but_keep_their_place() {
     ed.tracks.track_mut(1).unwrap().hidden = true;
     let rows = ed.tracks.stack(600.0, 1.0, 0.0);
     assert_eq!(
-        rows.iter().map(|r| r.track).collect::<Vec<_>>(),
+        rows.iter().map(|r| r.lane).collect::<Vec<_>>(),
         vec![0, 2, 3],
         "hiding removes a dimension without renumbering the others"
     );
@@ -198,11 +198,11 @@ fn a_y_coordinate_resolves_to_the_lane_under_it() {
     let rows = ed.tracks.stack(600.0, 1.0, 0.0);
     for r in &rows {
         let mid = r.y + r.height / 2.0;
-        assert_eq!(Workspace::row_at(&rows, mid), Some(r.track));
+        assert_eq!(Workspace::row_at(&rows, mid), Some(r.lane));
     }
     // Just inside the top edge belongs to that dimension, not the one above.
     for r in &rows {
-        assert_eq!(Workspace::row_at(&rows, r.y), Some(r.track));
+        assert_eq!(Workspace::row_at(&rows, r.y), Some(r.lane));
     }
     assert_eq!(Workspace::row_at(&rows, -1.0), None);
     assert_eq!(Workspace::row_at(&rows, 601.0), None);
@@ -295,4 +295,141 @@ fn the_adapter_can_hand_the_active_track_the_host_s_identity() {
     assert_eq!(t.guid, "{HOST-GUID}");
     assert_eq!(t.name, "Lead Vox");
     assert_ne!(t.guid, generated, "the generated id was replaced");
+}
+
+// ── Lanes ────────────────────────────────────────────────────────────
+//
+// A lane holds N tracks. These fix the properties the rest of the lane
+// work leans on: identity is membership, weight belongs to the lane,
+// hiding is per-track, and a lane with nothing visible is not drawn.
+
+fn ws_with(names: &[&str]) -> Workspace {
+    let mut ws = Workspace::single(names[0], doc());
+    for n in &names[1..] {
+        ws.push(Track::new(*n, doc()));
+    }
+    ws
+}
+
+#[test]
+fn a_new_track_arrives_in_a_lane_of_its_own() {
+    let ws = ws_with(&["Lead Vox", "Ref MIDI", "Kit"]);
+    assert_eq!(ws.layout().len(), 3, "one lane each until something pairs them");
+    for i in 0..3 {
+        assert_eq!(ws.lane_tracks(i).len(), 1);
+    }
+}
+
+#[test]
+fn a_lane_can_hold_several_tracks() {
+    let mut ws = ws_with(&["Lead Vox", "Ref MIDI"]);
+    let ref_guid = ws.track(1).unwrap().guid.clone();
+    ws.layout_mut().forget(&ref_guid);
+    ws.layout_mut().lane_mut(0).unwrap().tracks.push(ref_guid);
+
+    assert_eq!(ws.layout().len(), 1, "two tracks, one lane");
+    assert_eq!(ws.lane_tracks(0), vec![0, 1]);
+}
+
+#[test]
+fn a_lane_takes_the_tallest_members_height() {
+    let mut ws = Workspace::single("Kit", doc());
+    ws.track_mut(0).unwrap().set_mode(Mode::UnpitchedAudio);
+    ws.push(Track::in_mode("Ref MIDI", doc(), Mode::Midi));
+    let midi_guid = ws.track(1).unwrap().guid.clone();
+    ws.layout_mut().forget(&midi_guid);
+    ws.layout_mut().lane_mut(0).unwrap().tracks.push(midi_guid);
+
+    let kit = Mode::UnpitchedAudio.stack_weight();
+    let midi = Mode::Midi.stack_weight();
+    let natural = ws.natural_weight(0);
+    assert_eq!(
+        natural,
+        kit.max(midi),
+        "the tallest member's need is what makes the lane readable"
+    );
+}
+
+#[test]
+fn a_hand_dragged_lane_keeps_its_height_when_a_member_changes_mode() {
+    let mut ws = Workspace::single("Kit", doc());
+    ws.layout_mut().lane_mut(0).unwrap().weight = 9.0;
+    assert!(ws.layout().lane(0).unwrap().is_hand_sized());
+
+    ws.track_mut(0).unwrap().set_mode(Mode::UnpitchedAudio);
+    ws.refresh_lane_weights();
+
+    assert_eq!(
+        ws.layout().lane(0).unwrap().weight,
+        9.0,
+        "a hand-sized lane is not silently resized"
+    );
+}
+
+#[test]
+fn an_untouched_lane_follows_its_members_mode() {
+    let mut ws = Workspace::single("Kit", doc());
+    let before = ws.layout().lane(0).unwrap().weight;
+    ws.track_mut(0).unwrap().set_mode(Mode::UnpitchedAudio);
+    ws.refresh_lane_weights();
+    let after = ws.layout().lane(0).unwrap().weight;
+    assert_ne!(before, after);
+    assert_eq!(after, Mode::UnpitchedAudio.stack_weight());
+}
+
+#[test]
+fn a_lane_with_every_track_hidden_is_not_drawn() {
+    let mut ws = ws_with(&["Lead Vox", "Kit"]);
+    assert_eq!(ws.stack(600.0, 1.0, 0.0).len(), 2);
+
+    ws.track_mut(1).unwrap().hidden = true;
+    let rows = ws.stack(600.0, 1.0, 0.0);
+    assert_eq!(rows.len(), 1, "the emptied lane leaves the stack");
+    assert_eq!(rows[0].lane, 0);
+
+    // Hiding a track inside a lane that still has a visible member does
+    // not remove the lane — that is the second gesture, for free.
+    let kit_guid = ws.track(1).unwrap().guid.clone();
+    ws.layout_mut().forget(&kit_guid);
+    ws.layout_mut().lane_mut(0).unwrap().tracks.push(kit_guid);
+    assert_eq!(ws.stack(600.0, 1.0, 0.0).len(), 1);
+    assert!(ws.lane_is_visible(0), "Lead Vox is still visible in it");
+}
+
+#[test]
+fn removing_a_track_removes_the_lane_it_emptied() {
+    let mut ws = ws_with(&["Lead Vox", "Kit"]);
+    assert!(ws.remove(1));
+    assert_eq!(ws.layout().len(), 1);
+    assert_eq!(ws.lane_tracks(0), vec![0]);
+}
+
+#[test]
+fn the_boost_goes_to_the_lane_holding_the_active_track() {
+    let mut ws = ws_with(&["A", "B", "C"]);
+    ws.push(Track::new("D", doc()));
+    // Put the active track (0) in the same lane as D, so a per-track
+    // boost and a per-lane boost would give different answers.
+    let d = ws.track(3).unwrap().guid.clone();
+    ws.layout_mut().forget(&d);
+    ws.layout_mut().lane_mut(0).unwrap().tracks.push(d);
+
+    let plain = ws.stack(600.0, 1.0, 0.0);
+    let boosted = ws.stack(600.0, 3.0, 0.0);
+    let h = |rows: &[expression_editor_core::tracks::StackRow], lane: usize| {
+        rows.iter().find(|r| r.lane == lane).unwrap().height
+    };
+    assert!(h(&boosted, 0) > h(&plain, 0), "the active lane grew");
+    assert!(h(&boosted, 1) < h(&plain, 1), "the others yielded room");
+}
+
+#[test]
+fn lane_membership_survives_a_track_being_inserted_above() {
+    let mut ws = ws_with(&["Lead Vox", "Kit"]);
+    let kit = ws.track(1).unwrap().guid.clone();
+    assert_eq!(ws.layout().lane_of(&kit), Some(1));
+
+    // Whatever happens to indices, the guid still finds its lane.
+    assert_eq!(ws.lane_tracks(1), vec![1]);
+    assert_eq!(ws.track_by_guid(&kit).map(|t| t.name.as_str()), Some("Kit"));
 }

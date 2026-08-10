@@ -159,11 +159,127 @@ impl Track {
     }
 }
 
-/// One track's slot in a stacked layout.
+/// A lane: the tracks drawn on one shared vertical strip.
+///
+/// Lanes are a **view** concern, not a container for ownership —
+/// everything still layers into one window, and a lane exists only to
+/// split the visualisation. That is why a track's document, history and
+/// mode stay on the track and none of them appear here.
+///
+/// A lane holds as many tracks as you want. The motivating case is a
+/// vocal and its MIDI guide superimposed, because tuning one against the
+/// other means seeing them on the same axis — and, inversely, two
+/// instruments doubling a line need *separate* lanes, because layered on
+/// top of each other they are invisible.
+///
+/// **A lane has no identity of its own.** It *is* its set of track
+/// guids, and its position in [`LaneLayout`] is its order. Nothing
+/// dereferences a lane durably — the per-lane camera is ephemeral,
+/// weight lives here, and merge/split rewrite the list wholesale — so an
+/// id would be a field that never gets read and quietly drifts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lane {
+    /// Track guids, in draw order. Never indices: a lane outlives the
+    /// insertion of a track above it.
+    pub tracks: Vec<String>,
+    /// Height weight relative to the other lanes.
+    pub weight: f32,
+    /// What `weight` would be if nobody had dragged it.
+    ///
+    /// Kept so a member's mode change can update the height *only while
+    /// it is still the default* — the same bargain [`Track::set_mode`]
+    /// strikes, and for the same reason: once you have sized a lane by
+    /// hand, switching modes must not silently undo it.
+    default_weight: f32,
+}
+
+impl Lane {
+    /// A lane holding one track, at that track's natural height.
+    pub fn single(guid: impl Into<String>, weight: f32) -> Self {
+        Self {
+            tracks: vec![guid.into()],
+            weight,
+            default_weight: weight,
+        }
+    }
+
+    pub fn contains(&self, guid: &str) -> bool {
+        self.tracks.iter().any(|g| g == guid)
+    }
+
+    /// Whether the height has been set by hand.
+    pub fn is_hand_sized(&self) -> bool {
+        (self.weight - self.default_weight).abs() > f32::EPSILON
+    }
+
+    /// Take a new natural height, unless the user has overridden it.
+    pub fn set_default_weight(&mut self, weight: f32) {
+        if !self.is_hand_sized() {
+            self.weight = weight;
+        }
+        self.default_weight = weight;
+    }
+}
+
+/// The lanes of a workspace, in top-to-bottom order.
+///
+/// Persisted as one unit and **project-scoped** — a lane spans tracks
+/// across the whole song, so keying it per take would give every track a
+/// conflicting copy of the same layout, and keying it per track leaves
+/// lane order and lane weight with nowhere to live.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LaneLayout {
+    lanes: Vec<Lane>,
+}
+
+impl LaneLayout {
+    pub fn len(&self) -> usize {
+        self.lanes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.lanes.is_empty()
+    }
+
+    pub fn lanes(&self) -> &[Lane] {
+        &self.lanes
+    }
+
+    pub fn lane(&self, i: usize) -> Option<&Lane> {
+        self.lanes.get(i)
+    }
+
+    pub fn lane_mut(&mut self, i: usize) -> Option<&mut Lane> {
+        self.lanes.get_mut(i)
+    }
+
+    pub fn push(&mut self, lane: Lane) -> usize {
+        self.lanes.push(lane);
+        self.lanes.len() - 1
+    }
+
+    /// Which lane holds this track.
+    pub fn lane_of(&self, guid: &str) -> Option<usize> {
+        self.lanes.iter().position(|l| l.contains(guid))
+    }
+
+    /// Drop a track from whichever lane holds it, removing the lane if
+    /// that empties it. A lane with no tracks is not a lane.
+    pub fn forget(&mut self, guid: &str) {
+        if let Some(i) = self.lane_of(guid) {
+            self.lanes[i].tracks.retain(|g| g != guid);
+            if self.lanes[i].tracks.is_empty() {
+                self.lanes.remove(i);
+            }
+        }
+    }
+}
+
+/// One lane's slot in a stacked layout.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StackRow {
-    /// Index into [`Workspace::tracks`].
-    pub track: usize,
+    /// Index into [`Workspace::layout`].
+    pub lane: usize,
     /// Top edge, in the same units as the height passed to
     /// [`Workspace::stack`].
     pub y: f32,
@@ -179,6 +295,12 @@ pub struct StackRow {
 pub struct Workspace {
     tracks: Vec<Track>,
     active: usize,
+    /// How the tracks are grouped into vertical strips.
+    ///
+    /// Kept beside the tracks rather than derived from them, because it
+    /// is the one part of this that a user arranges by hand and expects
+    /// back — everything else here can be recomputed.
+    layout: LaneLayout,
 }
 
 impl Workspace {
@@ -187,9 +309,78 @@ impl Workspace {
     /// The slot's copy of `doc` is stale from this moment on — the live
     /// one lives in `Editor::doc`. See [`Workspace::doc_of`].
     pub fn single(name: impl Into<String>, doc: ExpressionDoc) -> Self {
+        let track = Track::new(name, doc);
+        let mut layout = LaneLayout::default();
+        layout.push(Lane::single(track.guid.clone(), track.weight));
         Self {
-            tracks: vec![Track::new(name, doc)],
+            tracks: vec![track],
             active: 0,
+            layout,
+        }
+    }
+
+    pub fn layout(&self) -> &LaneLayout {
+        &self.layout
+    }
+
+    pub fn layout_mut(&mut self) -> &mut LaneLayout {
+        &mut self.layout
+    }
+
+    /// The track indices a lane draws, in draw order.
+    ///
+    /// Resolved from guids on every call. Lanes never cache indices —
+    /// that is the whole point of holding guids.
+    pub fn lane_tracks(&self, lane: usize) -> Vec<usize> {
+        self.layout
+            .lane(lane)
+            .map(|l| {
+                l.tracks
+                    .iter()
+                    .filter_map(|g| self.index_of_guid(g))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The lane holding the active track.
+    pub fn active_lane(&self) -> Option<usize> {
+        let guid = &self.tracks.get(self.active)?.guid;
+        self.layout.lane_of(guid)
+    }
+
+    /// Whether a lane has anything to draw.
+    ///
+    /// A lane whose every track is hidden is not drawn at all — which is
+    /// what gives both gestures, hiding a track *inside* a lane and
+    /// hiding a whole lane, without a second flag to keep consistent.
+    pub fn lane_is_visible(&self, lane: usize) -> bool {
+        self.lane_tracks(lane)
+            .iter()
+            .any(|&i| !self.tracks[i].hidden)
+    }
+
+    /// The natural height for a lane: the **max** of its members' modes.
+    ///
+    /// Max rather than sum or mean, because the tallest member's need is
+    /// what makes the lane readable — a kit layered with its MIDI still
+    /// needs the kit's rows.
+    pub fn natural_weight(&self, lane: usize) -> f32 {
+        self.lane_tracks(lane)
+            .iter()
+            .map(|&i| self.tracks[i].mode.stack_weight())
+            .fold(0.0_f32, f32::max)
+            .max(0.01)
+    }
+
+    /// Re-apply natural heights after something changed a member's mode.
+    /// Hand-sized lanes keep their height.
+    pub fn refresh_lane_weights(&mut self) {
+        for i in 0..self.layout.len() {
+            let natural = self.natural_weight(i);
+            if let Some(lane) = self.layout.lane_mut(i) {
+                lane.set_default_weight(natural);
+            }
         }
     }
 
@@ -285,11 +476,20 @@ impl Workspace {
     /// working in it and it should have the room. `1.0` divides purely
     /// by weight.
     pub fn stack(&self, height: f32, active_boost: f32, min_row: f32) -> Vec<StackRow> {
-        let rows: Vec<(usize, f32)> = self
-            .visible()
-            .map(|(i, t)| {
-                let boost = if i == self.active { active_boost } else { 1.0 };
-                (i, (t.weight.max(0.01)) * boost.max(0.01))
+        // One row per *lane*, not per track. The boost goes to the
+        // active lane — the active track inside it already carries the
+        // highlight, so boosting per-track would double-count.
+        let active_lane = self.active_lane();
+        let rows: Vec<(usize, f32)> = (0..self.layout.len())
+            .filter(|&i| self.lane_is_visible(i))
+            .map(|i| {
+                let weight = self.layout.lane(i).map(|l| l.weight).unwrap_or(1.0);
+                let boost = if Some(i) == active_lane {
+                    active_boost
+                } else {
+                    1.0
+                };
+                (i, weight.max(0.01) * boost.max(0.01))
             })
             .collect();
         if rows.is_empty() || height <= 0.0 {
@@ -309,7 +509,7 @@ impl Workspace {
                 .iter()
                 .map(|&(track, _)| {
                     let row = StackRow {
-                        track,
+                        lane: track,
                         y,
                         height: each,
                     };
@@ -329,7 +529,7 @@ impl Workspace {
             .map(|&(track, w)| {
                 let h = min_row + spare * (w / total);
                 let row = StackRow {
-                    track,
+                    lane: track,
                     y,
                     height: h,
                 };
@@ -339,11 +539,11 @@ impl Workspace {
             .collect()
     }
 
-    /// Which stacked row a y coordinate falls in.
+    /// Which lane a y coordinate falls in.
     pub fn row_at(rows: &[StackRow], y: f32) -> Option<usize> {
         rows.iter()
             .find(|r| y >= r.y && y < r.y + r.height)
-            .map(|r| r.track)
+            .map(|r| r.lane)
     }
 
     /// Parked tracks marked as references, with their indices.
@@ -355,7 +555,15 @@ impl Workspace {
     }
 
     /// Add a track and return its index.
+    ///
+    /// It arrives in a lane of its own. Pairing it with an existing lane
+    /// is the matcher's job, not this one's — and a track alone in a
+    /// lane is the safe default, because too many lanes is legible and
+    /// one merge away, whereas a wrong pairing hides a track underneath
+    /// another, which is the failure lanes exist to prevent.
     pub fn push(&mut self, track: Track) -> usize {
+        let lane = Lane::single(track.guid.clone(), track.mode.stack_weight());
+        self.layout.push(lane);
         self.tracks.push(track);
         self.tracks.len() - 1
     }
@@ -366,7 +574,9 @@ impl Workspace {
         if i == self.active || i >= self.tracks.len() {
             return false;
         }
+        let guid = self.tracks[i].guid.clone();
         self.tracks.remove(i);
+        self.layout.forget(&guid);
         if i < self.active {
             self.active -= 1;
         }

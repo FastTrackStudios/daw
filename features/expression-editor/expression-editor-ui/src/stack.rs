@@ -82,8 +82,19 @@ pub fn lanes(ed: &Editor, active_boost: f32, min_row: f32) -> Vec<LaneView> {
 }
 
 fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
-    let track = ed.tracks.track(row.track)?;
-    let active = row.track == ed.tracks.active();
+    // A lane may hold several tracks. Until the matcher starts pairing
+    // them (#195) every lane holds exactly one, so this draws the lane's
+    // *primary* track: the active one when the lane holds it, else the
+    // first. Extending this to draw every member is #195's job — the
+    // model already carries them.
+    let members = ed.tracks.lane_tracks(row.lane);
+    let track_index = members
+        .iter()
+        .copied()
+        .find(|&i| i == ed.tracks.active())
+        .or_else(|| members.first().copied())?;
+    let track = ed.tracks.track(track_index)?;
+    let active = track_index == ed.tracks.active();
     // The active track's parked copy is stale by design — the live
     // document is the editor's. `doc_of` refuses to hand out the stale
     // one, which is exactly the guard that keeps a stacked view from
@@ -91,7 +102,7 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
     let doc = if active {
         &ed.doc
     } else {
-        ed.tracks.doc_of(row.track)?
+        ed.tracks.doc_of(track_index)?
     };
 
     let y0 = row.y as f64 + LANE_PAD;
@@ -113,7 +124,7 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
     let (dividers, labels) = guides(&doc.row_space, lo, hi, y_of);
 
     Some(LaneView {
-        track: row.track,
+        track: track_index,
         name: track.name.clone(),
         mode: track.mode,
         y: row.y as f64,
@@ -296,7 +307,16 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                 let hit = {
                     let ed = editor.read();
                     let rows = ed.tracks.stack(ed.viewport.h as f32, ACTIVE_BOOST, MIN_LANE);
+                    // `row_at` resolves to a *lane*. Clicking a lane
+                    // targets its first visible track; choosing among
+                    // several members is #200's job, not a click's.
                     expression_editor_core::tracks::Workspace::row_at(&rows, y as f32)
+                        .and_then(|lane| {
+                            ed.tracks
+                                .lane_tracks(lane)
+                                .into_iter()
+                                .find(|&i| ed.tracks.track(i).is_some_and(|t| !t.hidden))
+                        })
                 };
                 if let Some(track) = hit {
                     editor.write().switch_track(track);
