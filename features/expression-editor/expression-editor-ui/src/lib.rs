@@ -463,6 +463,9 @@ fn Canvas(
                 }
             },
             svg {
+                // The roll is the surface every gesture lands on, so it
+                // carries an id a test can aim a pointer at (#167).
+                "data-testid": "roll",
                 style: "display: block; width: 100%; height: 100%; \
                         touch-action: none; user-select: none; cursor: crosshair;",
                 view_box: "0 0 {vp.w + canvas::GUTTER_W:.0} {vp.h + canvas::RULER_H:.0}",
