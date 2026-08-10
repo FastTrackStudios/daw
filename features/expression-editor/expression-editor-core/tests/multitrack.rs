@@ -683,3 +683,115 @@ fn zoom_keeps_the_anchor_row_under_the_pointer() {
     cam.zoom_about(55.0, 2.0);
     assert!((cam.y(55.0, 0.0, 240.0) - before).abs() < 1e-9);
 }
+
+// ── Merge and split ──────────────────────────────────────────────────
+
+#[test]
+fn merging_takes_the_upper_lanes_position() {
+    let mut ws = Workspace::single("A", doc());
+    named(&mut ws, "B", None);
+    named(&mut ws, "C", None);
+    ws.auto_pair();
+
+    // Merge in either order: the answer must be the same.
+    assert!(ws.merge_lanes(2, 1));
+    assert_eq!(ws.layout().len(), 2);
+    assert_eq!(ws.track(ws.lane_tracks(0)[0]).unwrap().name, "A");
+    assert_eq!(ws.lane_tracks(1).len(), 2, "B and C, at B's position");
+    assert_eq!(ws.track(ws.lane_tracks(1)[0]).unwrap().name, "B");
+}
+
+#[test]
+fn merging_takes_the_greater_weight() {
+    let mut ws = Workspace::single("A", doc());
+    named(&mut ws, "B", None);
+    ws.auto_pair();
+    ws.layout_mut().lane_mut(0).unwrap().weight = 2.0;
+    ws.layout_mut().lane_mut(1).unwrap().weight = 7.0;
+
+    ws.merge_lanes(0, 1);
+    assert_eq!(ws.layout().lane(0).unwrap().weight, 7.0);
+}
+
+#[test]
+fn splitting_peels_one_track_directly_below() {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    named(&mut ws, "Lead Vox MIDI", None);
+    named(&mut ws, "Kit", None);
+    ws.auto_pair();
+    assert_eq!(ws.layout().len(), 2);
+
+    let midi = ws.track(1).unwrap().guid.clone();
+    let at = ws.split_track_out(&midi).unwrap();
+
+    assert_eq!(at, 1, "directly below the lane it came from");
+    assert_eq!(ws.layout().len(), 3);
+    assert_eq!(ws.lane_tracks(0).len(), 1, "the vocal stayed put");
+    assert_eq!(ws.lane_tracks(1), vec![1]);
+    assert_eq!(
+        ws.track(ws.lane_tracks(2)[0]).unwrap().name,
+        "Kit",
+        "the kit moved down, it did not get split"
+    );
+}
+
+#[test]
+fn splitting_a_lone_track_does_nothing() {
+    let mut ws = Workspace::single("A", doc());
+    ws.auto_pair();
+    let a = ws.track(0).unwrap().guid.clone();
+    assert_eq!(ws.split_track_out(&a), None);
+    assert_eq!(ws.layout().len(), 1);
+}
+
+#[test]
+fn merge_then_split_returns_to_the_starting_arrangement() {
+    let mut ws = Workspace::single("A", doc());
+    named(&mut ws, "B", None);
+    ws.auto_pair();
+    let before: Vec<Vec<usize>> = (0..ws.layout().len()).map(|i| ws.lane_tracks(i)).collect();
+
+    ws.merge_lanes(0, 1);
+    let b = ws.track(1).unwrap().guid.clone();
+    ws.split_track_out(&b);
+
+    let after: Vec<Vec<usize>> = (0..ws.layout().len()).map(|i| ws.lane_tracks(i)).collect();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn rearranging_marks_the_layout_worth_persisting() {
+    let mut ws = Workspace::single("A", doc());
+    named(&mut ws, "B", None);
+    ws.auto_pair();
+    assert!(!ws.layout().is_arranged());
+
+    ws.merge_lanes(0, 1);
+    assert!(ws.layout().is_arranged(), "a merge is a decision");
+
+    // And the matcher must not undo it.
+    ws.auto_pair();
+    assert_eq!(ws.layout().len(), 1);
+}
+
+#[test]
+fn a_split_also_marks_the_layout_arranged() {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    named(&mut ws, "Lead Vox MIDI", None);
+    ws.auto_pair();
+    assert!(!ws.layout().is_arranged());
+
+    let midi = ws.track(1).unwrap().guid.clone();
+    ws.split_track_out(&midi);
+    assert!(ws.layout().is_arranged());
+}
+
+#[test]
+fn merging_a_lane_with_itself_is_refused() {
+    let mut ws = Workspace::single("A", doc());
+    named(&mut ws, "B", None);
+    ws.auto_pair();
+    assert!(!ws.merge_lanes(1, 1));
+    assert!(!ws.merge_lanes(0, 9));
+    assert_eq!(ws.layout().len(), 2);
+}
