@@ -338,7 +338,11 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
     let theme = daw_theme::Theme::default();
     let tint_colour = track
         .color
-        .map(|c| daw_theme::Color::rgb((c >> 16) as u8, (c >> 8) as u8, c as u8))
+        .map(|c| daw_theme_art::dress::panel_tint(daw_theme::Color::rgb(
+            (c >> 16) as u8,
+            (c >> 8) as u8,
+            c as u8,
+        )))
         .unwrap_or(theme.chrome.surface_raised);
     let tint = tint_colour.css();
     // One row of highlight along the band's top edge — `mcp.custom.bg_hl_t`.

@@ -1,0 +1,270 @@
+//! The track control panel — REAPER's TCP, as Dioxus.
+//!
+//! The mixer strip's sibling, and deliberately built the same way: the
+//! numbers are REAPER's, taken from `daw-theme-art`'s panel sheet, which
+//! composes the same components at the same coordinates for the exporter.
+//! Two renderings of one layout is the point — if they drift, the sheet is
+//! the thing that is wrong.
+//!
+//! # It is a row, not a column
+//!
+//! Everything the mixer strip learned still applies, but rotated. The
+//! track colour tints the *whole* row rather than a band inside it; the
+//! controls sit on two rows of 17-tall fields; and mute and solo live
+//! outside the tint in their own 44-wide gutter, which is why the row is
+//! 340 wide and the tint only 296.
+//!
+//! # Layout-critical values are inline
+//!
+//! Same rule, same reason: every window in this tree embeds its stylesheet
+//! as a static string, and a panel that mounts before the sheet arrives —
+//! or a test that mounts without one — must still lay out. Tailwind is the
+//! additive layer. The mixer strip spent an afternoon learning this the
+//! hard way; see `components::mixer`.
+
+use daw_proto::Track;
+use daw_theme_art::dress::Panel;
+use daw_theme_art::vector_controls as art;
+
+use crate::controls::{
+    MonitorButton, MuteButton, PanKnob, RecordArmButton, SoloButton, TrackMeter, TrackName,
+    use_track_store,
+};
+use crate::prelude::*;
+
+/// The row's own geometry, measured off REAPER itself rather than off the
+/// panel sheet.
+///
+/// The sheet is a useful reference for *drawing* the controls, but it puts
+/// the meter inside the tint, and REAPER does not: with `meterRight` set —
+/// which this theme sets — `rtconfig` moves the whole meter section to the
+/// right edge of the panel, past mute and solo. Measured in a REAPER
+/// screenshot, a row's tint ends at 296, the gutter runs to 343, mute and
+/// solo occupy 318..339, and what is left at the end of the row is the
+/// meter's.
+const ROW_H: f32 = 70.0;
+/// The tinted part. Everything after it is REAPER's meter section.
+const TINT_W: f32 = 296.0;
+/// The meter section: mute and solo, then the meter at the very end.
+const GUTTER_W: f32 = 47.0;
+const ROW_W: f32 = TINT_W + GUTTER_W;
+/// Mute and solo, 21 into the section — measured at 318 against a section
+/// starting at 297.
+const GUTTER_BUTTON_X: f32 = 21.0;
+/// The meter: a vertical strip at the *start* of the section, before mute
+/// and solo rather than after them. Measured at 297..316 against a section
+/// starting at 297 — grey at rest, which is why it is easy to mistake for
+/// the section's own background.
+const TCP_METER_X: f32 = 1.0;
+const TCP_METER_W: u32 = 19;
+/// Both rows of fields are 17 tall, at these tops.
+const ROW_ONE: f32 = 7.0;
+const ROW_TWO: f32 = 34.0;
+const FIELD_H: f32 = 17.0;
+
+/// One track's row in the panel.
+///
+/// Public so a test, a playground or a design review can photograph a row
+/// without a backend behind it — the same reason `ChannelStripPreview`
+/// exists on the mixer side.
+#[component]
+pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
+    // The store first, the prop as the seed — a rename or a recolour in
+    // REAPER reaches the row on the track stream rather than on a poll.
+    // The mixer strip read its colour off the prop and sat a poll behind
+    // every button beside it.
+    let store = use_track_store();
+    let guid = track.guid.clone();
+    let live = use_memo(use_reactive!(|guid| store.track(&guid)));
+    let live = live.read();
+    let track = live.as_ref().unwrap_or(&track);
+
+    let theme = daw_theme::Theme::default();
+    let tint = track
+        .color
+        .map(|c| daw_theme_art::dress::panel_tint(daw_theme::Color::rgb(
+            (c >> 16) as u8,
+            (c >> 8) as u8,
+            c as u8,
+        )))
+        .unwrap_or(theme.chrome.surface_raised);
+    let field = theme.chrome.hardware.shade(-0.40).css();
+    let gutter = theme.chrome.hardware.shade(-0.40).css();
+    let rule = theme.chrome.hardware.shade(-0.72).css();
+    let index_ink = theme.chrome.hardware_mark.shade(0.1).css();
+    let name_ink = theme.chrome.hardware_mark.shade(0.62).css();
+    let combo_ink = theme.chrome.hardware_mark.shade(0.5).css();
+    let caret = theme.chrome.hardware_mark.shade(0.2).css();
+    let fx_ink = theme.chrome.hardware_mark.shade(-0.1).css();
+
+    rsx! {
+        div {
+            class: "relative shrink-0",
+            style: "position:relative; width:{ROW_W}px; height:{ROW_H + 1.0}px; \
+                    border-bottom:1px solid {rule};",
+
+            // The track colour is the row: REAPER tints the whole panel,
+            // not a stripe on it. It stops at the gutter.
+            div {
+                style: "position:absolute; left:0; top:0; \
+                        width:{TINT_W}px; height:{ROW_H}px; background:{tint.css()};",
+            }
+            div {
+                style: "position:absolute; left:{TINT_W}px; top:0; \
+                        width:{GUTTER_W}px; height:{ROW_H}px; background:{gutter};",
+            }
+
+            // The track number, down the left edge.
+            div {
+                class: "absolute font-mono",
+                style: "position:absolute; left:9px; top:{ROW_H / 2.0 - 8.0}px; \
+                        font-size:11px; line-height:16px; color:{index_ink};",
+                "{index + 1}"
+            }
+
+            // ── Row one: arm, name, pan, meter, FX-in, monitor ──
+            div { style: "position:absolute; left:26px; top:6px;",
+                RecordArmButton { track: track.guid.clone(), panel: Panel::Track }
+            }
+            div {
+                style: "position:absolute; left:50px; top:{ROW_ONE}px; \
+                        width:130px; height:{FIELD_H}px; background:{field};",
+                div {
+                    style: "padding:0 6px; line-height:{FIELD_H}px; font-size:11.5px; \
+                            color:{name_ink}; white-space:nowrap; overflow:hidden; \
+                            text-overflow:ellipsis; \
+                            font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                    "{track.name}"
+                }
+            }
+            div { style: "position:absolute; left:186px; top:3px;",
+                PanKnob { track: track.guid.clone() }
+            }
+            div { style: "position:absolute; left:242px; top:6px;",
+                FxInButton { has_input_fx: track.input_fx_count > 0 }
+            }
+            div { style: "position:absolute; left:274px; top:6px;",
+                MonitorButton { track: track.guid.clone(), panel: Panel::Track }
+            }
+
+            // ── Row two: envelope, the FX slot, the input combo ──
+            div { style: "position:absolute; left:26px; top:32px;",
+                EnvelopeButton {}
+            }
+            div {
+                style: "position:absolute; left:56px; top:{ROW_TWO}px; \
+                        width:34px; height:{FIELD_H}px; background:{field}; \
+                        line-height:{FIELD_H}px; text-align:center; font-size:10px; \
+                        color:{fx_ink}; font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                "FX"
+            }
+            div {
+                style: "position:absolute; left:94px; top:{ROW_TWO}px; \
+                        width:186px; height:{FIELD_H}px; background:{field};",
+                div {
+                    style: "padding:0 6px; line-height:{FIELD_H}px; font-size:11px; \
+                            color:{combo_ink}; white-space:nowrap; overflow:hidden; \
+                            font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                    "{input_label(track)}"
+                }
+                // The combo's caret. A triangle rather than a glyph, so it
+                // does not depend on a font having one.
+                svg {
+                    style: "position:absolute; left:172px; top:6px;",
+                    width: "7", height: "4", view_box: "0 0 7 4",
+                    xmlns: "http://www.w3.org/2000/svg",
+                    path { d: "M 0 0 h 7 l -3.5 4 z", fill: "{caret}" }
+                }
+            }
+
+            // ── The meter section: the meter, then mute over solo ──
+            //
+            // `meterRight` in the theme moves the whole section to the end
+            // of the row, and within it the meter comes *first* — a
+            // vertical strip against the tint, with mute and solo to its
+            // right. The panel sheet draws the meter inside the tint
+            // instead, which put it in the middle of the row.
+            div {
+                style: "position:absolute; left:{TINT_W + GUTTER_BUTTON_X}px; top:3px;",
+                MuteButton { track: track.guid.clone(), panel: Panel::Track }
+            }
+            div {
+                style: "position:absolute; left:{TINT_W + GUTTER_BUTTON_X}px; top:25px;",
+                SoloButton { track: track.guid.clone(), panel: Panel::Track }
+            }
+            // No scale: there is no column for numbers out here, and REAPER
+            // prints them only in the mixer.
+            div {
+                style: "position:absolute; left:{TINT_W + TCP_METER_X}px; top:2px;",
+                TrackMeter {
+                    track: track.guid.clone(),
+                    width: TCP_METER_W,
+                    height: (ROW_H - 4.0) as u32,
+                    scale: false,
+                }
+            }
+        }
+    }
+}
+
+/// What the input combo reads.
+///
+/// The row shows the track's record input, which is the same fact the
+/// mixer's `RecordInputLabel` shows — spelled out here rather than
+/// abbreviated, because the field is 186 wide instead of 86.
+fn input_label(track: &Track) -> String {
+    use daw_proto::track::RecordInput;
+    match track.record_input {
+        RecordInput::None => "No input".to_string(),
+        RecordInput::Audio { channel } => format!("Input {}", channel + 1),
+        RecordInput::Midi { device_id, channel } => match (device_id, channel) {
+            (Some(d), Some(c)) => format!("MIDI {d} ch {}", c + 1),
+            (Some(d), None) => format!("MIDI {d}"),
+            (None, Some(c)) => format!("MIDI all ch {}", c + 1),
+            (None, None) => "MIDI".to_string(),
+        },
+        RecordInput::Raw(v) => format!("Input #{v}"),
+    }
+}
+
+/// The FX-in button — the *input* chain, which is a different chain from
+/// the one the row's FX slot reports.
+#[component]
+fn FxInButton(has_input_fx: bool) -> Element {
+    let mut at = use_signal(art::Interaction::default);
+    rsx! {
+        div {
+            style: "display:inline-block; line-height:0; cursor:pointer;",
+            onmouseenter: move |_| at.set(art::Interaction::Hover),
+            onmouseleave: move |_| at.set(art::Interaction::Normal),
+            art::FxInButton {
+                loaded: has_input_fx,
+                cell: (29.0, 20.0),
+                width: Some(29),
+                height: Some(20),
+                at: at(),
+            }
+        }
+    }
+}
+
+/// The envelope button. Its mode is not track state the DAW reports yet,
+/// so it draws the off state rather than inventing one.
+#[component]
+fn EnvelopeButton() -> Element {
+    let mut at = use_signal(art::Interaction::default);
+    rsx! {
+        div {
+            style: "display:inline-block; line-height:0; cursor:pointer;",
+            onmouseenter: move |_| at.set(art::Interaction::Hover),
+            onmouseleave: move |_| at.set(art::Interaction::Normal),
+            art::EnvelopeButton {
+                mode: art::EnvelopeMode::Off,
+                cell: (22.0, 20.0),
+                width: Some(22),
+                height: Some(20),
+                at: at(),
+            }
+        }
+    }
+}

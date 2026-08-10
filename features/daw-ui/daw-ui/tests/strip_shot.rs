@@ -26,7 +26,10 @@ fn kick() -> Track {
         guid: "kick".into(),
         index: 0,
         name: "Kick".into(),
-        color: Some(0xc4_44_6a),
+        // REAPER's raw track colour, not the colour of the band it paints:
+        // the reference's band is #A8415C and the panel tint is a flat 0.70,
+        // so the track itself is #F05D83.
+        color: Some(0xf0_5d_83),
         // Unity, which is where the reference screenshot's tracks are —
         // the cap should land where REAPER's does, not at the top.
         volume: 1.0,
@@ -167,5 +170,34 @@ fn paint_the_fx_label_half() {
         .build()
         .render_png(&path);
     crop_to_strip_sized(&path, 60, 30);
+    println!("wrote {}", path.display());
+}
+
+/// The TCP row, painted for the same loop.
+#[test]
+fn paint_the_track_row() {
+    fn app() -> Element {
+        let mut store = use_hook(TrackStore::new);
+        use_hook(|| {
+            store.seed([kick()]);
+            provide_context(store);
+        });
+        rsx! {
+            div {
+                style: "position:absolute; left:0; top:0; background:#1e1e1e; \
+                        width:340px; height:71px;",
+                daw_ui::components::tcp::TrackRow { track: kick(), index: 0 }
+            }
+        }
+    }
+
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/theme-shots");
+    std::fs::create_dir_all(&out).unwrap();
+    let path = out.join("track-row.png");
+    dioxus_test::render(app)
+        .with_window_size(340 + BODY_MARGIN * 2, 71 + BODY_MARGIN * 2)
+        .build()
+        .render_png(&path);
+    crop_to_strip_sized(&path, 340, 71);
     println!("wrote {}", path.display());
 }

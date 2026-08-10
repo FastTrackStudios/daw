@@ -153,7 +153,16 @@ fn the_colour_lands_on_the_index_plate_and_not_the_name_plate() {
 
     assert!(!name.contains("#ff8800"), "the name plate took the track colour:\n{name}");
     assert!(name.contains("#262626"), "the name plate is not `mcp_namebg`:\n{name}");
-    assert!(strip.contains("#ff8800"), "the strip did not paint the colour:\n{strip}");
+    // The *tinted* colour, not the raw one: REAPER paints a panel at 70%
+    // of the track's colour, measured in one screenshot holding both
+    // renders of the same project. #ff8800 shaded 30% toward black.
+    let tinted = daw_theme_art::dress::panel_tint(daw_theme::Color::rgb(0xff, 0x88, 0x00));
+    assert!(
+        strip.contains(&tinted.to_hex()),
+        "the strip did not paint the tinted colour ({}):\n{strip}",
+        tinted.to_hex()
+    );
+    assert!(!strip.contains("#ff8800"), "the strip painted the raw track colour");
 }
 
 /// The two reads that did not exist before this ticket. They are on the

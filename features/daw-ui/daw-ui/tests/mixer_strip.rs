@@ -394,3 +394,24 @@ fn the_record_arm_and_the_button_column_share_an_axis() {
     // ring sits at 0.486 of a 36-wide cell, so 65.5 - 17.496.
     assert!(html.contains("left:48.00"), "the arm is not on the column's axis");
 }
+
+/// A panel is painted at REAPER's tint, not at the track's raw colour.
+///
+/// Settled in one screenshot holding both renders of the same project:
+/// REAPER's TCP painted its Kick row #9D3C55 where our mixer band painted
+/// the track's own #E0567A. A flat 0.70 on all three channels, and the
+/// largest single block of difference the strip comparison had left.
+#[test]
+fn the_band_is_painted_at_reapers_tint() {
+    use daw_theme::Color;
+    use daw_theme_art::dress::panel_tint;
+
+    assert_eq!(panel_tint(Color::rgb(0xE0, 0x56, 0x7A)).to_hex(), "#9d3c55");
+
+    // And the strip actually goes through it: the fixture's own colour,
+    // tinted, is in the markup and the raw colour is not.
+    let html = strip_at(371.0);
+    let raw = Color::rgb(0x88, 0x44, 0xcc);
+    assert!(html.contains(&panel_tint(raw).to_hex()), "the band is not tinted");
+    assert!(!html.contains(&raw.to_hex()), "the band painted the raw track colour");
+}
