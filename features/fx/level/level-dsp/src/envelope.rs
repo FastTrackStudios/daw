@@ -173,16 +173,9 @@ fn rdp(pts: &[EnvPoint], lo: usize, hi: usize, tol: f64, keep: &mut [bool]) {
 /// Forced into the decimation so an attack and a release survive it —
 /// the edges are the whole shape of a gate.
 fn transitions(open: &[bool]) -> Vec<usize> {
-    let mut out = Vec::new();
-    for i in 1..open.len() {
-        if open[i] != open[i - 1] {
-            // Both sides of the edge, so the ramp between them is real
-            // rather than an artefact of where the blocks fell.
-            out.push(i - 1);
-            out.push(i);
-        }
-    }
-    out
+    // Both sides of each edge, so the step between them is real rather
+    // than an artefact of where the blocks fell.
+    edges(open)
 }
 
 /// Generate the gate's envelope from a shared analysis pass.
@@ -217,6 +210,146 @@ pub fn gate_envelope(analysis: &Analysis, threshold_db: f64, floor_db: f64, tole
         .collect();
 
     decimate(&dense, tolerance_db, &transitions(&open))
+}
+
+/// A span of blocks with one gain, rather than a point curve.
+///
+/// Sibilance is a **discrete event**: two orders of magnitude fewer
+/// entries than a curve at block rate, directly editable ("this ess,
+/// 3 dB"), and the natural thing to hand a plugin.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GainSpan {
+    pub from_s: f64,
+    pub to_s: f64,
+    /// Gain in dB across the span. Negative reduces.
+    pub db: f64,
+}
+
+/// Generate the breath envelope.
+///
+/// A breath is quiet, and not bright enough to be an "ess" — the two are
+/// separated by the classifier rather than by re-running a detector, so
+/// this stage and the sibilance stage cannot disagree about which is
+/// which.
+pub fn breath_envelope(
+    analysis: &Analysis,
+    reduction_db: f64,
+    max_level_db: f64,
+    min_level_db: f64,
+    tolerance_db: f64,
+) -> Vec<EnvPoint> {
+    if analysis.blocks() == 0 {
+        return Vec::new();
+    }
+    let ducked: Vec<bool> = analysis
+        .rms_db
+        .iter()
+        .zip(&analysis.classes)
+        .map(|(&db, &class)| {
+            class != BlockClass::Tonal && db < max_level_db && db > min_level_db
+        })
+        .collect();
+
+    let dense: Vec<EnvPoint> = ducked
+        .iter()
+        .enumerate()
+        .map(|(i, &d)| EnvPoint {
+            t_s: analysis.time_of(i),
+            db: if d { -reduction_db.abs() } else { 0.0 },
+            // Breaths duck in and out over a slew, so they ramp.
+            hold: false,
+        })
+        .collect();
+
+    decimate(&dense, tolerance_db, &edges(&ducked))
+}
+
+/// Detect sibilant spans and the gain to apply over each.
+///
+/// Spans rather than a point curve, and **not** a split-band de-esser: a
+/// volume envelope is broadband, so folding a band-split reduction into
+/// it would duck the vowel body along with the "ess". True multiband
+/// de-essing stays available by feeding the item into a plugin — a
+/// different tool, rather than an envelope pretending to be one.
+pub fn sibilance_spans(analysis: &Analysis, reduction_db: f64) -> Vec<GainSpan> {
+    let mut spans: Vec<GainSpan> = Vec::new();
+    let mut run: Option<usize> = None;
+
+    for i in 0..analysis.blocks() {
+        let sibilant = analysis.classes[i] == BlockClass::Consonant
+            && analysis.rms_db[i] > analysis.silence_db;
+        match (sibilant, run) {
+            (true, None) => run = Some(i),
+            (false, Some(start)) => {
+                spans.push(GainSpan {
+                    from_s: analysis.time_of(start),
+                    to_s: analysis.time_of(i),
+                    db: -reduction_db.abs(),
+                });
+                run = None;
+            }
+            _ => {}
+        }
+    }
+    if let Some(start) = run {
+        spans.push(GainSpan {
+            from_s: analysis.time_of(start),
+            to_s: analysis.time_of(analysis.blocks().saturating_sub(1)),
+            db: -reduction_db.abs(),
+        });
+    }
+    spans
+}
+
+/// Generate the ride envelope: how loud each phrase should be.
+///
+/// Rides **tonal** blocks toward the target and holds elsewhere. It
+/// consults the shared silence floor, so it does not ride room tone up
+/// between lines — but it never consults the gate's *output*, which is
+/// what keeps the two independently bypassable.
+pub fn ride_envelope(
+    analysis: &Analysis,
+    target_db: f64,
+    amount: f64,
+    max_gain_db: f64,
+    max_cut_db: f64,
+    tolerance_db: f64,
+) -> Vec<EnvPoint> {
+    if analysis.blocks() == 0 {
+        return Vec::new();
+    }
+    let mut held = 0.0_f64;
+    let dense: Vec<EnvPoint> = (0..analysis.blocks())
+        .map(|i| {
+            let ridable = analysis.classes[i] == BlockClass::Tonal
+                && analysis.rms_db[i] > analysis.silence_db;
+            if ridable {
+                let correction = (target_db - analysis.rms_db[i]) * amount.clamp(0.0, 1.0);
+                held = correction.clamp(-max_cut_db.abs(), max_gain_db.abs());
+            }
+            // Between phrases the ride holds its last value rather than
+            // returning to unity, so a phrase does not swell at its edges.
+            EnvPoint {
+                t_s: analysis.time_of(i),
+                db: held,
+                hold: false,
+            }
+        })
+        .collect();
+
+    decimate(&dense, tolerance_db, &[])
+}
+
+/// Block indices either side of every change in a boolean series.
+fn edges(flags: &[bool]) -> Vec<usize> {
+    let mut out = Vec::new();
+    for i in 1..flags.len() {
+        if flags[i] != flags[i - 1] {
+            out.push(i - 1);
+            out.push(i);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
