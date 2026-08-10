@@ -4,16 +4,32 @@
 //! time map — with the targets coming from the grid instead of from
 //! another take. See `spec/grid-quantize.md`.
 //!
-//! The output is a [`Plan`]: a list of transients and where each should
-//! end up. What is done with it is the mode's business —
-//! [`Plan::alignment`] warps, [`Plan::splits`] cuts — and both are built
-//! from the same decisions, so the two modes can never disagree about
-//! where a hit belongs.
+//! **The matching itself is not here.** It lives in
+//! [`expression_editor_tools::quantize`], written once over
+//! [`Timed`](expression_editor_tools::Timed), so a drum take and a MIDI
+//! take are put on the grid by the same code. What is left here is the
+//! part that is genuinely audio: seconds, and the two ways a plan
+//! becomes sound — [`Plan::alignment`] warps, [`Plan::splits`] cuts.
+//! Both are built from the same decisions, so the two modes can never
+//! disagree about where a hit belongs.
+
+use std::ops::Deref;
+
+use expression_editor_tools::Timed;
+use expression_editor_tools::quantize as tools;
 
 use crate::align::Alignment;
 use crate::detect::Transient;
 
+pub use expression_editor_tools::quantize::Move;
+
 /// How transients are matched to grid divisions.
+///
+/// The audio face of [`tools::QuantizeConfig`]. It exists so this domain
+/// can say `secs` and mean it: audio is sampled at a rate, so seconds
+/// are its natural unit, where a MIDI grid under a tempo map is only
+/// evenly spaced in ticks. Converting at the boundary is a line; a seam
+/// that assumed seconds would be wrong the first time the tempo moved.
 #[derive(Clone, Copy, Debug)]
 pub struct QuantizeConfig {
     /// Seconds between grid divisions.
@@ -44,35 +60,36 @@ impl Default for QuantizeConfig {
     }
 }
 
-/// One transient and where it is going.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Move {
-    /// Where the transient is now, in seconds.
-    pub from: f64,
-    /// Where it should be after quantizing, in seconds. Strength is
-    /// already applied — this is the final position, not the division.
-    pub to: f64,
-    /// The division it was matched to, for display. Unaffected by
-    /// strength.
-    pub division: f64,
-}
-
-impl Move {
-    pub fn shift(&self) -> f64 {
-        self.to - self.from
+impl From<QuantizeConfig> for tools::QuantizeConfig {
+    fn from(cfg: QuantizeConfig) -> Self {
+        Self {
+            grid: cfg.grid_secs,
+            grid_offset: cfg.grid_offset_secs,
+            tolerance: cfg.tolerance_secs,
+            strength: cfg.strength,
+            // Audio gets its sensitivity filter upstream: the detector's
+            // gate never reports the bleed, so by the time transients
+            // reach the planner they are all real hits. MIDI, which has
+            // no detector, filters here instead.
+            min_strength: 0.0,
+        }
     }
 }
 
-/// What quantizing will do, before anything is written.
+/// What quantizing will do to a take, before anything is written.
+///
+/// The generic plan plus the two ways audio can be rendered from it.
+/// Derefs to [`tools::Plan`], so `moves` and `unmatched` are the same
+/// list every other mode reads.
 #[derive(Clone, Debug, Default)]
-pub struct Plan {
-    pub moves: Vec<Move>,
-    /// Transients that were detected and deliberately left alone: no
-    /// division claimed them.
-    ///
-    /// Kept rather than dropped because "why did that hit not move" is
-    /// the first question a user asks, and the answer is here.
-    pub unmatched: Vec<f64>,
+pub struct Plan(pub tools::Plan);
+
+impl Deref for Plan {
+    type Target = tools::Plan;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
 /// Match transients to grid divisions.
@@ -86,98 +103,38 @@ pub struct Plan {
 ///
 /// Without one, every transient snaps to its own nearest division, which
 /// is right for material that is not on a grid and wrong for a kit.
+///
+/// Concrete in `Transient` on purpose: a caller here always has
+/// transients, and the seam is one call down.
 pub fn plan(transients: &[Transient], cfg: QuantizeConfig) -> Plan {
-    if transients.is_empty() || cfg.grid_secs <= 0.0 {
-        return Plan::default();
-    }
-    let strength = cfg.strength.clamp(0.0, 1.0);
-    let division_of = |t: f64| {
-        let n = ((t - cfg.grid_offset_secs) / cfg.grid_secs).round();
-        cfg.grid_offset_secs + n * cfg.grid_secs
-    };
+    Plan(tools::plan(transients, cfg.into()))
+}
 
-    let mut moves = Vec::new();
-    let mut matched = vec![false; transients.len()];
-
-    match cfg.tolerance_secs {
-        Some(tolerance) => {
-            // Walk divisions, not transients. Every division from the
-            // first hit to the last, so a division with nothing near it
-            // is visited and correctly produces nothing.
-            let first = transients.first().expect("non-empty").at;
-            let last = transients.last().expect("non-empty").at;
-            let n0 = ((first - cfg.grid_offset_secs) / cfg.grid_secs).floor() as i64;
-            let n1 = ((last - cfg.grid_offset_secs) / cfg.grid_secs).ceil() as i64;
-
-            for n in n0..=n1 {
-                let division = cfg.grid_offset_secs + n as f64 * cfg.grid_secs;
-                // The loudest transient in the window, not the nearest.
-                // A ghost note a hair closer to the division than the
-                // backbeat must not be the one that gets quantized —
-                // same reasoning as the spacing contest in `onsets`.
-                let winner = transients
-                    .iter()
-                    .enumerate()
-                    .filter(|(i, t)| !matched[*i] && (t.at - division).abs() <= tolerance)
-                    .max_by(|a, b| {
-                        a.1.loudness
-                            .partial_cmp(&b.1.loudness)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
-                if let Some((i, t)) = winner {
-                    matched[i] = true;
-                    moves.push(Move {
-                        from: t.at,
-                        to: t.at + (division - t.at) * strength,
-                        division,
-                    });
-                }
-            }
-        }
-        None => {
-            for (i, t) in transients.iter().enumerate() {
-                let division = division_of(t.at);
-                matched[i] = true;
-                moves.push(Move {
-                    from: t.at,
-                    to: t.at + (division - t.at) * strength,
-                    division,
-                });
-            }
-        }
+/// A transient is a *measurement* of the take, so the seam's
+/// [`Timed::move_to`] only records where the hit is now expected to
+/// land — it does not move any audio. The audio moves when the plan is
+/// rendered, as a warp map or as split pieces.
+impl Timed for Transient {
+    fn onset(&self) -> f64 {
+        self.at
     }
 
-    moves.sort_by(|a, b| {
-        a.from
-            .partial_cmp(&b.from)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    // Two hits quantized past each other would need audio to run
-    // backwards. Drop the later one rather than reorder: it is the one
-    // whose division was already taken by something louder.
-    let mut ordered: Vec<Move> = Vec::with_capacity(moves.len());
-    let mut dropped: Vec<f64> = Vec::new();
-    for m in moves {
-        if ordered.last().is_some_and(|last| m.to <= last.to) {
-            dropped.push(m.from);
-            continue;
-        }
-        ordered.push(m);
+    fn move_to(&mut self, to: f64) {
+        self.at = to;
     }
 
-    let mut unmatched: Vec<f64> = transients
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| !matched[*i])
-        .map(|(_, t)| t.at)
-        .collect();
-    unmatched.extend(dropped);
-    unmatched.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-    Plan {
-        moves: ordered,
-        unmatched,
+    /// Detected loudness, on whichever scale the detector was configured
+    /// for — the same number the one-per-division contest already ranked
+    /// hits by.
+    fn strength(&self) -> f64 {
+        self.loudness
     }
+
+    // No `length`: a transient is the instant a stick meets a head.
+    // Inventing an end for it — the decay? the next hit? — would be a
+    // number the tools then acted on. So `Transient` is deliberately
+    // not `Sustained`, and that is the whole difference between the
+    // audio and MIDI sides of this seam.
 }
 
 impl Plan {
