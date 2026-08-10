@@ -32,6 +32,7 @@
 //! ```
 
 pub mod event;
+pub mod align;
 pub mod quantize;
 
 pub use event::{Sustained, Timed, length_of};
