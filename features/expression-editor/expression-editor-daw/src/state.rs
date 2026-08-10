@@ -235,6 +235,131 @@ impl StoredLayout {
     }
 }
 
+/// A generated envelope, as stored.
+///
+/// Sparse breakpoints with shapes, in **item-relative time** — seconds
+/// from the item's start, not from the project's. That is possible
+/// because this data is ours on both backends, and it is what makes
+/// moving an item leave every curve aligned to its audio. It is also why
+/// the four are not written as FX-parameter envelopes: those are *track*
+/// envelopes in project time, so dragging the item would leave its gate
+/// curve behind, and keeping them aligned would make item-move a write
+/// path for envelope data — which nothing else in this design needs.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct StoredEnvelope {
+    pub points: Vec<StoredEnvPoint>,
+}
+
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct StoredEnvPoint {
+    /// Seconds from the start of the item.
+    pub t_s: f64,
+    pub db: f64,
+    pub hold: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct StoredSpan {
+    pub from_s: f64,
+    pub to_s: f64,
+    pub db: f64,
+}
+
+/// The four envelopes and the settings they came from, for one item.
+///
+/// The **composite is not here**: it is the take volume envelope, which
+/// the DAW owns and plays. These four are ours, and they are what you
+/// edit.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct ItemEnvelopes {
+    pub item_guid: String,
+    pub gate: StoredEnvelope,
+    pub breath: StoredEnvelope,
+    pub sibilance: Vec<StoredSpan>,
+    pub ride: StoredEnvelope,
+    /// Which are switched off. Bypass is a mix decision, so it travels.
+    pub bypass_gate: bool,
+    pub bypass_breath: bool,
+    pub bypass_sibilance: bool,
+    pub bypass_ride: bool,
+    /// The config digest these were generated from, so a reopened item
+    /// knows whether they are still current without re-analysing.
+    pub digest: u64,
+}
+
+impl ItemEnvelopes {
+    pub fn capture(
+        item_guid: impl Into<String>,
+        curves: &level_dsp::envelope::Contributions,
+        digest: u64,
+    ) -> Self {
+        let pts = |v: &[level_dsp::envelope::EnvPoint]| StoredEnvelope {
+            points: v
+                .iter()
+                .map(|p| StoredEnvPoint {
+                    t_s: p.t_s,
+                    db: p.db,
+                    hold: p.hold,
+                })
+                .collect(),
+        };
+        Self {
+            item_guid: item_guid.into(),
+            gate: pts(&curves.gate),
+            breath: pts(&curves.breath),
+            ride: pts(&curves.ride),
+            sibilance: curves
+                .sibilance
+                .iter()
+                .map(|s| StoredSpan {
+                    from_s: s.from_s,
+                    to_s: s.to_s,
+                    db: s.db,
+                })
+                .collect(),
+            bypass_gate: curves.bypass.gate,
+            bypass_breath: curves.bypass.breath,
+            bypass_sibilance: curves.bypass.sibilance,
+            bypass_ride: curves.bypass.ride,
+            digest,
+        }
+    }
+
+    pub fn restore(&self) -> level_dsp::envelope::Contributions {
+        use level_dsp::envelope::{Bypass, Contributions, EnvPoint, GainSpan};
+        let pts = |e: &StoredEnvelope| {
+            e.points
+                .iter()
+                .map(|p| EnvPoint {
+                    t_s: p.t_s,
+                    db: p.db,
+                    hold: p.hold,
+                })
+                .collect::<Vec<_>>()
+        };
+        Contributions {
+            gate: pts(&self.gate),
+            breath: pts(&self.breath),
+            ride: pts(&self.ride),
+            sibilance: self
+                .sibilance
+                .iter()
+                .map(|s| GainSpan {
+                    from_s: s.from_s,
+                    to_s: s.to_s,
+                    db: s.db,
+                })
+                .collect(),
+            bypass: Bypass {
+                gate: self.bypass_gate,
+                breath: self.bypass_breath,
+                sibilance: self.bypass_sibilance,
+                ride: self.bypass_ride,
+            },
+        }
+    }
+}
+
 /// Everything about a project that the editor persists.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct EditorState {
@@ -246,6 +371,8 @@ pub struct EditorState {
     pub take_modes: Vec<ModeOverride>,
     /// How each take was being looked at.
     pub take_views: Vec<TakeView>,
+    /// Generated envelopes, per item.
+    pub envelopes: Vec<ItemEnvelopes>,
     /// The hand-arranged lane layout. Empty means nobody arranged one,
     /// so the matcher decides on load.
     ///
@@ -262,6 +389,7 @@ impl Default for EditorState {
             track_modes: Vec::new(),
             take_modes: Vec::new(),
             take_views: Vec::new(),
+            envelopes: Vec::new(),
             layout: StoredLayout::default(),
         }
     }
@@ -310,11 +438,29 @@ impl EditorState {
         }
     }
 
+    /// The stored envelopes for an item.
+    pub fn envelopes_for(&self, item_guid: &str) -> Option<&ItemEnvelopes> {
+        self.envelopes.iter().find(|e| e.item_guid == item_guid)
+    }
+
+    /// Record an item's envelopes.
+    pub fn set_envelopes(&mut self, env: ItemEnvelopes) {
+        match self
+            .envelopes
+            .iter_mut()
+            .find(|e| e.item_guid == env.item_guid)
+        {
+            Some(existing) => *existing = env,
+            None => self.envelopes.push(env),
+        }
+    }
+
     /// Whether anything here is worth writing.
     pub fn is_empty(&self) -> bool {
         self.track_modes.is_empty()
             && self.take_modes.is_empty()
             && self.take_views.is_empty()
+            && self.envelopes.is_empty()
             && self.layout.lanes.is_empty()
     }
 }
