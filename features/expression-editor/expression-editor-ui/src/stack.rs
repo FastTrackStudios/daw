@@ -350,10 +350,15 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                 let hit = {
                     let ed = editor.read();
                     let rows = ed.tracks.stack(ed.viewport.h as f32, ACTIVE_BOOST, MIN_LANE);
-                    // `row_at` resolves to a *lane*. Clicking a lane
-                    // targets its first visible track; choosing among
-                    // several members is #200's job, not a click's.
+                    // `row_at` resolves to a *lane*. Clicking targets a
+                    // lane, never a track within one: with a vocal and
+                    // its guide a few pixels apart, picking by proximity
+                    // silently edits the reference you were tuning
+                    // against. If the click lands on the lane you are
+                    // already in, nothing changes — cycling within a
+                    // lane is a key, not a click.
                     expression_editor_core::tracks::Workspace::row_at(&rows, y as f32)
+                        .filter(|&lane| Some(lane) != ed.tracks.active_lane())
                         .and_then(|lane| {
                             ed.tracks
                                 .lane_tracks(lane)

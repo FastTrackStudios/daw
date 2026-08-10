@@ -795,3 +795,93 @@ fn merging_a_lane_with_itself_is_refused() {
     assert!(!ws.merge_lanes(0, 9));
     assert_eq!(ws.layout().len(), 2);
 }
+
+// ── One active track per lane ────────────────────────────────────────
+//
+// Only the active track takes gestures. Proximity hit-testing is the
+// trap this exists to avoid: a vocal superimposed on its reference MIDI
+// puts two notes a few pixels apart, and picking the nearer one silently
+// edits the reference you were tuning against.
+
+fn paired_workspace() -> Workspace {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    named(&mut ws, "Lead Vox MIDI", None);
+    named(&mut ws, "Kit", None);
+    ws.auto_pair();
+    ws
+}
+
+#[test]
+fn cycling_moves_within_the_lane_and_wraps() {
+    let mut ed = Editor::new(doc(), Viewport::new(800.0, 600.0));
+    ed.add_track("Track 1 MIDI", doc());
+    ed.tracks.auto_pair();
+    assert_eq!(ed.tracks.lane_tracks(0).len(), 2, "they paired");
+
+    let first = ed.tracks.active();
+    assert!(ed.cycle_track_in_lane());
+    let second = ed.tracks.active();
+    assert_ne!(first, second);
+
+    assert!(ed.cycle_track_in_lane());
+    assert_eq!(ed.tracks.active(), first, "and wraps back");
+}
+
+#[test]
+fn cycling_never_leaves_the_lane() {
+    let mut ws = paired_workspace();
+    // Lane 0 is the vocal pair, lane 1 the kit.
+    assert_eq!(ws.active_lane(), Some(0));
+    let next = ws.next_in_lane(0, ws.active()).unwrap();
+    assert!(ws.lane_tracks(0).contains(&next));
+    assert!(!ws.lane_tracks(1).contains(&next));
+}
+
+#[test]
+fn cycling_a_lone_track_is_a_no_op() {
+    let mut ed = Editor::new(doc(), Viewport::new(800.0, 600.0));
+    ed.add_track("Kit", doc());
+    ed.tracks.auto_pair();
+    let before = ed.tracks.active();
+    assert!(!ed.cycle_track_in_lane(), "nothing else in this lane");
+    assert_eq!(ed.tracks.active(), before);
+}
+
+#[test]
+fn cycling_skips_hidden_members() {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    named(&mut ws, "Lead Vox MIDI", None);
+    named(&mut ws, "Lead Vox Ref", None);
+    ws.auto_pair();
+    assert_eq!(ws.lane_tracks(0).len(), 3);
+
+    ws.track_mut(1).unwrap().hidden = true;
+    let next = ws.next_in_lane(0, 0).unwrap();
+    assert_eq!(next, 2, "the hidden member is not reachable by cycling");
+}
+
+#[test]
+fn cycling_parks_the_document_instead_of_moving_the_index() {
+    // The bug this guards: setting `active` directly would leave the
+    // live document behind and hand the editor a stale one.
+    let mut ed = Editor::new(doc(), Viewport::new(800.0, 600.0));
+    ed.add_track("Track 1 MIDI", doc());
+    ed.tracks.auto_pair();
+
+    let marker = NoteId(9999);
+    ed.doc.notes.push(Note::new(marker, 0.0, 10.0, 64));
+    let moved_from = ed.tracks.active();
+
+    assert!(ed.cycle_track_in_lane());
+    assert!(
+        !ed.doc.notes.iter().any(|n| n.id == marker),
+        "the other track's document is now live"
+    );
+
+    assert!(ed.cycle_track_in_lane());
+    assert_eq!(ed.tracks.active(), moved_from);
+    assert!(
+        ed.doc.notes.iter().any(|n| n.id == marker),
+        "coming back restores the edit that was parked"
+    );
+}
