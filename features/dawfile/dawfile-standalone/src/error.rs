@@ -18,6 +18,12 @@ pub enum DawError {
         message: String,
     },
 
+    /// The persisted CRDT history could not be exported, imported or
+    /// merged. Never fatal to opening a project: a bad oplog costs
+    /// merge history, and the text is the source of truth.
+    #[error("oplog: {0}")]
+    Oplog(String),
+
     /// Serializing the document to styx failed.
     #[error("serializing: {0}")]
     Serialize(String),
