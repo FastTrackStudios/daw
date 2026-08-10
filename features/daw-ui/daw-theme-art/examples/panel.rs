@@ -291,7 +291,12 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     // 47 is the housing's crown, not the band's foot — scanning x 8, 30
     // and 40, all clear of the arm, gives `a8415c` solid to 61. One
     // column is not a measurement when something else is drawn over it.
-    s.push_str(&rect(x, pan_y, W, stretch_y - pan_y, &tk.tint.css()));
+    // One row deeper than `pan_sec + in_sec`: the sections total 28 and
+    // the band measures 29, running 33 to 61 inclusive against a body
+    // that starts at 62. The extra row is the `lscale` term in
+    // `mcp.custom.bg`'s expression, which this does not evaluate — so it
+    // is added here as the measurement rather than derived.
+    s.push_str(&rect(x, pan_y, W, stretch_y - pan_y + 1.0, &tk.tint.css()));
     // `mcp.custom.bg_hl_t` — one row of `hl_color` along the tint's top
     // edge. REAPER prints `b0526b` there against the band's `a8415c`, and
     // without it the band starts flat where the source starts lit.
