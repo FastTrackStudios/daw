@@ -734,8 +734,15 @@ pub fn FxControl(props: FxControlProps) -> Element {
     // half a pixel either side — left both halves' edges mid-pixel and
     // the column half covered.
     let (lhs, rhs) = (p.split, p.split + gut);
+    // The two left arcs sweep 0, the two right arcs sweep 1.
+    //
+    // Not a symmetry to tidy up: with the traversal these paths use, both
+    // ends need a different flag to bulge outward, and at sweep 1 the
+    // left corners picked the other centre and curved *into* the pill —
+    // a notch where the source has a rounded end. The source's own left
+    // corner is plainly convex, reaching x2 by row 3 and x1 by row 5.
     let outline = format!(
-        "M {} {y} H {lhs} V {} H {} A {r} {r} 0 0 1 {x} {} V {} A {r} {r} 0 0 1 {} {y} Z \
+        "M {} {y} H {lhs} V {} H {} A {r} {r} 0 0 0 {x} {} V {} A {r} {r} 0 0 0 {} {y} Z \
          M {rhs} {y} H {} A {r} {r} 0 0 1 {} {} V {} A {r} {r} 0 0 1 {} {} H {rhs} Z",
         x + r,
         y + h,
@@ -755,7 +762,7 @@ pub fn FxControl(props: FxControlProps) -> Element {
     // so stroking the closed outline drew a line down each side of the
     // seam, half of it landing in the empty column.
     let frame = format!(
-        "M {lhs} {y} H {} A {r} {r} 0 0 1 {x} {} V {} A {r} {r} 0 0 1 {} {} H {lhs} \
+        "M {lhs} {y} H {} A {r} {r} 0 0 0 {x} {} V {} A {r} {r} 0 0 0 {} {} H {lhs} \
          M {rhs} {y} H {} A {r} {r} 0 0 1 {} {} V {} A {r} {r} 0 0 1 {} {} H {rhs}",
         x + r,
         y + r,
