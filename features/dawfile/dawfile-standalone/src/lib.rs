@@ -75,6 +75,7 @@ pub mod edit;
 pub mod error;
 pub mod id;
 pub mod objects;
+pub mod oplog;
 pub mod project;
 pub mod rpp;
 pub mod styx;
