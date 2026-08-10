@@ -125,7 +125,6 @@ async fn the_roll_is_reachable_by_a_pointer() -> dioxus_test::Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "dioxus document RefCell re-entrancy from get_client_rect in a spawned task; see module docs"]
 async fn a_drag_on_the_pitch_dimension_does_not_panic() -> dioxus_test::Result<()> {
     // Blitz's event dispatch is where the surface has broken before —
     // a RefCell re-entrancy panic mid-drag. This is the regression net.
@@ -133,19 +132,16 @@ async fn a_drag_on_the_pitch_dimension_does_not_panic() -> dioxus_test::Result<(
 }
 
 #[tokio::test]
-#[ignore = "dioxus document RefCell re-entrancy from get_client_rect in a spawned task; see module docs"]
 async fn a_drag_on_the_pressure_dimension_does_not_panic() -> dioxus_test::Result<()> {
     drag_across(PressureSurface).await
 }
 
 #[tokio::test]
-#[ignore = "dioxus document RefCell re-entrancy from get_client_rect in a spawned task; see module docs"]
 async fn a_drag_on_the_timbre_dimension_does_not_panic() -> dioxus_test::Result<()> {
     drag_across(TimbreSurface).await
 }
 
 #[tokio::test]
-#[ignore = "dioxus document RefCell re-entrancy from get_client_rect in a spawned task; see module docs"]
 async fn a_press_without_moving_is_survivable() -> dioxus_test::Result<()> {
     // Separated from the drag because a press alone and a press-plus-move
     // take different paths, and only one of them has broken before.

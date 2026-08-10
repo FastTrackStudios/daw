@@ -470,35 +470,58 @@ fn Canvas(
                         touch-action: none; user-select: none; cursor: crosshair;",
                 view_box: "0 0 {vp.w + canvas::GUTTER_W:.0} {vp.h + canvas::RULER_H:.0}",
                 preserve_aspect_ratio: "none",
-                onmounted: move |e| {
-                    let data = e.data();
-                    spawn(async move {
-                        if let Ok(r) = data.get_client_rect().await {
-                            let want = Viewport::new(
-                                r.width() - canvas::GUTTER_W,
-                                r.height() - canvas::RULER_H,
-                            );
-                            // `try_write`, not `write`. The await
-                            // resolves inside a later event dispatch,
-                            // which is already holding a borrow of this
-                            // signal — and `write()` there panics with
-                            // "RefCell already borrowed", taking the
-                            // canvas down on the first click under
-                            // Blitz, the renderer REAPER uses (#167).
-                            //
-                            // Skipping a contended frame is safe: a
-                            // measurement is idempotent, and the next
-                            // mount or resize re-measures. Guarding on
-                            // an actual change also stops a no-op
-                            // resize from invalidating the view.
-                            if let Ok(mut ed) = editor.try_write() {
-                                if ed.viewport != want {
-                                    ed.resize(want);
-                                }
+                // Measured by `onresize`, not by a spawned
+                // `get_client_rect().await`.
+                //
+                // The old code spawned a task to measure; that future
+                // resolves inside a later event dispatch and re-enters
+                // dioxus's document, panicking with "RefCell already
+                // borrowed" at `native-dom/src/events.rs:164` — taking
+                // the canvas down on the first click under Blitz, the
+                // renderer REAPER uses (#167). dioxus documents the
+                // constraint itself: background tasks must not touch
+                // the document during event handling, and
+                // `get_client_rect` has no `try_` form.
+                //
+                // `onresize` carries its size in the event, so there is
+                // no task and nothing to re-enter — and unlike a
+                // mount-time measurement it fires again when a REAPER
+                // dock is dragged, which is the behaviour the spawned
+                // version was reaching for in the first place.
+                onresize: move |e: Event<ResizeData>| {
+                    if let Ok(size) = e.data().get_content_box_size() {
+                        let want = Viewport::new(
+                            size.width - canvas::GUTTER_W,
+                            size.height - canvas::RULER_H,
+                        );
+                        // Guarded: a no-op resize would invalidate the
+                        // view for nothing, and `try_write` keeps a
+                        // contended frame from panicking rather than
+                        // relying on dispatch order.
+                        if let Ok(mut ed) = editor.try_write() {
+                            if ed.viewport != want {
+                                ed.resize(want);
                             }
                         }
-                    });
+                    }
                 },
+                // (the old onmounted measurement lived here)
+                //
+                // It used to `spawn` a `get_client_rect().await` and
+                // resize from the result. That future resolves inside a
+                // later event dispatch and re-enters dioxus's document,
+                // which panics with "RefCell already borrowed" at
+                // `native-dom/src/events.rs:164` — taking the canvas
+                // down on the first click under Blitz, the renderer
+                // REAPER uses (#167). dioxus documents the constraint
+                // itself: background tasks must not touch the document
+                // during event handling, and `get_client_rect` has no
+                // `try_` form.
+                //
+                // The viewport comes from the host instead, through
+                // `Editor::resize` — which the standalone runner and
+                // the REAPER panel both already call. One source for
+                // the size, and no background task racing the pointer.
                 onpointerdown: move |e: PointerEvent| {
                     let raw = e.data().element_coordinates();
                     // Resolve against a snapshot: the read guard must
