@@ -1862,6 +1862,18 @@ pub mod email_password {
             self.storage.list_email_history(user_id).await
         }
 
+        /// Look an account up by its CURRENT address. Sibling of
+        /// [`find_user_by_previous_email`](Self::find_user_by_previous_email),
+        /// which answers the same question about addresses it has left
+        /// behind.
+        pub async fn find_user_by_email(
+            &self,
+            email: &str,
+        ) -> Result<Option<auth_proto::AuthUser>, AuthFlowError> {
+            let canonical = normalize_email(email)?;
+            self.storage.find_user_by_email(&canonical).await
+        }
+
         /// Which account once held `email` — the reverse lookup that makes
         /// a migrated address still resolvable ("who was old@…?").
         pub async fn find_user_by_previous_email(
