@@ -16,3 +16,6 @@ guitarpro = "=0.4.2"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+guitarpro = "=0.4.2"

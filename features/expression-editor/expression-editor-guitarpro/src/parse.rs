@@ -6,7 +6,7 @@
 //! than tracked: a 0.x model change should land in this file.
 
 use crate::{BendPoint, GpNote};
-use expression_editor_core::rows::StringTuning;
+use expression_editor_core::rows::{Articulation, StringTuning};
 use guitarpro::model::legacy::song::Song;
 
 /// Which format a file is, decided by extension.
@@ -71,6 +71,48 @@ pub fn tuning_of(track: &guitarpro::model::legacy::track::Track) -> StringTuning
         frets: track.fret_count.max(1),
         capo: track.offset.clamp(0, 24) as u8,
     }
+}
+
+/// Collapse GP's articulation flags into the editor's vocabulary.
+///
+/// GP carries several booleans plus a slide list, and a note can be
+/// more than one thing at once — palm-muted *and* slid into. The
+/// editor's `articulation` is a single value, so this picks in order of
+/// what most changes how the note reads on a roll: a slide or a legato
+/// move first, because it is the thing that draws, then the
+/// articulations that colour a static note.
+///
+/// Returns `None` for a plainly-picked note rather than inventing
+/// `Sustain`, so "the file said nothing" stays distinguishable.
+fn articulation_of(effect: &guitarpro::model::legacy::note::NoteEffect) -> Option<Articulation> {
+    if !effect.slides.is_empty() {
+        return Some(Articulation::LegatoSlide);
+    }
+    if effect.hammer {
+        // GP stores hammer-on and pull-off as one flag; which it is
+        // depends on whether the next note is higher, and the roll draws
+        // them the same way regardless.
+        return Some(Articulation::HammerOn);
+    }
+    if effect.bend.is_some() {
+        return Some(Articulation::Bend);
+    }
+    if effect.vibrato {
+        return Some(Articulation::Vibrato);
+    }
+    if effect.palm_mute {
+        return Some(Articulation::PalmMute);
+    }
+    if effect.staccato {
+        return Some(Articulation::Staccato);
+    }
+    if effect.harmonic.is_some() {
+        return Some(Articulation::NaturalHarmonic);
+    }
+    if effect.let_ring {
+        return Some(Articulation::Sustain);
+    }
+    None
 }
 
 /// A beat's length in ticks.
@@ -141,6 +183,7 @@ pub fn notes_of(track: &guitarpro::model::legacy::track::Track, strings: usize) 
                         length,
                         bend,
                         prebend,
+                        articulation: articulation_of(&note.effect),
                     });
                 }
                 tick = start + length;
