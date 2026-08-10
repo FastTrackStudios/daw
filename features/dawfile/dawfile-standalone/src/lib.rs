@@ -69,6 +69,7 @@
 //! [#174]: https://github.com/FastTrackStudios/FastTrackStudio/issues/174
 //! [#175]: https://github.com/FastTrackStudios/FastTrackStudio/issues/175
 
+pub mod dawproject;
 pub mod document;
 pub mod edit;
 pub mod error;
