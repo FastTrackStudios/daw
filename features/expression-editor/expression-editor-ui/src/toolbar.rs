@@ -2,7 +2,7 @@
 //!
 //! The top bar carries only what changes *what a gesture does* — tool,
 //! dimension, curve shape, history, view. Everything that is a setting
-//! rather than a mode (grid, key, tuning, bend range, dimension strip) moved
+//! rather than a mode (grid, key, tuning, bend range, lane strip) moved
 //! to the status bar, because those get set once a session and were
 //! crowding the controls that get touched constantly.
 //!
@@ -527,7 +527,7 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
 
 // ── status bar ───────────────────────────────────────────────────────
 
-/// Settings, not modes: grid, key, tuning, the dimension strip, and readouts.
+/// Settings, not modes: grid, key, tuning, the lane strip, and readouts.
 #[component]
 pub fn StatusBar(editor: Signal<Editor>) -> Element {
     let mut editor = editor;

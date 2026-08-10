@@ -912,7 +912,7 @@ pub fn keyboard(ed: &Editor) -> Vec<Key> {
     let (lo, hi) = ed.camera.pitch_span(ed.viewport);
     let h = ed.camera.px_per_semitone;
     let (rlo, rhi) = ed.row_space.bounds();
-    // Named rows always carry their label — a drum dimension called nothing
+    // Named rows always carry their label — a drum lane called nothing
     // is unusable, where an unlabelled piano key can still be counted.
     let named = !matches!(ed.row_space, expression_editor_core::RowSpace::Pitch);
     let label_rows = h >= 8.0;
@@ -1016,7 +1016,7 @@ pub fn razor_rects(ed: &Editor) -> Vec<RazorRect> {
         .collect()
 }
 
-// ── velocity / CC dimension strip ─────────────────────────────────────────
+// ── velocity / CC lane strip ─────────────────────────────────────────
 
 /// One note's velocity stem in the strip.
 pub struct Stem {
@@ -1074,7 +1074,7 @@ pub fn stems(ed: &Editor, h: f64) -> Vec<Stem> {
         .collect()
 }
 
-/// The strip's continuous-dimension curve, when it is showing one.
+/// The strip's continuous-lane curve, when it is showing one.
 ///
 /// Every visible note's curve is drawn end to end, normalized into the
 /// strip — so a Pressure sweep reads as one gesture across the phrase
@@ -1123,7 +1123,7 @@ pub fn strip_guides(h: f64) -> Vec<(f64, bool)> {
 
 // ── pinned controller lanes ──────────────────────────────────────────
 
-/// A controller dimension ready to draw behind the roll.
+/// A controller lane ready to draw behind the roll.
 pub struct CcPath {
     pub number: u8,
     pub label: String,
@@ -1139,7 +1139,7 @@ pub struct CcPath {
 /// Pinned lanes, spanning the full roll height.
 ///
 /// The curve is sampled at the visible edges as well as at its own
-/// points, so a dimension whose last authored value is off-screen still
+/// points, so a lane whose last authored value is off-screen still
 /// draws across the whole view instead of stopping mid-canvas.
 pub fn cc_paths(ed: &Editor) -> Vec<CcPath> {
     let (t0, t1) = ed.camera.time_span(ed.viewport);

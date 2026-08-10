@@ -2277,7 +2277,7 @@ use expression_editor_core::cc::{self, CcSet};
 #[test]
 fn volume_like_controllers_rest_at_full_not_silence() {
     let set = CcSet::orchestral();
-    // A CC11 dimension that defaulted to zero would mute the part the moment
+    // A CC11 lane that defaulted to zero would mute the part the moment
     // it was pinned.
     assert_eq!(set.get(11).unwrap().default_value(), 1.0);
     assert_eq!(set.get(11).unwrap().value(0.0), 127);
@@ -2430,7 +2430,7 @@ fn clearing_part_of_a_curve_splices_the_default_in_at_both_edges() {
 #[test]
 fn clearing_a_whole_curve_empties_it_rather_than_authoring_defaults() {
     // The exception: with nothing outside to bleed in, leaving two
-    // default points behind would call an untouched dimension "authored".
+    // default points behind would call an untouched lane "authored".
     let mut c = Curve::new();
     c.set(PPQ, 0.5);
     c.set(PPQ * 2.0, 0.8);

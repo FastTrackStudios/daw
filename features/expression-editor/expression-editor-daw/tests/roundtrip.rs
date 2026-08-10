@@ -202,7 +202,7 @@ fn cc74_becomes_the_timbre_lane_and_other_ccs_become_document_lanes() {
         "CC74 is the MPE timbre dimension"
     );
     // CC11 is a document-level controller, not per-note.
-    let cc11 = doc.cc.get(11).expect("CC11 dimension created");
+    let cc11 = doc.cc.get(11).expect("CC11 lane created");
     assert_eq!(cc11.value(PPQ), 64);
     assert!(cc11.pinned, "the controllers an orchestral part rides show");
     assert!(doc.cc.get(74).is_none(), "CC74 is not duplicated as a dimension");

@@ -32,7 +32,7 @@
 //! which is the read side of the facade. The write side has no channel
 //! pressure in `MidiTakeContent`, so [`crate::to_content`] emits CC11
 //! instead; a fixture round-tripped through a take comes back with its
-//! pressure in a controller dimension. That is a property of the write path,
+//! pressure in a controller lane. That is a property of the write path,
 //! not of this fixture.
 
 use daw::service::midi::{MidiCC, MidiChannelPressure, MidiNote, MidiPitchBend, MidiTakeSnapshot};

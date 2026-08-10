@@ -98,7 +98,7 @@ pub struct Editor {
     /// The controller being edited, when CC edit mode is on. The roll
     /// becomes that dimension's editing surface and the notes recede.
     pub cc_edit: Option<u8>,
-    /// Velocity / CC dimension strip height in pixels, 0 when hidden.
+    /// Velocity / CC lane strip height in pixels, 0 when hidden.
     pub lane_strip_h: f64,
     /// Which dimension the strip shows.
     pub strip_lane: StripLane,
@@ -211,8 +211,39 @@ impl Editor {
     }
 
     /// Add a track and return its index. It does not become active.
+    ///
+    /// The guid is generated. Hosts that have one should use
+    /// [`Editor::add_track_with_guid`] instead, so that anything
+    /// persisted against this track still resolves next session.
     pub fn add_track(&mut self, name: impl Into<String>, doc: ExpressionDoc) -> usize {
         self.tracks.push(tracks::Track::new(name, doc))
+    }
+
+    /// Add a track carrying the host's identity.
+    pub fn add_track_with_guid(
+        &mut self,
+        guid: impl Into<String>,
+        name: impl Into<String>,
+        doc: ExpressionDoc,
+    ) -> usize {
+        self.tracks.push(tracks::Track::with_guid(guid, name, doc))
+    }
+
+    /// Give the active track the host's identity.
+    ///
+    /// `Editor::new` cannot know it — the document arrives before the
+    /// adapter has resolved which track it came from — so the adapter
+    /// hands it over immediately afterwards. Without this, an editor
+    /// opened on a REAPER take would key its persisted state on a
+    /// generated guid that means nothing next session.
+    pub fn adopt_track_identity(&mut self, guid: impl Into<String>, name: Option<String>) {
+        let active = self.tracks.active();
+        if let Some(track) = self.tracks.track_mut(active) {
+            track.guid = guid.into();
+            if let Some(name) = name {
+                track.name = name;
+            }
+        }
     }
 
     /// Switch to track `i`, parking the current document and history.
@@ -1061,7 +1092,7 @@ pub fn content_of(doc: &ExpressionDoc) -> Content {
     }
 }
 
-/// What the bottom dimension strip displays.
+/// What the bottom lane strip displays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StripLane {
     /// Per-note velocity, drawn as stems.

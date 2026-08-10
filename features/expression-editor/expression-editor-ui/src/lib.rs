@@ -1490,7 +1490,7 @@ fn strip_write(mut editor: Signal<Editor>, h: f64, x: f64, y: f64) {
     editor.write().apply_live(&edit);
 }
 
-/// The velocity / CC dimension strip below the roll.
+/// The velocity / CC lane strip below the roll.
 ///
 /// Shares the roll's horizontal camera exactly — a stem must sit under
 /// its note — but has its own vertical scale, because the value being

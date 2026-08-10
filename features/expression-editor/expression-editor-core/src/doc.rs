@@ -175,7 +175,7 @@ impl Curve {
     ///
     /// Clearing the whole curve is the exception — there is nothing
     /// outside to bleed in, so it empties rather than leaving two
-    /// default points behind and calling an untouched dimension "authored".
+    /// default points behind and calling an untouched lane "authored".
     ///
     /// Returns whether anything changed.
     pub fn clear_range(&mut self, t0: f64, t1: f64, default: f64) -> bool {
