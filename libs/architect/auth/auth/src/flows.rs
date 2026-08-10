@@ -287,6 +287,37 @@ pub mod admin {
                 .await
         }
 
+        /// Delete a user with NO admin session — operator tooling whose
+        /// authorization is possession of the data root.
+        ///
+        /// Returns the deleted user so a caller can report what it
+        /// removed; deleting a nonexistent account is an error rather
+        /// than a silent success, because "did that do anything?" is the
+        /// question an operator actually has.
+        pub async fn delete_user_local_trusted(
+            &self,
+            user_id: uuid::Uuid,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            let user = self
+                .storage
+                .find_user_by_id(user_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.storage.delete_user_by_id(user_id).await?;
+            Ok(user)
+        }
+
+        /// Every user in this org's store, for operator tooling.
+        pub async fn list_users_local_trusted(
+            &self,
+        ) -> Result<Vec<auth_proto::AuthUser>, AuthFlowError> {
+            // 1000 is the same ceiling `org_members_for_token` uses; an
+            // org with more users than that has bigger problems than this
+            // listing.
+            let (users, _total) = self.storage.list_users(0, 1000).await?;
+            Ok(users)
+        }
+
         /// Set a user's password with NO admin session.
         ///
         /// For operator tooling whose authorization is possession of the
