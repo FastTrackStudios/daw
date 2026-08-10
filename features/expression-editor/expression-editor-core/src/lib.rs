@@ -1276,7 +1276,8 @@ pub fn content_of(doc: &ExpressionDoc) -> Content {
 }
 
 /// What the bottom lane strip displays.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, facet::Facet)]
 pub enum StripLane {
     /// Per-note velocity, drawn as stems.
     Velocity,

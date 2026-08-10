@@ -39,7 +39,7 @@
 use daw::service::ExtState;
 use daw::service::ProjectContext;
 use daw::service::ext_state::side_store;
-use expression_editor_core::Mode;
+use expression_editor_core::{CcDisplay, Dimension, Editor, Mode, StripLane, Tuning, tuning};
 use facet::Facet;
 
 /// The namespace the expression editor stores under.
@@ -57,6 +57,88 @@ pub struct ModeOverride {
     pub mode: Mode,
 }
 
+/// A tuning, stored by preset name.
+///
+/// `Temperament` holds `&'static str` and a table of offsets, so it
+/// cannot round-trip by value. Storing the name means a preset whose
+/// offsets are corrected in a later build takes effect — which is what
+/// you want from a preset — and an unknown name falls back to the
+/// default rather than to a guessed tuning.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct TuningRef {
+    pub temperament: String,
+    pub key_pc: i32,
+    pub snap_12tet: bool,
+}
+
+impl TuningRef {
+    pub fn of(t: &Tuning) -> Self {
+        Self {
+            temperament: t.temperament.name.to_string(),
+            key_pc: t.key_pc,
+            snap_12tet: t.snap_12tet,
+        }
+    }
+
+    pub fn resolve(&self) -> Tuning {
+        let mut out = Tuning::default();
+        if let Some(t) = tuning::by_name(&self.temperament) {
+            out.temperament = t.clone();
+        }
+        out.key_pc = self.key_pc;
+        out.snap_12tet = self.snap_12tet;
+        out
+    }
+}
+
+/// How one take was being *looked at*.
+///
+/// Everything here answers yes to #192's test — a collaborator opening
+/// the project wants it exactly as you left it. Notably absent, and
+/// deliberately: the camera and the viewport. Where you were scrolled in
+/// this song is yours and resets on open.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct TakeView {
+    pub guid: String,
+    pub dimension: Dimension,
+    pub overlays: Vec<Dimension>,
+    pub strip_lane: StripLane,
+    /// Project state, not a habit: lane strip height travels with the
+    /// song. (The lanes-visible *count* is the preference; this is not.)
+    pub lane_strip_h: f64,
+    pub cc_display: CcDisplay,
+    pub tuning: TuningRef,
+}
+
+impl TakeView {
+    /// Capture the parts of an editor that travel with the project.
+    pub fn capture(guid: impl Into<String>, ed: &Editor) -> Self {
+        Self {
+            guid: guid.into(),
+            dimension: ed.dimension,
+            overlays: ed.overlays.clone(),
+            strip_lane: ed.strip_lane,
+            lane_strip_h: ed.lane_strip_h,
+            cc_display: ed.cc_display,
+            tuning: TuningRef::of(&ed.tuning),
+        }
+    }
+
+    /// Restore them, leaving everything ephemeral alone.
+    ///
+    /// Camera, selection, razor, clipboard, playhead and the momentary
+    /// toggles are untouched here *on purpose*: restoring a selection
+    /// the user did not make is a hazard, not a convenience.
+    pub fn apply(&self, ed: &mut Editor) {
+        ed.dimension = self.dimension;
+        ed.overlays = self.overlays.clone();
+        ed.strip_lane = self.strip_lane;
+        ed.lane_strip_h = self.lane_strip_h;
+        ed.cc_display = self.cc_display;
+        ed.tuning = self.tuning.resolve();
+    }
+}
+
 /// Everything about a project that the editor persists.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct EditorState {
@@ -66,6 +148,8 @@ pub struct EditorState {
     pub track_modes: Vec<ModeOverride>,
     /// Take-level corrections, which beat the track's.
     pub take_modes: Vec<ModeOverride>,
+    /// How each take was being looked at.
+    pub take_views: Vec<TakeView>,
 }
 
 impl Default for EditorState {
@@ -74,6 +158,7 @@ impl Default for EditorState {
             version: CURRENT_VERSION,
             track_modes: Vec::new(),
             take_modes: Vec::new(),
+            take_views: Vec::new(),
         }
     }
 }
@@ -108,9 +193,22 @@ impl EditorState {
         self.take_modes.retain(|o| o.guid != take_guid);
     }
 
+    /// The stored view for a take, if it has one.
+    pub fn view_for(&self, take_guid: &str) -> Option<&TakeView> {
+        self.take_views.iter().find(|v| v.guid == take_guid)
+    }
+
+    /// Record how a take is being looked at.
+    pub fn set_view(&mut self, view: TakeView) {
+        match self.take_views.iter_mut().find(|v| v.guid == view.guid) {
+            Some(existing) => *existing = view,
+            None => self.take_views.push(view),
+        }
+    }
+
     /// Whether anything here is worth writing.
     pub fn is_empty(&self) -> bool {
-        self.track_modes.is_empty() && self.take_modes.is_empty()
+        self.track_modes.is_empty() && self.take_modes.is_empty() && self.take_views.is_empty()
     }
 }
 
