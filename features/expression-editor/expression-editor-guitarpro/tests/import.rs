@@ -21,6 +21,7 @@ fn note(string: usize, fret: i32, start: f64, len: f64) -> GpNote {
         length: len,
         bend: Vec::new(),
         prebend: false,
+        articulation: None,
     }
 }
 
@@ -262,4 +263,23 @@ fn any_gp_fixture_present_imports() {
     if seen > 0 {
         eprintln!("imported {seen} Guitar Pro fixture(s)");
     }
+}
+
+// ── Articulations ────────────────────────────────────────────────────
+
+#[test]
+fn an_articulation_reaches_the_note() {
+    use expression_editor_core::rows::Articulation;
+    let mut n = note(0, 3, 0.0, 960.0);
+    n.articulation = Some(Articulation::PalmMute);
+    let out = to_document(&[n], standard());
+    assert_eq!(out.doc.notes[0].articulation, Some(Articulation::PalmMute));
+}
+
+#[test]
+fn a_plainly_picked_note_carries_none_rather_than_sustain() {
+    // "The file said nothing" has to stay distinguishable from "the
+    // file said let-ring".
+    let out = to_document(&[note(0, 3, 0.0, 960.0)], standard());
+    assert_eq!(out.doc.notes[0].articulation, None);
 }

@@ -32,7 +32,7 @@
 pub mod parse;
 
 use expression_editor_core::doc::{Curve, Dimension, ExpressionDoc, Note, NoteId, Point, TimeBase};
-use expression_editor_core::rows::{RowSpace, StringTuning};
+use expression_editor_core::rows::{Articulation, RowSpace, StringTuning};
 
 /// How much of a bend's shape survived the import.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -88,6 +88,12 @@ pub struct GpNote {
     /// first point is the *sounding* pitch rather than a departure from
     /// the fretted one.
     pub prebend: bool,
+    /// How the note is played, when the file says.
+    ///
+    /// The editor's own vocabulary, not the library's: GP's flags are
+    /// several booleans and a slide list, and collapsing them here keeps
+    /// the dependency's shape out of the document.
+    pub articulation: Option<Articulation>,
 }
 
 /// Convert a GP bend point list to a curve in semitones over document
@@ -143,6 +149,7 @@ pub fn to_document(notes: &[GpNote], tuning: StringTuning) -> Imported {
             gp.string as i32,
         );
         note.channel = Some(gp.string as u8);
+        note.articulation = gp.articulation;
 
         if !gp.bend.is_empty() {
             *note.curve_mut(Dimension::Pitch) = bend_curve(&gp.bend, gp.length);
