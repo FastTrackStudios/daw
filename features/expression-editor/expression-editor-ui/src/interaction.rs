@@ -4,7 +4,7 @@
 //! here is a plain function over `&mut Editor`, and the component just
 //! routes events into them.
 
-use expression_editor_core::doc::{Lane, NoteId, Point, Target};
+use expression_editor_core::doc::{Dimension, NoteId, Point, Target};
 use expression_editor_core::edit::Edit;
 use expression_editor_core::handles::{self, Handle};
 use expression_editor_core::menu::Command;
@@ -99,14 +99,14 @@ pub enum Drag {
         last_cell: Option<(i64, i32)>,
         snap: bool,
     },
-    /// Freehand drawing into a pinned controller lane.
+    /// Freehand drawing into a pinned controller dimension.
     CcPen {
         number: u8,
         /// Previous sample, so a fast drag interpolates instead of
         /// leaving a staircase.
         last: Option<(f64, f64)>,
     },
-    /// A shaped ramp across a controller lane. Like [`Drag::Curve`] it
+    /// A shaped ramp across a controller dimension. Like [`Drag::Curve`] it
     /// survives release, so the toolbar's shape buttons restyle the
     /// stroke you just drew instead of the one before it.
     CcLine {
@@ -114,7 +114,7 @@ pub enum Drag {
         start: (f64, f64),
         current: (f64, f64),
     },
-    /// Sweeping a controller lane back to its default.
+    /// Sweeping a controller dimension back to its default.
     CcErase {
         number: u8,
         start_t: f64,
@@ -129,7 +129,7 @@ pub enum Drag {
         number: u8,
         t0: f64,
         t1: f64,
-        /// The lane's points as they were when the gesture opened.
+        /// The dimension's points as they were when the gesture opened.
         base: Vec<Point>,
         /// Widest range the drag has covered, so shrinking it back
         /// restores what the wider sweep had already scaled.
@@ -198,7 +198,7 @@ impl Drag {
     }
 
     /// The controller ramp the shape buttons target, same contract as
-    /// [`Drag::live_curve`] but for a CC lane.
+    /// [`Drag::live_curve`] but for a CC dimension.
     pub fn live_cc_line(&self) -> Option<(u8, f64, f64)> {
         match self {
             Drag::CcLine {
@@ -217,7 +217,7 @@ const CC_EVENT_PX: f64 = 5.0;
 /// Which mouse-modifier context `(x, y)` falls in.
 ///
 /// CC edit mode outranks everything: while it is on, the roll *is* that
-/// controller's lane, so the razor and the notes behind it are not what
+/// controller's dimension, so the razor and the notes behind it are not what
 /// the pointer is addressing.
 ///
 /// Razor areas outrank notes: once you have drawn a rectangle, dragging
@@ -228,7 +228,7 @@ pub fn context_at(ed: &Editor, x: f64, y: f64) -> Context {
     let row = ed.camera.pitch_at(y, ed.viewport).round() as i32;
 
     if let Some(number) = ed.cc_edit {
-        // Near the existing curve is `CcEvent`, open lane is `CcLane` —
+        // Near the existing curve is `CcEvent`, open dimension is `CcLane` —
         // the same distinction REAPER draws, so a mouse map written for
         // REAPER lands on the right binding without translation.
         let on_curve = ed
@@ -520,7 +520,7 @@ fn run_action(
             Some(Drag::None)
         }
         // ── controller lanes ─────────────────────────────────────────
-        // All four need a lane to act on. Outside CC edit mode there is
+        // All four need a dimension to act on. Outside CC edit mode there is
         // no active controller, so they fall through to the tool path
         // rather than inventing one.
         Action::EditCcEvents => {
@@ -723,18 +723,18 @@ fn handle_press(ed: &mut Editor, x: f64, y: f64, mods: Mods, gesture: Gesture) -
 /// own mean is what makes a factor of 0 flatten a swell to its average
 /// level instead of dropping it to silence.
 fn cc_mean(ed: &Editor, number: u8, t0: f64, t1: f64) -> f64 {
-    let Some(lane) = ed.doc.cc.get(number) else {
+    let Some(dimension) = ed.doc.cc.get(number) else {
         return 0.0;
     };
-    let default = lane.default_value();
+    let default = dimension.default_value();
     if (t1 - t0).abs() < f64::EPSILON {
-        return lane.curve.sample(t0, default);
+        return dimension.curve.sample(t0, default);
     }
     const STEPS: usize = 32;
     let sum: f64 = (0..=STEPS)
         .map(|i| {
             let f = i as f64 / STEPS as f64;
-            lane.curve.sample(t0 + (t1 - t0) * f, default)
+            dimension.curve.sample(t0 + (t1 - t0) * f, default)
         })
         .sum();
     sum / (STEPS + 1) as f64
@@ -856,10 +856,10 @@ fn paint_at(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64) {
     }
     let id = ed.doc.mint_id();
     let mut note = expression_editor_core::Note::new(id, start, end, row.clamp(0, 127));
-    for lane in Lane::ALL {
-        let v = lane.default_value();
-        note.lane_mut(lane).set(start, v);
-        note.lane_mut(lane).set(end, v);
+    for dimension in Dimension::ALL {
+        let v = dimension.default_value();
+        note.curve_mut(dimension).set(start, v);
+        note.curve_mut(dimension).set(end, v);
     }
     ed.apply_live(&Edit::AddNote(Box::new(note)));
 }
@@ -1053,10 +1053,10 @@ fn begin_new_note(ed: &mut Editor, x: f64, y: f64, mods: Mods) -> Drag {
     let mut note = expression_editor_core::Note::new(id, start, end, row.clamp(0, 127));
     // A new note is playable immediately: centered pitch, MPE-default
     // pressure and timbre across its full length.
-    for lane in Lane::ALL {
-        let v = lane.default_value();
-        note.lane_mut(lane).set(start, v);
-        note.lane_mut(lane).set(end, v);
+    for dimension in Dimension::ALL {
+        let v = dimension.default_value();
+        note.curve_mut(dimension).set(start, v);
+        note.curve_mut(dimension).set(end, v);
     }
     ed.begin_gesture();
     ed.apply_live(&Edit::AddNote(Box::new(note)));
@@ -1108,9 +1108,9 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             for &id in notes.iter() {
                 let Some(n) = ed.doc.note(id) else { continue };
                 let (s, e) = n.target_span();
-                ed.apply_live(&Edit::EraseLane {
+                ed.apply_live(&Edit::EraseDimension {
                     note: id,
-                    lane: ed.lane,
+                    dimension: ed.dimension,
                     t0: t0.max(s),
                     t1: t1.min(e),
                 });
@@ -1188,9 +1188,9 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                     Target::Zone(_) => vec![n.target_span()],
                 };
                 for (t0, t1) in spans {
-                    ed.apply_live(&Edit::ScaleLane {
+                    ed.apply_live(&Edit::ScaleDimension {
                         note: id,
-                        lane: ed.lane,
+                        dimension: ed.dimension,
                         t0,
                         t1,
                         factor: relative,
@@ -1484,7 +1484,7 @@ fn write_pen(
     samples: &[(f64, f64)],
     mods: Mods,
 ) {
-    let lane = ed.lane;
+    let dimension = ed.dimension;
     let start_t = ed.camera.t_at(start.0);
     for &id in notes {
         let Some(n) = ed.doc.note(id) else { continue };
@@ -1495,10 +1495,10 @@ fn write_pen(
             .iter()
             .map(|&(x, y)| {
                 let t = ed.camera.t_at(x).clamp(span0, span1);
-                let value = match lane {
+                let value = match dimension {
                     // Pitch drawing snaps to semitones unless shift is
                     // held for continuous pitch.
-                    Lane::Pitch => {
+                    Dimension::Pitch => {
                         let p = ed.camera.pitch_at(y, ed.viewport);
                         let p = if mods.shift {
                             p
@@ -1511,16 +1511,16 @@ fn write_pen(
                 };
                 Point {
                     t,
-                    value: lane.clamp(value),
+                    value: dimension.clamp(value),
                 }
             })
             .collect();
 
         let (t0, t1) = gesture_bounds(&points);
         let (t0, t1) = tools::clamp_gesture((span0, span1), start_t, t0, t1);
-        ed.apply_live(&Edit::DrawLane {
+        ed.apply_live(&Edit::DrawDimension {
             note: id,
-            lane,
+            dimension,
             t0,
             t1,
             points,
@@ -1537,7 +1537,7 @@ fn write_curve(
     shape: Shape,
 ) {
     const SAMPLES: usize = 48;
-    let lane = ed.lane;
+    let dimension = ed.dimension;
     let start_t = ed.camera.t_at(start.0);
     for &id in notes {
         let Some(n) = ed.doc.note(id) else { continue };
@@ -1545,8 +1545,8 @@ fn write_curve(
         let row = n.row;
 
         let value_at = |y: f64| -> f64 {
-            match lane {
-                Lane::Pitch => ed.camera.pitch_at(y, ed.viewport) - row as f64,
+            match dimension {
+                Dimension::Pitch => ed.camera.pitch_at(y, ed.viewport) - row as f64,
                 _ => tools::lane_box_value(&ed.camera, ed.viewport, row, y),
             }
         };
@@ -1566,13 +1566,13 @@ fn write_curve(
                 let f = i as f64 / (SAMPLES - 1) as f64;
                 Point {
                     t: t0 + (t1 - t0) * f,
-                    value: lane.clamp(from + (to - from) * shape.amount(f)),
+                    value: dimension.clamp(from + (to - from) * shape.amount(f)),
                 }
             })
             .collect();
-        ed.apply_live(&Edit::DrawLane {
+        ed.apply_live(&Edit::DrawDimension {
             note: id,
-            lane,
+            dimension,
             t0,
             t1,
             points,
@@ -1614,9 +1614,9 @@ pub fn apply_shape(ed: &mut Editor, drag: &Drag, shape: Shape) {
                 ed.camera.t_at(x0),
                 ed.camera.t_at(x1),
             );
-            ed.apply_live(&Edit::ReshapeLane {
+            ed.apply_live(&Edit::ReshapeDimension {
                 note: id,
-                lane: ed.lane,
+                dimension: ed.dimension,
                 t0,
                 t1,
                 shape,
@@ -1634,9 +1634,9 @@ pub fn apply_shape(ed: &mut Editor, drag: &Drag, shape: Shape) {
     for id in notes {
         let Some(n) = ed.doc.note(id) else { continue };
         let (t0, t1) = n.target_span();
-        ed.apply_live(&Edit::ReshapeLane {
+        ed.apply_live(&Edit::ReshapeDimension {
             note: id,
-            lane: ed.lane,
+            dimension: ed.dimension,
             t0,
             t1,
             shape,

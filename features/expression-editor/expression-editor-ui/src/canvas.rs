@@ -5,7 +5,7 @@
 //! asserted in tests without mounting a DOM, and it keeps the component
 //! body about events rather than arithmetic.
 
-use expression_editor_core::doc::{Lane, Note, NoteId};
+use expression_editor_core::doc::{Dimension, Note, NoteId};
 use expression_editor_core::handles;
 use expression_editor_core::tools;
 use expression_editor_core::{Editor, RefColor};
@@ -603,7 +603,7 @@ fn note_amplitude(n: &Note, f: f64, t: f64) -> f64 {
     if !n.pressure.is_empty() {
         return n
             .pressure
-            .sample(t, Lane::Pressure.default_value())
+            .sample(t, Dimension::Pressure.default_value())
             .clamp(0.0, 1.0);
     }
     n.weight.clamp(0.0, 1.0)
@@ -689,14 +689,14 @@ pub fn note_ribbon(ed: &Editor, n: &Note) -> Option<String> {
 /// A rendered expression curve.
 pub struct CurvePath {
     pub note: NoteId,
-    pub lane: Lane,
+    pub dimension: Dimension,
     pub points: String,
     pub color: &'static str,
     pub active: bool,
     pub selected: bool,
 }
 
-/// Polyline paths for every visible note on every drawn lane, back to
+/// Polyline paths for every visible note on every drawn dimension, back to
 /// front.
 ///
 /// Pitch uses the full piano-roll height; Pressure and Timbre are
@@ -705,17 +705,17 @@ pub struct CurvePath {
 pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
     let (t0, t1) = ed.camera.time_span(ed.viewport);
     let mut out = Vec::new();
-    // On a string roll the pitch lane belongs to `guitar::flow_paths`,
+    // On a string roll the pitch dimension belongs to `guitar::flow_paths`,
     // which draws it as the string lifting off its row rather than as a
     // thin expression polyline. Drawing both would double the line.
     let strings = matches!(ed.row_space, expression_editor_core::RowSpace::Strings(_));
-    for lane in ed.draw_order() {
-        if strings && lane == Lane::Pitch {
+    for dimension in ed.draw_order() {
+        if strings && dimension == Dimension::Pitch {
             continue;
         }
-        let active = lane == ed.lane;
+        let active = dimension == ed.dimension;
         for n in ed.doc.notes.iter().filter(|n| n.end >= t0 && n.start <= t1) {
-            let curve = n.lane(lane);
+            let curve = n.curve(dimension);
             if curve.is_empty() {
                 continue;
             }
@@ -724,7 +724,7 @@ pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
             // through a sibilant is the single most misleading thing
             // this surface could show — the manual makes the same
             // point: no pitch track *means* unvoiced.
-            let break_unvoiced = lane == Lane::Pitch && ed.mode.draws_blobs();
+            let break_unvoiced = dimension == Dimension::Pitch && ed.mode.draws_blobs();
             // A curve is in semitones; a row is only a semitone in pitch
             // space. See `RowSpace::semitones_per_row`.
             let spr = ed.row_space.semitones_per_row();
@@ -736,8 +736,8 @@ pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
                     continue;
                 }
                 let x = ed.camera.x(p.t);
-                let y = match lane {
-                    Lane::Pitch => ed.camera.y(n.row as f64 + p.value / spr, ed.viewport),
+                let y = match dimension {
+                    Dimension::Pitch => ed.camera.y(n.row as f64 + p.value / spr, ed.viewport),
                     _ => tools::lane_box_y(&ed.camera, ed.viewport, n.row, p.value),
                 };
                 // A polyline cannot express a gap, so a run that
@@ -746,9 +746,9 @@ pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
                 if !prev_voiced && !s.is_empty() {
                     out.push(CurvePath {
                         note: n.id,
-                        lane,
+                        dimension,
                         points: core::mem::take(&mut s),
-                        color: track_color(ed, lane),
+                        color: track_color(ed, dimension),
                         active,
                         selected: ed.selection.contains(n.id),
                     });
@@ -761,9 +761,9 @@ pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
             }
             out.push(CurvePath {
                 note: n.id,
-                lane,
+                dimension,
                 points: s,
-                color: track_color(ed, lane),
+                color: track_color(ed, dimension),
                 active,
                 selected: ed.selection.contains(n.id),
             });
@@ -777,16 +777,16 @@ fn is_unvoiced(ed: &Editor, t: f64) -> bool {
     ed.doc.unvoiced.iter().any(|(a, b)| t >= *a && t <= *b)
 }
 
-/// On the audio surface the pitch track is white, not the lane's hue.
+/// On the audio surface the pitch track is white, not the dimension's hue.
 ///
 /// It is the one line that has to stay legible over a body whose colour
 /// is already saying something else — how far out of tune the note is —
 /// and a coloured track competes with that reading.
-fn track_color(ed: &Editor, lane: Lane) -> &'static str {
-    if lane == Lane::Pitch && ed.mode.draws_blobs() {
+fn track_color(ed: &Editor, dimension: Dimension) -> &'static str {
+    if dimension == Dimension::Pitch && ed.mode.draws_blobs() {
         theme::PITCH_TRACK
     } else {
-        theme::lane_color(lane)
+        theme::lane_color(dimension)
     }
 }
 
@@ -799,7 +799,7 @@ pub struct LaneBox {
 }
 
 pub fn lane_boxes(ed: &Editor) -> Vec<LaneBox> {
-    if ed.lane == Lane::Pitch {
+    if ed.dimension == Dimension::Pitch {
         return Vec::new();
     }
     ed.doc
@@ -865,7 +865,7 @@ pub struct ZoneGuide {
 }
 
 pub fn zone_guides(ed: &Editor) -> Vec<ZoneGuide> {
-    if ed.lane != Lane::Pitch {
+    if ed.dimension != Dimension::Pitch {
         return Vec::new();
     }
     let mut out = Vec::new();
@@ -912,7 +912,7 @@ pub fn keyboard(ed: &Editor) -> Vec<Key> {
     let (lo, hi) = ed.camera.pitch_span(ed.viewport);
     let h = ed.camera.px_per_semitone;
     let (rlo, rhi) = ed.row_space.bounds();
-    // Named rows always carry their label — a drum lane called nothing
+    // Named rows always carry their label — a drum dimension called nothing
     // is unusable, where an unlabelled piano key can still be counted.
     let named = !matches!(ed.row_space, expression_editor_core::RowSpace::Pitch);
     let label_rows = h >= 8.0;
@@ -1016,7 +1016,7 @@ pub fn razor_rects(ed: &Editor) -> Vec<RazorRect> {
         .collect()
 }
 
-// ── velocity / CC lane strip ─────────────────────────────────────────
+// ── velocity / CC dimension strip ─────────────────────────────────────────
 
 /// One note's velocity stem in the strip.
 pub struct Stem {
@@ -1074,36 +1074,36 @@ pub fn stems(ed: &Editor, h: f64) -> Vec<Stem> {
         .collect()
 }
 
-/// The strip's continuous-lane curve, when it is showing one.
+/// The strip's continuous-dimension curve, when it is showing one.
 ///
 /// Every visible note's curve is drawn end to end, normalized into the
 /// strip — so a Pressure sweep reads as one gesture across the phrase
 /// rather than as a set of disconnected per-note boxes.
 pub fn strip_curves(ed: &Editor, h: f64) -> Vec<CurvePath> {
     use expression_editor_core::StripLane;
-    let StripLane::Expression(lane) = ed.strip_lane else {
+    let StripLane::Expression(dimension) = ed.strip_lane else {
         return Vec::new();
     };
     let (t0, t1) = ed.camera.time_span(ed.viewport);
-    let (lo, hi) = match lane {
-        Lane::Pitch => (-2.0, 2.0),
+    let (lo, hi) = match dimension {
+        Dimension::Pitch => (-2.0, 2.0),
         _ => (0.0, 1.0),
     };
     ed.doc
         .notes
         .iter()
-        .filter(|n| n.end >= t0 && n.start <= t1 && !n.lane(lane).is_empty())
+        .filter(|n| n.end >= t0 && n.start <= t1 && !n.curve(dimension).is_empty())
         .map(|n| {
             let mut s = String::new();
-            for p in n.lane(lane).points() {
+            for p in n.curve(dimension).points() {
                 let y = h * (1.0 - ((p.value - lo) / (hi - lo)).clamp(0.0, 1.0));
                 s.push_str(&format!("{:.1},{y:.1} ", ed.camera.x(p.t)));
             }
             CurvePath {
                 note: n.id,
-                lane,
+                dimension,
                 points: s,
-                color: theme::lane_color(lane),
+                color: theme::lane_color(dimension),
                 active: true,
                 selected: ed.selection.contains(n.id),
             }
@@ -1123,7 +1123,7 @@ pub fn strip_guides(h: f64) -> Vec<(f64, bool)> {
 
 // ── pinned controller lanes ──────────────────────────────────────────
 
-/// A controller lane ready to draw behind the roll.
+/// A controller dimension ready to draw behind the roll.
 pub struct CcPath {
     pub number: u8,
     pub label: String,
@@ -1139,7 +1139,7 @@ pub struct CcPath {
 /// Pinned lanes, spanning the full roll height.
 ///
 /// The curve is sampled at the visible edges as well as at its own
-/// points, so a lane whose last authored value is off-screen still
+/// points, so a dimension whose last authored value is off-screen still
 /// draws across the whole view instead of stopping mid-canvas.
 pub fn cc_paths(ed: &Editor) -> Vec<CcPath> {
     let (t0, t1) = ed.camera.time_span(ed.viewport);
@@ -1149,13 +1149,13 @@ pub fn cc_paths(ed: &Editor) -> Vec<CcPath> {
     ed.doc
         .cc
         .pinned()
-        .map(|lane| {
-            let active = ed.cc_edit == Some(lane.number);
-            let default = lane.default_value();
+        .map(|dimension| {
+            let active = ed.cc_edit == Some(dimension.number);
+            let default = dimension.default_value();
 
             let mut ts: Vec<f64> = vec![t0];
             ts.extend(
-                lane.curve
+                dimension.curve
                     .points()
                     .iter()
                     .map(|p| p.t)
@@ -1165,7 +1165,7 @@ pub fn cc_paths(ed: &Editor) -> Vec<CcPath> {
 
             let mut line = String::new();
             for &t in &ts {
-                let v = lane.curve.sample(t, default);
+                let v = dimension.curve.sample(t, default);
                 line.push_str(&format!(
                     "{:.1},{:.1} ",
                     ed.camera.x(t),
@@ -1183,10 +1183,10 @@ pub fn cc_paths(ed: &Editor) -> Vec<CcPath> {
             );
 
             CcPath {
-                number: lane.number,
-                label: lane.label(),
+                number: dimension.number,
+                label: dimension.label(),
                 color: expression_editor_core::cc::CC_COLORS
-                    [lane.color % expression_editor_core::cc::CC_COLORS.len()],
+                    [dimension.color % expression_editor_core::cc::CC_COLORS.len()],
                 points: line,
                 fill,
                 opacity: if active {

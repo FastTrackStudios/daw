@@ -10,7 +10,7 @@
 //! curve, byte-for-byte.
 
 use dioxus::prelude::*;
-use expression_editor_core::doc::{Lane, NoteId, Point};
+use expression_editor_core::doc::{Dimension, NoteId, Point};
 use expression_editor_core::edit::Edit;
 use expression_editor_core::modulation::{CurveTarget, Row, Stack, Wave};
 use expression_editor_core::{Editor, Shape};
@@ -24,9 +24,9 @@ pub struct ModDrawer {
     pub open: bool,
     pub stack: Stack,
     pub selected_row: Option<usize>,
-    /// Captured target: note, lane, span.
-    target: Option<(NoteId, Lane, f64, f64)>,
-    /// The lane's exact points before the drawer touched anything.
+    /// Captured target: note, dimension, span.
+    target: Option<(NoteId, Dimension, f64, f64)>,
+    /// The dimension's exact points before the drawer touched anything.
     captured: Vec<Point>,
     pub taper: f64,
 }
@@ -42,8 +42,8 @@ impl ModDrawer {
             return false;
         };
         let (t0, t1) = n.target_span();
-        self.target = Some((id, ed.lane, t0, t1));
-        self.captured = n.lane(ed.lane).points().to_vec();
+        self.target = Some((id, ed.dimension, t0, t1));
+        self.captured = n.curve(ed.dimension).points().to_vec();
         self.stack = Stack::growing_vibrato();
         self.selected_row = Some(0);
         self.taper = 0.08;
@@ -51,26 +51,26 @@ impl ModDrawer {
         true
     }
 
-    pub fn target(&self) -> Option<(NoteId, Lane, f64, f64)> {
+    pub fn target(&self) -> Option<(NoteId, Dimension, f64, f64)> {
         self.target
     }
 
     /// Rewrite the preview from the captured curve — restore first, then
     /// modulate, so successive control moves never compound.
     pub fn preview(&self, ed: &mut Editor) {
-        let Some((note, lane, t0, t1)) = self.target else {
+        let Some((note, dimension, t0, t1)) = self.target else {
             return;
         };
-        ed.apply_live(&Edit::RestoreLane {
+        ed.apply_live(&Edit::RestoreDimension {
             note,
-            lane,
+            dimension,
             t0,
             t1,
             points: self.captured.clone(),
         });
         ed.apply_live(&Edit::ApplyModulation {
             note,
-            lane,
+            dimension,
             t0,
             t1,
             stack: self.stack.clone(),
@@ -81,21 +81,21 @@ impl ModDrawer {
 
     /// Commit as one undo step.
     pub fn apply(&mut self, ed: &mut Editor) {
-        let Some((note, lane, t0, t1)) = self.target else {
+        let Some((note, dimension, t0, t1)) = self.target else {
             return;
         };
         // Rewind to captured *without* history, then apply once through
         // it — so undo lands on the pre-drawer curve, not on a preview.
-        ed.apply_live(&Edit::RestoreLane {
+        ed.apply_live(&Edit::RestoreDimension {
             note,
-            lane,
+            dimension,
             t0,
             t1,
             points: self.captured.clone(),
         });
         ed.apply(&Edit::ApplyModulation {
             note,
-            lane,
+            dimension,
             t0,
             t1,
             stack: self.stack.clone(),
@@ -106,10 +106,10 @@ impl ModDrawer {
     }
 
     pub fn cancel(&mut self, ed: &mut Editor) {
-        if let Some((note, lane, t0, t1)) = self.target {
-            ed.apply_live(&Edit::RestoreLane {
+        if let Some((note, dimension, t0, t1)) = self.target {
+            ed.apply_live(&Edit::RestoreDimension {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 points: self.captured.clone(),
@@ -265,7 +265,7 @@ pub fn ModulationDrawer(editor: Signal<Editor>, drawer: Signal<ModDrawer>) -> El
                                 polyline {
                                     points: "{row_preview(row, 60.0, 20.0)}",
                                     fill: "none",
-                                    stroke: theme::lane_color(Lane::Pitch),
+                                    stroke: theme::lane_color(Dimension::Pitch),
                                     stroke_width: "1.2",
                                 }
                             }

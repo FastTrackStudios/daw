@@ -25,7 +25,7 @@
 //! handles scope-aware from the start means temporary notes are a
 //! different *argument*, not a different code path.
 
-use crate::doc::{Lane, Note};
+use crate::doc::{Dimension, Note};
 
 /// Which handle a press landed on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -68,18 +68,18 @@ impl Handle {
         }
     }
 
-    /// Which lane the handle writes to, where it writes to one.
+    /// Which dimension the handle writes to, where it writes to one.
     ///
-    /// Pitch, fine pitch and both slopes all shape the Pitch lane;
+    /// Pitch, fine pitch and both slopes all shape the Pitch dimension;
     /// vibrato rewrites it through the decomposition rather than
-    /// directly, so it has no single lane in this sense.
-    pub fn lane(&self) -> Option<Lane> {
+    /// directly, so it has no single dimension in this sense.
+    pub fn dimension(&self) -> Option<Dimension> {
         match self {
             Handle::Pitch | Handle::FinePitch | Handle::LeftSlope | Handle::RightSlope => {
-                Some(Lane::Pitch)
+                Some(Dimension::Pitch)
             }
-            Handle::Formant => Some(Lane::Timbre),
-            Handle::Amplitude => Some(Lane::Pressure),
+            Handle::Formant => Some(Dimension::Timbre),
+            Handle::Amplitude => Some(Dimension::Pressure),
             Handle::Vibrato => None,
         }
     }
@@ -271,12 +271,12 @@ impl HandleDrag {
         }
     }
 
-    /// The captured curve for a lane.
-    pub fn base_of(&self, lane: Lane) -> &Curve {
-        match lane {
-            Lane::Pitch => &self.base[0],
-            Lane::Timbre => &self.base[1],
-            Lane::Pressure => &self.base[2],
+    /// The captured curve for a dimension.
+    pub fn base_of(&self, dimension: Dimension) -> &Curve {
+        match dimension {
+            Dimension::Pitch => &self.base[0],
+            Dimension::Timbre => &self.base[1],
+            Dimension::Pressure => &self.base[2],
         }
     }
 
@@ -301,8 +301,8 @@ pub fn drag_range(handle: Handle) -> f64 {
         Handle::Pitch => 24.0,
         Handle::FinePitch => 2.0,
         Handle::LeftSlope | Handle::RightSlope => 12.0,
-        // The lane handles are 0..1 normalized, so a full drag is the
-        // full lane either way from where it started.
+        // The dimension handles are 0..1 normalized, so a full drag is the
+        // full dimension either way from where it started.
         Handle::Formant | Handle::Amplitude => 1.0,
         // Vibrato blends 0..2: silent to twice as deep.
         Handle::Vibrato => 2.0,

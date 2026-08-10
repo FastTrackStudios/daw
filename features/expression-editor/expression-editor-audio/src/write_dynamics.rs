@@ -35,13 +35,13 @@ pub struct DynamicsWritten {
 }
 
 impl AudioSession {
-    /// Write the lane sum as the take's volume envelope.
+    /// Write the dimension sum as the take's volume envelope.
     ///
     /// Replaces whatever was there: the envelope is *derived* from the
     /// lanes, so merging with a previous version would accumulate one
     /// pass on top of another and the gain would creep every time.
     ///
-    /// With every lane off, the envelope is cleared rather than written
+    /// With every dimension off, the envelope is cleared rather than written
     /// flat at unity — dead automation on an item is something the user
     /// then has to find and delete.
     pub fn write_dynamics<D>(

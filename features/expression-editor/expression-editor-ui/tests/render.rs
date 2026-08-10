@@ -6,7 +6,7 @@
 //! this asserts the view actually reaches the screen.
 
 use dioxus::prelude::*;
-use expression_editor_core::doc::{ExpressionDoc, Lane, Note, NoteId, TimeBase};
+use expression_editor_core::doc::{ExpressionDoc, Dimension, Note, NoteId, TimeBase};
 use expression_editor_core::{Editor, Viewport};
 use expression_editor_ui::ExpressionEditor;
 
@@ -68,10 +68,10 @@ fn the_editor_renders_its_toolbar_canvas_and_status_bar() {
     assert!(html.contains("Reset view (V)"), "view controls");
     assert!(html.contains("12TET"), "tuning moved to the status bar");
     assert!(html.contains("Chord"), "the chord box renders");
-    // Lane controls.
-    for lane in Lane::ALL {
-        let label = expression_editor_ui::theme::lane_label(lane);
-        assert!(html.contains(label), "missing lane control: {label}");
+    // Dimension controls.
+    for dimension in Dimension::ALL {
+        let label = expression_editor_ui::theme::lane_label(dimension);
+        assert!(html.contains(label), "missing dimension control: {label}");
     }
     assert!(
         html.contains("1/16"),

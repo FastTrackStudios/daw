@@ -1,7 +1,7 @@
 //! The analysis ↔ document path, exercised with no audio and no DSP.
 
 use expression_editor_audio::{FORMANT_RANGE, GAIN_RANGE_DB, Span, apply_to, spans, to_doc};
-use expression_editor_core::doc::{Lane, NoteId};
+use expression_editor_core::doc::{Dimension, NoteId};
 use tune_dsp::TrackedNote;
 use tune_dsp::model::{NoteBlob, PitchDoc};
 
@@ -147,8 +147,8 @@ fn the_per_note_trims_round_trip_exactly() {
     // They survive the trip out...
     let n = doc.note(NoteId(1)).unwrap();
     let mid = (n.start + n.end) * 0.5;
-    assert!(n.timbre.sample(mid, Lane::Timbre.default_value()) < 0.5);
-    assert!(n.pressure.sample(mid, Lane::Pressure.default_value()) > 0.5);
+    assert!(n.timbre.sample(mid, Dimension::Timbre.default_value()) < 0.5);
+    assert!(n.pressure.sample(mid, Dimension::Pressure.default_value()) > 0.5);
 
     // ...and come back as the same numbers, not re-derived ones.
     pitch.blobs[0].formant_shift = 0.0;

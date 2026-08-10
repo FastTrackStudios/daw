@@ -146,7 +146,7 @@ fn the_lane_being_edited_can_be_given_extra_room() {
 
 #[test]
 fn every_lane_stays_clickable_however_many_there_are() {
-    // A lane squeezed to nothing cannot be clicked to select, so a user
+    // A dimension squeezed to nothing cannot be clicked to select, so a user
     // cannot get back out of the state they fell into.
     let mut ed = band();
     for i in 0..20 {
@@ -185,7 +185,7 @@ fn hidden_tracks_leave_the_stack_but_keep_their_place() {
     assert_eq!(
         rows.iter().map(|r| r.track).collect::<Vec<_>>(),
         vec![0, 2, 3],
-        "hiding removes a lane without renumbering the others"
+        "hiding removes a dimension without renumbering the others"
     );
     // Still in the workspace, still editable by index.
     assert_eq!(ed.tracks.len(), 4);
@@ -200,7 +200,7 @@ fn a_y_coordinate_resolves_to_the_lane_under_it() {
         let mid = r.y + r.height / 2.0;
         assert_eq!(Workspace::row_at(&rows, mid), Some(r.track));
     }
-    // Just inside the top edge belongs to that lane, not the one above.
+    // Just inside the top edge belongs to that dimension, not the one above.
     for r in &rows {
         assert_eq!(Workspace::row_at(&rows, r.y), Some(r.track));
     }
@@ -215,10 +215,10 @@ fn a_hand_sized_lane_is_not_resized_by_a_mode_change() {
     t.set_mode(Mode::PitchedAudio);
     assert!(
         (t.weight - natural).abs() > f32::EPSILON,
-        "an untouched lane follows its mode"
+        "an untouched dimension follows its mode"
     );
 
     t.weight = 5.0;
     t.set_mode(Mode::UnpitchedAudio);
-    assert_eq!(t.weight, 5.0, "a hand-sized lane keeps its height");
+    assert_eq!(t.weight, 5.0, "a hand-sized dimension keeps its height");
 }

@@ -8,7 +8,7 @@
 //! | audio pitch    | MIDI pitch       | note name  |
 //! | MPE / MIDI     | MIDI pitch       | note name  |
 //! | vocal lyrics   | MIDI pitch       | syllable   |
-//! | drums          | named drum lane  | drum name  |
+//! | drums          | named drum dimension  | drum name  |
 //! | guitar / bass  | **string**       | **fret**   |
 //!
 //! So the row axis is abstracted here rather than hard-coded as pitch.
@@ -106,7 +106,7 @@ impl StringTuning {
     }
 }
 
-/// A named drum lane.
+/// A named drum dimension.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DrumLane {
     pub pitch: i32,
@@ -125,7 +125,7 @@ pub struct DrumMap {
 
 impl DrumMap {
     /// General MIDI, trimmed to the kit pieces people actually
-    /// sequence. A full 47-lane GM map is unusable as a roll.
+    /// sequence. A full 47-dimension GM map is unusable as a roll.
     pub fn general_midi() -> Self {
         let lanes = [
             (35, "Kick 2", None),

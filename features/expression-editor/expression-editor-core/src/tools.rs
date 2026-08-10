@@ -8,7 +8,7 @@
 //! pointer.
 
 use crate::camera::{Camera, Viewport};
-use crate::doc::{ExpressionDoc, Lane, NoteId, Target};
+use crate::doc::{ExpressionDoc, Dimension, NoteId, Target};
 
 /// The active drawing tool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -71,8 +71,8 @@ pub enum Hit {
     NoteEdge { id: NoteId, start_edge: bool },
     /// A Q-zone split handle in the bottom strip or note body.
     ZoneSplit { id: NoteId, index: usize, t: f64 },
-    /// A point on the active lane's curve.
-    CurvePoint { id: NoteId, lane: Lane, t: f64 },
+    /// A point on the active dimension's curve.
+    CurvePoint { id: NoteId, dimension: Dimension, t: f64 },
     /// Empty canvas at this time and pitch.
     Empty { t: f64, pitch: f64 },
 }
@@ -104,7 +104,7 @@ pub fn hit_test(
     doc: &ExpressionDoc,
     camera: &Camera,
     vp: Viewport,
-    lane: Lane,
+    dimension: Dimension,
     x: f64,
     y: f64,
     cfg: HitConfig,
@@ -158,16 +158,16 @@ pub fn hit_test(
         if t < n.start || t > n.end {
             continue;
         }
-        let curve = n.lane(lane);
+        let curve = n.curve(dimension);
         for p in curve.points() {
-            let py = match lane {
-                Lane::Pitch => camera.y(n.row as f64 + p.value, vp),
+            let py = match dimension {
+                Dimension::Pitch => camera.y(n.row as f64 + p.value, vp),
                 _ => lane_box_y(camera, vp, n.row, p.value),
             };
             if (camera.x(p.t) - x).abs() <= cfg.point_px && (py - y).abs() <= cfg.point_px {
                 return Hit::CurvePoint {
                     id: n.id,
-                    lane,
+                    dimension,
                     t: p.t,
                 };
             }
@@ -200,8 +200,8 @@ pub fn lane_box_value(camera: &Camera, vp: Viewport, row: i32, y: f64) -> f64 {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Selection {
     pub notes: Vec<NoteId>,
-    /// `(note, lane, t)` of individually selected points.
-    pub points: Vec<(NoteId, Lane, f64)>,
+    /// `(note, dimension, t)` of individually selected points.
+    pub points: Vec<(NoteId, Dimension, f64)>,
 }
 
 impl Selection {

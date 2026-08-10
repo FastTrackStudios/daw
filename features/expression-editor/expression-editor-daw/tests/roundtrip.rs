@@ -9,7 +9,7 @@ use daw::service::midi::{
     smf, MidiCC, MidiCCCreate, MidiNote, MidiNoteCreate, MidiPitchBend, MidiTakeContent,
     MidiTakeSnapshot,
 };
-use expression_editor_core::doc::Lane;
+use expression_editor_core::doc::Dimension;
 use expression_editor_daw::{to_content, to_doc, write_warnings};
 
 const PPQ: f64 = 960.0;
@@ -198,14 +198,14 @@ fn cc74_becomes_the_timbre_lane_and_other_ccs_become_document_lanes() {
     let doc = to_doc(&snap, 48.0);
     let n = &doc.notes[0];
     assert!(
-        (n.lane(Lane::Timbre).sample(PPQ, 0.0) - 100.0 / 127.0).abs() < 1e-6,
+        (n.curve(Dimension::Timbre).sample(PPQ, 0.0) - 100.0 / 127.0).abs() < 1e-6,
         "CC74 is the MPE timbre dimension"
     );
     // CC11 is a document-level controller, not per-note.
-    let cc11 = doc.cc.get(11).expect("CC11 lane created");
+    let cc11 = doc.cc.get(11).expect("CC11 dimension created");
     assert_eq!(cc11.value(PPQ), 64);
     assert!(cc11.pinned, "the controllers an orchestral part rides show");
-    assert!(doc.cc.get(74).is_none(), "CC74 is not duplicated as a lane");
+    assert!(doc.cc.get(74).is_none(), "CC74 is not duplicated as a dimension");
 }
 
 #[test]

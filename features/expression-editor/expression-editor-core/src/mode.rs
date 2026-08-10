@@ -12,7 +12,7 @@
 
 use crate::mouse::MouseMap;
 use crate::rows::{DrumMap, RowSpace, SliceBands, StringTuning};
-use crate::{Lane, StripLane};
+use crate::{Dimension, StripLane};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum Mode {
@@ -149,7 +149,7 @@ impl Mode {
     /// Whether the per-note expression lanes are meaningful.
     ///
     /// Plain MIDI has no per-note pressure or timbre — showing those
-    /// lane buttons would offer an edit the format cannot carry.
+    /// dimension buttons would offer an edit the format cannot carry.
     pub fn has_expression_lanes(&self) -> bool {
         matches!(self, Mode::Mpe | Mode::PitchedAudio)
     }
@@ -208,9 +208,9 @@ impl Mode {
     }
 
     /// Which expression lanes start visible.
-    pub fn default_overlays(&self) -> Vec<Lane> {
+    pub fn default_overlays(&self) -> Vec<Dimension> {
         if self.has_expression_lanes() {
-            vec![Lane::Pitch]
+            vec![Dimension::Pitch]
         } else {
             Vec::new()
         }
@@ -218,12 +218,12 @@ impl Mode {
 
     pub fn default_strip(&self) -> StripLane {
         match self {
-            Mode::Mpe | Mode::PitchedAudio => StripLane::Expression(Lane::Pressure),
+            Mode::Mpe | Mode::PitchedAudio => StripLane::Expression(Dimension::Pressure),
             _ => StripLane::Velocity,
         }
     }
 
-    /// Natural height of this mode's lane in a stacked view, relative
+    /// Natural height of this mode's dimension in a stacked view, relative
     /// to the other lanes.
     ///
     /// Rough, and meant to be: it encodes how many rows the surface

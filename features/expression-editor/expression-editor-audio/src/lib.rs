@@ -34,7 +34,7 @@
 //! [`to_doc`] and [`apply_to`] are pure functions over snapshots, so
 //! the whole path is testable with no audio, no DSP and no UI.
 
-use expression_editor_core::doc::{ExpressionDoc, Lane, Note, NoteId, TimeBase};
+use expression_editor_core::doc::{ExpressionDoc, Dimension, Note, NoteId, TimeBase};
 use tune_dsp::model::{NoteBlob, PitchDoc, WarpMarker};
 
 pub mod align;
@@ -79,7 +79,7 @@ pub use spans::{Span, unvoiced_spans};
 #[cfg(feature = "daw")]
 pub use write_dynamics::DynamicsWritten;
 
-/// How a per-note trim is stored in a lane.
+/// How a per-note trim is stored in a dimension.
 ///
 /// The lanes are 0..1 normalized, and both trims are signed, so each
 /// needs a range and a centre. These are display ranges, not limits on
@@ -103,7 +103,7 @@ const REFERENCE_BPM: f64 = 120.0;
 /// The formant trim a note carries, in semitones.
 pub fn formant_of(note: &Note, t: f64) -> f64 {
     from_lane(
-        note.timbre.sample(t, Lane::Timbre.default_value()),
+        note.timbre.sample(t, Dimension::Timbre.default_value()),
         FORMANT_RANGE,
     )
 }
@@ -111,12 +111,12 @@ pub fn formant_of(note: &Note, t: f64) -> f64 {
 /// The gain trim a note carries, in dB.
 pub fn gain_of(note: &Note, t: f64) -> f64 {
     from_lane(
-        note.pressure.sample(t, Lane::Pressure.default_value()),
+        note.pressure.sample(t, Dimension::Pressure.default_value()),
         GAIN_RANGE_DB,
     )
 }
 
-/// Encode a signed value into a 0..1 lane position.
+/// Encode a signed value into a 0..1 dimension position.
 fn to_lane(v: f64, range: f64) -> f64 {
     (0.5 + v / (range * 2.0)).clamp(0.0, 1.0)
 }
@@ -228,25 +228,25 @@ pub fn blob_to_note(id: NoteId, blob: &NoteBlob) -> Note {
 
     set_flat(
         &mut note,
-        Lane::Timbre,
+        Dimension::Timbre,
         to_lane(blob.formant_shift, FORMANT_RANGE),
     );
     set_flat(
         &mut note,
-        Lane::Pressure,
+        Dimension::Pressure,
         to_lane(blob.gain_db, GAIN_RANGE_DB),
     );
     note
 }
 
-/// Hold a lane at one value across the note.
+/// Hold a dimension at one value across the note.
 ///
 /// Two points rather than one: the curve holds its endpoint value
 /// outside the authored range, but a single point gives the UI nothing
 /// to draw a span from.
-fn set_flat(note: &mut Note, lane: Lane, value: f64) {
+fn set_flat(note: &mut Note, dimension: Dimension, value: f64) {
     let (s, e) = (note.start, note.end);
-    let curve = note.lane_mut(lane);
+    let curve = note.curve_mut(dimension);
     curve.set(s, value);
     curve.set(e, value);
 }
@@ -273,7 +273,7 @@ pub fn apply_to(doc: &ExpressionDoc, pitch: &mut PitchDoc) -> usize {
         // pulled toward the scoop. It is the median of the contour —
         // the same "where the curve actually dwells" the core uses for
         // zone scaling, so the surface and the write-back agree.
-        let default = Lane::Pitch.default_value();
+        let default = Dimension::Pitch.default_value();
         let center = expression_editor_core::blob::decompose(
             &note.pitch,
             note.start,
@@ -287,11 +287,11 @@ pub fn apply_to(doc: &ExpressionDoc, pitch: &mut PitchDoc) -> usize {
 
         let mid = (note.start + note.end) * 0.5;
         blob.formant_shift = from_lane(
-            note.timbre.sample(mid, Lane::Timbre.default_value()),
+            note.timbre.sample(mid, Dimension::Timbre.default_value()),
             FORMANT_RANGE,
         );
         blob.gain_db = from_lane(
-            note.pressure.sample(mid, Lane::Pressure.default_value()),
+            note.pressure.sample(mid, Dimension::Pressure.default_value()),
             GAIN_RANGE_DB,
         );
         applied += 1;

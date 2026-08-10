@@ -57,23 +57,23 @@ impl TimeBase {
 /// The three MPE expression dimensions. Audio reads them as pitch,
 /// dynamics, and formant.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Lane {
+pub enum Dimension {
     Pitch,
     Pressure,
     Timbre,
 }
 
-impl Lane {
-    pub const ALL: [Lane; 3] = [Lane::Pitch, Lane::Pressure, Lane::Timbre];
+impl Dimension {
+    pub const ALL: [Dimension; 3] = [Dimension::Pitch, Dimension::Pressure, Dimension::Timbre];
 
-    /// Value a lane holds where nothing has been authored.
+    /// Value a dimension holds where nothing has been authored.
     ///
     /// Pitch rests at the note's own row; Pressure/Timbre default to
     /// the MPE convention of 100/127 rather than full scale.
     pub fn default_value(&self) -> f64 {
         match self {
-            Lane::Pitch => 0.0,
-            Lane::Pressure | Lane::Timbre => 100.0 / 127.0,
+            Dimension::Pitch => 0.0,
+            Dimension::Pressure | Dimension::Timbre => 100.0 / 127.0,
         }
     }
 
@@ -81,8 +81,8 @@ impl Lane {
     /// normalized.
     pub fn range(&self) -> (f64, f64) {
         match self {
-            Lane::Pitch => (-127.0, 127.0),
-            Lane::Pressure | Lane::Timbre => (0.0, 1.0),
+            Dimension::Pitch => (-127.0, 127.0),
+            Dimension::Pressure | Dimension::Timbre => (0.0, 1.0),
         }
     }
 
@@ -98,7 +98,7 @@ pub struct Point {
     /// Document time, absolute (not note-relative) — keeps edits that
     /// span note boundaries honest.
     pub t: f64,
-    /// Lane-native value. Pitch: semitones from the note row.
+    /// Dimension-native value. Pitch: semitones from the note row.
     pub value: f64,
 }
 
@@ -175,7 +175,7 @@ impl Curve {
     ///
     /// Clearing the whole curve is the exception — there is nothing
     /// outside to bleed in, so it empties rather than leaving two
-    /// default points behind and calling an untouched lane "authored".
+    /// default points behind and calling an untouched dimension "authored".
     ///
     /// Returns whether anything changed.
     pub fn clear_range(&mut self, t0: f64, t1: f64, default: f64) -> bool {
@@ -384,7 +384,7 @@ pub struct Note {
     /// Per-frame amplitude across the note, 0..1, for drawing a sung
     /// note's body as the waveform it actually is.
     ///
-    /// Deliberately separate from the Pressure lane. Pressure is an
+    /// Deliberately separate from the Pressure dimension. Pressure is an
     /// *edit* — a smooth trim the user applies — where this is what was
     /// recorded, and it is jagged in a way a curve of control points
     /// could not represent without thousands of them. Empty outside the
@@ -434,24 +434,24 @@ impl Note {
         for split in self.splits.iter_mut() {
             *split += delta;
         }
-        for lane in Lane::ALL {
-            self.lane_mut(lane).shift_time(s, e, delta);
+        for dimension in Dimension::ALL {
+            self.curve_mut(dimension).shift_time(s, e, delta);
         }
     }
 
-    pub fn lane(&self, lane: Lane) -> &Curve {
-        match lane {
-            Lane::Pitch => &self.pitch,
-            Lane::Pressure => &self.pressure,
-            Lane::Timbre => &self.timbre,
+    pub fn curve(&self, dimension: Dimension) -> &Curve {
+        match dimension {
+            Dimension::Pitch => &self.pitch,
+            Dimension::Pressure => &self.pressure,
+            Dimension::Timbre => &self.timbre,
         }
     }
 
-    pub fn lane_mut(&mut self, lane: Lane) -> &mut Curve {
-        match lane {
-            Lane::Pitch => &mut self.pitch,
-            Lane::Pressure => &mut self.pressure,
-            Lane::Timbre => &mut self.timbre,
+    pub fn curve_mut(&mut self, dimension: Dimension) -> &mut Curve {
+        match dimension {
+            Dimension::Pitch => &mut self.pitch,
+            Dimension::Pressure => &mut self.pressure,
+            Dimension::Timbre => &mut self.timbre,
         }
     }
 

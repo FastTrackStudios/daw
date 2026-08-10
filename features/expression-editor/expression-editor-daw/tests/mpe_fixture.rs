@@ -9,7 +9,7 @@
 //! the wire rather than assumed by the reader.
 
 use daw::service::midi::MidiTakeSnapshot;
-use expression_editor_core::doc::Lane;
+use expression_editor_core::doc::Dimension;
 use expression_editor_daw::fixture::{
     self, MASTER_CHANNEL, MEMBER_CHANNELS, PER_NOTE_BEND_RANGE, TIMBRE_CC,
 };
@@ -118,7 +118,7 @@ fn every_note_carries_bend_pressure_and_timbre() {
         assert!(timbre >= 8, "note {} has {timbre} CC74 events", n.pitch);
     }
 
-    // Pressure moves. A flat lane would pass every count above while
+    // Pressure moves. A flat dimension would pass every count above while
     // being exactly the data a player never produces.
     let mut by_channel: std::collections::BTreeMap<u8, Vec<u8>> = Default::default();
     for p in &snap.channel_pressures {
@@ -189,10 +189,10 @@ fn the_document_gets_per_note_expression_on_every_note() {
             n.channel.is_some_and(|c| c >= 2),
             "member channels are 2..=16 to a musician"
         );
-        for lane in Lane::ALL {
+        for dimension in Dimension::ALL {
             assert!(
-                !n.lane(lane).is_empty(),
-                "note {} lost its {lane:?} lane on the way into the document",
+                !n.curve(dimension).is_empty(),
+                "note {} lost its {dimension:?} dimension on the way into the document",
                 n.row
             );
         }
@@ -211,8 +211,8 @@ fn a_gesture_survives_into_the_document_at_its_written_depth() {
         .iter()
         .find(|n| n.row == 64)
         .expect("the scooped note");
-    let first = scooped.lane(Lane::Pitch).sample(scooped.start, 0.0);
-    let last = scooped.lane(Lane::Pitch).sample(scooped.end - 1.0, 0.0);
+    let first = scooped.curve(Dimension::Pitch).sample(scooped.start, 0.0);
+    let last = scooped.curve(Dimension::Pitch).sample(scooped.end - 1.0, 0.0);
     assert!(
         (first + 1.0).abs() < 0.05,
         "scoop starts at {first}, not a semitone flat"
@@ -226,7 +226,7 @@ fn a_gesture_survives_into_the_document_at_its_written_depth() {
         .iter()
         .find(|n| n.row == 76)
         .expect("the octave scoop");
-    let start = wide.lane(Lane::Pitch).sample(wide.start, 0.0);
+    let start = wide.curve(Dimension::Pitch).sample(wide.start, 0.0);
     assert!(
         (start - 12.0).abs() < 0.05,
         "octave scoop starts at {start} semitones"
@@ -244,7 +244,7 @@ fn reading_at_the_wrong_bend_range_is_wrong_by_exactly_that_factor() {
 
     let pick = |doc: &expression_editor_core::doc::ExpressionDoc| {
         let n = doc.notes.iter().find(|n| n.row == 76).unwrap();
-        n.lane(Lane::Pitch).sample(n.start, 0.0)
+        n.curve(Dimension::Pitch).sample(n.start, 0.0)
     };
     let factor = pick(&right) / pick(&wrong);
     assert!(

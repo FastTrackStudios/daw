@@ -247,51 +247,51 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
             {section("Controller lanes")}
             div {
                 style: "display: flex; flex-direction: column; gap: 3px; padding: 0 10px 8px;",
-                for lane in lanes.iter() {
+                for dimension in lanes.iter() {
                     div {
-                        key: "cc{lane.number}",
+                        key: "cc{dimension.number}",
                         style: format!(
                             "display: flex; align-items: center; gap: 6px; \
                              border: 1px solid {}; border-radius: 5px; padding: 4px 6px; \
                              background: {};",
-                            if cc_edit == Some(lane.number) { theme::ACCENT } else { theme::PANEL_BORDER },
-                            if cc_edit == Some(lane.number) { theme::CONTROL_SELECTED } else { theme::SURFACE_INSET },
+                            if cc_edit == Some(dimension.number) { theme::ACCENT } else { theme::PANEL_BORDER },
+                            if cc_edit == Some(dimension.number) { theme::CONTROL_SELECTED } else { theme::SURFACE_INSET },
                         ),
                         // The colour swatch is how a background curve is
-                        // matched to its lane, so it has to be here.
+                        // matched to its dimension, so it has to be here.
                         div {
                             style: format!(
                                 "width: 10px; height: 10px; border-radius: 2px; \
                                  background: {}; flex: 0 0 auto;",
-                                CC_COLORS[lane.color % CC_COLORS.len()],
+                                CC_COLORS[dimension.color % CC_COLORS.len()],
                             ),
                         }
                         span {
                             style: "flex: 1; font-size: 10px;",
-                            "CC{lane.number} {lane.name}"
+                            "CC{dimension.number} {dimension.name}"
                         }
                         button {
                             style: format!(
                                 "background: none; border: none; cursor: pointer; \
                                  font-size: 11px; color: {};",
-                                if lane.pinned { theme::ACCENT } else { theme::BORDER_STRONG },
+                                if dimension.pinned { theme::ACCENT } else { theme::BORDER_STRONG },
                             ),
                             title: "Pin behind the roll",
                             onclick: {
-                                let number = lane.number;
+                                let number = dimension.number;
                                 move |_| { editor.write().doc.cc.toggle_pin(number); }
                             },
-                            if lane.pinned { "◉" } else { "○" }
+                            if dimension.pinned { "◉" } else { "○" }
                         }
                         button {
                             style: format!(
                                 "background: none; border: none; cursor: pointer; \
                                  font-size: 10px; color: {};",
-                                if cc_edit == Some(lane.number) { theme::ACCENT } else { theme::TEXT_DIM },
+                                if cc_edit == Some(dimension.number) { theme::ACCENT } else { theme::TEXT_DIM },
                             ),
                             title: "Edit this controller on the roll",
                             onclick: {
-                                let number = lane.number;
+                                let number = dimension.number;
                                 move |_| {
                                     let mut e = editor;
                                     if e.read().cc_edit == Some(number) {

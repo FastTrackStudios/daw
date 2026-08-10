@@ -1,4 +1,4 @@
-//! Controller-lane gestures, driven through the real pointer path.
+//! Controller-dimension gestures, driven through the real pointer path.
 //!
 //! `interaction::pointer_down` resolves everything through the mouse
 //! map, so these assert the *whole* route — context detection, binding,
@@ -52,15 +52,15 @@ fn sweep(ed: &mut Editor, from: (f64, f64), to: (f64, f64), mods: Mods, button: 
 }
 
 fn value_at(ed: &Editor, t: f64) -> f64 {
-    let lane = ed.doc.cc.get(1).expect("lane");
-    lane.curve.sample(t, lane.default_value())
+    let dimension = ed.doc.cc.get(1).expect("dimension");
+    dimension.curve.sample(t, dimension.default_value())
 }
 
 #[test]
 fn cc_edit_mode_claims_the_roll_from_the_notes_behind_it() {
     let mut ed = editor();
     // An empty CC1 rests at 0, drawn at the bottom of the roll, so the
-    // middle of the canvas is open lane rather than curve.
+    // middle of the canvas is open dimension rather than curve.
     assert_eq!(
         interaction::context_at(&ed, 400.0, H * 0.5),
         Context::CcLane
@@ -105,7 +105,7 @@ fn an_unmodified_drag_draws_freehand() {
         after > before,
         "the stroke wrote values: {before} -> {after}"
     );
-    // y = H/4 is three quarters of the way up the lane.
+    // y = H/4 is three quarters of the way up the dimension.
     assert!(
         (after - 0.75).abs() < 0.05,
         "the value follows the pointer height, got {after}"
@@ -253,7 +253,7 @@ fn cc_gestures_stay_out_of_the_way_when_no_lane_is_being_edited() {
     ed.exit_cc_edit();
     let before = ed.doc.cc.get(1).map(|l| l.curve.points().len());
 
-    // The same drags that draw in CC edit mode must not touch the lane
+    // The same drags that draw in CC edit mode must not touch the dimension
     // once it is off; they belong to the notes again.
     sweep(&mut ed, (200.0, H * 0.25), (400.0, H * 0.25), ALT, 0);
     sweep(&mut ed, (200.0, H * 0.25), (400.0, H * 0.25), CTRL, 0);
@@ -283,7 +283,7 @@ fn the_map_owns_the_bindings_so_a_preset_can_disagree() {
         A::EraseCcEvents
     );
 
-    // Shift stays unbound in the lane: it is the snap-reverse key, and
+    // Shift stays unbound in the dimension: it is the snap-reverse key, and
     // giving it a tool would cost the only consistent "other behaviour"
     // modifier the surface has.
     assert_eq!(

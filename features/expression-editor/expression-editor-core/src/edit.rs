@@ -11,7 +11,7 @@
 //! right for free.
 
 use crate::blob;
-use crate::doc::{Curve, ExpressionDoc, Lane, Note, NoteId, Point, Target};
+use crate::doc::{Curve, ExpressionDoc, Dimension, Note, NoteId, Point, Target};
 use crate::modulation::Stack;
 use crate::rows::{Articulation, RowSpace};
 use crate::shape::Shape;
@@ -19,36 +19,36 @@ use crate::shape::Shape;
 /// One describable change to the document.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Edit {
-    /// Replace `[t0, t1]` of a lane with drawn points (pen, curve).
+    /// Replace `[t0, t1]` of a dimension with drawn points (pen, curve).
     /// Points outside the interval survive untouched.
-    DrawLane {
+    DrawDimension {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         points: Vec<Point>,
     },
-    /// Erase a lane over `[t0, t1]`.
-    EraseLane {
+    /// Erase a dimension over `[t0, t1]`.
+    EraseDimension {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
     },
     /// Restyle `[t0, t1]` between its existing endpoints.
-    ReshapeLane {
+    ReshapeDimension {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         shape: Shape,
         samples: usize,
     },
-    /// Scale a lane about its effective center — the alt-drag gesture.
+    /// Scale a dimension about its effective center — the alt-drag gesture.
     /// `factor` below zero inverts.
-    ScaleLane {
+    ScaleDimension {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         factor: f64,
@@ -62,26 +62,26 @@ pub enum Edit {
         drift_amount: f64,
         modulation_amount: f64,
     },
-    /// Move a lane's values up or down over a span, keeping its shape.
+    /// Move a dimension's values up or down over a span, keeping its shape.
     ///
     /// The pitch handles: dragging a note body or its fine-tune handle
     /// changes where the contour sits without flattening the scoop and
     /// vibrato that make it sound sung.
-    ShiftLane {
+    ShiftDimension {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         delta: f64,
     },
-    /// Hold a lane at one value across a span.
+    /// Hold a dimension at one value across a span.
     ///
     /// The formant and amplitude handles, which are per-note trims
     /// rather than contours — there is nothing to preserve the shape
     /// of, and a drag sets a level.
-    SetLaneLevel {
+    SetDimensionLevel {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         value: f64,
@@ -92,9 +92,9 @@ pub enum Edit {
     /// at the anchored end and decaying linearly to zero at the far end,
     /// so the transition into or out of a note steepens without moving
     /// the note's body.
-    TiltLane {
+    TiltDimension {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         amount: f64,
@@ -115,18 +115,18 @@ pub enum Edit {
     /// swells. `taper` is the fraction of the span eased in and out.
     ApplyModulation {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         stack: Stack,
         taper: f64,
         samples: usize,
     },
-    /// Replace a lane's span with given points — the drawer's cancel
+    /// Replace a dimension's span with given points — the drawer's cancel
     /// path, restoring exactly what was captured.
-    RestoreLane {
+    RestoreDimension {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         points: Vec<Point>,
@@ -308,9 +308,9 @@ impl Edit {
     pub fn apply(&self, doc: &mut ExpressionDoc) -> bool {
         let units_per_second = doc.time_base.units_per_second(120.0);
         match self {
-            Edit::DrawLane {
+            Edit::DrawDimension {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 points,
@@ -319,21 +319,21 @@ impl Edit {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                n.lane_mut(*lane).splice(lo, hi, points);
-                extend_to_note_edges(n, *lane);
+                n.curve_mut(*dimension).splice(lo, hi, points);
+                extend_to_note_edges(n, *dimension);
                 true
             }
-            Edit::EraseLane { note, lane, t0, t1 } => {
+            Edit::EraseDimension { note, dimension, t0, t1 } => {
                 let Some(n) = doc.note_mut(*note) else {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                let default = lane.default_value();
-                n.lane_mut(*lane).clear_range(lo, hi, default)
+                let default = dimension.default_value();
+                n.curve_mut(*dimension).clear_range(lo, hi, default)
             }
-            Edit::ReshapeLane {
+            Edit::ReshapeDimension {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 shape,
@@ -343,14 +343,14 @@ impl Edit {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                let default = lane.default_value();
-                n.lane_mut(*lane)
+                let default = dimension.default_value();
+                n.curve_mut(*dimension)
                     .reshape(lo, hi, *shape, (*samples).max(2), default);
                 true
             }
-            Edit::ScaleLane {
+            Edit::ScaleDimension {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 factor,
@@ -359,14 +359,14 @@ impl Edit {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                let default = lane.default_value();
-                let pivot = blob::effective_center(n.lane(*lane), lo, hi, DEFAULT_SAMPLES, default);
-                n.lane_mut(*lane).scale_about(lo, hi, pivot, *factor);
+                let default = dimension.default_value();
+                let pivot = blob::effective_center(n.curve(*dimension), lo, hi, DEFAULT_SAMPLES, default);
+                n.curve_mut(*dimension).scale_about(lo, hi, pivot, *factor);
                 true
             }
-            Edit::ShiftLane {
+            Edit::ShiftDimension {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 delta,
@@ -378,29 +378,29 @@ impl Edit {
                 if hi - lo <= 0.0 || *delta == 0.0 {
                     return false;
                 }
-                let default = lane.default_value();
+                let default = dimension.default_value();
                 // Sample the ends before moving anything: a partial
                 // shift has to leave the values *outside* the span
                 // where they were, and the only way to hold them is to
                 // pin the boundary explicitly.
                 let (v0, v1) = {
-                    let c = n.lane(*lane);
+                    let c = n.curve(*dimension);
                     (c.sample(lo, default), c.sample(hi, default))
                 };
-                let lane = *lane;
-                let curve = n.lane_mut(lane);
+                let dimension = *dimension;
+                let curve = n.curve_mut(dimension);
                 for p in curve.points_mut() {
                     if p.t >= lo && p.t <= hi {
-                        p.value = lane.clamp(p.value + delta);
+                        p.value = dimension.clamp(p.value + delta);
                     }
                 }
-                curve.set(lo, lane.clamp(v0 + delta));
-                curve.set(hi, lane.clamp(v1 + delta));
+                curve.set(lo, dimension.clamp(v0 + delta));
+                curve.set(hi, dimension.clamp(v1 + delta));
                 true
             }
-            Edit::SetLaneLevel {
+            Edit::SetDimensionLevel {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 value,
@@ -412,17 +412,17 @@ impl Edit {
                 if hi - lo <= 0.0 {
                     return false;
                 }
-                let v = lane.clamp(*value);
-                n.lane_mut(*lane).splice(
+                let v = dimension.clamp(*value);
+                n.curve_mut(*dimension).splice(
                     lo,
                     hi,
                     &[Point { t: lo, value: v }, Point { t: hi, value: v }],
                 );
                 true
             }
-            Edit::TiltLane {
+            Edit::TiltDimension {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 amount,
@@ -436,14 +436,14 @@ impl Edit {
                 if span <= 0.0 || *amount == 0.0 {
                     return false;
                 }
-                let default = lane.default_value();
-                let lane = *lane;
+                let default = dimension.default_value();
+                let dimension = *dimension;
                 // Resample: a tilt is a continuous weighting, and
                 // applying it only to existing points would leave a
                 // sparse curve tilting in straight segments between
                 // them rather than as a slope.
                 let n_samples = DEFAULT_SAMPLES;
-                let curve = n.lane(lane);
+                let curve = n.curve(dimension);
                 let pts: Vec<Point> = (0..n_samples)
                     .map(|i| {
                         let f = i as f64 / (n_samples - 1) as f64;
@@ -452,11 +452,11 @@ impl Edit {
                         let w = if *from_start { 1.0 - f } else { f };
                         Point {
                             t,
-                            value: lane.clamp(curve.sample(t, default) + amount * w),
+                            value: dimension.clamp(curve.sample(t, default) + amount * w),
                         }
                     })
                     .collect();
-                n.lane_mut(lane).splice(lo, hi, &pts);
+                n.curve_mut(dimension).splice(lo, hi, &pts);
                 true
             }
             Edit::NormalizeRow { notes } => {
@@ -506,7 +506,7 @@ impl Edit {
             }
             Edit::ApplyModulation {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 stack,
@@ -521,8 +521,8 @@ impl Edit {
                     return false;
                 }
                 let count = (*samples).max(8);
-                let default = lane.default_value();
-                let curve = n.lane(*lane);
+                let default = dimension.default_value();
+                let curve = n.curve(*dimension);
                 let times: Vec<f64> = (0..count)
                     .map(|i| lo + (hi - lo) * (i as f64 / (count - 1) as f64))
                     .collect();
@@ -534,16 +534,16 @@ impl Edit {
                     .zip(&values)
                     .map(|(&t, &v)| Point {
                         t,
-                        value: lane.clamp(v),
+                        value: dimension.clamp(v),
                     })
                     .collect();
                 // Splice, so data outside the target range survives.
-                n.lane_mut(*lane).splice(lo, hi, &points);
+                n.curve_mut(*dimension).splice(lo, hi, &points);
                 true
             }
-            Edit::RestoreLane {
+            Edit::RestoreDimension {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 points,
@@ -552,7 +552,7 @@ impl Edit {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                n.lane_mut(*lane).splice(lo, hi, points);
+                n.curve_mut(*dimension).splice(lo, hi, points);
                 true
             }
             Edit::Transpose { notes, semitones } => {
@@ -591,8 +591,8 @@ impl Edit {
                 for s in n.splits.iter_mut() {
                     *s = new_s + (*s - old_s) * scale;
                 }
-                for lane in Lane::ALL {
-                    n.lane_mut(lane).remap_time(old_s, old_e, new_s, new_e);
+                for dimension in Dimension::ALL {
+                    n.curve_mut(dimension).remap_time(old_s, old_e, new_s, new_e);
                 }
                 n.start = new_s;
                 n.end = new_e;
@@ -913,23 +913,23 @@ fn ordered(a: f64, b: f64) -> (f64, f64) {
     if a <= b { (a, b) } else { (b, a) }
 }
 
-/// Hold a lane's first and last authored values out to the note edges.
+/// Hold a dimension's first and last authored values out to the note edges.
 ///
 /// Without this a gesture drawn in the middle of a note leaves a gap
-/// where the lane falls back to its default — audible as a jump to
+/// where the dimension falls back to its default — audible as a jump to
 /// center on either side of the edit.
-fn extend_to_note_edges(note: &mut Note, lane: Lane) {
+fn extend_to_note_edges(note: &mut Note, dimension: Dimension) {
     let (s, e) = (note.start, note.end);
-    let curve = note.lane_mut(lane);
+    let curve = note.curve_mut(dimension);
     let Some((first, last)) = curve.bounds() else {
         return;
     };
     if first > s {
-        let v = curve.sample(first, lane.default_value());
+        let v = curve.sample(first, dimension.default_value());
         curve.set(s, v);
     }
     if last < e {
-        let v = curve.sample(last, lane.default_value());
+        let v = curve.sample(last, dimension.default_value());
         curve.set(e, v);
     }
 }
@@ -947,9 +947,9 @@ fn split_note(doc: &mut ExpressionDoc, id: NoteId, t: f64) -> bool {
     right.start = t;
     right.splits.retain(|&s| s > t);
     right.target = Target::WholeNote;
-    for lane in Lane::ALL {
-        let held = right.lane(lane).sample(t, lane.default_value());
-        let curve = right.lane_mut(lane);
+    for dimension in Dimension::ALL {
+        let held = right.curve(dimension).sample(t, dimension.default_value());
+        let curve = right.curve_mut(dimension);
         curve.remove_range(f64::NEG_INFINITY, t);
         curve.set(t, held);
     }
@@ -960,9 +960,9 @@ fn split_note(doc: &mut ExpressionDoc, id: NoteId, t: f64) -> bool {
     left.end = t;
     left.splits.retain(|&s| s < t);
     left.target = Target::WholeNote;
-    for lane in Lane::ALL {
-        let held = left.lane(lane).sample(t, lane.default_value());
-        let curve = left.lane_mut(lane);
+    for dimension in Dimension::ALL {
+        let held = left.curve(dimension).sample(t, dimension.default_value());
+        let curve = left.curve_mut(dimension);
         curve.remove_range(t, f64::INFINITY);
         curve.set(t, held);
     }
@@ -1098,10 +1098,10 @@ impl Default for History {
 
 /// Build the point list a freehand stroke commits, at one point per
 /// document-time step (screen-pixel resolution at the current zoom).
-pub fn stroke_points(samples: &[(f64, f64)], lane: Lane) -> Vec<Point> {
+pub fn stroke_points(samples: &[(f64, f64)], dimension: Dimension) -> Vec<Point> {
     let mut curve = Curve::new();
     for &(t, v) in samples {
-        curve.set(t, lane.clamp(v));
+        curve.set(t, dimension.clamp(v));
     }
     curve.points().to_vec()
 }
