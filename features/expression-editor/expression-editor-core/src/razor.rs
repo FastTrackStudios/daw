@@ -266,7 +266,7 @@ pub fn set_velocity(doc: &mut ExpressionDoc, area: RazorArea, velocity: f64) -> 
 
 /// Erase one expression lane across the area, leaving the notes.
 ///
-/// The edge-splicing rule this needs is [`Curve::clear_range`], which is
+/// The edge-splicing rule this needs is [`crate::doc::Curve::clear_range`], which is
 /// also what the lane and controller erasers use — the razor was where
 /// it was first got right, not where it belongs.
 pub fn clear_lane(doc: &mut ExpressionDoc, area: RazorArea, lane: Lane) -> bool {
