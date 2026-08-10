@@ -29,6 +29,7 @@
 //! UI's, not the engine's, so it never waits on a round trip. That lives in
 //! [`Drafts`], drained by [`ControlSync`].
 
+mod collapse;
 mod drafts;
 mod fader;
 mod fx;
@@ -44,6 +45,7 @@ mod track_store;
 /// art layer, which owns the distinction because it is a fact about the
 /// images (different boxes, different measurements), not about the wrapper.
 pub use daw_theme_art::dress::Panel;
+pub use collapse::{Collapse, PanAnchor, Thresholds, VolumeWidget, REAPER as REAPER_THRESHOLDS};
 pub use drafts::{Drafts, Held};
 pub use fader::VolumeFader;
 pub use fx::FxButton;

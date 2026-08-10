@@ -9,9 +9,9 @@
 //! - Track name + number
 
 use crate::controls::{
-    ControlSync, FxButton, IoButton, MeterFeed, MonitorButton, MuteButton, PanKnob, PhaseButton,
-    RecordArmButton, RecordInputLabel, SoloButton, TrackMeter, TrackName, VolumeFader,
-    use_daw_tracks, use_track_store,
+    Collapse, ControlSync, FxButton, IoButton, MeterFeed, MonitorButton, MuteButton, PanAnchor,
+    PanKnob, PhaseButton, RecordArmButton, RecordInputLabel, SoloButton, TrackMeter, TrackName,
+    VolumeFader, VolumeWidget, use_daw_tracks, use_track_store,
 };
 use crate::prelude::*;
 use daw_control::{FxNodeKind, FxTree};
@@ -154,9 +154,16 @@ pub fn MixerPanel() -> Element {
 /// only the strip. Public so the assembled strip can be exercised — and
 /// photographed — without a backend behind it.
 #[component]
-pub fn ChannelStripPreview(track: Track, #[props(default)] index: u32) -> Element {
+pub fn ChannelStripPreview(
+    track: Track,
+    #[props(default)] index: u32,
+    /// The strip's height in px. Drives the collapse — see
+    /// [`Collapse`][crate::controls::Collapse].
+    #[props(default = 371.0)]
+    height: f32,
+) -> Element {
     rsx! {
-        ChannelStrip { track, fx_tree: FxTree::default(), index }
+        ChannelStrip { track, fx_tree: FxTree::default(), index, height }
     }
 }
 
@@ -167,11 +174,17 @@ struct ChannelStripProps {
     track: Track,
     fx_tree: FxTree,
     index: u32,
+    /// The height the strip is drawn at, which is what it collapses by.
+    ///
+    /// REAPER's own default MCP height; a panel that knows its box passes
+    /// the real one.
+    #[props(default = 371.0)]
+    height: f32,
 }
 
 impl PartialEq for ChannelStripProps {
     fn eq(&self, other: &Self) -> bool {
-        self.track == other.track && self.index == other.index
+        self.track == other.track && self.index == other.index && self.height == other.height
     }
 }
 
@@ -203,6 +216,11 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
     } else {
         "-inf".to_string()
     };
+
+    // Resolved once, so the markup asks a question rather than doing the
+    // arithmetic in six places.
+    let shape = Collapse::at(props.height);
+    let pad = shape.padding;
 
     let selected_border = if track.selected {
         "border-blue-500"
@@ -264,30 +282,71 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
             div { class: "border-t border-zinc-700 mx-1" }
 
             // ── Pan ─────────────────────────────────────────────
-            div { class: "flex items-center justify-center py-1 flex-shrink-0",
-                PanKnob { track: track.guid.clone() }
+            //
+            // A real box, not implied space: the gap below it is one of the
+            // things REAPER's own thresholds are measured against, and a
+            // gap that is not a box cannot be queried or tested.
+            if shape.pan == PanAnchor::PanSection {
+                div {
+                    class: "flex flex-col items-center justify-center flex-shrink-0",
+                    style: "padding-top:{pad}px; padding-bottom:{pad}px;",
+                    PanKnob { track: track.guid.clone() }
+                    if shape.show_pan_labels {
+                        div { class: "text-[8px] text-zinc-500 leading-none", "pan" }
+                    }
+                }
             }
 
             // ── Input ───────────────────────────────────────────
-            div { class: "flex items-center justify-center gap-1 py-1 flex-shrink-0",
+            div {
+                class: "flex items-center justify-center gap-1 flex-shrink-0",
+                style: "padding-top:{pad}px; padding-bottom:{pad}px;",
                 RecordArmButton { track: track.guid.clone() }
-                MonitorButton { track: track.guid.clone() }
-                PhaseButton { track: track.guid.clone() }
-                IoButton { track: track.guid.clone() }
+                // Record mode gives up its place when the pan control
+                // re-anchors here — the two share one slot, which is what
+                // makes this a re-anchor rather than a reposition.
+                if shape.show_record_mode {
+                    MonitorButton { track: track.guid.clone() }
+                } else {
+                    PanKnob { track: track.guid.clone() }
+                }
+                // Residual-driven: these key off the stretch section, not
+                // the strip's own height.
+                if shape.show_phase {
+                    PhaseButton { track: track.guid.clone() }
+                }
+                if shape.show_io {
+                    IoButton { track: track.guid.clone() }
+                }
             }
-            RecordInputLabel { track: track.guid.clone() }
+            if shape.show_record_input {
+                RecordInputLabel { track: track.guid.clone() }
+            }
 
             // ── Fader and meter ─────────────────────────────────
             //
             // `flex-1` and `min-h-0`: this is the region that absorbs the
             // strip's height, which is what gives the fader's stretch band
             // something to stretch into.
-            div { class: "flex-1 flex flex-row items-stretch justify-center gap-1 px-2 py-1 min-h-0",
-                VolumeFader { track: track.guid.clone() }
-                TrackMeter { track: track.guid.clone(), height: 120 }
+            // The stretch section, as a real box — it is the residual the
+            // IO, envelope and phase thresholds are measured against, so it
+            // has to exist in the tree to be one.
+            div {
+                class: "flex-1 flex flex-row items-stretch justify-center gap-1 px-2 min-h-0",
+                style: "padding-top:{pad}px; padding-bottom:{pad}px;",
+                match shape.volume {
+                    // Below the swap threshold a fader has no travel worth
+                    // having, so it stops being a fader. A Rust
+                    // conditional, because a widget type is not a style.
+                    VolumeWidget::Fader => rsx! { VolumeFader { track: track.guid.clone() } },
+                    VolumeWidget::Knob => rsx! { PanKnob { track: track.guid.clone(), large: true } },
+                }
+                TrackMeter { track: track.guid.clone(), height: shape.stretch.max(24.0) as u32 }
             }
-            div { class: "text-center px-1 flex-shrink-0",
-                div { class: "text-[9px] font-mono text-zinc-400", "{db_label}" }
+            if shape.show_volume_label {
+                div { class: "text-center px-1 flex-shrink-0",
+                    div { class: "text-[9px] font-mono text-zinc-400", "{db_label}" }
+                }
             }
 
             // ── Track Name + Number (bottom) ────────────────────

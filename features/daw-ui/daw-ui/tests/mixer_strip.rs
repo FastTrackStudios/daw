@@ -23,6 +23,40 @@ fn track(guid: &str, index: u32, name: &str) -> Track {
     }
 }
 
+/// The strip at a given height, which is what it collapses by.
+fn strip_at(height: f32) -> String {
+    #[derive(Props, Clone, PartialEq)]
+    struct P {
+        height: f32,
+    }
+    let mut dom = VirtualDom::new_with_props(
+        |p: P| {
+            let mut store = use_hook(TrackStore::new);
+            use_hook(|| {
+                store.seed([track("T1", 0, "Kick")]);
+                provide_context(store);
+            });
+            rsx! {
+                daw_ui::components::mixer::ChannelStripPreview {
+                    track: track("T1", 0, "Kick"),
+                    height: p.height,
+                }
+            }
+        },
+        P { height },
+    );
+    dom.rebuild_in_place();
+    dioxus_ssr::render(&dom)
+}
+
+/// Sweep a height boundary and assert the rendered strip changes there —
+/// the model's own tests prove the arithmetic, these prove the markup
+/// actually asks it.
+fn sweeps(at: f32, present: impl Fn(&str) -> bool, what: &str) {
+    assert!(present(&strip_at(at)), "{what} missing at {at}");
+    assert!(!present(&strip_at(at - 1.0)), "{what} still there below {at}");
+}
+
 /// The strip, mounted with **no stylesheet** — which is how a REAPER panel
 /// gets it if the sheet is ever mounted wrongly, and how every one of these
 /// tests runs.
@@ -129,4 +163,87 @@ fn several_strips_read_as_a_mixer() {
     // One mute button per strip — the count is what catches a strip that
     // silently renders its neighbour's controls.
     assert_eq!(html.matches(">M<").count(), 3, "not one mute per strip");
+}
+
+
+/// Each container-height threshold hides its element at REAPER's value.
+#[test]
+fn the_container_thresholds_hide_their_elements() {
+    use daw_ui::controls::REAPER_THRESHOLDS as T;
+
+    // The record-input readout is the clearest marker: it prints "in".
+    sweeps(T.record_input, |h| h.contains(">in "), "record input");
+    // The dB readout under the fader.
+    sweeps(T.volume_label, |h| h.contains("font-mono"), "volume label");
+    // The pan label under the knob.
+    sweeps(T.pan_labels, |h| h.contains(">pan<"), "pan labels");
+}
+
+/// Below the pan-section threshold the pan control is still present — it
+/// has re-parented into the input area — and record mode is gone.
+#[test]
+fn pan_re_anchors_rather_than_disappearing() {
+    use daw_ui::controls::REAPER_THRESHOLDS as T;
+
+    let tall = strip_at(T.pan_section);
+    let short = strip_at(T.pan_section - 1.0);
+
+    // The knob is drawn either way: its art is the one with a 24x25 box.
+    let knobs = |h: &str| h.matches("viewBox=\"0 0 24 25\"").count();
+    assert!(knobs(&tall) >= 1, "no pan knob above the threshold:\n{tall}");
+    assert!(knobs(&short) >= 1, "the pan control vanished with its section");
+
+    // And the pan label is gone with the section it belonged to.
+    assert!(!short.contains(">pan<"), "the pan section's label survived it");
+}
+
+/// Below the swap threshold the fader is not a short fader — it is a
+/// different widget. The fader's rail decomposes into three bands; a knob
+/// does not.
+#[test]
+fn the_fader_becomes_a_knob() {
+    use daw_ui::controls::REAPER_THRESHOLDS as T;
+
+    let rail = |h: &str| h.contains("viewBox=\"0 16 23 23\"");
+    assert!(rail(&strip_at(T.fader_swap)), "no fader above the swap threshold");
+    assert!(!rail(&strip_at(T.fader_swap - 1.0)), "still a fader below the swap threshold");
+}
+
+/// The residual-driven collapses fire off the stretch section. Sweeping the
+/// strip's height crosses them too, just at a different place than the
+/// container thresholds — which is the point of them being separate.
+#[test]
+fn the_residual_collapses_fire_on_the_stretch_section() {
+    use daw_ui::controls::Collapse;
+
+    // Find the strip height at which the stretch section crosses the IO
+    // threshold, then check the rendered strip agrees on both sides.
+    let io_boundary = (100..=700)
+        .map(|h| h as f32)
+        .find(|h| Collapse::at(*h).show_io)
+        .expect("some height shows the IO button");
+
+    let with = strip_at(io_boundary);
+    let without = strip_at(io_boundary - 1.0);
+    // The IO art is 23x32 — nothing else in the strip uses that box.
+    let io = |h: &str| h.contains("viewBox=\"0 0 23 32\"");
+    assert!(io(&with), "no IO button at the boundary:\n{with}");
+    assert!(!io(&without), "IO button survived below its threshold");
+}
+
+/// Padding steps down in three stages as the strip shortens.
+#[test]
+fn padding_steps_down_in_three_stages() {
+    let stages: std::collections::BTreeSet<String> = (120..=800)
+        .step_by(4)
+        .map(|h| {
+            let html = strip_at(h as f32);
+            ["padding-top:2px", "padding-top:3px", "padding-top:4px"]
+                .into_iter()
+                .find(|p| html.contains(p))
+                .unwrap_or("none")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(stages.len(), 3, "padding does not step through three stages: {stages:?}");
 }
