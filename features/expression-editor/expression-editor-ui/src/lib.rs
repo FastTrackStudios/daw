@@ -474,10 +474,28 @@ fn Canvas(
                     let data = e.data();
                     spawn(async move {
                         if let Ok(r) = data.get_client_rect().await {
-                            editor.write().resize(Viewport::new(
+                            let want = Viewport::new(
                                 r.width() - canvas::GUTTER_W,
                                 r.height() - canvas::RULER_H,
-                            ));
+                            );
+                            // `try_write`, not `write`. The await
+                            // resolves inside a later event dispatch,
+                            // which is already holding a borrow of this
+                            // signal — and `write()` there panics with
+                            // "RefCell already borrowed", taking the
+                            // canvas down on the first click under
+                            // Blitz, the renderer REAPER uses (#167).
+                            //
+                            // Skipping a contended frame is safe: a
+                            // measurement is idempotent, and the next
+                            // mount or resize re-measures. Guarding on
+                            // an actual change also stops a no-op
+                            // resize from invalidating the view.
+                            if let Ok(mut ed) = editor.try_write() {
+                                if ed.viewport != want {
+                                    ed.resize(want);
+                                }
+                            }
                         }
                     });
                 },
