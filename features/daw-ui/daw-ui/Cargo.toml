@@ -10,6 +10,10 @@ edition.workspace = true
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
+# `platform::sleep` — the wasm-cfg-split timer seam. The controls' DAW
+# subscription waits for a connection, and it has to do that in the browser
+# build too, where tokio's timer compiles and panics.
+architect = { workspace = true }
 daw-control = { workspace = true }
 daw-proto = { workspace = true }
 dock-dioxus = { workspace = true, default-features = false }
@@ -50,6 +54,14 @@ daw-theme-reaper = { workspace = true, optional = true }
 daw-theme-art = { workspace = true, default-features = false }
 
 [dev-dependencies]
+# The palette, so a test can assert a lit button is the theme's mute red
+# rather than some hex it copied out of the component.
+daw-theme = { workspace = true }
+# Real hit-tested pointer events against blitz-dom — the DOM the REAPER
+# panels render through. Hover cannot be tested any other way: it is a
+# pointer-chain change, not something a synthesized `mouseenter` reproduces.
+dioxus-test = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }
 # Renders a panel to a string so a test can assert it actually mounted.
 # Type-checking a Dioxus component proves nothing about whether it draws.
 dioxus-ssr = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", default-features = false }

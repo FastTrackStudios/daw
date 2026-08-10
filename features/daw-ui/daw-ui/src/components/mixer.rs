@@ -8,6 +8,7 @@
 //! - Record arm / monitoring buttons
 //! - Track name + number
 
+use crate::controls::{MuteButton, use_daw_tracks, use_track_store};
 use crate::prelude::*;
 use daw_control::{FxNodeKind, FxTree};
 use daw_proto::Track;
@@ -25,6 +26,11 @@ pub fn MixerPanel() -> Element {
     let mut fx_data = use_signal(Vec::<(String, TrackFxData)>::new);
     let mut error_msg = use_signal(|| Option::<String>::None);
     let mut connected = use_signal(|| false);
+
+    // The vector controls read their track from here, and it is fed by the
+    // track-event subscription rather than by this panel's two-second poll:
+    // a mute performed in REAPER shows up as soon as the event lands.
+    use_daw_tracks(use_track_store());
 
     // Poll for tracks + FX trees
     use_future(move || async move {
@@ -221,15 +227,12 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
 
             // ── M / S / FX buttons ──────────────────────────────
             div { class: "flex items-center justify-center gap-0.5 px-0.5 py-1 flex-shrink-0",
-                // Mute
-                span {
-                    class: if track.muted {
-                        "w-5 h-4 flex items-center justify-center rounded text-[8px] font-bold bg-red-600 text-white"
-                    } else {
-                        "w-5 h-4 flex items-center justify-center rounded text-[8px] font-bold bg-zinc-700 text-zinc-400"
-                    },
-                    "M"
-                }
+                // Mute — the vector control, which is the same component
+                // the REAPER theme's `mcp_mute_*` sprite is rasterised
+                // from. It reads its own state from the track store and
+                // toggles through the DAW itself, so it does not take
+                // `track.muted` from this panel's poll.
+                MuteButton { track: track.guid.clone() }
                 // Solo
                 span {
                     class: if track.soloed {

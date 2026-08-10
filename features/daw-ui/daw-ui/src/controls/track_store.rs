@@ -1,0 +1,167 @@
+//! Where a control gets its track from.
+//!
+//! Two things have to be true at once, and they pull in opposite
+//! directions. A control must render from *live* state — mute the track from
+//! REAPER's own menu and the button in the app has to light without anybody
+//! asking the backend again. And a control must be renderable with **no**
+//! backend at all: the theme exporter, the panel tests and the browser
+//! playground all draw mixer strips with no DAW attached.
+//!
+//! So the state and the wire are separated. [`TrackStore`] is a plain map of
+//! track GUID to [`Track`], held in a Signal and read from context: a test
+//! or a playground seeds it by hand. [`use_daw_tracks`] is the only piece
+//! that touches `daw_control`, and all it does is push into the same store —
+//! seed once from the project, then apply every [`TrackEvent`] as it
+//! arrives.
+//!
+//! That is why a backend-side mute shows up in the app without a refetch:
+//! nothing polls, the event *is* the update.
+
+use std::collections::HashMap;
+
+use daw_proto::{Track, TrackEvent};
+
+use crate::prelude::*;
+
+/// Every track the UI knows about, by GUID.
+///
+/// `Copy`, because a Dioxus `Signal` is: handlers take it by value and
+/// closures do not have to clone it.
+#[derive(Clone, Copy, PartialEq)]
+pub struct TrackStore {
+    tracks: Signal<HashMap<String, Track>>,
+}
+
+impl TrackStore {
+    /// An empty store. Must be called inside a component scope — it owns a
+    /// Signal.
+    pub fn new() -> Self {
+        Self { tracks: Signal::new(HashMap::new()) }
+    }
+
+    /// Replace everything with the project's current track list.
+    ///
+    /// The seeding read, and deliberately a *replace*: a track removed while
+    /// the app was not listening must not survive the reseed.
+    pub fn seed(&mut self, tracks: impl IntoIterator<Item = Track>) {
+        self.tracks
+            .set(tracks.into_iter().map(|t| (t.guid.clone(), t)).collect());
+    }
+
+    /// Fold one backend event into the store.
+    ///
+    /// Only the fields some control renders are handled. The rest are
+    /// ignored rather than triggering a refetch — an event this store does
+    /// not understand is state nothing on screen is showing yet, and each
+    /// control that lands adds its own arm here.
+    pub fn apply(&mut self, event: &TrackEvent) {
+        let mut tracks = self.tracks.write();
+        // The list changing is its own shape; everything else is one field
+        // of one track, so those share a single lookup rather than
+        // repeating `if let Some(t) = tracks.get_mut(guid)` nine times.
+        let (guid, edit): (_, &dyn Fn(&mut Track)) = match event {
+            TrackEvent::Added(t) => {
+                tracks.insert(t.guid.clone(), t.clone());
+                return;
+            }
+            TrackEvent::Removed(guid) => {
+                tracks.remove(guid);
+                return;
+            }
+            TrackEvent::Renamed { guid, name } => (guid, &|t| t.name = name.clone()),
+            TrackEvent::MuteChanged { guid, muted } => (guid, &|t| t.muted = *muted),
+            TrackEvent::SoloChanged { guid, soloed } => (guid, &|t| t.soloed = *soloed),
+            TrackEvent::ArmChanged { guid, armed } => (guid, &|t| t.armed = *armed),
+            TrackEvent::SelectionChanged { guid, selected } => {
+                (guid, &|t| t.selected = *selected)
+            }
+            TrackEvent::VolumeChanged { guid, volume } => (guid, &|t| t.volume = *volume),
+            TrackEvent::PanChanged { guid, pan } => (guid, &|t| t.pan = *pan),
+            TrackEvent::ColorChanged { guid, color } => (guid, &|t| t.color = *color),
+            // Moved and the automation/monitor modes: state no control
+            // draws yet. Ignored rather than refetched — the next control
+            // that renders one adds its arm here.
+            _ => return,
+        };
+        if let Some(t) = tracks.get_mut(guid) {
+            edit(t);
+        }
+    }
+
+    /// One track, if the store has it.
+    pub fn track(&self, guid: &str) -> Option<Track> {
+        self.tracks.read().get(guid).cloned()
+    }
+
+}
+
+/// The store from context, creating and providing one if this is the first
+/// asker.
+///
+/// Provide-or-consume rather than provide-only: a control has to draw
+/// wherever it is put, including a test that mounts one button and nothing
+/// else. An empty store renders an unmuted button, which is the right thing
+/// to show before the project has answered.
+pub fn use_track_store() -> TrackStore {
+    use_hook(|| match try_consume_context::<TrackStore>() {
+        Some(store) => store,
+        None => provide_context(TrackStore::new()),
+    })
+}
+
+/// One track from the store, re-read whenever it changes.
+///
+/// A [`Memo`] rather than a plain read so a control only re-renders when
+/// *its* track moves — a 40-track project should not redraw every strip
+/// because one fader did.
+pub fn use_track(guid: String) -> Memo<Option<Track>> {
+    let store = use_track_store();
+    // `use_reactive!`, not a plain closure: hooks run once, so a closure
+    // capturing `guid` would pin the memo to whichever track the component
+    // first rendered. A strip that reorders, or a list without keys, then
+    // shows one track's name over another's mute.
+    use_memo(use_reactive!(|guid| store.track(&guid)))
+}
+
+/// Keep `store` fed from the connected DAW.
+///
+/// Call once, high up — a strip's worth of controls share the one store.
+/// Waits for a connection, subscribes, then seeds: subscribing first means
+/// an edit landing during the seeding read shows up as an event rather than
+/// falling into the gap between the two calls.
+///
+pub fn use_daw_tracks(mut store: TrackStore) {
+    use_future(move || async move {
+        loop {
+            if daw_control::Daw::try_get().is_some() {
+                break;
+            }
+            // `architect::platform::sleep`, not `tokio::time`: this runs in
+            // the browser build too, where tokio's timer compiles and then
+            // panics. The platform seam maps to a browser timer there.
+            architect::platform::sleep(std::time::Duration::from_millis(500)).await;
+        }
+        let daw = daw_control::Daw::get();
+        let project = match daw.current_project().await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("track store: no project: {e:?}");
+                return;
+            }
+        };
+        let mut events = match project.tracks().subscribe().await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("track store: cannot subscribe: {e:?}");
+                return;
+            }
+        };
+        match project.tracks().all().await {
+            Ok(tracks) => store.seed(tracks),
+            Err(e) => tracing::warn!("track store: cannot seed: {e:?}"),
+        }
+        while let Ok(Some(event)) = events.recv().await {
+            store.apply(&event.get().event);
+        }
+    });
+}
