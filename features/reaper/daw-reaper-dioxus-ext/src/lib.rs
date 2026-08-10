@@ -32,7 +32,7 @@ use fragile::Fragile;
 use reaper_high::Reaper as HighReaper;
 use reaper_low::{PluginContext, Reaper as LowReaper, Swell};
 use reaper_macros::reaper_extension_plugin;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// REAPER's built-in misc timer id (the one driven by `plugin_register("timer", ...)`).
 const MISC_TIMER_ID: usize = 666;
@@ -122,6 +122,14 @@ impl App {
     }
 
     fn timer(&self) {
+        // Everything below runs with this extension's tokio runtime in
+        // context. A panel's futures are polled by dioxus's scheduler on
+        // this thread, and the daw subscriptions they start call
+        // `tokio::task::spawn` — which aborts the process, non-unwinding,
+        // when no runtime is current. That took REAPER down with it the
+        // first time a panel actually opened.
+        let _guard = self.runtime.handle().enter();
+
         self.runtime.process_tasks();
         // Drain pending actions on the main thread — handlers touch the
         // thread-local dock panel registry, so they MUST run here, not
@@ -137,33 +145,22 @@ impl App {
     }
 }
 
-async fn drive_action_events(mut rx: vox::Rx<ActionEvent>, tx: Sender<String>) {
+async fn drive_action_events(
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<ActionEvent>,
+    tx: Sender<String>,
+) {
     info!("FTS UI action dispatch loop started");
-    loop {
-        match rx.recv().await {
-            Ok(Some(event_ref)) => {
-                let mut event = None;
-                let _ = event_ref.map(|value| {
-                    event = Some(value.clone());
-                });
-                let Some(ActionEvent::Triggered { command_name }) = event else {
-                    continue;
-                };
-                if tx.send(command_name).is_err() {
-                    info!("FTS UI dispatch channel closed");
-                    break;
-                }
-            }
-            Ok(None) => {
-                info!("FTS UI action stream closed");
-                break;
-            }
-            Err(e) => {
-                warn!("FTS UI action stream error: {e:?}");
-                break;
-            }
+    while let Some(event) = rx.recv().await {
+        let ActionEvent::Triggered { command_name } = event else {
+            continue;
+        };
+        debug!(%command_name, "action received");
+        if tx.send(command_name).is_err() {
+            info!("FTS UI dispatch channel closed");
+            break;
         }
     }
+    info!("FTS UI action stream closed");
 }
 
 extern "C" fn timer_callback() {

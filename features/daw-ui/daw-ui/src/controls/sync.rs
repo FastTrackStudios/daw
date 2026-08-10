@@ -32,7 +32,7 @@ pub fn ControlSync() -> Element {
     use_future(move || async move {
         let mut drafts = store.drafts();
         loop {
-            architect::platform::sleep(FLUSH).await;
+            futures_timer::Delay::new(FLUSH).await;
 
             let dirty = drafts.take_dirty();
             if dirty.is_empty() {

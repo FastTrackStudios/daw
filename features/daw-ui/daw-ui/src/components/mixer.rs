@@ -42,7 +42,11 @@ pub fn MixerPanel() -> Element {
             if daw_control::Daw::try_get().is_some() {
                 break;
             }
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            // futures-timer, not tokio: this panel runs inside REAPER on
+            // dioxus's own scheduler, where there is no tokio runtime and a
+            // tokio timer is a non-unwinding panic that takes the host down
+            // with it.
+            futures_timer::Delay::new(std::time::Duration::from_millis(500)).await;
         }
 
         let daw = daw_control::Daw::get();
@@ -78,7 +82,7 @@ pub fn MixerPanel() -> Element {
                 }
             }
 
-            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+            futures_timer::Delay::new(std::time::Duration::from_secs(2)).await;
         }
     });
 
