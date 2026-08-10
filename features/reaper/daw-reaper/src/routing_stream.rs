@@ -78,6 +78,15 @@ pub fn subscribe_routing() -> Option<broadcast::Receiver<RoutingEvent>> {
 /// changes ahead of the create just floods the apply pipeline with
 /// "route not found" lookups and starves the create event. The next
 /// poll tick picks up both the route + its initial state in order.
+/// Send a routing event to the in-process broadcaster **and** the bus.
+///
+/// No project guid to resolve: unlike an `FxEvent`, every `RoutingEvent`
+/// already carries its own, so the bus copy is the event itself.
+fn emit(tx: &broadcast::Sender<RoutingEvent>, event: RoutingEvent) {
+    let _ = tx.send(event.clone());
+    crate::event_hub::hub().publish_routing(event);
+}
+
 pub(crate) fn publish_from_callback(event: RoutingEvent) {
     let Some(tx) = ROUTING_BROADCASTER.get() else {
         return;
@@ -92,7 +101,7 @@ pub(crate) fn publish_from_callback(event: RoutingEvent) {
     if !cached {
         return;
     }
-    let _ = tx.send(event);
+    emit(tx, event);
 }
 
 /// Returns true if the cache had the affected route (and the patch
@@ -166,7 +175,10 @@ pub fn poll_and_broadcast_routing() {
     let Some(tx) = ROUTING_BROADCASTER.get() else {
         return;
     };
-    if tx.receiver_count() == 0 {
+    // Either audience: the in-process broadcaster's subscribers, or anyone
+    // on the cross-domain bus. Same gate as the FX poller, and the same
+    // reason — a bus subscriber alone used to see nothing.
+    if tx.receiver_count() == 0 && crate::event_hub::hub().routing_subscriber_count() == 0 {
         return;
     }
     let Some(cache_cell) = ROUTING_CACHE.get() else {
@@ -258,7 +270,7 @@ fn diff_and_emit(
     // Deleted: in prev but not in curr.
     for p in prev {
         if !p.dest_key.is_empty() && !curr_by_dest.contains_key(p.dest_key.as_str()) {
-            let _ = tx.send(RoutingEvent::RouteDeleted {
+            emit(tx, RoutingEvent::RouteDeleted {
                 project_guid: project_guid.to_string(),
                 source_track_guid: source_track_guid.to_string(),
                 route_type,
@@ -275,7 +287,7 @@ fn diff_and_emit(
         match prev_by_dest.get(c.dest_key.as_str()) {
             None => {
                 if let Some(route) = curr_full.get(i) {
-                    let _ = tx.send(RoutingEvent::RouteCreated {
+                    emit(tx, RoutingEvent::RouteCreated {
                         project_guid: project_guid.to_string(),
                         source_track_guid: source_track_guid.to_string(),
                         route: route.clone(),
@@ -284,7 +296,7 @@ fn diff_and_emit(
             }
             Some(prev) => {
                 if (prev.volume - c.volume).abs() > VOLUME_THRESHOLD {
-                    let _ = tx.send(RoutingEvent::VolumeChanged {
+                    emit(tx, RoutingEvent::VolumeChanged {
                         project_guid: project_guid.to_string(),
                         source_track_guid: source_track_guid.to_string(),
                         route_type,
@@ -293,7 +305,7 @@ fn diff_and_emit(
                     });
                 }
                 if (prev.pan - c.pan).abs() > PAN_THRESHOLD {
-                    let _ = tx.send(RoutingEvent::PanChanged {
+                    emit(tx, RoutingEvent::PanChanged {
                         project_guid: project_guid.to_string(),
                         source_track_guid: source_track_guid.to_string(),
                         route_type,
@@ -302,7 +314,7 @@ fn diff_and_emit(
                     });
                 }
                 if prev.muted != c.muted {
-                    let _ = tx.send(RoutingEvent::MuteChanged {
+                    emit(tx, RoutingEvent::MuteChanged {
                         project_guid: project_guid.to_string(),
                         source_track_guid: source_track_guid.to_string(),
                         route_type,

@@ -662,6 +662,56 @@ async fn event_bus_multiplexes_standalone_marker_region_tempo_events() -> eyre::
     Ok(())
 }
 
+/// `EventBus` promises every domain on one channel, and FX and routing were
+/// the two it did not deliver under REAPER: the events were built correctly
+/// and published into in-process broadcasters that nothing bridged to the
+/// bus. #139 bridged them.
+///
+/// Pinned here, against the standalone backend, because REAPER cannot be
+/// driven in CI — and because a consumer written against standalone and
+/// then run under REAPER is exactly who the gap silently failed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn event_bus_carries_fx_and_routing_events() -> eyre::Result<()> {
+    let bundle = build_in_process_daw(seeded()).await?;
+    let project = bundle.daw.current_project().await?;
+    let project_guid = project.info().await?.guid;
+    let tracks = project.tracks();
+    let source = tracks.add("Source", None).await?;
+    let dest = tracks.add("Dest", None).await?;
+
+    let mut rx = bundle
+        .daw
+        .events()
+        .subscribe(
+            BusFilter {
+                fx: true,
+                routing: true,
+                ..BusFilter::default()
+            }
+            .for_project(project_guid.clone()),
+        )
+        .await?;
+    {
+        use daw_proto::event_bus::EventBusStreamSource;
+        let hub = bundle.standalone.events_hub().clone();
+        settle_subscription(move || hub.subscriber_count(), 1).await;
+    }
+
+    // An FX add reaches the bus.
+    source.fx_chain().add("ReaEQ").await?;
+    wait_for_daw_event(&mut rx, |event| {
+        matches!(event, DawEvent::Fx(event) if matches!(&event.event, daw_proto::FxEvent::Added { .. }))
+    })
+    .await?;
+
+    // And a send change does too.
+    let send = source.sends().add_to(dest.guid()).await?;
+    send.set_volume(0.5).await?;
+    wait_for_daw_event(&mut rx, |event| matches!(event, DawEvent::Routing(_))).await?;
+
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn track_subscribe_emits_mutation_events_through_in_process_daw() -> eyre::Result<()> {
     let bundle = build_in_process_daw(seeded()).await?;

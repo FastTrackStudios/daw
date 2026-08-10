@@ -130,12 +130,27 @@ pub(crate) fn publish_from_callback(event: FxEvent) {
     let _ = tx.send(event);
 }
 
+/// Send an FX event to the in-process broadcaster **and** the event bus.
+///
+/// Both, from one call, so a publish site cannot feed one and forget the
+/// other — which is exactly how the bus ended up missing this domain.
+fn emit(tx: &broadcast::Sender<FxEvent>, project_guid: &str, event: FxEvent) {
+    let _ = tx.send(event.clone());
+    crate::event_hub::hub().publish_fx(daw_proto::fx::FxStreamEvent {
+        project_guid: project_guid.to_string(),
+        event,
+    });
+}
+
 /// Poll REAPER FX chain state for every open project. **Main thread only.**
 pub fn poll_and_broadcast_fx() {
     let Some(tx) = FX_BROADCASTER.get() else {
         return;
     };
-    if tx.receiver_count() == 0 {
+    // Either audience keeps the poller alive: the in-process broadcaster
+    // subscribers, or anyone on the cross-domain bus. Gating on the
+    // broadcaster alone meant a bus subscriber saw nothing at all.
+    if tx.receiver_count() == 0 && crate::event_hub::hub().fx_subscriber_count() == 0 {
         return;
     }
     let Some(cache_cell) = FX_CACHE.get() else {
@@ -177,7 +192,7 @@ pub fn poll_and_broadcast_fx() {
                     // First poll for this chain — seed cache, don't emit.
                 }
                 Some(prev) => {
-                    diff_and_emit(tx, &chain, prev, &fresh_cached, &fresh);
+                    diff_and_emit(tx, &project_guid_str, &chain, prev, &fresh_cached, &fresh);
                 }
             }
             cache.insert(key, fresh_cached);
@@ -191,6 +206,7 @@ pub fn poll_and_broadcast_fx() {
 
 fn diff_and_emit(
     tx: &broadcast::Sender<FxEvent>,
+    project_guid: &str,
     ctx: &FxChainContext,
     prev: &[CachedFx],
     curr_cached: &[CachedFx],
@@ -206,7 +222,7 @@ fn diff_and_emit(
     // Removed: in prev but not in curr.
     for p in prev {
         if !p.guid.is_empty() && !curr_by_guid.contains_key(p.guid.as_str()) {
-            let _ = tx.send(FxEvent::Removed {
+            emit(tx, project_guid, FxEvent::Removed {
                 context: ctx.clone(),
                 fx_guid: p.guid.clone(),
             });
@@ -222,7 +238,7 @@ fn diff_and_emit(
             None => {
                 // Added — send the full Fx struct from curr_full.
                 if let Some(fx) = curr_full.get(i) {
-                    let _ = tx.send(FxEvent::Added {
+                    emit(tx, project_guid, FxEvent::Added {
                         context: ctx.clone(),
                         fx: fx.clone(),
                     });
@@ -230,7 +246,7 @@ fn diff_and_emit(
             }
             Some(prev) => {
                 if prev.enabled != c.enabled {
-                    let _ = tx.send(FxEvent::EnabledChanged {
+                    emit(tx, project_guid, FxEvent::EnabledChanged {
                         context: ctx.clone(),
                         fx_guid: c.guid.clone(),
                         enabled: c.enabled,
@@ -240,7 +256,7 @@ fn diff_and_emit(
                 // the same — otherwise add/remove dominates and the
                 // index shift is just bookkeeping.
                 if prev.index != c.index && prev.name == c.name {
-                    let _ = tx.send(FxEvent::Moved {
+                    emit(tx, project_guid, FxEvent::Moved {
                         context: ctx.clone(),
                         fx_guid: c.guid.clone(),
                         old_index: prev.index,
