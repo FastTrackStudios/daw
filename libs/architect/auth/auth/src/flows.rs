@@ -287,6 +287,31 @@ pub mod admin {
                 .await
         }
 
+        /// Grant or clear the `admin` role with NO admin session —
+        /// operator tooling authorized by possession of the data root.
+        ///
+        /// This is the bootstrap for admin itself: `require_admin` needs
+        /// an existing admin, so the FIRST one cannot be made through the
+        /// admin flows. Something outside them has to seed it, and
+        /// possession of the auth store is the only authority that
+        /// predates any account.
+        ///
+        /// Note this sets architect-auth's `user.role`, which gates the
+        /// `admin_*` flows. It is NOT the permission gate's role — that
+        /// comes from `architect-permissions`' engine, which currently
+        /// assigns every validated user the same default.
+        pub async fn set_user_role_local_trusted(
+            &self,
+            user_id: uuid::Uuid,
+            role: Option<String>,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            self.storage
+                .find_user_by_id(user_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            self.storage.update_user_role(user_id, role).await
+        }
+
         /// Delete a user with NO admin session — operator tooling whose
         /// authorization is possession of the data root.
         ///
