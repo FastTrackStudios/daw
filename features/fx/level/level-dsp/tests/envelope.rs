@@ -120,3 +120,136 @@ fn one_analysis_pass_serves_every_stage() {
     assert!(analysis.time_of(0) > 0.0);
     assert!(analysis.time_of(analysis.blocks() - 1) < 1.6);
 }
+
+// ── The other three (#204) ───────────────────────────────────────────
+
+use level_dsp::envelope::{breath_envelope, ride_envelope, sibilance_spans};
+
+/// Loud tonal phrase, quiet breath, loud tonal phrase.
+fn phrase_breath_phrase() -> Vec<f64> {
+    let mut out = Vec::new();
+    let tone = |n: usize, amp: f64, hz: f64, out: &mut Vec<f64>| {
+        for i in 0..n {
+            let t = i as f64 / SR;
+            out.push(amp * (2.0 * core::f64::consts::PI * hz * t).sin());
+        }
+    };
+    tone((SR * 0.4) as usize, 0.5, 220.0, &mut out);
+    // A breath: quiet broadband noise, not bright enough to be an ess.
+    let mut seed = 12345u32;
+    for _ in 0..(SR * 0.3) as usize {
+        seed = seed.wrapping_mul(1103515245).wrapping_add(12345);
+        let n = ((seed >> 16) as f64 / 32768.0) - 1.0;
+        out.push(n * 0.01);
+    }
+    tone((SR * 0.4) as usize, 0.5, 220.0, &mut out);
+    out
+}
+
+#[test]
+fn every_stage_emits_its_own_curve_from_one_pass() {
+    let audio = phrase_breath_phrase();
+    let a = analyze(&audio, SR, ClassifyConfig::default());
+
+    let gate = gate_envelope(&a, -40.0, -60.0, 0.25);
+    let breath = breath_envelope(&a, 12.0, -30.0, -70.0, 0.25);
+    let ride = ride_envelope(&a, -18.0, 1.0, 6.0, 6.0, 0.25);
+    let sib = sibilance_spans(&a, 4.0);
+
+    assert!(!gate.is_empty());
+    assert!(!breath.is_empty());
+    assert!(!ride.is_empty());
+    // Sibilance may legitimately find nothing in this material; the
+    // point is that it ran off the same pass.
+    let _ = sib;
+}
+
+#[test]
+fn sibilance_is_spans_with_gain_not_a_dense_curve() {
+    let audio = phrase_breath_phrase();
+    let a = analyze(&audio, SR, ClassifyConfig::default());
+    let spans = sibilance_spans(&a, 4.0);
+
+    assert!(
+        spans.len() < a.blocks() / 10,
+        "{} spans for {} blocks is not a discrete-event representation",
+        spans.len(),
+        a.blocks()
+    );
+    for s in &spans {
+        assert!(s.to_s > s.from_s, "a span has width");
+        assert!(s.db < 0.0, "sibilance reduces");
+    }
+}
+
+#[test]
+fn the_ride_does_not_track_the_noise_floor_between_phrases() {
+    // The reason the stages share an analysis pass: without the silence
+    // floor the rider would boost room tone in the gap by the full
+    // correction, which is exactly what gating-first used to prevent.
+    let audio = phrase_breath_phrase();
+    let a = analyze(&audio, SR, ClassifyConfig::default());
+    let ride = ride_envelope(&a, -18.0, 1.0, 24.0, 6.0, 0.25);
+
+    let peak = ride.iter().map(|p| p.db).fold(f64::MIN, f64::max);
+    assert!(
+        peak < 24.0,
+        "the ride hit its ceiling, which means it chased the floor: {peak}"
+    );
+}
+
+#[test]
+fn the_ride_holds_between_phrases_rather_than_returning_to_unity() {
+    let audio = phrase_breath_phrase();
+    let a = analyze(&audio, SR, ClassifyConfig::default());
+    let ride = ride_envelope(&a, -18.0, 1.0, 6.0, 6.0, 0.25);
+
+    // A ride that snapped to 0 dB in every gap would swell at each
+    // phrase edge.
+    let zeros = ride.iter().filter(|p| p.db.abs() < 1e-9).count();
+    assert!(
+        zeros <= 1,
+        "{zeros} points at unity suggests it reset between phrases"
+    );
+}
+
+#[test]
+fn the_curves_are_independent_of_each_other() {
+    // Each must be bypassable on its own, so none may be derived from
+    // another's output. Generating one twice with a different *other*
+    // stage's settings must change nothing.
+    let audio = phrase_breath_phrase();
+    let a = analyze(&audio, SR, ClassifyConfig::default());
+
+    let ride_a = ride_envelope(&a, -18.0, 1.0, 6.0, 6.0, 0.25);
+    // Nothing about the gate's configuration is an input to the ride.
+    let _tight_gate = gate_envelope(&a, -10.0, -90.0, 0.25);
+    let ride_b = ride_envelope(&a, -18.0, 1.0, 6.0, 6.0, 0.25);
+
+    assert_eq!(ride_a, ride_b, "the ride does not know what the gate did");
+}
+
+#[test]
+fn a_breath_ducks_and_the_phrases_do_not() {
+    let audio = phrase_breath_phrase();
+    let a = analyze(&audio, SR, ClassifyConfig::default());
+    let breath = breath_envelope(&a, 12.0, -30.0, -70.0, 0.25);
+
+    assert!(
+        breath.iter().any(|p| p.db < -6.0),
+        "something got ducked"
+    );
+    assert!(
+        breath.iter().any(|p| p.db.abs() < 1e-9),
+        "and something did not"
+    );
+}
+
+#[test]
+fn a_breath_curve_ramps_rather_than_stepping() {
+    // Unlike a gate: a breath ducks in and out over a slew.
+    let audio = phrase_breath_phrase();
+    let a = analyze(&audio, SR, ClassifyConfig::default());
+    let breath = breath_envelope(&a, 12.0, -30.0, -70.0, 0.25);
+    assert!(breath.iter().all(|p| !p.hold));
+}
