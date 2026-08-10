@@ -77,7 +77,22 @@ pub use zoom::{HorizontalMode, SmartZoom, VerticalMode, ZoomModes};
 #[derive(Clone, Debug, PartialEq)]
 pub struct Editor {
     pub doc: ExpressionDoc,
+    /// The shared camera. Its horizontal half is authoritative for every
+    /// lane; its vertical half serves the single-track roll.
     pub camera: Camera,
+    /// One vertical camera per lane, parallel to the workspace layout.
+    ///
+    /// Ephemeral — never persisted, re-fitted on load. Time stays on
+    /// `camera` because two instruments doubling a line are only
+    /// comparable on a common time axis; vertical is per lane because
+    /// that is what makes twenty lanes readable at once.
+    ///
+    /// Fitting happens on load and on an explicit Reset View, and
+    /// **never automatically**. Re-fitting when content changes would
+    /// rescale a lane under the cursor mid-gesture — drag one note up an
+    /// octave and the whole lane moves. The accepted cost is that an
+    /// edit can push content out of view, with Reset View one key away.
+    pub lane_cameras: Vec<camera::VerticalCamera>,
     pub viewport: Viewport,
     pub tool: Tool,
     /// The dimension being edited. Others may still be drawn as overlays.
@@ -173,10 +188,11 @@ impl Editor {
         let content = content_of(&doc);
         let camera = camera::reset_view(content, viewport, CUSHION, PAD);
         let tracks = Workspace::single("Track 1", doc.clone());
-        Self {
+        let mut editor = Self {
             doc,
             tracks,
             camera,
+            lane_cameras: Vec::new(),
             viewport,
             tool: Tool::Curve,
             dimension: Dimension::Pitch,
@@ -207,7 +223,10 @@ impl Editor {
             reference_to_front: false,
             temp_note: None,
             history: History::new(tracks::HISTORY_LIMIT),
-        }
+        };
+        // Fit once, up front. Every later fit is an explicit Reset View.
+        editor.fit_lanes();
+        editor
     }
 
     /// Add a track and return its index. It does not become active.
@@ -227,6 +246,73 @@ impl Editor {
         doc: ExpressionDoc,
     ) -> usize {
         self.tracks.push(tracks::Track::with_guid(guid, name, doc))
+    }
+
+    /// Rows of headroom a lane leaves around its content before fitting.
+    ///
+    /// Without it, a track whose notes are all on one row fits to zero
+    /// height and draws as a hairline, and a melody touching its own
+    /// extremes has notes flush against the lane edge where they read as
+    /// clipped.
+    pub const LANE_FIT_PAD: f64 = 1.0;
+
+    /// The vertical camera for a lane, if it has been fitted.
+    pub fn lane_camera(&self, lane: usize) -> Option<camera::VerticalCamera> {
+        self.lane_cameras.get(lane).copied()
+    }
+
+    /// Fit every lane to its own content.
+    ///
+    /// Called on load and from Reset View — **never** in response to an
+    /// edit. See [`Editor::lane_cameras`] for why.
+    pub fn fit_lanes(&mut self) {
+        let count = self.tracks.layout().len();
+        let rows = self
+            .tracks
+            .stack(self.viewport.h as f32, 1.0, 0.0)
+            .into_iter()
+            .map(|r| (r.lane, r.height as f64))
+            .collect::<Vec<_>>();
+
+        self.lane_cameras = (0..count)
+            .map(|lane| {
+                let height = rows
+                    .iter()
+                    .find(|(l, _)| *l == lane)
+                    .map(|(_, h)| *h)
+                    .unwrap_or(self.viewport.h.max(1.0));
+                match self
+                    .tracks
+                    .lane_row_range(lane, &self.doc, Self::LANE_FIT_PAD)
+                {
+                    Some((lo, hi)) => camera::VerticalCamera::fitted(lo, hi, height),
+                    None => camera::VerticalCamera::default(),
+                }
+            })
+            .collect();
+    }
+
+    /// Fit one lane, leaving the others where the user put them.
+    pub fn fit_lane(&mut self, lane: usize) {
+        if self.lane_cameras.len() != self.tracks.layout().len() {
+            self.fit_lanes();
+            return;
+        }
+        let height = self
+            .tracks
+            .stack(self.viewport.h as f32, 1.0, 0.0)
+            .into_iter()
+            .find(|r| r.lane == lane)
+            .map(|r| r.height as f64)
+            .unwrap_or(self.viewport.h.max(1.0));
+        if let Some((lo, hi)) = self
+            .tracks
+            .lane_row_range(lane, &self.doc, Self::LANE_FIT_PAD)
+        {
+            if let Some(slot) = self.lane_cameras.get_mut(lane) {
+                *slot = camera::VerticalCamera::fitted(lo, hi, height);
+            }
+        }
     }
 
     /// Give the active track the host's identity.
@@ -598,6 +684,10 @@ impl Editor {
     /// `V` — snap directly to Reset View, no interpolation, no magnets.
     pub fn reset_view(&mut self) {
         self.camera = self.reset_camera();
+        // Reset View is the one gesture that re-fits lanes. Everything
+        // else leaves them exactly where they are, including edits that
+        // push content out of view.
+        self.fit_lanes();
     }
 
     pub fn bounds(&self) -> Bounds {
