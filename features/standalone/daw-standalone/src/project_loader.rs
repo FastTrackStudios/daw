@@ -335,6 +335,11 @@ fn populate_tracks(
                     .unwrap_or(true),
                 fx_count: 0, // FX not loaded (synthetic standalone)
                 input_fx_count: 0,
+                // The project file's own answer, not a default: a track
+                // muted out of the master bus must not read as sending to
+                // it just because nobody asked the routing service.
+                parent_send: rt.master_send.as_ref().map(|m| m.enabled).unwrap_or(true),
+                record_input: daw_proto::track::RecordInput::None,
             };
             p.tracks.push(track);
 

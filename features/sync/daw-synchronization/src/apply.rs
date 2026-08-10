@@ -622,6 +622,16 @@ async fn apply_track(
             suppression.suppress(SuppressionKey::track(&resolve(guid), "moved"));
             move_track_to_index(daw, ctx, guid, *new_index).await;
         }
+        // Unlike the FX count below, this *is* a mutation — a track either
+        // sends to its parent or does not, and the other DAW can be told.
+        TrackEvent::ParentSendChanged { guid, enabled } => {
+            suppression.suppress(SuppressionKey::track(&resolve(guid), "parentsend"));
+            let enabled = *enabled;
+            apply_track_mutation(daw, ctx, guid, move |handle| {
+                Box::pin(async move { handle.set_parent_send(enabled).await })
+            })
+            .await;
+        }
         // A report, not a mutation: a track's FX count is whatever its
         // chain contains, and there is nothing to set. The chain itself
         // syncs through `SyncDomain::Fx`, and applying this would at best

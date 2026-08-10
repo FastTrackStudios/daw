@@ -8,7 +8,10 @@
 //! - Record arm / monitoring buttons
 //! - Track name + number
 
-use crate::controls::{FxButton, MuteButton, VolumeFader, VolumeSync, use_daw_tracks, use_track_store};
+use crate::controls::{
+    ControlSync, FxButton, IoButton, MonitorButton, MuteButton, PanKnob, PhaseButton,
+    RecordArmButton, SoloButton, TrackName, VolumeFader, use_daw_tracks, use_track_store,
+};
 use crate::prelude::*;
 use daw_control::{FxNodeKind, FxTree};
 use daw_proto::Track;
@@ -105,8 +108,8 @@ pub fn MixerPanel() -> Element {
 
     rsx! {
         div { class: "h-full w-full flex flex-col bg-zinc-900 overflow-hidden",
-            // The single place a fader's drag becomes an engine write.
-            VolumeSync {}
+            // The single place a drag becomes an engine write.
+            ControlSync {}
 
             // Header
             div { class: "px-3 py-1.5 border-b border-zinc-700 flex items-center justify-between flex-shrink-0",
@@ -233,15 +236,7 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 // toggles through the DAW itself, so it does not take
                 // `track.muted` from this panel's poll.
                 MuteButton { track: track.guid.clone() }
-                // Solo
-                span {
-                    class: if track.soloed {
-                        "w-5 h-4 flex items-center justify-center rounded text-[8px] font-bold bg-yellow-500 text-black"
-                    } else {
-                        "w-5 h-4 flex items-center justify-center rounded text-[8px] font-bold bg-zinc-700 text-zinc-400"
-                    },
-                    "S"
-                }
+                SoloButton { track: track.guid.clone() }
                 // FX — lit from the store, which the FxCountChanged event
                 // keeps current. The old `if track.fx_count > 0` read this
                 // panel's two-second poll of a field no event ever updated,
@@ -259,36 +254,30 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 VolumeFader { track: track.guid.clone() }
             }
 
-            // ── dB + Pan readout ────────────────────────────────
+            // ── dB readout + pan ────────────────────────────────
             div { class: "text-center px-1 flex-shrink-0",
                 div { class: "text-[9px] font-mono text-zinc-400", "{db_label}" }
-                div { class: "text-[8px] text-zinc-500", "{pan_label}" }
+            }
+            div { class: "flex items-center justify-center py-1 flex-shrink-0",
+                PanKnob { track: track.guid.clone() }
             }
 
-            // ── Record arm / monitoring ─────────────────────────
+            // ── Record arm / monitoring / polarity ──────────────
             div { class: "flex items-center justify-center gap-1 py-1 flex-shrink-0",
-                // Record arm
-                span {
-                    class: if track.armed {
-                        "w-4 h-4 rounded-full bg-red-500 border border-red-400"
-                    } else {
-                        "w-4 h-4 rounded-full bg-zinc-700 border border-zinc-600"
-                    },
-                }
-                // Monitoring indicator (small circle)
-                span {
-                    class: "w-4 h-4 rounded-full bg-zinc-700 border border-zinc-600",
-                }
+                RecordArmButton { track: track.guid.clone() }
+                MonitorButton { track: track.guid.clone() }
+                PhaseButton { track: track.guid.clone() }
+                IoButton { track: track.guid.clone() }
             }
 
             // ── Track Name + Number (bottom) ────────────────────
             div {
-                class: "px-1 py-1.5 text-center flex-shrink-0 border-t border-zinc-700",
-                style: "background-color: color-mix(in srgb, {color_css} 20%, transparent);",
-                div { class: "text-[10px] font-medium text-zinc-200 truncate leading-tight",
-                    "{track.name}"
-                }
-                div { class: "text-[8px] text-zinc-500",
+                class: "flex-shrink-0 border-t border-zinc-700",
+                // The name and its colour come from the store, so a rename
+                // or a recolour in the DAW lands here without this panel
+                // refetching anything.
+                TrackName { track: track.guid.clone() }
+                div { class: "text-[8px] text-zinc-500 text-center",
                     "{track.index}"
                 }
             }

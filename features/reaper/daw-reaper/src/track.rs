@@ -140,6 +140,7 @@ pub(crate) fn build_track_info(track: &reaper_high::Track) -> Track {
     let input_fx_count = track.input_fx_chain().fx_count();
     let visible_in_tcp = track.is_shown(reaper_medium::TrackArea::Tcp);
     let visible_in_mixer = track.is_shown(reaper_medium::TrackArea::Mcp);
+    let (record_input, parent_send) = record_input_and_parent_send(track);
 
     Track {
         guid,
@@ -190,6 +191,8 @@ pub(crate) fn build_track_info(track: &reaper_high::Track) -> Track {
         visible_in_mixer,
         fx_count,
         input_fx_count,
+        record_input,
+        parent_send,
     }
 }
 
@@ -398,6 +401,53 @@ fn reorder_behavior_to_reaper(behavior: ProtoReorderTracksBehavior) -> ReorderTr
             ReorderTracksBehavior::MakeChildOfPreviousTrack
         }
         ProtoReorderTracksBehavior::ExtendFolder => ReorderTracksBehavior::ExtendFolder,
+    }
+}
+
+/// What the track records from, and whether it still reaches its parent.
+///
+/// Both read here rather than through their own service calls: a strip
+/// shows them, and building a strip has to stay *one* bulk read. A
+/// per-track getter would make an N-track mixer cost N extra round trips.
+pub(crate) fn record_input_and_parent_send(track: &reaper_high::Track) -> (RecordInput, bool) {
+    track
+        .raw()
+        .map(|raw| {
+            let medium = ReaperHigh::get().medium_reaper();
+            let attr = |key| unsafe { medium.get_media_track_info_value(raw, key) };
+            (
+                record_input_from_raw(attr(TrackAttributeKey::RecInput) as i32),
+                attr(TrackAttributeKey::MainSend) > 0.0,
+            )
+        })
+        // A track whose raw pointer has gone is being removed; REAPER's own
+        // defaults are the honest answer.
+        .unwrap_or((RecordInput::None, true))
+}
+
+/// The inverse of [`record_input_to_raw`].
+///
+/// Only the shapes the encoder produces are decoded; everything else is
+/// `Raw`, which is what that variant is for — REAPER has input types this
+/// model does not name, and inventing a name for one would be worse than
+/// carrying the number.
+fn record_input_from_raw(value: i32) -> RecordInput {
+    const ALL_MIDI_DEVICES_ID: u32 = 63;
+    match value {
+        v if v < 0 => RecordInput::None,
+        v if v >= 4096 => {
+            let packed = (v - 4096) as u32;
+            let (device, channel) = (packed / 32, packed % 32);
+            RecordInput::Midi {
+                device_id: (device != ALL_MIDI_DEVICES_ID).then_some(device as u8),
+                channel: (channel != 0).then(|| (channel - 1) as u8),
+            }
+        }
+        // A mono hardware input is its own 0-based channel number. Stereo
+        // pairs and other modes live in ranges this does not decode, and
+        // reach the strip as `Raw`.
+        v if v < 1024 => RecordInput::Audio { channel: v as u32 },
+        v => RecordInput::Raw(v),
     }
 }
 
@@ -1057,6 +1107,12 @@ pub fn poll_and_broadcast_tracks() {
                     // where that poller enumerates every plugin of every
                     // chain — and it only runs at all when something is
                     // subscribed to the FX stream, which the strip is not.
+                    if p.parent_send != track.parent_send {
+                        publish(TrackEvent::ParentSendChanged {
+                            guid: guid.clone(),
+                            enabled: track.parent_send,
+                        });
+                    }
                     if p.fx_count != track.fx_count || p.input_fx_count != track.input_fx_count {
                         publish(TrackEvent::FxCountChanged {
                             guid: guid.clone(),

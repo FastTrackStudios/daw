@@ -52,6 +52,12 @@ pub enum TrackEvent {
         old_index: u32,
         new_index: u32,
     },
+    /// The track stopped or started sending to its parent / master.
+    ///
+    /// The IO indicator on every strip shows this, and it used to be a
+    /// per-track routing call — so a mixer paid N round trips for it and
+    /// then never heard about a change.
+    ParentSendChanged { guid: String, enabled: bool },
     /// The track's FX chains gained or lost plugins.
     ///
     /// `Track::fx_count` and `input_fx_count` were seeded by the bulk read

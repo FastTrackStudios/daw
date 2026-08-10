@@ -21,7 +21,7 @@ use std::collections::HashMap;
 
 use daw_proto::{Track, TrackEvent};
 
-use crate::controls::Drafts;
+use crate::controls::{Drafts, Held};
 use crate::prelude::*;
 
 /// Every track the UI knows about, by GUID.
@@ -56,6 +56,14 @@ impl TrackStore {
         self.drafts
             .volume(guid)
             .or_else(|| self.track(guid).map(|t| t.volume))
+            .unwrap_or(0.0)
+    }
+
+    /// The same for pan, which a drag owns the same way.
+    pub fn pan(&self, guid: &str) -> f64 {
+        self.drafts
+            .pan(guid)
+            .or_else(|| self.track(guid).map(|t| t.pan))
             .unwrap_or(0.0)
     }
 
@@ -98,12 +106,24 @@ impl TrackStore {
             // Dropped while the UI holds this track: it is the echo of a
             // drag still in progress, and obeying it would drag the cap
             // backwards under the pointer.
-            TrackEvent::VolumeChanged { guid, volume } if !self.drafts.holds(guid) => {
+            TrackEvent::VolumeChanged { guid, volume } if !self.drafts.holds(guid, Held::Volume) => {
                 (guid, &|t| t.volume = *volume)
             }
             TrackEvent::VolumeChanged { .. } => return,
-            TrackEvent::PanChanged { guid, pan } => (guid, &|t| t.pan = *pan),
+            TrackEvent::PanChanged { guid, pan } if !self.drafts.holds(guid, Held::Pan) => {
+                (guid, &|t| t.pan = *pan)
+            }
+            TrackEvent::PanChanged { .. } => return,
             TrackEvent::ColorChanged { guid, color } => (guid, &|t| t.color = *color),
+            TrackEvent::ParentSendChanged { guid, enabled } => {
+                (guid, &|t| t.parent_send = *enabled)
+            }
+            TrackEvent::PhaseInvertedChanged { guid, inverted } => {
+                (guid, &|t| t.phase_inverted = *inverted)
+            }
+            TrackEvent::InputMonitorChanged { guid, monitor } => {
+                (guid, &|t| t.input_monitor = *monitor)
+            }
             // The event that did not exist until #142: without it a
             // mixer's FX buttons were right when it opened and wrong from
             // the first plugin the user added.

@@ -10,7 +10,7 @@
 
 use std::time::Duration;
 
-use crate::controls::use_track_store;
+use crate::controls::{Held, use_track_store};
 use crate::prelude::*;
 
 /// How often drafts are flushed to the engine.
@@ -21,12 +21,12 @@ use crate::prelude::*;
 /// is not waiting on either — it is already showing the draft.
 const FLUSH: Duration = Duration::from_millis(33);
 
-/// Drain drafts to the DAW for as long as this is mounted.
+/// Drain every held value to the DAW for as long as this is mounted.
 ///
 /// Mount once, high up — beside
 /// [`use_daw_tracks`][crate::controls::use_daw_tracks].
 #[component]
-pub fn VolumeSync() -> Element {
+pub fn ControlSync() -> Element {
     let store = use_track_store();
 
     use_future(move || async move {
@@ -44,12 +44,12 @@ pub fn VolumeSync() -> Element {
                 drafts.retire();
                 continue;
             }
-            for (guid, value) in dirty {
-                if let Err(e) = write_volume(&guid, value).await {
+            for (guid, what, value) in dirty {
+                if let Err(e) = write(&guid, what, value).await {
                     // Warn rather than retry: the next flush carries the
                     // newest value anyway, and a retry queue would replay
                     // stale positions after the user has moved on.
-                    tracing::warn!("volume {guid}: {e}");
+                    tracing::warn!("{what:?} {guid}: {e}");
                 }
             }
         }
@@ -58,14 +58,12 @@ pub fn VolumeSync() -> Element {
     rsx! {}
 }
 
-async fn write_volume(guid: &str, value: f64) -> eyre::Result<()> {
-    let daw = daw_control::Daw::try_get().ok_or_else(|| eyre::eyre!("no DAW connected"))?;
-    let project = daw.current_project().await?;
-    let track = project
-        .tracks()
-        .by_guid(guid)
-        .await?
-        .ok_or_else(|| eyre::eyre!("no track {guid}"))?;
-    track.set_volume(value).await?;
-    Ok(())
+async fn write(guid: &str, what: Held, value: f64) -> eyre::Result<()> {
+    crate::controls::reach::on_track(guid, |t| async move {
+        match what {
+            Held::Volume => t.set_volume(value).await,
+            Held::Pan => t.set_pan(value).await,
+        }
+    })
+    .await
 }
