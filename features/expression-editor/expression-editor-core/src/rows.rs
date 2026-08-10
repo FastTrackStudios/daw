@@ -297,6 +297,29 @@ impl RowSpace {
         }
     }
 
+    /// How many semitones one row is worth, when a pitch curve is drawn
+    /// against it.
+    ///
+    /// In pitch space a row *is* a semitone and this is 1. Everywhere
+    /// else the row axis is not pitch at all, and drawing a semitone
+    /// curve at one-row-per-semitone is a unit error: a whole-tone bend
+    /// on a string roll would deflect the line across two neighbouring
+    /// strings.
+    ///
+    /// Two semitones per string row is the whole-step bend a guitarist
+    /// actually plays, drawn as exactly one row of deflection — the
+    /// largest interval that reads as "a bend" rather than "a note
+    /// somewhere else".
+    pub fn semitones_per_row(&self) -> f64 {
+        match self {
+            RowSpace::Pitch => 1.0,
+            RowSpace::Strings(_) => 2.0,
+            // Neither space has a pitch axis to scale against; the
+            // curves drawn over them are decoration, not a reading.
+            RowSpace::Drums(_) | RowSpace::Bands(_) => 1.0,
+        }
+    }
+
     /// Black-key shading only means anything in pitch space.
     pub fn is_accidental(&self, row: i32) -> bool {
         match self {
