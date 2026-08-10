@@ -33,6 +33,17 @@
 
 pub mod event;
 pub mod align;
+// Absorbed from the `midi-tools` crates (#153). Velocity and arp are
+// the same shape as the tools already here — an operation over selected
+// events with a config — so they belong beside them rather than in
+// three crates of their own.
+pub mod arp;
+pub mod note_shape;
+pub mod sink;
+pub mod velocity;
 pub mod quantize;
 
 pub use event::{Sustained, Timed, length_of};
+
+pub use sink::{ArpSink, DemoArpSink, DemoSink, VelocitySink};
+pub use velocity::{Note, Range, Session, VelocityEdit};

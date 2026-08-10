@@ -14,6 +14,7 @@ default = []
 native = ["dep:nice-plug-dioxus", "dep:fts-ui"]
 
 [dependencies]
+expression-editor-tools.workspace = true
 expression-editor-core = { workspace = true }
 level-dsp.workspace = true
 # The canonical FTS palette — every colour below comes from here.

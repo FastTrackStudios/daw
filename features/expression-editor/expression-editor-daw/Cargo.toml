@@ -10,6 +10,7 @@ description = "Adapter between the expression editor's document and the DAW MIDI
 # the same editor drive a live REAPER take and a standalone project
 # without knowing which it has.
 [dependencies]
+expression-editor-tools.workspace = true
 daw = { workspace = true }
 expression-editor-core = { workspace = true }
 facet.workspace = true
