@@ -193,6 +193,19 @@ const BOTTOM_SECTION: f32 = 47.0;
 /// anchored to it. The record arm's ring sits at 0.486 of its own 36-wide
 /// cell rather than in the middle, which is why it is placed separately.
 const COLUMN: f32 = 55.0;
+/// `mcp.recmon`, `mcp.mute` and `mcp.solo` are all 21 wide. Stated because
+/// the column has to *be* that wide: left to shrink-wrap, `align-items:
+/// center` centres every button on the widest child — the IO button, which
+/// `rtconfig` writes as `mcp.solo + [-1 23 23 30]`, deliberately one column
+/// left and two wider — and the whole stack drifted a pixel right of the
+/// record arm above it.
+const BUTTON_W: f32 = 21.0;
+/// The one vertical axis the arm and the column share.
+const COLUMN_AXIS: f32 = COLUMN + BUTTON_W / 2.0;
+/// `mcp_recarm_*` is a 36-wide cell whose ring is centred at 0.486 of it,
+/// not at 18 — so the cell's left edge is not the axis minus half its width.
+const ARM_CELL_W: f32 = 36.0;
+const ARM_LEFT: f32 = COLUMN_AXIS - ARM_CELL_W * 0.486;
 /// `mcp.label` — 26 of the bottom section's 47, above the 20-row index
 /// plate and the row that divides them.
 const NAME_PLATE: u32 = 26;
@@ -391,8 +404,8 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 // `z-index` because the stretch section is the next sibling
                 // and would otherwise paint over the overhang.
                 div {
-                    style: "position:absolute; left:48px; bottom:-{ARM_OVERHANG}px; \
-                            z-index:2;",
+                    style: "position:absolute; left:{ARM_LEFT}px; \
+                            bottom:-{ARM_OVERHANG}px; z-index:2;",
                     RecordArmButton { track: track.guid.clone() }
                 }
                 if shape.show_record_input {
@@ -452,6 +465,7 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 div {
                     class: "absolute flex flex-col items-center",
                     style: "position:absolute; left:{COLUMN}px; top:2px; \
+                            width:{BUTTON_W}px; \
                             display:flex; flex-direction:column; align-items:center; \
                             gap:{shape.padding}px;",
                     // `mcp.recmon` is anchored off the record arm and stays

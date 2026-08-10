@@ -355,3 +355,23 @@ fn the_record_arm_sinks_its_base_into_the_dark() {
     // And it hangs, rather than sitting inside the band.
     assert!(!html.contains("bottom:2px"), "the arm is back inside the band");
 }
+
+/// The record arm and the button column stand on one axis.
+///
+/// The column shrink-wrapped, so `align-items: center` centred every
+/// button on its widest child — the IO button, which `rtconfig` writes as
+/// `mcp.solo + [-1 23 23 30]`, one column left and two wider on purpose.
+/// That pushed mute, solo and the monitor a pixel right of the arm above
+/// them. Stating the column's width puts the axis back where the arm is.
+#[test]
+fn the_record_arm_and_the_button_column_share_an_axis() {
+    let html = strip_at(371.0);
+
+    // The column is as wide as the buttons it holds, not as wide as the
+    // one that deliberately overhangs them.
+    assert!(html.contains("width:21px"), "the button column shrink-wraps:\n{html}");
+
+    // And the arm is placed from the same axis rather than by eye: the
+    // ring sits at 0.486 of a 36-wide cell, so 65.5 - 17.496.
+    assert!(html.contains("left:48.00"), "the arm is not on the column's axis");
+}
