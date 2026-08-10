@@ -110,7 +110,7 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
         ed.tracks.doc_of(track_index)?
     };
 
-    let y0 = row.y as f64 + LANE_PAD;
+    let y0 = row.y as f64 - ed.stack_scroll + LANE_PAD;
     let h = (row.height as f64 - LANE_PAD * 2.0).max(1.0);
     // Read the lane's stored vertical camera rather than re-deriving a
     // fit from content. That distinction *is* the feature: deriving it
@@ -170,7 +170,7 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
         track: track_index,
         name: track.name.clone(),
         mode: track.mode,
-        y: row.y as f64,
+        y: row.y as f64 - ed.stack_scroll,
         h: row.height as f64,
         active,
         reference: track.reference,
@@ -300,7 +300,10 @@ fn guides(
 }
 
 /// How much taller the lane being edited is than the rest.
-const ACTIVE_BOOST: f32 = 1.8;
+/// Kept in core so the editor's auto-scroll lays lanes out exactly
+/// as the renderer does; a mismatch would scroll to the wrong place.
+use expression_editor_core::Editor as CoreEditor;
+const ACTIVE_BOOST: f32 = CoreEditor::ACTIVE_BOOST;
 
 /// Shortest a lane may be, in pixels.
 ///
@@ -321,7 +324,7 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
     let mut editor = editor;
     let ed = editor.read();
     let vp = ed.viewport;
-    let lanes = lanes(&ed, ACTIVE_BOOST, MIN_LANE);
+    let lanes = lanes(&ed, ACTIVE_BOOST, ed.lane_floor().max(MIN_LANE));
     let ticks = canvas::ruler(&ed);
     drop(ed);
 
@@ -344,12 +347,14 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
             },
             onpointerdown: move |e: PointerEvent| {
                 let c = e.data().element_coordinates();
-                let y = c.y - canvas::RULER_H;
+                let y = c.y - canvas::RULER_H + editor.read().stack_scroll;
                 // Resolve against a snapshot: the read guard has to be
                 // gone before the write below.
                 let hit = {
                     let ed = editor.read();
-                    let rows = ed.tracks.stack(ed.viewport.h as f32, ACTIVE_BOOST, MIN_LANE);
+                    let rows = ed
+                        .tracks
+                        .stack(ed.viewport.h as f32, ACTIVE_BOOST, ed.lane_floor().max(MIN_LANE));
                     // `row_at` resolves to a *lane*. Clicking targets a
                     // lane, never a track within one: with a vocal and
                     // its guide a few pixels apart, picking by proximity

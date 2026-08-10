@@ -93,6 +93,14 @@ pub struct Editor {
     /// octave and the whole lane moves. The accepted cost is that an
     /// edit can push content out of view, with Reset View one key away.
     pub lane_cameras: Vec<camera::VerticalCamera>,
+    /// How far the stack is scrolled, in pixels. Ephemeral.
+    pub stack_scroll: f64,
+    /// How many lanes fill the viewport before the stack scrolls.
+    ///
+    /// A user preference, read by the host and handed down — core has
+    /// one dependency by design and does not reach for a config file.
+    /// Default 5.
+    pub lanes_visible: u8,
     pub viewport: Viewport,
     pub tool: Tool,
     /// The dimension being edited. Others may still be drawn as overlays.
@@ -193,6 +201,8 @@ impl Editor {
             tracks,
             camera,
             lane_cameras: Vec::new(),
+            stack_scroll: 0.0,
+            lanes_visible: 5,
             viewport,
             tool: Tool::Curve,
             dimension: Dimension::Pitch,
@@ -255,6 +265,64 @@ impl Editor {
     /// extremes has notes flush against the lane edge where they read as
     /// clipped.
     pub const LANE_FIT_PAD: f64 = 1.0;
+
+    /// Extra weight the active lane gets — you are working in it and it
+    /// should have the room.
+    ///
+    /// In core rather than the renderer so that auto-scroll lays lanes
+    /// out exactly as the renderer will; a mismatch scrolls to the wrong
+    /// place.
+    pub const ACTIVE_BOOST: f32 = 1.8;
+
+    /// The lane-height floor, derived from the viewport and the
+    /// `lanes_visible` preference.
+    ///
+    /// Derived rather than stored, because a pixel floor means something
+    /// different on every screen: 200px is five lanes on a laptop and
+    /// eleven on a studio monitor.
+    pub fn lane_floor(&self) -> f32 {
+        (self.viewport.h as f32 / self.lanes_visible.max(1) as f32).max(1.0)
+    }
+
+    /// Total height the stack wants, which may exceed the viewport.
+    pub fn stack_height(&self, active_boost: f32) -> f32 {
+        self.tracks
+            .stack(self.viewport.h as f32, active_boost, self.lane_floor())
+            .last()
+            .map(|r| r.y + r.height)
+            .unwrap_or(0.0)
+    }
+
+    /// Scroll just enough to bring a lane fully into view.
+    ///
+    /// Minimal rather than centred: centring makes the whole stack jump
+    /// on every switch, while a minimal scroll leaves the surrounding
+    /// lanes where your eye left them. This does not contradict the
+    /// no-auto-refit rule — the view must not move *mid-gesture*, but
+    /// changing which lane is active is the request to work somewhere
+    /// else, and a highlight you cannot see is worse than a small
+    /// scroll.
+    pub fn scroll_lane_into_view(&mut self, lane: usize, active_boost: f32) {
+        let rows = self
+            .tracks
+            .stack(self.viewport.h as f32, active_boost, self.lane_floor());
+        let Some(row) = rows.iter().find(|r| r.lane == lane) else {
+            return;
+        };
+        let (top, bottom) = (row.y as f64, (row.y + row.height) as f64);
+        let view_h = self.viewport.h;
+
+        if top < self.stack_scroll {
+            self.stack_scroll = top;
+        } else if bottom > self.stack_scroll + view_h {
+            self.stack_scroll = bottom - view_h;
+        }
+
+        // Never scroll past the end, and never above the top.
+        let total = rows.last().map(|r| (r.y + r.height) as f64).unwrap_or(0.0);
+        let max = (total - view_h).max(0.0);
+        self.stack_scroll = self.stack_scroll.clamp(0.0, max);
+    }
 
     /// The vertical camera for a lane, if it has been fitted.
     pub fn lane_camera(&self, lane: usize) -> Option<camera::VerticalCamera> {
@@ -370,6 +438,11 @@ impl Editor {
         };
         self.doc = doc;
         self.history = history;
+        // Changing which lane is active is the request to work somewhere
+        // else, so the view follows — minimally.
+        if let Some(lane) = self.tracks.active_lane() {
+            self.scroll_lane_into_view(lane, Self::ACTIVE_BOOST);
+        }
         // Note ids are per-document, so a carried-over selection would
         // point at whatever happens to share those ids on the new track.
         self.selection.clear();
