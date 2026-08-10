@@ -49,10 +49,16 @@ pub enum Scene {
     /// A part whose note density changes across it — sixteenths at the
     /// start, held notes at the end. What contextual zoom is for.
     Density,
+    /// Unpitched audio: hits on spectral bands rather than notes on a
+    /// scale. The seventh mode, and the one #162 was missing.
+    Percussive,
+    /// A riff as it arrives from a Guitar Pro import — the file's own
+    /// tuning driving the rows, bends as per-note curves (#168).
+    GuitarPro,
 }
 
 impl Scene {
-    pub const ALL: [Scene; 15] = [
+    pub const ALL: [Scene; 17] = [
         Scene::Phrase,
         Scene::Zones,
         Scene::Microtonal,
@@ -68,6 +74,8 @@ impl Scene {
         Scene::GuitarLane,
         Scene::GuitarBoth,
         Scene::Lyrics,
+        Scene::Percussive,
+        Scene::GuitarPro,
     ];
 
     /// Stable file-name stem for screenshots.
@@ -88,6 +96,8 @@ impl Scene {
             Scene::GuitarLane => "26b-guitar-bend-dimension",
             Scene::GuitarBoth => "26c-guitar-bend-both",
             Scene::Lyrics => "27-lyrics",
+            Scene::Percussive => "28-percussive",
+            Scene::GuitarPro => "29-guitar-pro",
         }
     }
 
@@ -108,6 +118,8 @@ impl Scene {
             Scene::GuitarLane => "Guitar — bend dimension",
             Scene::GuitarBoth => "Guitar — row + dimension",
             Scene::Lyrics => "Vocal lyrics",
+            Scene::Percussive => "Unpitched audio",
+            Scene::GuitarPro => "Guitar Pro import",
         }
     }
 
@@ -375,6 +387,55 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             n.target = expression_editor_core::Target::Zone(1);
             doc.push(n);
         }
+        Scene::Percussive => {
+            // The seventh mode: hits on spectral bands, not notes on a
+            // scale. A pitch contour taken from unpitched material is
+            // noise, so there is deliberately no curve here.
+            use expression_editor_core::rows::{RowSpace, SliceBands};
+            let bands = SliceBands::default();
+            let rows = bands.count().max(1) as i32;
+            let mut id = 1u64;
+            for i in 0..24 {
+                let t = PPQ * 0.25 * i as f64;
+                let row = (i * 7) % rows as usize;
+                let mut n = Note::new(NoteId(id), t, t + PPQ * 0.12, row as i32);
+                n.velocity = 0.4 + ((i % 5) as f64) * 0.12;
+                doc.push(n);
+                id += 1;
+            }
+            doc.row_space = RowSpace::Bands(bands);
+        }
+        Scene::GuitarPro => {
+            // What an import looks like on arrival: the file's own
+            // tuning driving the rows, a bend as a per-note curve.
+            use expression_editor_core::rows::{RowSpace, StringTuning};
+            let tuning = StringTuning::guitar_standard();
+            let mut id = 1u64;
+            let mut fretted = |doc: &mut ExpressionDoc, string: i32, beat: f64, len: f64| {
+                let t = PPQ * beat;
+                let n = Note::new(NoteId(id), t, t + PPQ * len, string);
+                doc.push(n);
+                id += 1;
+            };
+            fretted(&mut doc, 5, 0.0, 0.5);
+            fretted(&mut doc, 4, 0.5, 0.5);
+            fretted(&mut doc, 2, 1.0, 1.5);
+            fretted(&mut doc, 2, 2.5, 0.5);
+            fretted(&mut doc, 1, 3.0, 1.0);
+
+            // The bend on the third note: up a tone, held, released —
+            // the shape the two middle offsets exist to carry.
+            if let Some(n) = doc.note_mut(NoteId(3)) {
+                *n.curve_mut(expression_editor_core::Dimension::Pitch) =
+                    expression_editor_core::Curve::from_points(vec![
+                        expression_editor_core::Point::new(PPQ * 1.0, 0.0),
+                        expression_editor_core::Point::new(PPQ * 1.4, 2.0),
+                        expression_editor_core::Point::new(PPQ * 2.1, 2.0),
+                        expression_editor_core::Point::new(PPQ * 2.5, 0.0),
+                    ]);
+            }
+            doc.row_space = RowSpace::Strings(tuning);
+        }
         Scene::Drums => {
             use expression_editor_core::{DrumMap, RowSpace};
             let map = DrumMap::general_midi();
@@ -562,6 +623,13 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             ed.selection.set_single(NoteId(3));
         }
         Scene::Phrase => {
+            ed.selection.set_single(NoteId(3));
+        }
+        Scene::Percussive => {
+            ed.set_mode(expression_editor_core::Mode::UnpitchedAudio);
+        }
+        Scene::GuitarPro => {
+            ed.set_mode(expression_editor_core::Mode::Guitar);
             ed.selection.set_single(NoteId(3));
         }
     }
