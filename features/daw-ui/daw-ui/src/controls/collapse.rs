@@ -131,7 +131,18 @@ impl Collapse {
             // input area it takes record mode's place, so record mode goes.
             show_record_mode: show_pan_section,
             pan: if show_pan_section { PanAnchor::PanSection } else { PanAnchor::InputArea },
-            volume: if height >= t.fader_swap { VolumeWidget::Fader } else { VolumeWidget::Knob },
+            // Asked of the fader area, which is what REAPER asks it of.
+            volume: if daw_theme_art::collapse::fader_area(
+                stretch,
+                stretch >= t.io,
+                stretch >= t.envelope,
+                stretch >= t.phase,
+            ) >= t.fader_swap
+            {
+                VolumeWidget::Fader
+            } else {
+                VolumeWidget::Knob
+            },
             padding: if stretch < t.padding_steps.1 {
                 2.0
             } else if stretch < t.padding_steps.0 {
@@ -164,11 +175,33 @@ mod tests {
         sweep(|c| c.pan == PanAnchor::PanSection, REAPER.pan_section);
     }
 
-    /// The fader becomes a knob rather than becoming a very short fader.
+    /// The fader becomes a knob rather than becoming a very short fader —
+    /// and it is the *fader area* that decides, not the strip.
+    ///
+    /// Read as a strip height the threshold was 280, which drew a knob on a
+    /// 228-row strip where REAPER draws a fader. The reference screenshot is
+    /// a 228-row strip with a fader in it.
     #[test]
-    fn the_volume_widget_switches_type() {
-        assert_eq!(Collapse::at(REAPER.fader_swap).volume, VolumeWidget::Fader);
-        assert_eq!(Collapse::at(REAPER.fader_swap - 1.0).volume, VolumeWidget::Knob);
+    fn the_volume_widget_switches_on_the_fader_area() {
+        assert_eq!(Collapse::at(228.0).volume, VolumeWidget::Fader);
+
+        // Walk down and find where it flips; the fader area either side of
+        // that height must straddle REAPER's `min_vol_h`.
+        let flip = (60..=400)
+            .rev()
+            .find(|h| Collapse::at(*h as f32).volume == VolumeWidget::Knob)
+            .expect("the fader swaps somewhere");
+        let area = |h: f32| {
+            let c = Collapse::at(h);
+            daw_theme_art::collapse::fader_area(
+                c.stretch,
+                c.show_io,
+                c.show_envelope,
+                c.show_phase,
+            )
+        };
+        assert!(area(flip as f32) < REAPER.fader_swap, "swapped with room to spare");
+        assert!(area(flip as f32 + 1.0) >= REAPER.fader_swap, "swapped a row late");
     }
 
     /// The re-anchor: the pan section goes, the pan control does not, and

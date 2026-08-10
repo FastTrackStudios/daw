@@ -193,6 +193,9 @@ const BOTTOM_SECTION: f32 = 47.0;
 /// anchored to it. The record arm's ring sits at 0.486 of its own 36-wide
 /// cell rather than in the middle, which is why it is placed separately.
 const COLUMN: f32 = 55.0;
+/// `mcp.label` — 26 of the bottom section's 47, above the 20-row index
+/// plate and the row that divides them.
+const NAME_PLATE: u32 = 26;
 
 // ── Channel Strip ───────────────────────────────────────────────────
 
@@ -217,7 +220,15 @@ impl PartialEq for ChannelStripProps {
 
 #[component]
 fn ChannelStrip(props: ChannelStripProps) -> Element {
-    let track = &props.track;
+    // The store first, the prop as the seed. Everything else on the strip
+    // already follows the track stream, so reading colour and name off the
+    // prop left the band and the plate a poll behind the buttons beside
+    // them — a recolour in REAPER took up to two seconds to arrive.
+    let store = use_track_store();
+    let guid = props.track.guid.clone();
+    let live = use_memo(use_reactive!(|guid| store.track(&guid)));
+    let live = live.read();
+    let track = live.as_ref().unwrap_or(&props.track);
     let fx_tree = &props.fx_tree;
 
     let color_css = track
@@ -281,8 +292,16 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
 
     rsx! {
         div {
-            class: "flex flex-col flex-shrink-0 border-r {selected_border} bg-zinc-900",
-            style: "width:{STRIP_W}px; height:{props.height}px;",
+            class: "flex flex-col shrink-0 border-r {selected_border} bg-zinc-900",
+            // The section stack is stated inline as well as in Tailwind.
+            // Blitz windows embed the sheet as a static string and a panel
+            // that mounts before it — or a test that mounts without it —
+            // gets no `flex` at all: the fixed bands stack at their content
+            // height and the stretch band collapses to nothing, so the
+            // bottom section paints over the meter. Tailwind is the
+            // additive layer here, not the structure.
+            style: "width:{STRIP_W}px; height:{props.height}px; \
+                    display:flex; flex-direction:column;",
 
             // Laid out on REAPER's own geometry, in Tailwind and explicit
             // pixels rather than by eye.
@@ -303,7 +322,9 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
             //
             // `mcp.fx` is [7 7 43 20] of the section, with `mcp.fxbyp`
             // butted onto its right — the pill is one shape in two images.
-            div { class: "relative flex-shrink-0", style: "height:{FX_SECTION}px;",
+            div {
+                class: "relative shrink-0",
+                style: "flex:0 0 auto; position:relative; height:{FX_SECTION}px;",
                 div { style: "position:absolute; left:7px; top:7px;",
                     FxButton { track: track.guid.clone(), width: 43.0 }
                 }
@@ -319,7 +340,8 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
             // collapsed sat a few rows shorter than its neighbours.
             div {
                 class: "relative shrink-0 grow-0",
-                style: "height:{band}px; min-height:{band}px; max-height:{band}px; \
+                style: "flex:0 0 auto; position:relative; height:{band}px; \
+                        min-height:{band}px; max-height:{band}px; \
                         background:{tint}; border-top:1px solid {tint_hl};",
 
                 // Pan at local x 9.5, the record arm on the right-hand
@@ -362,7 +384,9 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
             //     mcp.mute   = mcp.recmon + [0 19 21 20]
             //     mcp.solo   = mcp.mute   + [0 21 21 20]
             //     mcp.io     = mcp.solo   + [-1 23 23 30]
-            div { class: "relative flex-1 min-h-0",
+            div {
+                class: "relative flex-1 min-h-0",
+                style: "flex:1 1 0; min-height:0; position:relative;",
                 // The numeric readout, which is a different thing from the
                 // scale printed inside the meter: `hide_volume_label` drops
                 // this one at 250 while the scale stays.
@@ -391,12 +415,20 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                         },
                     }
                 }
+                // Inline, not only in Tailwind: without the sheet
+                // `flex-col` is inert and the column lays out as a row, so
+                // mute and solo sat side by side and ran off the strip.
                 div {
                     class: "absolute flex flex-col items-center",
-                    style: "left:{COLUMN}px; top:2px; gap:{shape.padding}px;",
-                    if shape.show_record_mode {
-                        MonitorButton { track: track.guid.clone() }
-                    }
+                    style: "position:absolute; left:{COLUMN}px; top:2px; \
+                            display:flex; flex-direction:column; align-items:center; \
+                            gap:{shape.padding}px;",
+                    // `mcp.recmon` is anchored off the record arm and stays
+                    // in the column at every height — it is `mcp.recmode`,
+                    // the *slot* below the pan section, that gives way when
+                    // pan re-anchors. Gating the monitor on that took the
+                    // glyph off short strips where REAPER still draws it.
+                    MonitorButton { track: track.guid.clone() }
                     MuteButton { track: track.guid.clone() }
                     SoloButton { track: track.guid.clone() }
                     if shape.show_io {
@@ -411,13 +443,18 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
             // ── Bottom (47 rows: 26 of name, 20 of index) ──────
             div {
                 class: "shrink-0 grow-0",
-                style: "height:{BOTTOM_SECTION}px; min-height:{BOTTOM_SECTION}px; \
-                        max-height:{BOTTOM_SECTION}px;",
-                TrackName { track: track.guid.clone(), width: STRIP_W as u32 }
+                style: "flex:0 0 auto; height:{BOTTOM_SECTION}px; \
+                        min-height:{BOTTOM_SECTION}px; max-height:{BOTTOM_SECTION}px;",
+                // 26 of the section's 47, with the index plate's 20 and a
+                // dividing row under it. Left to its content the plate was
+                // 16 tall and the strip ended in a band of dead grey.
+                TrackName { track: track.guid.clone(), width: STRIP_W as u32, height: NAME_PLATE }
                 div {
                     class: "text-center",
+                    // `text-align` inline as well: without the sheet the
+                    // index sat against the left edge of its own plate.
                     style: "height:20px; line-height:20px; font-size:11px; \
-                            color:#f0f0f0; background:{tint}; \
+                            text-align:center; color:#f0f0f0; background:{tint}; \
                             border-top:1px solid {tint_hl};",
                     "{track.index + 1}"
                 }

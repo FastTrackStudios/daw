@@ -199,16 +199,31 @@ fn pan_re_anchors_rather_than_disappearing() {
     assert!(!short.contains(">pan<"), "the pan section's label survived it");
 }
 
-/// Below the swap threshold the fader is not a short fader — it is a
-/// different widget. The fader's rail decomposes into three bands; a knob
-/// does not.
+/// Below the swap the fader is not a short fader — it is a different
+/// widget. The fader's rail decomposes into three bands; a knob does not.
+///
+/// The swap is a threshold on the *fader area*, not on the strip
+/// (`vol_h<min_vol_h` in `rtconfig`), so this sweeps strip heights and
+/// checks the widget flips exactly where that area crosses REAPER's 45.
 #[test]
-fn the_fader_becomes_a_knob() {
-    use daw_ui::controls::REAPER_THRESHOLDS as T;
+fn the_fader_becomes_a_knob_when_its_area_runs_out() {
+    use daw_ui::controls::{Collapse, REAPER_THRESHOLDS as T};
 
     let rail = |h: &str| h.contains("viewBox=\"0 16 23 23\"");
-    assert!(rail(&strip_at(T.fader_swap)), "no fader above the swap threshold");
-    assert!(!rail(&strip_at(T.fader_swap - 1.0)), "still a fader below the swap threshold");
+    let area = |h: f32| {
+        let c = Collapse::at(h);
+        daw_theme_art::collapse::fader_area(c.stretch, c.show_io, c.show_envelope, c.show_phase)
+    };
+
+    let flip = (60..=400)
+        .rev()
+        .find(|h| !rail(&strip_at(*h as f32)))
+        .expect("the fader swaps somewhere") as f32;
+
+    assert!(area(flip) < T.fader_swap, "swapped while the area still had room");
+    assert!(area(flip + 1.0) >= T.fader_swap, "swapped a row late");
+    // And the reference screenshot's strip really does carry a fader.
+    assert!(rail(&strip_at(228.0)), "no fader on a 228-row strip");
 }
 
 /// The residual-driven collapses fire off the stretch section. Sweeping the

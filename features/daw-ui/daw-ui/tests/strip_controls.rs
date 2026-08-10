@@ -6,6 +6,7 @@
 
 use daw_proto::track::InputMonitoringMode;
 use daw_proto::{Track, TrackEvent};
+use daw_ui::components::mixer::ChannelStripPreview;
 use daw_ui::controls::{
     IoButton, MonitorButton, PanKnob, PhaseButton, RecordArmButton, SoloButton, TrackName,
     TrackStore,
@@ -97,8 +98,11 @@ fn each_control_follows_its_own_backend_event() {
             TrackEvent::Renamed { guid: "T1".into(), name: "Snare".into() },
         ),
         (
+            // The colour lands on the index plate, not the name plate —
+            // `mcp_namebg` is a plain dark plate — so the whole strip is
+            // what has to notice a colour change.
             "colour",
-            || rsx! { TrackName { track: "T1" } },
+            || rsx! { ChannelStripPreview { track: base(), index: 0 } },
             TrackEvent::ColorChanged { guid: "T1".into(), color: Some(0xff8800) },
         ),
         (
@@ -132,22 +136,24 @@ fn the_name_plate_shows_the_track_name() {
     assert!(dioxus_ssr::render(&dom).contains("Kick"));
 }
 
-/// A coloured track paints its plate; an uncoloured one takes the panel's
-/// own grey rather than a colour invented for it.
+/// The track colour paints the index plate, and the name plate stays dark
+/// whatever the colour is.
+///
+/// REAPER's `mcp_namebg` is a plain plate and only `mcp_idxbg` under it
+/// carries the tint. Painting both doubled the coloured block at the bottom
+/// of every strip.
 #[test]
-fn colour_comes_from_the_track_and_only_from_the_track() {
+fn the_colour_lands_on_the_index_plate_and_not_the_name_plate() {
     fn coloured() -> Track {
         Track { color: Some(0xff8800), ..base() }
     }
-    let plain = dioxus_ssr::render(&mount(base, || rsx! { TrackName { track: "T1" } }));
-    let painted = dioxus_ssr::render(&mount(coloured, || rsx! { TrackName { track: "T1" } }));
+    let name = dioxus_ssr::render(&mount(coloured, || rsx! { TrackName { track: "T1" } }));
+    let strip =
+        dioxus_ssr::render(&mount(coloured, || rsx! { ChannelStripPreview { track: coloured() } }));
 
-    assert!(painted.contains("#ff8800"), "the track colour is not on the plate:\n{painted}");
-    assert!(!plain.contains("#ff8800"));
-    assert!(
-        plain.contains(&daw_theme::Theme::default().chrome.surface_raised.to_hex()),
-        "an uncoloured track did not take the panel grey:\n{plain}"
-    );
+    assert!(!name.contains("#ff8800"), "the name plate took the track colour:\n{name}");
+    assert!(name.contains("#262626"), "the name plate is not `mcp_namebg`:\n{name}");
+    assert!(strip.contains("#ff8800"), "the strip did not paint the colour:\n{strip}");
 }
 
 /// The two reads that did not exist before this ticket. They are on the

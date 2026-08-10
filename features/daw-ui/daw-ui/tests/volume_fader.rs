@@ -94,9 +94,13 @@ fn dragging_moves_the_fader_before_any_round_trip() {
 
     assert_ne!(resting, dragged, "the cap did not move with the draft");
     // The cap rides higher: its offset from the top is smaller.
+    //
+    // 0.3104, not 0.1: the draft is a *gain* and the rail's top is +12 dB,
+    // so 0.9 gain sits at (0.9/3.981)^(1/4) = 0.6896 of the travel. A fader
+    // that read the gain as its position pinned unity to the very top.
     assert!(
-        dragged.contains("* 0.1000"),
-        "the cap is not at 0.9 of the travel:\n{dragged}"
+        dragged.contains("* 0.310"),
+        "the cap is not at the taper's position for 0.9 gain:\n{dragged}"
     );
 }
 
