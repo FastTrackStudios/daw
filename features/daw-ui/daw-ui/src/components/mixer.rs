@@ -190,6 +190,9 @@ const STRIP_W: f32 = 86.0;
 const FX_SECTION: f32 = 33.0;
 /// Where the pill sits inside the FX section — measured, not nominal.
 const FX_PILL_TOP: f32 = 9.0;
+/// The meter's block, scale included. It starts at x=4 and REAPER's fader
+/// cap starts at 30, so 26 is the room there is.
+const METER_W: u32 = 26;
 const BOTTOM_SECTION: f32 = 47.0;
 /// The axis the right-hand column centres on: `mcp.recmon` and everything
 /// anchored to it. The record arm's ring sits at 0.486 of its own 36-wide
@@ -512,7 +515,7 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 // to nothing — the meter looked right only because its own
                 // art carries pixel dimensions.
                 div { style: "position:absolute; left:4px; top:4px; height:{meter_h}px;",
-                    TrackMeter { track: track.guid.clone(), width: 24, height: meter_h }
+                    TrackMeter { track: track.guid.clone(), width: METER_W, height: meter_h }
                 }
                 div { style: "position:absolute; left:28px; top:4px; height:{meter_h}px;",
                     match shape.volume {

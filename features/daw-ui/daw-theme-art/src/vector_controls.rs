@@ -4333,7 +4333,11 @@ pub fn Meter(props: MeterProps) -> Element {
     // rest, which is why REAPER's meters are as thin as they are: "-18-"
     // at nine pixels is most of a 24-wide `mcp.meter`. At two-thirds the
     // marks ran off their own left edge and rendered as "18-".
-    let bars_x = if props.scale { vw * 0.80 } else { 0.0 };
+    // 0.85, measured: in a 26-wide block at x=4, REAPER's scale runs 7..24
+    // and its fader cap starts at 30 — so the bars get the five columns
+    // between them and the scale gets everything to their left. At 0.80 the
+    // whole scale sat three columns left of REAPER's.
+    let bars_x = if props.scale { vw * 0.85 } else { 0.0 };
     let bars_w = vw - bars_x;
     let n = props.levels.len().max(1) as f32;
     let gap = 1.0f32;
@@ -4372,8 +4376,18 @@ pub fn Meter(props: MeterProps) -> Element {
                     let head = vh * 0.055;
                     let top = vh * 0.0914;
                     let rest = (props.marks.len().max(2) - 1) as f32;
-                    let size = (vw * 0.36).min(8.6);
-                    let x = bars_x - 2.0;
+                    // 0.43 and 11.2, measured: REAPER's "-18-" is 17
+                    // columns wide and eight rows tall, ours was 13 by six.
+                    // The marks are the biggest thing in the meter's block
+                    // and reading them at a glance is the whole point of a
+                    // scale, so the type is REAPER's size rather than a
+                    // size that merely fits.
+                    let size = (vw * 0.43).min(11.2);
+                    // Anchored on the bars, with no gap of its own: the
+                    // glyphs' own right side bearing is the gap, and the
+                    // two columns this used to reserve were two columns
+                    // REAPER spends on the scale.
+                    let x = bars_x;
                     let ink = text.css();
                     rsx! {
                         for (i, mark) in props.marks.iter().enumerate() {

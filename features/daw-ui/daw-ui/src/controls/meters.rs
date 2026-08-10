@@ -125,7 +125,12 @@ pub fn TrackMeter(
     /// The track's GUID.
     track: String,
     /// The meter's box, which includes the scale when it is printed.
-    #[props(default = 24)]
+    ///
+    /// 26, so the block ends exactly where the fader's cap begins.
+    /// Measured against REAPER: its scale's right edge is at x=23 and its
+    /// cap's left at 30, with the bars between them. At 24 the block
+    /// stopped short and the scale had to be set small to fit.
+    #[props(default = 26)]
     width: u32,
     #[props(default = 120)] height: u32,
     /// Print the dB scale inside the meter, as the mixer does.
