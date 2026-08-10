@@ -427,3 +427,177 @@ fn re_capturing_a_take_replaces_its_view() {
     assert_eq!(state.take_views.len(), 1);
     assert_eq!(state.view_for(TAKE).unwrap().dimension, Dimension::Timbre);
 }
+
+// ── The lane layout (#201) ───────────────────────────────────────────
+
+use expression_editor_core::{ExpressionDoc as Doc, TimeBase, Track, Workspace};
+use expression_editor_daw::state::StoredLayout;
+
+fn doc_for(_n: &str) -> Doc {
+    Doc::new(TimeBase::Ppq { ppq: 960.0 }, 0.0, 3840.0)
+}
+
+fn workspace(names: &[&str]) -> Workspace {
+    let mut ws = Workspace::single(names[0], doc_for(names[0]));
+    for n in &names[1..] {
+        ws.push(Track::new(*n, doc_for(n)));
+    }
+    ws.auto_pair();
+    ws
+}
+
+/// The same tracks with the *same guids* — what reopening a project
+/// looks like. `Track::new` mints a fresh guid each time, so a plain
+/// rebuild is a different project as far as a stored layout is
+/// concerned, and correctly refuses to apply.
+fn reopened(names: &[&str]) -> Workspace {
+    let mut ws = Workspace::single("", doc_for(""));
+    {
+        let t = ws.track_mut(0).unwrap();
+        t.guid = format!("g-{}", names[0]);
+        t.name = names[0].to_string();
+    }
+    for n in &names[1..] {
+        ws.push(Track::with_guid(format!("g-{n}"), *n, doc_for(n)));
+    }
+    // Rebuild the inferred layout against the corrected guids.
+    ws.layout_mut().mark_arranged();
+    *ws.layout_mut() = Default::default();
+    ws.auto_pair();
+    ws
+}
+
+#[test]
+fn an_inferred_layout_is_not_stored() {
+    let ws = workspace(&["Lead Vox", "Lead Vox MIDI", "Kit"]);
+    assert!(!ws.layout().is_arranged());
+    assert!(
+        !StoredLayout::capture(&ws).is_arranged(),
+        "the matcher recomputes it on load; storing it would just go stale"
+    );
+}
+
+#[test]
+fn a_hand_arranged_layout_survives_a_save() {
+    let (d, project) = daw();
+    let mut ws = reopened(&["A", "B", "C"]);
+    ws.merge_lanes(0, 1);
+    assert_eq!(ws.layout().len(), 2);
+
+    let mut state = EditorState::default();
+    state.layout = StoredLayout::capture(&ws);
+    state::save(&d, project.clone(), &state).unwrap();
+
+    let mut fresh = reopened(&["A", "B", "C"]);
+    // The matcher would leave three lanes; the stored arrangement wins.
+    assert_eq!(fresh.layout().len(), 3);
+    state::load(&d, project).layout.apply(&mut fresh);
+
+    assert_eq!(fresh.layout().len(), 2);
+    assert_eq!(fresh.lane_tracks(0).len(), 2);
+    assert!(fresh.layout().is_arranged());
+}
+
+#[test]
+fn the_layout_is_stored_once_per_project_not_per_take() {
+    // Twenty tracks, one layout. Keyed by take it would be twenty
+    // conflicting copies of the same thing.
+    let mut ws = workspace(&["A", "B"]);
+    ws.merge_lanes(0, 1);
+    let state = EditorState {
+        layout: StoredLayout::capture(&ws),
+        ..Default::default()
+    };
+    assert_eq!(state.layout.lanes.len(), 1);
+    assert!(state.take_views.is_empty(), "no per-take copy of it");
+}
+
+#[test]
+fn a_lane_weight_survives_with_the_layout() {
+    let (d, project) = daw();
+    let mut ws = reopened(&["A", "B"]);
+    ws.merge_lanes(0, 1);
+    ws.layout_mut().lane_mut(0).unwrap().weight = 6.5;
+
+    let state = EditorState {
+        layout: StoredLayout::capture(&ws),
+        ..Default::default()
+    };
+    state::save(&d, project.clone(), &state).unwrap();
+
+    let mut fresh = reopened(&["A", "B"]);
+    state::load(&d, project).layout.apply(&mut fresh);
+    assert_eq!(fresh.layout().lane(0).unwrap().weight, 6.5);
+}
+
+#[test]
+fn a_track_added_since_the_layout_was_written_is_matched_in() {
+    let mut ws = reopened(&["Lead Vox", "Kit"]);
+    ws.merge_lanes(0, 1);
+    let stored = StoredLayout::capture(&ws);
+
+    // Reopen with an extra comp on the vocal.
+    let mut fresh = reopened(&["Lead Vox", "Kit", "Lead Vox Audio"]);
+    stored.apply(&mut fresh);
+
+    let vox = fresh.index_of("Lead Vox").unwrap();
+    let comp = fresh.index_of("Lead Vox Audio").unwrap();
+    let vox_lane = fresh.layout().lane_of(&fresh.track(vox).unwrap().guid.clone()).unwrap();
+    assert!(
+        fresh.lane_tracks(vox_lane).contains(&comp),
+        "the new comp joined the vocal's lane rather than being appended"
+    );
+}
+
+#[test]
+fn a_stale_entry_is_dropped_and_the_rest_survives() {
+    let mut ws = reopened(&["A", "B", "C"]);
+    ws.merge_lanes(0, 1);
+    let mut stored = StoredLayout::capture(&ws);
+    // A guid nobody has: what a deleted track leaves behind.
+    stored.lanes[0].tracks.push("{GONE}".into());
+
+    let mut fresh = reopened(&["A", "B", "C"]);
+    stored.apply(&mut fresh);
+
+    let all: Vec<usize> = (0..fresh.layout().len())
+        .flat_map(|i| fresh.lane_tracks(i))
+        .collect();
+    assert_eq!(all.len(), 3, "every real track is still placed");
+}
+
+#[test]
+fn a_layout_whose_tracks_are_all_gone_does_not_leave_empty_lanes() {
+    let mut ws = reopened(&["A", "B"]);
+    ws.merge_lanes(0, 1);
+    let stored = StoredLayout::capture(&ws);
+
+    // Reopened against a completely different project.
+    let mut other = reopened(&["X", "Y"]);
+    stored.apply(&mut other);
+
+    assert_eq!(other.layout().len(), 2, "X and Y each got a lane");
+    for i in 0..other.layout().len() {
+        assert!(!other.lane_tracks(i).is_empty());
+    }
+}
+
+#[test]
+fn a_layout_from_a_different_project_is_ignored_rather_than_applied() {
+    // Guids are how a layout knows it is looking at the same tracks. A
+    // layout carried into a project whose tracks it has never seen
+    // applies to nothing — which is right, and is also the trap that
+    // makes a test built from freshly-minted tracks look broken.
+    let mut ws = reopened(&["A", "B"]);
+    ws.merge_lanes(0, 1);
+    let stored = StoredLayout::capture(&ws);
+
+    let mut elsewhere = workspace(&["A", "B"]); // same names, new guids
+    stored.apply(&mut elsewhere);
+
+    assert_eq!(
+        elsewhere.layout().len(),
+        2,
+        "the matcher placed them; the foreign layout did not"
+    );
+}

@@ -139,6 +139,102 @@ impl TakeView {
     }
 }
 
+/// One lane, as stored.
+///
+/// Track **guids**, never indices: a layout keyed on position is
+/// re-targeted by inserting a track above it, and keyed on name it is
+/// broken by a rename. A lane has no id of its own — it *is* its
+/// membership, and its position in the list is its order.
+#[derive(Debug, Clone, PartialEq, Facet)]
+pub struct StoredLane {
+    pub tracks: Vec<String>,
+    pub weight: f32,
+}
+
+/// The lane layout: **project-scoped, one ordered list**.
+///
+/// Not per take. A lane spans tracks across the whole song, so keying it
+/// by take would give twenty tracks conflicting copies of the same
+/// layout. Not per track either: lane order and lane weight have nowhere
+/// to live under that, and two tracks could disagree about a lane's
+/// identity. (This corrects the per-take filing in #157's original
+/// resolution — see the correction comment there.)
+///
+/// Only a **hand-arranged** layout is stored. An inferred one is
+/// recomputed by the matcher on load, which keeps the stored data small
+/// and means improving the matcher benefits every song nobody arranged.
+#[derive(Debug, Clone, Default, PartialEq, Facet)]
+pub struct StoredLayout {
+    pub lanes: Vec<StoredLane>,
+}
+
+impl StoredLayout {
+    /// Capture a layout, empty when it was only inferred.
+    pub fn capture(ws: &expression_editor_core::Workspace) -> Self {
+        if !ws.layout().is_arranged() {
+            return Self::default();
+        }
+        Self {
+            lanes: ws
+                .layout()
+                .lanes()
+                .iter()
+                .map(|l| StoredLane {
+                    tracks: l.tracks.clone(),
+                    weight: l.weight,
+                })
+                .collect(),
+        }
+    }
+
+    /// Whether anything was arranged by hand.
+    pub fn is_arranged(&self) -> bool {
+        !self.lanes.is_empty()
+    }
+
+    /// Restore into a workspace, dropping entries whose track is gone
+    /// and matching in any track the layout never heard of.
+    ///
+    /// Silent about both: a deleted track is not an error, and one added
+    /// track must never invalidate the whole arrangement.
+    pub fn apply(&self, ws: &mut expression_editor_core::Workspace) {
+        use expression_editor_core::tracks::{Lane, LaneLayout};
+
+        if !self.is_arranged() {
+            return;
+        }
+
+        let known: Vec<String> = ws.tracks().iter().map(|t| t.guid.clone()).collect();
+        let mut layout = LaneLayout::default();
+        for stored in &self.lanes {
+            let live: Vec<String> = stored
+                .tracks
+                .iter()
+                .filter(|g| known.contains(g))
+                .cloned()
+                .collect();
+            if live.is_empty() {
+                continue;
+            }
+            let mut lane = Lane::single(live[0].clone(), stored.weight);
+            lane.tracks = live;
+            lane.weight = stored.weight;
+            layout.push(lane);
+        }
+        layout.mark_arranged();
+        *ws.layout_mut() = layout;
+
+        // Anything the stored layout did not mention arrived since it
+        // was written; the matcher places it rather than appending
+        // blindly, so a new comp lands in its track's lane.
+        for guid in known {
+            if ws.layout().lane_of(&guid).is_none() {
+                ws.place_new_track(&guid);
+            }
+        }
+    }
+}
+
 /// Everything about a project that the editor persists.
 #[derive(Debug, Clone, PartialEq, Facet)]
 pub struct EditorState {
@@ -150,6 +246,13 @@ pub struct EditorState {
     pub take_modes: Vec<ModeOverride>,
     /// How each take was being looked at.
     pub take_views: Vec<TakeView>,
+    /// The hand-arranged lane layout. Empty means nobody arranged one,
+    /// so the matcher decides on load.
+    ///
+    /// A plain field rather than an `Option`: `facet-styx` round-trips
+    /// an optional struct out but not back in, and "no lanes" says the
+    /// same thing without a shape the parser cannot read.
+    pub layout: StoredLayout,
 }
 
 impl Default for EditorState {
@@ -159,6 +262,7 @@ impl Default for EditorState {
             track_modes: Vec::new(),
             take_modes: Vec::new(),
             take_views: Vec::new(),
+            layout: StoredLayout::default(),
         }
     }
 }
@@ -208,7 +312,10 @@ impl EditorState {
 
     /// Whether anything here is worth writing.
     pub fn is_empty(&self) -> bool {
-        self.track_modes.is_empty() && self.take_modes.is_empty() && self.take_views.is_empty()
+        self.track_modes.is_empty()
+            && self.take_modes.is_empty()
+            && self.take_views.is_empty()
+            && self.layout.lanes.is_empty()
     }
 }
 
