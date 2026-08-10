@@ -296,6 +296,17 @@ Nothing on this machine is a usable MPE fixture. Options, cheapest first:
 The Ableton trial files stay useful as an unpaired real-world sanity check
 during parser development — read locally, never copied in.
 
+**Resolved (#177): option 1, at `expression-editor-daw::fixture`.** The fixture is
+generated, not stored — thirteen voices, an eight-note chord that fills the whole
+member zone under a line that takes the released channels back, per-note bend,
+channel pressure and CC74 on every note, an RPN 6 Configuration Message declaring
+a lower zone of eight members, and RPN 0 stating the 48-semitone per-note bend
+range that `expression-editor-reaper` loads takes with (now one constant,
+`expression_editor_daw::DEFAULT_BEND_RANGE`, so the two cannot drift).
+`fixture::parse_config` reads the zone and range back out of a CC stream, which is
+the check that catches a file meaning 2 where the reader assumes 48.
+`tests/mpe_fixture.rs` asserts the properties the found files lacked.
+
 ### Second-order notes
 
 - **Orchestral material drives no editor mode.** The Colombus PDFs are for #78;

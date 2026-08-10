@@ -20,14 +20,14 @@ use daw::service::ProjectContext;
 use dioxus::prelude::*;
 use expression_editor_audio::{AudioSession, TakeConfig};
 use expression_editor_core::Viewport;
-use expression_editor_daw::Session;
+// The MPE bend range a take is loaded with. Taken from the adapter
+// rather than restated here, so the range the editor reads at is the
+// same one the MPE fixture declares on the wire — a mismatch rescales
+// every pitch curve silently.
+use expression_editor_daw::{DEFAULT_BEND_RANGE, Session};
 use expression_editor_ui::ExpressionEditor;
 
 pub const PANEL_ID: &str = "FTS_EXPRESSION_EDITOR";
-
-/// Default MPE bend range. Must match the receiving instrument or every
-/// pitch curve reads wrong by a factor; 48 is the MPE convention.
-const DEFAULT_BEND_RANGE: f64 = 48.0;
 
 /// What the panel currently holds.
 ///

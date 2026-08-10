@@ -25,9 +25,19 @@
 //!   core already models, so bends are attributed to the note sounding
 //!   on that channel and flagged ambiguous when two are.
 
+pub mod fixture;
 pub mod session;
 
 pub use session::Session;
+
+/// MPE's per-note bend range convention, in semitones.
+///
+/// Lives here rather than in each caller because it has to be the same
+/// number on both sides of a conversion: a document read at one range
+/// and written at another has every pitch curve rescaled silently. The
+/// REAPER module loads takes with it and [`fixture`] declares it on the
+/// wire, so the two cannot drift apart.
+pub const DEFAULT_BEND_RANGE: f64 = 48.0;
 
 use daw::service::midi::{
     MidiCCCreate, MidiNoteCreate, MidiPitchBendCreate, MidiTakeContent, MidiTakeSnapshot,
