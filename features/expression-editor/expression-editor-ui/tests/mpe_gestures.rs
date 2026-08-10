@@ -11,23 +11,34 @@
 //! ## What these found
 //!
 //! Every gesture test below panics with **"RefCell already borrowed"**
-//! inside dioxus's native-dom event dispatch, and the cause is not the
-//! pointer handler — it is `ExpressionEditor`'s `onmounted`, which does
-//! `spawn` + `get_client_rect().await` + `editor.write()`. The write
-//! lands when the spawned future resolves, which is during the next
-//! event dispatch, while a borrow is already held.
+//! at `native-dom/src/events.rs:164` — which is `doc.borrow_mut()`, and
+//! dioxus documents the constraint on the line above it:
 //!
-//! That makes this **the same fault `slider_drag.rs` was written to
-//! isolate**, in the primary editing surface rather than in a widget.
-//! It matters beyond tests: Blitz is the renderer REAPER uses, so this
-//! is the editor's canvas panicking on interaction in the host it ships
-//! in.
+//! > Returns `None` if the document is currently mutably borrowed.
+//! > Use this from background tasks to avoid panicking during event
+//! > handling.
 //!
-//! The fix is to stop writing the editor from inside a spawned future —
-//! measure into its own signal and apply it outside dispatch — but that
-//! is a change to a load-bearing surface whose result has to be *looked
-//! at* in REAPER, not asserted. So the tests are `#[ignore]`d with this
-//! note rather than deleted: they are the net the moment it is fixed.
+//! The background task is ours: `ExpressionEditor`'s `onmounted` does
+//! `spawn` + `get_client_rect().await`, and resolving that future
+//! re-enters the document while an event is being dispatched.
+//!
+//! **This is a dioxus/Blitz constraint, not a stray line in our
+//! handler** — `get_client_rect` has no `try_` form to reach for. It is
+//! the same fault `slider_drag.rs` isolated in a widget, here in the
+//! primary editing surface, and Blitz is the renderer REAPER uses.
+//!
+//! Guarding our own signal with `try_write` (done, and worth keeping —
+//! it also stops a no-op resize invalidating the view) does **not** fix
+//! it, because the contended borrow is dioxus's document, not ours.
+//!
+//! The real fix is to stop measuring from a spawned task: let the host
+//! supply the viewport, which `Editor::resize` already supports and the
+//! standalone runner already does. Removing the mount-time measurement
+//! changes how the canvas auto-sizes inside a REAPER dock, which is a
+//! thing to *look at* rather than assert — so it is not done here.
+//!
+//! These stay `#[ignore]`d with the diagnosis, and become the net the
+//! moment someone makes that change with REAPER open.
 
 use dioxus::prelude::*;
 use dioxus_test::{by_testid, render};
@@ -114,7 +125,7 @@ async fn the_roll_is_reachable_by_a_pointer() -> dioxus_test::Result<()> {
 }
 
 #[tokio::test]
-#[ignore = "RefCell re-entrancy from ExpressionEditor's onmounted spawn; see module docs"]
+#[ignore = "dioxus document RefCell re-entrancy from get_client_rect in a spawned task; see module docs"]
 async fn a_drag_on_the_pitch_dimension_does_not_panic() -> dioxus_test::Result<()> {
     // Blitz's event dispatch is where the surface has broken before —
     // a RefCell re-entrancy panic mid-drag. This is the regression net.
@@ -122,19 +133,19 @@ async fn a_drag_on_the_pitch_dimension_does_not_panic() -> dioxus_test::Result<(
 }
 
 #[tokio::test]
-#[ignore = "RefCell re-entrancy from ExpressionEditor's onmounted spawn; see module docs"]
+#[ignore = "dioxus document RefCell re-entrancy from get_client_rect in a spawned task; see module docs"]
 async fn a_drag_on_the_pressure_dimension_does_not_panic() -> dioxus_test::Result<()> {
     drag_across(PressureSurface).await
 }
 
 #[tokio::test]
-#[ignore = "RefCell re-entrancy from ExpressionEditor's onmounted spawn; see module docs"]
+#[ignore = "dioxus document RefCell re-entrancy from get_client_rect in a spawned task; see module docs"]
 async fn a_drag_on_the_timbre_dimension_does_not_panic() -> dioxus_test::Result<()> {
     drag_across(TimbreSurface).await
 }
 
 #[tokio::test]
-#[ignore = "RefCell re-entrancy from ExpressionEditor's onmounted spawn; see module docs"]
+#[ignore = "dioxus document RefCell re-entrancy from get_client_rect in a spawned task; see module docs"]
 async fn a_press_without_moving_is_survivable() -> dioxus_test::Result<()> {
     // Separated from the drag because a press alone and a press-plus-move
     // take different paths, and only one of them has broken before.
