@@ -34,6 +34,7 @@
 //! the point: change the palette or a component and every scale regenerates.
 
 pub mod art_data;
+pub mod collapse;
 pub mod components;
 pub mod dress;
 pub mod generated;

@@ -25,6 +25,10 @@
 //!    gone but the pan *control* is not: it re-parents into the input area.
 //!    Genuine re-anchoring, not repositioning.
 //!
+//! The numbers themselves live in [`daw_theme_art::collapse`] — they are
+//! facts about the theme, and `fts-themer` needs the same ones to keep the
+//! layout file in step. This module is what a strip *does* with them.
+//!
 //! # Why this is Rust and not a container query
 //!
 //! A container query can only ask about a container, so (2) and (3) are
@@ -35,66 +39,11 @@
 //! it testable by sweeping a height across a boundary, which is the only way
 //! to prove a threshold fires where REAPER's does.
 
-/// Every height at which the strip changes shape, in REAPER's own pixels.
-///
-/// One constant, read by the panel — and spliced into the theme's layout
-/// file by #148, so the two sides cannot drift.
-///
-/// Taken from `rtconfig.txt`: the five container thresholds are the
-/// `hide_*` parameters, the residual ones are `mcp_io_hide_h`,
-/// `mcp_env_hide_h` and `mcp_phase_hide_h`, and the padding stages are
-/// `padding_reduction_h`. The env and phase thresholds are pairs because
-/// the theme carries one value per labels mode; the first is the mode this
-/// strip draws.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub struct Thresholds {
-    /// Below this, the input-FX row goes.
-    pub input_fx: f32,
-    /// Below this, the record-input row goes.
-    pub record_input: f32,
-    /// Below this, the pan labels go.
-    pub pan_labels: f32,
-    /// Below this, the pan *section* goes — the control re-anchors.
-    pub pan_section: f32,
-    /// Below this, the fader's dB readout goes.
-    pub volume_label: f32,
-    /// Stretch-section height below which the IO button goes.
-    pub io: f32,
-    /// Stretch-section height below which the envelope button goes.
-    pub envelope: f32,
-    /// Stretch-section height below which the phase button goes.
-    pub phase: f32,
-    /// Stretch-section heights at which padding steps down: below the
-    /// first it is 3px, below the second 2px, otherwise 4px.
-    pub padding_steps: (f32, f32),
-    /// Below this, the fader becomes a knob.
-    pub fader_swap: f32,
-}
-
-/// REAPER's values, at scale 1.
-pub const REAPER: Thresholds = Thresholds {
-    input_fx: 400.0,
-    record_input: 350.0,
-    pan_labels: 320.0,
-    pan_section: 260.0,
-    volume_label: 250.0,
-    io: 106.0,
-    envelope: 125.0,
-    phase: 144.0,
-    padding_steps: (350.0, 250.0),
-    fader_swap: 280.0,
+pub use daw_theme_art::collapse::{Bands, Thresholds, REAPER, REAPER_BANDS};
+use daw_theme_art::collapse::{
+    BOTTOM_SECTION, FX_SECTION, INPUT_SECTION_FULL, INPUT_SECTION_MINIMAL, INPUT_SECTION_NO_FX,
+    PAN_SECTION_COLLAPSED, PAN_SECTION_FULL, PAN_SECTION_UNLABELLED,
 };
-
-/// The fixed bands, in REAPER's pixels, that the stretch section is what is
-/// left over from. From `fx_sec`, `pan_sec`, `in_sec` and `bot_sec`.
-const FX_SECTION: f32 = 33.0;
-const PAN_SECTION_FULL: f32 = 50.0;
-const PAN_SECTION_UNLABELLED: f32 = 33.0;
-const PAN_SECTION_COLLAPSED: f32 = 6.0;
-const INPUT_SECTION_FULL: f32 = 54.0;
-const INPUT_SECTION_NO_FX: f32 = 42.0;
-const INPUT_SECTION_MINIMAL: f32 = 22.0;
-const BOTTOM_SECTION: f32 = 47.0;
 
 /// Where the pan control lives at a given height.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

@@ -174,6 +174,16 @@ enum Command {
         #[arg(long)]
         full: bool,
     },
+    /// Write the collapse thresholds into the theme's layout file.
+    ///
+    /// The Dioxus strip and the theme encode the same collapse heights;
+    /// this makes the Rust constant the source of both. Idempotent, and it
+    /// touches nothing but the value on each `set` line.
+    Thresholds {
+        /// Report what would change without writing.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -382,6 +392,42 @@ fn main() -> Result<()> {
             );
         }
 
+        Command::Thresholds { check } => {
+            use fts_themer::thresholds;
+
+            let path = cli.theme.join(format!("{}/rtconfig.txt", theme.name));
+            let text = std::fs::read_to_string(&path)
+                .with_context(|| format!("read {}", path.display()))?;
+
+            let wanted = thresholds::generated_lines();
+            let (patched, changed) = thresholds::splice(&text, &wanted)?;
+            let drifted = thresholds::section_heights_agree(&text);
+
+            for line in &drifted {
+                eprintln!("  DRIFT: {line}");
+            }
+            if check {
+                for t in &wanted {
+                    println!("  {} = {}", t.name, t.value);
+                }
+                if changed > 0 {
+                    anyhow::bail!("{changed} threshold(s) in the layout file are out of date");
+                }
+                if !drifted.is_empty() {
+                    anyhow::bail!(
+                        "{} section height(s) disagree with the Rust constant",
+                        drifted.len()
+                    );
+                }
+                println!("  thresholds are current");
+            } else if changed == 0 {
+                println!("  thresholds already current — nothing written");
+            } else {
+                std::fs::write(&path, patched)
+                    .with_context(|| format!("write {}", path.display()))?;
+                println!("  wrote {changed} threshold(s) to {}", path.display());
+            }
+        }
         Command::Shot {
             out,
             profile,

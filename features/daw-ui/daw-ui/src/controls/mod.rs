@@ -45,7 +45,10 @@ mod track_store;
 /// art layer, which owns the distinction because it is a fact about the
 /// images (different boxes, different measurements), not about the wrapper.
 pub use daw_theme_art::dress::Panel;
-pub use collapse::{Collapse, PanAnchor, Thresholds, VolumeWidget, REAPER as REAPER_THRESHOLDS};
+pub use collapse::{
+    Bands, Collapse, PanAnchor, Thresholds, VolumeWidget, REAPER as REAPER_THRESHOLDS,
+    REAPER_BANDS,
+};
 pub use drafts::{Drafts, Held};
 pub use fader::VolumeFader;
 pub use fx::FxButton;
