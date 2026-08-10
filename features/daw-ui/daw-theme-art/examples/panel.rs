@@ -494,8 +494,13 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
         &t.chrome.hardware_mark.shade(0.5).css(),
         tk.name,
     ));
-    s.push_str(&rect(x + 1.0, bot_y + 26.0, W - 2.0, 20.0, &tk.tint.css()));
-    s.push_str(&label(x + 40.0, bot_y + 40.0, 11.0, "#f0f0f0", &n.to_string()));
+    // 27, not 26: REAPER's number band starts at row 215 against a body
+    // that runs to 214, and ours began a row early — which showed as a
+    // grey line where the red should already have started. It carries the
+    // same `hl_color` top row the track tint does.
+    s.push_str(&rect(x + 1.0, bot_y + 27.0, W - 2.0, 20.0, &tk.tint.css()));
+    s.push_str(&rect(x + 1.0, bot_y + 27.0, W - 2.0, 1.0, &tk.tint.shade(0.13).css()));
+    s.push_str(&label(x + 40.0, bot_y + 41.0, 11.0, "#f0f0f0", &n.to_string()));
     s
 }
 
