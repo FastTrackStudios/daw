@@ -1,13 +1,18 @@
-# Percussive audio, and every track at once
+# Unpitched audio, and every track at once
 
 Two features that only make sense together.
 
-**UnpitchedAudio** is the mode for audio with no pitch to speak of — drums,
-percussion, noise, most FX. The pitched audio mode (`Mode::PitchedAudio`, the
-Melodyne surface) is built on a pitch contour, and on unpitched material
-that contour is noise: it produces notes that flicker between octaves
-and a blob that jumps around the grid. Better to admit there is no pitch
-and edit what is actually there — hits in time.
+**UnpitchedAudio** is the mode for audio with no pitch to speak of —
+drums, percussion, noise, most FX. The pitched audio mode
+(`Mode::PitchedAudio`, the Melodyne surface) is built on a pitch
+contour, and on unpitched material that contour is noise: it produces
+notes that flicker between octaves and a blob that jumps around the
+grid. Better to admit there is no pitch and edit what is actually
+there — hits in time.
+
+The two are the whole of `ModeFamily::Audio`. There is no third audio
+mode: Quantize and Align are tools that run over either of them, not
+modes of their own.
 
 **Multitrack** is showing every track at once, each rendered in *its own*
 mode, on one shared timeline. That is what makes the editor worth
@@ -16,7 +21,7 @@ reference MIDI vocal as a plain roll, the guitar as a string roll, the
 kit and the bass as slices — stacked, sharing an x axis, so you can see
 that the guitar is late against the kick.
 
-## Percussive
+## UnpitchedAudio
 
 ### The vertical axis is bands, not pitch
 

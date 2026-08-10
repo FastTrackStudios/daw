@@ -44,11 +44,18 @@ pub enum Mode {
 
 /// The two families the modes fall into, for the switcher UI.
 ///
-/// The split is where the notes came from: a MIDI-family mode edits
-/// events the format already carries, an audio-family mode edits what
-/// analysis found in a recording. That is also the line the tools care
-/// about — the same Quantize or Velocity tool writes note events on one
-/// side and stretch markers plus envelope points on the other.
+/// The split is *provenance*, and only provenance: a MIDI-family mode
+/// edits events the format already carries, an audio-family mode edits
+/// what analysis found in a recording. That is the axis the write path
+/// turns on — an edit goes back as note events on one side and as
+/// stretch markers plus envelope points on the other.
+///
+/// It is deliberately not the axis the *surface* turns on. `Vocals` is
+/// a MIDI-family mode that draws blobs, carries handles and has a pitch
+/// contour to decompose, exactly like `PitchedAudio`; those questions
+/// are asked one at a time by [`Mode::draws_blobs`],
+/// [`Mode::has_handles`] and [`Mode::has_pitch_shape`], and reading
+/// them off the family instead would get `Vocals` wrong every time.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ModeFamily {
     /// Notes come from a MIDI-shaped source: [`Mode::Midi`],

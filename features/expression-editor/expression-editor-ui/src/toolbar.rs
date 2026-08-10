@@ -152,6 +152,9 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
             // MIDI-shaped modes on the left, the two analysed-audio
             // ones on the right.
             for (i, family) in ModeFamily::ALL.into_iter().enumerate() {
+                // Separator *between* groups, not after each: a
+                // trailing divider would collide with the fixed one
+                // below and read as a double rule.
                 if i > 0 {
                     {divider()}
                 }

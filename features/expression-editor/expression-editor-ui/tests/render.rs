@@ -81,7 +81,7 @@ fn the_editor_renders_its_toolbar_canvas_and_status_bar() {
 
 #[test]
 fn the_top_bar_follows_the_mode() {
-    use expression_editor_core::Mode;
+    use expression_editor_core::{Mode, ModeFamily};
 
     let mut mpe = demo_editor(false, false);
     mpe.set_mode(Mode::Mpe);
@@ -110,6 +110,31 @@ fn the_top_bar_follows_the_mode() {
             mode.label()
         );
     }
+    // And it is grouped by family rather than one flat run. The check
+    // is positional because that is the whole point of the grouping:
+    // every MIDI-family label must come before every audio-family one,
+    // so the bar reads "which kind of material" left to right.
+    let at = |label: &str| {
+        midi_html
+            .find(label)
+            .unwrap_or_else(|| panic!("missing mode: {label}"))
+    };
+    let last_midi = ModeFamily::Midi
+        .modes()
+        .iter()
+        .map(|m| at(m.label()))
+        .max()
+        .unwrap();
+    let first_audio = ModeFamily::Audio
+        .modes()
+        .iter()
+        .map(|m| at(m.label()))
+        .min()
+        .unwrap();
+    assert!(
+        last_midi < first_audio,
+        "the two families must render as separate runs, MIDI first"
+    );
 }
 
 #[test]
