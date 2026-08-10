@@ -164,16 +164,36 @@ fn every_lane_stays_clickable_however_many_there_are() {
 }
 
 #[test]
-fn an_impossible_floor_degrades_to_an_even_split_rather_than_overflowing() {
+fn a_floor_that_does_not_fit_overflows_and_scrolls() {
+    // Changed by #198. This used to assert an even split — 44 lanes
+    // sharing 600 px at 13 px each — on the reasoning that if nothing
+    // fits well, everything should be equally bad. That is right for
+    // four tracks and wrong for an orchestra: 13 px lanes are no more
+    // usable than lanes you cannot see, so the floor is honoured and the
+    // stack overflows instead.
     let mut ed = band();
     for i in 0..40 {
         ed.tracks
             .push(Track::in_mode(format!("T{i}"), doc(), Mode::Midi));
     }
-    // 44 lanes, 40 px each, 600 px of room: cannot be done.
     let rows = ed.tracks.stack(600.0, 1.0, 40.0);
+    assert!(rows.iter().all(|r| r.height >= 40.0 - 1e-3), "floor honoured");
+    let total = rows.last().unwrap().y + rows.last().unwrap().height;
+    assert!(total > 600.0, "and the stack is taller than the viewport");
+}
+
+#[test]
+fn a_viewport_too_small_for_one_floored_lane_is_the_last_resort() {
+    // The even split survives for exactly this case: nothing can be
+    // readable, so be uniformly wrong rather than arbitrarily so.
+    let mut ed = band();
+    for i in 0..40 {
+        ed.tracks
+            .push(Track::in_mode(format!("T{i}"), doc(), Mode::Midi));
+    }
+    let rows = ed.tracks.stack(30.0, 1.0, 40.0);
     let last = rows.last().unwrap();
-    assert!((last.y + last.height - 600.0).abs() < 1e-3);
+    assert!((last.y + last.height - 30.0).abs() < 1e-3, "fits exactly");
     let first = rows.first().unwrap().height;
     assert!(rows.iter().all(|r| (r.height - first).abs() < 1e-3));
 }
@@ -884,4 +904,116 @@ fn cycling_parks_the_document_instead_of_moving_the_index() {
         ed.doc.notes.iter().any(|n| n.id == marker),
         "coming back restores the edit that was parked"
     );
+}
+
+// ── Fit while it fits, then scroll ───────────────────────────────────
+
+fn many_lanes(n: usize) -> Editor {
+    let mut ed = Editor::new(doc(), Viewport::new(800.0, 600.0));
+    for i in 1..n {
+        ed.add_track(format!("T{i}"), doc());
+    }
+    ed.tracks.auto_pair();
+    ed
+}
+
+#[test]
+fn the_floor_comes_from_the_lane_count_not_a_pixel_value() {
+    let mut ed = many_lanes(3);
+    ed.lanes_visible = 5;
+    assert_eq!(ed.lane_floor(), 120.0, "600 / 5");
+    // Same setting, taller screen, taller lanes.
+    ed.viewport = Viewport::new(800.0, 1000.0);
+    assert_eq!(ed.lane_floor(), 200.0);
+    // More lanes on screen, shorter lanes.
+    ed.lanes_visible = 10;
+    assert_eq!(ed.lane_floor(), 100.0);
+}
+
+#[test]
+fn with_fewer_lanes_than_the_setting_nothing_scrolls() {
+    let ed = many_lanes(3);
+    let total = ed.stack_height(1.0);
+    assert!(
+        total <= ed.viewport.h as f32 + 0.01,
+        "three lanes fit in a five-lane viewport"
+    );
+}
+
+#[test]
+fn the_sixth_lane_starts_a_scroll_rather_than_shrinking_the_first_five() {
+    let ed = many_lanes(6);
+    let floor = ed.lane_floor();
+    let rows = ed.tracks.stack(ed.viewport.h as f32, 1.0, floor);
+
+    assert_eq!(rows.len(), 6);
+    for r in &rows {
+        assert!(
+            r.height >= floor - 0.01,
+            "every lane keeps the floor: {} < {floor}",
+            r.height
+        );
+    }
+    assert!(
+        ed.stack_height(1.0) > ed.viewport.h as f32,
+        "so the stack overflows and scrolls"
+    );
+}
+
+#[test]
+fn twenty_lanes_stay_readable_instead_of_becoming_equally_bad() {
+    let ed = many_lanes(20);
+    let floor = ed.lane_floor();
+    let rows = ed.tracks.stack(ed.viewport.h as f32, 1.0, floor);
+    // The old behaviour divided 600px twenty ways: 30px each.
+    for r in &rows {
+        assert!(r.height >= floor - 0.01);
+    }
+}
+
+#[test]
+fn a_viewport_too_small_for_one_lane_still_degrades_evenly() {
+    let mut ed = many_lanes(4);
+    ed.viewport = Viewport::new(800.0, 40.0);
+    let rows = ed.tracks.stack(40.0, 1.0, ed.lane_floor());
+    let total: f32 = rows.iter().map(|r| r.height).sum();
+    assert!((total - 40.0).abs() < 0.01, "the last resort still fits");
+}
+
+#[test]
+fn switching_to_an_off_screen_lane_scrolls_it_just_into_view() {
+    let mut ed = many_lanes(10);
+    assert_eq!(ed.stack_scroll, 0.0);
+
+    let last = ed.tracks.len() - 1;
+    ed.switch_track(last);
+
+    let rows = ed
+        .tracks
+        .stack(ed.viewport.h as f32, Editor::ACTIVE_BOOST, ed.lane_floor());
+    let lane = ed.tracks.active_lane().unwrap();
+    let row = rows.iter().find(|r| r.lane == lane).unwrap();
+
+    assert!(ed.stack_scroll > 0.0, "it scrolled");
+    let bottom = (row.y + row.height) as f64;
+    assert!(
+        (ed.stack_scroll + ed.viewport.h - bottom).abs() < 0.01,
+        "just into view, not centred"
+    );
+}
+
+#[test]
+fn switching_to_a_visible_lane_does_not_scroll_at_all() {
+    let mut ed = many_lanes(10);
+    ed.switch_track(1);
+    assert_eq!(ed.stack_scroll, 0.0, "lane 1 was already on screen");
+}
+
+#[test]
+fn scrolling_never_runs_past_the_ends() {
+    let mut ed = many_lanes(10);
+    ed.switch_track(ed.tracks.len() - 1);
+    let max = (ed.stack_height(Editor::ACTIVE_BOOST) as f64 - ed.viewport.h).max(0.0);
+    assert!(ed.stack_scroll <= max + 0.01);
+    assert!(ed.stack_scroll >= 0.0);
 }
