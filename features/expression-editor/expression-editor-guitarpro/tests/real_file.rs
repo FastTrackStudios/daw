@@ -120,6 +120,52 @@ fn write_gp5() -> Vec<u8> {
     song.write((5, 1, 0), None).expect("write a gp5")
 }
 
+/// The same song at an earlier version.
+fn write_version(major: u8, minor: u8, patch: u8) -> Vec<u8> {
+    let mut song = Song::default();
+    song.lyrics.lines = (0..5).map(|_| (0u8, 1u16, String::new())).collect();
+    let mut track = Track {
+        number: 1,
+        name: "Guitar".into(),
+        strings: vec![(1, 64), (2, 59), (3, 55), (4, 50), (5, 45), (6, 40)],
+        fret_count: 24,
+        ..Track::default()
+    };
+    let mut voice = Voice::default();
+    voice.beats.push(Beat {
+        notes: vec![Note {
+            value: 5,
+            string: 6,
+            ..Note::default()
+        }],
+        ..Beat::default()
+    });
+    let mut measure = Measure::default();
+    measure.voices.push(voice);
+    track.measures.push(measure);
+    song.channels
+        .push(guitarpro::audio::midi::MidiChannel::default());
+    song.measure_headers
+        .push(guitarpro::model::legacy::headers::MeasureHeader::default());
+    song.tracks.push(track);
+    song.write((major, minor, patch), None).expect("write")
+}
+
+/// Which versions the library can read back after writing.
+#[test]
+fn which_versions_round_trip_through_the_library() {
+    for (name, bytes, fmt) in [
+        ("gp3", write_version(3, 0, 0), Format::Gp3),
+        ("gp4", write_version(4, 0, 6), Format::Gp4),
+        ("gp5", write_version(5, 1, 0), Format::Gp5),
+    ] {
+        match import_bytes(&bytes, fmt) {
+            Ok(_) => eprintln!("{name}: round-trips"),
+            Err(e) => eprintln!("{name}: does NOT round-trip — {e}"),
+        }
+    }
+}
+
 #[test]
 #[ignore = "guitarpro 0.4.2's gp5 writer does not round-trip through its own reader; see the module docs"]
 fn a_real_gp5_file_imports_as_a_string_roll() {
