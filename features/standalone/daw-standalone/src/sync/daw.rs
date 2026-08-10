@@ -221,6 +221,12 @@ fn envelope_default_name(t: EnvelopeType) -> &'static str {
         EnvelopeType::WidthPrefx => "Width (Pre-FX)",
         EnvelopeType::Mute => "Mute",
         EnvelopeType::FxParam => "FX Param",
+        EnvelopeType::PlayRate => "Playrate",
+        EnvelopeType::Pitch => "Pitch",
+        // A kind the enum does not name yet — the `.daw` format carries the
+        // originating name alongside, so this default is only ever seen by
+        // an envelope created without one.
+        EnvelopeType::Custom => "Envelope",
     }
 }
 
