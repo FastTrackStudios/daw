@@ -32,6 +32,7 @@
 mod drafts;
 mod fader;
 mod fx;
+mod meters;
 mod mute;
 mod pan;
 pub(crate) mod reach;
@@ -46,6 +47,7 @@ pub use daw_theme_art::dress::Panel;
 pub use drafts::{Drafts, Held};
 pub use fader::VolumeFader;
 pub use fx::FxButton;
+pub use meters::{MeterFeed, Meters, TrackMeter, use_meters};
 pub use mute::MuteButton;
 pub use pan::{PanKnob, TrackName};
 pub use toggles::{IoButton, MonitorButton, PhaseButton, RecordArmButton, SoloButton};

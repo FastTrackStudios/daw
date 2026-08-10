@@ -230,6 +230,13 @@ pub struct MeterProps {
     /// Level, 0–1.
     #[props(default = 0.0)]
     pub level: f32,
+    /// Decaying peak-hold, 0–1. `None` draws no hold mark at all.
+    ///
+    /// Optional rather than defaulted to the level, because "no hold" and
+    /// "hold sitting exactly on the level" are different pictures, and
+    /// every drawing that existed before peak-hold did means the first.
+    #[props(default)]
+    pub hold: Option<f32>,
 }
 
 #[component]
@@ -271,6 +278,22 @@ pub fn Meter(props: MeterProps) -> Element {
                 rect {
                     x: "0", y: "{h - lit}", width: "{w}", height: "{lit}",
                     fill: "url(#meter)",
+                }
+            }
+            // The hold mark, in the colour of the zone it is *in* rather
+            // than a fixed white line: a hold sitting in the red has to
+            // read as a peak that clipped, and a white tick above a green
+            // bar reads as a scale mark instead.
+            if let Some(hold) = props.hold {
+                {
+                    let hold = hold.clamp(0.0, 1.0);
+                    let y = (h - h * hold - 1.0).max(0.0);
+                    rsx! {
+                        rect {
+                            x: "0", y: "{y}", width: "{w}", height: "1",
+                            fill: "url(#meter)",
+                        }
+                    }
                 }
             }
         }
@@ -391,6 +414,7 @@ mod tests {
         let svg = render_svg(
             Meter,
             MeterProps {
+                hold: None,
                 width: 6,
                 height: 60,
                 level: 0.25,
@@ -407,6 +431,7 @@ mod tests {
         let empty = render_svg(
             Meter,
             MeterProps {
+                hold: None,
                 width: 6,
                 height: 60,
                 level: 0.0,
@@ -415,6 +440,7 @@ mod tests {
         let half = render_svg(
             Meter,
             MeterProps {
+                hold: None,
                 width: 6,
                 height: 60,
                 level: 0.5,
@@ -423,6 +449,7 @@ mod tests {
         let full = render_svg(
             Meter,
             MeterProps {
+                hold: None,
                 width: 6,
                 height: 60,
                 level: 1.0,
@@ -441,6 +468,7 @@ mod tests {
             let svg = render_svg(
                 Meter,
                 MeterProps {
+                    hold: None,
                     width: 6,
                     height: 60,
                     level,

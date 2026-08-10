@@ -35,13 +35,74 @@ pub struct TrackStore {
     /// an inbound change for a held track is the echo of our own write, and
     /// applying it would fight the finger — see [`crate::controls::Drafts`].
     drafts: Drafts,
+    /// Track guids in project order.
+    ///
+    /// The meter frame is indexed by *position*, not by guid — one frame
+    /// carries the whole mixer, which is what makes it cheap — so something
+    /// has to know which position is which track. Kept here because this is
+    /// the thing that already learns about adds, removes and moves; kept as
+    /// a cached vector rather than derived per frame because it is read
+    /// thirty times a second and changes about never.
+    order: Signal<Vec<String>>,
 }
 
 impl TrackStore {
     /// An empty store. Must be called inside a component scope — it owns a
     /// Signal.
     pub fn new() -> Self {
-        Self { tracks: Signal::new(HashMap::new()), drafts: Drafts::new() }
+        Self {
+            tracks: Signal::new(HashMap::new()),
+            drafts: Drafts::new(),
+            order: Signal::new(Vec::new()),
+        }
+    }
+
+    /// Track guids in project order — position `i` is the track the meter
+    /// frame's `tracks[i]` describes.
+    pub fn order(&self) -> Vec<String> {
+        self.order.read().clone()
+    }
+
+    /// Move one track to a new position, renumbering everything it passes.
+    ///
+    /// The backend's own numbering arrives with the next bulk read; until
+    /// then this is the honest local answer, and it keeps the meter frame
+    /// pointing at the right strips.
+    fn move_track(&mut self, guid: &str, to: usize) {
+        let mut order = self.order.read().clone();
+        let Some(from) = order.iter().position(|g| g == guid) else {
+            return;
+        };
+        let to = to.min(order.len().saturating_sub(1));
+        let moved = order.remove(from);
+        order.insert(to, moved);
+
+        let mut tracks = self.tracks.write();
+        for (i, g) in order.iter().enumerate() {
+            if let Some(t) = tracks.get_mut(g) {
+                t.index = i as u32;
+            }
+        }
+        drop(tracks);
+        self.order.set(order);
+    }
+
+    /// Recompute the order from the tracks themselves.
+    ///
+    /// By `Track::index`, which is the same order `Tracks::all` returns and
+    /// therefore the order the meter frame is indexed in. Called whenever
+    /// the set of tracks or their indices could have changed — an add, a
+    /// remove, a move — because getting this wrong is silent: every meter
+    /// still moves, they are just each pointing at the wrong track.
+    fn reorder(&mut self) {
+        let mut by_index: Vec<(u32, String)> = self
+            .tracks
+            .read()
+            .values()
+            .map(|t| (t.index, t.guid.clone()))
+            .collect();
+        by_index.sort_unstable();
+        self.order.set(by_index.into_iter().map(|(_, g)| g).collect());
     }
 
     /// The values the UI is holding. A control writes its drag here and
@@ -74,6 +135,7 @@ impl TrackStore {
     pub fn seed(&mut self, tracks: impl IntoIterator<Item = Track>) {
         self.tracks
             .set(tracks.into_iter().map(|t| (t.guid.clone(), t)).collect());
+        self.reorder();
     }
 
     /// Fold one backend event into the store.
@@ -88,12 +150,32 @@ impl TrackStore {
         // of one track, so those share a single lookup rather than
         // repeating `if let Some(t) = tracks.get_mut(guid)` nine times.
         let (guid, edit): (_, &dyn Fn(&mut Track)) = match event {
+            // The three that change *positions*, and so the meter frame's
+            // alignment. `drop(tracks)` before `reorder`, which takes the
+            // same signal.
             TrackEvent::Added(t) => {
                 tracks.insert(t.guid.clone(), t.clone());
+                drop(tracks);
+                self.reorder();
                 return;
             }
             TrackEvent::Removed(guid) => {
                 tracks.remove(guid);
+                drop(tracks);
+                self.reorder();
+                return;
+            }
+            // A move renumbers *every* track it passes, and the event can
+            // only name one of them — so the order is edited as a move
+            // rather than recomputed from indices that are now stale. A
+            // first version set the moved track's index and re-sorted,
+            // which left the track it displaced still claiming the same
+            // index and the sort deciding between them alphabetically: the
+            // meters shifted by one and kept running, which is exactly the
+            // silent failure this ordering exists to prevent.
+            TrackEvent::Moved { guid, new_index, .. } => {
+                drop(tracks);
+                self.move_track(guid, *new_index as usize);
                 return;
             }
             TrackEvent::Renamed { guid, name } => (guid, &|t| t.name = name.clone()),

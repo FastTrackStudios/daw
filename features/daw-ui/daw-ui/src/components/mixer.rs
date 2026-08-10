@@ -9,8 +9,9 @@
 //! - Track name + number
 
 use crate::controls::{
-    ControlSync, FxButton, IoButton, MonitorButton, MuteButton, PanKnob, PhaseButton,
-    RecordArmButton, SoloButton, TrackName, VolumeFader, use_daw_tracks, use_track_store,
+    ControlSync, FxButton, IoButton, MeterFeed, MonitorButton, MuteButton, PanKnob, PhaseButton,
+    RecordArmButton, SoloButton, TrackMeter, TrackName, VolumeFader, use_daw_tracks,
+    use_track_store,
 };
 use crate::prelude::*;
 use daw_control::{FxNodeKind, FxTree};
@@ -110,6 +111,10 @@ pub fn MixerPanel() -> Element {
         div { class: "h-full w-full flex flex-col bg-zinc-900 overflow-hidden",
             // The single place a drag becomes an engine write.
             ControlSync {}
+            // One meter subscription for the whole mixer. Mounted here
+            // rather than per strip: the frame carries every track, and the
+            // engine's pump is gated on there being a subscriber at all.
+            MeterFeed {}
 
             // Header
             div { class: "px-3 py-1.5 border-b border-zinc-700 flex items-center justify-between flex-shrink-0",
@@ -250,8 +255,9 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
             // theme's `mcp_volbg` and `mcp_volthumb` are rasterised from.
             // It owns the value while a finger is on it, so it does not
             // wait on this panel's poll or on the engine.
-            div { class: "flex-1 flex flex-col items-center px-2 py-1 min-h-0",
+            div { class: "flex-1 flex flex-row items-stretch justify-center gap-1 px-2 py-1 min-h-0",
                 VolumeFader { track: track.guid.clone() }
+                TrackMeter { track: track.guid.clone(), height: 120 }
             }
 
             // ── dB readout + pan ────────────────────────────────
