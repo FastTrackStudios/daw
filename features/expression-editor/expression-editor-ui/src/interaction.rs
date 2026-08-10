@@ -773,6 +773,9 @@ fn cc_line(ed: &mut Editor, number: u8, start: (f64, f64), current: (f64, f64), 
             Point {
                 t: lo + (hi - lo) * f,
                 value: v_lo + (v_hi - v_lo) * shape.amount(f),
+                // The pen bakes its curve into the values, so the
+                // segments between the sampled points are linear.
+                ..Point::default()
             }
         })
         .collect();
@@ -812,8 +815,7 @@ fn cc_draw(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64) {
             let f = i as f64 / steps as f64;
             Point {
                 t: lo + (hi - lo) * f,
-                value: v_lo + (v_hi - v_lo) * f,
-            }
+                value: v_lo + (v_hi - v_lo) * f, ..Point::default() }
         })
         .collect();
     ed.apply_live(&Edit::DrawCc {
@@ -1377,8 +1379,7 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                         (p + (pt.value - p) * factor).clamp(0.0, 1.0)
                     } else {
                         pt.value
-                    },
-                })
+                    }, ..Point::default() })
                 .collect();
             ed.apply_live(&Edit::DrawCc {
                 number: *number,
@@ -1511,8 +1512,7 @@ fn write_pen(
                 };
                 Point {
                     t,
-                    value: dimension.clamp(value),
-                }
+                    value: dimension.clamp(value), ..Point::default() }
             })
             .collect();
 
@@ -1567,6 +1567,7 @@ fn write_curve(
                 Point {
                     t: t0 + (t1 - t0) * f,
                     value: dimension.clamp(from + (to - from) * shape.amount(f)),
+                    ..Point::default()
                 }
             })
             .collect();

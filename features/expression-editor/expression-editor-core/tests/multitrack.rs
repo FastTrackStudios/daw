@@ -425,7 +425,7 @@ fn the_boost_goes_to_the_lane_holding_the_active_track() {
 
 #[test]
 fn lane_membership_survives_a_track_being_inserted_above() {
-    let mut ws = ws_with(&["Lead Vox", "Kit"]);
+    let ws = ws_with(&["Lead Vox", "Kit"]);
     let kit = ws.track(1).unwrap().guid.clone();
     assert_eq!(ws.layout().lane_of(&kit), Some(1));
 

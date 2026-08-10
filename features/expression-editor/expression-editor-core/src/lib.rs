@@ -51,7 +51,7 @@ pub mod zoom;
 pub use camera::{Bounds, Camera, Content, Viewport};
 pub use cc::{CcDisplay, CcLane, CcSet};
 pub use chord::Chord;
-pub use doc::{Curve, ExpressionDoc, Dimension, Marker, Note, NoteId, Point, Target, TimeBase};
+pub use doc::{Curve, CurveShape, ExpressionDoc, Dimension, Marker, Note, NoteId, Point, Target, TimeBase};
 pub use draft::PitchDraft;
 pub use edit::{Edit, History};
 pub use handles::{Handle, Scope};

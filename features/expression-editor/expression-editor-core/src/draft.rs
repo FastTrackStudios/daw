@@ -96,7 +96,7 @@ impl PitchDraft {
             .binary_search_by(|a| a.t.partial_cmp(&t).unwrap_or(core::cmp::Ordering::Equal))
         {
             Ok(i) => self.anchors[i].value = value,
-            Err(i) => self.anchors.insert(i, Point { t, value }),
+            Err(i) => self.anchors.insert(i, Point { t, value, ..Point::default() }),
         }
     }
 
@@ -186,8 +186,7 @@ impl PitchDraft {
             let a = self.anchors[0];
             return vec![Point {
                 t: a.t,
-                value: a.value,
-            }];
+                value: a.value, ..Point::default() }];
         }
         let mut out = Vec::with_capacity(self.anchors.len() * SAMPLES_PER_SPAN);
         for pair in self.anchors.windows(2) {
@@ -204,8 +203,7 @@ impl PitchDraft {
                 }
                 out.push(Point {
                     t,
-                    value: a.value + (b.value - a.value) * sine_ease(f),
-                });
+                    value: a.value + (b.value - a.value) * sine_ease(f), ..Point::default() });
             }
         }
         // The loop stops one sample short of each anchor, so the final
