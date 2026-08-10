@@ -77,11 +77,7 @@ async fn shoot_with(ed: Editor, drawer: Option<ModDrawer>, name: &str) {
     shoot_full(ed, drawer, None, None, name).await
 }
 
-async fn shoot_with_draft(
-    ed: Editor,
-    draft: expression_editor_core::PitchDraft,
-    name: &str,
-) {
+async fn shoot_with_draft(ed: Editor, draft: expression_editor_core::PitchDraft, name: &str) {
     shoot_full(ed, None, None, Some(draft), name).await
 }
 
@@ -386,7 +382,11 @@ async fn shoot_audio_backdrop() {
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, end);
 
     // Three sung notes with consonants between them.
-    let spans = [(PPQ * 0.6, PPQ * 4.0), (PPQ * 5.2, PPQ * 8.6), (PPQ * 9.8, PPQ * 13.5)];
+    let spans = [
+        (PPQ * 0.6, PPQ * 4.0),
+        (PPQ * 5.2, PPQ * 8.6),
+        (PPQ * 9.8, PPQ * 13.5),
+    ];
     for (i, (s, e)) in spans.iter().enumerate() {
         let mut n = Note::new(NoteId(i as u64 + 1), *s, *e, 60 + i as i32 * 3);
         n.weight = 0.85;
@@ -422,7 +422,13 @@ async fn shoot_audio_backdrop() {
             let t = end * (k as f64 / 1199.0);
             let voiced = spans.iter().any(|(s, e)| t >= *s && t <= *e);
             let sib = doc.unvoiced.iter().any(|(a, b)| t >= *a && t <= *b);
-            let base = if voiced { 0.8 } else if sib { 0.45 } else { 0.04 };
+            let base = if voiced {
+                0.8
+            } else if sib {
+                0.45
+            } else {
+                0.04
+            };
             let grain = 0.7 + 0.3 * (t / PPQ * 30.0).sin() * (t / PPQ * 3.0).cos();
             (base * grain).clamp(0.0, 1.0) as f32
         })
@@ -490,7 +496,7 @@ async fn shoot_pitch_drawing() {
 #[tokio::test(flavor = "current_thread")]
 async fn shoot_timing_and_reference() {
     use expression_editor_core::doc::{ExpressionDoc, Note, NoteId, TimeBase};
-    use expression_editor_core::{Mode, MidiReference, RefNote};
+    use expression_editor_core::{MidiReference, Mode, RefNote};
 
     const PPQ: f64 = 960.0;
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 16.0);
@@ -508,8 +514,10 @@ async fn shoot_timing_and_reference() {
         const STEPS: usize = 40;
         for k in 0..STEPS {
             let f = k as f64 / (STEPS - 1) as f64;
-            n.pitch
-                .set(s + (e - s) * f, 0.18 * (f * core::f64::consts::TAU * 4.0).sin());
+            n.pitch.set(
+                s + (e - s) * f,
+                0.18 * (f * core::f64::consts::TAU * 4.0).sin(),
+            );
         }
         n.envelope = (0..160)
             .map(|k| {
@@ -543,4 +551,88 @@ async fn shoot_timing_and_reference() {
 
     ed.timing_mode = true;
     shoot(ed, "39-timing-separators").await;
+}
+
+/// The stacked multitrack view: a vocal, its reference MIDI, a guitar
+/// and a kit, each drawn in its own mode on one shared timeline.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_stack() {
+    use expression_editor_core::rows::{RowSpace, SliceBands, StringTuning};
+    use expression_editor_core::tracks::Track;
+    use expression_editor_core::{ExpressionDoc, Mode, Note, NoteId, TimeBase};
+
+    fn part(rate: f64, hits: &[(f64, i32)], len: f64) -> ExpressionDoc {
+        let mut doc = ExpressionDoc::new(TimeBase::Frames { frame_rate: rate }, 0.0, rate * 4.0);
+        for (i, &(s, row)) in hits.iter().enumerate() {
+            doc.push(Note::new(
+                NoteId(i as u64 + 1),
+                s * rate,
+                (s + len) * rate,
+                row,
+            ));
+        }
+        doc
+    }
+
+    // A sung line.
+    let vox = [
+        (0.10, 62),
+        (0.55, 64),
+        (1.05, 67),
+        (1.60, 65),
+        (2.10, 64),
+        (2.70, 62),
+    ];
+    let mut ed = Editor::new(
+        part(172.265625, &vox, 0.40),
+        Viewport::new(W as f64, CANVAS_H),
+    );
+    ed.set_mode(Mode::Audio);
+    ed.tracks.rename(0, "Lead Vox");
+
+    // The same line as a MIDI reference, dead on the grid.
+    let refs = [
+        (0.00, 62),
+        (0.50, 64),
+        (1.00, 67),
+        (1.50, 65),
+        (2.00, 64),
+        (2.50, 62),
+    ];
+    ed.tracks.push(Track::in_mode(
+        "Ref MIDI",
+        part(172.265625, &refs, 0.45),
+        Mode::Midi,
+    ));
+
+    // A guitar part on strings 2 and 3.
+    let gtr = [
+        (0.00, 2),
+        (0.50, 3),
+        (1.00, 2),
+        (1.50, 3),
+        (2.00, 2),
+        (2.50, 3),
+    ];
+    let mut guitar = part(172.265625, &gtr, 0.45);
+    guitar.row_space = RowSpace::Strings(StringTuning::guitar_standard());
+    ed.tracks
+        .push(Track::in_mode("Guitar", guitar, Mode::Guitar));
+
+    // Kick/snare on the beat, hats on the eighths.
+    let mut kit_hits = Vec::new();
+    for b in 0..6 {
+        let t = b as f64 * 0.5;
+        kit_hits.push((t, if b % 2 == 0 { 0 } else { 1 }));
+        kit_hits.push((t + 0.25, 2));
+    }
+    let mut kit = part(86.1328125, &kit_hits, 0.06);
+    kit.row_space = RowSpace::Bands(SliceBands::default());
+    ed.tracks.push(Track::in_mode("Kit", kit, Mode::Percussive));
+
+    ed.camera.t0 = -20.0;
+    ed.camera.units_per_px = 0.55;
+    ed.stacked = true;
+
+    shoot(ed, "stack-multitrack").await;
 }

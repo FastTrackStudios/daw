@@ -26,6 +26,7 @@ pub mod inspector;
 pub mod interaction;
 pub mod menu_ui;
 pub mod multitool_ui;
+pub mod stack;
 pub mod switcher;
 pub mod theme;
 pub mod toolbar;
@@ -94,8 +95,12 @@ pub fn ExpressionEditor(
                 div {
                     style: "display: flex; flex-direction: column; flex: 1 1 auto; \
                             min-width: 0; min-height: 0;",
-                    Canvas { editor, drag, drawer, multi, menu_state, pending, draft }
-                    LaneStrip { editor }
+                    if editor.read().stacked {
+                        stack::StackView { editor }
+                    } else {
+                        Canvas { editor, drag, drawer, multi, menu_state, pending, draft }
+                        LaneStrip { editor }
+                    }
                 }
                 inspector::Inspector { editor, open: inspector_open }
             }
@@ -122,10 +127,34 @@ fn handle_mark(
 ) -> String {
     use expression_editor_core::Handle as H;
     match handle {
-        H::LeftSlope => format!("M {:.1} {:.1} L {:.1} {:.1}", cx - r, cy + r * 0.5, cx + r, cy - r * 0.5),
-        H::RightSlope => format!("M {:.1} {:.1} L {:.1} {:.1}", cx - r, cy - r * 0.5, cx + r, cy + r * 0.5),
-        H::FinePitch => format!("M {:.1} {:.1} L {:.1} {:.1}", cx - r * 0.6, cy, cx + r * 0.6, cy),
-        H::Formant => format!("M {:.1} {:.1} L {:.1} {:.1}", cx, cy - r * 0.7, cx, cy + r * 0.7),
+        H::LeftSlope => format!(
+            "M {:.1} {:.1} L {:.1} {:.1}",
+            cx - r,
+            cy + r * 0.5,
+            cx + r,
+            cy - r * 0.5
+        ),
+        H::RightSlope => format!(
+            "M {:.1} {:.1} L {:.1} {:.1}",
+            cx - r,
+            cy - r * 0.5,
+            cx + r,
+            cy + r * 0.5
+        ),
+        H::FinePitch => format!(
+            "M {:.1} {:.1} L {:.1} {:.1}",
+            cx - r * 0.6,
+            cy,
+            cx + r * 0.6,
+            cy
+        ),
+        H::Formant => format!(
+            "M {:.1} {:.1} L {:.1} {:.1}",
+            cx,
+            cy - r * 0.7,
+            cx,
+            cy + r * 0.7
+        ),
         H::Amplitude => {
             // A small circle, drawn as two arcs so it stays one path.
             // Larger when hollow, since an outline reads smaller than a

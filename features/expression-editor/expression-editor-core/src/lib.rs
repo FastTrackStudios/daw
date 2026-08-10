@@ -146,6 +146,14 @@ pub struct Editor {
     /// every note join is a picket fence across a screen that is
     /// otherwise about pitch.
     pub timing_mode: bool,
+    /// Show every track stacked on one timeline instead of the single
+    /// roll.
+    ///
+    /// A view flag rather than a mode: the document, selection and
+    /// history are untouched, and switching back leaves the roll exactly
+    /// where it was. The stack is how you find *which* track needs work
+    /// — the roll is where you do it.
+    pub stacked: bool,
     /// A MIDI part loaded as a tuning target, drawn behind the notes.
     pub reference: Option<MidiReference>,
     /// `M` held: the reference comes forward, as with `Shift+R` for
@@ -194,6 +202,7 @@ impl Editor {
             snap_pitch: true,
             sibilant_scope: false,
             timing_mode: false,
+            stacked: false,
             reference: None,
             reference_to_front: false,
             temp_note: None,

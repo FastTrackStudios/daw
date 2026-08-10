@@ -48,7 +48,11 @@ fn shape_glyph(shape: Shape) -> &'static str {
 fn Segment(children: Element) -> Element {
     rsx! {
         div {
-            style: "display: flex; align-items: stretch; \
+            // `flex: 0 0 auto` is load-bearing. A segment allowed to
+            // shrink does not drop cells or ellipsize — it compresses
+            // each one until the icon overlaps its own label, which
+            // reads as a rendering bug rather than as a full toolbar.
+            style: "display: flex; flex: 0 0 auto; align-items: stretch; \
                     border: 1px solid {theme::PANEL_BORDER}; border-radius: 6px; \
                     overflow: hidden; background: {theme::SURFACE_BAR};",
             {children}
@@ -122,15 +126,23 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
     let can_redo = ed.can_redo();
     let mod_open = drawer.read().open;
     let mode = ed.mode;
+    let stacked = ed.stacked;
     let bend = ed.doc.bend_range;
     drop(ed);
 
     rsx! {
         div {
-            style: "display: flex; flex: 0 0 auto; align-items: center; gap: 5px; \
+            // Wraps rather than clips. With seven modes plus the tool,
+            // lane and view segments the bar does not fit a narrow
+            // plugin window, and the alternatives are both worse:
+            // `overflow: hidden` silently amputates whatever is on the
+            // right, and letting the segments shrink collides each
+            // icon with its own label.
+            style: "display: flex; flex: 0 0 auto; flex-wrap: wrap; \
+                    align-items: center; gap: 5px; \
                     padding: 5px 8px; background: {theme::PANEL}; \
                     border-bottom: 1px solid {theme::PANEL_BORDER}; \
-                    font-family: system-ui, sans-serif; overflow: hidden;",
+                    font-family: system-ui, sans-serif;",
 
             // The mode leads: everything after it is conditional on
             // what the editor currently is.
@@ -163,6 +175,43 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
             }
 
             {divider()}
+
+            // Stack toggle. Next to the mode buttons because it answers
+            // the same question from the other side: those pick how one
+            // track is drawn, this shows every track drawn its own way.
+            // Hidden with one track, where a stack of one is just the
+            // roll with less room.
+            if editor.read().tracks.len() > 1 {
+                Segment {
+                    Seg {
+                        active: stacked,
+                        accent: true,
+                        title: "Show every track on one timeline".to_string(),
+                        onclick: move |_| {
+                            let now = editor.read().stacked;
+                            editor.write().stacked = !now;
+                        },
+                        // Icon only. The toolbar is already full at the
+                        // width a plugin window gets, and this is a view
+                        // toggle rather than something you hunt for by
+                        // name.
+                        svg {
+                            view_box: "0 0 16 16",
+                            style: "width: 13px; height: 13px; flex: 0 0 auto;",
+                            path {
+                                // Three stacked lanes.
+                                d: "M2 4h12 M2 8h12 M2 12h12",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "1.3",
+                                stroke_linecap: "round",
+                            }
+                        }
+                    }
+                }
+
+                {divider()}
+            }
 
             Segment {
                 for t in Tool::ALL {

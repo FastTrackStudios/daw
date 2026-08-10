@@ -16,7 +16,8 @@ fn editor(mode: Mode, offset: f64) -> Editor {
     for k in 0..64 {
         let f = k as f64 / 63.0;
         let t = n.start + (n.end - n.start) * f;
-        n.pitch.set(t, offset + 0.6 * (f * core::f64::consts::TAU * 4.0).sin());
+        n.pitch
+            .set(t, offset + 0.6 * (f * core::f64::consts::TAU * 4.0).sin());
         // Swells in, fades out.
         n.pressure.set(t, (f * core::f64::consts::PI).sin());
     }
@@ -80,7 +81,9 @@ fn the_body_is_flat_and_the_pitch_track_moves_against_it() {
     let pts = points(rects[0].blob.as_ref().unwrap());
     let n = pts.len();
     // Centre line of the top/bottom pair, per sample.
-    let centers: Vec<f64> = (0..n / 2).map(|i| (pts[i].1 + pts[n - 1 - i].1) * 0.5).collect();
+    let centers: Vec<f64> = (0..n / 2)
+        .map(|i| (pts[i].1 + pts[n - 1 - i].1) * 0.5)
+        .collect();
 
     let lo = centers.iter().cloned().fold(f64::MAX, f64::min);
     let hi = centers.iter().cloned().fold(f64::MIN, f64::max);
@@ -354,7 +357,10 @@ fn the_whole_note_scope_still_moves_everything() {
     let n = ed.doc.note(NoteId(1)).unwrap();
     let a = n.pressure.sample(PPQ * 0.5, Lane::Pressure.default_value());
     let b = n.pressure.sample(PPQ * 2.0, Lane::Pressure.default_value());
-    assert!((a - b).abs() < 1e-6, "one level across the note: {a} vs {b}");
+    assert!(
+        (a - b).abs() < 1e-6,
+        "one level across the note: {a} vs {b}"
+    );
 }
 
 #[test]

@@ -61,7 +61,10 @@ fn cc_edit_mode_claims_the_roll_from_the_notes_behind_it() {
     let mut ed = editor();
     // An empty CC1 rests at 0, drawn at the bottom of the roll, so the
     // middle of the canvas is open lane rather than curve.
-    assert_eq!(interaction::context_at(&ed, 400.0, H * 0.5), Context::CcLane);
+    assert_eq!(
+        interaction::context_at(&ed, 400.0, H * 0.5),
+        Context::CcLane
+    );
 
     ed.exit_cc_edit();
     assert_eq!(
@@ -77,7 +80,10 @@ fn the_pointer_on_the_drawn_curve_is_a_cc_event() {
     // CC1 defaults to 0 — the very bottom of the roll.
     let y = cc::cc_y(0.0, H);
     assert_eq!(interaction::context_at(&ed, 400.0, y), Context::CcEvent);
-    assert_eq!(interaction::context_at(&ed, 400.0, y - 60.0), Context::CcLane);
+    assert_eq!(
+        interaction::context_at(&ed, 400.0, y - 60.0),
+        Context::CcLane
+    );
 
     // And it tracks the curve rather than a fixed height: draw a value
     // mid-roll and the event follows it up.
@@ -95,7 +101,10 @@ fn an_unmodified_drag_draws_freehand() {
     sweep(&mut ed, (200.0, H * 0.25), (400.0, H * 0.25), NONE, 0);
     let after = value_at(&ed, ed.camera.t_at(300.0));
 
-    assert!(after > before, "the stroke wrote values: {before} -> {after}");
+    assert!(
+        after > before,
+        "the stroke wrote values: {before} -> {after}"
+    );
     // y = H/4 is three quarters of the way up the lane.
     assert!(
         (after - 0.75).abs() < 0.05,
@@ -313,7 +322,13 @@ fn two_track_editor(mode: Mode) -> Editor {
 fn bare_r_brings_references_forward_wherever_mpe_is_not_using_it() {
     // Audio and vocal notes have no member channel to assign, so the
     // key is free and takes Vovious's meaning.
-    for mode in [Mode::Audio, Mode::Vocals, Mode::Midi, Mode::Drums, Mode::Guitar] {
+    for mode in [
+        Mode::Audio,
+        Mode::Vocals,
+        Mode::Midi,
+        Mode::Drums,
+        Mode::Guitar,
+    ] {
         let mut ed = two_track_editor(mode);
         let drag = Drag::None;
         assert!(

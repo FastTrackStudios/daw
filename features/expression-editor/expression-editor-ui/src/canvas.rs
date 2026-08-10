@@ -196,7 +196,10 @@ pub fn reference_rects(ed: &Editor) -> Vec<RefRect> {
         // reference grey otherwise, so a host that supplies no colours
         // still renders something legible.
         let colour = match track.ref_color {
-            RefColor::Host => track.color.clone().unwrap_or_else(|| theme::REFERENCE.into()),
+            RefColor::Host => track
+                .color
+                .clone()
+                .unwrap_or_else(|| theme::REFERENCE.into()),
             RefColor::Default | RefColor::Shadow => theme::REFERENCE.into(),
         };
         let fill = (track.ref_color != RefColor::Shadow).then(|| colour.clone());
@@ -419,7 +422,11 @@ pub struct DraftView {
 
 /// Geometry for an open pitch drawing.
 pub fn draft_view(ed: &Editor, draft: &expression_editor_core::PitchDraft) -> DraftView {
-    let row = ed.doc.note(draft.note).map(|n| n.row as f64).unwrap_or(60.0);
+    let row = ed
+        .doc
+        .note(draft.note)
+        .map(|n| n.row as f64)
+        .unwrap_or(60.0);
     let to_px = |p: &expression_editor_core::Point| {
         (ed.camera.x(p.t), ed.camera.y(row + p.value, ed.viewport))
     };

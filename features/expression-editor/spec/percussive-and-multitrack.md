@@ -147,3 +147,30 @@ timing edit produces. Same write path, no new machinery.
 The cue for "which track is the reference" is the same one the editor
 already has — a track marked reference — so multitrack alignment is
 "align every non-reference track to the reference", one command.
+
+## What the stack does and does not do
+
+It is a **read-only overview**. Clicking a lane makes that track active,
+and that is the only gesture it takes — which is deliberate, because it
+is also the gesture that gets you back to the roll, where the editing
+happens. Answering "which track needs work" and "is this in time with
+that" is the job; doing the work is the roll's.
+
+Two consequences worth stating rather than discovering:
+
+- Lane notes draw as **bars and triangles, not blobs**. At a lane height
+  of forty pixels a blob's pitch excursion is a couple of pixels and the
+  waveform body is a smear, so the extra fidelity would cost the frame
+  budget and buy nothing. Switch to the roll to see the contour.
+- Everything is drawn from each track's **parked document**, except the
+  active one which comes from the live editor. That asymmetry is already
+  enforced by `Workspace::doc_of` refusing to hand out the active slot's
+  stale copy, and it is why the stack shows an edit the moment it is
+  made rather than one switch later.
+
+The **toolbar wraps** now. Seven modes plus the tool, lane and view
+segments do not fit the width a plugin window gets, and the two
+alternatives are both worse: clipping amputates whatever is on the right
+without saying so, and letting the segments shrink collides each icon
+with its own label — which reads as a rendering bug rather than as a
+full toolbar.

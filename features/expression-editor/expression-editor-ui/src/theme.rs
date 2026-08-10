@@ -238,9 +238,7 @@ pub fn mode_icon(mode: expression_editor_core::Mode) -> &'static str {
         // Transients: a baseline with decaying spikes on it. The same
         // family as the Audio waveform, but struck rather than sung —
         // which is the distinction the mode exists to make.
-        Mode::Percussive => {
-            "M1 13h14 M3 13V4l1.2 9 M7.5 13V6l1.2 7 M12 13V2l1.2 11"
-        }
+        Mode::Percussive => "M1 13h14 M3 13V4l1.2 9 M7.5 13V6l1.2 7 M12 13V2l1.2 11",
     }
 }
 
