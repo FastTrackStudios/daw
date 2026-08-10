@@ -42,6 +42,15 @@ pub struct OrgMember {
 /// `AuthServerMiddleware` parses it back out on the server side.
 pub const AUTHORIZATION_METADATA_KEY: &str = "authorization";
 
+/// Wire form of a self-service email change.
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+pub struct ChangeEmailRequest {
+    /// Identifies the account; the change always applies to the
+    /// session's own user.
+    pub session_token: String,
+    pub new_email: String,
+}
+
 /// Wire form of a self-service password change.
 #[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
 pub struct ChangePasswordRequest {
@@ -149,4 +158,15 @@ pub trait AuthService {
     /// Distinct from an operator reset, which needs neither and is
     /// therefore not exposed here at all.
     async fn change_password(&self, input: ChangePasswordRequest) -> Result<(), AuthFlowError>;
+
+    /// Change your OWN email.
+    ///
+    /// Self-service counterpart to the operator migration: the session
+    /// names the account, so there is no target parameter and no way to
+    /// move someone else's address. Appends to the same history trail,
+    /// recorded with no `changed_by` because the owner did it.
+    ///
+    /// The new address starts unverified — it has not been proven to
+    /// belong to anyone yet.
+    async fn change_email(&self, input: ChangeEmailRequest) -> Result<AuthUser, AuthFlowError>;
 }
