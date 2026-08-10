@@ -22,6 +22,7 @@ use keyboard_types::Modifiers;
 pub mod canvas;
 pub mod demo;
 pub mod drawer;
+pub mod guitar;
 pub mod inspector;
 pub mod interaction;
 pub mod menu_ui;
@@ -33,6 +34,7 @@ pub mod toolbar;
 pub mod widgets;
 
 pub use drawer::ModDrawer;
+pub use guitar::BendFlow;
 pub use expression_editor_core as core;
 pub use interaction::Drag;
 pub use menu_ui::ContextMenu;
@@ -61,7 +63,14 @@ pub fn ExpressionEditor(
     /// is otherwise only produced by a key press and several clicks.
     #[props(default)]
     initial_draft: Option<expression_editor_core::PitchDraft>,
+    /// **Prototype (#161).** Where a string roll draws its bend flow.
+    /// Ignored outside `RowSpace::Strings`.
+    #[props(default)]
+    bend_flow: Option<BendFlow>,
 ) -> Element {
+    // Context rather than a prop chain: the flow variant is read deep
+    // inside the canvas and nothing between here and there cares.
+    use_context_provider(|| bend_flow.unwrap_or_default());
     let drag = use_signal(Drag::default);
     let drawer = use_signal(|| initial_drawer.clone().unwrap_or_default());
     let mut inspector_open = use_signal(|| true);
@@ -268,6 +277,14 @@ fn Canvas(
     let sibilant_scope = ed.sibilant_scope;
     let draft_view = draft.read().as_ref().map(|d| canvas::draft_view(&ed, d));
     let sep_lines = canvas::separators(&ed);
+    // Prototype (#161): the string roll's bend flow.
+    let flow_mode = try_consume_context::<BendFlow>().unwrap_or_default();
+    let flow = flow_mode
+        .on_row()
+        .then(|| guitar::flow_paths(&ed))
+        .unwrap_or_default();
+    let joins = guitar::joins(&ed);
+    let bend_lane = flow_mode.lane().then(|| guitar::bend_lane(&ed)).flatten();
     let midi_ref = canvas::midi_reference_rects(&ed);
     let midi_ref_front = ed.reference_to_front;
     // `R` brings references forward, the way `M` does for the MIDI
@@ -916,6 +933,117 @@ fn Canvas(
                                 fill: theme::GOLD,
                                 font_size: "9",
                                 "{cents:+.0}¢"
+                            }
+                        }
+                    }
+                }
+
+                // ── #161 prototype: bend flow ───────────────────────
+                //
+                // The string's own line, lifted off its row by the
+                // bend. Drawn thick and in the string's colour so it
+                // reads as "the string moved", not as an overlay.
+                for (i, f) in flow.iter().enumerate() {
+                    g {
+                        key: "flow{i}",
+                        polyline {
+                            points: "{f.points}",
+                            fill: "none",
+                            stroke: f.color,
+                            stroke_width: if f.selected { "3.5" } else { "2.5" },
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            stroke_opacity: "0.95",
+                            pointer_events: "none",
+                        }
+                        // The height of the bend, where it peaks. A
+                        // guitarist reads bends as "full" and "half",
+                        // not as a shape — the number is the datum and
+                        // the curve is how it got there.
+                        if let Some(label) = f.peak_label.as_ref() {
+                            text {
+                                x: "{f.peak_at.0 + 3.0:.1}",
+                                y: "{f.peak_at.1 - 4.0:.1}",
+                                fill: theme::ACCENT,
+                                font_size: "9",
+                                font_weight: "600",
+                                pointer_events: "none",
+                                "{label}"
+                            }
+                        }
+                    }
+                }
+
+                // Joins between two notes on one string. A hammer-on
+                // gets an arc and a letter; a slide gets a straight
+                // connector — deliberately two different marks, so the
+                // pictures can be compared.
+                for (i, j) in joins.iter().enumerate() {
+                    g {
+                        key: "join{i}",
+                        path {
+                            d: "{j.d}",
+                            fill: "none",
+                            stroke: j.color,
+                            stroke_width: "1.5",
+                            pointer_events: "none",
+                        }
+                        if let guitar::JoinKind::Hopo(letter) = j.kind {
+                            text {
+                                x: "{j.label_at.0 - 3.0:.1}",
+                                y: "{j.label_at.1:.1}",
+                                fill: theme::ACCENT,
+                                font_size: "9",
+                                font_weight: "700",
+                                pointer_events: "none",
+                                "{letter}"
+                            }
+                        }
+                    }
+                }
+
+                // The lane variant: the same motion on an absolute
+                // semitone axis, under the roll.
+                if let Some(lane) = bend_lane.as_ref() {
+                    g {
+                        rect {
+                            x: "0", y: "{lane.y:.1}",
+                            width: "{vp.w:.0}", height: "{lane.h:.1}",
+                            fill: theme::SURFACE_DEEP,
+                            fill_opacity: "0.9",
+                            stroke: theme::BORDER_STRONG,
+                            stroke_width: "1",
+                            pointer_events: "none",
+                        }
+                        for (gi, (gy, label)) in lane.guides.iter().enumerate() {
+                            g {
+                                key: "bg{gi}",
+                                line {
+                                    x1: "0", y1: "{gy:.1}",
+                                    x2: "{vp.w:.0}", y2: "{gy:.1}",
+                                    stroke: theme::BORDER_STRONG,
+                                    stroke_width: "1",
+                                    stroke_dasharray: "4 4",
+                                    pointer_events: "none",
+                                }
+                                text {
+                                    x: "3", y: "{gy - 2.0:.1}",
+                                    fill: theme::TEXT_FAINT,
+                                    font_size: "8",
+                                    pointer_events: "none",
+                                    "{label}"
+                                }
+                            }
+                        }
+                        for (pi, f) in lane.paths.iter().enumerate() {
+                            polyline {
+                                key: "bp{pi}",
+                                points: "{f.points}",
+                                fill: "none",
+                                stroke: f.color,
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                pointer_events: "none",
                             }
                         }
                     }

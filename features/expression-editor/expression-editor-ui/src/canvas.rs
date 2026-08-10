@@ -25,7 +25,12 @@ pub struct Row {
 pub fn rows(ed: &Editor) -> Vec<Row> {
     let (lo, hi) = ed.camera.pitch_span(ed.viewport);
     let h = ed.camera.px_per_semitone;
-    ((lo.floor() as i32).max(0)..=(hi.ceil() as i32).min(127))
+    // Clamped to the row space's own bounds, not to 0..127. A six-string
+    // roll has six rows and painting a hundred and twenty-two phantom
+    // ones above and below them says there is somewhere else to put a
+    // note, which there is not.
+    let (rlo, rhi) = ed.row_space.bounds();
+    ((lo.floor() as i32).max(rlo)..=(hi.ceil() as i32).min(rhi))
         .map(|row| Row {
             row,
             y: ed.camera.y(row as f64 + 0.5, ed.viewport),
@@ -700,7 +705,14 @@ pub struct CurvePath {
 pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
     let (t0, t1) = ed.camera.time_span(ed.viewport);
     let mut out = Vec::new();
+    // On a string roll the pitch lane belongs to `guitar::flow_paths`,
+    // which draws it as the string lifting off its row rather than as a
+    // thin expression polyline. Drawing both would double the line.
+    let strings = matches!(ed.row_space, expression_editor_core::RowSpace::Strings(_));
     for lane in ed.draw_order() {
+        if strings && lane == Lane::Pitch {
+            continue;
+        }
         let active = lane == ed.lane;
         for n in ed.doc.notes.iter().filter(|n| n.end >= t0 && n.start <= t1) {
             let curve = n.lane(lane);
@@ -713,6 +725,9 @@ pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
             // this surface could show — the manual makes the same
             // point: no pitch track *means* unvoiced.
             let break_unvoiced = lane == Lane::Pitch && ed.mode.draws_blobs();
+            // A curve is in semitones; a row is only a semitone in pitch
+            // space. See `RowSpace::semitones_per_row`.
+            let spr = ed.row_space.semitones_per_row();
             let mut s = String::new();
             let mut prev_voiced = true;
             for p in curve.points() {
@@ -722,7 +737,7 @@ pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
                 }
                 let x = ed.camera.x(p.t);
                 let y = match lane {
-                    Lane::Pitch => ed.camera.y(n.row as f64 + p.value, ed.viewport),
+                    Lane::Pitch => ed.camera.y(n.row as f64 + p.value / spr, ed.viewport),
                     _ => tools::lane_box_y(&ed.camera, ed.viewport, n.row, p.value),
                 };
                 // A polyline cannot express a gap, so a run that
@@ -1045,7 +1060,13 @@ pub fn stems(ed: &Editor, h: f64) -> Vec<Stem> {
                 w: bar,
                 y: h * (1.0 - v),
                 h: h * v,
-                color: theme::pitch_class_color(n.row),
+                // Same rule as the note body: where the row itself
+                // carries meaning, the strip has to agree with the roll
+                // or two colours name the same note.
+                color: ed
+                    .row_space
+                    .row_color(n.row)
+                    .unwrap_or_else(|| theme::pitch_class_color(n.row)),
                 selected: ed.selection.contains(n.id),
                 muted: n.muted,
             }

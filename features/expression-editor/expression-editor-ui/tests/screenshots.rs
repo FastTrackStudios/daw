@@ -39,6 +39,7 @@ fn Harness(
     drawer: Option<ModDrawer>,
     multi: Option<MultiTool>,
     draft: Option<expression_editor_core::PitchDraft>,
+    flow: Option<expression_editor_ui::BendFlow>,
 ) -> Element {
     let editor = use_signal(|| seed.clone());
     rsx! {
@@ -53,6 +54,7 @@ fn Harness(
                 initial_drawer: drawer.clone(),
                 initial_multi: multi.clone(),
                 initial_draft: draft.clone(),
+                bend_flow: flow,
             }
         }
     }
@@ -81,11 +83,27 @@ async fn shoot_with_draft(ed: Editor, draft: expression_editor_core::PitchDraft,
     shoot_full(ed, None, None, Some(draft), name).await
 }
 
+/// A shot with an explicit bend-flow variant (#161).
+async fn shoot_flow(ed: Editor, flow: expression_editor_ui::BendFlow, name: &str) {
+    shoot_inner(ed, None, None, None, Some(flow), name).await
+}
+
 async fn shoot_full(
     ed: Editor,
     drawer: Option<ModDrawer>,
     multi: Option<MultiTool>,
     draft: Option<expression_editor_core::PitchDraft>,
+    name: &str,
+) {
+    shoot_inner(ed, drawer, multi, draft, None, name).await
+}
+
+async fn shoot_inner(
+    ed: Editor,
+    drawer: Option<ModDrawer>,
+    multi: Option<MultiTool>,
+    draft: Option<expression_editor_core::PitchDraft>,
+    flow: Option<expression_editor_ui::BendFlow>,
     name: &str,
 ) {
     // The canvas measures itself from the mounted element; headless
@@ -100,6 +118,7 @@ async fn shoot_full(
             drawer,
             multi,
             draft,
+            flow,
         },
     );
     let tester = DocumentTester::from_virtual_dom(dom)
@@ -117,7 +136,47 @@ async fn shoot_full(
 async fn shoot_every_scene() {
     for scene in Scene::ALL {
         let ed = demo::editor(scene, Viewport::new(W as f64, CANVAS_H));
-        shoot(ed, scene.slug()).await;
+        shoot_flow(ed, scene.bend_flow(), scene.slug()).await;
+    }
+}
+
+/// **Prototype (#161).** The six-string roll down a zoom ladder.
+///
+/// The question is not "is it pretty at one size" but *where it breaks
+/// and what breaks first*, so this walks the same riff from framed-item
+/// out to a whole-song overview and back in to one bend filling the
+/// screen.
+#[tokio::test(flavor = "current_thread")]
+async fn shoot_guitar_zoom_ladder() {
+    use expression_editor_ui::BendFlow;
+
+    let vp = Viewport::new(W as f64, CANVAS_H);
+    let base = || demo::editor(Scene::Guitar, vp);
+
+    // Zoomed in on the full bend: one gesture, all the detail there is.
+    let mut ed = base();
+    for _ in 0..5 {
+        ed.zoom_in_at(W as f64 * 0.45, CANVAS_H * 0.5, 1.25);
+    }
+    shoot_flow(ed, BendFlow::OnRow, "40-guitar-zoom-close").await;
+
+    // Progressively out. Each step halves the pixels per beat and the
+    // pixels per string at once, because both axes are being asked
+    // whether they still say anything.
+    for (i, out) in [2.0_f64, 4.0, 8.0, 16.0].iter().enumerate() {
+        let mut ed = base();
+        ed.camera.units_per_px *= out;
+        ed.camera.px_per_semitone /= out;
+        // Through the editor's own clamps, so the ladder shows what the
+        // real camera would allow rather than an impossible zoom.
+        let (b, vp) = (ed.bounds(), ed.viewport);
+        ed.camera.constrain(b, vp);
+        shoot_flow(
+            ed,
+            BendFlow::OnRow,
+            &format!("4{}-guitar-zoom-out-{out:.0}x", i + 1),
+        )
+        .await;
     }
 }
 
