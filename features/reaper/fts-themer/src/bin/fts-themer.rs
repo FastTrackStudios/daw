@@ -154,6 +154,25 @@ enum Command {
         /// Seconds to let REAPER settle before capturing.
         #[arg(long, default_value_t = 14)]
         settle: u64,
+        /// Extension library to install before launch (repeatable).
+        ///
+        /// Photographing a *panel* rather than the theme's own chrome means
+        /// the extension that owns the panel has to be loaded.
+        #[arg(long = "plugin")]
+        plugins: Vec<PathBuf>,
+        /// Action to run at startup, by named-command id (repeatable).
+        ///
+        /// e.g. `--action fts-mixer` to open the mixer panel. Written as a
+        /// `__startup.lua` REAPER runs itself.
+        #[arg(long = "action")]
+        actions: Vec<String>,
+        /// Window title to capture. Defaults to REAPER's own window; pass a
+        /// panel's title to photograph a floating panel instead.
+        #[arg(long)]
+        window: Option<String>,
+        /// Capture the whole screen rather than one window.
+        #[arg(long)]
+        full: bool,
     },
 }
 
@@ -369,6 +388,10 @@ fn main() -> Result<()> {
             geometry,
             display,
             settle,
+            plugins,
+            actions,
+            window,
+            full,
         } => {
             use fts_themer::shot::{self, Profile, ShotOptions};
 
@@ -376,6 +399,15 @@ fn main() -> Result<()> {
             opts.geometry = geometry;
             opts.display = display;
             opts.settle = std::time::Duration::from_secs(settle);
+            opts.plugins = plugins;
+            opts.startup_actions = actions;
+            opts.window = if full {
+                fts_themer::shot::Capture::Screen
+            } else if let Some(title) = window {
+                fts_themer::shot::Capture::Window(title)
+            } else {
+                opts.window
+            };
             if let Some(dir) = profile {
                 opts.profile = Profile::Existing(dir);
             }
