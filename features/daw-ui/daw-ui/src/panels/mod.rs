@@ -1,3 +1,31 @@
+//! # These panels are not the app's mixer, and must not be deleted
+//!
+//! [`McpStrip`][mcp_strip::McpStrip] executes a **WALTER program**: the
+//! theme's own layout, evaluated per frame at the strip's real pixel box by
+//! a 938-line interpreter with preprocessor, macro expansion, prefix
+//! arithmetic and layout scoping, corpus-tested against four third-party
+//! themes. It does not imitate a REAPER layout — it runs one, and it blits
+//! that theme's art because rendering somebody else's theme is precisely
+//! what it is for.
+//!
+//! The app's own mixer is [`crate::components::mixer::MixerPanel`], which
+//! draws the vector controls and blits nothing. #147 replaced the bitmap
+//! art path *there*, behind that seam, and deliberately left this one
+//! standing, because:
+//!
+//! - the theme editor's live preview depends on it, rebuilding a theme from
+//!   palette and layout **text** with no filesystem, on the same frame as a
+//!   colour edit;
+//! - it is the verifier any future layout generator would need — the only
+//!   way to check emitted output against real rendering;
+//! - it is how this tree reads other people's themes at all, and that
+//!   corpus is the only evidence available about what real WALTER programs
+//!   look like in the wild.
+//!
+//! An earlier version of the wayfinding map said these would be deleted.
+//! #130 corrected it. Building against that note would remove a shipping
+//! feature.
+
 //! Top-level DAW panels — reusable, Reaper-style composition components.
 //!
 //! Built from the crate's widgets and driven by a shared [`TrackView`] model

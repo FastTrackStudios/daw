@@ -247,3 +247,28 @@ fn padding_steps_down_in_three_stages() {
         .collect();
     assert_eq!(stages.len(), 3, "padding does not step through three stages: {stages:?}");
 }
+
+
+/// The app's mixer draws vectors and blits nothing — the guarantee #147
+/// exists to make permanent.
+///
+/// Deliberately a whole-strip sweep rather than a spot check: the bitmap
+/// path it replaced was per-element, so a single control regressing to a
+/// blit is exactly the failure mode, and it would be invisible at any one
+/// height.
+#[test]
+fn the_apps_mixer_never_blits_at_any_height() {
+    for height in (120..=760).step_by(20) {
+        let html = strip_at(height as f32);
+        assert!(!html.contains("<img"), "an <img> appeared at height {height}");
+        assert!(
+            !html.contains("url(data:"),
+            "a data-URI background appeared at height {height}"
+        );
+        assert!(
+            !html.contains("background-image"),
+            "a background image appeared at height {height}"
+        );
+        assert!(html.contains("<svg"), "nothing drawn at height {height}");
+    }
+}
