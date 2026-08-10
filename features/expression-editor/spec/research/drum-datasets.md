@@ -80,8 +80,26 @@ bleed into the hi-hat channel is measured, not modelled.
 
 Attribution is required: "Drum samples provided by DrumGizmo.org".
 
-**Unconfirmed**: none of the three wiki pages state sample rate or bit
-depth. Read the WAV headers on first fetch.
+**~~Unconfirmed~~ — answered by [#176](https://github.com/FastTrackStudios/FastTrackStudio/issues/176).**
+No wiki page states a sample rate or a bit depth, so the headers were
+read directly out of the zips, by range-requesting each one's central
+directory and inflating the front of one small entry — no download:
+
+| Kit | Rate | Format | Channels per file |
+|---|---|---|---|
+| CrocellKit 1.1 | 48 000 Hz | 32-bit IEEE float (`fmt ` tag 3) | 15 |
+| DRSKit 2.1 | 44 100 Hz | 32-bit IEEE float | 13 |
+
+The two recommended kits are at **different sample rates** — the same
+trap #159 found in the demo material, and one a harness assuming one
+rate per corpus walks into on its second kit. The samples are float, not
+integer PCM. And one file per hit carries the whole array interleaved,
+so a mic is a channel to deinterleave rather than a file to open.
+
+Published MD5s, for the fetch: CrocellKit 1.1
+`fa2be0f847bcd8ddef3830c1523690d3`, DRSKit 2.1
+`8c4d4b61ad9d354b3b845edd5da9c133`. There are no `.md5` sibling URLs;
+both come off the wiki pages.
 
 ### Why the ground truth is the real argument
 
@@ -252,10 +270,39 @@ human annotators meant. CC BY-NC-SA.
    against — we own that licence outright, and a deliberate flam-spacing
    ladder against a click is something no public corpus offers.
 
+## What was built on this, and what it measured
+
+[#176](https://github.com/FastTrackStudios/FastTrackStudio/issues/176)
+turned the recommendation into `features/expression-editor/expression-editor-corpus`
+— `fetch-corpus.sh` plus a `drum-corpus` tool. Its README carries the
+detail; the findings that change how the engines should be approached:
+
+1. **The flam curve exists now.** On the synthetic sweep, a flam played
+   the ordinary way (grace, then accent) is resolved into two hits from
+   about **40 ms** apart, graded down through 75% at 25–35 ms to nothing
+   below 15 ms. A ghost landing *inside* the previous strike's decay is
+   **never** resolved anywhere in 5–60 ms; widening the axis puts that
+   knee near **200 ms**. Point 2 below is therefore settled: the knee is
+   recorded, not moved.
+2. **The missing strike in a normal flam is the accent, not the grace.**
+   Log compression values a rise out of silence far above a louder rise
+   out of a decay, so the detector collapses the flam onto the *grace's*
+   position — earlier than where the note is. A quantize error, not a
+   detection one, and invisible if you only count onsets.
+3. **Onsets lag by a median 5.7 ms**, worst 11 ms, which is the hop plus
+   flux build-up. That is the concrete size of the gap `gate.rs` exists
+   to close.
+4. **`OnsetConfig::default()`'s 50 ms `min_spacing_secs` decides every
+   flam before the audio is examined.** Correct for segmenting, fatal
+   for measuring; any future flam work that leaves it alone measures
+   nothing.
+
 ## Not asserted
 
 The ENST licence PDF itself was not opened (terms come from the site text
-and the Zenodo record); no DrumGizmo file header was read, so sample rate
-and bit depth are unconfirmed; no archive interior was inspected, because
-nothing was downloaded; and the Cambridge-MT terms page returned 403 to a
-direct request, so its terms come from its indexed library and FAQ text.
+and the Zenodo record); no archive interior was inspected beyond the
+DrumGizmo `fmt ` chunks read over HTTP range requests, because nothing
+else was downloaded; the flam numbers above are measured on synthetic
+snares with no bleed, so they are an optimistic bound on what a real kit
+will show; and the Cambridge-MT terms page returned 403 to a direct
+request, so its terms come from its indexed library and FAQ text.
