@@ -16,6 +16,7 @@ facet.workspace = true
 facet-styx.workspace = true
 
 [dev-dependencies]
+facet-styx.workspace = true
 # The standalone backend, so the whole load → edit → write-back loop is
 # exercised through the real `Midi` trait with no DAW running.
 daw = { workspace = true, features = ["standalone"] }
