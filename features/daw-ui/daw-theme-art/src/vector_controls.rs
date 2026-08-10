@@ -22,6 +22,7 @@ use daw_theme::{Color, Theme};
 use dioxus::prelude::*;
 
 pub use crate::mixer_controls::{FxChain, Interaction, Monitoring, RecordArm, Solo};
+pub use crate::slice::NamedArt;
 
 /// Which way a control is laid out.
 ///
@@ -205,13 +206,11 @@ pub struct LabelButtonProps {
     /// Face colour when engaged. `None` draws the resting state.
     #[props(default)]
     pub lit: Option<Color>,
-    /// The cell this button replaces, in REAPER's pixels.
-    ///
-    /// Not cosmetic: mute and solo are 21x20 but FX is 28x22, and drawing
-    /// both at 21x20 left the FX button to be stretched into its cell by
-    /// whatever rendered it — visibly wide, with an oval `FX` on it.
-    #[props(default = (21.0, 20.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -234,7 +233,7 @@ pub struct LabelButtonProps {
 #[component]
 pub fn LabelButton(props: LabelButtonProps) -> Element {
     let k = ink(props.lit, props.at, props.sinks, props.hover);
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
     let (body_y, body_h) = (vh * props.body.0, vh * props.body.1);
     let id = format!("lb{}", props.label.replace(' ', ""));
     // The radius was never the problem — the stroke was.
@@ -385,9 +384,11 @@ pub struct ToggleProps {
     pub body: (f32, f32),
     #[props(default)]
     pub on: bool,
-    /// The cell this replaces: `mcp_mute_*` is 21x20, `track_mute_*` 22x24.
-    #[props(default = (21.0, 20.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -404,7 +405,7 @@ pub fn MuteButton(props: ToggleProps) -> Element {
         LabelButton {
             label: "M",
             lit: props.on.then_some(t.signal.mute).or(props.unlit),
-            cell: props.cell, body: props.body, legend: props.legend,
+            art: props.art, body: props.body, legend: props.legend,
             depth: props.depth, sinks: props.sinks, hover: props.hover,
             shadow: !props.on, scales: true,
             width: props.width, height: props.height, at: props.at,
@@ -444,9 +445,11 @@ pub struct SoloProps {
     pub body: (f32, f32),
     #[props(default)]
     pub state: Solo,
-    /// The cell this replaces: `mcp_mute_*` is 21x20, `track_mute_*` 22x24.
-    #[props(default = (21.0, 20.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -476,7 +479,7 @@ pub fn SoloButton(props: SoloProps) -> Element {
     };
     rsx! {
         LabelButton {
-            label: "S", lit, cell: props.cell, body: props.body,
+            label: "S", lit, art: props.art, body: props.body,
             legend: props.legend, depth: props.depth, sinks: props.sinks,
             hover: props.hover,
             width: props.width, height: props.height, at: props.at,
@@ -995,9 +998,11 @@ pub fn FxControl(props: FxControlProps) -> Element {
 pub struct RecordArmProps {
     #[props(default)]
     pub state: RecordArm,
-    /// The cell this replaces: `mcp_recarm_*` is 36x24, `track_*` 20x20.
-    #[props(default = (36.0, 24.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     /// Draw the moulded housing the ring is seated in.
     ///
     /// The mixer has one; the track panel draws a bare ring on the strip.
@@ -1027,7 +1032,7 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     );
     let barred = matches!(props.state, RecordArm::NoRecord | RecordArm::AutoNoRecord);
 
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
     let unit = vw.min(vh);
 
     // Traced, in *edge* coordinates rather than pixel indices. In the
@@ -1348,9 +1353,11 @@ pub struct RoutingProps {
     pub has_receives: bool,
     #[props(default)]
     pub disabled: bool,
-    /// The cell this replaces: `mcp_io*` is 23x32, `track_io*` 29x22.
-    #[props(default = (23.0, 32.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     /// Mixer stacks the lanes; the track panel sets them in a row.
     #[props(default)]
     pub axis: Axis,
@@ -1367,7 +1374,7 @@ pub struct RoutingProps {
 pub fn RoutingButton(props: RoutingProps) -> Element {
     let t = Theme::default();
     let k = ink(None, props.at, true, 0.35);
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
 
     // Three lanes, not two: the original stacks the track's own output,
     // its sends and its receives. Two bars cannot express what the
@@ -1512,9 +1519,11 @@ pub fn RoutingButton(props: RoutingProps) -> Element {
 pub struct MonitoringProps {
     #[props(default)]
     pub state: Monitoring,
-    /// The cell this replaces: `mcp_monitor_*` is 21x20, `track_*` 16x24.
-    #[props(default = (21.0, 20.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     /// Mixer radiates downward; the track panel radiates right.
     #[props(default)]
     pub axis: Axis,
@@ -1554,7 +1563,7 @@ pub struct MonitoringProps {
 #[component]
 pub fn InputMonitorIndicator(props: MonitoringProps) -> Element {
     let t = Theme::default();
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
     let mark = t.chrome.hardware_mark;
 
     // Mixer radiates downward from a dot near the top; the track panel
@@ -2179,8 +2188,11 @@ pub struct PhaseProps {
     /// Inverted — the lit blue state.
     #[props(default)]
     pub inverted: bool,
-    #[props(default = (16.0, 20.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -2199,7 +2211,7 @@ pub struct PhaseProps {
 #[component]
 pub fn PhaseButton(props: PhaseProps) -> Element {
     let t = Theme::default();
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
 
     let plate = if props.inverted {
         Color::rgb(0x16, 0xa9, 0xfe)
@@ -3431,8 +3443,11 @@ pub enum SliderPart {
 pub struct SliderProps {
     #[props(default)]
     pub part: SliderPart,
-    #[props(default = (19.0, 24.0))]
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     /// Rows to shift the pan cap down. `tcp_widththumb` is the same
     /// drawing as the other three thumbs one row lower — 164 pixels
     /// different and every one of them that offset.
@@ -3455,7 +3470,7 @@ pub struct SliderProps {
 #[component]
 pub fn PanelSlider(props: SliderProps) -> Element {
     let t = Theme::default();
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
     let h = t.chrome.hardware;
 
     rsx! {
@@ -3616,8 +3631,11 @@ pub struct PlateProps {
     /// Vertical marks drawn over the bands. Empty for all but one plate.
     #[props(default)]
     pub stripes: Vec<Stripe>,
-    /// Cell size.
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     /// Columns of margin, left and right. Asymmetric because some of
     /// these plates are: the mixer's selected icon background leaves one
     /// column for a rule on the left and one bare column on the right.
@@ -3639,7 +3657,7 @@ pub struct PlateProps {
 /// beside it in the table that feeds this.
 #[component]
 pub fn PanelPlate(props: PlateProps) -> Element {
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
     rsx! {
         svg {
             width: "{props.width.unwrap_or(vw as u32)}",
@@ -3678,8 +3696,11 @@ pub type ListPill = (Color, Color, f32);
 pub struct ListStripProps {
     /// The three pills, top to bottom: normal, hover, pressed.
     pub pills: Vec<ListPill>,
-    /// Cell size.
-    pub cell: (f32, f32),
+    /// The REAPER image this draws: the box its art is drawn at, and which
+    /// band of that box takes up slack when it is drawn bigger — see
+    /// [`NamedArt`]. Deliberately without a default, because one component
+    /// serves several images at several sizes.
+    pub art: NamedArt,
     /// First pill's top row, and the pitch between them.
     #[props(default = (2.0, 17.0))]
     pub rows: (f32, f32),
@@ -3710,7 +3731,7 @@ pub struct ListStripProps {
 /// and is right to. The three pills are one drawing.
 #[component]
 pub fn ListStrip(props: ListStripProps) -> Element {
-    let (vw, vh) = props.cell;
+    let (vw, vh) = props.art.source;
     let (top, pitch) = props.rows;
     rsx! {
         svg {
@@ -4448,12 +4469,12 @@ mod tests {
     fn every_control_is_shaped_like_the_cell_it_replaces() {
         let n = (None, None);
         let cases: [(&str, String); 7] = [
-            ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { cell: (36.0, 24.0), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_solo_on", render_svg(SoloButton, SoloProps { unlit: None, hover: 0.35, sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_recarm_on", render_svg(RecordArmButton, RecordArmProps { art: crate::slice::expect_art("mcp_recarm_on"), housing: true, state: RecordArm::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_mute_on", render_svg(MuteButton, ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, art: crate::slice::expect_art("mcp_mute_on"), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_solo_on", render_svg(SoloButton, SoloProps { unlit: None, hover: 0.35, sinks: true, depth: 0.11, legend: None, art: crate::slice::expect_art("mcp_solo_on"), body: (0.0, 1.0), state: Solo::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_fx_norm", render_svg(FxButton, FxProps { family: Default::default(), state: FxChain::Active, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
-            ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_io_s_r", render_svg(RoutingButton, RoutingProps { art: crate::slice::expect_art("mcp_io_s_r"), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: Interaction::Normal })),
+            ("mcp_monitor_on", render_svg(InputMonitorIndicator, MonitoringProps { art: crate::slice::expect_art("mcp_monitor_on"), axis: Default::default(), state: Monitoring::On, width: n.0, height: n.1, at: Interaction::Normal })),
             ("mcp_volthumb", render_svg(VolumeFaderCap, FaderCapProps { accent: None, full: false, width: n.0, height: n.1 })),
         ];
 
@@ -4491,7 +4512,7 @@ mod tests {
                         depth: 0.15,
                         legend: None,
                         body: (0.0, 1.0),
-                        cell: (21.0, 20.0),
+                        art: crate::slice::expect_art("mcp_mute_on"),
                         on: true,
                         width: w,
                         height: h,
@@ -4506,7 +4527,7 @@ mod tests {
                         depth: 0.11,
                         legend: None,
                         body: (0.0, 1.0),
-                        cell: (21.0, 20.0),
+                        art: crate::slice::expect_art("mcp_solo_on"),
                         state: Solo::Defeat,
                         width: w,
                         height: h,
@@ -4526,7 +4547,7 @@ mod tests {
                 render_svg(
                     RecordArmButton,
                     RecordArmProps {
-                        cell: (36.0, 24.0),
+                        art: crate::slice::expect_art("mcp_recarm_on"),
                         housing: true,
                         state: RecordArm::NoRecord,
                         width: w,
@@ -4537,7 +4558,7 @@ mod tests {
                 render_svg(
                     RoutingButton,
                     RoutingProps {
-                        cell: (23.0, 32.0),
+                        art: crate::slice::expect_art("mcp_io_s_r"),
                         axis: Default::default(),
                         has_sends: true,
                         has_receives: true,
@@ -4550,7 +4571,7 @@ mod tests {
                 render_svg(
                     InputMonitorIndicator,
                     MonitoringProps {
-                        cell: (21.0, 20.0),
+                        art: crate::slice::expect_art("mcp_monitor_on"),
                         axis: Default::default(),
                         state: Monitoring::On,
                         width: w,
@@ -4607,7 +4628,7 @@ mod tests {
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_mute_on"),
                 on: false,
                 width: Some(21),
                 height: Some(20),
@@ -4622,7 +4643,7 @@ mod tests {
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_mute_on"),
                 on: false,
                 width: Some(210),
                 height: Some(200),
@@ -4708,7 +4729,7 @@ mod tests {
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_mute_on"),
                 on: false,
                 width: None,
                 height: None,
@@ -4723,7 +4744,7 @@ mod tests {
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_mute_on"),
                 on: false,
                 width: None,
                 height: None,
@@ -4738,7 +4759,7 @@ mod tests {
                 depth: 0.15,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_mute_on"),
                 on: false,
                 width: None,
                 height: None,
@@ -4760,7 +4781,7 @@ mod tests {
                 depth: 0.11,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_solo_on"),
                 state: Solo::Off,
                 width: None,
                 height: None,
@@ -4775,7 +4796,7 @@ mod tests {
                 depth: 0.11,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_solo_on"),
                 state: Solo::On,
                 width: None,
                 height: None,
@@ -4790,7 +4811,7 @@ mod tests {
                 depth: 0.11,
                 legend: None,
                 body: (0.0, 1.0),
-                cell: (21.0, 20.0),
+                art: crate::slice::expect_art("mcp_solo_on"),
                 state: Solo::Defeat,
                 width: None,
                 height: None,

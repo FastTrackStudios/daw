@@ -22,7 +22,24 @@
 
 use daw_theme::Color;
 use daw_theme_art::render::{rasterise, render_svg};
+use daw_theme_art::slice::{Slice, expect_art as art};
 use daw_theme_art::vector_controls as v;
+
+/// The routing button as *this drawing* wants it: two rows short of
+/// `mcp_io`'s 23x32 source, which is what the reference shot measures.
+///
+/// Not a table entry, and not `..art("mcp_io_s_r")` either. `MCP_ART`
+/// records what REAPER ships, measured; a `source` that disagrees with the
+/// art while carrying the art's declared `slice` would be neither, and the
+/// bands are stated in `source`'s units, so the two cannot be mixed. This
+/// says plainly that it is the demo's own box. It goes away with
+/// `FaderCapProps::full` and `FxControlProps::widen`, when the slice
+/// actually drives rendering.
+const IO_DRAWN_SHORT: v::NamedArt = v::NamedArt {
+    name: "mcp_io_s_r, drawn short",
+    source: (23.0, 30.0),
+    slice: Slice::FIXED,
+};
 
 const NONE: (Option<u32>, Option<u32>) = (None, None);
 
@@ -74,13 +91,13 @@ struct Track {
     soloed: bool,
 }
 
-fn mute(cell: (f32, f32), body: (f32, f32), track: bool, on: bool) -> String {
+fn mute(art: v::NamedArt, body: (f32, f32), track: bool, on: bool) -> String {
     let t = daw_theme::Theme::default();
     render_svg(
         v::MuteButton,
         v::ToggleProps {
             on,
-            cell,
+            art,
             body,
             unlit: Some(t.chrome.hardware.shade(if track { 0.078 } else { 0.036 })),
             legend: Some(t.chrome.hardware_mark.shade(match (track, on) {
@@ -98,13 +115,13 @@ fn mute(cell: (f32, f32), body: (f32, f32), track: bool, on: bool) -> String {
     )
 }
 
-fn solo(cell: (f32, f32), body: (f32, f32), track: bool, on: bool) -> String {
+fn solo(art: v::NamedArt, body: (f32, f32), track: bool, on: bool) -> String {
     let t = daw_theme::Theme::default();
     render_svg(
         v::SoloButton,
         v::SoloProps {
             state: if on { v::Solo::On } else { v::Solo::Off },
-            cell,
+            art,
             body,
             unlit: Some(t.chrome.hardware.shade(if track { 0.078 } else { 0.036 })),
             legend: Some(t.chrome.hardware_mark.shade(match (track, on) {
@@ -161,7 +178,7 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
             v::RecordArmButton,
             v::RecordArmProps {
                 state: if tk.armed { v::RecordArm::On } else { v::RecordArm::Off },
-                cell: (20.0, 20.0),
+                art: art("track_recarm_on"),
                 housing: false,
                 width: NONE.0,
                 height: NONE.1,
@@ -204,7 +221,7 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
             v::InputMonitorIndicator,
             v::MonitoringProps {
                 state: if tk.armed { v::Monitoring::On } else { v::Monitoring::Off },
-                cell: (15.0, 24.0),
+                art: art("track_monitor_on"),
                 axis: v::Axis::Horizontal,
                 width: NONE.0,
                 height: NONE.1,
@@ -242,8 +259,8 @@ fn track_row(y: f32, n: u32, tk: &Track) -> String {
 
     // Mute and solo live outside the tint, stacked.
     s.push_str(&rect(296.0, y, 44.0, 71.0, &t.chrome.hardware.shade(-0.40).css()));
-    s.push_str(&at(306.0, y + 4.0, &mute((21.0, 24.0), (1.0 / 24.0, 20.0 / 24.0), true, tk.muted)));
-    s.push_str(&at(306.0, y + 36.0, &solo((21.0, 24.0), (1.0 / 24.0, 20.0 / 24.0), true, tk.soloed)));
+    s.push_str(&at(306.0, y + 4.0, &mute(art("track_mute_on"), (1.0 / 24.0, 20.0 / 24.0), true, tk.muted)));
+    s.push_str(&at(306.0, y + 36.0, &solo(art("track_solo_on"), (1.0 / 24.0, 20.0 / 24.0), true, tk.soloed)));
     s
 }
 
@@ -414,7 +431,7 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
             v::RecordArmButton,
             v::RecordArmProps {
                 state: if tk.armed { v::RecordArm::On } else { v::RecordArm::Off },
-                cell: (36.0, 24.0),
+                art: art("mcp_recarm_on"),
                 housing: true,
                 width: NONE.0,
                 height: NONE.1,
@@ -440,7 +457,7 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
             v::InputMonitorIndicator,
             v::MonitoringProps {
                 state: if tk.armed { v::Monitoring::On } else { v::Monitoring::Off },
-                cell: (21.0, 20.0),
+                art: art("mcp_monitor_on"),
                 axis: v::Axis::Vertical,
                 width: NONE.0,
                 height: NONE.1,
@@ -448,8 +465,8 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
             },
         ),
     ));
-    s.push_str(&at(x + COL - 10.5, mute_y, &mute((21.0, 20.0), (0.0, 1.0), false, tk.muted)));
-    s.push_str(&at(x + COL - 10.5, solo_y, &solo((21.0, 20.0), (0.0, 1.0), false, tk.soloed)));
+    s.push_str(&at(x + COL - 10.5, mute_y, &mute(art("mcp_mute_on"), (0.0, 1.0), false, tk.muted)));
+    s.push_str(&at(x + COL - 10.5, solo_y, &solo(art("mcp_solo_on"), (0.0, 1.0), false, tk.soloed)));
     s.push_str(&at(
         x + COL - 11.5,
         io_y,
@@ -463,7 +480,7 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
                 has_receives: false,
                 disabled: false,
                 axis: v::Axis::Vertical,
-                cell: (23.0, 30.0),
+                art: IO_DRAWN_SHORT,
                 width: NONE.0,
                 height: NONE.1,
                 at: v::Interaction::Normal,

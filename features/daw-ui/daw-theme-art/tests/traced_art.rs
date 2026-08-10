@@ -253,7 +253,7 @@ fn button_labels_sit_where_the_source_puts_them() {
                     depth: 0.15,
                     legend: None,
                     body: (0.0, 1.0),
-                    cell: (21.0, 20.0),
+                    art: daw_theme_art::slice::expect_art("mcp_mute_on"),
                     on: true,
                     width: n.0,
                     height: n.1,
@@ -272,7 +272,7 @@ fn button_labels_sit_where_the_source_puts_them() {
                     depth: 0.11,
                     legend: None,
                     body: (0.0, 1.0),
-                    cell: (21.0, 20.0),
+                    art: daw_theme_art::slice::expect_art("mcp_solo_on"),
                     state: vector::Solo::On,
                     width: n.0,
                     height: n.1,
@@ -436,4 +436,56 @@ fn strips_are_split_where_the_art_says() {
             );
         }
     }
+}
+
+
+/// Every declared slice still equals the guides in the art it replaces.
+///
+/// The highest-value assertion in the set, and the reason the slice table
+/// exists before anything renders from it. A `NamedArt` states a source box
+/// and which band of it stretches; the source PNG states the same thing in
+/// magenta, in REAPER's own notation. When they disagree, one of them is a
+/// lie — either the table has gone stale, or a control has been redrawn
+/// into a band it does not belong in.
+///
+/// The second failure is the one worth catching. It is invisible at the
+/// source size, where every slice is the identity, and shows up only when a
+/// mixer is resized on a machine that is not this one.
+#[test]
+fn declared_slices_match_the_source_art() {
+    let Some(dir) = source_dir() else { return };
+    let bad = daw_theme_art::export::slice_mismatches(&dir);
+    assert!(bad.is_empty(), "the slice table disagrees with the art:\n  {}", bad.join("\n  "));
+}
+
+/// The table covers every MCP image the exporter can draw.
+///
+/// A control wired into `cell_markup` but left out of the table is a gap
+/// the audit above cannot see: it only checks what is declared. The list of
+/// exclusions is the ticket's scope, written down where it can be argued
+/// with rather than inferred from what happens to be present.
+#[test]
+fn every_mcp_image_the_exporter_draws_is_declared() {
+    let out_of_scope = |name: &str| {
+        name.starts_with("transport_")
+            // The envelope panel's own controls and furniture. Its three
+            // *plates* are in the table, because `PanelPlate` draws those
+            // and the prop carrying a source box has to be one thing per
+            // component; its fader, knob and buttons are drawn by `Envcp*`
+            // components that keep their `cell`.
+            || (name.starts_with("envcp_")
+                && !matches!(name, "envcp_bg" | "envcp_bgsel" | "envcp_namebg"))
+            || name == "custom_envcp_arm_bg"
+            // Track-panel-only controls, which no mixer strip has room for.
+            || name.starts_with("track_env")
+            || name.starts_with("track_recmode_")
+            || name.starts_with("track_fcomp_")
+            || name.starts_with("track_folder_")
+            || name.starts_with("track_fx_in_")
+    };
+    let missing: Vec<&str> = daw_theme_art::export::generatable()
+        .into_iter()
+        .filter(|n| !out_of_scope(n) && daw_theme_art::slice::art(n).is_none())
+        .collect();
+    assert!(missing.is_empty(), "MCP art with no NamedArt: {missing:?}");
 }

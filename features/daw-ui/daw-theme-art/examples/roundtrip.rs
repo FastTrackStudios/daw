@@ -16,7 +16,7 @@
 //! a 9px glyph have nowhere to go.
 
 use daw_theme_art::render::render_svg;
-use daw_theme_art::{generated, vector_controls as vector};
+use daw_theme_art::{generated, slice, vector_controls as vector};
 
 const DISPLAY: u32 = 84;
 const PAD: u32 = 8;
@@ -80,29 +80,29 @@ fn main() {
     groups.push((
         "record arm",
         vec![
-            Entry { source: ("mcp_recarm_off", 0), svg: render_svg(vector::RecordArmButton, vector::RecordArmProps { cell: (36.0, 24.0), housing: true, state: vector::RecordArm::Off, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_recarm_on", 0), svg: render_svg(vector::RecordArmButton, vector::RecordArmProps { cell: (36.0, 24.0), housing: true, state: vector::RecordArm::On, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_recarm_norec", 0), svg: render_svg(vector::RecordArmButton, vector::RecordArmProps { cell: (36.0, 24.0), housing: true, state: vector::RecordArm::NoRecord, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_recarm_auto", 0), svg: render_svg(vector::RecordArmButton, vector::RecordArmProps { cell: (36.0, 24.0), housing: true, state: vector::RecordArm::Auto, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_recarm_off", 0), svg: render_svg(vector::RecordArmButton, vector::RecordArmProps { art: slice::expect_art("mcp_recarm_off"), housing: true, state: vector::RecordArm::Off, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_recarm_on", 0), svg: render_svg(vector::RecordArmButton, vector::RecordArmProps { art: slice::expect_art("mcp_recarm_on"), housing: true, state: vector::RecordArm::On, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_recarm_norec", 0), svg: render_svg(vector::RecordArmButton, vector::RecordArmProps { art: slice::expect_art("mcp_recarm_norec"), housing: true, state: vector::RecordArm::NoRecord, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_recarm_auto", 0), svg: render_svg(vector::RecordArmButton, vector::RecordArmProps { art: slice::expect_art("mcp_recarm_auto"), housing: true, state: vector::RecordArm::Auto, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
         ],
     ));
 
     groups.push((
         "mute",
         vec![
-            Entry { source: ("mcp_mute_off", 0), svg: render_svg(vector::MuteButton, vector::ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: false, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_mute_on", 0), svg: render_svg(vector::MuteButton, vector::ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_mute_on", 1), svg: render_svg(vector::MuteButton, vector::ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: vector::Interaction::Hover }) },
-            Entry { source: ("mcp_mute_on", 2), svg: render_svg(vector::MuteButton, vector::ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: vector::Interaction::Pressed }) },
+            Entry { source: ("mcp_mute_off", 0), svg: render_svg(vector::MuteButton, vector::ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, art: slice::expect_art("mcp_mute_off"), body: (0.0, 1.0), on: false, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_mute_on", 0), svg: render_svg(vector::MuteButton, vector::ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, art: slice::expect_art("mcp_mute_on"), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_mute_on", 1), svg: render_svg(vector::MuteButton, vector::ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, art: slice::expect_art("mcp_mute_on"), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: vector::Interaction::Hover }) },
+            Entry { source: ("mcp_mute_on", 2), svg: render_svg(vector::MuteButton, vector::ToggleProps { unlit: None, hover: 0.35, sinks: true, depth: 0.15, legend: None, art: slice::expect_art("mcp_mute_on"), body: (0.0, 1.0), on: true, width: n.0, height: n.1, at: vector::Interaction::Pressed }) },
         ],
     ));
 
     groups.push((
         "solo",
         vec![
-            Entry { source: ("mcp_solo_off", 0), svg: render_svg(vector::SoloButton, vector::SoloProps { unlit: None, hover: 0.35, sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: vector::Solo::Off, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_solo_on", 0), svg: render_svg(vector::SoloButton, vector::SoloProps { unlit: None, hover: 0.35, sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: vector::Solo::On, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_solodefeat_on", 0), svg: render_svg(vector::SoloButton, vector::SoloProps { unlit: None, hover: 0.35, sinks: true, depth: 0.11, legend: None, cell: (21.0, 20.0), body: (0.0, 1.0), state: vector::Solo::Defeat, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_solo_off", 0), svg: render_svg(vector::SoloButton, vector::SoloProps { unlit: None, hover: 0.35, sinks: true, depth: 0.11, legend: None, art: slice::expect_art("mcp_solo_off"), body: (0.0, 1.0), state: vector::Solo::Off, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_solo_on", 0), svg: render_svg(vector::SoloButton, vector::SoloProps { unlit: None, hover: 0.35, sinks: true, depth: 0.11, legend: None, art: slice::expect_art("mcp_solo_on"), body: (0.0, 1.0), state: vector::Solo::On, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_solodefeat_on", 0), svg: render_svg(vector::SoloButton, vector::SoloProps { unlit: None, hover: 0.35, sinks: true, depth: 0.11, legend: None, art: slice::expect_art("mcp_solodefeat_on"), body: (0.0, 1.0), state: vector::Solo::Defeat, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
         ],
     ));
 
@@ -118,18 +118,18 @@ fn main() {
     groups.push((
         "routing",
         vec![
-            Entry { source: ("mcp_io", 0), svg: render_svg(vector::RoutingButton, vector::RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: false, has_receives: false, disabled: false, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_io_s", 0), svg: render_svg(vector::RoutingButton, vector::RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: false, disabled: false, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_io_s_r", 0), svg: render_svg(vector::RoutingButton, vector::RoutingProps { cell: (23.0, 32.0), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_io", 0), svg: render_svg(vector::RoutingButton, vector::RoutingProps { art: slice::expect_art("mcp_io"), axis: Default::default(), has_sends: false, has_receives: false, disabled: false, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_io_s", 0), svg: render_svg(vector::RoutingButton, vector::RoutingProps { art: slice::expect_art("mcp_io_s"), axis: Default::default(), has_sends: true, has_receives: false, disabled: false, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_io_s_r", 0), svg: render_svg(vector::RoutingButton, vector::RoutingProps { art: slice::expect_art("mcp_io_s_r"), axis: Default::default(), has_sends: true, has_receives: true, disabled: false, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
         ],
     ));
 
     groups.push((
         "input monitor",
         vec![
-            Entry { source: ("mcp_monitor_off", 0), svg: render_svg(vector::InputMonitorIndicator, vector::MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: vector::Monitoring::Off, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_monitor_on", 0), svg: render_svg(vector::InputMonitorIndicator, vector::MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: vector::Monitoring::On, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
-            Entry { source: ("mcp_monitor_auto", 0), svg: render_svg(vector::InputMonitorIndicator, vector::MonitoringProps { cell: (21.0, 20.0), axis: Default::default(), state: vector::Monitoring::Auto, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_monitor_off", 0), svg: render_svg(vector::InputMonitorIndicator, vector::MonitoringProps { art: slice::expect_art("mcp_monitor_off"), axis: Default::default(), state: vector::Monitoring::Off, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_monitor_on", 0), svg: render_svg(vector::InputMonitorIndicator, vector::MonitoringProps { art: slice::expect_art("mcp_monitor_on"), axis: Default::default(), state: vector::Monitoring::On, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
+            Entry { source: ("mcp_monitor_auto", 0), svg: render_svg(vector::InputMonitorIndicator, vector::MonitoringProps { art: slice::expect_art("mcp_monitor_auto"), axis: Default::default(), state: vector::Monitoring::Auto, width: n.0, height: n.1, at: vector::Interaction::Normal }) },
         ],
     ));
 

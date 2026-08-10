@@ -38,6 +38,7 @@ pub mod components;
 pub mod generated;
 pub mod mixer_controls;
 pub mod primitives;
+pub mod slice;
 pub mod strip;
 pub mod vector_controls;
 
@@ -59,6 +60,10 @@ pub mod render;
 pub mod trace;
 
 pub use art_data::{ArtData, ArtImage, ColorMode, Rect};
+// `Band` is deliberately *not* re-exported: `vector_controls::Band` is a
+// plate's colour band and already lives at that name. The stretch band stays
+// spelled `slice::Band`, which is where its meaning is legible.
+pub use slice::{NamedArt, Slice};
 #[cfg(feature = "render")]
 pub use compare::{Fidelity, compare};
 #[cfg(feature = "render")]

@@ -49,11 +49,18 @@ fn interaction(cell: usize) -> v::Interaction {
 pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
     let n = (None, None);
 
-    // Cell sizes, measured from the art. The two families are *not* the
-    // same drawings at two sizes: the track panel's ring has no housing
-    // and is proportionally larger for it, its routing lanes sit in a row
-    // rather than stacked, and its monitor icon radiates right rather
-    // than down. Same components, turned and resized.
+    // The source box no longer lives here. Every MCP-relevant image's is a
+    // `NamedArt` in [`crate::slice`], declared once beside the stretch band
+    // it belongs with, and looked up by name — which is what lets the two
+    // families stop being an `if track` at each call site. `expect_art`
+    // panics rather than returning: it is only ever reached from an arm
+    // that has already matched a name, so a miss is a table that has fallen
+    // behind the components.
+    //
+    // The two families are *not* the same drawings at two sizes: the track
+    // panel's ring has no housing and is proportionally larger for it, its
+    // routing lanes sit in a row rather than stacked, and its monitor icon
+    // radiates right rather than down. Same components, turned and resized.
     // `tcp_` is the track control panel too — REAPER names most of its
     // controls `track_*` and a handful `tcp_*`, and where both exist for
     // the same control they are the same drawing: `tcp_solodefeat_on` and
@@ -69,12 +76,17 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
         v::FxFamily::TrackPanel
     };
 
+    // Looked up lazily: `cell_markup` is also called for the transport and
+    // the envelope panel's own buttons, which are outside the table's scope
+    // and never reach a closure that wants one.
+    let art = || crate::slice::expect_art(name);
+
     let rec = |state| {
         render_svg(
             v::RecordArmButton,
             v::RecordArmProps {
                 state,
-                cell: if track { (20.0, 20.0) } else { (36.0, 24.0) },
+                art: art(),
                 housing: !track,
                 width: n.0,
                 height: n.1,
@@ -82,12 +94,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             },
         )
     };
-    // Measured, not assumed: the track panel's label cells are 21 wide
-    // starting at x1, not 22 starting at x0. A viewBox one unit wider
-    // than the cell it lands in squeezes every coordinate inward, which
-    // is a fraction of a pixel at the edges and a whole one at the far
-    // side — the source of the last stubborn `bottom -1`.
-    let label_cell = if track { (21.0, 24.0) } else { (21.0, 20.0) };
     // Traced: the track panel's buttons occupy rows 1..20 of a 24-row
     // cell; the mixer's fill theirs.
     // The legend is not one grey. It brightens when the button lights,
@@ -130,7 +136,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 // channel from the top of the face to the bottom.
                 depth: 0.11,
                 on,
-                cell: label_cell,
+                art: art(),
                 body: label_body,
                 legend: legend(on, false),
                 unlit,
@@ -149,7 +155,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::SoloProps {
                 hover: 0.35,
                 state,
-                cell: label_cell,
+                art: art(),
                 body: label_body,
                 legend: legend(state != v::Solo::Off, true),
                 unlit,
@@ -181,10 +187,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::InputMonitorIndicator,
             v::MonitoringProps {
                 state,
-                // 15, not 16: the measured cell is (origin 1, width 15),
-                // and a 16-wide viewBox squeezed into it puts every
-                // coordinate half a pixel right of where it was measured.
-                cell: if track { (15.0, 24.0) } else { (21.0, 20.0) },
+                art: art(),
                 axis,
                 width: n.0,
                 height: n.1,
@@ -199,7 +202,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 has_sends,
                 has_receives,
                 disabled,
-                cell: if track { (28.0, 22.0) } else { (23.0, 32.0) },
+                art: art(),
                 axis,
                 width: n.0,
                 height: n.1,
@@ -242,7 +245,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::PhaseButton,
             v::PhaseProps {
                 inverted,
-                cell: if track { (16.0, 20.0) } else { (16.0, 18.0) },
+                art: art(),
                 width: n.0,
                 height: n.1,
                 at,
@@ -352,12 +355,12 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
     {
         let g = |v: f32| theme.chrome.hardware.shade(v);
         let flat = |c: daw_theme::Color, a: f32| (c, c, a);
-        let strip = |pills: Vec<v::ListPill>, cell, rows, pill, edge, inset| {
+        let strip = |pills: Vec<v::ListPill>, rows, pill, edge, inset| {
             render_svg(
                 v::ListStrip,
                 v::ListStripProps {
                     pills,
-                    cell,
+                    art: art(),
                     rows,
                     pill,
                     edge,
@@ -368,8 +371,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 },
             )
         };
-        let fx = (38.0, 53.0);
-        let send = (38.0, 50.0);
         let hit = match name {
             "mcp_fxlist_norm" => Some(strip(
                 // The one gradient in the set: #575757 down to #434343,
@@ -379,7 +380,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     (g(0.20), g(0.13), 1.0),
                     (g(0.55), g(0.37), 1.0),
                 ],
-                fx,
                 (2.0, 17.0),
                 15.0,
                 None,
@@ -392,7 +392,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     flat(g(-0.19), 1.0), // #333333
                     flat(g(-0.40), 1.0),
                 ],
-                fx,
                 (2.0, 17.0),
                 15.0,
                 None,
@@ -404,7 +403,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     flat(g(1.0), 0.137),
                     flat(g(1.0), 0.204),
                 ],
-                fx,
                 (2.0, 17.0),
                 15.0,
                 None,
@@ -416,7 +414,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     flat(g(-0.32), 1.0), // #2b2b2b
                     flat(g(-0.48), 1.0), // #212121
                 ],
-                send,
                 (2.0, 16.0),
                 14.0,
                 None,
@@ -432,7 +429,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     flat(theme.signal.mute.mix(g(-0.40), 0.60), 1.0), // #5f3d44
                     flat(theme.signal.mute.mix(g(-0.40), 0.66), 1.0),
                 ],
-                send,
                 (2.0, 16.0),
                 14.0,
                 None,
@@ -444,7 +440,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     flat(g(1.0), 0.137),
                     flat(g(-1.0), 0.098),
                 ],
-                send,
                 (2.0, 16.0),
                 14.0,
                 None,
@@ -456,7 +451,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     flat(g(-0.22), 1.0), // #313131
                     flat(g(-0.35), 1.0),
                 ],
-                send,
                 (2.0, 16.0),
                 14.0,
                 Some(theme.chrome.accent.shade(-0.42)), // #01659f
@@ -473,44 +467,47 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
     // shade is what retints and the value is what it has to match today.
     {
         let g = |v: f32| theme.chrome.hardware.shade(v);
-        let full = |bands: Vec<v::Band>, stripes: Vec<v::Stripe>, cell, inset| {
+        let full = |bands: Vec<v::Band>, stripes: Vec<v::Stripe>, inset| {
             render_svg(
                 v::PanelPlate,
-                v::PlateProps { bands, stripes, cell, inset, width: n.0, height: n.1, at },
+                v::PlateProps {
+                    bands,
+                    stripes,
+                    art: art(),
+                    inset,
+                    width: n.0,
+                    height: n.1,
+                    at,
+                },
             )
         };
-        let plate = |bands: Vec<v::Band>, cell, inset: f32| {
-            full(bands, vec![], cell, (inset, inset))
-        };
-        let marked = |bands: Vec<v::Band>, stripes: Vec<v::Stripe>, cell| {
-            full(bands, stripes, cell, (0.0, 0.0))
-        };
+        let plate = |bands: Vec<v::Band>, inset: f32| full(bands, vec![], (inset, inset));
+        let marked =
+            |bands: Vec<v::Band>, stripes: Vec<v::Stripe>| full(bands, stripes, (0.0, 0.0));
         let sunk = g(-0.19); // #333333
         // #515151, and it has to round to 81 rather than 80 — at 0.09 the
         // shade landed a level low on every selected background at once.
         let lit = g(0.094);
         let deep = g(-0.40); // #262626
         let hit = match name {
-            "mcp_mainbg" => Some(plate(vec![(0.0, 6.0, sunk, 1.0)], (6.0, 6.0), 0.0)),
+            "mcp_mainbg" => Some(plate(vec![(0.0, 6.0, sunk, 1.0)], 0.0)),
             // A rule down column 1 — the mark that says *selected*, and
             // the only difference from `mcp_mainbg` other than the shade.
             "mcp_mainbgsel" => Some(marked(
                 vec![(0.0, 6.0, lit, 1.0)],
                 vec![(1.0, 1.0, 1.0, 4.0, g(-0.20))], // #323232
-                (6.0, 6.0),
             )),
-            "mcp_bg" => Some(plate(vec![(1.0, 2.0, sunk, 1.0)], (4.0, 4.0), 1.0)),
-            "mcp_bgsel" => Some(plate(vec![(1.0, 1.0, sunk, 1.0)], (4.0, 3.0), 1.0)),
-            "mcp_extmixbg" => Some(plate(vec![(0.0, 3.0, sunk, 1.0)], (3.0, 3.0), 0.0)),
+            "mcp_bg" => Some(plate(vec![(1.0, 2.0, sunk, 1.0)], 1.0)),
+            "mcp_bgsel" => Some(plate(vec![(1.0, 1.0, sunk, 1.0)], 1.0)),
+            "mcp_extmixbg" => Some(plate(vec![(0.0, 3.0, sunk, 1.0)], 0.0)),
             "mcp_extmixbgsel" => {
-                Some(plate(vec![(1.0, 1.0, sunk, 0.88)], (3.0, 3.0), 1.0))
+                Some(plate(vec![(1.0, 1.0, sunk, 0.88)], 1.0))
             }
             "mcp_mainextmixbg" => {
-                Some(plate(vec![(1.0, 6.0, sunk, 1.0)], (9.0, 8.0), 1.0))
+                Some(plate(vec![(1.0, 6.0, sunk, 1.0)], 1.0))
             }
             "mcp_mainextmixbgsel" => Some(plate(
                 vec![(1.0, 1.0, sunk, 1.0), (2.0, 5.0, g(0.005), 1.0)],
-                (9.0, 8.0),
                 1.0,
             )),
             // The name plate's first and last columns stay `#333333`
@@ -526,7 +523,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     (8.0, 1.0, sunk, 1.0),
                 ],
                 vec![(0.0, 1.0, 0.0, 9.0, sunk), (7.0, 1.0, 0.0, 9.0, sunk)],
-                (8.0, 9.0),
                 (0.0, 0.0),
             )),
             "mcp_main_namebg_sel" => Some(full(
@@ -539,7 +535,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     (8.0, 1.0, sunk, 1.0),
                 ],
                 vec![(0.0, 1.0, 0.0, 9.0, sunk), (7.0, 1.0, 0.0, 9.0, sunk)],
-                (8.0, 9.0),
                 (0.0, 0.0),
             )),
             // Both icon backgrounds keep column 1 as a plain `#333333`
@@ -552,7 +547,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     (8.0, 2.0, sunk, 1.0),
                 ],
                 vec![(1.0, 1.0, 1.0, 9.0, sunk)],
-                (6.0, 11.0),
                 (2.0, 1.0),
             )),
             "mcp_iconbgsel" => Some(full(
@@ -563,19 +557,16 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     (8.0, 2.0, sunk, 1.0),
                 ],
                 vec![(1.0, 1.0, 1.0, 9.0, sunk)],
-                (6.0, 11.0),
                 (2.0, 1.0),
             )),
-            "tcp_mainbg" => Some(plate(vec![(0.0, 9.0, sunk, 1.0)], (22.0, 9.0), 0.0)),
-            "tcp_mainbgsel" => Some(plate(vec![(0.0, 9.0, lit, 1.0)], (22.0, 9.0), 0.0)),
+            "tcp_mainbg" => Some(plate(vec![(0.0, 9.0, sunk, 1.0)], 0.0)),
+            "tcp_mainbgsel" => Some(plate(vec![(0.0, 9.0, lit, 1.0)], 0.0)),
             "tcp_iconbg" => Some(plate(
                 vec![(1.0, 10.0, deep, 1.0), (11.0, 1.0, g(-0.52), 1.0)],
-                (11.0, 13.0),
                 1.0,
             )),
             "tcp_iconbgsel" => Some(plate(
                 vec![(1.0, 10.0, g(-0.06), 1.0), (11.0, 1.0, deep, 1.0)],
-                (11.0, 13.0),
                 1.0,
             )),
             // Twelve rows, not eleven: the separator at row 10 has the
@@ -588,7 +579,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     (10.0, 1.0, g(-0.51), 1.0), // #1f1f1f
                     (11.0, 1.0, sunk, 1.0),
                 ],
-                (48.0, 12.0),
                 0.0,
             )),
             // And the selected one carries the accent bar: two columns of
@@ -604,10 +594,9 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     (44.0, 4.0, 0.0, 10.0, g(-0.43)),
                     (45.0, 2.0, 0.0, 10.0, theme.chrome.accent),
                 ],
-                (48.0, 12.0),
             )),
             "envcp_namebg" => {
-                Some(plate(vec![(1.0, 22.0, g(-0.56), 1.0)], (22.0, 24.0), 1.0))
+                Some(plate(vec![(1.0, 22.0, g(-0.56), 1.0)], 1.0))
             }
             // The track panel's index strip: a `#313131` rule down
             // column 1 and a mark on the right that says whether the
@@ -621,7 +610,6 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     (1.0, 1.0, 1.0, 4.0, g(-0.222)), // #313131
                     (19.0, 1.0, 2.0, 2.0, Color::rgba(0, 0, 0, 63)),
                 ],
-                (23.0, 6.0),
             )),
             "tcp_idxbg_sel" => Some(marked(
                 vec![],
@@ -630,12 +618,11 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     (19.0, 5.0, 2.0, 2.0, Color::rgba(0, 0, 0, 63)),
                     (20.0, 3.0, 2.0, 2.0, Color::rgba(255, 255, 255, 217)),
                 ],
-                (25.0, 6.0),
             )),
             // Drawn by REAPER, not by the theme: every pixel is
             // transparent, so an empty band list is the whole truth.
             "mcp_namebg" | "mcp_idxbg" | "mcp_idxbg_sel" | "tcp_namebg"
-            | "tcp_main_namebg_sel" => Some(plate(vec![], (4.0, 4.0), 0.0)),
+            | "tcp_main_namebg_sel" => Some(plate(vec![], 0.0)),
             _ => None,
         };
         if let Some(markup) = hit {
@@ -708,10 +695,10 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
     }
     {
         use v::SliderPart as S;
-        let slider = |part, cell| {
+        let slider = |part| {
             render_svg(
                 v::PanelSlider,
-                v::SliderProps { part, cell, drop: 0.0, width: n.0, height: n.1, at },
+                v::SliderProps { part, art: art(), drop: 0.0, width: n.0, height: n.1, at },
             )
         };
         let thumb = |drop| {
@@ -719,7 +706,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 v::PanelSlider,
                 v::SliderProps {
                     part: v::SliderPart::PanThumb,
-                    cell: (13.0, 23.0),
+                    art: art(),
                     drop,
                     width: n.0,
                     height: n.1,
@@ -728,7 +715,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             )
         };
         let hit = match name {
-            "mcp_folder_on" => Some(slider(S::MixerFolder, (55.0, 15.0))),
+            "mcp_folder_on" => Some(slider(S::MixerFolder)),
             // `mcp_folder_last` and `mcp_fcomp_*` are not wired here on
             // purpose. The strip
             // detector reports three cells of 49, and cell 0 contains two
@@ -738,10 +725,13 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             // dressed as a measurement. `mcp_folder_last` reads the same
             // way: its wedge sits in one cell of three and the other two
             // are not empty, which no single drawing accounts for.
-            "tcp_volbg" => Some(slider(S::VolumeTrough, (19.0, 24.0))),
-            "tcp_volthumb" => Some(slider(S::VolumeThumb, (27.0, 29.0))),
-            "tcp_panbg" | "tcp_widthbg" => Some(slider(S::PanTrough, (43.0, 11.0))),
-            "mcp_panbg" | "mcp_widthbg" => Some(slider(S::PanTrough, (69.0, 11.0))),
+            "tcp_volbg" => Some(slider(S::VolumeTrough)),
+            "tcp_volthumb" => Some(slider(S::VolumeThumb)),
+            // One drawing at two widths — 43 in the track panel, 69 in the
+            // mixer. Two arms until the width came from the table.
+            "tcp_panbg" | "tcp_widthbg" | "mcp_panbg" | "mcp_widthbg" => {
+                Some(slider(S::PanTrough))
+            }
             "tcp_panthumb" | "mcp_panthumb" | "mcp_widththumb" => Some(thumb(0.0)),
             "tcp_widththumb" => Some(thumb(1.0)),
             _ => None,
@@ -964,27 +954,38 @@ pub fn composite_cells(
 /// never authored, because REAPER only reads magenta as geometry when it
 /// lands where the layout expects it.
 pub fn render_control(name: &str, spec: &DerivedSpec) -> Result<RgbaImage, RenderError> {
-    // Trust the measured split only when it agrees with what this control
-    // actually draws. Detection needs a strip's cells to resemble each
-    // other, which fails on the FX bypass toggle — pill, plus, plus — and
-    // reported it as a single drawing, so it was stretched across its own
-    // width and vanished into the strip.
     let mut spec = spec.clone();
-    if spec.cells.len() != states(name) {
-        // `art_x` is the first *drawn* column, which is the cell origin
-        // for every control whose art starts at its own left edge. The
-        // mixer's FX toggle does not: it leaves one empty column as the
-        // seam between the pill's halves, so the first ink is a pixel in
-        // and the fallback put every cell a pixel right.
-        let origin = spec.art_x.saturating_sub(leading_gap(name));
-        spec.cells =
-            crate::derive::even_cells(spec.width, states(name) as u32, origin);
-    }
+    spec.cells = cells_for(name, &spec);
 
     composite_cells(&spec, |i, _w| {
         cell_markup(name, interaction(i))
             .ok_or_else(|| RenderError::Svg(format!("no vector control draws {name}")))
     })
+}
+
+/// Where `name`'s cells actually sit — the measured split, corrected.
+///
+/// Trust the measured split only when it agrees with what this control
+/// actually draws. Detection needs a strip's cells to resemble each other,
+/// which fails on the FX bypass toggle — pill, plus, plus — and reported it
+/// as a single drawing, so it was stretched across its own width and
+/// vanished into the strip.
+///
+/// Shared with the slice audit, which has to read a cell the same way the
+/// exporter draws one: on `envcp_namebg` the detector finds two cells of 9
+/// in a 22px background, and a slice measured against that describes a
+/// drawing nothing renders.
+pub fn cells_for(name: &str, spec: &DerivedSpec) -> Vec<(u32, u32)> {
+    if spec.cells.len() == states(name) {
+        return spec.cells.clone();
+    }
+    // `art_x` is the first *drawn* column, which is the cell origin for
+    // every control whose art starts at its own left edge. The mixer's FX
+    // toggle does not: it leaves one empty column as the seam between the
+    // pill's halves, so the first ink is a pixel in and the fallback put
+    // every cell a pixel right.
+    let origin = spec.art_x.saturating_sub(leading_gap(name));
+    crate::derive::even_cells(spec.width, states(name) as u32, origin)
 }
 
 /// Empty columns before a control's art, which `art_x` cannot see past.
@@ -1055,6 +1056,61 @@ fn states(name: &str) -> usize {
         | "transport_playspeedthumb" | "transport_knob_bg_large" => 1,
         _ => 3,
     }
+}
+
+/// Every [`crate::slice::NamedArt`] that disagrees with the art it replaces.
+///
+/// The declaration in [`crate::slice::MCP_ART`] and the magenta guides in
+/// the source PNG say the same thing twice, so they can be checked against
+/// each other. Two things are compared:
+///
+/// - **The source box** — the declared one against the cell the exporter
+///   actually draws into, which is what makes a stale box a failure rather
+///   than a viewBox quietly squeezed into the wrong width.
+/// - **The stretch band** — the declared one against
+///   [`crate::derive::Guides::slice`]. Only the guided bounds are compared:
+///   [`crate::slice::Band::Fixed`] and [`crate::slice::Band::All`] are the
+///   same drawing to REAPER and the art cannot tell them apart, so which of
+///   the two an entry chooses is a rendering decision this does not police.
+///
+/// This is the audit the slice model is *for*. Nothing renders from these
+/// declarations yet; what they buy today is that art drawn into a band it
+/// does not belong in fails here, rather than surfacing months later as a
+/// smeared mixer on somebody else's screen.
+///
+/// Returns one line per disagreement, and an empty vector when the table is
+/// an accurate description of the theme.
+pub fn slice_mismatches(source_art: &std::path::Path) -> Vec<String> {
+    let mut out = Vec::new();
+    for a in crate::slice::MCP_ART {
+        let path = source_art.join(format!("{}.png", a.name));
+        let Ok(src) = image::open(&path) else {
+            out.push(format!("{}: declared, but no source art at {}", a.name, path.display()));
+            continue;
+        };
+        let src = src.to_rgba8();
+        let spec = DerivedSpec::from_image(&src);
+        let cells = cells_for(a.name, &spec);
+        let (cw, h) = (cells[0].1 as f32, spec.height as f32);
+        if a.source != (cw, h) {
+            out.push(format!(
+                "{}: declared source box {:?}, but the exporter draws a {cw}x{h} cell",
+                a.name, a.source,
+            ));
+        }
+        let want = crate::derive::guides(&src).slice(&cells, spec.width, spec.height);
+        for (axis, declared, measured) in
+            [("x", a.slice.x, want.x), ("y", a.slice.y, want.y)]
+        {
+            if declared.guided() != measured.guided() {
+                out.push(format!(
+                    "{}: declared {axis} {declared:?}, but the art's guides say {measured:?}",
+                    a.name,
+                ));
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]

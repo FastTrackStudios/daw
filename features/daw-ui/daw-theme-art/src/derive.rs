@@ -17,6 +17,8 @@
 
 use image::RgbaImage;
 
+use crate::slice::{Band, Slice};
+
 /// WALTER's stretch-guide colours: magenta marks non-stretched regions,
 /// yellow the outer extents.
 pub const MARKERS: [[u8; 4]; 2] = [[255, 0, 255, 255], [255, 255, 0, 255]];
@@ -214,6 +216,106 @@ fn marker_columns(img: &RgbaImage) -> Vec<u32> {
                 .count() as u32
         })
         .collect()
+}
+
+/// How far REAPER's magenta guides reach in from each edge, in file pixels.
+///
+/// The convention is REAPER's, not ours: *"define these regions by making
+/// the upper left and lower right corners pink (255,0,255), and having
+/// lines going along the edges of the image to specify the unstretched
+/// portion"* — [the WALTER image
+/// reference](https://www.reaper.fm/sdk/walter/images.php). So a run of
+/// magenta along the top row says how many **columns** at the left do not
+/// stretch, a run down the left column how many **rows** at the top, and
+/// the runs anchored to the far corner say the same about the other end.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub struct Guides {
+    pub left: u32,
+    pub right: u32,
+    pub top: u32,
+    pub bottom: u32,
+}
+
+/// Measure an image's guide runs, exactly as REAPER's wording reads them.
+///
+/// Four runs, two corners. From the **upper-left** corner: along row 0 for
+/// the fixed columns at the left, down column 0 for the fixed rows at the
+/// top. From the **lower-right**: along the last row for the fixed columns
+/// at the right, up the last column for the fixed rows at the bottom.
+///
+/// Deliberately literal. A more forgiving rule — take the longest run
+/// anchored to either end of either border line — was tried first, because
+/// `mcp_volthumb` carries a five-row run down the *top* of its right-hand
+/// column that looks like the fader cap's fixed top end. It reads that one
+/// image more sympathetically and mis-reads several others, because it
+/// lets a strip's trailing guide stand in for a leading one. REAPER reads
+/// two corners; so does this. A guide drawn anywhere else is not geometry
+/// REAPER acts on, and a rule that quietly honoured it would hide exactly
+/// the kind of mistake this measurement exists to find.
+pub fn guides(img: &RgbaImage) -> Guides {
+    let (w, h) = (img.width(), img.height());
+    let magenta = |x: u32, y: u32| img.get_pixel(x, y).0 == MARKERS[0];
+
+    // A run of magenta along `line`, anchored at one end of it.
+    let run = |line: &dyn Fn(u32) -> bool, n: u32, from_start: bool| {
+        (0..n)
+            .take_while(|&i| line(if from_start { i } else { n - 1 - i }))
+            .count() as u32
+    };
+
+    Guides {
+        left: run(&|x| magenta(x, 0), w, true),
+        right: run(&|x| magenta(x, h - 1), w, false),
+        top: run(&|y| magenta(0, y), h, true),
+        bottom: run(&|y| magenta(w - 1, y), h, false),
+    }
+}
+
+impl Guides {
+    /// The [`Slice`] these guides describe for one sprite cell.
+    ///
+    /// A slice is in the **cell's** units, because the cell is what a
+    /// component draws — `mcp_mute_on` is three 21x20 buttons in one 63x20
+    /// file. The guides are in the *file's*, and on a strip they sit at the
+    /// file's outer edges rather than at any cell's: the leading run starts
+    /// where the file does, which is `cells` before the first cell's art,
+    /// and the trailing run ends where the file does, which is `slack`
+    /// after the last cell's. Both are subtracted, so what is left is the
+    /// guide as it falls on one cell. `track_monitor_on` has a single
+    /// magenta column at each end of a 47px file whose cells run 1..46 —
+    /// after the shift those guides land outside every cell, which is the
+    /// truth about them.
+    ///
+    /// Vertical guides need no such shift: a cell is the full height of its
+    /// file.
+    ///
+    /// An axis whose guides survive the shift with nothing left yields
+    /// [`Band::Fixed`]: REAPER scales an unguided image whole, and that is
+    /// what `Fixed` renders. It can never yield [`Band::All`] — the two are
+    /// the same drawing — which is why the exporter's audit compares the
+    /// guide *structure* rather than the band itself.
+    pub fn slice(&self, cells: &[(u32, u32)], width: u32, height: u32) -> Slice {
+        let (x0, cw) = cells.first().copied().unwrap_or((0, width));
+        let end = cells.last().map_or(width, |&(x, w)| x + w);
+        let slack = width.saturating_sub(end);
+        let band = |lead: u32, trail: u32, extent: u32| {
+            let (lead, trail) = (lead.min(extent), trail.min(extent));
+            if lead == 0 && trail == 0 {
+                return Band::Fixed;
+            }
+            let hi = extent - trail;
+            Band::Middle(lead as f32, hi.max(lead) as f32)
+        };
+        Slice {
+            // Shifted onto the cell; the vertical guides already are.
+            x: band(
+                self.left.saturating_sub(x0),
+                self.right.saturating_sub(slack),
+                cw,
+            ),
+            y: band(self.top, self.bottom, height),
+        }
+    }
 }
 
 /// The geometry of one theme image, measured from the original.
