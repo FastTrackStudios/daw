@@ -601,3 +601,170 @@ fn a_layout_from_a_different_project_is_ignored_rather_than_applied() {
         "the matcher placed them; the foreign layout did not"
     );
 }
+
+// ── Envelopes persist, in item-relative time (#208) ──────────────────
+
+use expression_editor_daw::state::ItemEnvelopes;
+use level_dsp::classify::ClassifyConfig;
+use level_dsp::envelope::{Contributions, EnvPoint, GainSpan, GenerationConfig, analyze, generate};
+
+const ITEM: &str = "{ITEM-GUID}";
+
+fn some_curves() -> Contributions {
+    Contributions {
+        gate: vec![
+            EnvPoint {
+                t_s: 0.0,
+                db: -60.0,
+                hold: true,
+            },
+            EnvPoint {
+                t_s: 0.5,
+                db: 0.0,
+                hold: true,
+            },
+        ],
+        breath: vec![EnvPoint::new(0.0, 0.0), EnvPoint::new(1.0, -12.0)],
+        ride: vec![EnvPoint::new(0.0, 3.0)],
+        sibilance: vec![GainSpan {
+            from_s: 0.2,
+            to_s: 0.3,
+            db: -4.0,
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn the_four_survive_a_save_and_reload() {
+    let (d, project) = daw();
+    let curves = some_curves();
+
+    let mut state = EditorState::default();
+    state.set_envelopes(ItemEnvelopes::capture(ITEM, &curves, 0xABCD));
+    state::save(&d, project.clone(), &state).unwrap();
+
+    let back = state::load(&d, project)
+        .envelopes_for(ITEM)
+        .expect("stored")
+        .restore();
+
+    assert_eq!(back.gate, curves.gate);
+    assert_eq!(back.breath, curves.breath);
+    assert_eq!(back.ride, curves.ride);
+    assert_eq!(back.sibilance, curves.sibilance);
+}
+
+#[test]
+fn hold_survives_the_round_trip() {
+    // A gate that came back ramping instead of stepping would need far
+    // more points to describe, and would not sound like a gate.
+    let (d, project) = daw();
+    let mut state = EditorState::default();
+    state.set_envelopes(ItemEnvelopes::capture(ITEM, &some_curves(), 1));
+    state::save(&d, project.clone(), &state).unwrap();
+
+    let back = state::load(&d, project).envelopes_for(ITEM).unwrap().restore();
+    assert!(back.gate.iter().all(|p| p.hold));
+    assert!(back.breath.iter().all(|p| !p.hold));
+}
+
+#[test]
+fn bypass_travels_with_the_envelopes() {
+    let (d, project) = daw();
+    let mut curves = some_curves();
+    curves.bypass.gate = true;
+    curves.bypass.sibilance = true;
+
+    let mut state = EditorState::default();
+    state.set_envelopes(ItemEnvelopes::capture(ITEM, &curves, 1));
+    state::save(&d, project.clone(), &state).unwrap();
+
+    let back = state::load(&d, project).envelopes_for(ITEM).unwrap().restore();
+    assert!(back.bypass.gate, "a mix decision travels");
+    assert!(back.bypass.sibilance);
+    assert!(!back.bypass.ride);
+}
+
+#[test]
+fn times_are_item_relative_so_moving_the_item_keeps_them_aligned() {
+    // Nothing stored is in project time, which is the whole reason the
+    // four are not FX-parameter envelopes on a track.
+    let curves = some_curves();
+    let stored = ItemEnvelopes::capture(ITEM, &curves, 1);
+
+    assert_eq!(stored.gate.points[0].t_s, 0.0, "an item starts at zero");
+    assert!(
+        stored.gate.points.iter().all(|p| p.t_s <= 1.0),
+        "and the times are within the item, not on the project timeline"
+    );
+    // Moving the item is a no-op on this data by construction: there is
+    // no project-time anchor to update.
+    assert_eq!(stored.restore().gate, curves.gate);
+}
+
+#[test]
+fn the_digest_is_stored_so_a_reopened_item_knows_if_it_is_current() {
+    let (d, project) = daw();
+    let cfg = GenerationConfig::default();
+    let a = analyze(&vec![0.0; 48_000], 48_000.0, ClassifyConfig::default());
+    let curves = generate(&a, &cfg);
+
+    let mut state = EditorState::default();
+    state.set_envelopes(ItemEnvelopes::capture(ITEM, &curves, cfg.digest()));
+    state::save(&d, project.clone(), &state).unwrap();
+
+    let stored = state::load(&d, project);
+    let e = stored.envelopes_for(ITEM).unwrap();
+    assert_eq!(e.digest, cfg.digest(), "still current, so no re-analysis");
+
+    let changed = GenerationConfig {
+        ride_target_db: -6.0,
+        ..cfg
+    };
+    assert_ne!(e.digest, changed.digest(), "a tuned threshold re-runs it");
+}
+
+#[test]
+fn each_item_keeps_its_own_envelopes() {
+    let mut state = EditorState::default();
+    state.set_envelopes(ItemEnvelopes::capture("item-a", &some_curves(), 1));
+    let mut other = some_curves();
+    other.ride = vec![EnvPoint::new(0.0, -9.0)];
+    state.set_envelopes(ItemEnvelopes::capture("item-b", &other, 2));
+
+    assert_eq!(state.envelopes.len(), 2);
+    assert_eq!(state.envelopes_for("item-a").unwrap().ride.points[0].db, 3.0);
+    assert_eq!(state.envelopes_for("item-b").unwrap().ride.points[0].db, -9.0);
+}
+
+#[test]
+fn re_capturing_replaces_rather_than_appending() {
+    let mut state = EditorState::default();
+    state.set_envelopes(ItemEnvelopes::capture(ITEM, &some_curves(), 1));
+    state.set_envelopes(ItemEnvelopes::capture(ITEM, &some_curves(), 2));
+    assert_eq!(state.envelopes.len(), 1);
+    assert_eq!(state.envelopes_for(ITEM).unwrap().digest, 2);
+}
+
+#[test]
+fn a_five_minute_curve_is_small_enough_to_sit_in_the_item() {
+    // The claim decimation exists to make true. Undecimated, a
+    // five-minute vocal at a 10 ms block is ~30,000 points per curve.
+    let mut audio = Vec::new();
+    for i in 0..(48_000 * 10) {
+        let t = i as f64 / 48_000.0;
+        audio.push(0.4 * (2.0 * core::f64::consts::PI * 180.0 * t).sin());
+    }
+    let a = analyze(&audio, 48_000.0, ClassifyConfig::default());
+    let curves = generate(&a, &GenerationConfig::default());
+    let stored = ItemEnvelopes::capture(ITEM, &curves, 1);
+    let text = facet_styx::to_string(&stored).unwrap();
+
+    assert!(
+        text.len() < 64 * 1024,
+        "10 s of vocal serialised to {} bytes; a five-minute take would \
+         not fit in the item",
+        text.len()
+    );
+}
