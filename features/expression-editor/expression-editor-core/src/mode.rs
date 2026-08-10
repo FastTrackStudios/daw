@@ -14,7 +14,8 @@ use crate::mouse::MouseMap;
 use crate::rows::{DrumMap, RowSpace, SliceBands, StringTuning};
 use crate::{Dimension, StripLane};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default, facet::Facet)]
 pub enum Mode {
     /// Plain MIDI: notes and velocity, nothing else.
     #[default]

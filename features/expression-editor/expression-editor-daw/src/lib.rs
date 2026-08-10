@@ -26,6 +26,7 @@
 //!   on that channel and flagged ambiguous when two are.
 
 pub mod shapes;
+pub mod state;
 pub mod fixture;
 pub mod session;
 

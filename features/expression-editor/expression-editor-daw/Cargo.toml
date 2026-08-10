@@ -12,6 +12,8 @@ description = "Adapter between the expression editor's document and the DAW MIDI
 [dependencies]
 daw = { workspace = true }
 expression-editor-core = { workspace = true }
+facet.workspace = true
+facet-styx.workspace = true
 
 [dev-dependencies]
 # The standalone backend, so the whole load → edit → write-back loop is
