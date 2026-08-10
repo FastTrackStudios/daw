@@ -82,6 +82,15 @@ impl ObjectStore {
     }
 
     /// Every id held, in a stable order.
+    /// Drop every object the predicate rejects.
+    ///
+    /// Only `compact` should call this. Objects are immutable and
+    /// content-addressed, so removing one is never an update — it is a
+    /// deletion, and the only safe basis for it is reachability.
+    pub fn retain(&mut self, keep: impl Fn(&ObjectId) -> bool) {
+        self.blobs.retain(|id, _| keep(id));
+    }
+
     pub fn ids(&self) -> impl Iterator<Item = &ObjectId> {
         self.blobs.keys()
     }
