@@ -20,6 +20,7 @@
 //! DSP style matches the sibling fx crates (`comp-dsp`, `pitch-dsp`): plain
 //! `std`, `f64`, allocation confined to construction/`set_sample_rate`.
 
+pub mod envelope;
 pub mod analyze;
 pub mod classify;
 pub mod debreath;
