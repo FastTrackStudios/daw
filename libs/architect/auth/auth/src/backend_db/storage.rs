@@ -18,6 +18,7 @@ use crate::{
     AuthAuditEvent, AuthStorage, AuthStorageCapabilities, AuthStorageClock,
     backend_db::{
         AuthAccountActiveModel, AuthAccountColumn, AuthAccountEntity, AuthApiKeyActiveModel,
+        AuthEmailChange, AuthEmailChangeActiveModel, AuthEmailChangeColumn, AuthEmailChangeEntity,
         AuthApiKeyColumn, AuthApiKeyEntity, AuthAuditEventRecordActiveModel,
         AuthInvitationActiveModel, AuthInvitationEntity, AuthMemberActiveModel, AuthMemberColumn,
         AuthMemberEntity, AuthOrganizationActiveModel, AuthOrganizationColumn,
@@ -287,6 +288,56 @@ impl AuthStorage for AuthSeaOrmStorage {
             .update(&self.db)
             .await
             .map(AuthUser::from)
+            .map_err(map_db_err)
+    }
+
+    async fn record_email_change(
+        &self,
+        user_id: Uuid,
+        previous_email: Option<String>,
+        new_email: String,
+        changed_by: Option<Uuid>,
+        reason: Option<String>,
+    ) -> Result<AuthEmailChange, AuthFlowError> {
+        let row = AuthEmailChangeActiveModel {
+            id: Set(Uuid::new_v4()),
+            user_id: Set(user_id),
+            previous_email: Set(previous_email),
+            new_email: Set(new_email),
+            changed_by: Set(changed_by),
+            reason: Set(reason),
+            created_at: Set(Utc::now()),
+        };
+        row.insert(&self.db)
+            .await
+            .map(AuthEmailChange::from)
+            .map_err(map_db_err)
+    }
+
+    async fn list_email_history(&self, user_id: Uuid) -> Result<Vec<AuthEmailChange>, AuthFlowError> {
+        AuthEmailChangeEntity::find()
+            .filter(AuthEmailChangeColumn::UserId.eq(user_id))
+            // Oldest first: the trail reads as the chain of addresses in
+            // the order they were held.
+            .order_by_asc(AuthEmailChangeColumn::CreatedAt)
+            .all(&self.db)
+            .await
+            .map(|rows| rows.into_iter().map(AuthEmailChange::from).collect())
+            .map_err(map_db_err)
+    }
+
+    async fn find_user_id_by_previous_email(
+        &self,
+        email: &str,
+    ) -> Result<Option<Uuid>, AuthFlowError> {
+        AuthEmailChangeEntity::find()
+            .filter(AuthEmailChangeColumn::PreviousEmail.eq(email.to_owned()))
+            // An address can be held, released and held again; the most
+            // recent record is the one that answers "who was this".
+            .order_by_desc(AuthEmailChangeColumn::CreatedAt)
+            .one(&self.db)
+            .await
+            .map(|row| row.map(|r| r.user_id))
             .map_err(map_db_err)
     }
 

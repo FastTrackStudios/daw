@@ -77,6 +77,12 @@ pub use auth_proto::audit_event::{
     Column as AuthAuditEventRecordColumn, Entity as AuthAuditEventRecordEntity,
     Model as AuthAuditEventRecordModel, Relation as AuthAuditEventRecordRelation,
 };
+pub use auth_proto::email_change::{
+    ActiveModel as AuthEmailChangeActiveModel, AuthEmailChange, AuthEmailChangeCreate,
+    AuthEmailChangeList, AuthEmailChangeRepo, AuthEmailChangeRepoStorage, AuthEmailChangeUpdate,
+    Column as AuthEmailChangeColumn, Entity as AuthEmailChangeEntity,
+    Model as AuthEmailChangeModel, Relation as AuthEmailChangeRelation,
+};
 pub use auth_proto::invitation::{
     ActiveModel as AuthInvitationActiveModel, AuthInvitation, AuthInvitationCreate,
     AuthInvitationList, AuthInvitationRepo, AuthInvitationRepoStorage, AuthInvitationUpdate,
