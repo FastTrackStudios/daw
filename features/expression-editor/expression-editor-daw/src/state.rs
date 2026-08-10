@@ -153,3 +153,51 @@ pub fn save<D: ExtState + ?Sized>(
     let text = facet_styx::to_string(state).unwrap_or_default();
     side_store::store(daw, project, NAMESPACE, &text)
 }
+
+/// Resolve the mode for a take: **take → track → infer**.
+///
+/// `infer` is only consulted when nobody has corrected anything, and it
+/// is a closure rather than a fixed function so the heuristic can change
+/// — and improve — without this layer knowing. That is the whole point
+/// of not persisting inference: a better heuristic reaches every take
+/// except the ones somebody explicitly overrode.
+pub fn resolve_mode<D: ExtState + ?Sized>(
+    daw: &D,
+    project: ProjectContext,
+    track_guid: &str,
+    take_guid: &str,
+    infer: impl FnOnce() -> Mode,
+) -> Mode {
+    load(daw, project)
+        .mode_for(track_guid, take_guid)
+        .unwrap_or_else(infer)
+}
+
+/// Record a correction and write it, in one step.
+///
+/// The write marks the project dirty, which is what makes the
+/// correction survive: a correction that is a project's only change
+/// must still prompt to save.
+pub fn correct_take_mode<D: ExtState + ?Sized>(
+    daw: &D,
+    project: ProjectContext,
+    take_guid: &str,
+    mode: Mode,
+) -> daw::service::DawResult<()> {
+    let mut state = load(daw, project.clone());
+    state.correct_take(take_guid, mode);
+    save(daw, project, &state)
+}
+
+/// Record a track-level correction, the default for its takes —
+/// including takes recorded later.
+pub fn correct_track_mode<D: ExtState + ?Sized>(
+    daw: &D,
+    project: ProjectContext,
+    track_guid: &str,
+    mode: Mode,
+) -> daw::service::DawResult<()> {
+    let mut state = load(daw, project.clone());
+    state.correct_track(track_guid, mode);
+    save(daw, project, &state)
+}

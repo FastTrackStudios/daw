@@ -199,3 +199,80 @@ fn another_feature_cannot_collide_with_the_editors_state() {
         Some("whatever")
     );
 }
+
+// ── Improving the heuristic ──────────────────────────────────────────
+//
+// The reason inference is never persisted: a better heuristic should
+// reach every take *except* the ones somebody explicitly overrode. These
+// stand in for that by changing the inference and watching who moves.
+
+#[test]
+fn a_better_heuristic_reaches_uncorrected_takes() {
+    let (d, project) = daw();
+    let before = state::resolve_mode(&d, project.clone(), TRACK, TAKE, || Mode::Midi);
+    assert_eq!(before, Mode::Midi);
+
+    // Same take, same stored state, smarter guess.
+    let after = state::resolve_mode(&d, project, TRACK, TAKE, || Mode::PitchedAudio);
+    assert_eq!(
+        after,
+        Mode::PitchedAudio,
+        "nobody corrected this, so the improvement lands"
+    );
+}
+
+#[test]
+fn a_better_heuristic_does_not_override_a_correction() {
+    let (d, project) = daw();
+    state::correct_take_mode(&d, project.clone(), TAKE, Mode::Drums).unwrap();
+
+    let resolved = state::resolve_mode(&d, project, TRACK, TAKE, || Mode::PitchedAudio);
+    assert_eq!(
+        resolved,
+        Mode::Drums,
+        "a human said Drums; a cleverer guess does not get to disagree"
+    );
+}
+
+#[test]
+fn correcting_a_track_reaches_its_takes_through_the_resolver() {
+    let (d, project) = daw();
+    state::correct_track_mode(&d, project.clone(), TRACK, Mode::Vocals).unwrap();
+
+    let resolved = state::resolve_mode(&d, project, TRACK, "{ANY-TAKE}", || Mode::Midi);
+    assert_eq!(resolved, Mode::Vocals);
+}
+
+#[test]
+fn a_take_correction_still_beats_its_tracks_through_the_resolver() {
+    let (d, project) = daw();
+    state::correct_track_mode(&d, project.clone(), TRACK, Mode::Vocals).unwrap();
+    state::correct_take_mode(&d, project.clone(), TAKE, Mode::Guitar).unwrap();
+
+    assert_eq!(
+        state::resolve_mode(&d, project.clone(), TRACK, TAKE, || Mode::Midi),
+        Mode::Guitar
+    );
+    // ...and a sibling take on that track still follows the track.
+    assert_eq!(
+        state::resolve_mode(&d, project, TRACK, "{SIBLING}", || Mode::Midi),
+        Mode::Vocals
+    );
+}
+
+#[test]
+fn corrections_accumulate_across_separate_writes() {
+    // Each correction is a read-modify-write of one blob, so this is the
+    // case where a careless implementation loses the earlier one.
+    let (d, project) = daw();
+    state::correct_track_mode(&d, project.clone(), TRACK, Mode::Vocals).unwrap();
+    state::correct_take_mode(&d, project.clone(), TAKE, Mode::Drums).unwrap();
+    state::correct_take_mode(&d, project.clone(), "{OTHER}", Mode::Guitar).unwrap();
+
+    let s = state::load(&d, project);
+    assert_eq!(s.track_modes.len(), 1);
+    assert_eq!(s.take_modes.len(), 2);
+    assert_eq!(s.mode_for(TRACK, TAKE), Some(Mode::Drums));
+    assert_eq!(s.mode_for(TRACK, "{OTHER}"), Some(Mode::Guitar));
+    assert_eq!(s.mode_for(TRACK, "{THIRD}"), Some(Mode::Vocals));
+}
