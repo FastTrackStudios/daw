@@ -253,3 +253,174 @@ fn a_breath_curve_ramps_rather_than_stepping() {
     let breath = breath_envelope(&a, 12.0, -30.0, -70.0, 0.25);
     assert!(breath.iter().all(|p| !p.hold));
 }
+
+// ── The composite (#205) ─────────────────────────────────────────────
+
+use level_dsp::envelope::{COMPOSITE_FLOOR_DB, Contributions, EnvPoint, GainSpan, composite};
+
+fn flat(db: f64) -> Vec<EnvPoint> {
+    vec![EnvPoint::new(0.0, db), EnvPoint::new(1.0, db)]
+}
+
+/// Read the composite at a time, the way a consumer would.
+fn at(env: &[EnvPoint], t: f64) -> f64 {
+    match env.iter().position(|p| p.t_s >= t) {
+        None => env.last().unwrap().db,
+        Some(0) => env[0].db,
+        Some(i) => {
+            let (a, b) = (env[i - 1], env[i]);
+            let span = b.t_s - a.t_s;
+            if span.abs() < 1e-12 {
+                b.db
+            } else {
+                a.db + (b.db - a.db) * ((t - a.t_s) / span)
+            }
+        }
+    }
+}
+
+#[test]
+fn the_composite_is_the_sum_in_db() {
+    // Exact, not approximate: summing dB is multiplying linear gains.
+    let parts = Contributions {
+        gate: flat(-3.0),
+        breath: flat(-2.0),
+        ride: flat(4.0),
+        sibilance: Vec::new(),
+    };
+    let env = composite(&parts);
+    assert!((at(&env, 0.5) - (-1.0)).abs() < 1e-9, "-3 -2 +4 = -1");
+}
+
+#[test]
+fn sibilance_only_applies_across_its_span() {
+    let parts = Contributions {
+        gate: Vec::new(),
+        breath: Vec::new(),
+        ride: flat(0.0),
+        sibilance: vec![GainSpan {
+            from_s: 0.4,
+            to_s: 0.6,
+            db: -5.0,
+        }],
+    };
+    let env = composite(&parts);
+    assert!((at(&env, 0.2) - 0.0).abs() < 1e-9, "before the ess");
+    assert!((at(&env, 0.5) - (-5.0)).abs() < 1e-9, "during it");
+    assert!((at(&env, 0.8) - 0.0).abs() < 1e-9, "after it");
+}
+
+#[test]
+fn a_closed_gate_is_silent_but_finite() {
+    let parts = Contributions {
+        gate: flat(-400.0),
+        breath: Vec::new(),
+        ride: Vec::new(),
+        sibilance: Vec::new(),
+    };
+    let env = composite(&parts);
+    assert!(env.iter().all(|p| p.db.is_finite()), "no infinities escape");
+    assert!(env.iter().all(|p| p.db >= COMPOSITE_FLOOR_DB - 1e-9));
+    assert!((at(&env, 0.5) - COMPOSITE_FLOOR_DB).abs() < 1e-9);
+}
+
+#[test]
+fn a_hand_dragged_zero_does_not_produce_an_infinity_downstream() {
+    // Nothing stops a user dragging a curve to silence by hand, so the
+    // floor has to exist independently of what the gate does.
+    let parts = Contributions {
+        gate: Vec::new(),
+        breath: flat(f64::NEG_INFINITY),
+        ride: Vec::new(),
+        sibilance: Vec::new(),
+    };
+    let env = composite(&parts);
+    assert!(env.iter().all(|p| p.db.is_finite()));
+}
+
+#[test]
+fn editing_one_contribution_recomputes_the_composite() {
+    let mut parts = Contributions {
+        gate: flat(0.0),
+        breath: Vec::new(),
+        ride: flat(0.0),
+        sibilance: Vec::new(),
+    };
+    let before = at(&composite(&parts), 0.5);
+    parts.ride = flat(6.0);
+    let after = at(&composite(&parts), 0.5);
+    assert!((after - before - 6.0).abs() < 1e-9);
+}
+
+#[test]
+fn bypassing_a_stage_is_leaving_it_out() {
+    let with = Contributions {
+        gate: flat(-10.0),
+        breath: Vec::new(),
+        ride: flat(3.0),
+        sibilance: Vec::new(),
+    };
+    let without = Contributions {
+        gate: Vec::new(),
+        ..with.clone()
+    };
+    assert!((at(&composite(&with), 0.5) - (-7.0)).abs() < 1e-9);
+    assert!(
+        (at(&composite(&without), 0.5) - 3.0).abs() < 1e-9,
+        "the gate's contribution is gone and the ride's is untouched"
+    );
+}
+
+#[test]
+fn a_gate_step_survives_into_the_composite() {
+    // The gate holds, so the composite must not ramp through its edge.
+    let gate = vec![
+        EnvPoint {
+            t_s: 0.0,
+            db: -60.0,
+            hold: true,
+        },
+        EnvPoint {
+            t_s: 0.5,
+            db: -60.0,
+            hold: true,
+        },
+        EnvPoint {
+            t_s: 0.51,
+            db: 0.0,
+            hold: true,
+        },
+    ];
+    let env = composite(&Contributions {
+        gate,
+        ..Default::default()
+    });
+    assert!(at(&env, 0.25) < -50.0, "still shut a quarter of the way in");
+    assert!(at(&env, 0.49) < -50.0, "and right up to the edge");
+}
+
+#[test]
+fn every_contributions_breakpoints_reach_the_result() {
+    let parts = Contributions {
+        gate: vec![EnvPoint::new(0.0, 0.0), EnvPoint::new(0.3, -6.0)],
+        breath: vec![EnvPoint::new(0.1, 0.0), EnvPoint::new(0.7, -3.0)],
+        ride: Vec::new(),
+        sibilance: vec![GainSpan {
+            from_s: 0.2,
+            to_s: 0.4,
+            db: -2.0,
+        }],
+    };
+    let env = composite(&parts);
+    for t in [0.0, 0.1, 0.2, 0.3, 0.4, 0.7] {
+        assert!(
+            env.iter().any(|p| (p.t_s - t).abs() < 1e-9),
+            "a breakpoint at {t} is where the sum can change slope"
+        );
+    }
+}
+
+#[test]
+fn nothing_at_all_composites_to_nothing() {
+    assert!(composite(&Contributions::default()).is_empty());
+}
