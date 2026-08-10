@@ -18,6 +18,9 @@ daw = ["dep:daw"]
 
 [dependencies]
 expression-editor-core = { workspace = true }
+# The tool seam. `pitch` on, because this is the crate that produces
+# pitch-detected notes, so this is where their `Timed` impl is wanted.
+expression-editor-tools = { workspace = true, features = ["pitch"] }
 tune-dsp = { workspace = true }
 realfft = { workspace = true }
 daw = { workspace = true, optional = true }

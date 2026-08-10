@@ -93,6 +93,24 @@ from nothing does trip a high crest setting if the threshold is far
 enough below it. Set the threshold near the material's noise floor,
 which is what it is for.
 
+## Where the planner lives
+
+None of the matching below is audio-specific, and it is not written
+twice. The planner lives in `expression-editor-tools`, generic over two
+traits (`Timed`, `Sustained`) that a MIDI note, an audio transient and a
+pitch-detected note all satisfy — so a drum take and a programmed kit are
+put on the grid by the same code and cannot drift into disagreeing about
+which division a hit belongs to.
+
+`expression_editor_audio::quantize` keeps the part that is genuinely
+audio: a config in seconds (a musical grid under a tempo map is evenly
+spaced in *ticks*, not seconds, which is why the seam itself carries no
+unit), and the two ways a plan becomes sound — WARP and SPLIT below.
+
+The one rule with a domain in it is the sensitivity filter. Audio gets it
+upstream, from the detector's gate; MIDI has no detector, so the seam
+carries a `min_strength` that a caller with velocities can use instead.
+
 ## Grid scan
 
 The expensive part of quantizing is deciding which transient a grid
