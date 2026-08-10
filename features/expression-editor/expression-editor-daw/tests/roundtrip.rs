@@ -251,8 +251,7 @@ fn a_midi_file_round_trips_through_the_codec() {
             position_ppq: PPQ,
         }],
         pitch_bends: Vec::new(),
-        note_expressions: Vec::new(),
-    };
+        note_expressions: Vec::new(), ..Default::default() };
 
     let bytes = smf::encode(&content, PPQ);
     let back = smf::parse(&bytes, 0).expect("the file we just wrote must parse");
@@ -291,8 +290,7 @@ fn a_repeated_pitch_at_one_tick_does_not_swallow_its_retrigger() {
         ],
         ccs: Vec::new(),
         pitch_bends: Vec::new(),
-        note_expressions: Vec::new(),
-    };
+        note_expressions: Vec::new(), ..Default::default() };
     let back = smf::parse(&smf::encode(&content, PPQ), 0).unwrap();
     assert_eq!(back.notes.len(), 2, "two notes, not one held one");
 }
@@ -309,8 +307,7 @@ fn a_file_at_another_division_is_rescaled() {
         }],
         ccs: Vec::new(),
         pitch_bends: Vec::new(),
-        note_expressions: Vec::new(),
-    };
+        note_expressions: Vec::new(), ..Default::default() };
     // Written at 96 PPQ, read back at the snapshot's own 960.
     let back = smf::parse(&smf::encode(&content, 96.0), 0).unwrap();
     assert_eq!(back.ppq, 960.0, "callers never carry a per-file time base");
@@ -333,8 +330,7 @@ fn a_file_and_a_take_produce_the_same_document() {
         }],
         ccs: Vec::new(),
         pitch_bends: Vec::new(),
-        note_expressions: Vec::new(),
-    };
+        note_expressions: Vec::new(), ..Default::default() };
     let from_file = to_doc(&smf::parse(&smf::encode(&content, PPQ), 0).unwrap(), 48.0);
     let from_take = to_doc(&snapshot(vec![note(0, 1, 64, 0.0, PPQ)]), 48.0);
 

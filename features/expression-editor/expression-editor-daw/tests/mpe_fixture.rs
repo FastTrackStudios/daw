@@ -271,8 +271,16 @@ fn the_fixture_writes_back_without_losing_a_note_or_a_channel() {
     // the write path only discards expression it cannot attribute.
     assert!(!content.pitch_bends.is_empty());
     assert!(content.ccs.iter().any(|c| c.controller == TIMBRE_CC));
-    // Channel pressure has no create type in the facade, so it leaves
-    // as CC11. Documented in `fixture`, asserted here so a change to
-    // that mapping is a test failure rather than a surprise.
-    assert!(content.ccs.iter().any(|c| c.controller == 11));
+    // Changed by #167. This used to assert pressure leaving as CC11,
+    // because `MidiTakeContent` had no field for it — but the snapshot
+    // reads pressure from `channel_pressures`, so the dimension did not
+    // survive a round trip. It now goes out as real channel pressure.
+    assert!(
+        !content.channel_pressures.is_empty(),
+        "pressure must leave as pressure, or it cannot come back"
+    );
+    assert!(
+        !content.ccs.iter().any(|c| c.controller == 11),
+        "and not as CC11, which a genuine CC11 lane would then collide with"
+    );
 }

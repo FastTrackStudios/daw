@@ -43,6 +43,7 @@ pub use session::Session;
 pub const DEFAULT_BEND_RANGE: f64 = 48.0;
 
 use daw::service::midi::{
+    MidiChannelPressureCreate,
     MidiCCCreate, MidiNoteCreate, MidiPitchBendCreate, MidiTakeContent, MidiTakeSnapshot,
 };
 use expression_editor_core::cc::CcLane;
@@ -153,6 +154,7 @@ pub fn to_content(doc: &ExpressionDoc) -> MidiTakeContent {
     let mut notes = Vec::with_capacity(doc.notes.len());
     let mut bends = Vec::new();
     let mut ccs = Vec::new();
+    let mut pressures = Vec::new();
 
     for n in &doc.notes {
         // Ambiguous ownership means the writer cannot know which note a
@@ -192,13 +194,14 @@ pub fn to_content(doc: &ExpressionDoc) -> MidiTakeContent {
                         value: (v * 127.0).round().clamp(0.0, 127.0) as u8,
                         position_ppq: t,
                     }),
-                    // Channel pressure has no `Create` in the bulk
-                    // content type; it goes out as CC11 instead, which
-                    // is what most instruments read anyway.
-                    Dimension::Pressure => ccs.push(MidiCCCreate {
+                    // Real channel pressure, not CC11. It used to go
+                    // out as CC11 because the bulk content type had no
+                    // field for it — but the snapshot reads pressure
+                    // from `channel_pressures`, so the dimension did not
+                    // survive a round trip (#167).
+                    Dimension::Pressure => pressures.push(MidiChannelPressureCreate {
                         channel,
-                        controller: 11,
-                        value: (v * 127.0).round().clamp(0.0, 127.0) as u8,
+                        pressure: (v * 127.0).round().clamp(0.0, 127.0) as u8,
                         position_ppq: t,
                     }),
                 }
@@ -224,6 +227,7 @@ pub fn to_content(doc: &ExpressionDoc) -> MidiTakeContent {
         ccs,
         pitch_bends: bends,
         note_expressions: Vec::new(),
+        channel_pressures: pressures,
     }
 }
 
