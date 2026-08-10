@@ -340,6 +340,108 @@ pub fn ride_envelope(
     decimate(&dense, tolerance_db, &[])
 }
 
+/// The floor the composite is clamped to, in dB.
+///
+/// A fully closed gate is -inf dB and a user can drag a curve to zero by
+/// hand, but a take volume envelope needs a real number that every
+/// consumer downstream can handle. -96 dB is inaudible.
+pub const COMPOSITE_FLOOR_DB: f64 = -96.0;
+
+/// The four contributions, ready to sum.
+#[derive(Clone, Debug, Default)]
+pub struct Contributions {
+    pub gate: Vec<EnvPoint>,
+    pub breath: Vec<EnvPoint>,
+    pub sibilance: Vec<GainSpan>,
+    pub ride: Vec<EnvPoint>,
+}
+
+/// Value of a point curve at `t`, honouring `hold`.
+fn value_at(points: &[EnvPoint], t: f64) -> f64 {
+    if points.is_empty() {
+        return 0.0;
+    }
+    match points.iter().position(|p| p.t_s >= t) {
+        None => points[points.len() - 1].db,
+        Some(0) => points[0].db,
+        Some(i) => {
+            let (a, b) = (points[i - 1], points[i]);
+            if a.hold {
+                // A gate holds its value until the next point, which is
+                // the discontinuity that makes it cheap to represent.
+                return a.db;
+            }
+            let span = b.t_s - a.t_s;
+            if span.abs() < 1e-12 {
+                b.db
+            } else {
+                a.db + (b.db - a.db) * ((t - a.t_s) / span)
+            }
+        }
+    }
+}
+
+/// Gain the sibilance spans apply at `t`.
+fn span_value_at(spans: &[GainSpan], t: f64) -> f64 {
+    spans
+        .iter()
+        .find(|s| t >= s.from_s && t < s.to_s)
+        .map(|s| s.db)
+        .unwrap_or(0.0)
+}
+
+/// Sum the four into the item's one volume envelope.
+///
+/// **The sum in dB**, which is identical to multiplying the linear
+/// gains — so the composite is exact rather than an approximation and
+/// needs no reconciliation with what the realtime chain would do.
+///
+/// Every breakpoint from any contribution becomes a breakpoint of the
+/// result, because that is where the sum can change slope. Bypassing a
+/// stage is simply leaving it out of `Contributions`, which is why
+/// bypass is a mix decision rather than a display toggle.
+pub fn composite(parts: &Contributions) -> Vec<EnvPoint> {
+    let mut times: Vec<f64> = Vec::new();
+    for p in parts.gate.iter().chain(&parts.breath).chain(&parts.ride) {
+        times.push(p.t_s);
+    }
+    // A span is a *step*, but the composite's points ramp. Without a
+    // point immediately before each edge carrying the pre-edge value,
+    // the ramp into the edge starts at the previous breakpoint and the
+    // reduction bleeds backwards across the whole gap — audibly ducking
+    // the vowel before the "ess", which is the exact failure that made
+    // sibilance a span instead of a band-split in the first place.
+    const EDGE: f64 = 1e-4;
+    for s in &parts.sibilance {
+        times.push((s.from_s - EDGE).max(0.0));
+        times.push(s.from_s);
+        times.push((s.to_s - EDGE).max(0.0));
+        times.push(s.to_s);
+    }
+    if times.is_empty() {
+        return Vec::new();
+    }
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+    times.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+
+    times
+        .into_iter()
+        .map(|t| {
+            let sum = value_at(&parts.gate, t)
+                + value_at(&parts.breath, t)
+                + span_value_at(&parts.sibilance, t)
+                + value_at(&parts.ride, t);
+            EnvPoint {
+                t_s: t,
+                db: sum.max(COMPOSITE_FLOOR_DB),
+                // The result ramps: only the gate steps, and its step is
+                // already carried by a pair of points at the edge.
+                hold: false,
+            }
+        })
+        .collect()
+}
+
 /// Block indices either side of every change in a boolean series.
 fn edges(flags: &[bool]) -> Vec<usize> {
     let mut out = Vec::new();
