@@ -347,6 +347,47 @@ pub fn ride_envelope(
 /// consumer downstream can handle. -96 dB is inaudible.
 pub const COMPOSITE_FLOOR_DB: f64 = -96.0;
 
+/// Which of the four are contributing.
+///
+/// Bypass is a **mix decision**, not a display toggle: the composite is
+/// rewritten without the stage, so it changes what you hear.
+///
+/// The bypassed curve is *retained*, not discarded, so un-bypassing
+/// restores it exactly rather than regenerating it.
+///
+/// One consequence held deliberately: the four are generated from a
+/// shared analysis pass but stored independently, so bypassing one
+/// leaves the others as they were generated. That is a known
+/// approximation, accepted because it only bites when you bypass —
+/// which is a deliberate act with audible consequences — and because
+/// regenerating downstream curves on a toggle would fight the
+/// stored-curve model and make bypass expensive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Bypass {
+    pub gate: bool,
+    pub breath: bool,
+    pub sibilance: bool,
+    pub ride: bool,
+}
+
+impl Default for Bypass {
+    /// Nothing bypassed.
+    fn default() -> Self {
+        Self {
+            gate: false,
+            breath: false,
+            sibilance: false,
+            ride: false,
+        }
+    }
+}
+
+impl Bypass {
+    pub fn all_bypassed(&self) -> bool {
+        self.gate && self.breath && self.sibilance && self.ride
+    }
+}
+
 /// The four contributions, ready to sum.
 #[derive(Clone, Debug, Default)]
 pub struct Contributions {
@@ -354,6 +395,27 @@ pub struct Contributions {
     pub breath: Vec<EnvPoint>,
     pub sibilance: Vec<GainSpan>,
     pub ride: Vec<EnvPoint>,
+    /// Which of them are switched off.
+    pub bypass: Bypass,
+}
+
+impl Contributions {
+    fn gate_pts(&self) -> &[EnvPoint] {
+        if self.bypass.gate { &[] } else { &self.gate }
+    }
+    fn breath_pts(&self) -> &[EnvPoint] {
+        if self.bypass.breath { &[] } else { &self.breath }
+    }
+    fn ride_pts(&self) -> &[EnvPoint] {
+        if self.bypass.ride { &[] } else { &self.ride }
+    }
+    fn sibilance_spans(&self) -> &[GainSpan] {
+        if self.bypass.sibilance {
+            &[]
+        } else {
+            &self.sibilance
+        }
+    }
 }
 
 /// Value of a point curve at `t`, honouring `hold`.
@@ -402,7 +464,12 @@ fn span_value_at(spans: &[GainSpan], t: f64) -> f64 {
 /// bypass is a mix decision rather than a display toggle.
 pub fn composite(parts: &Contributions) -> Vec<EnvPoint> {
     let mut times: Vec<f64> = Vec::new();
-    for p in parts.gate.iter().chain(&parts.breath).chain(&parts.ride) {
+    for p in parts
+        .gate_pts()
+        .iter()
+        .chain(parts.breath_pts())
+        .chain(parts.ride_pts())
+    {
         times.push(p.t_s);
     }
     // A span is a *step*, but the composite's points ramp. Without a
@@ -412,7 +479,7 @@ pub fn composite(parts: &Contributions) -> Vec<EnvPoint> {
     // the vowel before the "ess", which is the exact failure that made
     // sibilance a span instead of a band-split in the first place.
     const EDGE: f64 = 1e-4;
-    for s in &parts.sibilance {
+    for s in parts.sibilance_spans() {
         times.push((s.from_s - EDGE).max(0.0));
         times.push(s.from_s);
         times.push((s.to_s - EDGE).max(0.0));
@@ -427,10 +494,10 @@ pub fn composite(parts: &Contributions) -> Vec<EnvPoint> {
     times
         .into_iter()
         .map(|t| {
-            let sum = value_at(&parts.gate, t)
-                + value_at(&parts.breath, t)
-                + span_value_at(&parts.sibilance, t)
-                + value_at(&parts.ride, t);
+            let sum = value_at(parts.gate_pts(), t)
+                + value_at(parts.breath_pts(), t)
+                + span_value_at(parts.sibilance_spans(), t)
+                + value_at(parts.ride_pts(), t);
             EnvPoint {
                 t_s: t,
                 db: sum.max(COMPOSITE_FLOOR_DB),
@@ -545,4 +612,151 @@ mod tests {
             }
         }
     }
+}
+
+// ── Generation policy ────────────────────────────────────────────────
+
+/// Everything that changes what the four curves come out as.
+///
+/// Hashed to decide whether a cached set is still valid. Deliberately
+/// *not* including the audio: an item's samples do not change under it,
+/// and hashing megabytes on every open would cost more than the
+/// analysis it is trying to avoid.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GenerationConfig {
+    pub gate_threshold_db: f64,
+    pub gate_floor_db: f64,
+    pub breath_reduction_db: f64,
+    pub breath_max_level_db: f64,
+    pub breath_min_level_db: f64,
+    pub sibilance_reduction_db: f64,
+    pub ride_target_db: f64,
+    pub ride_amount: f64,
+    pub ride_max_gain_db: f64,
+    pub ride_max_cut_db: f64,
+    /// The decimation knob — the one number worth exposing if curves
+    /// ever do get too large.
+    pub tolerance_db: f64,
+}
+
+impl Default for GenerationConfig {
+    fn default() -> Self {
+        Self {
+            gate_threshold_db: -40.0,
+            gate_floor_db: -60.0,
+            breath_reduction_db: 12.0,
+            breath_max_level_db: -30.0,
+            breath_min_level_db: -70.0,
+            sibilance_reduction_db: 4.0,
+            ride_target_db: -18.0,
+            ride_amount: 1.0,
+            ride_max_gain_db: 6.0,
+            ride_max_cut_db: 6.0,
+            tolerance_db: 0.25,
+        }
+    }
+}
+
+impl GenerationConfig {
+    /// A stable digest of the settings.
+    ///
+    /// Hand-rolled rather than `Hash`, because these are floats and
+    /// `f64` is deliberately not `Hash`. Bit patterns are the right
+    /// comparison here: two configs that differ in the last bit produce
+    /// different curves, so they should miss the cache.
+    pub fn digest(&self) -> u64 {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut eat = |v: f64| {
+            for b in v.to_bits().to_le_bytes() {
+                h ^= b as u64;
+                h = h.wrapping_mul(0x1000_0000_01b3);
+            }
+        };
+        eat(self.gate_threshold_db);
+        eat(self.gate_floor_db);
+        eat(self.breath_reduction_db);
+        eat(self.breath_max_level_db);
+        eat(self.breath_min_level_db);
+        eat(self.sibilance_reduction_db);
+        eat(self.ride_target_db);
+        eat(self.ride_amount);
+        eat(self.ride_max_gain_db);
+        eat(self.ride_max_cut_db);
+        eat(self.tolerance_db);
+        h
+    }
+}
+
+/// Generate all four curves from one analysis pass.
+pub fn generate(analysis: &Analysis, cfg: &GenerationConfig) -> Contributions {
+    Contributions {
+        gate: gate_envelope(
+            analysis,
+            cfg.gate_threshold_db,
+            cfg.gate_floor_db,
+            cfg.tolerance_db,
+        ),
+        breath: breath_envelope(
+            analysis,
+            cfg.breath_reduction_db,
+            cfg.breath_max_level_db,
+            cfg.breath_min_level_db,
+            cfg.tolerance_db,
+        ),
+        sibilance: sibilance_spans(analysis, cfg.sibilance_reduction_db),
+        ride: ride_envelope(
+            analysis,
+            cfg.ride_target_db,
+            cfg.ride_amount,
+            cfg.ride_max_gain_db,
+            cfg.ride_max_cut_db,
+            cfg.tolerance_db,
+        ),
+        bypass: Bypass::default(),
+    }
+}
+
+/// Curves plus the config digest they were generated from.
+///
+/// Generation is **on demand** — the first time the level editor is
+/// opened on an item — not on project load. Opening a 40-track project
+/// would otherwise run 40 analysis passes for envelopes nobody will look
+/// at.
+#[derive(Clone, Debug)]
+pub struct Cached {
+    pub digest: u64,
+    pub curves: Contributions,
+}
+
+impl Cached {
+    /// Whether this cache still answers for `cfg`.
+    ///
+    /// Changing a threshold re-runs generation. **Nothing else does** —
+    /// which is what composes with "only corrections persist": a
+    /// regenerated curve nobody edited need not be written at all.
+    pub fn is_valid_for(&self, cfg: &GenerationConfig) -> bool {
+        self.digest == cfg.digest()
+    }
+
+    pub fn generate(analysis: &Analysis, cfg: &GenerationConfig) -> Self {
+        Self {
+            digest: cfg.digest(),
+            curves: generate(analysis, cfg),
+        }
+    }
+}
+
+/// The config an item starts from: its own, else its track\'s, else the
+/// default.
+///
+/// Setting a breath threshold once for a vocal track and having it apply
+/// to thirty comps is the difference between usable on a real session
+/// and not — and it is the same cascade #191 uses for mode, not a second
+/// mechanism. The item owns its curves outright; only the config it
+/// *starts* from is inherited.
+pub fn config_for(
+    item: Option<GenerationConfig>,
+    track_default: Option<GenerationConfig>,
+) -> GenerationConfig {
+    item.or(track_default).unwrap_or_default()
 }
