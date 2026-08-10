@@ -67,7 +67,10 @@ fn marker_target(
 /// what makes "the marker at index 3" mean the fourth one in time
 /// rather than the fourth one added.
 fn renumber(list: &mut [TakeMarker]) {
-    list.sort_by(|a, b| a.source_position_seconds.total_cmp(&b.source_position_seconds));
+    list.sort_by(|a, b| {
+        a.source_position_seconds
+            .total_cmp(&b.source_position_seconds)
+    });
     for (i, m) in list.iter_mut().enumerate() {
         m.index = i as u32;
     }

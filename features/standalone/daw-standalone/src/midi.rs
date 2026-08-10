@@ -20,12 +20,11 @@
 
 use daw_proto::item::SourceType;
 use daw_proto::midi::{
-    MidiTakeContent, MidiTakeSnapshot, WriteMode,
     HumanizeParams, Midi, MidiCC, MidiCCCreate, MidiChannelPressure, MidiChannelPressureCreate,
     MidiNote, MidiNoteCreate, MidiNoteExpression, MidiNoteExpressionCreate, MidiPitchBend,
     MidiPitchBendCreate, MidiPolyPressure, MidiPolyPressureCreate, MidiProgramChange,
-    MidiProgramChangeCreate, MidiSysEx, MidiSysExCreate, MidiTakeLocation, PpqRange,
-    QuantizeParams,
+    MidiProgramChangeCreate, MidiSysEx, MidiSysExCreate, MidiTakeContent, MidiTakeLocation,
+    MidiTakeSnapshot, PpqRange, QuantizeParams, WriteMode,
 };
 use daw_proto::primitives::{Duration, PositionInSeconds};
 use daw_proto::project::ProjectContext;

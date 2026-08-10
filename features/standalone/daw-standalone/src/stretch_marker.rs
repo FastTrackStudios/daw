@@ -8,12 +8,17 @@ use daw_proto::{
     ItemRef, ProjectContext, StretchMarker, StretchMarkers, StretchMode, StretchTakeRef, TakeRef,
 };
 
-use daw_proto::{DawError, DawResult};
 use crate::sync::Standalone;
+use daw_proto::{DawError, DawResult};
 
 /// The take guid a location names, resolved through the active-take
 /// rules.
-fn take_guid(daw: &Standalone, project: &ProjectContext, item: &ItemRef, take: &TakeRef) -> Option<String> {
+fn take_guid(
+    daw: &Standalone,
+    project: &ProjectContext,
+    item: &ItemRef,
+    take: &TakeRef,
+) -> Option<String> {
     use daw_proto::Takes;
     let takes = daw.get_takes(project.clone(), item.clone());
     let index = match take {

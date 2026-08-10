@@ -10,17 +10,23 @@ Both are cloned to `.reference/` (gitignored) by:
 mkdir -p .reference && cd .reference
 git clone --depth 1 https://github.com/b451c/SneakPeak.git
 git clone --depth 1 https://github.com/MichaelPilyavskiy/ReaScripts.git mpl-reascripts
+git clone --depth 1 https://github.com/ReaTeam/ReaScripts.git 80icio
 ```
 
 | project | licence | what that permits |
 |---|---|---|
 | [SneakPeak](https://github.com/b451c/SneakPeak) | **MIT** (b451c, 2025–2026) | port code, with attribution |
 | [mpl ReaScripts](https://github.com/MichaelPilyavskiy/ReaScripts) | **no LICENSE file** | read only — clean-room |
+| [Perfect Timing](https://github.com/ReaTeam/ReaScripts) (80icio) | **no LICENSE file** | read only — clean-room |
 
 A repository with no licence is all rights reserved, whatever its
 visibility. mpl's scripts get the same treatment MPElodyne already gets
 in this tree: read the algorithm, describe it here, design our own. No
 lines cross over.
+
+ReaTeam/ReaScripts — where Perfect Timing lives — is a community
+collection, and neither the repository nor the script carries a licence
+grant. Same rule.
 
 ## SneakPeak — the REAPER audio API, done properly
 
@@ -164,3 +170,26 @@ band. The band is around the length-scaled diagonal so takes of
 different length can match at all, and a shift inside that band can
 still exceed what the user allowed. Better a partly-corrected take than
 one silently dragged five times further than asked.
+
+## Perfect Timing — grid quantize
+
+`Items Editing/80icio_Perfect Timing! - Audio Quantizer.lua`, and the
+[forum thread](https://forum.cockos.com/showthread.php?t=288964). Beat
+Detective for REAPER: detect transients, snap them to the grid, either
+by splitting and sliding or by warping.
+
+Read for two things, both of which changed our design and are written up
+in `grid-quantize.md`:
+
+- **The detector is a dual envelope-follower gate**, not spectral flux.
+  Sample-accurate by construction, where an STFT is quantised to its hop
+  — which is 5.8 ms at our settings and therefore the same size as the
+  timing error being corrected.
+- **The crest test is a trigger condition**, not a post-hoc measurement:
+  the ratio between a fast and a slow envelope follower *is* how struck
+  a sound is, and it is available at the instant the hit arrives.
+
+Its grid rule — each division claims at most one transient, the loudest
+in a window either side — we had already arrived at independently for
+the same reason (a buzz roll must not put eight hits on one beat), which
+is some evidence it is the natural answer rather than a borrowed one.

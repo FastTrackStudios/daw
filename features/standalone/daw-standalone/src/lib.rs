@@ -31,7 +31,6 @@
 
 mod action_registry;
 mod audio_accessor;
-mod stretch_marker;
 #[cfg(any(
     feature = "audio",
     feature = "decode",
@@ -42,6 +41,7 @@ pub mod audio_engine;
 mod audio_engine_svc;
 mod automation;
 mod automation_touch;
+mod stretch_marker;
 pub use automation_touch::TouchableParam;
 mod batch;
 #[cfg(feature = "bootstrap")]

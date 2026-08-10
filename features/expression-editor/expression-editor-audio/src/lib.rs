@@ -40,11 +40,16 @@ use tune_dsp::model::{NoteBlob, PitchDoc, WarpMarker};
 pub mod align;
 pub mod align_hits;
 pub mod analyze;
+#[cfg(feature = "daw")]
+pub mod apply_quantize;
+pub mod detect;
 pub mod dynamics;
 pub mod frames;
+pub mod gate;
 pub mod lanes;
 pub mod onsets;
 pub mod percussive;
+pub mod quantize;
 #[cfg(feature = "daw")]
 pub mod retime;
 #[cfg(feature = "daw")]
@@ -56,11 +61,16 @@ pub mod write_dynamics;
 pub use align::{AlignConfig, Alignment, align};
 pub use align_hits::{HitAlignConfig, align_hits, pair_hits};
 pub use analyze::{Analysis, TakeConfig, analyze_take, to_mono};
+#[cfg(feature = "daw")]
+pub use apply_quantize::{Applied, GroupError, apply_split, group_start};
+pub use detect::{DetectConfig, Filters, Scale, Transient, transients};
 pub use dynamics::{Detection, Dynamics, DynamicsConfig, GainPoint, Region};
 pub use frames::{FrameFeature, frame_features};
+pub use gate::{GateConfig, Hit};
 pub use lanes::{DynamicsLane, Lanes};
 pub use onsets::{Onset, OnsetConfig, detect as detect_onsets};
 pub use percussive::{Percussion, PercussiveConfig, analyze_percussive, looks_percussive};
+pub use quantize::{Move, Piece, Plan, QuantizeConfig, SplitConfig, plan};
 #[cfg(feature = "daw")]
 pub use retime::{TakePlacement, stretch_markers};
 #[cfg(feature = "daw")]

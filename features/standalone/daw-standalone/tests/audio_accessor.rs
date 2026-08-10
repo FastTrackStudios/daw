@@ -82,14 +82,13 @@ fn project_with_audio(secs: f64) -> (Standalone, ItemRef, TempDir) {
     });
     let ctx = ProjectContext::Current;
     let track = Tracks::add(&daw, ctx.clone(), "Vox", None).unwrap();
-    let loc = Midi::create_midi_item(&daw, ctx.clone(), TrackRef::Guid(track), 0.0, secs)
-        .expect("item");
+    let loc =
+        Midi::create_midi_item(&daw, ctx.clone(), TrackRef::Guid(track), 0.0, secs).expect("item");
     let item_guid = match &loc.item {
         ItemRef::Guid(g) => g.clone(),
         _ => panic!("expected a guid"),
     };
-    let active =
-        Takes::get_active_take(&daw, ctx, ItemRef::Guid(item_guid.clone())).expect("take");
+    let active = Takes::get_active_take(&daw, ctx, ItemRef::Guid(item_guid.clone())).expect("take");
 
     // Point the take at the file on disk; the accessor decodes it.
     daw.write_project(&guid, |p| {

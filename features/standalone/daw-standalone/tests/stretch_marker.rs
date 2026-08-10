@@ -140,10 +140,8 @@ fn project_time_converts_into_the_two_coordinate_systems() {
     // take's start offset. They are not the same number and neither is
     // project time.
     let m = StretchMarker::at_project_time(
-        /* project_pos        */ 12.0,
-        /* source_project_pos */ 11.5,
-        /* item_position      */ 10.0,
-        /* start_offset       */ 3.0,
+        /* project_pos        */ 12.0, /* source_project_pos */ 11.5,
+        /* item_position      */ 10.0, /* start_offset       */ 3.0,
         /* play_rate          */ 2.0,
     );
     assert_eq!(m.position, 4.0, "(12 - 10) * 2");
