@@ -86,11 +86,27 @@ pub mod admin {
                 (name, email)
             }
 
-            // Precise path: valid session for THIS org + real membership
-            // rows. A foreign/absent token just falls through (no error).
-            if !token.is_empty()
-                && let Ok(bundle) = self.current_session(CurrentSession { token }).await
-                    && let Some(org_id) = bundle.session.active_organization_id {
+            // A VALID SESSION FOR THIS ORG IS REQUIRED.
+            //
+            // This method is reachable without a session on any lane that
+            // treats `AuthService` as public (Task's org lane does, so the
+            // sign-in path stays usable). The enumerate-everything
+            // fallback below therefore used to answer ANONYMOUS callers:
+            // every user's name, email and id, for every org, over the
+            // internet, even with permission enforcement on. Verified on
+            // production 2026-08-08 with a CLI holding no credentials.
+            //
+            // The fallback itself is still right for its actual purpose —
+            // an org whose users predate membership rows — so it is kept,
+            // but now only behind a session that validates HERE. A
+            // foreign token doesn't (each org has its own auth store), so
+            // this also stops one org's members being read with another
+            // org's session.
+            let Ok(bundle) = self.current_session(CurrentSession { token }).await else {
+                return Err(AuthFlowError::PermissionDenied);
+            };
+            // Precise path: valid session for THIS org + real membership rows.
+            if let Some(org_id) = bundle.session.active_organization_id {
                         let members = self.storage.list_members_by_organization(org_id).await?;
                         if !members.is_empty() {
                             let mut out = Vec::with_capacity(members.len());
@@ -114,8 +130,9 @@ pub mod admin {
                         }
                     }
 
-            // Default: enumerate the org store's users (no membership
-            // rows, or no valid session for this org).
+            // Fallback: a validated session, but this org keeps no
+            // membership rows — enumerate its users. Anonymous callers
+            // never reach here.
             let (users, _total) = self.storage.list_users(0, 1000).await?;
             let out = users
                 .into_iter()
@@ -1296,7 +1313,7 @@ pub mod email_password {
     use chrono::{Duration, Utc};
 
     use crate::{
-        ArchitectAuth, AuthService, AuthStorage, ChangeEmail, ChangePassword,
+        ArchitectAuth, AuthService, AuthStorage, ChangeEmail, ChangePassword, MigrateUserEmail,
         CompletePasswordReset, CreateEmailPasswordUser, DeleteUser, ListAccounts, ListSessions,
         RefreshSession, RequestEmailVerification, RequestPasswordReset, RevokeOtherSessions,
         RevokeSession, SignInEmailPassword, VerificationToken, VerifyEmail,
@@ -1762,9 +1779,101 @@ pub mod email_password {
             {
                 return Err(AuthFlowError::InvalidInput("email already exists".into()));
             }
+            let previous_email = bundle.user.email.clone();
+            let user = self
+                .storage
+                .update_user_email(bundle.user.id, canonical_email.clone(), false)
+                .await?;
+            // Every path that changes an address appends to the trail, so
+            // the history is complete rather than "whatever remembered to
+            // write". `changed_by: None` = the user changed their own.
             self.storage
-                .update_user_email(bundle.user.id, canonical_email, false)
-                .await
+                .record_email_change(user.id, previous_email, canonical_email, None, None)
+                .await?;
+            Ok(user)
+        }
+
+        /// Migrate an account onto a different address, keeping the same
+        /// user id and appending to the email trail.
+        ///
+        /// The id staying put is the point: it is what tasks, timers,
+        /// sessions and authorship are keyed on, so renaming an address
+        /// must not mint a new account. Creating one and abandoning the
+        /// old would orphan all of it, which is the failure this exists to
+        /// avoid.
+        ///
+        /// Takes a `user_id` rather than a session, so an operator can run
+        /// it for someone who cannot sign in — which is the usual reason a
+        /// migration is needed at all. Authorization is the CALLER's job:
+        /// this is a storage-level operation, exposed only where the
+        /// surface around it enforces who may ask.
+        ///
+        /// Sessions are deliberately left alone. They key on the user id,
+        /// so they survive the rename; a migration is not a credential
+        /// change and should not sign anyone out.
+        pub async fn migrate_user_email(
+            &self,
+            input: MigrateUserEmail,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            let canonical_email = normalize_email(&input.new_email)?;
+            let user = self
+                .storage
+                .find_user_by_id(input.user_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            let previous_email = user.email.clone();
+            if previous_email.as_deref() == Some(canonical_email.as_str()) {
+                // Already there. Not an error — a re-run of a bulk
+                // migration should be a no-op, not a failure — but it must
+                // not append a row saying nothing changed.
+                return Ok(user);
+            }
+            if let Some(existing) = self.storage.find_user_by_email(&canonical_email).await?
+                && existing.id != user.id
+            {
+                return Err(AuthFlowError::InvalidInput(
+                    "another account already uses that email".into(),
+                ));
+            }
+            // Verification resets: the new address has not been proven to
+            // belong to anyone yet, and inheriting the old address's
+            // verified flag would be a lie the rest of the system trusts.
+            let updated = self
+                .storage
+                .update_user_email(user.id, canonical_email.clone(), false)
+                .await?;
+            self.storage
+                .record_email_change(
+                    updated.id,
+                    previous_email,
+                    canonical_email,
+                    input.changed_by,
+                    input.reason,
+                )
+                .await?;
+            Ok(updated)
+        }
+
+        /// Every address this account has held, oldest first.
+        pub async fn list_email_history(
+            &self,
+            user_id: uuid::Uuid,
+        ) -> Result<Vec<auth_proto::email_change::AuthEmailChange>, AuthFlowError> {
+            self.storage.list_email_history(user_id).await
+        }
+
+        /// Which account once held `email` — the reverse lookup that makes
+        /// a migrated address still resolvable ("who was old@…?").
+        pub async fn find_user_by_previous_email(
+            &self,
+            email: &str,
+        ) -> Result<Option<auth_proto::AuthUser>, AuthFlowError> {
+            let canonical = normalize_email(email)?;
+            let Some(user_id) = self.storage.find_user_id_by_previous_email(&canonical).await?
+            else {
+                return Ok(None);
+            };
+            self.storage.find_user_by_id(user_id).await
         }
 
         // r[impl auth.user.delete]
@@ -1851,6 +1960,45 @@ pub mod email_password {
     where
         S: AuthStorage,
     {
+        async fn migrate_user_email(
+            &self,
+            input: auth_proto::service::MigrateUserEmailRequest,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            // Same contract as the vox transport: the session authorizes
+            // the call and names who performed it.
+            let caller = ArchitectAuth::current_session(
+                self,
+                CurrentSession {
+                    token: input.session_token,
+                },
+            )
+            .await?;
+            ArchitectAuth::migrate_user_email(
+                self,
+                MigrateUserEmail {
+                    user_id: input.user_id,
+                    new_email: input.new_email,
+                    changed_by: Some(caller.user.id),
+                    reason: input.reason,
+                },
+            )
+            .await
+        }
+
+        async fn list_email_history(
+            &self,
+            input: auth_proto::service::EmailHistoryRequest,
+        ) -> Result<Vec<auth_proto::email_change::AuthEmailChange>, AuthFlowError> {
+            ArchitectAuth::current_session(
+                self,
+                CurrentSession {
+                    token: input.session_token,
+                },
+            )
+            .await?;
+            ArchitectAuth::list_email_history(self, input.user_id).await
+        }
+
         async fn sign_up_email_password(
             &self,
             input: auth_proto::SignUpEmailPassword,
@@ -1976,6 +2124,7 @@ pub mod email_password {
             BeginOAuthAuthorization, BeginOAuthProxyAuthorization, BeginPasskeyAuthentication,
             BeginPasskeyRegistration, BreachedPasswordFailurePolicy, BreachedPasswordProvider,
             CaptchaFlow, ChangeEmail, ChangePassword, CheckPasswordBreach, CleanupAnonymousUsers,
+            MigrateUserEmail,
             ClearLastLoginMethod, CompletePasskeyAuthentication, CompletePasskeyRegistration,
             CompletePasswordReset, ConfirmTwoFactor, ConsumeOAuthProxyCallback, CreateApiKey,
             CreateDeviceAuthorization, CreateEmailPasswordUser, CreateInvitation,
@@ -2027,6 +2176,10 @@ pub mod email_password {
             invitations: HashMap<Uuid, AuthInvitation>,
             two_factors: HashMap<Uuid, AuthTwoFactor>,
             two_factor_attempts: HashMap<Uuid, i64>,
+            /// Append-only, in insertion order — mirrors the real store's
+            /// "oldest first" ordering without needing timestamps to be
+            /// distinct (tests move fast enough to collide on `Utc::now`).
+            email_history: Vec<auth_proto::email_change::AuthEmailChange>,
         }
 
         #[async_trait]
@@ -2192,6 +2345,55 @@ pub mod email_password {
                 user.email_verified = email_verified;
                 user.updated_at = Utc::now();
                 Ok(user.clone())
+            }
+
+            async fn record_email_change(
+                &self,
+                user_id: Uuid,
+                previous_email: Option<String>,
+                new_email: String,
+                changed_by: Option<Uuid>,
+                reason: Option<String>,
+            ) -> Result<auth_proto::email_change::AuthEmailChange, AuthFlowError> {
+                let record = auth_proto::email_change::AuthEmailChange {
+                    id: Uuid::new_v4(),
+                    user_id,
+                    previous_email,
+                    new_email,
+                    changed_by,
+                    reason,
+                    created_at: Utc::now(),
+                };
+                let mut inner = self.inner.lock().expect("lock memory storage");
+                inner.email_history.push(record.clone());
+                Ok(record)
+            }
+
+            async fn list_email_history(
+                &self,
+                user_id: Uuid,
+            ) -> Result<Vec<auth_proto::email_change::AuthEmailChange>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                Ok(inner
+                    .email_history
+                    .iter()
+                    .filter(|r| r.user_id == user_id)
+                    .cloned()
+                    .collect())
+            }
+
+            async fn find_user_id_by_previous_email(
+                &self,
+                email: &str,
+            ) -> Result<Option<Uuid>, AuthFlowError> {
+                let inner = self.inner.lock().expect("lock memory storage");
+                // Most recent wins, matching the sea-orm impl's ordering.
+                Ok(inner
+                    .email_history
+                    .iter()
+                    .rev()
+                    .find(|r| r.previous_email.as_deref() == Some(email))
+                    .map(|r| r.user_id))
             }
 
             async fn update_user_profile(
@@ -4366,6 +4568,195 @@ pub mod email_password {
         // r[verify auth.password.change.requires-current]
         // r[verify auth.password.change-invalidates]
         // r[verify auth.password.strength-policy]
+        // ── email migration ────────────────────────────────────────
+
+        // Not a test: a helper. Named so it can't be mistaken for one.
+        async fn seed_user_with_email(email: &str) -> (ArchitectAuth<MemoryStorage>, Uuid) {
+            let auth = auth();
+            let bundle = auth
+                .create_email_password_user(CreateEmailPasswordUser {
+                    email: email.into(),
+                    password: "correct horse battery staple".into(),
+                    name: Some("Seed".into()),
+                    username: None,
+                    image: None,
+                    metadata_json: None,
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("create user");
+            let id = bundle.user.id;
+            (auth, id)
+        }
+
+        #[tokio::test]
+        async fn migrating_an_email_keeps_the_user_id() {
+            // THE property. The id is what tasks, timers, sessions and
+            // authorship are keyed on, so a rename must not mint a new
+            // account — doing that would orphan everything silently.
+            let (auth, id) = seed_user_with_email("old@example.com").await;
+            let moved = auth
+                .migrate_user_email(MigrateUserEmail {
+                    user_id: id,
+                    new_email: "new@example.com".into(),
+                    changed_by: None,
+                    reason: None,
+                })
+                .await
+                .expect("migrate");
+            assert_eq!(moved.id, id, "migration must not change the user id");
+            assert_eq!(moved.email.as_deref(), Some("new@example.com"));
+        }
+
+        #[tokio::test]
+        async fn migration_records_the_trail() {
+            let (auth, id) = seed_user_with_email("first@example.com").await;
+            for (to, why) in [
+                ("second@example.com", "domain move"),
+                ("third@example.com", "consolidating"),
+            ] {
+                auth.migrate_user_email(MigrateUserEmail {
+                    user_id: id,
+                    new_email: to.into(),
+                    changed_by: Some(id),
+                    reason: Some(why.into()),
+                })
+                .await
+                .expect("migrate");
+            }
+
+            let history = auth.list_email_history(id).await.expect("history");
+            assert_eq!(history.len(), 2, "one row per change: {history:?}");
+            // Oldest first, and each row links the pair it moved between,
+            // so the chain reads end to end.
+            assert_eq!(history[0].previous_email.as_deref(), Some("first@example.com"));
+            assert_eq!(history[0].new_email, "second@example.com");
+            assert_eq!(history[0].reason.as_deref(), Some("domain move"));
+            assert_eq!(history[1].previous_email.as_deref(), Some("second@example.com"));
+            assert_eq!(history[1].new_email, "third@example.com");
+        }
+
+        #[tokio::test]
+        async fn a_migrated_address_is_still_resolvable() {
+            // The reason the trail exists: after a migration, "who was
+            // old@example.com?" must still have an answer.
+            let (auth, id) = seed_user_with_email("old@example.com").await;
+            auth.migrate_user_email(MigrateUserEmail {
+                user_id: id,
+                new_email: "new@example.com".into(),
+                changed_by: None,
+                reason: None,
+            })
+            .await
+            .expect("migrate");
+
+            let found = auth
+                .find_user_by_previous_email("old@example.com")
+                .await
+                .expect("lookup")
+                .expect("the old address should still resolve");
+            assert_eq!(found.id, id);
+            assert_eq!(found.email.as_deref(), Some("new@example.com"));
+        }
+
+        #[tokio::test]
+        async fn migration_refuses_an_address_another_account_holds() {
+            let (auth, id) = seed_user_with_email("mine@example.com").await;
+            auth.create_email_password_user(CreateEmailPasswordUser {
+                email: "taken@example.com".into(),
+                password: "correct horse battery staple".into(),
+                name: None,
+                username: None,
+                image: None,
+                metadata_json: None,
+                ip_address: None,
+                user_agent: None,
+            })
+            .await
+            .expect("second user");
+
+            let clash = auth
+                .migrate_user_email(MigrateUserEmail {
+                    user_id: id,
+                    new_email: "taken@example.com".into(),
+                    changed_by: None,
+                    reason: None,
+                })
+                .await;
+            assert!(clash.is_err(), "must not collide two accounts onto one address");
+            assert!(
+                auth.list_email_history(id).await.expect("history").is_empty(),
+                "a refused migration must not leave a row in the trail"
+            );
+        }
+
+        #[tokio::test]
+        async fn migrating_to_the_same_address_is_a_no_op() {
+            // Re-running a bulk migration should be safe, and must not
+            // append a row claiming a change that didn't happen.
+            let (auth, id) = seed_user_with_email("same@example.com").await;
+            let again = auth
+                .migrate_user_email(MigrateUserEmail {
+                    user_id: id,
+                    new_email: "same@example.com".into(),
+                    changed_by: None,
+                    reason: None,
+                })
+                .await
+                .expect("no-op migrate");
+            assert_eq!(again.id, id);
+            assert!(auth.list_email_history(id).await.expect("history").is_empty());
+        }
+
+        #[tokio::test]
+        async fn migration_resets_verification() {
+            // The new address hasn't been proven to belong to anyone;
+            // inheriting the old one's verified flag would be a lie the
+            // rest of the system trusts.
+            let (auth, id) = seed_user_with_email("old@example.com").await;
+            let moved = auth
+                .migrate_user_email(MigrateUserEmail {
+                    user_id: id,
+                    new_email: "new@example.com".into(),
+                    changed_by: None,
+                    reason: None,
+                })
+                .await
+                .expect("migrate");
+            assert!(!moved.email_verified);
+        }
+
+        #[tokio::test]
+        async fn self_service_change_email_also_records() {
+            // Every path that changes an address appends, or the trail is
+            // "whatever remembered to write" rather than a record.
+            let (auth, id) = seed_user_with_email("self@example.com").await;
+            let signed_in = auth
+                .sign_in_email_password(SignInEmailPassword {
+                    email: "self@example.com".into(),
+                    password: "correct horse battery staple".into(),
+                    ip_address: None,
+                    user_agent: None,
+                })
+                .await
+                .expect("sign in");
+            auth.change_email(ChangeEmail {
+                session_token: signed_in.token,
+                new_email: "self-new@example.com".into(),
+            })
+            .await
+            .expect("change email");
+
+            let history = auth.list_email_history(id).await.expect("history");
+            assert_eq!(history.len(), 1);
+            assert_eq!(history[0].previous_email.as_deref(), Some("self@example.com"));
+            assert_eq!(
+                history[0].changed_by, None,
+                "self-service changes record no operator"
+            );
+        }
+
         #[tokio::test]
         async fn change_password_requires_current_password() {
             let auth = auth();
