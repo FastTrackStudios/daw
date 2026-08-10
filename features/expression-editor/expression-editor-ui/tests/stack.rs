@@ -53,7 +53,7 @@ fn ppq_doc(seconds: &[f64], row: i32) -> ExpressionDoc {
 fn band() -> Editor {
     let hits = [0.5, 1.0, 1.5];
     let mut ed = Editor::new(frames_doc(172.265625, &hits, 62), viewport());
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
     ed.tracks.rename(0, "Lead Vox");
 
     ed.tracks
@@ -68,7 +68,7 @@ fn band() -> Editor {
     // that makes the shared timeline non-trivial.
     let mut kit = frames_doc(86.1328125, &hits, 1);
     kit.row_space = RowSpace::Bands(SliceBands::default());
-    ed.tracks.push(Track::in_mode("Kit", kit, Mode::Percussive));
+    ed.tracks.push(Track::in_mode("Kit", kit, Mode::UnpitchedAudio));
 
     ed
 }
@@ -83,7 +83,7 @@ fn a_lane_per_track_in_workspace_order() {
     );
     assert_eq!(
         lanes.iter().map(|l| l.mode).collect::<Vec<_>>(),
-        vec![Mode::Audio, Mode::Midi, Mode::Guitar, Mode::Percussive]
+        vec![Mode::PitchedAudio, Mode::Midi, Mode::Guitar, Mode::UnpitchedAudio]
     );
     assert!(lanes[0].active);
     assert!(lanes[1..].iter().all(|l| !l.active));

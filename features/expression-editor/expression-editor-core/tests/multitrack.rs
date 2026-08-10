@@ -24,12 +24,12 @@ fn viewport() -> Viewport {
 /// stacked view exists for.
 fn band() -> Editor {
     let mut ed = Editor::new(doc(), viewport());
-    ed.set_mode(Mode::Audio);
+    ed.set_mode(Mode::PitchedAudio);
     ed.tracks.rename(0, "Lead Vox");
     for (name, mode) in [
         ("Ref MIDI", Mode::Midi),
         ("Guitar", Mode::Guitar),
-        ("Kit", Mode::Percussive),
+        ("Kit", Mode::UnpitchedAudio),
     ] {
         ed.tracks.push(Track::in_mode(name, doc(), mode));
     }
@@ -42,7 +42,7 @@ fn each_track_keeps_its_own_mode() {
     let modes: Vec<Mode> = ed.tracks.tracks().iter().map(|t| t.mode).collect();
     assert_eq!(
         modes,
-        vec![Mode::Audio, Mode::Midi, Mode::Guitar, Mode::Percussive]
+        vec![Mode::PitchedAudio, Mode::Midi, Mode::Guitar, Mode::UnpitchedAudio]
     );
 }
 
@@ -51,10 +51,10 @@ fn switching_track_brings_its_surface_with_it() {
     // Without this the document changes and nothing else does, so a kit
     // gets edited on whatever surface the vocal left behind.
     let mut ed = band();
-    assert_eq!(ed.mode, Mode::Audio);
+    assert_eq!(ed.mode, Mode::PitchedAudio);
 
     assert!(ed.switch_track(3));
-    assert_eq!(ed.mode, Mode::Percussive);
+    assert_eq!(ed.mode, Mode::UnpitchedAudio);
     assert!(matches!(ed.row_space, RowSpace::Bands(_)));
 
     assert!(ed.switch_track(2));
@@ -71,7 +71,7 @@ fn changing_mode_changes_the_active_tracks_mode() {
     ed.set_mode(Mode::Vocals);
     assert_eq!(ed.tracks.track(0).unwrap().mode, Mode::Vocals);
     // And the others are untouched.
-    assert_eq!(ed.tracks.track(3).unwrap().mode, Mode::Percussive);
+    assert_eq!(ed.tracks.track(3).unwrap().mode, Mode::UnpitchedAudio);
 }
 
 #[test]
@@ -210,15 +210,15 @@ fn a_y_coordinate_resolves_to_the_lane_under_it() {
 
 #[test]
 fn a_hand_sized_lane_is_not_resized_by_a_mode_change() {
-    let mut t = Track::in_mode("Kit", doc(), Mode::Percussive);
+    let mut t = Track::in_mode("Kit", doc(), Mode::UnpitchedAudio);
     let natural = t.weight;
-    t.set_mode(Mode::Audio);
+    t.set_mode(Mode::PitchedAudio);
     assert!(
         (t.weight - natural).abs() > f32::EPSILON,
         "an untouched lane follows its mode"
     );
 
     t.weight = 5.0;
-    t.set_mode(Mode::Percussive);
+    t.set_mode(Mode::UnpitchedAudio);
     assert_eq!(t.weight, 5.0, "a hand-sized lane keeps its height");
 }

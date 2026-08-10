@@ -21,35 +21,86 @@ pub enum Mode {
     Midi,
     /// Per-note pitch bend, pressure and timbre.
     Mpe,
+    /// Pitch rows with lyric syllables.
+    Vocals,
     /// Named kit lanes, triangle heads, paint-on-drag.
     Drums,
     /// String roll with frets and techniques.
     Guitar,
-    /// Pitch rows with lyric syllables.
-    Vocals,
-    /// Analyzed audio — the Melodyne surface. Same components, notes
-    /// sourced from pitch tracking instead of MIDI.
-    Audio,
+    /// Analysed audio that has a pitch worth editing — the Melodyne
+    /// surface. Same components, notes sourced from pitch tracking
+    /// instead of MIDI.
+    PitchedAudio,
     /// Analysed audio with no pitch to speak of: drums, percussion,
     /// noise. Hits on spectral bands rather than notes on a scale.
     ///
-    /// Separate from [`Mode::Audio`] because a pitch contour taken from
-    /// unpitched material is noise — it yields notes that flicker
-    /// between octaves and a blob that wanders the grid. Editing what
-    /// is actually there (when each hit lands, how hard) beats editing
-    /// a pitch that was never in the recording.
-    Percussive,
+    /// Separate from [`Mode::PitchedAudio`] because a pitch contour
+    /// taken from unpitched material is noise — it yields notes that
+    /// flicker between octaves and a blob that wanders the grid.
+    /// Editing what is actually there (when each hit lands, how hard)
+    /// beats editing a pitch that was never in the recording.
+    UnpitchedAudio,
+}
+
+/// The two families the modes fall into, for the switcher UI.
+///
+/// The split is *provenance*, and only provenance: a MIDI-family mode
+/// edits events the format already carries, an audio-family mode edits
+/// what analysis found in a recording. That is the axis the write path
+/// turns on — an edit goes back as note events on one side and as
+/// stretch markers plus envelope points on the other.
+///
+/// It is deliberately not the axis the *surface* turns on. `Vocals` is
+/// a MIDI-family mode that draws blobs, carries handles and has a pitch
+/// contour to decompose, exactly like `PitchedAudio`; those questions
+/// are asked one at a time by [`Mode::draws_blobs`],
+/// [`Mode::has_handles`] and [`Mode::has_pitch_shape`], and reading
+/// them off the family instead would get `Vocals` wrong every time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ModeFamily {
+    /// Notes come from a MIDI-shaped source: [`Mode::Midi`],
+    /// [`Mode::Mpe`], [`Mode::Vocals`], [`Mode::Drums`],
+    /// [`Mode::Guitar`].
+    Midi,
+    /// Notes come from analysing a recording: [`Mode::PitchedAudio`],
+    /// [`Mode::UnpitchedAudio`].
+    Audio,
+}
+
+impl ModeFamily {
+    pub const ALL: [ModeFamily; 2] = [ModeFamily::Midi, ModeFamily::Audio];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            ModeFamily::Midi => "MIDI",
+            ModeFamily::Audio => "Audio",
+        }
+    }
+
+    /// The modes in this family, in switcher order.
+    pub fn modes(&self) -> &'static [Mode] {
+        match self {
+            ModeFamily::Midi => &[
+                Mode::Midi,
+                Mode::Mpe,
+                Mode::Vocals,
+                Mode::Drums,
+                Mode::Guitar,
+            ],
+            ModeFamily::Audio => &[Mode::PitchedAudio, Mode::UnpitchedAudio],
+        }
+    }
 }
 
 impl Mode {
     pub const ALL: [Mode; 7] = [
         Mode::Midi,
         Mode::Mpe,
+        Mode::Vocals,
         Mode::Drums,
         Mode::Guitar,
-        Mode::Vocals,
-        Mode::Audio,
-        Mode::Percussive,
+        Mode::PitchedAudio,
+        Mode::UnpitchedAudio,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -59,19 +110,29 @@ impl Mode {
             Mode::Drums => "Drums",
             Mode::Guitar => "Guitar",
             Mode::Vocals => "Vocals",
-            Mode::Audio => "Audio",
-            Mode::Percussive => "Percussive",
+            Mode::PitchedAudio => "Pitched Audio",
+            Mode::UnpitchedAudio => "Unpitched Audio",
+        }
+    }
+
+    /// Which family this mode belongs to, for grouping the switcher.
+    pub fn family(&self) -> ModeFamily {
+        match self {
+            Mode::Midi | Mode::Mpe | Mode::Vocals | Mode::Drums | Mode::Guitar => {
+                ModeFamily::Midi
+            }
+            Mode::PitchedAudio | Mode::UnpitchedAudio => ModeFamily::Audio,
         }
     }
 
     /// Whether this mode's notes came from analysing a recording.
     pub fn is_analysed_audio(&self) -> bool {
-        matches!(self, Mode::Audio | Mode::Percussive)
+        matches!(self.family(), ModeFamily::Audio)
     }
 
     /// Whether notes draw as hits on a waveform rather than as a roll.
     pub fn draws_slices(&self) -> bool {
-        matches!(self, Mode::Percussive)
+        matches!(self, Mode::UnpitchedAudio)
     }
 
     /// Whether a note in this mode has a pitch worth editing at all.
@@ -82,7 +143,7 @@ impl Mode {
     /// is written as stretch markers and envelope points, never as a
     /// re-render, so there is nothing for a pitch change to write to.
     pub fn has_pitch(&self) -> bool {
-        !matches!(self, Mode::Percussive)
+        !matches!(self, Mode::UnpitchedAudio)
     }
 
     /// Whether the per-note expression lanes are meaningful.
@@ -90,7 +151,7 @@ impl Mode {
     /// Plain MIDI has no per-note pressure or timbre — showing those
     /// lane buttons would offer an edit the format cannot carry.
     pub fn has_expression_lanes(&self) -> bool {
-        matches!(self, Mode::Mpe | Mode::Audio)
+        matches!(self, Mode::Mpe | Mode::PitchedAudio)
     }
 
     /// Whether MPE channel management applies.
@@ -113,7 +174,7 @@ impl Mode {
     /// They need a continuous pitch contour to decompose. A plain MIDI
     /// note has a flat one, so the controls would do nothing.
     pub fn has_pitch_shape(&self) -> bool {
-        matches!(self, Mode::Audio | Mode::Mpe | Mode::Vocals)
+        matches!(self, Mode::PitchedAudio | Mode::Mpe | Mode::Vocals)
     }
 
     /// Whether notes draw as amplitude blobs rather than bars.
@@ -128,7 +189,7 @@ impl Mode {
     /// and a MIDI editor are both `RowSpace::Pitch`, and only one of
     /// them has an envelope to draw.
     pub fn draws_blobs(&self) -> bool {
-        matches!(self, Mode::Audio | Mode::Vocals)
+        matches!(self, Mode::PitchedAudio | Mode::Vocals)
     }
 
     /// Whether the note carries the seven drag handles.
@@ -138,12 +199,12 @@ impl Mode {
     /// has none of that, so the handles would be six inert targets
     /// cluttering every note.
     pub fn has_handles(&self) -> bool {
-        matches!(self, Mode::Audio | Mode::Vocals)
+        matches!(self, Mode::PitchedAudio | Mode::Vocals)
     }
 
     /// Whether microtonal tuning targets are worth showing.
     pub fn has_tuning(&self) -> bool {
-        !matches!(self, Mode::Drums | Mode::Percussive)
+        !matches!(self, Mode::Drums | Mode::UnpitchedAudio)
     }
 
     /// Which expression lanes start visible.
@@ -157,7 +218,7 @@ impl Mode {
 
     pub fn default_strip(&self) -> StripLane {
         match self {
-            Mode::Mpe | Mode::Audio => StripLane::Expression(Lane::Pressure),
+            Mode::Mpe | Mode::PitchedAudio => StripLane::Expression(Lane::Pressure),
             _ => StripLane::Velocity,
         }
     }
@@ -171,10 +232,10 @@ impl Mode {
     /// preference about importance.
     pub fn stack_weight(&self) -> f32 {
         match self {
-            Mode::Percussive => 0.6,
+            Mode::UnpitchedAudio => 0.6,
             Mode::Drums => 1.0,
             Mode::Guitar => 0.8,
-            Mode::Audio | Mode::Vocals => 1.4,
+            Mode::PitchedAudio | Mode::Vocals => 1.4,
             Mode::Midi | Mode::Mpe => 1.0,
         }
     }
@@ -183,7 +244,7 @@ impl Mode {
         match self {
             Mode::Drums => RowSpace::Drums(DrumMap::general_midi()),
             Mode::Guitar => RowSpace::Strings(StringTuning::guitar_standard()),
-            Mode::Percussive => RowSpace::Bands(SliceBands::default()),
+            Mode::UnpitchedAudio => RowSpace::Bands(SliceBands::default()),
             _ => RowSpace::Pitch,
         }
     }

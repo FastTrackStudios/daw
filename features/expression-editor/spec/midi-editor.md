@@ -235,12 +235,15 @@ sine/power, `S` toggles symmetric. Transforms always run from a captured
 snapshot, never the live state — the Lua original calls this out as why
 it keeps float positions between steps.
 
-**Modes** (`mode.rs`) — MIDI / MPE / Drums / Guitar / Vocals / Audio.
-Each is a *preset*, not a lock: it sets the row space, mouse map,
-visible lanes and strip, all of which stay editable. The top bar is
-conditional on it, so MPE channel controls and the per-note expression
-lanes only appear where the format can carry them. Audio is the
-Melodyne surface — same components, notes sourced from pitch tracking.
+**Modes** (`mode.rs`) — MIDI / MPE / Vocals / Drums / Guitar, then
+PitchedAudio / UnpitchedAudio. Each is a *preset*, not a lock: it sets
+the row space, mouse map, visible lanes and strip, all of which stay
+editable. The top bar is conditional on it, so MPE channel controls and
+the per-note expression lanes only appear where the format can carry
+them. PitchedAudio is the Melodyne surface — same components, notes
+sourced from pitch tracking. The switcher groups them by
+`Mode::family()`: the first five are `ModeFamily::Midi`, the last two
+`ModeFamily::Audio`. Quantize and Align are *tools*, not modes.
 
 **Controller lanes are done.** `EditCcEvents` was bound in the preset
 and handled nowhere, and `ShapeCc` / `ScaleCc` / `EraseCc` were
