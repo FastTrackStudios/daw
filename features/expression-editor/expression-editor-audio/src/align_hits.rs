@@ -1,6 +1,6 @@
 //! Aligning percussion by its hits.
 //!
-//! [`crate::align`] matches two takes frame by frame on energy, with
+//! [`mod@crate::align`] matches two takes frame by frame on energy, with
 //! pitch as a weak cue. It works on a kit — energy is exactly what a kit
 //! has — but the parts of it that make it *good* on a vocal do nothing
 //! here: pairing voiced spans at zero cost matters when there are voiced
