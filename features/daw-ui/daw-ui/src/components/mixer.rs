@@ -147,6 +147,19 @@ pub fn MixerPanel() -> Element {
     }
 }
 
+/// One strip, for a caller that already has its track.
+///
+/// [`MixerPanel`] polls the DAW for a track list and owns the subscriptions;
+/// a test, a playground or a design review has the tracks in hand and wants
+/// only the strip. Public so the assembled strip can be exercised — and
+/// photographed — without a backend behind it.
+#[component]
+pub fn ChannelStripPreview(track: Track, #[props(default)] index: u32) -> Element {
+    rsx! {
+        ChannelStrip { track, fx_tree: FxTree::default(), index }
+    }
+}
+
 // ── Channel Strip ───────────────────────────────────────────────────
 
 #[derive(Props, Clone)]
@@ -201,26 +214,39 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
         div {
             class: "flex flex-col h-full w-[72px] flex-shrink-0 border-r {selected_border} bg-zinc-900",
 
-            // ── FX Block Strip (top) ────────────────────────────
-            // Shows colored rectangles for each top-level FX/container
+            // REAPER's MCP stacks its strip in a fixed order, and a mixer
+            // that reorders them stops being readable by anyone who knows
+            // the host: FX at the top, then pan, then the input controls,
+            // then the fader and meter taking whatever height is left, then
+            // a fixed block at the bottom carrying identity.
+            //
+            // Layout is Tailwind because layout lives *outside* the `<svg>`
+            // elements, where every target runs a real CSS engine — the
+            // browser on web, Stylo and Taffy in every desktop, plugin and
+            // REAPER window. Inside an `<svg>` there is no box model and no
+            // custom properties, which is why the art states its own values
+            // and takes none from here.
+
+            // ── FX ──────────────────────────────────────────────
             div { class: "flex flex-col gap-px px-0.5 py-1 flex-shrink-0 min-h-[40px] max-h-[120px] overflow-y-auto",
                 for node in fx_tree.nodes.iter() {
                     {
                         let (name, block_color) = match &node.kind {
                             FxNodeKind::Container { name, .. } => {
-                                // Containers get the track color
                                 (name.as_str().to_string(), color_css.clone())
                             }
                             FxNodeKind::Plugin(fx) => {
-                                // Plugins get a dimmer color
                                 (fx.name.clone(), "#3f3f46".to_string())
                             }
                         };
-                        let is_enabled = node.enabled;
-                        let opacity = if is_enabled { "1.0" } else { "0.4" };
+                        let opacity = if node.enabled { "1.0" } else { "0.4" };
                         rsx! {
                             div {
                                 class: "w-full rounded-sm px-1 py-px text-center truncate",
+                                // Explicit, not a class: a block that loses
+                                // its colour and line-height when the sheet
+                                // is late reads as a broken chain rather
+                                // than an unstyled one.
                                 style: "background-color: {block_color}; opacity: {opacity}; font-size: 8px; color: white; line-height: 1.4;",
                                 title: "{name}",
                                 "{name}"
@@ -229,46 +255,20 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                     }
                 }
             }
-
-            // ── Separator ───────────────────────────────────────
-            div { class: "border-t border-zinc-700 mx-1" }
-
-            // ── M / S / FX buttons ──────────────────────────────
-            div { class: "flex items-center justify-center gap-0.5 px-0.5 py-1 flex-shrink-0",
-                // Mute — the vector control, which is the same component
-                // the REAPER theme's `mcp_mute_*` sprite is rasterised
-                // from. It reads its own state from the track store and
-                // toggles through the DAW itself, so it does not take
-                // `track.muted` from this panel's poll.
+            div { class: "flex items-center justify-center gap-0.5 px-0.5 pb-1 flex-shrink-0",
                 MuteButton { track: track.guid.clone() }
                 SoloButton { track: track.guid.clone() }
-                // FX — lit from the store, which the FxCountChanged event
-                // keeps current. The old `if track.fx_count > 0` read this
-                // panel's two-second poll of a field no event ever updated,
-                // so it was right on open and wrong from the first plugin.
                 FxButton { track: track.guid.clone() }
             }
 
-            // ── Volume Fader ────────────────────────────────────
-            //
-            // The vector control, which is the same drawing the REAPER
-            // theme's `mcp_volbg` and `mcp_volthumb` are rasterised from.
-            // It owns the value while a finger is on it, so it does not
-            // wait on this panel's poll or on the engine.
-            div { class: "flex-1 flex flex-row items-stretch justify-center gap-1 px-2 py-1 min-h-0",
-                VolumeFader { track: track.guid.clone() }
-                TrackMeter { track: track.guid.clone(), height: 120 }
-            }
+            div { class: "border-t border-zinc-700 mx-1" }
 
-            // ── dB readout + pan ────────────────────────────────
-            div { class: "text-center px-1 flex-shrink-0",
-                div { class: "text-[9px] font-mono text-zinc-400", "{db_label}" }
-            }
+            // ── Pan ─────────────────────────────────────────────
             div { class: "flex items-center justify-center py-1 flex-shrink-0",
                 PanKnob { track: track.guid.clone() }
             }
 
-            // ── Record arm / monitoring / polarity ──────────────
+            // ── Input ───────────────────────────────────────────
             div { class: "flex items-center justify-center gap-1 py-1 flex-shrink-0",
                 RecordArmButton { track: track.guid.clone() }
                 MonitorButton { track: track.guid.clone() }
@@ -276,6 +276,19 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 IoButton { track: track.guid.clone() }
             }
             RecordInputLabel { track: track.guid.clone() }
+
+            // ── Fader and meter ─────────────────────────────────
+            //
+            // `flex-1` and `min-h-0`: this is the region that absorbs the
+            // strip's height, which is what gives the fader's stretch band
+            // something to stretch into.
+            div { class: "flex-1 flex flex-row items-stretch justify-center gap-1 px-2 py-1 min-h-0",
+                VolumeFader { track: track.guid.clone() }
+                TrackMeter { track: track.guid.clone(), height: 120 }
+            }
+            div { class: "text-center px-1 flex-shrink-0",
+                div { class: "text-[9px] font-mono text-zinc-400", "{db_label}" }
+            }
 
             // ── Track Name + Number (bottom) ────────────────────
             div {

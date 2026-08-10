@@ -75,6 +75,19 @@ pub fn UiTestPanel() -> Element {
 #[component]
 pub fn MixerStripPanel() -> Element {
     rsx! {
+        // Embedded as a static string, never linked by URL and never
+        // through the asset pipeline. Every Blitz window in this tree
+        // builds a dummy network provider with no base URL, so a linked
+        // stylesheet is fetched into a void and silently never arrives —
+        // a total, deterministic failure that looks like a styling bug.
+        //
+        // The strip must render correctly without this, and does: layout
+        // outside the `<svg>` elements is Tailwind, but everything
+        // layout-critical is stated inline. The sheet is polish, not
+        // structure.
+        document::Style { {TAILWIND_CSS} }
+        document::Style { {BLITZ_FIXES} }
+
         crate::components::mixer::MixerPanel {}
     }
 }
