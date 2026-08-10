@@ -224,7 +224,7 @@ pub fn joins(ed: &Editor) -> Vec<Join> {
             let mid = ((x0 + x1) * 0.5, (ya + yb) * 0.5);
             let d = match kind {
                 JoinKind::Hopo(_) => {
-                    let lift = (ed.camera.px_per_semitone * 0.55).clamp(5.0, 16.0);
+                    let lift = (ed.camera.vertical.px_per_row * 0.55).clamp(5.0, 16.0);
                     format!(
                         "M {x0:.1} {ya:.1} Q {:.1} {:.1} {x1:.1} {yb:.1}",
                         mid.0,

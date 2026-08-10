@@ -48,7 +48,7 @@ pub mod tracks;
 pub mod tuning;
 pub mod zoom;
 
-pub use camera::{Bounds, Camera, Content, Viewport};
+pub use camera::{Bounds, Camera, Content, VerticalCamera, Viewport};
 pub use cc::{CcDisplay, CcLane, CcSet};
 pub use chord::Chord;
 pub use doc::{Curve, CurveShape, ExpressionDoc, Dimension, Marker, Note, NoteId, Point, Target, TimeBase};

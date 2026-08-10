@@ -4,7 +4,7 @@
 //! which is the point of keeping the engine dependency-free.
 
 use expression_editor_core::blob;
-use expression_editor_core::camera::{self, Bounds, Camera, Content, Viewport};
+use expression_editor_core::camera::{self, Bounds, Camera, Content, VerticalCamera, Viewport};
 use expression_editor_core::doc::{
     Curve, ExpressionDoc, Dimension, Note, NoteId, Point, Target, TimeBase,
 };
@@ -669,7 +669,7 @@ fn reset_view_frames_the_content_with_headroom() {
     let (t0, t1) = cam.time_span(vp);
     assert!(t0 < c.t_start && t1 > c.t_end);
     assert!(
-        (cam.pitch_center - 64.0).abs() < 1e-6,
+        (cam.vertical.center - 64.0).abs() < 1e-6,
         "centered on the content midpoint"
     );
 }
@@ -688,8 +688,7 @@ fn a_full_weight_influence_fully_replaces_the_base() {
     let target = Camera {
         t0: 1234.0,
         units_per_px: 2.0,
-        pitch_center: 70.0,
-        px_per_semitone: 20.0,
+        vertical: VerticalCamera { center: 70.0, px_per_row: 20.0 },
     };
     let out = camera::blend(
         base,
@@ -699,7 +698,7 @@ fn a_full_weight_influence_fully_replaces_the_base() {
         }],
     );
     assert!((out.t0 - target.t0).abs() < 1e-6);
-    assert!((out.px_per_semitone - target.px_per_semitone).abs() < 1e-6);
+    assert!((out.vertical.px_per_row - target.vertical.px_per_row).abs() < 1e-6);
 }
 
 #[test]
@@ -707,8 +706,7 @@ fn scales_blend_geometrically_so_zoom_stays_even() {
     let base = Camera {
         t0: 0.0,
         units_per_px: 1.0,
-        pitch_center: 60.0,
-        px_per_semitone: 10.0,
+        vertical: VerticalCamera { center: 60.0, px_per_row: 10.0 },
     };
     let target = Camera {
         units_per_px: 100.0,
@@ -753,7 +751,7 @@ fn the_reset_tail_stays_out_until_the_final_stretch() {
     // Deep zoom-in: nowhere near reset.
     let deep = Camera {
         units_per_px: reset.units_per_px / 50.0,
-        px_per_semitone: reset.px_per_semitone * 50.0,
+        vertical: VerticalCamera { px_per_row: reset.vertical.px_per_row * 50.0, ..reset.vertical },
         ..reset
     };
     assert!(
@@ -779,14 +777,13 @@ fn constrain_never_shows_more_than_the_cushioned_item() {
     let mut cam = Camera {
         t0: -99999.0,
         units_per_px: 1000.0,
-        pitch_center: 200.0,
-        px_per_semitone: 0.001,
+        vertical: VerticalCamera { center: 200.0, px_per_row: 0.001 },
     };
     cam.constrain(bounds, vp);
     let (t0, t1) = cam.time_span(vp);
     assert!(t1 - t0 <= 4000.0 + 1e-6);
-    assert!(cam.pitch_center <= 127.0 && cam.pitch_center >= 0.0);
-    assert!(cam.px_per_semitone >= bounds.min_px_per_semitone);
+    assert!(cam.vertical.center <= 127.0 && cam.vertical.center >= 0.0);
+    assert!(cam.vertical.px_per_row >= bounds.min_px_per_semitone);
     assert!(t0 >= bounds.t_min - (t1 - t0) * bounds.edge_whitespace - 1e-6);
 }
 
@@ -1797,8 +1794,7 @@ fn vertical_fit_respects_the_row_floor_and_ceiling() {
     let cam = Camera {
         t0: 0.0,
         units_per_px: 10.0,
-        pitch_center: 60.0,
-        px_per_semitone: 10.0,
+        vertical: VerticalCamera { center: 60.0, px_per_row: 10.0 },
     };
     // One note: without a floor this would fill the screen with a
     // single row.
@@ -1813,9 +1809,9 @@ fn vertical_fit_respects_the_row_floor_and_ceiling() {
         (0.0, 8000.0),
         cfg,
     );
-    assert!(out.px_per_semitone <= cfg.max_px_per_row);
+    assert!(out.vertical.px_per_row <= cfg.max_px_per_row);
     assert!(
-        vp.h / out.px_per_semitone >= cfg.min_rows - 1e-6,
+        vp.h / out.vertical.px_per_row >= cfg.min_rows - 1e-6,
         "at least min_rows must stay visible"
     );
 }
@@ -1826,8 +1822,7 @@ fn notes_in_view_ignores_notes_outside_the_horizontal_span() {
     let cam = Camera {
         t0: 0.0,
         units_per_px: 1.0,
-        pitch_center: 60.0,
-        px_per_semitone: 10.0,
+        vertical: VerticalCamera { center: 60.0, px_per_row: 10.0 },
     };
     let mut spans = spans_at(&[0.0], 240.0, 60);
     spans.extend(spans_at(&[50_000.0], 240.0, 100)); // far away, high
@@ -1841,7 +1836,7 @@ fn notes_in_view_ignores_notes_outside_the_horizontal_span() {
         SmartZoom::default(),
     );
     assert!(
-        (out.pitch_center - 60.0).abs() < 1e-6,
+        (out.vertical.center - 60.0).abs() < 1e-6,
         "the offscreen note must not drag the view up"
     );
 }
@@ -1875,9 +1870,9 @@ fn contextual_modes_zoom_differently_per_pointer_region() {
     );
 
     // The ruler leaves pitch alone entirely.
-    let before = ed.camera.px_per_semitone;
+    let before = ed.camera.vertical.px_per_row;
     ed.smart_zoom(ZoomModes::RULER, anchor, 62.0);
-    assert_eq!(ed.camera.px_per_semitone, before);
+    assert_eq!(ed.camera.vertical.px_per_row, before);
 }
 
 #[test]

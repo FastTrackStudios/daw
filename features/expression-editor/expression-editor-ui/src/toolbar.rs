@@ -400,7 +400,7 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                                 (
                                     ed.playhead
                                         .unwrap_or_else(|| ed.camera.t_at(ed.viewport.w * 0.5)),
-                                    ed.camera.pitch_center,
+                                    ed.camera.vertical.center,
                                 )
                             };
                             editor.write().smart_zoom(

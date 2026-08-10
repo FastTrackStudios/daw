@@ -102,10 +102,13 @@ pub struct Camera {
     pub t0: f64,
     /// Horizontal scale.
     pub units_per_px: f64,
-    /// MIDI pitch at the vertical center.
-    pub pitch_center: f64,
-    /// Vertical scale — the height of one semitone row.
-    pub px_per_semitone: f64,
+    /// The vertical half.
+    ///
+    /// One type, shared with lanes: the roll is a second consumer of
+    /// vertical position, so this is a *move* rather than the deletion
+    /// #197 first assumed. Two implementations of the same arithmetic
+    /// was the thing worth removing, not the fields.
+    pub vertical: VerticalCamera,
 }
 
 /// Hard limits applied after every navigation. These are clamps, not
@@ -146,11 +149,11 @@ impl Camera {
     }
 
     pub fn y(&self, pitch: f64, vp: Viewport) -> f64 {
-        vp.h * 0.5 - (pitch - self.pitch_center) * self.px_per_semitone
+        vp.h * 0.5 - (pitch - self.vertical.center) * self.vertical.px_per_row
     }
 
     pub fn pitch_at(&self, y: f64, vp: Viewport) -> f64 {
-        self.pitch_center + (vp.h * 0.5 - y) / self.px_per_semitone
+        self.vertical.center + (vp.h * 0.5 - y) / self.vertical.px_per_row
     }
 
     /// `(t_left, t_right)`.
@@ -160,8 +163,8 @@ impl Camera {
 
     /// `(pitch_low, pitch_high)`.
     pub fn pitch_span(&self, vp: Viewport) -> (f64, f64) {
-        let half = vp.h * 0.5 / self.px_per_semitone;
-        (self.pitch_center - half, self.pitch_center + half)
+        let half = vp.h * 0.5 / self.vertical.px_per_row;
+        (self.vertical.center - half, self.vertical.center + half)
     }
 
     /// Zoom time by `factor` (>1 zooms in) keeping `anchor_t` pinned to
@@ -175,13 +178,13 @@ impl Camera {
     /// Zoom pitch by `factor` keeping `anchor_pitch` pinned.
     pub fn zoom_pitch_about(&mut self, anchor_pitch: f64, factor: f64, vp: Viewport) {
         let y = self.y(anchor_pitch, vp);
-        self.px_per_semitone *= factor.max(1e-6);
-        self.pitch_center = anchor_pitch - (vp.h * 0.5 - y) / self.px_per_semitone;
+        self.vertical.px_per_row *= factor.max(1e-6);
+        self.vertical.center = anchor_pitch - (vp.h * 0.5 - y) / self.vertical.px_per_row;
     }
 
     pub fn pan_px(&mut self, dx: f64, dy: f64) {
         self.t0 -= dx * self.units_per_px;
-        self.pitch_center += dy / self.px_per_semitone;
+        self.vertical.center += dy / self.vertical.px_per_row;
     }
 
     /// Clamp to `bounds`. Applied once, after blending.
@@ -199,10 +202,10 @@ impl Camera {
             (bounds.t_max + slack - visible).max(bounds.t_min - slack),
         );
 
-        self.px_per_semitone = self
-            .px_per_semitone
+        self.vertical.px_per_row = self
+            .vertical.px_per_row
             .clamp(bounds.min_px_per_semitone, bounds.max_px_per_semitone);
-        self.pitch_center = self.pitch_center.clamp(0.0, 127.0);
+        self.vertical.center = self.vertical.center.clamp(0.0, 127.0);
     }
 }
 
@@ -230,23 +233,25 @@ pub fn blend(base: Camera, influences: &[Influence]) -> Camera {
     let base_w = (1.0 - total * norm).max(0.0);
 
     let mut t0 = base.t0 * base_w;
-    let mut pitch_center = base.pitch_center * base_w;
+    let mut center = base.vertical.center * base_w;
     let mut log_upp = base.units_per_px.max(1e-12).ln() * base_w;
-    let mut log_pps = base.px_per_semitone.max(1e-12).ln() * base_w;
+    let mut log_pps = base.vertical.px_per_row.max(1e-12).ln() * base_w;
 
     for i in influences {
         let w = i.weight.clamp(0.0, 1.0) * norm;
         t0 += i.camera.t0 * w;
-        pitch_center += i.camera.pitch_center * w;
+        center += i.camera.vertical.center * w;
         log_upp += i.camera.units_per_px.max(1e-12).ln() * w;
-        log_pps += i.camera.px_per_semitone.max(1e-12).ln() * w;
+        log_pps += i.camera.vertical.px_per_row.max(1e-12).ln() * w;
     }
 
     Camera {
         t0,
         units_per_px: log_upp.exp(),
-        pitch_center,
-        px_per_semitone: log_pps.exp(),
+        vertical: VerticalCamera {
+            center,
+            px_per_row: log_pps.exp(),
+        },
     }
 }
 
@@ -273,13 +278,15 @@ pub fn reset_view(content: Content, vp: Viewport, cushion: f64, pad: f64) -> Cam
     let pitch_span = (content.pitch_hi - content.pitch_lo).max(1.0) * (1.0 + 2.0 * pad);
     // Reset View keeps a readable floor of its own, above the manual
     // zoom-out floor, so `V` always lands somewhere legible.
-    let px_per_semitone = (vp.h / pitch_span).max(7.0);
+    let px_per_row = (vp.h / pitch_span).max(7.0);
 
     Camera {
         t0,
         units_per_px,
-        pitch_center: (content.pitch_lo + content.pitch_hi) * 0.5,
-        px_per_semitone,
+        vertical: VerticalCamera {
+            center: (content.pitch_lo + content.pitch_hi) * 0.5,
+            px_per_row,
+        },
     }
 }
 
@@ -328,7 +335,7 @@ pub fn edge_magnet(
 /// the reset camera.
 pub fn reset_progress(current: Camera, reset: Camera) -> f64 {
     let h = axis_progress(current.units_per_px, reset.units_per_px);
-    let v = axis_progress(reset.px_per_semitone, current.px_per_semitone);
+    let v = axis_progress(reset.vertical.px_per_row, current.vertical.px_per_row);
     h.max(v)
 }
 
@@ -373,7 +380,7 @@ pub fn pitch_focus(
     if let Some(p) = local_pitch {
         out.push(Influence {
             camera: Camera {
-                pitch_center: p,
+                vertical: VerticalCamera { center: p, ..base.vertical },
                 ..base
             },
             weight: local_weight,
@@ -381,7 +388,7 @@ pub fn pitch_focus(
     }
     out.push(Influence {
         camera: Camera {
-            pitch_center: mouse_pitch,
+            vertical: VerticalCamera { center: mouse_pitch, ..base.vertical },
             ..base
         },
         weight: mouse_weight,
@@ -397,11 +404,14 @@ pub fn deep_zoom_center(
     onset: f64,
     max_px_per_semitone: f64,
 ) -> Option<Influence> {
-    let depth = base.px_per_semitone / max_px_per_semitone.max(1e-6);
+    let depth = base.vertical.px_per_row / max_px_per_semitone.max(1e-6);
     let weight = smoothstep(smoothstep_between(onset, 1.0, depth));
     (weight > 0.0).then_some(Influence {
         camera: Camera {
-            pitch_center: (content.pitch_lo + content.pitch_hi) * 0.5,
+            vertical: VerticalCamera {
+                center: (content.pitch_lo + content.pitch_hi) * 0.5,
+                ..base.vertical
+            },
             ..base
         },
         weight,
