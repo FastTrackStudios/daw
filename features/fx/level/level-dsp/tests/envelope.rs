@@ -286,8 +286,7 @@ fn the_composite_is_the_sum_in_db() {
         gate: flat(-3.0),
         breath: flat(-2.0),
         ride: flat(4.0),
-        sibilance: Vec::new(),
-    };
+        sibilance: Vec::new(), ..Default::default() };
     let env = composite(&parts);
     assert!((at(&env, 0.5) - (-1.0)).abs() < 1e-9, "-3 -2 +4 = -1");
 }
@@ -302,8 +301,7 @@ fn sibilance_only_applies_across_its_span() {
             from_s: 0.4,
             to_s: 0.6,
             db: -5.0,
-        }],
-    };
+        }], ..Default::default() };
     let env = composite(&parts);
     assert!((at(&env, 0.2) - 0.0).abs() < 1e-9, "before the ess");
     assert!((at(&env, 0.5) - (-5.0)).abs() < 1e-9, "during it");
@@ -316,8 +314,7 @@ fn a_closed_gate_is_silent_but_finite() {
         gate: flat(-400.0),
         breath: Vec::new(),
         ride: Vec::new(),
-        sibilance: Vec::new(),
-    };
+        sibilance: Vec::new(), ..Default::default() };
     let env = composite(&parts);
     assert!(env.iter().all(|p| p.db.is_finite()), "no infinities escape");
     assert!(env.iter().all(|p| p.db >= COMPOSITE_FLOOR_DB - 1e-9));
@@ -332,8 +329,7 @@ fn a_hand_dragged_zero_does_not_produce_an_infinity_downstream() {
         gate: Vec::new(),
         breath: flat(f64::NEG_INFINITY),
         ride: Vec::new(),
-        sibilance: Vec::new(),
-    };
+        sibilance: Vec::new(), ..Default::default() };
     let env = composite(&parts);
     assert!(env.iter().all(|p| p.db.is_finite()));
 }
@@ -344,8 +340,7 @@ fn editing_one_contribution_recomputes_the_composite() {
         gate: flat(0.0),
         breath: Vec::new(),
         ride: flat(0.0),
-        sibilance: Vec::new(),
-    };
+        sibilance: Vec::new(), ..Default::default() };
     let before = at(&composite(&parts), 0.5);
     parts.ride = flat(6.0);
     let after = at(&composite(&parts), 0.5);
@@ -358,8 +353,7 @@ fn bypassing_a_stage_is_leaving_it_out() {
         gate: flat(-10.0),
         breath: Vec::new(),
         ride: flat(3.0),
-        sibilance: Vec::new(),
-    };
+        sibilance: Vec::new(), ..Default::default() };
     let without = Contributions {
         gate: Vec::new(),
         ..with.clone()
@@ -409,8 +403,7 @@ fn every_contributions_breakpoints_reach_the_result() {
             from_s: 0.2,
             to_s: 0.4,
             db: -2.0,
-        }],
-    };
+        }], ..Default::default() };
     let env = composite(&parts);
     for t in [0.0, 0.1, 0.2, 0.3, 0.4, 0.7] {
         assert!(
@@ -423,4 +416,194 @@ fn every_contributions_breakpoints_reach_the_result() {
 #[test]
 fn nothing_at_all_composites_to_nothing() {
     assert!(composite(&Contributions::default()).is_empty());
+}
+
+// ── Bypass (#206) ────────────────────────────────────────────────────
+
+use level_dsp::envelope::{Bypass, Cached, GenerationConfig, config_for, generate};
+
+#[test]
+fn bypassing_removes_a_contribution_and_leaves_the_rest() {
+    let mut parts = Contributions {
+        gate: flat(-10.0),
+        breath: flat(-2.0),
+        ride: flat(3.0),
+        sibilance: Vec::new(),
+        bypass: Bypass::default(),
+    };
+    assert!((at(&composite(&parts), 0.5) - (-9.0)).abs() < 1e-9);
+
+    parts.bypass.gate = true;
+    assert!(
+        (at(&composite(&parts), 0.5) - 1.0).abs() < 1e-9,
+        "the gate is out; breath and ride are untouched"
+    );
+}
+
+#[test]
+fn a_bypassed_curve_is_retained_and_un_bypassing_restores_it_exactly() {
+    let mut parts = Contributions {
+        gate: flat(-10.0),
+        ride: flat(3.0),
+        ..Default::default()
+    };
+    let before = composite(&parts);
+
+    parts.bypass.gate = true;
+    let _ = composite(&parts);
+    parts.bypass.gate = false;
+
+    assert_eq!(
+        composite(&parts),
+        before,
+        "nothing was regenerated, so it comes back bit for bit"
+    );
+    assert_eq!(parts.gate, flat(-10.0), "the curve was never discarded");
+}
+
+#[test]
+fn bypassing_does_not_alter_any_other_curve() {
+    let mut parts = generate(
+        &analyze(&phrase_breath_phrase(), SR, ClassifyConfig::default()),
+        &GenerationConfig::default(),
+    );
+    let ride_before = parts.ride.clone();
+    let breath_before = parts.breath.clone();
+
+    parts.bypass.gate = true;
+    let _ = composite(&parts);
+
+    assert_eq!(parts.ride, ride_before);
+    assert_eq!(parts.breath, breath_before);
+}
+
+#[test]
+fn all_four_bypassed_is_a_flat_unity_composite() {
+    let parts = Contributions {
+        gate: flat(-10.0),
+        breath: flat(-2.0),
+        ride: flat(3.0),
+        sibilance: vec![GainSpan {
+            from_s: 0.1,
+            to_s: 0.2,
+            db: -5.0,
+        }],
+        bypass: Bypass {
+            gate: true,
+            breath: true,
+            sibilance: true,
+            ride: true,
+        },
+    };
+    let env = composite(&parts);
+    assert!(
+        env.is_empty() || env.iter().all(|p| p.db.abs() < 1e-9),
+        "nothing contributes, so nothing is applied"
+    );
+}
+
+// ── Generation policy (#207) ─────────────────────────────────────────
+
+#[test]
+fn the_same_config_hits_the_cache() {
+    let a = analyze(&phrase_breath_phrase(), SR, ClassifyConfig::default());
+    let cfg = GenerationConfig::default();
+    let cached = Cached::generate(&a, &cfg);
+    assert!(
+        cached.is_valid_for(&cfg),
+        "reopening an item you already tuned does not re-run analysis"
+    );
+}
+
+#[test]
+fn changing_a_threshold_invalidates_the_cache() {
+    let a = analyze(&phrase_breath_phrase(), SR, ClassifyConfig::default());
+    let cfg = GenerationConfig::default();
+    let cached = Cached::generate(&a, &cfg);
+
+    let changed = GenerationConfig {
+        gate_threshold_db: -35.0,
+        ..cfg
+    };
+    assert!(!cached.is_valid_for(&changed));
+}
+
+#[test]
+fn nothing_else_invalidates_it() {
+    // The digest covers the settings and only the settings — not the
+    // audio, which does not change under an item, and hashing megabytes
+    // on every open would cost more than the analysis it avoids.
+    let cfg = GenerationConfig::default();
+    let same = GenerationConfig::default();
+    assert_eq!(cfg.digest(), same.digest());
+}
+
+#[test]
+fn every_setting_is_actually_in_the_digest() {
+    // A field left out of the digest is a stale cache nobody can
+    // reproduce, so check each one moves it.
+    let base = GenerationConfig::default();
+    let mutations: Vec<GenerationConfig> = vec![
+        GenerationConfig { gate_threshold_db: -1.0, ..base },
+        GenerationConfig { gate_floor_db: -1.0, ..base },
+        GenerationConfig { breath_reduction_db: 1.0, ..base },
+        GenerationConfig { breath_max_level_db: -1.0, ..base },
+        GenerationConfig { breath_min_level_db: -1.0, ..base },
+        GenerationConfig { sibilance_reduction_db: 1.0, ..base },
+        GenerationConfig { ride_target_db: -1.0, ..base },
+        GenerationConfig { ride_amount: 0.5, ..base },
+        GenerationConfig { ride_max_gain_db: 1.0, ..base },
+        GenerationConfig { ride_max_cut_db: 1.0, ..base },
+        GenerationConfig { tolerance_db: 1.0, ..base },
+    ];
+    for m in mutations {
+        assert_ne!(base.digest(), m.digest(), "a setting is missing from the digest");
+    }
+}
+
+#[test]
+fn an_item_inherits_its_tracks_config_and_can_override_it() {
+    let track = GenerationConfig {
+        breath_reduction_db: 20.0,
+        ..Default::default()
+    };
+    // Thirty comps on that track all start from its threshold.
+    assert_eq!(config_for(None, Some(track)).breath_reduction_db, 20.0);
+
+    // Until one of them is tuned.
+    let tuned = GenerationConfig {
+        breath_reduction_db: 3.0,
+        ..Default::default()
+    };
+    assert_eq!(config_for(Some(tuned), Some(track)).breath_reduction_db, 3.0);
+
+    // And with neither, the defaults.
+    assert_eq!(
+        config_for(None, None).breath_reduction_db,
+        GenerationConfig::default().breath_reduction_db
+    );
+}
+
+#[test]
+fn tuning_one_item_does_not_change_another_on_the_same_track() {
+    let track = GenerationConfig {
+        ride_target_db: -12.0,
+        ..Default::default()
+    };
+    let tuned = GenerationConfig {
+        ride_target_db: -24.0,
+        ..Default::default()
+    };
+    assert_eq!(config_for(Some(tuned), Some(track)).ride_target_db, -24.0);
+    assert_eq!(config_for(None, Some(track)).ride_target_db, -12.0);
+}
+
+#[test]
+fn generation_produces_all_four_from_one_pass() {
+    let a = analyze(&phrase_breath_phrase(), SR, ClassifyConfig::default());
+    let curves = generate(&a, &GenerationConfig::default());
+    assert!(!curves.gate.is_empty());
+    assert!(!curves.breath.is_empty());
+    assert!(!curves.ride.is_empty());
+    assert_eq!(curves.bypass, Bypass::default(), "nothing starts bypassed");
 }
