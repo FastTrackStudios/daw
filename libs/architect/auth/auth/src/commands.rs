@@ -471,6 +471,22 @@ pub struct ChangeEmail {
     pub new_email: String,
 }
 
+/// Move an account onto a different address, keeping its user id.
+///
+/// Identified by `user_id`, not a session: the usual reason to migrate an
+/// address is that the person cannot sign in with the old one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MigrateUserEmail {
+    pub user_id: uuid::Uuid,
+    pub new_email: String,
+    /// The operator performing it. `None` records the change as
+    /// self-service.
+    pub changed_by: Option<uuid::Uuid>,
+    /// Free text for the trail — worth filling in for bulk migrations, so
+    /// the record explains itself months later.
+    pub reason: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeleteUser {
     pub session_token: String,
