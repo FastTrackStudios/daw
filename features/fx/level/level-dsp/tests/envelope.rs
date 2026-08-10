@@ -607,3 +607,171 @@ fn generation_produces_all_four_from_one_pass() {
     assert!(!curves.ride.is_empty());
     assert_eq!(curves.bypass, Bypass::default(), "nothing starts bypassed");
 }
+
+// ── Absorbing an external edit (#209) ────────────────────────────────
+
+use level_dsp::envelope::absorb_into_ride;
+
+#[test]
+fn a_dragged_composite_is_absorbed_into_the_ride() {
+    let mut parts = Contributions {
+        gate: flat(-3.0),
+        breath: flat(-1.0),
+        ride: flat(0.0),
+        ..Default::default()
+    };
+    // Someone drags the take volume envelope up 5 dB in the DAW.
+    let edited: Vec<EnvPoint> = composite(&parts)
+        .into_iter()
+        .map(|p| EnvPoint::new(p.t_s, p.db + 5.0))
+        .collect();
+
+    absorb_into_ride(&mut parts, &edited);
+
+    assert!(
+        (at(&parts.ride, 0.5) - 5.0).abs() < 1e-9,
+        "the ride took the whole delta"
+    );
+}
+
+#[test]
+fn after_absorbing_the_four_sum_to_the_composite_again() {
+    // The invariant that removes any need for a stale state.
+    let mut parts = Contributions {
+        gate: flat(-3.0),
+        breath: flat(-1.0),
+        ride: flat(2.0),
+        sibilance: vec![GainSpan {
+            from_s: 0.3,
+            to_s: 0.4,
+            db: -4.0,
+        }],
+        ..Default::default()
+    };
+    let edited: Vec<EnvPoint> = composite(&parts)
+        .into_iter()
+        .map(|p| EnvPoint::new(p.t_s, p.db - 2.5))
+        .collect();
+
+    absorb_into_ride(&mut parts, &edited);
+
+    for t in [0.05, 0.2, 0.35, 0.6, 0.9] {
+        assert!(
+            (at(&composite(&parts), t) - at(&edited, t)).abs() < 1e-6,
+            "the sum does not match the user's composite at {t}"
+        );
+    }
+}
+
+#[test]
+fn only_the_ride_moves() {
+    let mut parts = Contributions {
+        gate: flat(-3.0),
+        breath: flat(-1.0),
+        ride: flat(0.0),
+        sibilance: vec![GainSpan {
+            from_s: 0.3,
+            to_s: 0.4,
+            db: -4.0,
+        }],
+        ..Default::default()
+    };
+    let gate_before = parts.gate.clone();
+    let breath_before = parts.breath.clone();
+    let sib_before = parts.sibilance.clone();
+
+    let edited: Vec<EnvPoint> = composite(&parts)
+        .into_iter()
+        .map(|p| EnvPoint::new(p.t_s, p.db + 3.0))
+        .collect();
+    absorb_into_ride(&mut parts, &edited);
+
+    assert_eq!(parts.gate, gate_before, "gain would be wrong when it is shut");
+    assert_eq!(parts.breath, breath_before);
+    assert_eq!(
+        parts.sibilance, sib_before,
+        "and sibilance would gain outside its own spans"
+    );
+}
+
+#[test]
+fn absorbing_is_idempotent() {
+    // Reloading without a further external edit must change nothing, or
+    // the ride would drift on every open.
+    let mut parts = Contributions {
+        gate: flat(-3.0),
+        ride: flat(1.0),
+        ..Default::default()
+    };
+    let unchanged = composite(&parts);
+
+    absorb_into_ride(&mut parts, &unchanged);
+    let once = parts.ride.clone();
+    let current = composite(&parts);
+    absorb_into_ride(&mut parts, &current);
+    let twice = parts.ride.clone();
+
+    for t in [0.1, 0.5, 0.9] {
+        assert!((at(&once, t) - at(&twice, t)).abs() < 1e-9);
+        assert!(
+            (at(&twice, t) - 1.0).abs() < 1e-6,
+            "the ride did not drift from where it started"
+        );
+    }
+}
+
+#[test]
+fn a_partial_edit_is_absorbed_only_where_it_happened() {
+    let mut parts = Contributions {
+        ride: flat(0.0),
+        gate: flat(0.0),
+        ..Default::default()
+    };
+    // Louder in the middle only.
+    let edited = vec![
+        EnvPoint::new(0.0, 0.0),
+        EnvPoint::new(0.4, 0.0),
+        EnvPoint::new(0.5, 6.0),
+        EnvPoint::new(0.6, 0.0),
+        EnvPoint::new(1.0, 0.0),
+    ];
+    absorb_into_ride(&mut parts, &edited);
+
+    assert!((at(&parts.ride, 0.5) - 6.0).abs() < 1e-6, "the bump landed");
+    assert!(at(&parts.ride, 0.1).abs() < 1e-6, "and nothing else moved");
+    assert!(at(&parts.ride, 0.9).abs() < 1e-6);
+}
+
+#[test]
+fn nothing_to_absorb_is_a_no_op() {
+    let mut parts = Contributions {
+        ride: flat(2.0),
+        ..Default::default()
+    };
+    let before = parts.ride.clone();
+    absorb_into_ride(&mut parts, &[]);
+    assert_eq!(parts.ride, before);
+}
+
+#[test]
+fn a_bypassed_stage_does_not_reappear_through_absorption() {
+    // The composite excludes a bypassed stage, so the delta is measured
+    // against what is actually playing.
+    let mut parts = Contributions {
+        gate: flat(-10.0),
+        ride: flat(0.0),
+        bypass: Bypass {
+            gate: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let edited: Vec<EnvPoint> = composite(&parts)
+        .into_iter()
+        .map(|p| EnvPoint::new(p.t_s, p.db + 2.0))
+        .collect();
+    absorb_into_ride(&mut parts, &edited);
+
+    assert!((at(&parts.ride, 0.5) - 2.0).abs() < 1e-6);
+    assert!(parts.bypass.gate, "still bypassed");
+}
