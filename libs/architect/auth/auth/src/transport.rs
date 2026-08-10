@@ -772,7 +772,7 @@ pub mod vox {
     use super::CustomSessionTransport;
     use crate::{
         ArchitectAuth, AuthStorage, CreateEmailPasswordUser, CurrentSession, CustomSessionBundle,
-        MigrateUserEmail, RefreshSession, SignOut, flows::bearer_tokens,
+        ChangePassword, MigrateUserEmail, RefreshSession, SignOut, flows::bearer_tokens,
     };
     use auth_proto::{
         AuthFlowError, AuthService, AuthSessionBundle, AuthUser, OrgMember, SignInEmailPassword,
@@ -882,6 +882,22 @@ pub mod vox {
                 })
                 .await?;
             self.auth.list_email_history(input.user_id).await
+        }
+
+        async fn change_password(
+            &self,
+            input: auth_proto::service::ChangePasswordRequest,
+        ) -> Result<(), AuthFlowError> {
+            // No extra checks here: `change_password` already validates
+            // the session, verifies the current password, enforces
+            // strength and rejects breached passwords.
+            self.auth
+                .change_password(ChangePassword {
+                    session_token: input.session_token,
+                    current_password: input.current_password,
+                    new_password: input.new_password,
+                })
+                .await
         }
     }
 

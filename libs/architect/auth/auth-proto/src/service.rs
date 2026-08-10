@@ -42,6 +42,18 @@ pub struct OrgMember {
 /// `AuthServerMiddleware` parses it back out on the server side.
 pub const AUTHORIZATION_METADATA_KEY: &str = "authorization";
 
+/// Wire form of a self-service password change.
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+pub struct ChangePasswordRequest {
+    /// Identifies the account. The change always applies to the session's
+    /// own user — there is no target parameter, by design.
+    pub session_token: String,
+    /// Proof of possession. Required even with a valid session, so a
+    /// stolen token alone cannot take an account over.
+    pub current_password: String,
+    pub new_password: String,
+}
+
 /// Wire form of an operator-performed email migration.
 #[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
 pub struct MigrateUserEmailRequest {
@@ -125,4 +137,16 @@ pub trait AuthService {
         &self,
         input: EmailHistoryRequest,
     ) -> Result<Vec<AuthEmailChange>, AuthFlowError>;
+
+    /// Change your OWN password.
+    ///
+    /// Self-service by construction: the session names the account, and
+    /// the current password must be supplied — so holding a stolen
+    /// session is not enough to lock the owner out, and knowing the
+    /// password is not enough without a session. The flow also enforces
+    /// strength and rejects known-breached passwords.
+    ///
+    /// Distinct from an operator reset, which needs neither and is
+    /// therefore not exposed here at all.
+    async fn change_password(&self, input: ChangePasswordRequest) -> Result<(), AuthFlowError>;
 }

@@ -287,6 +287,65 @@ pub mod admin {
                 .await
         }
 
+        /// Set a user's password with NO admin session.
+        ///
+        /// For operator tooling whose authorization is possession of the
+        /// data root rather than a session — the same basis as
+        /// `OrgManagementImpl::new_local_trusted`. It exists because the
+        /// case that needs it most is precisely the one where no session
+        /// can be had: the owner is locked out.
+        ///
+        /// Keeps every check `admin_set_user_password` applies to the new
+        /// password — strength and known-breach rejection — and creates
+        /// the password account when the user has none (an OAuth-only
+        /// account being given a password). What it drops is only the
+        /// admin lookup and the admin audit row, neither of which has a
+        /// meaning without an admin.
+        ///
+        /// Deliberately NOT exposed over vox: a caller that can reach the
+        /// network surface has not proven possession of anything.
+        pub async fn set_user_password_local_trusted(
+            &self,
+            user_id: uuid::Uuid,
+            new_password: &str,
+        ) -> Result<(), AuthFlowError> {
+            let user = self
+                .storage
+                .find_user_by_id(user_id)
+                .await?
+                .ok_or(AuthFlowError::InvalidCredentials)?;
+            validate_password_strength(new_password)?;
+            self.reject_breached_password(new_password).await?;
+            let password_hash = hash_password(new_password)
+                .map_err(|err| AuthFlowError::Internal(err.to_string()))?;
+            if self
+                .storage
+                .find_password_account_by_user_id(user_id)
+                .await?
+                .is_some()
+            {
+                self.storage
+                    .update_password_hash(user_id, password_hash)
+                    .await
+            } else {
+                self.storage
+                    .create_account(AuthAccountCreate {
+                        account_id: user.id.to_string(),
+                        provider_id: PASSWORD_PROVIDER_ID.into(),
+                        user_id: user.id,
+                        access_token_ciphertext: None,
+                        refresh_token_ciphertext: None,
+                        id_token_ciphertext: None,
+                        access_token_expires_at: None,
+                        refresh_token_expires_at: None,
+                        scope: None,
+                        password_hash: Some(password_hash),
+                    })
+                    .await
+                    .map(|_| ())
+            }
+        }
+
         // r[impl auth.admin.requires-role]
         // r[impl auth.admin.ban]
         // r[impl auth.admin.ban-expiry]
@@ -1972,6 +2031,21 @@ pub mod email_password {
     where
         S: AuthStorage,
     {
+        async fn change_password(
+            &self,
+            input: auth_proto::service::ChangePasswordRequest,
+        ) -> Result<(), AuthFlowError> {
+            ArchitectAuth::change_password(
+                self,
+                ChangePassword {
+                    session_token: input.session_token,
+                    current_password: input.current_password,
+                    new_password: input.new_password,
+                },
+            )
+            .await
+        }
+
         async fn migrate_user_email(
             &self,
             input: auth_proto::service::MigrateUserEmailRequest,
