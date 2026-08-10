@@ -1,6 +1,6 @@
 //! The stacked multitrack view — every track at once, on one timeline.
 //!
-//! Each track gets a horizontal dimension and is drawn in *its own* mode: a
+//! Each track gets a horizontal lane and is drawn in *its own* mode: a
 //! vocal as blobs, its reference MIDI as a roll, a guitar as tab, a kit
 //! as slices. Time is shared; vertical space is divided.
 //!
@@ -15,8 +15,8 @@
 //! than looking broken. Everything is converted through seconds.
 //!
 //! **Row spaces have different extents.** 128 pitch rows, 6 strings, 3
-//! bands. Giving each dimension the same rows-per-pixel would leave the kit
-//! occupying a twentieth of its dimension. Each dimension instead fits its own
+//! bands. Giving each lane the same rows-per-pixel would leave the kit
+//! occupying a twentieth of its lane. Each lane instead fits its own
 //! content to its own height.
 
 use expression_editor_core::doc::{ExpressionDoc, Note};
@@ -28,7 +28,7 @@ use dioxus::prelude::*;
 
 use crate::{canvas, theme};
 
-/// One track's dimension in the stack.
+/// One track's lane in the stack.
 pub struct LaneView {
     /// Index into the workspace.
     pub track: usize,
@@ -43,7 +43,7 @@ pub struct LaneView {
     /// The track other tracks are aligned against, if any.
     pub reference: bool,
     pub notes: Vec<LaneNote>,
-    /// Row dividers inside the dimension, for spaces where a row is a named
+    /// Row dividers inside the lane, for spaces where a row is a named
     /// thing (strings, bands, drum lanes). Empty for pitch, which has
     /// too many to draw and a keyboard to read instead.
     pub dividers: Vec<f64>,
@@ -51,7 +51,7 @@ pub struct LaneView {
     pub labels: Vec<(f64, String)>,
 }
 
-/// A note as it appears in a dimension.
+/// A note as it appears in a lane.
 pub struct LaneNote {
     pub x: f64,
     pub w: f64,
@@ -62,14 +62,14 @@ pub struct LaneNote {
     pub triangle: bool,
 }
 
-/// Vertical padding inside a dimension, in pixels, top and bottom.
+/// Vertical padding inside a lane, in pixels, top and bottom.
 const LANE_PAD: f64 = 3.0;
 
-/// Rows of headroom added around a dimension's content before fitting.
+/// Rows of headroom added around a lane's content before fitting.
 ///
 /// Without it a track whose notes are all on one row fits to zero height
 /// and draws as a hairline, and a melody that touches its own extremes
-/// has notes flush against the dimension edge where they read as clipped.
+/// has notes flush against the lane edge where they read as clipped.
 const FIT_PAD: f64 = 1.0;
 
 /// Lay out every visible track over the viewport.
@@ -126,7 +126,7 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
     })
 }
 
-/// The row range a dimension shows: its own content, padded.
+/// The row range a lane shows: its own content, padded.
 fn fit(doc: &ExpressionDoc, mode: &Mode) -> (f64, f64) {
     let (bound_lo, bound_hi) = doc.row_space.bounds();
     // A space with few rows shows all of them — three bands or six
@@ -143,7 +143,7 @@ fn fit(doc: &ExpressionDoc, mode: &Mode) -> (f64, f64) {
     }
     if !lo.is_finite() || !hi.is_finite() {
         // Nothing to fit to. An octave around middle C is a better blank
-        // dimension than the full 128 rows, which would draw everything
+        // lane than the full 128 rows, which would draw everything
         // subsequently loaded as a smear at the bottom.
         let centre = 60.0;
         return (centre - 6.0, centre + 6.0);
@@ -184,7 +184,7 @@ fn lane_note(
         base
     } else {
         // Parked lanes are context, not content. Dimming them keeps the
-        // dimension you are editing legible when six are on screen.
+        // lane you are editing legible when six are on screen.
         format!("{base}80")
     };
 
@@ -219,7 +219,7 @@ fn to_editor_time(ed: &Editor, doc: &ExpressionDoc, t: f64) -> f64 {
     t / from * to
 }
 
-/// Dividers and labels for a dimension's row space.
+/// Dividers and labels for a lane's row space.
 fn guides(
     space: &RowSpace,
     lo: f64,
@@ -227,7 +227,7 @@ fn guides(
     y_of: impl Fn(f64) -> f64,
 ) -> (Vec<f64>, Vec<(f64, String)>) {
     // Pitch space has 128 rows and a keyboard of its own; drawing a line
-    // per semitone inside a 60 px dimension is a grey block.
+    // per semitone inside a 60 px lane is a grey block.
     if matches!(space, RowSpace::Pitch) {
         return (Vec::new(), Vec::new());
     }
@@ -245,13 +245,13 @@ fn guides(
     (dividers, labels)
 }
 
-/// How much taller the dimension being edited is than the rest.
+/// How much taller the lane being edited is than the rest.
 const ACTIVE_BOOST: f32 = 1.8;
 
-/// Shortest a dimension may be, in pixels.
+/// Shortest a lane may be, in pixels.
 ///
-/// Enough to click, because clicking a dimension is how you make it the
-/// active one — a dimension too small to hit is a track you cannot get back
+/// Enough to click, because clicking a lane is how you make it the
+/// active one — a lane too small to hit is a track you cannot get back
 /// to.
 const MIN_LANE: f32 = 22.0;
 
@@ -259,7 +259,7 @@ const MIN_LANE: f32 = 22.0;
 ///
 /// Read-only by design. The stack answers "which track needs work" and
 /// "is this in time with that"; the roll is where the work happens.
-/// Clicking a dimension makes it active, which is the handover between the
+/// Clicking a lane makes it active, which is the handover between the
 /// two — and it means the one gesture the stack does take is the one
 /// that gets you out of it.
 #[component]
@@ -312,7 +312,7 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
 
             // One ruler for the whole stack — the shared axis is the
             // reason the view exists, so it is drawn once rather than
-            // per dimension.
+            // per lane.
             g {
                 transform: "translate({canvas::GUTTER_W}, 0)",
                 for t in ticks.iter() {
@@ -326,32 +326,32 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
 
             g {
                 transform: "translate(0, {canvas::RULER_H})",
-                for dimension in lanes.iter() {
+                for lane in lanes.iter() {
                     g {
-                        // A dimension's own background, so the active one
+                        // A lane's own background, so the active one
                         // reads as the foreground even when a neighbour
                         // is busier.
                         rect {
-                            x: 0, y: "{dimension.y:.1}",
+                            x: 0, y: "{lane.y:.1}",
                             width: "{vp.w + canvas::GUTTER_W}",
-                            height: "{dimension.h:.1}",
-                            fill: if dimension.active { theme::ROW_WHITE } else { theme::BG },
+                            height: "{lane.h:.1}",
+                            fill: if lane.active { theme::ROW_WHITE } else { theme::BG },
                         }
                         line {
                             x1: 0, x2: "{vp.w + canvas::GUTTER_W}",
-                            y1: "{dimension.y:.1}", y2: "{dimension.y:.1}",
+                            y1: "{lane.y:.1}", y2: "{lane.y:.1}",
                             stroke: theme::OCTAVE_LINE, stroke_width: 1,
                         }
                         g {
                             transform: "translate({canvas::GUTTER_W}, 0)",
-                            for d in dimension.dividers.iter() {
+                            for d in lane.dividers.iter() {
                                 line {
                                     x1: 0, x2: "{vp.w}",
                                     y1: "{d:.1}", y2: "{d:.1}",
                                     stroke: theme::GRID_SUB, stroke_width: 1,
                                 }
                             }
-                            for n in dimension.notes.iter() {
+                            for n in lane.notes.iter() {
                                 if n.triangle {
                                     polygon {
                                         points: "{n.x:.1},{n.y:.1} {n.x + n.w:.1},{n.y + n.h / 2.0:.1} {n.x:.1},{n.y + n.h:.1}",
@@ -370,10 +370,10 @@ pub fn StackView(editor: Signal<Editor>) -> Element {
                         // The name last, so it sits over the material
                         // rather than under it.
                         text {
-                            x: 4, y: "{dimension.y + 11.0:.1}",
+                            x: 4, y: "{lane.y + 11.0:.1}",
                             font_size: "9",
-                            fill: if dimension.active { theme::TEXT } else { theme::TEXT_DIM },
-                            "{dimension.name}"
+                            fill: if lane.active { theme::TEXT } else { theme::TEXT_DIM },
+                            "{lane.name}"
                         }
                     }
                 }

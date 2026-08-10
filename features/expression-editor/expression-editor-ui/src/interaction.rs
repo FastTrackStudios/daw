@@ -99,14 +99,14 @@ pub enum Drag {
         last_cell: Option<(i64, i32)>,
         snap: bool,
     },
-    /// Freehand drawing into a pinned controller dimension.
+    /// Freehand drawing into a pinned controller lane.
     CcPen {
         number: u8,
         /// Previous sample, so a fast drag interpolates instead of
         /// leaving a staircase.
         last: Option<(f64, f64)>,
     },
-    /// A shaped ramp across a controller dimension. Like [`Drag::Curve`] it
+    /// A shaped ramp across a controller lane. Like [`Drag::Curve`] it
     /// survives release, so the toolbar's shape buttons restyle the
     /// stroke you just drew instead of the one before it.
     CcLine {
@@ -114,7 +114,7 @@ pub enum Drag {
         start: (f64, f64),
         current: (f64, f64),
     },
-    /// Sweeping a controller dimension back to its default.
+    /// Sweeping a controller lane back to its default.
     CcErase {
         number: u8,
         start_t: f64,

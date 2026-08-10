@@ -15,6 +15,8 @@
 //! per-track: switching tracks changes what you are editing, not where
 //! you are looking. Only the document and its history swap.
 
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use crate::Mode;
 use crate::doc::ExpressionDoc;
 use crate::edit::History;
@@ -41,6 +43,21 @@ pub enum RefColor {
 /// workspace, so switching does not move you.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Track {
+    /// Stable identity, and the only thing durable data may reference.
+    ///
+    /// The host supplies it — the DAW adapter passes REAPER's track
+    /// GUID, tests pass something readable — and it never changes for
+    /// the life of the track. A bare `String` rather than a newtype:
+    /// considered and declined, the accepted trade being that a track
+    /// guid and a take guid are both bare strings.
+    ///
+    /// Indices into [`Workspace::tracks`] remain correct for in-memory
+    /// addressing and are used throughout. The rule this exists to make
+    /// possible is narrower and absolute: **nothing durable may hold an
+    /// index**. A stored lane layout keyed on position is re-targeted by
+    /// inserting a track above it; keyed on name, it is broken by
+    /// [`Workspace::rename`].
+    pub guid: String,
     pub name: String,
     /// Stale while this track is the active one — the live document
     /// lives in `Editor::doc` and is written back on switch. Reads go
@@ -76,9 +93,39 @@ pub struct Track {
     pub ref_color: RefColor,
 }
 
+/// Source of generated guids for tracks nobody named.
+///
+/// Guids are project-scoped, so a counter is sufficient: two projects
+/// may both contain `t1` and never meet. Generation happens once, at
+/// construction — the value is then persisted with the track, so it is
+/// stable across save and reload, which is the only stability that
+/// matters here.
+static NEXT_GUID: AtomicU64 = AtomicU64::new(1);
+
+fn generated_guid() -> String {
+    let n = NEXT_GUID.fetch_add(1, Ordering::Relaxed);
+    let mut s = String::from("t");
+    s.push_str(&n.to_string());
+    s
+}
+
 impl Track {
+    /// A track with a generated guid, for callers with no host identity
+    /// to supply — the standalone editor, tests, demo scenes.
     pub fn new(name: impl Into<String>, doc: ExpressionDoc) -> Self {
+        Self::with_guid(generated_guid(), name, doc)
+    }
+
+    /// A track carrying the host's identity. This is the constructor the
+    /// DAW adapter uses, so that persisted data keyed on a guid means
+    /// the same track when the project is reopened.
+    pub fn with_guid(
+        guid: impl Into<String>,
+        name: impl Into<String>,
+        doc: ExpressionDoc,
+    ) -> Self {
         Self {
+            guid: guid.into(),
             name: name.into(),
             doc,
             history: History::new(HISTORY_LIMIT),
@@ -102,7 +149,7 @@ impl Track {
     /// Change mode, and the height with it.
     ///
     /// Only while the weight is still the mode's default: once a user
-    /// has sized a dimension by hand, switching modes must not silently undo
+    /// has sized a track by hand, switching modes must not silently undo
     /// that.
     pub fn set_mode(&mut self, mode: Mode) {
         if (self.weight - self.mode.stack_weight()).abs() < f32::EPSILON {
@@ -177,6 +224,24 @@ impl Workspace {
 
     pub fn index_of(&self, name: &str) -> Option<usize> {
         self.tracks.iter().position(|t| t.name == name)
+    }
+
+    /// Resolve a guid to its current index.
+    ///
+    /// The index is a *result*, never something to store: it is valid
+    /// until the next insert or remove. Durable data holds the guid and
+    /// resolves it on load, which is what makes a stored layout survive
+    /// a track being inserted above it or renamed.
+    pub fn index_of_guid(&self, guid: &str) -> Option<usize> {
+        self.tracks.iter().position(|t| t.guid == guid)
+    }
+
+    pub fn track_by_guid(&self, guid: &str) -> Option<&Track> {
+        self.tracks.iter().find(|t| t.guid == guid)
+    }
+
+    pub fn track_by_guid_mut(&mut self, guid: &str) -> Option<&mut Track> {
+        self.tracks.iter_mut().find(|t| t.guid == guid)
     }
 
     /// A parked track's document.

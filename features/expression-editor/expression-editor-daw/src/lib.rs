@@ -103,7 +103,7 @@ pub fn to_doc(snapshot: &MidiTakeSnapshot, bend_range: f64) -> ExpressionDoc {
         }
     }
 
-    // Everything else is a document-level controller dimension.
+    // Everything else is a document-level controller lane.
     for cc in snapshot.ccs.iter().filter(|c| c.controller != 74) {
         let i = doc.cc.ensure(cc.controller);
         doc.cc.lanes[i]

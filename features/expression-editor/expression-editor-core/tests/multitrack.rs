@@ -222,3 +222,77 @@ fn a_hand_sized_lane_is_not_resized_by_a_mode_change() {
     t.set_mode(Mode::UnpitchedAudio);
     assert_eq!(t.weight, 5.0, "a hand-sized dimension keeps its height");
 }
+
+// ── Stable identity ──────────────────────────────────────────────────
+//
+// The rule these defend is narrow and absolute: indices are fine for
+// in-memory addressing, but nothing *durable* may hold one. Both of the
+// operations below are exactly what breaks a layout stored by position
+// or by name.
+
+#[test]
+fn a_track_inserted_above_does_not_move_anyone_else_s_identity() {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    let lead = ws.track(0).unwrap().guid.clone();
+    ws.push(Track::new("Kit", doc()));
+    let kit = ws.track(1).unwrap().guid.clone();
+
+    // The index of "Kit" is about to change. Its guid must not.
+    let mut reordered = Workspace::single("Inserted", doc());
+    reordered.push(Track::with_guid(lead.clone(), "Lead Vox", doc()));
+    reordered.push(Track::with_guid(kit.clone(), "Kit", doc()));
+
+    assert_eq!(reordered.index_of_guid(&kit), Some(2), "index moved");
+    assert_eq!(
+        reordered.track_by_guid(&kit).map(|t| t.name.as_str()),
+        Some("Kit"),
+        "the guid still resolves to the same track"
+    );
+    assert_ne!(lead, kit, "generated guids are distinct");
+}
+
+#[test]
+fn renaming_a_track_leaves_its_guid_alone() {
+    let mut ws = Workspace::single("Lead Vox", doc());
+    let before = ws.track(0).unwrap().guid.clone();
+    assert!(ws.rename(0, "Lead Vocal Comp 3"));
+    let after = ws.track(0).unwrap().guid.clone();
+
+    assert_eq!(before, after, "a rename is not a change of identity");
+    assert_eq!(ws.index_of("Lead Vox"), None, "the old name is gone");
+    assert_eq!(ws.index_of_guid(&after), Some(0), "the guid still resolves");
+}
+
+#[test]
+fn a_host_supplied_guid_is_kept_verbatim() {
+    // REAPER hands us its own GUID string; we store it, we do not mint
+    // our own, or persisted state would not survive reopening.
+    let host = "{A1B2C3D4-0000-0000-0000-000000000001}";
+    let ws = Workspace::single("x", doc());
+    let mut ws = ws;
+    ws.push(Track::with_guid(host, "Lead Vox", doc()));
+    assert_eq!(ws.track_by_guid(host).map(|t| t.name.as_str()), Some("Lead Vox"));
+}
+
+#[test]
+fn generated_guids_do_not_collide() {
+    let a = Track::new("a", doc());
+    let b = Track::new("b", doc());
+    let c = Track::new("c", doc());
+    assert_ne!(a.guid, b.guid);
+    assert_ne!(b.guid, c.guid);
+    assert_ne!(a.guid, c.guid);
+}
+
+#[test]
+fn the_adapter_can_hand_the_active_track_the_host_s_identity() {
+    let mut ed = Editor::new(doc(), Viewport::new(800.0, 600.0));
+    let generated = ed.tracks.track(0).unwrap().guid.clone();
+
+    ed.adopt_track_identity("{HOST-GUID}", Some("Lead Vox".into()));
+
+    let t = ed.tracks.track(0).unwrap();
+    assert_eq!(t.guid, "{HOST-GUID}");
+    assert_eq!(t.name, "Lead Vox");
+    assert_ne!(t.guid, generated, "the generated id was replaced");
+}

@@ -26,7 +26,7 @@ pub enum Context {
     NoteEdge,
     /// A Q-zone split handle.
     ZoneSplit,
-    /// The velocity/CC dimension strip below the roll.
+    /// The velocity/CC lane strip below the roll.
     CcLane,
     /// An event already in a CC dimension.
     CcEvent,
@@ -128,7 +128,7 @@ pub enum Action {
     PenOverride,
     ScaleExpression,
     TransposeSnapped,
-    /// Freehand into the active controller dimension.
+    /// Freehand into the active controller lane.
     EditCcEvents,
     /// A straight ramp between the drag's two ends, restyled by the
     /// toolbar shape. Stays live after release so the shape buttons can

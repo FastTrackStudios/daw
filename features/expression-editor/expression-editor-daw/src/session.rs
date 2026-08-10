@@ -61,7 +61,14 @@ impl Session {
             ItemRef::Guid(item.guid.clone()),
             TakeRef::Active,
         );
-        Some(Self::load(daw, location, bend_range, viewport))
+        let mut session = Self::load(daw, location, bend_range, viewport);
+        // The host owns track identity. Adopting it here is what lets
+        // anything persisted against this track — a mode correction, a
+        // lane layout — still resolve when the project is reopened.
+        session
+            .editor
+            .adopt_track_identity(item.track_guid.clone(), None);
+        Some(session)
     }
 
     /// Whether the document differs from what was loaded.

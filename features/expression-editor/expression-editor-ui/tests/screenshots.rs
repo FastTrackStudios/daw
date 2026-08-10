@@ -27,7 +27,7 @@ use expression_editor_ui::{ExpressionEditor, ModDrawer, MultiTool};
 
 const W: u32 = 1100;
 /// The roll's own height. The window has to hold this plus the top bar,
-/// the chord row, the dimension strip and the status bar — the canvas sizes
+/// the chord row, the lane strip and the status bar — the canvas sizes
 /// itself from its intrinsic aspect ratio, so overshooting here pushes
 /// the status bar out of frame rather than shrinking the roll.
 const CANVAS_H: f64 = 400.0;

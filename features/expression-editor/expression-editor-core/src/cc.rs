@@ -8,13 +8,13 @@
 //!
 //! Pinned lanes draw across the full height of the piano roll at low
 //! opacity, so the shape of a swell is visible *while* you edit notes
-//! rather than only when you switch to a dimension strip. Editing one means
-//! entering CC edit mode, where that dimension takes the full 0..127 range
+//! rather than only when you switch to a lane strip. Editing one means
+//! entering CC edit mode, where that lane takes the full 0..127 range
 //! of the roll and the notes recede.
 
 use crate::doc::Curve;
 
-/// One controller dimension.
+/// One controller lane.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CcLane {
     /// Controller number, 0..127.
@@ -48,10 +48,10 @@ impl CcLane {
             .clamp(0.0, 127.0) as u8
     }
 
-    /// Where a dimension rests when nothing is authored.
+    /// Where a lane rests when nothing is authored.
     ///
     /// Volume-like controllers rest at full, everything else at zero —
-    /// a CC11 dimension that defaults to silence would mute the part the
+    /// a CC11 lane that defaults to silence would mute the part the
     /// moment it is pinned.
     pub fn default_value(&self) -> f64 {
         match self.number {
@@ -125,7 +125,7 @@ impl CcSet {
         self.lanes.iter_mut().find(|l| l.number == number)
     }
 
-    /// Add a dimension, or return the existing one's index.
+    /// Add a lane, or return the existing one's index.
     pub fn ensure(&mut self, number: u8) -> usize {
         if let Some(i) = self.lanes.iter().position(|l| l.number == number) {
             return i;
@@ -175,11 +175,11 @@ impl CcSet {
 /// How pinned lanes are drawn behind the notes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CcDisplay {
-    /// Opacity of a pinned dimension that is not being edited. Low on
+    /// Opacity of a pinned lane that is not being edited. Low on
     /// purpose — several controllers at full strength turn the roll
     /// into a thicket and the notes stop being findable.
     pub background_opacity: f64,
-    /// Opacity of the dimension currently being edited.
+    /// Opacity of the lane currently being edited.
     pub active_opacity: f64,
     /// Fill under the curve, as a fraction of the line opacity. A faint
     /// fill is what makes a swell read as a shape rather than a
