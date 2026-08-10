@@ -331,3 +331,27 @@ fn the_meter_and_the_fader_share_the_stretch_band() {
         assert_eq!(heights[0], heights[1], "the fader is not as tall as the meter at {h}");
     }
 }
+
+/// The record arm's rectangular base is sunk out of sight.
+///
+/// `mcp_recarm_*` flares out at 45° and then goes vertical; below that it
+/// is a plain rectangle, and REAPER sinks exactly that rectangle into the
+/// dark under the coloured band so only the flare emerges into the colour.
+/// Left sitting in the band the button read as pasted on top of it.
+///
+/// The overhang is derived from the art rather than picked by eye —
+/// measuring it off a screenshot undercounts, because the part that is
+/// supposed to be hidden is dark on dark.
+#[test]
+fn the_record_arm_sinks_its_base_into_the_dark() {
+    use daw_theme_art::vector_controls::HOUSING_SHOULDER;
+
+    let html = strip_at(371.0);
+    let wanted = 24.0 * (1.0 - HOUSING_SHOULDER);
+    assert!(
+        html.contains(&format!("bottom:-{wanted}px")),
+        "the arm does not hang by its base's height ({wanted}):\n{html}"
+    );
+    // And it hangs, rather than sitting inside the band.
+    assert!(!html.contains("bottom:2px"), "the arm is back inside the band");
+}

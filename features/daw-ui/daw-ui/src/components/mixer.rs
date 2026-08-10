@@ -196,9 +196,20 @@ const COLUMN: f32 = 55.0;
 /// `mcp.label` — 26 of the bottom section's 47, above the 20-row index
 /// plate and the row that divides them.
 const NAME_PLATE: u32 = 26;
-/// How far the record arm's housing hangs below the coloured band, so its
-/// base sits on the dark the way REAPER's does.
-const ARM_OVERHANG: f32 = 4.0;
+/// How far the record arm's housing hangs below the coloured band.
+///
+/// Derived, not chosen: `mcp_recarm_*` is a 36x24 cell whose housing flares
+/// out at 45° and then goes vertical at
+/// [`HOUSING_SHOULDER`][daw_theme_art::vector_controls::HOUSING_SHOULDER].
+/// Everything below that is a plain rectangle, and REAPER sinks exactly
+/// that rectangle into the dark — so the flare emerges from the background
+/// instead of the button sitting on top of the colour with a seam under it.
+///
+/// Measuring it off a screenshot undercounts: below the band the housing is
+/// dark on dark, which is the whole point of it.
+const ARM_CELL_H: f32 = 24.0;
+const ARM_OVERHANG: f32 =
+    ARM_CELL_H * (1.0 - daw_theme_art::vector_controls::HOUSING_SHOULDER);
 /// The strip's own grey — `mcp_namebg`'s, and the same one the plate under
 /// the track name uses.
 const BODY_GREY: &str = "#262626";

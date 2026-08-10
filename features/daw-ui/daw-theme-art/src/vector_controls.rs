@@ -593,6 +593,16 @@ pub enum FxPart {
     Whole,
 }
 
+/// Where the record-arm housing stops flaring and goes vertical.
+///
+/// Its base corners run 45° out from `0.592` of the cell to here; below it
+/// the sides are upright — a plain rectangle. That rectangle is meant to be
+/// invisible: REAPER seats it in the dark under the coloured band so only
+/// the flare emerges into the colour, which is what makes the housing read
+/// as growing out of the background rather than sitting on it. A panel
+/// placing the button needs this number to know how far to sink it.
+pub const HOUSING_SHOULDER: f32 = 0.717;
+
 /// The measured geometry of one family's FX control.
 struct Pill {
     /// Whole pill, both halves.
@@ -1274,8 +1284,8 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                 }
                 path {
                     d: "M {cx - vw * 0.3194} {vh * 0.592}
-                        L {cx - vw * 0.4028} {vh * 0.717} V {vh}
-                        H {cx + vw * 0.4028} V {vh * 0.717}
+                        L {cx - vw * 0.4028} {vh * HOUSING_SHOULDER} V {vh}
+                        H {cx + vw * 0.4028} V {vh * HOUSING_SHOULDER}
                         L {cx + vw * 0.3194} {vh * 0.592} Z",
                     fill: "{hole_fill.css()}",
                 }
