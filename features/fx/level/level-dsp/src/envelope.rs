@@ -760,3 +760,54 @@ pub fn config_for(
 ) -> GenerationConfig {
     item.or(track_default).unwrap_or_default()
 }
+
+// ── Absorbing an external edit ───────────────────────────────────────
+
+/// Fold an externally-edited composite back into the ride.
+///
+/// The take volume envelope is an ordinary DAW envelope and users can
+/// drag it, at which point it no longer equals the sum of the four.
+///
+/// The delta goes into the **ride**, and only the ride: someone dragging
+/// a volume envelope meant "this bit louder", which is exactly what the
+/// ride expresses. Spreading it across all four would put gain into the
+/// gate and sibilance curves at times when neither is doing anything.
+///
+/// Doing this keeps the invariant *the four sum to the composite* true
+/// at all times, so there is never a stale state and never a re-derive
+/// prompt — a mode with its own UI for a situation that has an exact
+/// answer. Locking the composite was rejected outright: it would stop
+/// DAW users doing the most ordinary thing in their DAW to an item we
+/// touched.
+///
+/// The absorbed delta is a **user edit**, so it persists like any other.
+///
+/// Idempotent: absorbing a composite that already matches changes
+/// nothing, so a reload without a further external edit is a no-op.
+pub fn absorb_into_ride(parts: &mut Contributions, edited: &[EnvPoint]) {
+    if edited.is_empty() {
+        return;
+    }
+    let ours = composite(parts);
+
+    // Every time either side has an opinion about, so the correction is
+    // sampled wherever it could differ.
+    let mut times: Vec<f64> = ours.iter().map(|p| p.t_s).collect();
+    times.extend(edited.iter().map(|p| p.t_s));
+    times.extend(parts.ride.iter().map(|p| p.t_s));
+    times.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+    times.dedup_by(|a, b| (*a - *b).abs() < 1e-9);
+
+    let ride_now: Vec<EnvPoint> = parts.ride.clone();
+    parts.ride = times
+        .into_iter()
+        .map(|t| {
+            let delta = value_at(edited, t) - value_at(&ours, t);
+            EnvPoint {
+                t_s: t,
+                db: value_at(&ride_now, t) + delta,
+                hold: false,
+            }
+        })
+        .collect();
+}
