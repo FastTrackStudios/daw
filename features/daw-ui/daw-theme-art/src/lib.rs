@@ -35,6 +35,7 @@
 
 pub mod art_data;
 pub mod components;
+pub mod dress;
 pub mod generated;
 pub mod mixer_controls;
 pub mod primitives;

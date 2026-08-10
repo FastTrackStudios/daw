@@ -94,59 +94,20 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             },
         )
     };
-    // Traced: the track panel's buttons occupy rows 1..20 of a 24-row
-    // cell; the mixer's fill theirs.
-    // The legend is not one grey. It brightens when the button lights,
-    // and the track panel swings much further than the mixer:
-    //
-    //     mixer   mute 204/204   solo 204/217   defeat 217
-    //     track   mute 183/242   solo 203/255   defeat 255
-    //
-    // Read as a single #f2f2f2 the track panel's unlit buttons came out
-    // sixty levels hot, which is most of why they were the worst two
-    // images in the set by pixel error.
+    // How a label button is dressed — the resting face, the legend's grey,
+    // where the body sits in its cell — is measured off the art and now
+    // lives in [`crate::dress`], because the GUI draws the same buttons and
+    // cannot see this module (it is behind the `render` feature). Restating
+    // the numbers there would let the app's mute and REAPER's mute drift
+    // apart.
     let theme = daw_theme::Theme::default();
-    // Measured off the `off` cells: #464646 in the mixer, #4e4e4e in the
-    // track panel, both falling about 12% over the button's height.
-    let unlit = Some(theme.chrome.hardware.shade(if track { 0.078 } else { 0.036 }));
-    let legend = |lit: bool, solo: bool| {
-        let up = match (track, lit, solo) {
-            (false, _, false) => 0.45,
-            (false, false, true) => 0.45,
-            (false, true, true) => 0.59,
-            (true, false, false) => 0.23,
-            (true, true, false) => 0.86,
-            (true, false, true) => 0.44,
-            (true, true, true) => 1.0,
-        };
-        Some(theme.chrome.hardware_mark.shade(up))
-    };
-    let label_body = if track {
-        (1.0 / 24.0, 20.0 / 24.0)
-    } else {
-        (0.0, 1.0)
-    };
+    let unlit = crate::dress::label_unlit(track);
+    let legend = |lit: bool, solo: bool| crate::dress::label_legend(track, lit, solo);
+    let label_body = crate::dress::label_body(track);
     let mute = |on| {
         render_svg(
             v::MuteButton,
-            v::ToggleProps {
-                // Mute's hover is the gentlest of the three — see `ink`.
-                hover: 0.25,
-                // 0.11, and applied as a scale — measured 0.89 on every
-                // channel from the top of the face to the bottom.
-                depth: 0.11,
-                on,
-                art: art(),
-                body: label_body,
-                legend: legend(on, false),
-                unlit,
-                // The track panel's pressed cell is identical to its
-                // normal one; the mixer's is darker.
-                sinks: !track,
-                width: n.0,
-                height: n.1,
-                at,
-            },
+            v::ToggleProps { width: n.0, height: n.1, at, ..crate::dress::mute(art(), on) },
         )
     };
     let solo = |state| {
