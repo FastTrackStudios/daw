@@ -338,6 +338,26 @@ impl Editor {
     /// editing, not where you are looking. The selection *is* cleared,
     /// because note ids are per-document and a selection carried across
     /// would point at whatever happened to share those ids.
+    /// Move to the next track in the active lane, wrapping.
+    ///
+    /// The escape hatch for the rule that only the active track takes
+    /// gestures: with a vocal and its reference MIDI superimposed, this
+    /// is how you reach the other one. Never leaves the lane — moving
+    /// between lanes is a click.
+    ///
+    /// Goes through [`Editor::switch_track`] rather than moving the
+    /// active index directly, so the live document and its history are
+    /// parked exactly as they are on any other track change.
+    pub fn cycle_track_in_lane(&mut self) -> bool {
+        let Some(lane) = self.tracks.active_lane() else {
+            return false;
+        };
+        match self.tracks.next_in_lane(lane, self.tracks.active()) {
+            Some(next) => self.switch_track(next),
+            None => false,
+        }
+    }
+
     pub fn switch_track(&mut self, i: usize) -> bool {
         // Validate before moving anything out of the editor, so a
         // rejected switch cannot leave `doc` and `history` stranded.

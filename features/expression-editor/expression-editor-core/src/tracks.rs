@@ -530,6 +530,24 @@ impl Workspace {
         self.refresh_lane_weights();
     }
 
+    /// The next visible track in a lane, wrapping.
+    ///
+    /// Returns `None` when the lane has nothing else to offer, so a
+    /// caller can leave the active track alone rather than pointlessly
+    /// re-selecting it.
+    pub fn next_in_lane(&self, lane: usize, from: usize) -> Option<usize> {
+        let members: Vec<usize> = self
+            .lane_tracks(lane)
+            .into_iter()
+            .filter(|&i| !self.tracks[i].hidden)
+            .collect();
+        if members.len() < 2 {
+            return None;
+        }
+        let at = members.iter().position(|&i| i == from)?;
+        Some(members[(at + 1) % members.len()])
+    }
+
     /// Merge two lanes into one.
     ///
     /// The result takes the **upper** lane's position and the greater of
