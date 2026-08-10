@@ -13,7 +13,7 @@
 //! usable for comping and for rhythmic rearrangement, and it is why the
 //! area — not the note — is the unit of operation.
 
-use crate::doc::{ExpressionDoc, Lane, Note, NoteId};
+use crate::doc::{ExpressionDoc, Dimension, Note, NoteId};
 
 /// A rectangular selection over time and rows.
 ///
@@ -264,14 +264,14 @@ pub fn set_velocity(doc: &mut ExpressionDoc, area: RazorArea, velocity: f64) -> 
     .apply(doc)
 }
 
-/// Erase one expression lane across the area, leaving the notes.
+/// Erase one expression dimension across the area, leaving the notes.
 ///
 /// The edge-splicing rule this needs is [`crate::doc::Curve::clear_range`], which is
-/// also what the lane and controller erasers use — the razor was where
+/// also what the dimension and controller erasers use — the razor was where
 /// it was first got right, not where it belongs.
-pub fn clear_lane(doc: &mut ExpressionDoc, area: RazorArea, lane: Lane) -> bool {
+pub fn clear_lane(doc: &mut ExpressionDoc, area: RazorArea, dimension: Dimension) -> bool {
     let ids = peek(doc, area);
-    let default = lane.default_value();
+    let default = dimension.default_value();
     let mut ok = false;
     for id in ids {
         let Some(n) = doc.note_mut(id) else { continue };
@@ -280,9 +280,9 @@ pub fn clear_lane(doc: &mut ExpressionDoc, area: RazorArea, lane: Lane) -> bool 
             continue;
         }
         // `ok` tracks that a note was *in* the area, not that its curve
-        // had anything to clear — an already-empty lane inside a razor
+        // had anything to clear — an already-empty dimension inside a razor
         // is still a successful clear.
-        n.lane_mut(lane).clear_range(t0, t1, default);
+        n.curve_mut(dimension).clear_range(t0, t1, default);
         ok = true;
     }
     ok

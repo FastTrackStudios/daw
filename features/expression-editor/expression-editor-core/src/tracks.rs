@@ -102,7 +102,7 @@ impl Track {
     /// Change mode, and the height with it.
     ///
     /// Only while the weight is still the mode's default: once a user
-    /// has sized a lane by hand, switching modes must not silently undo
+    /// has sized a dimension by hand, switching modes must not silently undo
     /// that.
     pub fn set_mode(&mut self, mode: Mode) {
         if (self.weight - self.mode.stack_weight()).abs() < f32::EPSILON {
@@ -212,8 +212,8 @@ impl Workspace {
 
     /// Lay the visible tracks out over `height`, in order.
     ///
-    /// Proportional to each track's weight, with a floor: a lane
-    /// squeezed to nothing is a lane that cannot be clicked to select,
+    /// Proportional to each track's weight, with a floor: a dimension
+    /// squeezed to nothing is a dimension that cannot be clicked to select,
     /// so a user cannot get out of the state they fell into.
     ///
     /// `active_boost` gives the row being edited extra weight — you are
@@ -233,7 +233,7 @@ impl Workspace {
 
         // The floor can want more than there is. Rather than overflow
         // the viewport, fall back to an even split — at that point the
-        // honest answer is that nothing fits well and every lane should
+        // honest answer is that nothing fits well and every dimension should
         // at least be equally bad.
         let min_row = min_row.max(0.0);
         let n = rows.len() as f32;
@@ -254,7 +254,7 @@ impl Workspace {
                 .collect();
         }
 
-        // Hand every lane its floor first, then share what is left by
+        // Hand every dimension its floor first, then share what is left by
         // weight. Sharing the whole height by weight and clamping
         // afterwards would overflow by however much the clamping added.
         let spare = height - min_row * n;

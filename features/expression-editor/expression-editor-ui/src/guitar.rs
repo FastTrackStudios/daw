@@ -4,7 +4,7 @@
 //! questions can be answered by picture rather than by argument —
 //!
 //! 1. do bends draw **on** the string row, deflecting the line, or in a
-//!    lane below?
+//!    dimension below?
 //! 2. do slides and hammer-ons/pull-offs use the same curve mechanism,
 //!    or distinct glyphs?
 //! 3. does [`RowSpace::Strings`] survive contact with real tab?
@@ -42,7 +42,7 @@ impl BendFlow {
     pub fn on_row(self) -> bool {
         matches!(self, BendFlow::OnRow | BendFlow::Both)
     }
-    pub fn lane(self) -> bool {
+    pub fn draws_in_lane(self) -> bool {
         matches!(self, BendFlow::Lane | BendFlow::Both)
     }
 }
@@ -244,14 +244,14 @@ pub fn joins(ed: &Editor) -> Vec<Join> {
     out
 }
 
-// ── the lane variant ─────────────────────────────────────────────────
+// ── the dimension variant ─────────────────────────────────────────────────
 
-/// Full-scale of the bend lane, in semitones either way. Three is a
+/// Full-scale of the bend dimension, in semitones either way. Three is a
 /// tone-and-a-half up and a whammy dive down; GP's own ceiling is six,
-/// but a lane scaled to six makes a half-step bend invisible.
+/// but a dimension scaled to six makes a half-step bend invisible.
 pub const LANE_SEMITONES: f64 = 3.0;
 
-/// The bend lane: every string's pitch motion on one absolute axis.
+/// The bend dimension: every string's pitch motion on one absolute axis.
 pub struct BendLaneView {
     pub y: f64,
     pub h: f64,
@@ -260,7 +260,7 @@ pub struct BendLaneView {
     pub paths: Vec<FlowPath>,
 }
 
-/// Height the lane takes out of the roll.
+/// Height the dimension takes out of the roll.
 pub fn lane_height(vp_h: f64) -> f64 {
     (vp_h * 0.28).clamp(48.0, 130.0)
 }
@@ -271,7 +271,7 @@ pub fn bend_lane(ed: &Editor) -> Option<BendLaneView> {
     }
     let h = lane_height(ed.viewport.h);
     // Below the lowest string if the roll leaves room, pinned to the
-    // bottom otherwise. A lane that covers the low E is not a lane, it
+    // bottom otherwise. A dimension that covers the low E is not a dimension, it
     // is a second thing competing for the same pixels — and whether
     // there is room is exactly the cost this variant has to be judged
     // on.
@@ -295,7 +295,7 @@ pub fn bend_lane(ed: &Editor) -> Option<BendLaneView> {
         .iter()
         .filter(|n| n.end >= t0 && n.start <= t1)
         // Only notes that actually move. A flat line per fretted note
-        // would fill the lane with six overlapping horizontals at zero
+        // would fill the dimension with six overlapping horizontals at zero
         // and bury the one thing it exists to show.
         .filter(|n| !n.pitch.is_empty())
         .map(|n| {

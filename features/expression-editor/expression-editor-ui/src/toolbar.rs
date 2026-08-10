@@ -1,8 +1,8 @@
 //! The top bar, the chord box, and the status bar.
 //!
 //! The top bar carries only what changes *what a gesture does* — tool,
-//! lane, curve shape, history, view. Everything that is a setting
-//! rather than a mode (grid, key, tuning, bend range, lane strip) moved
+//! dimension, curve shape, history, view. Everything that is a setting
+//! rather than a mode (grid, key, tuning, bend range, dimension strip) moved
 //! to the status bar, because those get set once a session and were
 //! crowding the controls that get touched constantly.
 //!
@@ -10,7 +10,7 @@
 //! at plugin width, so the canvas no longer loses a wrapped second row.
 
 use dioxus::prelude::*;
-use expression_editor_core::doc::Lane;
+use expression_editor_core::doc::Dimension;
 use expression_editor_core::{chord, Editor, ModeFamily, Shape, StripLane, Tool};
 
 use crate::drawer::ModDrawer;
@@ -119,7 +119,7 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
 
     let ed = editor.read();
     let tool = ed.tool;
-    let lane = ed.lane;
+    let dimension = ed.dimension;
     let overlays = ed.overlays.clone();
     let shape = ed.shape;
     let can_undo = ed.can_undo();
@@ -133,7 +133,7 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
     rsx! {
         div {
             // Wraps rather than clips. With seven modes plus the tool,
-            // lane and view segments the bar does not fit a narrow
+            // dimension and view segments the bar does not fit a narrow
             // plugin window, and the alternatives are both worse:
             // `overflow: hidden` silently amputates whatever is on the
             // right, and letting the segments shrink collides each
@@ -241,25 +241,25 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
 
             {divider()}
 
-            // Lane selection and overlay visibility, joined: the name
-            // picks the lane to edit, the dot toggles it as an overlay.
+            // Dimension selection and overlay visibility, joined: the name
+            // picks the dimension to edit, the dot toggles it as an overlay.
             // Hidden outside MPE and Audio — plain MIDI cannot carry
             // per-note pressure, so offering the control would promise
             // an edit the format will drop.
             if mode.has_expression_lanes() {
             Segment {
-                for l in Lane::ALL {
-                    // One wrapper per lane so the key lands on a single
+                for l in Dimension::ALL {
+                    // One wrapper per dimension so the key lands on a single
                     // node; Dioxus only honours a key on the first node
                     // in a block, and this loop emits a pair.
                     div {
-                        key: "lane{l:?}",
+                        key: "dimension{l:?}",
                         style: "display: flex; align-items: stretch;",
                     Seg {
-                        active: lane == l,
+                        active: dimension == l,
                         color: theme::lane_color(l).to_string(),
                         title: format!("Edit {}", theme::lane_label(l)),
-                        onclick: move |_| editor.write().lane = l,
+                        onclick: move |_| editor.write().dimension = l,
                         "{theme::lane_label(l)}"
                     }
                     Seg {
@@ -527,7 +527,7 @@ pub fn ChordBox(editor: Signal<Editor>) -> Element {
 
 // ── status bar ───────────────────────────────────────────────────────
 
-/// Settings, not modes: grid, key, tuning, the lane strip, and readouts.
+/// Settings, not modes: grid, key, tuning, the dimension strip, and readouts.
 #[component]
 pub fn StatusBar(editor: Signal<Editor>) -> Element {
     let mut editor = editor;
@@ -641,7 +641,7 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                 Seg {
                     active: strip_on,
                     accent: true,
-                    title: "Show the velocity / CC lane".to_string(),
+                    title: "Show the velocity / CC dimension".to_string(),
                     onclick: move |_| {
                         let h = editor.read().lane_strip_h;
                         editor.write().lane_strip_h = if h > 0.0 { 0.0 } else { 96.0 };
@@ -650,7 +650,7 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                 }
                 Seg {
                     active: false,
-                    title: "Which lane the strip shows".to_string(),
+                    title: "Which dimension the strip shows".to_string(),
                     onclick: move |_| {
                         let cur = editor.read().strip_lane;
                         let all = StripLane::ALL;

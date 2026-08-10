@@ -107,11 +107,11 @@ fn events_at_the_same_moment_share_an_x_across_every_time_base() {
         })
         .collect();
     let first = xs[0];
-    for (lane, x) in lanes.iter().zip(&xs) {
+    for (dimension, x) in lanes.iter().zip(&xs) {
         assert!(
             (x - first).abs() < 1.0,
             "'{}' put 1.0s at x={x}, the vocal put it at {first}",
-            lane.name
+            dimension.name
         );
     }
 }
@@ -134,19 +134,19 @@ fn lanes_tile_the_viewport_without_overlapping() {
 
 #[test]
 fn every_note_is_drawn_inside_its_own_lane() {
-    // A note escaping its lane draws over the neighbouring track, which
+    // A note escaping its dimension draws over the neighbouring track, which
     // reads as that track having a note it does not have.
     let ed = band();
-    for lane in stack::lanes(&ed, 1.0, 12.0) {
-        for n in &lane.notes {
+    for dimension in stack::lanes(&ed, 1.0, 12.0) {
+        for n in &dimension.notes {
             assert!(
-                n.y >= lane.y - 0.5 && n.y + n.h <= lane.y + lane.h + 0.5,
-                "'{}' drew a note at y={}..{} outside its lane {}..{}",
-                lane.name,
+                n.y >= dimension.y - 0.5 && n.y + n.h <= dimension.y + dimension.h + 0.5,
+                "'{}' drew a note at y={}..{} outside its dimension {}..{}",
+                dimension.name,
                 n.y,
                 n.y + n.h,
-                lane.y,
-                lane.y + lane.h
+                dimension.y,
+                dimension.y + dimension.h
             );
         }
     }
@@ -155,7 +155,7 @@ fn every_note_is_drawn_inside_its_own_lane() {
 #[test]
 fn a_kit_fills_its_lane_rather_than_a_twentieth_of_it() {
     // Three bands over the same rows-per-pixel as 128 pitch rows would
-    // leave the kit a sliver. Each lane fits its own row space.
+    // leave the kit a sliver. Each dimension fits its own row space.
     let ed = band();
     let lanes = stack::lanes(&ed, 1.0, 12.0);
     let kit = lanes.iter().find(|l| l.name == "Kit").unwrap();
@@ -163,12 +163,12 @@ fn a_kit_fills_its_lane_rather_than_a_twentieth_of_it() {
     let top = kit.notes.iter().map(|n| n.y).fold(f64::INFINITY, f64::min);
     let bottom = kit.notes.iter().map(|n| n.y + n.h).fold(0.0f64, f64::max);
     // The kit's hits are all in one band, so they occupy about a third
-    // of the lane — the point is that the band is a third, not a
+    // of the dimension — the point is that the band is a third, not a
     // fortieth.
     let used = bottom - top;
     assert!(
         used > kit.h / 6.0,
-        "a band occupies {used}px of a {}px lane",
+        "a band occupies {used}px of a {}px dimension",
         kit.h
     );
 }
@@ -196,7 +196,7 @@ fn named_row_spaces_get_dividers_and_pitch_does_not() {
     // Three bands, six strings — each row is a named thing worth a line.
     assert_eq!(of("Kit"), (3, 3));
     assert_eq!(of("Guitar"), (6, 6));
-    // 128 semitones inside a 150 px lane is a grey block, and pitch has
+    // 128 semitones inside a 150 px dimension is a grey block, and pitch has
     // a keyboard of its own to read.
     assert_eq!(of("Lead Vox"), (0, 0));
     assert_eq!(of("Ref MIDI"), (0, 0));
@@ -256,7 +256,7 @@ fn hidden_tracks_do_not_get_a_lane() {
 fn an_empty_track_gets_a_sane_lane_rather_than_all_128_rows() {
     // Fitting to no content has no answer; falling back to the full
     // pitch range would draw anything later loaded as a smear at the
-    // bottom of the lane.
+    // bottom of the dimension.
     let mut ed = band();
     ed.tracks.push(Track::in_mode(
         "Empty",

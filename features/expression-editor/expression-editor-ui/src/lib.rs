@@ -16,7 +16,7 @@
 use dioxus::prelude::*;
 use dioxus_elements::input_data::MouseButton;
 use expression_editor_core::tools::Mods;
-use expression_editor_core::{Editor, Lane, Viewport};
+use expression_editor_core::{Editor, Dimension, Viewport};
 use keyboard_types::Modifiers;
 
 pub mod canvas;
@@ -284,7 +284,7 @@ fn Canvas(
         .then(|| guitar::flow_paths(&ed))
         .unwrap_or_default();
     let joins = guitar::joins(&ed);
-    let bend_lane = flow_mode.lane().then(|| guitar::bend_lane(&ed)).flatten();
+    let bend_lane = flow_mode.draws_in_lane().then(|| guitar::bend_lane(&ed)).flatten();
     let midi_ref = canvas::midi_reference_rects(&ed);
     let midi_ref_front = ed.reference_to_front;
     // `R` brings references forward, the way `M` does for the MIDI
@@ -293,7 +293,7 @@ fn Canvas(
     let ref_opacity = if ed.refs_to_front { 0.95 } else { 0.45 };
     let cc_paths = canvas::cc_paths(&ed);
     // Notes recede while a controller is being edited: the roll is that
-    // lane's editing surface for the moment, and full-strength notes
+    // dimension's editing surface for the moment, and full-strength notes
     // would compete with the curve for the same pixels.
     let note_opacity = if ed.cc_editing() {
         ed.cc_display.note_dim
@@ -303,7 +303,7 @@ fn Canvas(
     let cc_editing = ed.cc_edit;
     let microtonal = !ed.tuning.temperament.is_equal();
     let temperament_name = ed.tuning.temperament.name;
-    let lane = ed.lane;
+    let dimension = ed.dimension;
     let empty = ed.doc.notes.is_empty();
     drop(ed);
 
@@ -684,9 +684,9 @@ fn Canvas(
                         y: "{b.y:.1}",
                         width: "{b.w:.1}",
                         height: "{b.h:.1}",
-                        fill: theme::lane_color(lane),
+                        fill: theme::lane_color(dimension),
                         fill_opacity: "0.05",
-                        stroke: theme::lane_color(lane),
+                        stroke: theme::lane_color(dimension),
                         stroke_opacity: "0.25",
                         stroke_width: "1",
                     }
@@ -1002,20 +1002,20 @@ fn Canvas(
                     }
                 }
 
-                // The lane variant: the same motion on an absolute
+                // The dimension variant: the same motion on an absolute
                 // semitone axis, under the roll.
-                if let Some(lane) = bend_lane.as_ref() {
+                if let Some(dimension) = bend_lane.as_ref() {
                     g {
                         rect {
-                            x: "0", y: "{lane.y:.1}",
-                            width: "{vp.w:.0}", height: "{lane.h:.1}",
+                            x: "0", y: "{dimension.y:.1}",
+                            width: "{vp.w:.0}", height: "{dimension.h:.1}",
                             fill: theme::SURFACE_DEEP,
                             fill_opacity: "0.9",
                             stroke: theme::BORDER_STRONG,
                             stroke_width: "1",
                             pointer_events: "none",
                         }
-                        for (gi, (gy, label)) in lane.guides.iter().enumerate() {
+                        for (gi, (gy, label)) in dimension.guides.iter().enumerate() {
                             g {
                                 key: "bg{gi}",
                                 line {
@@ -1035,7 +1035,7 @@ fn Canvas(
                                 }
                             }
                         }
-                        for (pi, f) in lane.paths.iter().enumerate() {
+                        for (pi, f) in dimension.paths.iter().enumerate() {
                             polyline {
                                 key: "bp{pi}",
                                 points: "{f.points}",
@@ -1064,7 +1064,7 @@ fn Canvas(
                     }
                 }
 
-                // Expression curves — overlays first, active lane last.
+                // Expression curves — overlays first, active dimension last.
                 for (i, c) in curves.iter().enumerate() {
                     polyline {
                         key: "cv{i}",
@@ -1490,7 +1490,7 @@ fn strip_write(mut editor: Signal<Editor>, h: f64, x: f64, y: f64) {
     editor.write().apply_live(&edit);
 }
 
-/// The velocity / CC lane strip below the roll.
+/// The velocity / CC dimension strip below the roll.
 ///
 /// Shares the roll's horizontal camera exactly — a stem must sit under
 /// its note — but has its own vertical scale, because the value being
@@ -1608,6 +1608,6 @@ fn LaneStrip(editor: Signal<Editor>) -> Element {
 ///
 /// Only Pitch: three overlaid curves on a first look is noise, and the
 /// other two are one click away in the toolbar.
-pub fn default_overlays() -> Vec<Lane> {
-    vec![Lane::Pitch]
+pub fn default_overlays() -> Vec<Dimension> {
+    vec![Dimension::Pitch]
 }

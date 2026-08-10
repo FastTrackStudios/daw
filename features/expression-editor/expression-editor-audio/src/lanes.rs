@@ -2,7 +2,7 @@
 //!
 //! Each concern — gate, compressor, breath, sibilance — keeps its own
 //! gain curve, and the take's **volume envelope is their sum**. Editing
-//! any one lane and recomputing the sum is what makes the result
+//! any one dimension and recomputing the sum is what makes the result
 //! audible without a plugin in the signal path: the volume envelope is
 //! the one per-item gain every host already applies.
 //!
@@ -22,15 +22,15 @@
 //!
 //! ## Unity is a hole, not a value
 //!
-//! A lane that is off contributes nothing, which is not the same as
+//! A dimension that is off contributes nothing, which is not the same as
 //! contributing 0 dB — though the two sum identically. The difference
-//! shows when *every* lane is off: there is then no envelope to write,
+//! shows when *every* dimension is off: there is then no envelope to write,
 //! and writing a flat one at unity would leave dead automation on the
 //! item that the user has to find and delete.
 
 use crate::dynamics::{Dynamics, GainPoint};
 
-/// Which concern a lane carries.
+/// Which concern a dimension carries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DynamicsLane {
     Gate,
@@ -64,7 +64,7 @@ pub struct Lanes {
     compressor: Vec<GainPoint>,
     breath: Vec<GainPoint>,
     sibilance: Vec<GainPoint>,
-    /// Frames the lanes span. Kept so an empty lane still knows how
+    /// Frames the lanes span. Kept so an empty dimension still knows how
     /// long the take is.
     frames: usize,
 }
@@ -85,8 +85,8 @@ impl Lanes {
         self.frames
     }
 
-    pub fn get(&self, lane: DynamicsLane) -> &[GainPoint] {
-        match lane {
+    pub fn get(&self, dimension: DynamicsLane) -> &[GainPoint] {
+        match dimension {
             DynamicsLane::Gate => &self.gate,
             DynamicsLane::Compressor => &self.compressor,
             DynamicsLane::Breath => &self.breath,
@@ -94,10 +94,10 @@ impl Lanes {
         }
     }
 
-    /// Replace one lane. The sum follows on the next read, which is
+    /// Replace one dimension. The sum follows on the next read, which is
     /// what makes "edit any of them and hear it" true.
-    pub fn set(&mut self, lane: DynamicsLane, points: Vec<GainPoint>) {
-        let slot = match lane {
+    pub fn set(&mut self, dimension: DynamicsLane, points: Vec<GainPoint>) {
+        let slot = match dimension {
             DynamicsLane::Gate => &mut self.gate,
             DynamicsLane::Compressor => &mut self.compressor,
             DynamicsLane::Breath => &mut self.breath,
@@ -106,13 +106,13 @@ impl Lanes {
         *slot = points;
     }
 
-    /// Switch one lane off without losing the others.
-    pub fn clear(&mut self, lane: DynamicsLane) {
-        self.set(lane, Vec::new());
+    /// Switch one dimension off without losing the others.
+    pub fn clear(&mut self, dimension: DynamicsLane) {
+        self.set(dimension, Vec::new());
     }
 
-    pub fn is_active(&self, lane: DynamicsLane) -> bool {
-        !self.get(lane).is_empty()
+    pub fn is_active(&self, dimension: DynamicsLane) -> bool {
+        !self.get(dimension).is_empty()
     }
 
     /// Whether anything at all is on.
@@ -120,7 +120,7 @@ impl Lanes {
         DynamicsLane::ALL.iter().all(|&l| !self.is_active(l))
     }
 
-    /// The audible curve: every active lane summed, in dB.
+    /// The audible curve: every active dimension summed, in dB.
     ///
     /// `None` when nothing is on — see the note on unity above. A flat
     /// envelope at 0 dB and *no* envelope sound the same and are not the
@@ -130,8 +130,8 @@ impl Lanes {
             return None;
         }
         let mut db = vec![0.0f64; self.frames];
-        for lane in DynamicsLane::ALL {
-            for p in self.get(lane) {
+        for dimension in DynamicsLane::ALL {
+            for p in self.get(dimension) {
                 if let Some(slot) = db.get_mut(p.frame) {
                     *slot += p.db;
                 }

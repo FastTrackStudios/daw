@@ -98,7 +98,7 @@ pub const TEXT_BRIGHT: &str = d::TEXT_BRIGHT;
 pub const TEXT_FAINT: &str = d::TEXT_FAINT;
 /// The deepest surface step, below [`BG`].
 pub const SURFACE_DEEP: &str = d::SURFACE_DEEP;
-/// A well or lane cut into a panel.
+/// A well or dimension cut into a panel.
 pub const SURFACE_SUNKEN: &str = d::SURFACE_SUNKEN;
 /// Toolbars and status bars.
 pub const SURFACE_BAR: &str = d::SURFACE_BAR;
@@ -136,22 +136,22 @@ pub fn pitch_class_color(row: i32) -> &'static str {
     PITCH_CLASS[row.rem_euclid(12) as usize]
 }
 
-/// Per-lane curve color.
-pub fn lane_color(lane: expression_editor_core::Lane) -> &'static str {
-    use expression_editor_core::Lane;
-    match lane {
-        Lane::Pitch => d::LANE_PITCH,
-        Lane::Pressure => d::LANE_PRESSURE,
-        Lane::Timbre => d::LANE_TIMBRE,
+/// Per-dimension curve color.
+pub fn lane_color(dimension: expression_editor_core::Dimension) -> &'static str {
+    use expression_editor_core::Dimension;
+    match dimension {
+        Dimension::Pitch => d::LANE_PITCH,
+        Dimension::Pressure => d::LANE_PRESSURE,
+        Dimension::Timbre => d::LANE_TIMBRE,
     }
 }
 
-pub fn lane_label(lane: expression_editor_core::Lane) -> &'static str {
-    use expression_editor_core::Lane;
-    match lane {
-        Lane::Pitch => "Pitch",
-        Lane::Pressure => "Pressure",
-        Lane::Timbre => "Timbre",
+pub fn lane_label(dimension: expression_editor_core::Dimension) -> &'static str {
+    use expression_editor_core::Dimension;
+    match dimension {
+        Dimension::Pitch => "Pitch",
+        Dimension::Pressure => "Pressure",
+        Dimension::Timbre => "Timbre",
     }
 }
 

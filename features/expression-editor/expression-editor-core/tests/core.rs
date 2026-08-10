@@ -6,7 +6,7 @@
 use expression_editor_core::blob;
 use expression_editor_core::camera::{self, Bounds, Camera, Content, Viewport};
 use expression_editor_core::doc::{
-    Curve, ExpressionDoc, Lane, Note, NoteId, Point, Target, TimeBase,
+    Curve, ExpressionDoc, Dimension, Note, NoteId, Point, Target, TimeBase,
 };
 use expression_editor_core::edit::{Edit, History};
 use expression_editor_core::modulation::{CurveTarget, Row, Stack, Wave};
@@ -205,9 +205,9 @@ fn target_toggles_between_one_zone_and_the_whole_note() {
 #[test]
 fn drawing_extends_to_the_note_edges_so_no_gap_is_left() {
     let mut doc = doc_with_note();
-    let edit = Edit::DrawLane {
+    let edit = Edit::DrawDimension {
         note: NoteId(1),
-        lane: Lane::Pitch,
+        dimension: Dimension::Pitch,
         t0: 500.0,
         t1: 1000.0,
         points: vec![
@@ -230,10 +230,10 @@ fn drawing_extends_to_the_note_edges_so_no_gap_is_left() {
 #[test]
 fn erasing_one_lane_leaves_the_others_untouched() {
     let mut doc = doc_with_note();
-    for lane in Lane::ALL {
-        Edit::DrawLane {
+    for dimension in Dimension::ALL {
+        Edit::DrawDimension {
             note: NoteId(1),
-            lane,
+            dimension,
             t0: 0.0,
             t1: 1000.0,
             points: vec![
@@ -247,9 +247,9 @@ fn erasing_one_lane_leaves_the_others_untouched() {
         .apply(&mut doc);
     }
     let before = doc.note(NoteId(1)).unwrap().pitch.clone();
-    Edit::EraseLane {
+    Edit::EraseDimension {
         note: NoteId(1),
-        lane: Lane::Pressure,
+        dimension: Dimension::Pressure,
         // The whole note: drawing held the curve out to the note edges,
         // so erasing only the drawn interval would leave those.
         t0: 0.0,
@@ -823,7 +823,7 @@ fn a_new_editor_frames_its_content() {
     let (lo, hi) = ed.camera.pitch_span(ed.viewport);
     assert!(lo <= c.pitch_lo && hi >= c.pitch_hi);
     assert_eq!(ed.tool, Tool::Curve, "Curve is the default tool");
-    assert_eq!(ed.lane, Lane::Pitch);
+    assert_eq!(ed.dimension, Dimension::Pitch);
 }
 
 #[test]
@@ -993,9 +993,9 @@ fn pressure_and_timbre_map_into_a_fixed_two_semitone_box() {
 #[test]
 fn the_active_lane_draws_last_and_overlays_never_duplicate_it() {
     let mut ed = test_editor();
-    ed.lane = Lane::Pressure;
-    ed.overlays = vec![Lane::Pitch, Lane::Pressure];
-    assert_eq!(ed.draw_order(), vec![Lane::Pitch, Lane::Pressure]);
+    ed.dimension = Dimension::Pressure;
+    ed.overlays = vec![Dimension::Pitch, Dimension::Pressure];
+    assert_eq!(ed.draw_order(), vec![Dimension::Pitch, Dimension::Pressure]);
 }
 
 // ── modulation ───────────────────────────────────────────────────────
@@ -1106,7 +1106,7 @@ fn applying_modulation_tapers_at_the_span_edges() {
     assert!(
         Edit::ApplyModulation {
             note: NoteId(1),
-            lane: Lane::Pitch,
+            dimension: Dimension::Pitch,
             t0: 0.0,
             t1: PPQ * 2.0,
             stack,
@@ -1136,7 +1136,7 @@ fn modulation_preserves_data_outside_its_target_range() {
     // Target only the second half.
     Edit::ApplyModulation {
         note: NoteId(1),
-        lane: Lane::Pitch,
+        dimension: Dimension::Pitch,
         t0: PPQ,
         t1: PPQ * 2.0,
         stack: Stack::growing_vibrato(),
@@ -1169,7 +1169,7 @@ fn restore_puts_a_captured_curve_back_exactly() {
 
     Edit::ApplyModulation {
         note: NoteId(1),
-        lane: Lane::Pitch,
+        dimension: Dimension::Pitch,
         t0: 0.0,
         t1: PPQ * 2.0,
         stack: Stack::growing_vibrato(),
@@ -1179,9 +1179,9 @@ fn restore_puts_a_captured_curve_back_exactly() {
     .apply(&mut doc);
     assert_ne!(doc.note(NoteId(1)).unwrap().pitch, captured);
 
-    Edit::RestoreLane {
+    Edit::RestoreDimension {
         note: NoteId(1),
-        lane: Lane::Pitch,
+        dimension: Dimension::Pitch,
         t0: 0.0,
         t1: PPQ * 2.0,
         points: captured.points().to_vec(),
@@ -2087,8 +2087,8 @@ fn clearing_a_lane_across_an_area_keeps_the_notes() {
     let mut doc = held_doc();
     let before = doc.notes.len();
     let area = RazorArea::new(PPQ * 2.0, PPQ * 4.0, 60, 60);
-    assert!(razor::clear_lane(&mut doc, area, Lane::Pitch));
-    assert_eq!(doc.notes.len(), before, "notes survive a lane clear");
+    assert!(razor::clear_lane(&mut doc, area, Dimension::Pitch));
+    assert_eq!(doc.notes.len(), before, "notes survive a dimension clear");
 }
 
 #[test]
@@ -2277,7 +2277,7 @@ use expression_editor_core::cc::{self, CcSet};
 #[test]
 fn volume_like_controllers_rest_at_full_not_silence() {
     let set = CcSet::orchestral();
-    // A CC11 lane that defaulted to zero would mute the part the moment
+    // A CC11 dimension that defaulted to zero would mute the part the moment
     // it was pinned.
     assert_eq!(set.get(11).unwrap().default_value(), 1.0);
     assert_eq!(set.get(11).unwrap().value(0.0), 127);
@@ -2336,11 +2336,11 @@ fn cc_edits_are_document_level_not_per_note() {
         .apply(&mut doc)
     );
 
-    let lane = doc.cc.get(11).unwrap();
+    let dimension = doc.cc.get(11).unwrap();
     // The swell exists independently of where notes start and end.
-    assert_eq!(lane.value(0.0), 25);
-    assert_eq!(lane.value(PPQ * 4.0), 127);
-    assert_eq!(lane.value(PPQ * 2.0), 76, "linear between authored points");
+    assert_eq!(dimension.value(0.0), 25);
+    assert_eq!(dimension.value(PPQ * 4.0), 127);
+    assert_eq!(dimension.value(PPQ * 2.0), 76, "linear between authored points");
 }
 
 #[test]
@@ -2369,16 +2369,16 @@ fn scaling_a_controller_cannot_push_it_past_the_wire_range() {
     }
     .apply(&mut doc);
 
-    let lane = doc.cc.get(1).unwrap();
-    for p in lane.curve.points() {
+    let dimension = doc.cc.get(1).unwrap();
+    for p in dimension.curve.points() {
         assert!(
             (0.0..=1.0).contains(&p.value),
             "a controller must not clip on export, got {}",
             p.value
         );
     }
-    assert_eq!(lane.value(0.0), 127);
-    assert_eq!(lane.value(PPQ * 4.0), 0);
+    assert_eq!(dimension.value(0.0), 127);
+    assert_eq!(dimension.value(PPQ * 4.0), 0);
 }
 
 #[test]
@@ -2430,7 +2430,7 @@ fn clearing_part_of_a_curve_splices_the_default_in_at_both_edges() {
 #[test]
 fn clearing_a_whole_curve_empties_it_rather_than_authoring_defaults() {
     // The exception: with nothing outside to bleed in, leaving two
-    // default points behind would call an untouched lane "authored".
+    // default points behind would call an untouched dimension "authored".
     let mut c = Curve::new();
     c.set(PPQ, 0.5);
     c.set(PPQ * 2.0, 0.8);
@@ -2488,7 +2488,7 @@ fn erasing_part_of_a_controller_reads_as_cleared() {
 fn entering_cc_edit_mode_pins_the_lane_it_edits() {
     let mut ed = test_editor();
     assert!(!ed.cc_editing());
-    // Editing a lane you cannot see is a trap, so entering must pin it.
+    // Editing a dimension you cannot see is a trap, so entering must pin it.
     ed.edit_cc(11);
     assert!(ed.cc_editing());
     assert!(ed.doc.cc.get(11).unwrap().pinned);
@@ -2746,7 +2746,7 @@ fn zones_are_hit_testable_and_corners_beat_the_field() {
 
 #[test]
 fn positional_zones_are_the_ones_safe_across_lanes() {
-    // A value transform needs one lane's range to be meaningful; a
+    // A value transform needs one dimension's range to be meaningful; a
     // positional one does not.
     assert!(Zone::Warp.is_positional());
     assert!(Zone::Move.is_positional());
@@ -2773,9 +2773,9 @@ fn each_mode_brings_its_own_preset() {
 
     ed.set_mode(Mode::Midi);
     assert!(matches!(ed.row_space, RowSpace::Pitch));
-    // Plain MIDI cannot carry per-note pressure, so the active lane
+    // Plain MIDI cannot carry per-note pressure, so the active dimension
     // must not be left pointing at it.
-    assert_eq!(ed.lane, Lane::Pitch);
+    assert_eq!(ed.dimension, Dimension::Pitch);
     assert!(ed.overlays.is_empty());
 }
 
@@ -2833,7 +2833,7 @@ fn switching_modes_is_reversible() {
     ed.set_mode(Mode::Guitar);
     ed.set_mode(Mode::Mpe);
     assert!(matches!(ed.row_space, RowSpace::Pitch));
-    assert_eq!(ed.overlays, vec![Lane::Pitch]);
+    assert_eq!(ed.overlays, vec![Dimension::Pitch]);
     assert_eq!(ed.mouse.name, "REAPER-like");
 }
 
@@ -3476,12 +3476,12 @@ fn the_trim_handles_set_a_level_rather_than_a_contour() {
     let n = ed.doc.note(NoteId(1)).unwrap();
     let a = n
         .pressure
-        .sample(n.start + 1.0, Lane::Pressure.default_value());
+        .sample(n.start + 1.0, Dimension::Pressure.default_value());
     let b = n
         .pressure
-        .sample(n.end - 1.0, Lane::Pressure.default_value());
+        .sample(n.end - 1.0, Dimension::Pressure.default_value());
     assert!((a - b).abs() < 1e-6, "flat across the note: {a} vs {b}");
-    assert!(a > Lane::Pressure.default_value());
+    assert!(a > Dimension::Pressure.default_value());
 }
 
 // ── the temporary note ───────────────────────────────────────────────

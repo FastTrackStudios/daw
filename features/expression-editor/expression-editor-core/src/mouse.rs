@@ -26,9 +26,9 @@ pub enum Context {
     NoteEdge,
     /// A Q-zone split handle.
     ZoneSplit,
-    /// The velocity/CC lane strip below the roll.
+    /// The velocity/CC dimension strip below the roll.
     CcLane,
-    /// An event already in a CC lane.
+    /// An event already in a CC dimension.
     CcEvent,
     /// The piano-key gutter.
     Keys,
@@ -128,13 +128,13 @@ pub enum Action {
     PenOverride,
     ScaleExpression,
     TransposeSnapped,
-    /// Freehand into the active controller lane.
+    /// Freehand into the active controller dimension.
     EditCcEvents,
     /// A straight ramp between the drag's two ends, restyled by the
     /// toolbar shape. Stays live after release so the shape buttons can
-    /// change their mind, exactly like the note-lane `Curve` gesture.
+    /// change their mind, exactly like the note-dimension `Curve` gesture.
     DrawCcLine,
-    /// Splice the lane's default back in across the swept range.
+    /// Splice the dimension's default back in across the swept range.
     EraseCcEvents,
     /// Ride the fader: scale the swept range about a pivot, keeping its
     /// shape and changing only its depth.
@@ -416,7 +416,7 @@ impl MouseMap {
                 b(C::ZoneSplit, G::Drag, N, A::ActiveTool),
                 b(C::ZoneSplit, G::Click, AL, A::None),
                 b(C::ZoneSplit, G::RightClick, N, A::ContextMenu),
-                // ── velocity / CC lane ───────────────────────────────
+                // ── velocity / CC dimension ───────────────────────────────
                 // Shift is deliberately unbound here: it is the
                 // snap-reverse modifier for every CC gesture, the way it
                 // is everywhere else in the surface. Binding it to a

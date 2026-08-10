@@ -265,16 +265,16 @@ impl PitchDraft {
         };
         self.dirty = Some((t0, t1));
         vec![
-            Edit::RestoreLane {
+            Edit::RestoreDimension {
                 note: self.note,
-                lane: crate::doc::Lane::Pitch,
+                dimension: crate::doc::Dimension::Pitch,
                 t0,
                 t1,
                 points: self.captured.clone(),
             },
-            Edit::DrawLane {
+            Edit::DrawDimension {
                 note: self.note,
-                lane: crate::doc::Lane::Pitch,
+                dimension: crate::doc::Dimension::Pitch,
                 t0,
                 t1,
                 points: self.combined(),
@@ -284,14 +284,14 @@ impl PitchDraft {
 
     /// The single edit that commits the drawing.
     ///
-    /// One `DrawLane`, so the whole session — however many anchors were
+    /// One `DrawDimension`, so the whole session — however many anchors were
     /// placed, moved and undone along the way — is one step of the
     /// document's history.
     pub fn apply_edit(&self) -> Option<Edit> {
         let (t0, t1) = self.dirty_span()?;
-        Some(Edit::DrawLane {
+        Some(Edit::DrawDimension {
             note: self.note,
-            lane: crate::doc::Lane::Pitch,
+            dimension: crate::doc::Dimension::Pitch,
             t0,
             t1,
             points: self.combined(),
@@ -301,9 +301,9 @@ impl PitchDraft {
     /// The edit that puts everything back, for dismiss.
     pub fn cancel_edit(&self) -> Option<Edit> {
         let (t0, t1) = self.dirty_span()?;
-        Some(Edit::RestoreLane {
+        Some(Edit::RestoreDimension {
             note: self.note,
-            lane: crate::doc::Lane::Pitch,
+            dimension: crate::doc::Dimension::Pitch,
             t0,
             t1,
             points: self.captured.clone(),

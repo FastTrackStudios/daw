@@ -339,7 +339,7 @@ impl ZoomModes {
         horizontal: HorizontalMode::SmartNotes,
         vertical: VerticalMode::Keep,
     };
-    /// Pointer over a CC lane: keep pitch alone entirely.
+    /// Pointer over a CC dimension: keep pitch alone entirely.
     pub const CC_LANE: ZoomModes = ZoomModes {
         horizontal: HorizontalMode::SmartNotes,
         vertical: VerticalMode::Keep,

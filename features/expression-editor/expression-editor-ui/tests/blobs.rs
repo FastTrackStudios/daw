@@ -251,7 +251,7 @@ fn three_notes_on_one_row_separate_by_how_sharp_they_are() {
 // ── backdrop, unvoiced spans and sibilant scope ──────────────────────
 
 use expression_editor_core::handles::{Handle, HandleDrag, Scope};
-use expression_editor_core::Lane;
+use expression_editor_core::Dimension;
 
 /// A note spanning a consonant: voiced, unvoiced, voiced.
 fn sibilant_editor() -> Editor {
@@ -290,7 +290,7 @@ fn the_pitch_track_stops_where_there_was_no_pitch() {
     let ed = sibilant_editor();
     let paths: Vec<_> = canvas::curve_paths(&ed)
         .into_iter()
-        .filter(|p| p.lane == Lane::Pitch)
+        .filter(|p| p.dimension == Dimension::Pitch)
         .collect();
     assert!(
         paths.len() >= 2,
@@ -303,7 +303,7 @@ fn the_pitch_track_stops_where_there_was_no_pitch() {
     whole.doc.unvoiced.clear();
     let joined: Vec<_> = canvas::curve_paths(&whole)
         .into_iter()
-        .filter(|p| p.lane == Lane::Pitch)
+        .filter(|p| p.dimension == Dimension::Pitch)
         .collect();
     assert_eq!(joined.len(), 1);
 }
@@ -326,15 +326,15 @@ fn the_sibilant_scope_rides_the_consonant_and_leaves_the_singing() {
     let note = ed.doc.note(NoteId(1)).unwrap().clone();
     let before_voiced = note
         .pressure
-        .sample(PPQ * 0.5, Lane::Pressure.default_value());
+        .sample(PPQ * 0.5, Dimension::Pressure.default_value());
 
     let mut d = HandleDrag::begin_with(Handle::Amplitude, &note, Scope::Note, 250.0, true);
     ed.begin_gesture();
     ed.drag_handle(&mut d, 150.0, false);
 
     let n = ed.doc.note(NoteId(1)).unwrap();
-    let in_consonant = n.pressure.sample(PPQ * 2.0, Lane::Pressure.default_value());
-    let in_singing = n.pressure.sample(PPQ * 0.5, Lane::Pressure.default_value());
+    let in_consonant = n.pressure.sample(PPQ * 2.0, Dimension::Pressure.default_value());
+    let in_singing = n.pressure.sample(PPQ * 0.5, Dimension::Pressure.default_value());
 
     assert!(
         in_consonant > before_voiced + 0.05,
@@ -355,8 +355,8 @@ fn the_whole_note_scope_still_moves_everything() {
     ed.drag_handle(&mut d, 150.0, false);
 
     let n = ed.doc.note(NoteId(1)).unwrap();
-    let a = n.pressure.sample(PPQ * 0.5, Lane::Pressure.default_value());
-    let b = n.pressure.sample(PPQ * 2.0, Lane::Pressure.default_value());
+    let a = n.pressure.sample(PPQ * 0.5, Dimension::Pressure.default_value());
+    let b = n.pressure.sample(PPQ * 2.0, Dimension::Pressure.default_value());
     assert!(
         (a - b).abs() < 1e-6,
         "one level across the note: {a} vs {b}"
@@ -370,14 +370,14 @@ fn a_sibilant_drag_does_not_compound_across_moves() {
     let mut d = HandleDrag::begin_with(Handle::Amplitude, &note, Scope::Note, 250.0, true);
     ed.begin_gesture();
 
-    // Out and back: each frame restores the captured lane first, so the
+    // Out and back: each frame restores the captured dimension first, so the
     // consonant must land exactly where it started.
     let before = ed
         .doc
         .note(NoteId(1))
         .unwrap()
         .pressure
-        .sample(PPQ * 2.0, Lane::Pressure.default_value());
+        .sample(PPQ * 2.0, Dimension::Pressure.default_value());
     for step in 1..=8 {
         ed.drag_handle(&mut d, 250.0 - step as f64 * 10.0, false);
     }
@@ -388,6 +388,6 @@ fn a_sibilant_drag_does_not_compound_across_moves() {
         .note(NoteId(1))
         .unwrap()
         .pressure
-        .sample(PPQ * 2.0, Lane::Pressure.default_value());
+        .sample(PPQ * 2.0, Dimension::Pressure.default_value());
     assert!((after - before).abs() < 1e-6, "{before} -> {after}");
 }

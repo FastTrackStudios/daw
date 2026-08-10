@@ -215,7 +215,7 @@ pub struct Dynamics {
 }
 
 impl Dynamics {
-    /// The four curves summed, for hosts that get one lane.
+    /// The four curves summed, for hosts that get one dimension.
     ///
     /// Summed in dB, which is the correct composition: gain stages
     /// multiply, and dB is where multiplication is addition. Summing

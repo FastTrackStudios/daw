@@ -27,7 +27,7 @@ use expression_editor_ui::{ExpressionEditor, ModDrawer, MultiTool};
 
 const W: u32 = 1100;
 /// The roll's own height. The window has to hold this plus the top bar,
-/// the chord row, the lane strip and the status bar — the canvas sizes
+/// the chord row, the dimension strip and the status bar — the canvas sizes
 /// itself from its intrinsic aspect ratio, so overshooting here pushes
 /// the status bar out of frame rather than shrinking the roll.
 const CANVAS_H: f64 = 400.0;
@@ -306,7 +306,7 @@ async fn shoot_cc_lanes() {
     editing.edit_cc(11);
     shoot(editing.clone(), "23-cc-edit").await;
 
-    // And drawing on the roll writes into that lane.
+    // And drawing on the roll writes into that dimension.
     let vph = editing.viewport.h;
     let x0 = editing.camera.x(demo::PPQ * 1.0);
     let mut drag = expression_editor_ui::interaction::pointer_down(
@@ -340,7 +340,7 @@ async fn shoot_multitool_and_modes() {
 
     let vp = Viewport::new(W as f64, CANVAS_H);
 
-    // MPE mode shows the lane and channel controls; MIDI hides both.
+    // MPE mode shows the dimension and channel controls; MIDI hides both.
     let mut mpe = demo::editor(Scene::Phrase, vp);
     mpe.set_mode(Mode::Mpe);
     mpe.selection.notes = mpe.doc.notes.iter().map(|n| n.id).collect();

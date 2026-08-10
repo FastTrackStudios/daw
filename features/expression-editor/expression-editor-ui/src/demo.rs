@@ -5,7 +5,7 @@
 //! PNG harness show *the same thing*. A screenshot that drifted from
 //! what the app actually launches would be worse than no screenshot.
 
-use expression_editor_core::doc::{ExpressionDoc, Lane, Marker, Note, NoteId, TimeBase};
+use expression_editor_core::doc::{ExpressionDoc, Dimension, Marker, Note, NoteId, TimeBase};
 use expression_editor_core::{Editor, Viewport};
 
 pub const PPQ: f64 = 960.0;
@@ -20,10 +20,10 @@ pub enum Scene {
     Zones,
     /// The same phrase read under Maqam Rast.
     Microtonal,
-    /// Pressure lane active, showing the fixed two-semitone lane box.
+    /// Pressure dimension active, showing the fixed two-semitone dimension box.
     Pressure,
     /// All three MPE dimensions overlaid at once.
-    AllLanes,
+    AllDimensions,
     /// Two sounding notes sharing a member channel — ownership is
     /// undecidable and the editor says so.
     Ambiguous,
@@ -34,7 +34,7 @@ pub enum Scene {
     /// A guitar riff on a string roll: fret numbers, per-string colour,
     /// articulation badges and legato ties.
     Guitar,
-    /// The same riff with its bend flow in a lane below the roll
+    /// The same riff with its bend flow in a dimension below the roll
     /// instead of on the string rows (#161).
     GuitarLane,
     /// The same riff with both at once (#161).
@@ -57,7 +57,7 @@ impl Scene {
         Scene::Zones,
         Scene::Microtonal,
         Scene::Pressure,
-        Scene::AllLanes,
+        Scene::AllDimensions,
         Scene::Ambiguous,
         Scene::Empty,
         Scene::Density,
@@ -77,7 +77,7 @@ impl Scene {
             Scene::Zones => "02-zones",
             Scene::Microtonal => "03-microtonal",
             Scene::Pressure => "04-pressure",
-            Scene::AllLanes => "05-all-lanes",
+            Scene::AllDimensions => "05-all-lanes",
             Scene::Ambiguous => "06-ambiguous",
             Scene::Empty => "07-empty",
             Scene::Density => "16-density",
@@ -85,7 +85,7 @@ impl Scene {
             Scene::Orchestral => "21-orchestral",
             Scene::Drums => "25-drums",
             Scene::Guitar => "26-guitar",
-            Scene::GuitarLane => "26b-guitar-bend-lane",
+            Scene::GuitarLane => "26b-guitar-bend-dimension",
             Scene::GuitarBoth => "26c-guitar-bend-both",
             Scene::Lyrics => "27-lyrics",
         }
@@ -96,8 +96,8 @@ impl Scene {
             Scene::Phrase => "Sung phrase",
             Scene::Zones => "Q zones",
             Scene::Microtonal => "Maqam Rast",
-            Scene::Pressure => "Pressure lane",
-            Scene::AllLanes => "All lanes",
+            Scene::Pressure => "Pressure dimension",
+            Scene::AllDimensions => "All lanes",
             Scene::Ambiguous => "Channel conflict",
             Scene::Empty => "Empty",
             Scene::Density => "Mixed density",
@@ -105,8 +105,8 @@ impl Scene {
             Scene::Orchestral => "Orchestral CC",
             Scene::Drums => "Drum groove",
             Scene::Guitar => "Guitar riff",
-            Scene::GuitarLane => "Guitar — bend lane",
-            Scene::GuitarBoth => "Guitar — row + lane",
+            Scene::GuitarLane => "Guitar — bend dimension",
+            Scene::GuitarBoth => "Guitar — row + dimension",
             Scene::Lyrics => "Vocal lyrics",
         }
     }
@@ -536,11 +536,11 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             ed.selection.set_single(NoteId(3));
         }
         Scene::Pressure => {
-            ed.lane = Lane::Pressure;
+            ed.dimension = Dimension::Pressure;
             ed.selection.set_single(NoteId(3));
         }
-        Scene::AllLanes => {
-            ed.overlays = vec![Lane::Pitch, Lane::Pressure, Lane::Timbre];
+        Scene::AllDimensions => {
+            ed.overlays = vec![Dimension::Pitch, Dimension::Pressure, Dimension::Timbre];
             ed.selection.set_single(NoteId(3));
         }
         Scene::Ambiguous => {

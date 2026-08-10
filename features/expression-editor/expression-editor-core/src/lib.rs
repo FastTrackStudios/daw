@@ -51,7 +51,7 @@ pub mod zoom;
 pub use camera::{Bounds, Camera, Content, Viewport};
 pub use cc::{CcDisplay, CcLane, CcSet};
 pub use chord::Chord;
-pub use doc::{Curve, ExpressionDoc, Lane, Marker, Note, NoteId, Point, Target, TimeBase};
+pub use doc::{Curve, ExpressionDoc, Dimension, Marker, Note, NoteId, Point, Target, TimeBase};
 pub use draft::PitchDraft;
 pub use edit::{Edit, History};
 pub use handles::{Handle, Scope};
@@ -80,10 +80,10 @@ pub struct Editor {
     pub camera: Camera,
     pub viewport: Viewport,
     pub tool: Tool,
-    /// The lane being edited. Others may still be drawn as overlays.
-    pub lane: Lane,
+    /// The dimension being edited. Others may still be drawn as overlays.
+    pub dimension: Dimension,
     /// Lanes drawn behind the active one.
-    pub overlays: Vec<Lane>,
+    pub overlays: Vec<Dimension>,
     pub selection: Selection,
     /// Which product this editor is being: MIDI, MPE, Drums, Guitar,
     /// Vocals or Audio. Decides which controls are on screen.
@@ -96,11 +96,11 @@ pub struct Editor {
     /// document data (`doc.cc`); this is view policy.
     pub cc_display: CcDisplay,
     /// The controller being edited, when CC edit mode is on. The roll
-    /// becomes that lane's editing surface and the notes recede.
+    /// becomes that dimension's editing surface and the notes recede.
     pub cc_edit: Option<u8>,
-    /// Velocity / CC lane strip height in pixels, 0 when hidden.
+    /// Velocity / CC dimension strip height in pixels, 0 when hidden.
     pub lane_strip_h: f64,
-    /// Which lane the strip shows.
+    /// Which dimension the strip shows.
     pub strip_lane: StripLane,
     /// Context × modifier → action. Editable, so a host can ship a
     /// REAPER-matching profile or its own.
@@ -179,7 +179,7 @@ impl Editor {
             camera,
             viewport,
             tool: Tool::Curve,
-            lane: Lane::Pitch,
+            dimension: Dimension::Pitch,
             overlays: Vec::new(),
             selection: Selection::default(),
             mode: Mode::default(),
@@ -349,13 +349,13 @@ impl Editor {
         }
         let id = drag.note;
 
-        // Restore the captured lane first, so the edit below always
+        // Restore the captured dimension first, so the edit below always
         // sees the same input it saw on the previous frame.
-        let restore = |ed: &mut Self, lane: Lane| {
-            let points = drag.base_of(lane).points().to_vec();
-            ed.apply_live(&Edit::RestoreLane {
+        let restore = |ed: &mut Self, dimension: Dimension| {
+            let points = drag.base_of(dimension).points().to_vec();
+            ed.apply_live(&Edit::RestoreDimension {
                 note: id,
-                lane,
+                dimension,
                 t0,
                 t1,
                 points,
@@ -364,7 +364,7 @@ impl Editor {
 
         match drag.handle {
             H::Pitch | H::FinePitch => {
-                restore(self, Lane::Pitch);
+                restore(self, Dimension::Pitch);
                 // Coarse pitch snaps, fine pitch never does — that is
                 // the whole distinction between the two handles. The
                 // row is left alone during the drag and normalized on
@@ -382,31 +382,31 @@ impl Editor {
                     // the wobble happened to be.
                     let base = drag.base_row as f64
                         + blob::decompose(
-                            drag.base_of(Lane::Pitch),
+                            drag.base_of(Dimension::Pitch),
                             t0,
                             t1,
                             edit::DEFAULT_SAMPLES,
                             self.doc.time_base.units_per_second(self.bpm),
-                            Lane::Pitch.default_value(),
+                            Dimension::Pitch.default_value(),
                         )
                         .center;
                     self.tuning.snap(base + amount).pitch - base
                 } else {
                     amount
                 };
-                self.apply_live(&Edit::ShiftLane {
+                self.apply_live(&Edit::ShiftDimension {
                     note: id,
-                    lane: Lane::Pitch,
+                    dimension: Dimension::Pitch,
                     t0,
                     t1,
                     delta,
                 })
             }
             H::LeftSlope | H::RightSlope => {
-                restore(self, Lane::Pitch);
-                self.apply_live(&Edit::TiltLane {
+                restore(self, Dimension::Pitch);
+                self.apply_live(&Edit::TiltDimension {
                     note: id,
-                    lane: Lane::Pitch,
+                    dimension: Dimension::Pitch,
                     t0,
                     t1,
                     amount,
@@ -414,15 +414,15 @@ impl Editor {
                 })
             }
             H::Formant | H::Amplitude => {
-                let lane = if drag.handle == H::Formant {
-                    Lane::Timbre
+                let dimension = if drag.handle == H::Formant {
+                    Dimension::Timbre
                 } else {
-                    Lane::Pressure
+                    Dimension::Pressure
                 };
                 // A level, so it reads off the captured value at the
                 // scope's midpoint rather than restoring and shifting.
                 let mid = (t0 + t1) * 0.5;
-                let base = drag.base_of(lane).sample(mid, lane.default_value());
+                let base = drag.base_of(dimension).sample(mid, dimension.default_value());
 
                 // Sibilant scope: the amplitude handle addresses only
                 // the unvoiced spans inside the scope. Each is written
@@ -452,29 +452,29 @@ impl Editor {
                         // Restore first: the level is absolute, so a
                         // span already written this frame has to go
                         // back before it is written again.
-                        let points = drag.base_of(lane).points().to_vec();
-                        self.apply_live(&Edit::RestoreLane {
+                        let points = drag.base_of(dimension).points().to_vec();
+                        self.apply_live(&Edit::RestoreDimension {
                             note: id,
-                            lane,
+                            dimension,
                             t0: a,
                             t1: b,
                             points,
                         });
                         for (g0, g1) in [(a - eps * 2.0, a - eps), (b + eps, b + eps * 2.0)] {
                             if g0 > t0 && g1 < t1 {
-                                let held = drag.base_of(lane).sample(g0, lane.default_value());
-                                self.apply_live(&Edit::SetLaneLevel {
+                                let held = drag.base_of(dimension).sample(g0, dimension.default_value());
+                                self.apply_live(&Edit::SetDimensionLevel {
                                     note: id,
-                                    lane,
+                                    dimension,
                                     t0: g0,
                                     t1: g1,
                                     value: held,
                                 });
                             }
                         }
-                        any |= self.apply_live(&Edit::SetLaneLevel {
+                        any |= self.apply_live(&Edit::SetDimensionLevel {
                             note: id,
-                            lane,
+                            dimension,
                             t0: a,
                             t1: b,
                             value: base + amount,
@@ -483,16 +483,16 @@ impl Editor {
                     return any;
                 }
 
-                self.apply_live(&Edit::SetLaneLevel {
+                self.apply_live(&Edit::SetDimensionLevel {
                     note: id,
-                    lane,
+                    dimension,
                     t0,
                     t1,
                     value: base + amount,
                 })
             }
             H::Vibrato => {
-                restore(self, Lane::Pitch);
+                restore(self, Dimension::Pitch);
                 // 1.0 is as sung; 0 is robotic; above 1 exaggerates.
                 // Drift is held at full so the vibrato handle changes
                 // only the vibrato, which is what it says it does.
@@ -794,16 +794,16 @@ impl Editor {
                 self.clipboard.copy_from(&self.doc, &ids)
             }
             C::ClearExpression => {
-                let lane = self.lane;
+                let dimension = self.dimension;
                 let spans: Vec<(NoteId, f64, f64)> = targets
                     .iter()
                     .filter_map(|id| self.doc.note(*id).map(|n| (*id, n.start, n.end)))
                     .collect();
                 let mut any = false;
                 for (id, t0, t1) in spans {
-                    any |= self.apply(&Edit::EraseLane {
+                    any |= self.apply(&Edit::EraseDimension {
                         note: id,
-                        lane,
+                        dimension,
                         t0,
                         t1,
                     });
@@ -899,9 +899,9 @@ impl Editor {
         self.overlays = mode.default_overlays();
         self.strip_lane = mode.default_strip();
         if !mode.has_expression_lanes() {
-            // Leaving the active lane on Pressure in plain MIDI would
+            // Leaving the active dimension on Pressure in plain MIDI would
             // point every gesture at something the format cannot carry.
-            self.lane = Lane::Pitch;
+            self.dimension = Dimension::Pitch;
         }
         self.reset_view();
     }
@@ -1015,22 +1015,22 @@ impl Editor {
             &self.doc,
             &self.camera,
             self.viewport,
-            self.lane,
+            self.dimension,
             x,
             y,
             tools::HitConfig::default(),
         )
     }
 
-    /// Lanes to draw, back to front: overlays first, active lane last.
-    pub fn draw_order(&self) -> Vec<Lane> {
-        let mut lanes: Vec<Lane> = self
+    /// Lanes to draw, back to front: overlays first, active dimension last.
+    pub fn draw_order(&self) -> Vec<Dimension> {
+        let mut lanes: Vec<Dimension> = self
             .overlays
             .iter()
             .copied()
-            .filter(|&l| l != self.lane)
+            .filter(|&l| l != self.dimension)
             .collect();
-        lanes.push(self.lane);
+        lanes.push(self.dimension);
         lanes
     }
 }
@@ -1061,33 +1061,33 @@ pub fn content_of(doc: &ExpressionDoc) -> Content {
     }
 }
 
-/// What the bottom lane strip displays.
+/// What the bottom dimension strip displays.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum StripLane {
     /// Per-note velocity, drawn as stems.
     Velocity,
     /// Per-note release velocity.
     OffVelocity,
-    /// A continuous expression lane, drawn as a curve.
-    Expression(Lane),
+    /// A continuous expression dimension, drawn as a curve.
+    Expression(Dimension),
 }
 
 impl StripLane {
     pub const ALL: [StripLane; 5] = [
         StripLane::Velocity,
         StripLane::OffVelocity,
-        StripLane::Expression(Lane::Pitch),
-        StripLane::Expression(Lane::Pressure),
-        StripLane::Expression(Lane::Timbre),
+        StripLane::Expression(Dimension::Pitch),
+        StripLane::Expression(Dimension::Pressure),
+        StripLane::Expression(Dimension::Timbre),
     ];
 
     pub fn label(&self) -> &'static str {
         match self {
             StripLane::Velocity => "Velocity",
             StripLane::OffVelocity => "Release",
-            StripLane::Expression(Lane::Pitch) => "Pitch",
-            StripLane::Expression(Lane::Pressure) => "Pressure",
-            StripLane::Expression(Lane::Timbre) => "Timbre",
+            StripLane::Expression(Dimension::Pitch) => "Pitch",
+            StripLane::Expression(Dimension::Pressure) => "Pressure",
+            StripLane::Expression(Dimension::Timbre) => "Timbre",
         }
     }
 
