@@ -126,6 +126,9 @@ impl Midi for Standalone {
         for ne in content.note_expressions {
             Midi::add_note_expression(self, location.clone(), ne);
         }
+        for cp in content.channel_pressures {
+            Midi::add_channel_pressure(self, location.clone(), cp);
+        }
         indices
     }
 

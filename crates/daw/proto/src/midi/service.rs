@@ -242,6 +242,15 @@ pub struct MidiTakeContent {
     pub ccs: Vec<MidiCCCreate>,
     pub pitch_bends: Vec<MidiPitchBendCreate>,
     pub note_expressions: Vec<MidiNoteExpressionCreate>,
+    /// Channel pressure (mono aftertouch).
+    ///
+    /// Added for #167: without it, an MPE editor had to write pressure
+    /// out as CC11 while reading it back from real channel pressure, so
+    /// the dimension silently did not survive a round trip. A field per
+    /// event kind the snapshot already reads is the shape that makes
+    /// read and write symmetrical.
+    #[facet(default)]
+    pub channel_pressures: Vec<MidiChannelPressureCreate>,
 }
 
 /// How a write treats what is already in the take.
