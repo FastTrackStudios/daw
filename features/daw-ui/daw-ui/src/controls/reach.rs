@@ -38,6 +38,28 @@ where
     Ok(())
 }
 
+/// Wait for a DAW connection, then hand back its current project.
+///
+/// The two long-lived subscriptions — the track stream and the meter feed —
+/// both start this way, and both used to carry their own copy of the loop.
+/// `architect::platform::sleep`, not `tokio::time`: this runs in the browser
+/// build too, where tokio's timer compiles and then panics.
+pub async fn connected_project() -> Option<daw_control::Project> {
+    loop {
+        if daw_control::Daw::try_get().is_some() {
+            break;
+        }
+        architect::platform::sleep(std::time::Duration::from_millis(500)).await;
+    }
+    match daw_control::Daw::get().current_project().await {
+        Ok(p) => Some(p),
+        Err(e) => {
+            tracing::warn!("no project: {e:?}");
+            None
+        }
+    }
+}
+
 /// Fire `f` at the DAW and log whatever it says.
 ///
 /// The shape every click handler wants: a control has already updated what

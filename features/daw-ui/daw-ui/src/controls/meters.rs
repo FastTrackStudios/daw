@@ -22,8 +22,7 @@
 //! which is the thing that already hears about adds, removes and moves, and
 //! a frame whose length disagrees with it is dropped rather than guessed at.
 
-use std::collections::HashMap;
-use std::time::Duration;
+use std::collections::{HashMap, HashSet};
 
 use daw_proto::peak::TrackLevels;
 use daw_theme_art::primitives as art;
@@ -64,7 +63,11 @@ impl Meters {
         for (guid, l) in order.iter().zip(frame) {
             levels.insert(guid.clone(), *l);
         }
-        levels.retain(|g, _| order.contains(g));
+        // A set, not `order.contains`: this runs inside a Signal write at
+        // thirty frames a second, and a linear scan per track is quadratic
+        // in the size of the mixer.
+        let live: HashSet<&str> = order.iter().map(String::as_str).collect();
+        levels.retain(|g, _| live.contains(g.as_str()));
     }
 }
 
@@ -96,19 +99,8 @@ pub fn MeterFeed() -> Element {
     let mut meters = use_meters();
 
     use_future(move || async move {
-        loop {
-            if daw_control::Daw::try_get().is_some() {
-                break;
-            }
-            architect::platform::sleep(Duration::from_millis(500)).await;
-        }
-        let daw = daw_control::Daw::get();
-        let project = match daw.current_project().await {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!("meters: no project: {e:?}");
-                return;
-            }
+        let Some(project) = crate::controls::reach::connected_project().await else {
+            return;
         };
         let mut frames = project.meter_events();
         while let Ok(Some(frame)) = frames.recv().await {
@@ -138,24 +130,36 @@ pub fn TrackMeter(
     // One pixel of gap, so two channels read as two channels rather than
     // one wide bar that happens to be uneven.
     let bar = (width.saturating_sub(1) / 2).max(1);
+    let guid = track.replace(|c: char| !c.is_ascii_alphanumeric(), "");
 
     rsx! {
         div {
             style: "display:flex; gap:1px; line-height:0; height:{height}px;",
             art::Meter {
+                tag: "{guid}l",
                 width: bar,
                 height,
                 level: l.peak_left,
-                hold: Some(l.hold_left),
+                hold: hold(l.hold_left),
             }
             art::Meter {
+                tag: "{guid}r",
                 width: bar,
                 height,
                 level: l.peak_right,
-                hold: Some(l.hold_right),
+                hold: hold(l.hold_right),
             }
         }
     }
+}
+
+/// A hold mark only when there is a peak to hold.
+///
+/// Silence carries `hold = 0`, and drawing that leaves a permanent tick on
+/// the bottom row of every idle meter — which reads as a signal floor
+/// rather than as nothing.
+fn hold(v: f32) -> Option<f32> {
+    (v > 0.0).then_some(v)
 }
 
 #[cfg(test)]

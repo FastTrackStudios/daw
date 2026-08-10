@@ -54,7 +54,10 @@ impl Panel {
         }
     }
 
-    fn is_track(self) -> bool {
+    /// Track panel or mixer, as the `bool` the measured tables are keyed
+    /// by. Public because the tables are: `label_legend`'s seven-arm match
+    /// is measured data, not a decision that wants an enum per axis.
+    pub fn is_track(self) -> bool {
         self == Self::Track
     }
 }
@@ -63,8 +66,13 @@ impl Panel {
 ///
 /// Measured off the `off` cells: #464646 in the mixer, #4e4e4e in the track
 /// panel, both falling about 12% over the button's height.
-pub fn label_unlit(track: bool) -> Option<Color> {
-    Some(Theme::default().chrome.hardware.shade(if track { 0.078 } else { 0.036 }))
+pub fn label_unlit(panel: Panel) -> Option<Color> {
+    Some(
+        Theme::default()
+            .chrome
+            .hardware
+            .shade(if panel.is_track() { 0.078 } else { 0.036 }),
+    )
 }
 
 /// The printed letter's colour.
@@ -80,8 +88,8 @@ pub fn label_unlit(track: bool) -> Option<Color> {
 /// Read as a single #f2f2f2 the track panel's unlit buttons came out sixty
 /// levels hot, which is most of why they were the worst two images in the
 /// set by pixel error.
-pub fn label_legend(track: bool, lit: bool, solo: bool) -> Option<Color> {
-    let up = match (track, lit, solo) {
+pub fn label_legend(panel: Panel, lit: bool, solo: bool) -> Option<Color> {
+    let up = match (panel.is_track(), lit, solo) {
         (false, _, false) => 0.45,
         (false, false, true) => 0.45,
         (false, true, true) => 0.59,
@@ -97,8 +105,8 @@ pub fn label_legend(track: bool, lit: bool, solo: bool) -> Option<Color> {
 ///
 /// The track panel's buttons occupy rows 1..20 of a 24-row cell; the
 /// mixer's fill theirs.
-pub fn label_body(track: bool) -> (f32, f32) {
-    if track { (1.0 / 24.0, 20.0 / 24.0) } else { (0.0, 1.0) }
+pub fn label_body(panel: Panel) -> (f32, f32) {
+    if panel.is_track() { (1.0 / 24.0, 20.0 / 24.0) } else { (0.0, 1.0) }
 }
 
 /// Everything a mute button needs, for the image `art` names.
@@ -112,7 +120,8 @@ pub fn label_body(track: bool) -> (f32, f32) {
 /// ToggleProps { at, width, height, ..dress::mute(art, on) }
 /// ```
 pub fn mute(art: NamedArt, on: bool) -> ToggleProps {
-    let track = Panel::of(art.name).is_track();
+    let panel = Panel::of(art.name);
+    let track = panel.is_track();
     ToggleProps {
         // Mute's hover is the gentlest of the three — see
         // `vector_controls::ink`.
@@ -122,9 +131,9 @@ pub fn mute(art: NamedArt, on: bool) -> ToggleProps {
         depth: 0.11,
         on,
         art,
-        body: label_body(track),
-        legend: label_legend(track, on, false),
-        unlit: label_unlit(track),
+        body: label_body(panel),
+        legend: label_legend(panel, on, false),
+        unlit: label_unlit(panel),
         // The track panel's pressed cell is identical to its normal one;
         // the mixer's is darker.
         sinks: !track,

@@ -267,22 +267,8 @@ pub fn use_track(guid: String) -> Memo<Option<Track>> {
 ///
 pub fn use_daw_tracks(mut store: TrackStore) {
     use_future(move || async move {
-        loop {
-            if daw_control::Daw::try_get().is_some() {
-                break;
-            }
-            // `architect::platform::sleep`, not `tokio::time`: this runs in
-            // the browser build too, where tokio's timer compiles and then
-            // panics. The platform seam maps to a browser timer there.
-            architect::platform::sleep(std::time::Duration::from_millis(500)).await;
-        }
-        let daw = daw_control::Daw::get();
-        let project = match daw.current_project().await {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!("track store: no project: {e:?}");
-                return;
-            }
+        let Some(project) = crate::controls::reach::connected_project().await else {
+            return;
         };
         let mut events = match project.tracks().subscribe().await {
             Ok(s) => s,

@@ -69,10 +69,10 @@ pub fn SoloButton(
             art::SoloButton {
                 state: if on { art::Solo::On } else { art::Solo::Off },
                 art: named,
-                body: daw_theme_art::dress::label_body(panel == Panel::Track),
-                legend: daw_theme_art::dress::label_legend(panel == Panel::Track, on, true),
-                unlit: daw_theme_art::dress::label_unlit(panel == Panel::Track),
-                sinks: panel != Panel::Track,
+                body: daw_theme_art::dress::label_body(panel),
+                legend: daw_theme_art::dress::label_legend(panel, on, true),
+                unlit: daw_theme_art::dress::label_unlit(panel),
+                sinks: !panel.is_track(),
                 hover: 0.35,
                 depth: 0.11,
                 width: Some(w),
@@ -125,7 +125,7 @@ pub fn RecordArmButton(
                 art: named,
                 // The mixer seats its ring in a moulded housing; the track
                 // panel draws it bare on the strip.
-                housing: panel == Panel::Mixer,
+                housing: !panel.is_track(),
                 width: Some(w),
                 height: Some(h),
                 at: at(),
@@ -225,7 +225,7 @@ pub fn MonitorButton(
                 art: named,
                 // The mixer's waves radiate downward, the track panel's
                 // rightward: same geometry, turned a quarter turn.
-                axis: if panel == Panel::Track { art::Axis::Horizontal } else { art::Axis::Vertical },
+                axis: if panel.is_track() { art::Axis::Horizontal } else { art::Axis::Vertical },
                 width: Some(w),
                 height: Some(h),
                 at: at(),

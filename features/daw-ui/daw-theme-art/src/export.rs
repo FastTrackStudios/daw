@@ -88,7 +88,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 state,
                 art: art(),
                 housing: !track,
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -101,9 +101,10 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
     // the numbers there would let the app's mute and REAPER's mute drift
     // apart.
     let theme = daw_theme::Theme::default();
-    let unlit = crate::dress::label_unlit(track);
-    let legend = |lit: bool, solo: bool| crate::dress::label_legend(track, lit, solo);
-    let label_body = crate::dress::label_body(track);
+    let panel = crate::dress::Panel::of(name);
+    let unlit = crate::dress::label_unlit(panel);
+    let legend = |lit: bool, solo: bool| crate::dress::label_legend(panel, lit, solo);
+    let label_body = crate::dress::label_body(panel);
     let mute = |on| {
         render_svg(
             v::MuteButton,
@@ -125,7 +126,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 sinks: !track,
                 // Solo's red is pinned; only its green falls, by 11%.
                 depth: 0.11,
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -137,7 +138,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::FxProps {
                 state,
                 family,
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -150,7 +151,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 state,
                 art: art(),
                 axis,
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -165,7 +166,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 disabled,
                 art: art(),
                 axis,
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -180,7 +181,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::FxBypassProps {
                 state,
                 family,
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -195,7 +196,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::EnvelopeProps {
                 mode,
                 cell: (20.0, 20.0),
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -207,7 +208,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::PhaseProps {
                 inverted,
                 art: art(),
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -220,7 +221,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::RecordModeProps {
                 mode,
                 cell: (20.0, 20.0),
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -232,7 +233,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::FolderCompactProps {
                 state,
                 cell: (17.0, 13.0),
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -244,7 +245,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::FxInProps {
                 loaded,
                 cell: (29.0, 20.0),
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -256,7 +257,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::FolderProps {
                 state,
                 cell: (54.0, 14.0),
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -277,7 +278,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 } else {
                     (36.0, 26.0)
                 },
-                width: n.0,
+width: n.0,
                 height: n.1,
                 at,
             },
@@ -326,7 +327,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     pill,
                     edge,
                     inset,
-                    width: n.0,
+    width: n.0,
                     height: n.1,
                     at,
                 },
@@ -436,7 +437,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     stripes,
                     art: art(),
                     inset,
-                    width: n.0,
+    width: n.0,
                     height: n.1,
                     at,
                 },
@@ -603,7 +604,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     glyph,
                     lit,
                     cell: (30.0, 20.0),
-                    width: n.0,
+    width: n.0,
                     height: n.1,
                     at,
                 },
@@ -629,7 +630,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 v::EnvcpArmProps {
                     armed: name.ends_with("_on"),
                     cell: (20.0, 20.0),
-                    width: n.0,
+    width: n.0,
                     height: n.1,
                     at,
                 },
@@ -643,7 +644,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 v::EnvcpBypassProps {
                     bypassed: name.ends_with("_on"),
                     cell: (15.0, 20.0),
-                    width: n.0,
+    width: n.0,
                     height: n.1,
                     at,
                 },
@@ -669,7 +670,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                     part: v::SliderPart::PanThumb,
                     art: art(),
                     drop,
-                    width: n.0,
+    width: n.0,
                     height: n.1,
                     at,
                 },
@@ -823,7 +824,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 indicator: false,
                 position: 0.0,
                 large: false,
-                width: n.0,
+width: n.0,
                 height: n.1,
             },
         ),
@@ -833,7 +834,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
                 indicator: false,
                 position: 0.0,
                 large: true,
-                width: n.0,
+width: n.0,
                 height: n.1,
             },
         ),
@@ -842,7 +843,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::FaderCapProps {
                 accent: None,
                 pane: None,
-                                width: n.0,
+                width: n.0,
                 height: n.1,
             },
         ),
@@ -851,7 +852,7 @@ pub fn cell_markup(name: &str, at: v::Interaction) -> Option<String> {
             v::FaderCapProps {
                 accent: None,
                 pane: None,
-                                width: n.0,
+                width: n.0,
                 height: n.1,
             },
         ),

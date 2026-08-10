@@ -10,8 +10,8 @@
 
 use crate::controls::{
     ControlSync, FxButton, IoButton, MeterFeed, MonitorButton, MuteButton, PanKnob, PhaseButton,
-    RecordArmButton, SoloButton, TrackMeter, TrackName, VolumeFader, use_daw_tracks,
-    use_track_store,
+    RecordArmButton, RecordInputLabel, SoloButton, TrackMeter, TrackName, VolumeFader,
+    use_daw_tracks, use_track_store,
 };
 use crate::prelude::*;
 use daw_control::{FxNodeKind, FxTree};
@@ -275,6 +275,7 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 PhaseButton { track: track.guid.clone() }
                 IoButton { track: track.guid.clone() }
             }
+            RecordInputLabel { track: track.guid.clone() }
 
             // ── Track Name + Number (bottom) ────────────────────
             div {

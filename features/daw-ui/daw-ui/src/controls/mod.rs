@@ -49,7 +49,7 @@ pub use fader::VolumeFader;
 pub use fx::FxButton;
 pub use meters::{MeterFeed, Meters, TrackMeter, use_meters};
 pub use mute::MuteButton;
-pub use pan::{PanKnob, TrackName};
+pub use pan::{PanKnob, RecordInputLabel, TrackName};
 pub use toggles::{IoButton, MonitorButton, PhaseButton, RecordArmButton, SoloButton};
 pub use sync::ControlSync;
 pub use track_store::{TrackStore, use_daw_tracks, use_track, use_track_store};

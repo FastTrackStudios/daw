@@ -4743,7 +4743,7 @@ mod tests {
                     indicator: false,
                     position: p,
                     large: false,
-                    width: None,
+                width: None,
                     height: None,
                 },
             );
@@ -4866,7 +4866,7 @@ mod tests {
                 FaderCapProps {
                     accent: None,
                     pane: None,
-                                        width: None,
+                width: None,
                     height: Some(h),
                 },
             );
@@ -4909,7 +4909,7 @@ mod tests {
             FaderCapProps {
                 accent: None,
                 pane: None,
-                                width: None,
+                width: None,
                 height: None,
             },
         );

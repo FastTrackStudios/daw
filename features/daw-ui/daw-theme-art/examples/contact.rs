@@ -140,6 +140,8 @@ fn main() {
             &render_svg(
                 Meter,
                 MeterProps {
+                    tag: String::new(),
+                    hold: None,
                     width: 10,
                     height: 90,
                     level,

@@ -33,10 +33,11 @@ use crate::prelude::*;
 pub fn FxButton(
     /// The track's GUID.
     track: String,
-    /// The width to draw the pill's labelled half at, in art pixels. The
-    /// default is its source width; anything larger grows the flat run.
-    #[props(default = 28.0)]
-    width: f32,
+    /// The width to draw the pill's labelled half at, in art pixels.
+    /// `None` draws it at its source width — read from the art rather than
+    /// restated here, so it follows a remeasurement.
+    #[props(default)]
+    width: Option<f32>,
     /// Pixels per art pixel.
     #[props(default = 1.0)]
     scale: f32,
@@ -55,7 +56,7 @@ pub fn FxButton(
     // The slack goes to the one growing pane; the fixed ones keep their
     // source width. Stated in pixels here rather than left to flex-grow so
     // a pane's width is a fact and not a division of leftovers.
-    let slack = ((width - src_w) * scale).max(0.0);
+    let slack = ((width.unwrap_or(src_w) - src_w) * scale).max(0.0);
     let h = (src_h * scale).round() as u32;
     // The same accent the lit routing lanes use, from the one palette.
     let accent = daw_theme::Theme::default().chrome.accent.css();

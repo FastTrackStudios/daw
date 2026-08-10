@@ -93,6 +93,41 @@ pub fn PanKnob(
     }
 }
 
+/// What the track records from.
+///
+/// A **display**, and deliberately not a selector: no service enumerates
+/// the host's audio and MIDI inputs, so an input is an index with nowhere
+/// to get a name from. A dropdown here would be a raw number pretending to
+/// be a label, so the number is shown as what it is until something can
+/// name it.
+#[component]
+pub fn RecordInputLabel(
+    /// The track's GUID.
+    track: String,
+) -> Element {
+    use daw_proto::track::RecordInput;
+
+    let info = use_track(track.clone());
+    let text = match info.read().as_ref().map(|t| t.record_input) {
+        None | Some(RecordInput::None) => "in —".to_string(),
+        Some(RecordInput::Audio { channel }) => format!("in {}", channel + 1),
+        Some(RecordInput::Midi { device_id, channel }) => {
+            let dev = device_id.map(|d| d.to_string()).unwrap_or_else(|| "all".into());
+            let ch = channel.map(|c| (c + 1).to_string()).unwrap_or_else(|| "all".into());
+            format!("midi {dev}/{ch}")
+        }
+        Some(RecordInput::Raw(v)) => format!("in #{v}"),
+    };
+
+    rsx! {
+        div {
+            style: "font-family:Fira Sans, DejaVu Sans, sans-serif; font-size:8px; \
+                    color:#8a8a8a; text-align:center; white-space:nowrap; overflow:hidden;",
+            "{text}"
+        }
+    }
+}
+
 /// The strip's name plate: the track's name, in the track's colour.
 ///
 /// Both fields already existed and both already arrive as events, so this is

@@ -8,6 +8,7 @@
 use daw_theme_art::dress::{self, Panel};
 use daw_theme_art::vector_controls as art;
 
+use crate::controls::reach::write_track;
 use crate::controls::track_store::use_track;
 use crate::prelude::*;
 
@@ -44,12 +45,7 @@ pub fn MuteButton(
     let guid = track.clone();
     let press = move |_| {
         at.set(art::Interaction::Pressed);
-        let guid = guid.clone();
-        spawn(async move {
-            if let Err(e) = toggle_mute(&guid).await {
-                tracing::warn!("mute {guid}: {e}");
-            }
-        });
+        write_track(guid.clone(), "mute", |t| async move { t.toggle_mute().await });
     };
 
     rsx! {
@@ -76,21 +72,3 @@ pub fn MuteButton(
     }
 }
 
-/// Ask the backend to flip the track's mute.
-///
-/// Nothing is written locally on the way out. The store updates when the
-/// `MuteChanged` event arrives, so the button shows what the DAW actually
-/// did rather than what we asked for — and a mute that the backend refuses
-/// (or that never reaches it) shows as a button that does not light, not as
-/// a UI that disagrees with the project.
-async fn toggle_mute(guid: &str) -> eyre::Result<()> {
-    let daw = daw_control::Daw::try_get().ok_or_else(|| eyre::eyre!("no DAW connected"))?;
-    let project = daw.current_project().await?;
-    let track = project
-        .tracks()
-        .by_guid(guid)
-        .await?
-        .ok_or_else(|| eyre::eyre!("no track {guid}"))?;
-    track.toggle_mute().await?;
-    Ok(())
-}
