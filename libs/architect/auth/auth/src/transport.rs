@@ -772,7 +772,7 @@ pub mod vox {
     use super::CustomSessionTransport;
     use crate::{
         ArchitectAuth, AuthStorage, CreateEmailPasswordUser, CurrentSession, CustomSessionBundle,
-        ChangeEmail, ChangePassword, MigrateUserEmail, RefreshSession, SignOut,
+        ChangeEmail, ChangePassword, MigrateUserEmail, RefreshSession, SignOut, UpdateProfile,
         flows::bearer_tokens,
     };
     use auth_proto::{
@@ -883,6 +883,19 @@ pub mod vox {
                 })
                 .await?;
             self.auth.list_email_history(input.user_id).await
+        }
+
+        async fn update_profile(
+            &self,
+            input: auth_proto::service::UpdateProfileRequest,
+        ) -> Result<AuthUser, AuthFlowError> {
+            self.auth
+                .update_profile(UpdateProfile {
+                    session_token: input.session_token,
+                    name: input.name,
+                    image: input.image,
+                })
+                .await
         }
 
         async fn change_email(
