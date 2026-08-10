@@ -276,3 +276,154 @@ fn corrections_accumulate_across_separate_writes() {
     assert_eq!(s.mode_for(TRACK, "{OTHER}"), Some(Mode::Guitar));
     assert_eq!(s.mode_for(TRACK, "{THIRD}"), Some(Mode::Vocals));
 }
+
+// ── The rest of the per-take bucket (#192) ───────────────────────────
+
+use expression_editor_core::{Dimension, Editor, StripLane, Viewport, tuning};
+use expression_editor_daw::state::{TakeView, TuningRef};
+
+fn editor() -> Editor {
+    Editor::new(
+        expression_editor_core::ExpressionDoc::new(
+            expression_editor_core::TimeBase::Ppq { ppq: 960.0 },
+            0.0,
+            3840.0,
+        ),
+        Viewport::new(800.0, 600.0),
+    )
+}
+
+#[test]
+fn the_view_a_take_was_left_in_comes_back() {
+    let (d, project) = daw();
+
+    let mut ed = editor();
+    ed.dimension = Dimension::Pressure;
+    ed.overlays = vec![Dimension::Pitch, Dimension::Timbre];
+    ed.strip_lane = StripLane::OffVelocity;
+    ed.lane_strip_h = 87.0;
+    ed.cc_display.background_opacity = 0.42;
+    ed.tuning.key_pc = 7;
+    ed.tuning.snap_12tet = false;
+
+    let mut state = EditorState::default();
+    state.set_view(TakeView::capture(TAKE, &ed));
+    state::save(&d, project.clone(), &state).unwrap();
+
+    let mut fresh = editor();
+    state::load(&d, project)
+        .view_for(TAKE)
+        .expect("stored")
+        .apply(&mut fresh);
+
+    assert_eq!(fresh.dimension, Dimension::Pressure);
+    assert_eq!(fresh.overlays, vec![Dimension::Pitch, Dimension::Timbre]);
+    assert_eq!(fresh.strip_lane, StripLane::OffVelocity);
+    assert_eq!(fresh.lane_strip_h, 87.0);
+    assert_eq!(fresh.cc_display.background_opacity, 0.42);
+    assert_eq!(fresh.tuning.key_pc, 7);
+    assert!(!fresh.tuning.snap_12tet);
+}
+
+#[test]
+fn the_camera_is_not_part_of_it() {
+    // Vertical zoom and scroll position are deliberately not saved: the
+    // project should open fitted to *your* screen, not the sender's.
+    let (d, project) = daw();
+    let mut ed = editor();
+    ed.camera.t0 = 12345.0;
+    ed.camera.vertical.center = 99.0;
+
+    let mut state = EditorState::default();
+    state.set_view(TakeView::capture(TAKE, &ed));
+    state::save(&d, project.clone(), &state).unwrap();
+
+    let raw = d
+        .get_project(project.clone(), "fts.side", NAMESPACE)
+        .unwrap_or_default();
+    assert!(!raw.contains("12345"), "no camera reached the project: {raw}");
+
+    let mut fresh = editor();
+    let before = fresh.camera;
+    state::load(&d, project)
+        .view_for(TAKE)
+        .unwrap()
+        .apply(&mut fresh);
+    assert_eq!(fresh.camera, before, "applying a view does not move the camera");
+}
+
+#[test]
+fn applying_a_view_leaves_ephemeral_state_alone() {
+    // Restoring a selection the user did not make is a hazard, not a
+    // convenience — same for the razor and the clipboard.
+    let mut ed = editor();
+    let view = TakeView::capture(TAKE, &ed);
+
+    ed.stacked = true;
+    ed.timing_mode = true;
+    ed.sibilant_scope = true;
+    view.apply(&mut ed);
+
+    assert!(ed.stacked, "a view flag is not a stored view");
+    assert!(ed.timing_mode);
+    assert!(ed.sibilant_scope);
+}
+
+#[test]
+fn a_tuning_is_stored_by_name_not_by_value() {
+    let mut t = expression_editor_core::Tuning::default();
+    t.temperament = tuning::RAST.clone();
+    t.key_pc = 2;
+
+    let stored = TuningRef::of(&t);
+    assert_eq!(stored.temperament, tuning::RAST.name);
+
+    let back = stored.resolve();
+    assert_eq!(back.temperament.name, tuning::RAST.name);
+    assert_eq!(back.key_pc, 2);
+}
+
+#[test]
+fn an_unknown_temperament_falls_back_rather_than_guessing() {
+    let stored = TuningRef {
+        temperament: "Temperament From A Later Build".into(),
+        key_pc: 5,
+        snap_12tet: true,
+    };
+    let back = stored.resolve();
+    assert_eq!(
+        back.temperament.name,
+        expression_editor_core::Tuning::default().temperament.name,
+        "the default tuning, not a guessed one"
+    );
+    assert_eq!(back.key_pc, 5, "the rest of the setting still applies");
+}
+
+#[test]
+fn each_take_keeps_its_own_view() {
+    let mut state = EditorState::default();
+    let mut a = editor();
+    a.dimension = Dimension::Pressure;
+    let mut b = editor();
+    b.dimension = Dimension::Timbre;
+
+    state.set_view(TakeView::capture("take-a", &a));
+    state.set_view(TakeView::capture("take-b", &b));
+
+    assert_eq!(state.view_for("take-a").unwrap().dimension, Dimension::Pressure);
+    assert_eq!(state.view_for("take-b").unwrap().dimension, Dimension::Timbre);
+    assert_eq!(state.take_views.len(), 2);
+}
+
+#[test]
+fn re_capturing_a_take_replaces_its_view() {
+    let mut state = EditorState::default();
+    let mut ed = editor();
+    ed.dimension = Dimension::Pressure;
+    state.set_view(TakeView::capture(TAKE, &ed));
+    ed.dimension = Dimension::Timbre;
+    state.set_view(TakeView::capture(TAKE, &ed));
+
+    assert_eq!(state.take_views.len(), 1);
+    assert_eq!(state.view_for(TAKE).unwrap().dimension, Dimension::Timbre);
+}

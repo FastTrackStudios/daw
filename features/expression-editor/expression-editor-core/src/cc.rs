@@ -173,7 +173,7 @@ impl CcSet {
 }
 
 /// How pinned lanes are drawn behind the notes.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, facet::Facet)]
 pub struct CcDisplay {
     /// Opacity of a pinned lane that is not being edited. Low on
     /// purpose — several controllers at full strength turn the roll

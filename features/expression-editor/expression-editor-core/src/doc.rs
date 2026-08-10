@@ -56,7 +56,8 @@ impl TimeBase {
 
 /// The three MPE expression dimensions. Audio reads them as pitch,
 /// dynamics, and formant.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, facet::Facet)]
 pub enum Dimension {
     Pitch,
     Pressure,
