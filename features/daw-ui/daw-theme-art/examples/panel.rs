@@ -324,10 +324,13 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
             v::FxControl,
             v::FxControlProps {
                 part: v::FxPart::Label,
+                // 43 and 29 — `mcp.fx` and `mcp.fxbyp` — reached by
+                // growing the pill's middle, not by scaling it.
+                widen: Some((43.0, 29.0)),
                 chain: v::FxChain::Empty,
                 bypass: v::FxBypass::Empty,
                 family: v::FxFamily::Mixer,
-                width: Some(28),
+                width: Some(43),
                 height: Some(22),
                 at: v::Interaction::Normal,
             },
@@ -338,16 +341,17 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     // `leading_gap` exists for on the export side — so placed at the
     // arithmetic join the two halves show a bare pixel between them.
     s.push_str(&at(
-        x + 35.0,
+        x + 50.0,
         6.0,
         &render_svg(
             v::FxControl,
             v::FxControlProps {
                 part: v::FxPart::Toggle,
+                widen: Some((43.0, 29.0)),
                 chain: v::FxChain::Empty,
                 bypass: v::FxBypass::Empty,
                 family: v::FxFamily::Mixer,
-                width: Some(17),
+                width: Some(29),
                 height: Some(22),
                 at: v::Interaction::Normal,
             },

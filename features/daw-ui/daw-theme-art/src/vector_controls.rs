@@ -652,6 +652,16 @@ pub struct FxControlProps {
     /// Which half to emit.
     #[props(default)]
     pub part: FxPart,
+    /// Widen the pill to `(label, toggle)` units, keeping its ends.
+    ///
+    /// REAPER nine-slices this button: `mcp.fx` is 43 wide and `mcp.fxbyp`
+    /// 29, against art that is 28 and 17, and only the flat middle grows —
+    /// which is why its `FX` reads small in a long pill. Scaling the whole
+    /// thing into those boxes stretches the rounded ends into a notch and
+    /// the letters with them, so the widening belongs here, where the
+    /// geometry is, rather than in whatever is placing it.
+    #[props(default)]
+    pub widen: Option<(f32, f32)>,
     #[props(default)]
     pub width: Option<u32>,
     #[props(default)]
@@ -680,8 +690,17 @@ pub struct FxControlProps {
 pub fn FxControl(props: FxControlProps) -> Element {
     let t = Theme::default();
     let k = ink(None, props.at, true, 0.35);
-    let p = props.family.pill();
-    let (win_x, win_w) = props.family.window(props.part);
+    let mut p = props.family.pill();
+    if let Some((label, toggle)) = props.widen {
+        p.split = label;
+        p.w = label + p.gutter + toggle;
+    }
+    // Computed from the widened pill rather than from `window`, which
+    // reads the family's own untouched geometry.
+    let (win_x, win_w) = match props.part {
+        FxPart::Label => (0.0, p.split),
+        FxPart::Toggle => (p.split, p.w - p.split),
+    };
 
     let (body_y, body_h) = (p.h * p.body.0, p.h * p.body.1);
     // Exactly one pixel, on the pixel grid.
