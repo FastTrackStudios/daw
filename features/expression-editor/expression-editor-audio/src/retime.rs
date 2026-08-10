@@ -103,6 +103,65 @@ pub fn stretch_markers(
     out
 }
 
+/// Stretch markers for a quantize **plan** — WARP mode.
+///
+/// `Plan::alignment` has existed and returned an `Alignment` that
+/// nothing consumed, so warping was theoretical (#166). This is the
+/// consumer: an alignment is a frame-to-frame map, and a stretch marker
+/// is exactly a knot in such a map, so the write path is the one
+/// `stretch_markers` already uses rather than new machinery.
+///
+/// SPLIT moves the audio by cutting it; WARP moves it by bending time
+/// between anchors, which keeps the material continuous — the reason to
+/// have both.
+///
+/// One marker per anchor in the alignment: where a frame plays now, and
+/// where it played before. Everything between two markers stretches to
+/// fit.
+///
+/// Returns empty when the alignment corrects nothing, which is the case
+/// worth being cheap about: an untouched take must not acquire a warp
+/// just for being quantized with everything already on the grid.
+pub fn alignment_markers(
+    alignment: &crate::align::Alignment,
+    placement: TakePlacement,
+) -> Vec<StretchMarker> {
+    if alignment.map.is_empty() {
+        return Vec::new();
+    }
+    let rate = if alignment.frame_rate > 0.0 {
+        alignment.frame_rate
+    } else {
+        placement.frame_rate
+    };
+    let secs = |frames: f64| frames / rate.max(1e-9);
+
+    let mut out = Vec::new();
+    let mut corrected = false;
+    for (i, &target) in alignment.map.iter().enumerate() {
+        let was = i as f64;
+        if (target - was).abs() > 1e-9 {
+            corrected = true;
+        }
+        out.push(StretchMarker::at_project_time(
+            placement.item_position + secs(target),
+            placement.item_position + secs(was),
+            placement.item_position,
+            placement.start_offset,
+            placement.play_rate,
+        ));
+    }
+
+    if !corrected {
+        return Vec::new();
+    }
+    // Same reason as `stretch_markers`: a map with a repeated knot has
+    // an undefined slope there.
+    out.sort_by(|a, b| a.position.total_cmp(&b.position));
+    out.dedup_by(|a, b| (a.position - b.position).abs() < 1e-9);
+    out
+}
+
 /// Whether the user changed anything that only a resynthesis can carry.
 ///
 /// Compared **document to document**, not against the analysis: by the
