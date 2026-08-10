@@ -546,6 +546,70 @@ impl Workspace {
         }
     }
 
+    /// The row range one document wants, padded.
+    ///
+    /// Lives here rather than in the renderer because it is a question
+    /// about the material, not about pixels — and because a lane's fit
+    /// has to span every member, which the renderer should not be
+    /// deciding.
+    pub fn doc_row_range(doc: &ExpressionDoc, mode: Mode, fit_pad: f64) -> (f64, f64) {
+        let (bound_lo, bound_hi) = doc.row_space.bounds();
+        // A space with few rows shows all of them: three bands or six
+        // strings *are* the axis, and fitting to content would move a
+        // kit's rows around as hits come and go.
+        if !matches!(doc.row_space, crate::rows::RowSpace::Pitch) {
+            return (bound_lo as f64 - 0.5, bound_hi as f64 + 0.5);
+        }
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for n in &doc.notes {
+            lo = lo.min(n.row as f64);
+            hi = hi.max(n.row as f64);
+        }
+        if !lo.is_finite() || !hi.is_finite() {
+            // An octave around middle C is a better blank lane than all
+            // 128 rows, which would draw anything loaded later as a
+            // smear at the bottom.
+            return (54.0, 66.0);
+        }
+        // A blob needs room above and below for its excursions; a bar
+        // does not.
+        let pad = if mode.draws_blobs() {
+            fit_pad + 1.0
+        } else {
+            fit_pad
+        };
+        (lo - pad, hi + pad + 1.0)
+    }
+
+    /// The row range a whole lane wants: the union of its members'.
+    ///
+    /// Union, because fitting to the vocal alone would push its MIDI
+    /// guide off the top of the lane — and being able to compare them is
+    /// the reason they share a lane.
+    ///
+    /// `active_doc` is the live document for the active track, whose
+    /// parked copy is stale by design.
+    pub fn lane_row_range(
+        &self,
+        lane: usize,
+        active_doc: &ExpressionDoc,
+        fit_pad: f64,
+    ) -> Option<(f64, f64)> {
+        self.lane_tracks(lane)
+            .into_iter()
+            .filter(|&i| !self.tracks[i].hidden)
+            .filter_map(|i| {
+                let doc = if i == self.active {
+                    active_doc
+                } else {
+                    self.doc_of(i)?
+                };
+                Some(Self::doc_row_range(doc, self.tracks[i].mode, fit_pad))
+            })
+            .reduce(|(alo, ahi), (blo, bhi)| (alo.min(blo), ahi.max(bhi)))
+    }
+
     /// Re-apply natural heights after something changed a member's mode.
     /// Hand-sized lanes keep their height.
     pub fn refresh_lane_weights(&mut self) {

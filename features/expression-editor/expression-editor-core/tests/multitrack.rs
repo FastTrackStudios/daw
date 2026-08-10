@@ -8,6 +8,7 @@
 use expression_editor_core::rows::{RowSpace, SliceBands};
 use expression_editor_core::tracks::{Track, Workspace};
 use expression_editor_core::{Editor, ExpressionDoc, Mode, TimeBase, Viewport};
+use expression_editor_core::{Note, NoteId};
 
 fn doc() -> ExpressionDoc {
     ExpressionDoc::new(TimeBase::Frames { frame_rate: 100.0 }, 0.0, 400.0)
@@ -574,4 +575,111 @@ fn pairing_places_the_lane_by_first_appearance() {
         ws.track(ws.lane_tracks(1)[0]).unwrap().name,
         "Apple"
     );
+}
+
+// ── Per-lane vertical cameras ────────────────────────────────────────
+//
+// Time is shared, vertical is per lane. The load-bearing property is
+// that a lane's fit does NOT chase content: re-fitting on every edit
+// would rescale a lane under the cursor mid-gesture.
+
+use expression_editor_core::camera::VerticalCamera;
+
+fn doc_at_rows(rows: &[i32]) -> ExpressionDoc {
+    let mut d = doc();
+    d.notes.clear();
+    for (i, &r) in rows.iter().enumerate() {
+        d.notes.push(Note::new(NoteId(i as u64 + 1), 0.0, 480.0, r));
+    }
+    d
+}
+
+#[test]
+fn each_lane_fits_its_own_range() {
+    let mut ed = Editor::new(doc_at_rows(&[36, 38]), Viewport::new(800.0, 600.0));
+    ed.add_track("Piccolo", doc_at_rows(&[96, 100]));
+    ed.tracks.auto_pair();
+    ed.fit_lanes();
+
+    let bass = ed.lane_camera(0).unwrap();
+    let picc = ed.lane_camera(1).unwrap();
+    assert!(bass.center < 60.0, "the bass lane sits low");
+    assert!(picc.center > 80.0, "the piccolo lane sits high");
+}
+
+#[test]
+fn zooming_one_lane_leaves_the_others_alone() {
+    let mut ed = Editor::new(doc_at_rows(&[60]), Viewport::new(800.0, 600.0));
+    ed.add_track("Other", doc_at_rows(&[72]));
+    ed.tracks.auto_pair();
+    ed.fit_lanes();
+
+    let untouched = ed.lane_camera(1).unwrap();
+    ed.lane_cameras[0].zoom_about(60.0, 2.0);
+
+    assert_eq!(ed.lane_camera(1).unwrap(), untouched);
+    assert_ne!(ed.lane_camera(0).unwrap(), untouched);
+}
+
+#[test]
+fn the_horizontal_camera_is_shared_and_stays_that_way() {
+    // There is exactly one time axis. If this ever stops being true,
+    // two instruments doubling a line stop being comparable.
+    let mut ed = Editor::new(doc_at_rows(&[60]), Viewport::new(800.0, 600.0));
+    ed.add_track("Other", doc_at_rows(&[72]));
+    ed.tracks.auto_pair();
+    ed.fit_lanes();
+
+    let t0 = ed.camera.t0;
+    ed.camera.pan_px(50.0, 0.0);
+    assert_ne!(ed.camera.t0, t0, "panning moved the one shared axis");
+}
+
+#[test]
+fn an_edit_never_re_fits_a_lane() {
+    let mut ed = Editor::new(doc_at_rows(&[60]), Viewport::new(800.0, 600.0));
+    ed.fit_lanes();
+    let before = ed.lane_camera(0).unwrap();
+
+    // Move content far outside the fitted range.
+    ed.doc.notes[0].row = 100;
+
+    assert_eq!(
+        ed.lane_camera(0).unwrap(),
+        before,
+        "the lane must not rescale under the cursor"
+    );
+}
+
+#[test]
+fn reset_view_is_what_re_fits() {
+    let mut ed = Editor::new(doc_at_rows(&[60]), Viewport::new(800.0, 600.0));
+    ed.fit_lanes();
+    let before = ed.lane_camera(0).unwrap();
+
+    ed.doc.notes[0].row = 100;
+    ed.reset_view();
+
+    assert_ne!(
+        ed.lane_camera(0).unwrap(),
+        before,
+        "Reset View catches up with the content"
+    );
+}
+
+#[test]
+fn a_fitted_camera_maps_its_range_onto_the_lane() {
+    let cam = VerticalCamera::fitted(48.0, 72.0, 240.0);
+    // Centre of the range lands at the centre of the lane.
+    assert!((cam.y(60.0, 0.0, 240.0) - 120.0).abs() < 1e-9);
+    // And the mapping inverts.
+    assert!((cam.row_at(cam.y(55.0, 0.0, 240.0), 0.0, 240.0) - 55.0).abs() < 1e-9);
+}
+
+#[test]
+fn zoom_keeps_the_anchor_row_under_the_pointer() {
+    let mut cam = VerticalCamera::fitted(48.0, 72.0, 240.0);
+    let before = cam.y(55.0, 0.0, 240.0);
+    cam.zoom_about(55.0, 2.0);
+    assert!((cam.y(55.0, 0.0, 240.0) - before).abs() < 1e-9);
 }

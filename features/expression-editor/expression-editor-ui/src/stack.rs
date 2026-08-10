@@ -112,28 +112,23 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
 
     let y0 = row.y as f64 + LANE_PAD;
     let h = (row.height as f64 - LANE_PAD * 2.0).max(1.0);
-    // Fit across every member, not just the primary one: fitting to the
-    // vocal alone would push its MIDI guide off the top of the lane, and
-    // the whole reason they share a lane is to be compared.
-    let (lo, hi) = members
-        .iter()
-        .filter_map(|&i| {
-            let d = if i == ed.tracks.active() {
-                &ed.doc
-            } else {
-                ed.tracks.doc_of(i)?
-            };
-            let m = ed.tracks.track(i)?.mode;
-            Some(fit(d, &m))
-        })
-        .reduce(|(alo, ahi), (blo, bhi)| (alo.min(blo), ahi.max(bhi)))
-        .unwrap_or_else(|| fit(doc, &track.mode));
-    let span = (hi - lo).max(1e-6);
-    let row_h = h / span;
+    // Read the lane's stored vertical camera rather than re-deriving a
+    // fit from content. That distinction *is* the feature: deriving it
+    // here meant the lane silently rescaled whenever a note moved.
+    // Falling back to a fresh fit only covers the frame before the
+    // editor has fitted anything.
+    let cam = ed.lane_camera(row.lane).unwrap_or_else(|| {
+        let (lo, hi) = ed
+            .tracks
+            .lane_row_range(row.lane, &ed.doc, Editor::LANE_FIT_PAD)
+            .unwrap_or_else(|| fit(doc, &track.mode));
+        expression_editor_core::camera::VerticalCamera::fitted(lo, hi, h)
+    });
+    let row_h = cam.px_per_row;
     // Rows run bottom-up in every space this draws: higher pitch higher,
     // brighter band higher, and a string roll reads like tab with the
     // lowest string at the bottom.
-    let y_of = move |r: f64| y0 + h - (r - lo) * row_h;
+    let y_of = move |r: f64| cam.y(r, y0, h);
 
     // Every member's notes, primary last so the track you are editing
     // draws on top of the guide rather than under it.
@@ -165,6 +160,10 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
         }));
     }
 
+    // Guides span whatever the camera is actually showing, which is not
+    // necessarily the content range any more — an edit can push content
+    // past the edge, and the lane deliberately does not chase it.
+    let (lo, hi) = cam.span(h);
     let (dividers, labels) = guides(&doc.row_space, lo, hi, y_of);
 
     Some(LaneView {

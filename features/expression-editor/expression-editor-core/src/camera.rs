@@ -31,6 +31,70 @@ impl Viewport {
     }
 }
 
+/// The vertical half of a camera, owned by one lane.
+///
+/// Time is shared across every lane and stays on [`Camera`] — two
+/// instruments doubling a line are only comparable on a common time
+/// axis, and that invariant is enforced structurally here rather than
+/// by convention, so no stray call can break it.
+///
+/// Vertical is per lane, because that is the whole feature: a bass and a
+/// piccolo are both readable only if each lane fits its own range.
+///
+/// **Ephemeral.** Never persisted — re-fitted on load, which is what
+/// makes it free to keep out of the project file. See #192's ephemeral
+/// bucket.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VerticalCamera {
+    /// Row at the vertical centre of the lane.
+    pub center: f64,
+    /// Height of one row, in pixels.
+    pub px_per_row: f64,
+}
+
+impl VerticalCamera {
+    /// Fit a row range into a lane of `height` pixels.
+    pub fn fitted(lo: f64, hi: f64, height: f64) -> Self {
+        let span = (hi - lo).max(1e-6);
+        Self {
+            center: (lo + hi) / 2.0,
+            px_per_row: (height / span).max(1e-6),
+        }
+    }
+
+    /// Screen y for a row, within a lane whose top edge is `y0`.
+    pub fn y(&self, row: f64, y0: f64, height: f64) -> f64 {
+        y0 + height / 2.0 - (row - self.center) * self.px_per_row
+    }
+
+    /// The row under a screen y.
+    pub fn row_at(&self, y: f64, y0: f64, height: f64) -> f64 {
+        self.center - (y - y0 - height / 2.0) / self.px_per_row.max(1e-6)
+    }
+
+    /// Rows visible in a lane of `height` pixels.
+    pub fn span(&self, height: f64) -> (f64, f64) {
+        let half = height / (2.0 * self.px_per_row.max(1e-6));
+        (self.center - half, self.center + half)
+    }
+
+    /// Zoom about a fixed row, so the row under the cursor stays put.
+    pub fn zoom_about(&mut self, anchor_row: f64, factor: f64) {
+        let f = factor.max(1e-6);
+        self.center = anchor_row + (self.center - anchor_row) / f;
+        self.px_per_row = (self.px_per_row * f).max(1e-6);
+    }
+}
+
+impl Default for VerticalCamera {
+    fn default() -> Self {
+        Self {
+            center: 60.0,
+            px_per_row: 8.0,
+        }
+    }
+}
+
 /// Where the canvas is looking.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Camera {
