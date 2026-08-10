@@ -304,10 +304,22 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
 
     // fx_sec holds the FX button and its bypass, not a list: `mcp.fx` is
     // [7 7 43 20] of the section and `mcp.fxbyp` [0 0 29 20] butted onto
-    // its right. Drawn as a list strip this read as one long empty pill.
+    // its right.
+    //
+    // Drawn *into* those boxes it came out badly stretched — the pill's
+    // art is 28 wide by 22 and the boxes are 43 by 20, so a 1.54 stretch
+    // across and a 0.91 squash down. That elongated the rounded ends into
+    // a notch and blew the `FX` up to half again its size. REAPER gets
+    // the width by nine-slicing: only the flat middle grows and the ends
+    // stay 1:1, which is why its label reads small in a long pill.
+    //
+    // Nothing here can nine-slice a nested `<svg>`, so both halves are
+    // drawn at their own size instead. The button is shorter than
+    // REAPER's and the right shape, which is the better trade — matching
+    // the width wants nine-slice support in this layer, not a scale.
     s.push_str(&at(
         x + 7.0,
-        7.0,
+        6.0,
         &render_svg(
             v::FxControl,
             v::FxControlProps {
@@ -315,8 +327,8 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
                 chain: v::FxChain::Empty,
                 bypass: v::FxBypass::Empty,
                 family: v::FxFamily::Mixer,
-                width: Some(43),
-                height: Some(20),
+                width: Some(28),
+                height: Some(22),
                 at: v::Interaction::Normal,
             },
         ),
@@ -326,8 +338,8 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
     // `leading_gap` exists for on the export side — so placed at the
     // arithmetic join the two halves show a bare pixel between them.
     s.push_str(&at(
-        x + 49.0,
-        7.0,
+        x + 35.0,
+        6.0,
         &render_svg(
             v::FxControl,
             v::FxControlProps {
@@ -335,8 +347,8 @@ fn mixer_strip(x: f32, n: u32, tk: &Track, h: f32) -> String {
                 chain: v::FxChain::Empty,
                 bypass: v::FxBypass::Empty,
                 family: v::FxFamily::Mixer,
-                width: Some(29),
-                height: Some(20),
+                width: Some(17),
+                height: Some(22),
                 at: v::Interaction::Normal,
             },
         ),
