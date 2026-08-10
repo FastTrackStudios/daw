@@ -11,8 +11,8 @@
 //! need state-chunk parsing or REAPER APIs not exposed in the pinned
 //! reaper-rs version. Logged at debug so the trait still wires up.
 
-use crate::safe_wrappers::envelope as env_sw;
 use crate::item::{ReaperItem, ReaperTake};
+use crate::safe_wrappers::envelope as env_sw;
 use crate::track::{resolve_project, resolve_track};
 use daw_proto::{
     Automation, ProjectContext,
@@ -25,8 +25,8 @@ use daw_proto::{
 };
 use daw_proto::{ItemRef, TakeEnvelopeKind, TakeRef};
 use reaper_high::Reaper;
-use reaper_medium::ProjectContext as ReaperProjectContext;
 use reaper_low::raw::TrackEnvelope;
+use reaper_medium::ProjectContext as ReaperProjectContext;
 use tracing::debug;
 
 /// Map a raw REAPER shape index to the proto enum. Unknown values
@@ -67,6 +67,16 @@ fn envelope_type_chunk_tag(ty: EnvelopeType) -> &'static str {
         EnvelopeType::WidthPrefx => "<WIDTHENV",
         EnvelopeType::Mute => "<MUTEENV",
         EnvelopeType::FxParam => "<PARMENV",
+        // Take envelopes. REAPER exposes these on the take rather than the
+        // track, so they never reach a track-envelope lookup; the tags are
+        // here so the mapping is total and the `.daw` format's envelope
+        // types all have a REAPER counterpart.
+        EnvelopeType::PlayRate => "<SPEEDENV",
+        EnvelopeType::Pitch => "<PITCHENV",
+        // An envelope kind this enum does not name yet, carried through the
+        // `.daw` format by its original chunk name. There is nothing to
+        // disambiguate for one, so it falls back to the display-name lookup.
+        EnvelopeType::Custom => "",
     }
 }
 
@@ -130,6 +140,12 @@ fn resolve_envelope(
     match &location.envelope {
         EnvelopeRef::Type(ty) => {
             let tag = envelope_type_chunk_tag(*ty);
+            if tag.is_empty() {
+                // `EnvelopeType::Custom` has no chunk tag to look up — it is
+                // only meaningful when the caller also knows the name, which
+                // is what `EnvelopeRef::ByName` is for.
+                return None;
+            }
             let env = env_sw::get_track_envelope_by_chunk_name(low, track_ptr, tag);
             if !env.is_null() { Some(env) } else { None }
         }
