@@ -16,5 +16,11 @@ description = "Portable engine for the expression editor — note/curve document
 # lives in adapters, not here.
 [dependencies]
 keyflow-proto = { workspace = true }
+# Facet is a codebase-wide core dependency and `keyflow-proto` already
+# pulls it in transitively, so this adds no edge to the dependency graph
+# and stays wasm-clean. Persisted types derive it directly — #190 chose
+# derives on the real types over DTOs, which would have duplicated every
+# shape and let a forgotten field stop persisting silently.
+facet = { workspace = true }
 
 [dev-dependencies]
