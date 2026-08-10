@@ -86,8 +86,8 @@ fn slice_at(doc: &mut ExpressionDoc, t: f64, row_lo: i32, row_hi: i32) -> Vec<No
     for id in crossing {
         let before: Vec<NoteId> = doc.notes.iter().map(|n| n.id).collect();
         let split = crate::edit::Edit::SplitNote { note: id, t };
-        if split.apply(doc) {
-            if let Some(new_id) = doc
+        if split.apply(doc)
+            && let Some(new_id) = doc
                 .notes
                 .iter()
                 .map(|n| n.id)
@@ -95,7 +95,6 @@ fn slice_at(doc: &mut ExpressionDoc, t: f64, row_lo: i32, row_hi: i32) -> Vec<No
             {
                 created.push(new_id);
             }
-        }
     }
     created
 }

@@ -288,6 +288,9 @@ fn setup_setlist() -> SetlistFixture {
     }
 }
 
+// The fixture parses all three songs so the set is complete and
+// self-checking; only song_b's placement is asserted on.
+#[allow(dead_code)]
 struct SetlistFixture {
     song_a: dawfile_reaper::types::ReaperProject,
     song_b: dawfile_reaper::types::ReaperProject,

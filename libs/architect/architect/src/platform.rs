@@ -164,7 +164,7 @@ pub fn now() -> Instant {
 /// An async clock: read [`now`](Clock::now) and [`sleep`](Clock::sleep).
 ///
 /// Abstracting the clock is what makes scheduled code testable —
-/// [`schedule`](crate::schedule)'s drivers are generic over `Clock`, so a
+/// the `schedule` module's drivers are generic over `Clock`, so a
 /// test injects a [`TestClock`] and drives time by hand instead of waiting
 /// on the wall clock.
 pub trait Clock: Clone + Send + Sync + 'static {

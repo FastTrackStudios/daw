@@ -145,7 +145,7 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
                     id,
                     PPQ * 0.25 * i as f64,
                     PPQ * 0.2,
-                    60 + (i % 7) as i32,
+                    60 + (i % 7),
                     2 + (i % 14) as u8,
                     -0.5,
                 ));
@@ -156,7 +156,7 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
                     id,
                     PPQ * (16.0 + 4.0 * i as f64),
                     PPQ * 3.5,
-                    62 + (i * 2) as i32,
+                    62 + (i * 2),
                     2 + (i % 14) as u8,
                     -1.5,
                 ));

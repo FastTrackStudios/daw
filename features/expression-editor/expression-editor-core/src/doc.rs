@@ -449,11 +449,10 @@ impl Note {
             .partition_point(|&s| s < t);
         self.splits.insert(i, t);
         // A split inserted before the active zone shifts its index.
-        if let Target::Zone(z) = self.target {
-            if i <= z {
+        if let Target::Zone(z) = self.target
+            && i <= z {
                 self.target = Target::Zone(z + 1);
             }
-        }
         true
     }
 

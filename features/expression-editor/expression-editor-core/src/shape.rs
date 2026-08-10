@@ -100,8 +100,8 @@ fn simplify_range(points: &[(f64, f64)], first: usize, last: usize, tol: f64, ke
     let b = points[last];
     let mut worst = 0.0;
     let mut worst_i = first;
-    for i in (first + 1)..last {
-        let d = perpendicular_distance(points[i], a, b);
+    for (i, &p) in points.iter().enumerate().take(last).skip(first + 1) {
+        let d = perpendicular_distance(p, a, b);
         if d > worst {
             worst = d;
             worst_i = i;

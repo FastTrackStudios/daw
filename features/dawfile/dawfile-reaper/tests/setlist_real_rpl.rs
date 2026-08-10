@@ -9,8 +9,8 @@
 
 use dawfile_reaper::io::read_project;
 use dawfile_reaper::setlist_rpp::{
-    self, STANDARD_ROLES, build_song_infos_from_projects, concatenate_projects,
-    measures_to_seconds, project_to_rpp_text, resolve_song_bounds, write_role_setlists,
+    self, build_song_infos_from_projects, concatenate_projects,
+    measures_to_seconds, resolve_song_bounds,
 };
 use std::path::PathBuf;
 

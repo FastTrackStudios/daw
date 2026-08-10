@@ -174,11 +174,13 @@ macro_rules! define_actions {
             }
 
             $(
+                #[allow(dead_code)]
                 pub const $const_name: StaticActionId =
                     StaticActionId::new(concat!($prefix, ".", $id_suffix));
             )*
 
             #[allow(non_snake_case)]
+            #[allow(dead_code)]
             pub trait LocalActionBinder {
                 $(fn $const_name(&self) -> $crate::LocalActionImplementation;)*
             }
@@ -189,6 +191,7 @@ macro_rules! define_actions {
                         $crate::ActionDefinition::new(concat!($prefix, ".", $id_suffix), $name, $desc)
                             .with_category($crate::ActionCategory::$category)
                             .with_menu_path({
+                                #[allow(unused_mut)]
                                 let mut path = __menu_root();
                                 $(
                                     {
@@ -209,6 +212,7 @@ macro_rules! define_actions {
                 ]
             }
 
+            #[allow(dead_code)]
             pub fn definitions_with_binder<B: LocalActionBinder>(
                 binder: &B,
             ) -> Vec<$crate::LocalActionRegistration> {
@@ -220,6 +224,7 @@ macro_rules! define_actions {
                             )
                             .with_category($crate::ActionCategory::$category)
                             .with_menu_path({
+                                #[allow(unused_mut)]
                                 let mut path = __menu_root();
                                 $(
                                     {
@@ -251,6 +256,7 @@ macro_rules! define_actions {
                             )
                             .with_category($crate::ActionCategory::$category)
                             .with_menu_path({
+                                #[allow(unused_mut)]
                                 let mut path = __menu_root();
                                 $(
                                     {
@@ -322,11 +328,13 @@ macro_rules! define_actions {
             }
 
             $(
+                #[allow(dead_code)]
                 pub const $const_name: StaticActionId =
                     StaticActionId::new(concat!($prefix, ".", $id_suffix));
             )*
 
             #[allow(non_snake_case)]
+            #[allow(dead_code)]
             pub trait LocalActionBinder {
                 $(fn $const_name(&self) -> $crate::LocalActionImplementation;)*
             }
@@ -337,6 +345,7 @@ macro_rules! define_actions {
                         $crate::ActionDefinition::new(concat!($prefix, ".", $id_suffix), $name, $desc)
                             .with_category($crate::ActionCategory::$category)
                             .with_menu_path({
+                                #[allow(unused_mut)]
                                 let mut path = __menu_root();
                                 $(
                                     {
@@ -357,6 +366,7 @@ macro_rules! define_actions {
                 ]
             }
 
+            #[allow(dead_code)]
             pub fn definitions_with_binder<B: LocalActionBinder>(
                 binder: &B,
             ) -> Vec<$crate::LocalActionRegistration> {
@@ -368,6 +378,7 @@ macro_rules! define_actions {
                             )
                             .with_category($crate::ActionCategory::$category)
                             .with_menu_path({
+                                #[allow(unused_mut)]
                                 let mut path = __menu_root();
                                 $(
                                     {
@@ -410,7 +421,7 @@ macro_rules! define_actions {
     ) => {
         pub mod $mod_name {
             use $crate::ids::StaticActionId;
-            $(pub const $const_name: StaticActionId = StaticActionId::new($id_str);)*
+            $(#[allow(dead_code)] pub const $const_name: StaticActionId = StaticActionId::new($id_str);)*
             pub fn definitions() -> Vec<$crate::ActionDefinition> {
                 vec![
                     $(

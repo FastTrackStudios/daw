@@ -8,6 +8,9 @@ struct Smf {
     tracks: Vec<Vec<SmfEvent>>,
 }
 
+// Fields model the SMF events as decoded; several are only ever read
+// through `Debug` when a parity run is inspected by hand.
+#[allow(dead_code)]
 #[derive(Debug)]
 enum SmfEvent {
     Tempo { tick: u64, us_per_qn: u32 },

@@ -2,7 +2,7 @@
 //! Run with `cargo test -p dawfile-ableton --test fixture_summary -- --nocapture`.
 
 use dawfile_ableton::read_live_set;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const FIXTURE_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
 

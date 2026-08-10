@@ -6,6 +6,7 @@ pub use architect;
 pub mod account;
 pub mod api_key;
 pub mod audit_event;
+pub mod email_change;
 pub mod invitation;
 pub mod member;
 pub mod organization;

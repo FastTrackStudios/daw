@@ -15,6 +15,9 @@ fn rpl_exists() -> bool {
 }
 
 /// Parse the original project for a song and return its bounds + tempo info.
+// `name` identifies the song when a failure is read; the assertions use
+// the numbers.
+#[allow(dead_code)]
 struct SongExpectation {
     name: String,
     original_tempo: f64,

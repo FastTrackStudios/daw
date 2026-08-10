@@ -67,7 +67,7 @@ where
 }
 
 /// Serve a whole router over an upgraded axum WebSocket — the common case.
-/// Accepts any vox [`Handler`](vox_core::Handler): a [`crate::LayerRouter`], or
+/// Accepts any vox [`vox::Handler`]: a [`crate::LayerRouter`], or
 /// a wrapper around one (e.g. a snapshot-gating router). Collapses the
 /// per-binary `lane_acceptor_fn(|_, conn| conn.handle_with(router.clone()))` +
 /// [`serve`] boilerplate to one call, so a vox route is just:

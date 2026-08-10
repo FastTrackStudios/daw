@@ -30,7 +30,7 @@ pub use commands::{
     AuthenticateApiKey, AuthenticateBearerToken, AuthorizeApiKey, AuthorizeMcpRequest,
     AuthorizeOidc, AuthorizeOrganizationAction, BanUser, BearerTokenBundle, BearerTokenStrategy,
     BeginOAuthAuthorization, BeginOAuthProxyAuthorization, BeginPasskeyAuthentication,
-    BeginPasskeyRegistration, CaptchaVerification, ChangeEmail, ChangePassword,
+    BeginPasskeyRegistration, CaptchaVerification, ChangeEmail, ChangePassword, MigrateUserEmail,
     CheckPasswordBreach, CleanupAnonymousUsers, CleanupAnonymousUsersResult, ClearLastLoginMethod,
     CompletePasskeyAuthentication, CompletePasskeyRegistration, CompletePasswordReset,
     ConfirmTwoFactor, ConsumeOAuthProxyCallback, CreateApiKey, CreateDeviceAuthorization,

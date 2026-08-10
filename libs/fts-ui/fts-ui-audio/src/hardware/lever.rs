@@ -271,7 +271,13 @@ mod tests {
     #[test]
     fn a_lever_sweeps_far_less_than_a_knob() {
         // A knob turns 300°; a lever has to stay readable at a glance.
-        assert!(LEVER_SWEEP_DEG * 2.0 < 150.0);
+        // Both sides are constants on purpose — this guards the constant
+        // against being edited upward, so it is meant to be trivially
+        // true today.
+        #[allow(clippy::assertions_on_constants)]
+        {
+            assert!(LEVER_SWEEP_DEG * 2.0 < 150.0);
+        }
     }
 
     #[test]
