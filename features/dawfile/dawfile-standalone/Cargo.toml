@@ -11,6 +11,7 @@ license = "MIT"
 rustdoc-args = ["--html-in-header", "arborium-header.html"]
 
 [dependencies]
+dawfile-dawproject.workspace = true
 # The document model *is* the daw facade's model. See #155 decision 2.
 daw-proto = { workspace = true }
 # Styx is the on-disk syntax; facet (not serde) is the reflection layer.
@@ -31,6 +32,7 @@ dawfile-reaper = { workspace = true }
 workspace = true
 
 [dev-dependencies]
+dawfile-dawproject.workspace = true
 # The corpus test tokenizes raw `.rpp` lines to compare content through the
 # tree's quoting normalisation.
 dawfile-reaper = { workspace = true }
