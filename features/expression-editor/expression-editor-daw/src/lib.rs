@@ -25,6 +25,7 @@
 //!   core already models, so bends are attributed to the note sounding
 //!   on that channel and flagged ambiguous when two are.
 
+pub mod midi_tools_sink;
 pub mod shapes;
 pub mod state;
 pub mod fixture;

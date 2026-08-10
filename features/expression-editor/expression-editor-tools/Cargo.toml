@@ -20,6 +20,11 @@ default = []
 pitch = ["dep:tune-dsp"]
 
 [dependencies]
+# Absorbed with `velocity::Randomize` from midi-tools (#153); the only
+# thing in this crate that is not arithmetic.
+rand = { workspace = true }
+# Absorbed with the no-DAW `DemoSink`'s diagnostics.
+tracing = { workspace = true }
 # The document — its `Note` is the MIDI/MPE side of the seam. Portable,
 # no DSP, no UI, which is the property that lets this crate stay thin.
 expression-editor-core = { workspace = true }

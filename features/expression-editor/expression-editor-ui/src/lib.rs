@@ -22,7 +22,11 @@ use keyboard_types::Modifiers;
 pub mod canvas;
 pub mod demo;
 pub mod drawer;
+pub mod arp_panel;
+pub mod curve_editor;
+pub mod drag;
 pub mod envelopes;
+pub mod velocity_panel;
 pub mod guitar;
 pub mod inspector;
 pub mod interaction;
@@ -1612,3 +1616,15 @@ fn LaneStrip(editor: Signal<Editor>) -> Element {
 pub fn default_overlays() -> Vec<Dimension> {
     vec![Dimension::Pitch]
 }
+
+/// The raw widgets, for tests that need to drive one in isolation.
+///
+/// Not part of the panel API — exported so `tests/slider_drag.rs` can
+/// mount a single control without the whole panel around it. Absorbed
+/// with the panels from `midi-tools-ui` (#153).
+pub mod test_support {
+    pub use crate::drag::{BarEditor, RangeSlider, Slider};
+}
+
+pub use arp_panel::{ArpPanel, ArpSinkHandle};
+pub use velocity_panel::{SinkHandle, VelocityPanel};
