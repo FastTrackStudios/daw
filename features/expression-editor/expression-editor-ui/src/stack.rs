@@ -82,12 +82,17 @@ pub fn lanes(ed: &Editor, active_boost: f32, min_row: f32) -> Vec<LaneView> {
 }
 
 fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
-    // A lane may hold several tracks. Until the matcher starts pairing
-    // them (#195) every lane holds exactly one, so this draws the lane's
-    // *primary* track: the active one when the lane holds it, else the
-    // first. Extending this to draw every member is #195's job — the
-    // model already carries them.
-    let members = ed.tracks.lane_tracks(row.lane);
+    // A lane may hold several tracks, and all of them draw — that is the
+    // point of pairing a vocal with its guide. The lane's *primary*
+    // track (the active one if it is here, else the first visible)
+    // decides the labelling and the row space, because a lane needs one
+    // vertical axis and its members share a pitch range by construction.
+    let members: Vec<usize> = ed
+        .tracks
+        .lane_tracks(row.lane)
+        .into_iter()
+        .filter(|&i| ed.tracks.track(i).is_some_and(|t| !t.hidden))
+        .collect();
     let track_index = members
         .iter()
         .copied()
@@ -107,7 +112,22 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
 
     let y0 = row.y as f64 + LANE_PAD;
     let h = (row.height as f64 - LANE_PAD * 2.0).max(1.0);
-    let (lo, hi) = fit(doc, &track.mode);
+    // Fit across every member, not just the primary one: fitting to the
+    // vocal alone would push its MIDI guide off the top of the lane, and
+    // the whole reason they share a lane is to be compared.
+    let (lo, hi) = members
+        .iter()
+        .filter_map(|&i| {
+            let d = if i == ed.tracks.active() {
+                &ed.doc
+            } else {
+                ed.tracks.doc_of(i)?
+            };
+            let m = ed.tracks.track(i)?.mode;
+            Some(fit(d, &m))
+        })
+        .reduce(|(alo, ahi), (blo, bhi)| (alo.min(blo), ahi.max(bhi)))
+        .unwrap_or_else(|| fit(doc, &track.mode));
     let span = (hi - lo).max(1e-6);
     let row_h = h / span;
     // Rows run bottom-up in every space this draws: higher pitch higher,
@@ -115,11 +135,35 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
     // lowest string at the bottom.
     let y_of = move |r: f64| y0 + h - (r - lo) * row_h;
 
-    let notes = doc
-        .notes
-        .iter()
-        .map(|n| lane_note(ed, doc, n, &doc.row_space, &track.mode, active, y_of, row_h))
-        .collect();
+    // Every member's notes, primary last so the track you are editing
+    // draws on top of the guide rather than under it.
+    let mut notes: Vec<LaneNote> = Vec::new();
+    for &i in members.iter().filter(|&&i| i != track_index).chain([&track_index]) {
+        let Some(member) = ed.tracks.track(i) else {
+            continue;
+        };
+        let member_doc = if i == ed.tracks.active() {
+            &ed.doc
+        } else {
+            match ed.tracks.doc_of(i) {
+                Some(d) => d,
+                None => continue,
+            }
+        };
+        let member_active = i == ed.tracks.active();
+        notes.extend(member_doc.notes.iter().map(|n| {
+            lane_note(
+                ed,
+                member_doc,
+                n,
+                &member_doc.row_space,
+                &member.mode,
+                member_active,
+                y_of,
+                row_h,
+            )
+        }));
+    }
 
     let (dividers, labels) = guides(&doc.row_space, lo, hi, y_of);
 
