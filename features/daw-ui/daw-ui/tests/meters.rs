@@ -68,9 +68,14 @@ fn the_track_order_follows_adds_removes_and_moves() {
     });
 }
 
-/// The meter draws two channels and their holds, as vectors.
+/// The meter draws both channels and REAPER's dB scale, as vectors.
+///
+/// One `<svg>`, not two: `mcp.meter` is a single rect covering the bars
+/// *and* the scale, and REAPER draws the numbers as part of the widget.
+/// Split into a column per channel the bars had nowhere to go but under
+/// the button stack.
 #[test]
-fn a_strip_meter_draws_both_channels_and_their_holds() {
+fn a_strip_meter_draws_both_channels_and_its_scale() {
     fn app() -> Element {
         let mut meters = use_hook(Meters::new);
         use_hook(|| {
@@ -92,10 +97,10 @@ fn a_strip_meter_draws_both_channels_and_their_holds() {
     dom.rebuild_in_place();
     let html = dioxus_ssr::render(&dom);
 
-    assert_eq!(html.matches("<svg").count(), 2, "not two channels:\n{html}");
-    // Two bars, two holds, two backgrounds — the hold marks are the 1px
-    // rects, and without them the meter is peak-only.
-    assert!(html.contains("height=\"1\""), "no peak-hold mark:\n{html}");
+    assert_eq!(html.matches("<svg").count(), 1, "the meter is one widget:\n{html}");
+    // The scale REAPER prints down its left, inside the same box.
+    assert!(html.contains("-inf"), "no dB scale:\n{html}");
+    assert!(html.contains("-18-"), "the scale is incomplete:\n{html}");
     assert!(!html.contains("<img"), "the meter is blitting:\n{html}");
     assert!(!html.contains("currentColor"), "a colour is left to CSS:\n{html}");
 }
@@ -107,5 +112,5 @@ fn a_meter_with_no_frames_yet_draws_silence() {
     let mut dom = VirtualDom::new(|| rsx! { TrackMeter { track: "T1" } });
     dom.rebuild_in_place();
     let html = dioxus_ssr::render(&dom);
-    assert_eq!(html.matches("<svg").count(), 2);
+    assert_eq!(html.matches("<svg").count(), 1);
 }

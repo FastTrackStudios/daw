@@ -25,7 +25,17 @@ struct TrackFxData {
 
 /// Mixer panel that polls the DAW for track state.
 #[component]
-pub fn MixerPanel() -> Element {
+pub fn MixerPanel(
+    /// The height the strips are drawn at.
+    ///
+    /// One number, not two: the strip is drawn at this height *and*
+    /// collapses by it. `h-full` plus a separate collapse prop let the two
+    /// disagree silently — the strip resolved its bands for one height and
+    /// was stretched to another, so every measured offset landed in the
+    /// wrong band.
+    #[props(default = 371.0)]
+    height: f32,
+) -> Element {
     let mut tracks = use_signal(Vec::<Track>::new);
     let mut fx_data = use_signal(Vec::<(String, TrackFxData)>::new);
     let mut error_msg = use_signal(|| Option::<String>::None);
@@ -141,6 +151,7 @@ pub fn MixerPanel() -> Element {
                                     track: track.clone(),
                                     fx_tree: fx,
                                     index: i as u32,
+                                    height,
                                 }
                             }
                         }
@@ -170,6 +181,18 @@ pub fn ChannelStripPreview(
         ChannelStrip { track, fx_tree: FxTree::default(), index, height }
     }
 }
+
+/// The strip's own geometry, from `rtconfig.txt` at scale 1 in wide mode.
+///
+/// `mcp_w` is 86 and the sections are a function of height — which is the
+/// thing to know about this panel, and what [`Collapse`] resolves.
+const STRIP_W: f32 = 86.0;
+const FX_SECTION: f32 = 33.0;
+const BOTTOM_SECTION: f32 = 47.0;
+/// The axis the right-hand column centres on: `mcp.recmon` and everything
+/// anchored to it. The record arm's ring sits at 0.486 of its own 36-wide
+/// cell rather than in the middle, which is why it is placed separately.
+const COLUMN: f32 = 55.0;
 
 // ── Channel Strip ───────────────────────────────────────────────────
 
@@ -224,7 +247,31 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
     // Resolved once, so the markup asks a question rather than doing the
     // arithmetic in six places.
     let shape = Collapse::at(props.height);
-    let pad = shape.padding;
+
+    // The tinted band is `pan_sec` extended by `in_sec`, in the track's own
+    // colour. An uncoloured track takes the panel grey rather than a colour
+    // invented for it.
+    let theme = daw_theme::Theme::default();
+    let tint_colour = track
+        .color
+        .map(|c| daw_theme::Color::rgb((c >> 16) as u8, (c >> 8) as u8, c as u8))
+        .unwrap_or(theme.chrome.surface_raised);
+    let tint = tint_colour.css();
+    // One row of highlight along the band's top edge — `mcp.custom.bg_hl_t`.
+    // Without it the band starts flat where the source starts lit.
+    let tint_hl = tint_colour.shade(0.13).css();
+
+    let pan_h = if shape.pan == PanAnchor::PanSection { 33.0 } else { 6.0 };
+    let input_h = if !shape.show_record_input {
+        22.0
+    } else if !shape.show_input_fx {
+        42.0
+    } else {
+        54.0
+    };
+    let band = pan_h + input_h;
+    // `mcp.meter` is inset 4 on every side of the stretch section.
+    let meter_h = (shape.stretch - 8.0).max(24.0) as u32;
 
     let selected_border = if track.selected {
         "border-blue-500"
@@ -234,134 +281,145 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
 
     rsx! {
         div {
-            class: "flex flex-col h-full w-[72px] flex-shrink-0 border-r {selected_border} bg-zinc-900",
+            class: "flex flex-col flex-shrink-0 border-r {selected_border} bg-zinc-900",
+            style: "width:{STRIP_W}px; height:{props.height}px;",
 
-            // REAPER's MCP stacks its strip in a fixed order, and a mixer
-            // that reorders them stops being readable by anyone who knows
-            // the host: FX at the top, then pan, then the input controls,
-            // then the fader and meter taking whatever height is left, then
-            // a fixed block at the bottom carrying identity.
+            // Laid out on REAPER's own geometry, in Tailwind and explicit
+            // pixels rather than by eye.
             //
-            // Layout is Tailwind because layout lives *outside* the `<svg>`
-            // elements, where every target runs a real CSS engine — the
-            // browser on web, Stylo and Taffy in every desktop, plugin and
-            // REAPER window. Inside an `<svg>` there is no box model and no
-            // custom properties, which is why the art states its own values
-            // and takes none from here.
+            // Every number below is measured — the section heights and the
+            // control offsets come from `rtconfig.txt` by way of
+            // `daw-theme-art`'s panel sheet, which composes these same
+            // components at those coordinates. The first version of this
+            // strip stacked them in a flex column with its own paddings and
+            // no dB scale, and the two mixers did not read as the same
+            // mixer at a glance, which is the thing #135 is for.
+            //
+            // Structure is Tailwind (flex, flex-1, relative); position is
+            // px, because REAPER's layout is a coordinate system and
+            // pretending otherwise loses the match.
 
-            // ── FX ──────────────────────────────────────────────
-            div { class: "flex flex-col gap-px px-0.5 py-1 flex-shrink-0 min-h-[40px] max-h-[120px] overflow-y-auto",
-                for node in fx_tree.nodes.iter() {
-                    {
-                        let (name, block_color) = match &node.kind {
-                            FxNodeKind::Container { name, .. } => {
-                                (name.as_str().to_string(), color_css.clone())
-                            }
-                            FxNodeKind::Plugin(fx) => {
-                                (fx.name.clone(), "#3f3f46".to_string())
-                            }
-                        };
-                        let opacity = if node.enabled { "1.0" } else { "0.4" };
-                        rsx! {
-                            div {
-                                class: "w-full rounded-sm px-1 py-px text-center truncate",
-                                // Explicit, not a class: a block that loses
-                                // its colour and line-height when the sheet
-                                // is late reads as a broken chain rather
-                                // than an unstyled one.
-                                style: "background-color: {block_color}; opacity: {opacity}; font-size: 8px; color: white; line-height: 1.4;",
-                                title: "{name}",
-                                "{name}"
-                            }
-                        }
-                    }
+            // ── FX section (33 rows) ────────────────────────────
+            //
+            // `mcp.fx` is [7 7 43 20] of the section, with `mcp.fxbyp`
+            // butted onto its right — the pill is one shape in two images.
+            div { class: "relative flex-shrink-0", style: "height:{FX_SECTION}px;",
+                div { style: "position:absolute; left:7px; top:7px;",
+                    FxButton { track: track.guid.clone(), width: 43.0 }
                 }
             }
-            div { class: "flex items-center justify-center gap-0.5 px-0.5 pb-1 flex-shrink-0",
-                MuteButton { track: track.guid.clone() }
-                SoloButton { track: track.guid.clone() }
-                FxButton { track: track.guid.clone() }
-            }
 
-            div { class: "border-t border-zinc-700 mx-1" }
-
-            // ── Pan ─────────────────────────────────────────────
+            // ── The tinted band: pan + input ────────────────────
             //
-            // A real box, not implied space: the gap below it is one of the
-            // things REAPER's own thresholds are measured against, and a
-            // gap that is not a box cannot be queried or tested.
-            if shape.pan == PanAnchor::PanSection {
-                div {
-                    class: "flex flex-col items-center justify-center flex-shrink-0",
-                    style: "padding-top:{pad}px; padding-bottom:{pad}px;",
+            // `mcp.custom.bg` is `pan_sec` extended by `in_sec`'s height,
+            // in the track's own colour with one lit row along its top.
+            // Fixed both ways — `grow-0 shrink-0` and a stated height — so
+            // the band is the same depth on every strip whatever is inside
+            // it. Left to the flex default a strip whose pan label had
+            // collapsed sat a few rows shorter than its neighbours.
+            div {
+                class: "relative shrink-0 grow-0",
+                style: "height:{band}px; min-height:{band}px; max-height:{band}px; \
+                        background:{tint}; border-top:1px solid {tint_hl};",
+
+                // Pan at local x 9.5, the record arm on the right-hand
+                // column's axis — both placed on the centres the source
+                // gives, not on a corner.
+                // The pan control is here either way — what changes is the
+                // section around it. Compressed, `mcp.pan` re-anchors off
+                // `mcp.recmode` and both it and the record arm sit inside
+                // the band, pan at its left and the arm at its right, which
+                // is where the source has them.
+                div { style: "position:absolute; left:9px; top:2px;",
                     PanKnob { track: track.guid.clone() }
                     if shape.show_pan_labels {
-                        div { class: "text-[8px] text-zinc-500 leading-none", "pan" }
+                        div { class: "text-[8px] text-zinc-400 leading-none text-center", "pan" }
+                    }
+                }
+                // Bottom of the band, not the top: the arm sits on the
+                // band's floor beside the input label, which is where the
+                // source has it and where it stays as the band collapses.
+                div { style: "position:absolute; left:48px; bottom:2px;",
+                    RecordArmButton { track: track.guid.clone() }
+                }
+                if shape.show_record_input {
+                    div {
+                        class: "absolute w-full text-center",
+                        style: "top:{pan_h}px;",
+                        RecordInputLabel { track: track.guid.clone() }
                     }
                 }
             }
 
-            // ── Input ───────────────────────────────────────────
-            div {
-                class: "flex items-center justify-center gap-1 flex-shrink-0",
-                style: "padding-top:{pad}px; padding-bottom:{pad}px;",
-                RecordArmButton { track: track.guid.clone() }
-                // Record mode gives up its place when the pan control
-                // re-anchors here — the two share one slot, which is what
-                // makes this a re-anchor rather than a reposition.
-                if shape.show_record_mode {
-                    MonitorButton { track: track.guid.clone() }
-                } else {
-                    PanKnob { track: track.guid.clone() }
-                }
-                // Residual-driven: these key off the stretch section, not
-                // the strip's own height.
-                if shape.show_phase {
-                    PhaseButton { track: track.guid.clone() }
-                }
-                if shape.show_io {
-                    IoButton { track: track.guid.clone() }
-                }
-            }
-            if shape.show_record_input {
-                RecordInputLabel { track: track.guid.clone() }
-            }
-
-            // ── Fader and meter ─────────────────────────────────
+            // ── Stretch: meter, fader, and the button column ────
             //
-            // `flex-1` and `min-h-0`: this is the region that absorbs the
-            // strip's height, which is what gives the fader's stretch band
-            // something to stretch into.
-            // The stretch section, as a real box — it is the residual the
-            // IO, envelope and phase thresholds are measured against, so it
-            // has to exist in the tree to be one.
-            div {
-                class: "flex-1 flex flex-row items-stretch justify-center gap-1 px-2 min-h-0",
-                style: "padding-top:{pad}px; padding-bottom:{pad}px;",
-                match shape.volume {
-                    // Below the swap threshold a fader has no travel worth
-                    // having, so it stops being a fader. A Rust
-                    // conditional, because a widget type is not a style.
-                    VolumeWidget::Fader => rsx! { VolumeFader { track: track.guid.clone() } },
-                    VolumeWidget::Knob => rsx! { PanKnob { track: track.guid.clone(), large: true } },
+            // `mcp.meter` is one rect covering the bars *and* the scale;
+            // the fader sits at x 28; and everything in the right-hand
+            // column shares one axis, each control anchored to the last
+            // exactly as `rtconfig` writes it:
+            //
+            //     mcp.recmon = mcp.recarm + [7 20 21 20]
+            //     mcp.mute   = mcp.recmon + [0 19 21 20]
+            //     mcp.solo   = mcp.mute   + [0 21 21 20]
+            //     mcp.io     = mcp.solo   + [-1 23 23 30]
+            div { class: "relative flex-1 min-h-0",
+                // The numeric readout, which is a different thing from the
+                // scale printed inside the meter: `hide_volume_label` drops
+                // this one at 250 while the scale stays.
+                if shape.show_volume_label {
+                    div {
+                        class: "absolute font-mono text-[9px] text-zinc-400",
+                        style: "left:4px; top:-11px;",
+                        "{db_label}"
+                    }
                 }
-                TrackMeter { track: track.guid.clone(), height: shape.stretch.max(24.0) as u32 }
-            }
-            if shape.show_volume_label {
-                div { class: "text-center px-1 flex-shrink-0",
-                    div { class: "text-[9px] font-mono text-zinc-400", "{db_label}" }
+                // Both boxes state a height in px rather than `top/bottom`:
+                // the fader's rail is `height:100%`, and a percentage of an
+                // absolutely-positioned box with no stated height resolves
+                // to nothing — the meter looked right only because its own
+                // art carries pixel dimensions.
+                div { style: "position:absolute; left:4px; top:4px; height:{meter_h}px;",
+                    TrackMeter { track: track.guid.clone(), width: 24, height: meter_h }
+                }
+                div { style: "position:absolute; left:28px; top:4px; height:{meter_h}px;",
+                    match shape.volume {
+                        // Below the swap threshold a fader has no travel
+                        // worth having, so it stops being a fader.
+                        VolumeWidget::Fader => rsx! { VolumeFader { track: track.guid.clone() } },
+                        VolumeWidget::Knob => rsx! {
+                            PanKnob { track: track.guid.clone(), large: true }
+                        },
+                    }
+                }
+                div {
+                    class: "absolute flex flex-col items-center",
+                    style: "left:{COLUMN}px; top:2px; gap:{shape.padding}px;",
+                    if shape.show_record_mode {
+                        MonitorButton { track: track.guid.clone() }
+                    }
+                    MuteButton { track: track.guid.clone() }
+                    SoloButton { track: track.guid.clone() }
+                    if shape.show_io {
+                        IoButton { track: track.guid.clone() }
+                    }
+                    if shape.show_phase {
+                        PhaseButton { track: track.guid.clone() }
+                    }
                 }
             }
 
-            // ── Track Name + Number (bottom) ────────────────────
+            // ── Bottom (47 rows: 26 of name, 20 of index) ──────
             div {
-                class: "flex-shrink-0 border-t border-zinc-700",
-                // The name and its colour come from the store, so a rename
-                // or a recolour in the DAW lands here without this panel
-                // refetching anything.
-                TrackName { track: track.guid.clone() }
-                div { class: "text-[8px] text-zinc-500 text-center",
-                    "{track.index}"
+                class: "shrink-0 grow-0",
+                style: "height:{BOTTOM_SECTION}px; min-height:{BOTTOM_SECTION}px; \
+                        max-height:{BOTTOM_SECTION}px;",
+                TrackName { track: track.guid.clone(), width: STRIP_W as u32 }
+                div {
+                    class: "text-center",
+                    style: "height:20px; line-height:20px; font-size:11px; \
+                            color:#f0f0f0; background:{tint}; \
+                            border-top:1px solid {tint_hl};",
+                    "{track.index + 1}"
                 }
             }
         }

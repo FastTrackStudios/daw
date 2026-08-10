@@ -2062,10 +2062,20 @@ pub fn VolumeFaderTrack(props: FaderCapProps) -> Element {
     } else {
         format!("flex:0 0 auto; height:{}px", ph * scale)
     };
+    // An `<svg>` is a replaced element, so its `height` *attribute* beats
+    // `flex:1` — a growing band that states the source band's height stays
+    // that tall however long the strip is, which is what kept the rail
+    // stuck at 27 rows beside a full-height meter. A caller that states a
+    // height still gets it; the exporter always does.
+    let height = match (pane.grow, props.height) {
+        (_, Some(h)) => h.to_string(),
+        (true, None) => "100%".to_string(),
+        (false, None) => format!("{}", (ph * scale).round() as u32),
+    };
     rsx! {
         svg {
             width: "{w}",
-            height: "{props.height.unwrap_or((ph * scale).round() as u32)}",
+            height: "{height}",
             view_box: "{px} {py} {pw} {ph}",
             preserve_aspect_ratio: "none",
             style: "{sizing}; display:block",
@@ -4914,5 +4924,42 @@ mod tests {
             },
         );
         assert_ne!(svg, plain, "the accent made no difference");
+    }
+}
+
+#[cfg(test)]
+mod rail_band_tests {
+    use super::*;
+    use crate::slice::Pane;
+
+    fn render(pane: Pane, height: Option<u32>) -> String {
+        let mut dom = dioxus::prelude::VirtualDom::new_with_props(
+            VolumeFaderTrack,
+            FaderCapProps { accent: None, pane: Some(pane), width: Some(23), height },
+        );
+        dom.rebuild_in_place();
+        dioxus_ssr::render(&dom)
+    }
+
+    /// A growing band takes the layout's height, not the source band's.
+    ///
+    /// An `<svg>` is a replaced element: a `height` attribute beats the
+    /// `flex:1` beside it, so a rail that stated 27 stayed 27 rows tall in
+    /// a 300-row strip.
+    #[test]
+    fn a_growing_band_does_not_state_a_pixel_height() {
+        let html = render(Pane { view: (0.0, 14.0, 23.0, 27.0), grow: true }, None);
+        assert!(html.contains("height=\"100%\""), "the growing band pinned a height:\n{html}");
+    }
+
+    /// A fixed band still states one, and a caller that asks for a height
+    /// still gets it — the exporter always asks.
+    #[test]
+    fn a_fixed_band_and_an_asked_for_height_are_unchanged() {
+        let fixed = render(Pane { view: (0.0, 0.0, 23.0, 16.0), grow: false }, None);
+        assert!(fixed.contains("height=\"16\""), "the fixed band lost its height:\n{fixed}");
+
+        let asked = render(Pane { view: (0.0, 14.0, 23.0, 27.0), grow: true }, Some(55));
+        assert!(asked.contains("height=\"55\""), "an asked-for height was ignored:\n{asked}");
     }
 }

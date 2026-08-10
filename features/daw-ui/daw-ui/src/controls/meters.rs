@@ -25,7 +25,7 @@
 use std::collections::{HashMap, HashSet};
 
 use daw_proto::peak::TrackLevels;
-use daw_theme_art::primitives as art;
+use daw_theme_art::vector_controls as art;
 
 use crate::controls::use_track_store;
 use crate::prelude::*;
@@ -111,56 +111,46 @@ pub fn MeterFeed() -> Element {
     rsx! {}
 }
 
-/// A track's stereo meter.
+/// A track's stereo meter, with REAPER's dB scale printed down its left.
 ///
-/// Two bars and their peak holds. The levels are linear 0..1 exactly as the
-/// frame carries them — the conversion to a dB scale is a display decision
-/// that #135 leaves unspecified, and inventing one here would bake it in.
+/// The scale belongs *inside* the meter, not beside it: `mcp.meter` is one
+/// rect covering both and REAPER draws the numbers as part of the widget.
+/// Laid out as a separate column the bars have nowhere to go but under the
+/// button stack — which is exactly what the first version of this strip did.
+///
+/// Levels are linear 0..1 as the frame carries them; the marks are labels,
+/// not a conversion.
 #[component]
 pub fn TrackMeter(
     /// The track's GUID.
     track: String,
-    #[props(default = 8)] width: u32,
+    /// The meter's box, which includes the scale when it is printed.
+    #[props(default = 24)]
+    width: u32,
     #[props(default = 120)] height: u32,
+    /// Print the dB scale inside the meter, as the mixer does.
+    #[props(default = true)]
+    scale: bool,
 ) -> Element {
     let meters = use_meters();
     let guid = track.clone();
     let levels = use_memo(use_reactive!(|guid| meters.levels(&guid)));
     let l = levels();
-    // One pixel of gap, so two channels read as two channels rather than
-    // one wide bar that happens to be uneven.
-    let bar = (width.saturating_sub(1) / 2).max(1);
-    let guid = track.replace(|c: char| !c.is_ascii_alphanumeric(), "");
 
     rsx! {
-        div {
-            style: "display:flex; gap:1px; line-height:0; height:{height}px;",
-            art::Meter {
-                tag: "{guid}l",
-                width: bar,
-                height,
-                level: l.peak_left,
-                hold: hold(l.hold_left),
-            }
-            art::Meter {
-                tag: "{guid}r",
-                width: bar,
-                height,
-                level: l.peak_right,
-                hold: hold(l.hold_right),
-            }
+        art::Meter {
+            levels: vec![l.peak_left, l.peak_right],
+            cell: (width as f32, height as f32),
+            scale: scale,
+            marks: if scale { MARKS.iter().map(|m| m.to_string()).collect() } else { Vec::new() },
+            width: Some(width),
+            height: Some(height),
         }
     }
 }
 
-/// A hold mark only when there is a peak to hold.
-///
-/// Silence carries `hold = 0`, and drawing that leaves a permanent tick on
-/// the bottom row of every idle meter — which reads as a signal floor
-/// rather than as nothing.
-fn hold(v: f32) -> Option<f32> {
-    (v > 0.0).then_some(v)
-}
+/// REAPER's own scale down the mixer meter, top to bottom.
+const MARKS: [&str; 6] = ["-inf", "-6-", "-18-", "-30-", "-42-", "-54-"];
 
 #[cfg(test)]
 mod tests {

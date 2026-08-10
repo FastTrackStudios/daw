@@ -96,9 +96,11 @@ fn strip_html(tracks: &[Track]) -> String {
 fn the_strip_carries_its_sections_in_reapers_order() {
     let html = strip_html(&[track("T1", 0, "Kick")]);
 
-    // Each section is identified by a control only it contains: the FX
-    // pill, the pan knob, the record-arm ring, the fader, the name plate.
-    let order = ["M<", "in ", "Kick"];
+    // Each section is identified by something only it contains, in the
+    // order REAPER stacks them: the FX pill, the record input inside the
+    // tinted band, the mute button in the stretch's button column, and the
+    // name plate at the bottom.
+    let order = ["FX", "in ", ">M<", "Kick"];
     let mut at = 0usize;
     for needle in order {
         let found = html[at..]
@@ -238,7 +240,7 @@ fn padding_steps_down_in_three_stages() {
         .step_by(4)
         .map(|h| {
             let html = strip_at(h as f32);
-            ["padding-top:2px", "padding-top:3px", "padding-top:4px"]
+            ["gap:2px", "gap:3px", "gap:4px"]
                 .into_iter()
                 .find(|p| html.contains(p))
                 .unwrap_or("none")
@@ -270,5 +272,47 @@ fn the_apps_mixer_never_blits_at_any_height() {
             "a background image appeared at height {height}"
         );
         assert!(html.contains("<svg"), "nothing drawn at height {height}");
+    }
+}
+
+/// The strip is drawn at the height it collapses by.
+///
+/// These were two numbers — a CSS `h-full` for the drawing and a prop for
+/// the collapse — and nothing tied them together. The strip resolved its
+/// bands for 371 and was then stretched to whatever the panel was, so the
+/// stretch band absorbed the difference and every measured offset below it
+/// sat in the wrong place. A strip that states its own height cannot do
+/// that.
+#[test]
+fn the_strip_states_the_height_it_collapsed_by() {
+    for h in [250.0_f32, 371.0, 640.0] {
+        let html = strip_at(h);
+        assert!(
+            html.contains(&format!("height:{h}px")),
+            "the strip at {h} does not state its height:\n{html}"
+        );
+        assert!(!html.contains("h-full"), "the strip at {h} still stretches to its parent");
+    }
+}
+
+/// The meter and the fader fill the same band.
+///
+/// The fader's rail is `height:100%`, and a percentage of an absolutely
+/// positioned box that states only `top`/`bottom` resolves to nothing in
+/// Blitz — so the fader drew at its content height beside a full-height
+/// meter. Both boxes state the stretch height in pixels instead.
+#[test]
+fn the_meter_and_the_fader_share_the_stretch_band() {
+    for h in [371.0_f32, 640.0] {
+        let html = strip_at(h);
+        let heights: Vec<&str> = html
+            .match_indices("top:4px; height:")
+            .map(|(i, m)| {
+                let rest = &html[i + m.len()..];
+                &rest[..rest.find("px").expect("a px height")]
+            })
+            .collect();
+        assert_eq!(heights.len(), 2, "meter and fader do not both state a height at {h}:\n{html}");
+        assert_eq!(heights[0], heights[1], "the fader is not as tall as the meter at {h}");
     }
 }

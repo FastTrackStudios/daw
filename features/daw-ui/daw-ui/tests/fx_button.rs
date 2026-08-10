@@ -128,7 +128,7 @@ fn a_wider_pill_grows_its_flat_run_and_not_its_ends() {
 
 /// A wider button renders more pixels of flat run, not a wider glyph.
 #[test]
-fn the_wider_button_puts_the_extra_pixels_in_one_band() {
+fn the_pill_is_two_halves_and_only_the_label_half_widens() {
     fn app(width: f32) -> Element {
         let mut store = use_hook(TrackStore::new);
         use_hook(|| {
@@ -147,11 +147,19 @@ fn the_wider_button_puts_the_extra_pixels_in_one_band() {
     let narrow = render(28.0);
     let wide = render(43.0);
     assert_ne!(narrow, wide);
-    // The fixed band is the same width in both; only the growing one moved.
+
+    // Two `<svg>`s, always: `mcp.fx` and the `mcp.fxbyp` butted onto it.
+    // One is a pill with no bypass, which is what drawing the 86-wide
+    // source slice instead of the two boxes produced.
+    assert_eq!(wide.matches("<svg").count(), 2, "the bypass half is missing:\n{wide}");
+
+    // The label half takes the width it was asked for; the toggle keeps
+    // `mcp.fxbyp`'s own 28 whatever the pill does.
+    assert!(wide.contains("width=\"43\""), "the label half did not widen:\n{wide}");
+    assert!(narrow.contains("width=\"28\""), "the narrow pill lost its width:\n{narrow}");
     assert_eq!(
-        narrow.matches("width=\"23\"").count(),
-        wide.matches("width=\"23\"").count(),
-        "the fixed band changed width:\n{wide}"
+        wide.matches("width=\"28\"").count(),
+        1,
+        "the toggle half is not the only 28-wide band:\n{wide}"
     );
-    assert!(wide.contains("width=\"20\""), "the flat run did not take the slack:\n{wide}");
 }
