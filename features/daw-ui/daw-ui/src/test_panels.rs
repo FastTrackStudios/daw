@@ -174,7 +174,13 @@ pub fn action_defs() -> [ActionDef; 3] {
         })
         .in_menu(),
         ActionDef::new(FTS_MIXER_ACTION_ID, "FTS: Mixer", || {
+            // Logged on both sides of the call: everything upstream of here
+            // is a message-passing chain across two threads, and "the panel
+            // did not open" needs to distinguish "the handler never ran"
+            // from "the handler ran and the window did not appear".
+            tracing::info!("mixer panel toggle requested");
             daw_reaper_dioxus::dock::toggle_panel(FTS_MIXER_PANEL_ID);
+            tracing::info!("mixer panel toggle returned");
         })
         .in_menu(),
     ]

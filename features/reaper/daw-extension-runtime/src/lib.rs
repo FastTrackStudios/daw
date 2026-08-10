@@ -160,6 +160,53 @@ pub async fn register_actions(daw: &Daw, actions: &[ActionDef]) -> Result<Action
     let mut registered = 0usize;
     let mut failed = 0usize;
 
+    // Bridge REAPER's action callback onto the stream callers await —
+    // **before** a single action is registered.
+    //
+    // An action becomes triggerable the moment it is registered, and
+    // something may be waiting to trigger it: a startup script, a keybind,
+    // a session restoring its panels. Subscribing afterwards leaves a
+    // window — 18ms in the case that found this — in which REAPER fires
+    // the action, the broadcast has no receivers, and the trigger is
+    // dropped. The action then appears to do nothing, exactly once, at the
+    // least reproducible moment. Same discipline as any other
+    // subscribe-then-seed: open the ear first.
+    //
+    // `subscribe_actions` retired with the architect::rpc port, and what
+    // replaced it here was an immediately-empty `Rx` handed back to keep
+    // the struct shape — a channel nothing ever wrote to. Every consumer
+    // of this API was therefore waiting forever on an event no code in the
+    // tree constructed: actions registered, REAPER fired them, and the
+    // handler never ran. It presents as a panel that will not open, with
+    // nothing in any log, because nothing failed — the message simply had
+    // no sender.
+    //
+    // The sender exists and always did: `register_action_main_thread`'s
+    // callback broadcasts the command name. This forwards that broadcast
+    // as the `ActionEvent` the stream promises. In-process only, which is
+    // what an extension is.
+    let (tx, rx) = vox::channel::<daw_proto::ActionEvent>();
+    let mut triggers = daw_reaper::subscribe_action_broadcasts();
+    architect::platform::spawn(async move {
+        loop {
+            match triggers.recv().await {
+                Ok(command_name) => {
+                    if tx.send(daw_proto::ActionEvent::Triggered { command_name }).await.is_err() {
+                        break;
+                    }
+                }
+                // Lagged: a slow consumer missed triggers. Keep going —
+                // dropping the subscription would silently stop every
+                // action from that point on, which is worse than losing
+                // the ones already missed.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    warn!("action stream lagged, {n} trigger(s) dropped");
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
+
     for action in actions {
         let cmd_id = if action.toggleable {
             registry
@@ -195,11 +242,6 @@ pub async fn register_actions(daw: &Daw, actions: &[ActionDef]) -> Result<Action
         }
     }
 
-    // `subscribe_actions` retired with the architect::rpc port —
-    // streaming subscriptions live on a sibling trait. Hand callers
-    // an immediately-empty `Rx` so the struct shape is preserved;
-    // wire up the sibling-trait subscription when it lands.
-    let (_tx, rx) = vox::channel::<daw_proto::ActionEvent>();
     let _ = registry; // suppress unused-binding warning
 
     Ok(ActionRegistration {
