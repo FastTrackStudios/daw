@@ -62,34 +62,22 @@ pub fn FxButton(
 
     rsx! {
         div {
-            style: "position:relative; height:{h}px; width:{w + TOGGLE_W - 3.0}px; \
-                    line-height:0; user-select:none; cursor:pointer;",
+            style: "position:relative; height:{h}px; line-height:0; \
+                    user-select:none; cursor:pointer;",
             onmouseenter: move |_| at.set(art::Interaction::Hover),
             onmouseleave: move |_| at.set(art::Interaction::Normal),
 
-            div { style: "position:absolute; left:0; top:0;",
-                art::FxControl {
-                    pane: None,
-                    part: art::FxPart::Label,
-                    chain,
-                    bypass: art::FxBypass::Empty,
-                    family: art::FxFamily::Mixer,
-                    width: Some((w * scale).round() as u32),
-                    height: Some(h),
-                    at: at(),
-                }
-            }
-            div { style: "position:absolute; left:{(w - 3.0) * scale}px; top:0;",
-                art::FxControl {
-                    pane: None,
-                    part: art::FxPart::Toggle,
-                    chain,
-                    bypass: art::FxBypass::Empty,
-                    family: art::FxFamily::Mixer,
-                    width: Some((TOGGLE_W * scale).round() as u32),
-                    height: Some(h),
-                    at: at(),
-                }
+            art::FxControl {
+                pane: None,
+                part: art::FxPart::Whole,
+                chain,
+                bypass: art::FxBypass::Empty,
+                family: art::FxFamily::Mixer,
+                // `mcp.fx` plus `mcp.fxbyp`, as one shape. The widening
+                // goes into the label half, which is where REAPER puts it.
+                width: Some(((w + TOGGLE_W) * scale).round() as u32),
+                height: Some(h),
+                at: at(),
             }
 
             // The input-FX indicator: the *input* chain, which is a

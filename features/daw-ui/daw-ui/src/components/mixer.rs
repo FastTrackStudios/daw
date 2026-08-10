@@ -196,6 +196,12 @@ const COLUMN: f32 = 55.0;
 /// `mcp.label` — 26 of the bottom section's 47, above the 20-row index
 /// plate and the row that divides them.
 const NAME_PLATE: u32 = 26;
+/// How far the record arm's housing hangs below the coloured band, so its
+/// base sits on the dark the way REAPER's does.
+const ARM_OVERHANG: f32 = 4.0;
+/// The strip's own grey — `mcp_namebg`'s, and the same one the plate under
+/// the track name uses.
+const BODY_GREY: &str = "#262626";
 
 // ── Channel Strip ───────────────────────────────────────────────────
 
@@ -292,7 +298,7 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
 
     rsx! {
         div {
-            class: "flex flex-col shrink-0 border-r {selected_border} bg-zinc-900",
+            class: "flex flex-col shrink-0 border-r {selected_border}",
             // The section stack is stated inline as well as in Tailwind.
             // Blitz windows embed the sheet as a static string and a panel
             // that mounts before it — or a test that mounts without it —
@@ -300,8 +306,13 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
             // height and the stretch band collapses to nothing, so the
             // bottom section paints over the meter. Tailwind is the
             // additive layer here, not the structure.
+            // #262626 stated inline, not `bg-zinc-900`: REAPER's strip body
+            // is the same grey as `mcp_namebg`, which is why the plate under
+            // the name looked right while everything above it sat in a
+            // darker box. Inline because a class-only background disappears
+            // in any window that renders before the sheet.
             style: "width:{STRIP_W}px; height:{props.height}px; \
-                    display:flex; flex-direction:column;",
+                    display:flex; flex-direction:column; background:{BODY_GREY};",
 
             // Laid out on REAPER's own geometry, in Tailwind and explicit
             // pixels rather than by eye.
@@ -358,10 +369,19 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                         div { class: "text-[8px] text-zinc-400 leading-none text-center", "pan" }
                     }
                 }
-                // Bottom of the band, not the top: the arm sits on the
-                // band's floor beside the input label, which is where the
-                // source has it and where it stays as the band collapses.
-                div { style: "position:absolute; left:48px; bottom:2px;",
+                // Hung *through* the band's floor, not sat on it.
+                //
+                // In REAPER the housing spans rows 35..56 of a strip whose
+                // coloured band ends at 52 — the last four rows land on the
+                // dark below, so the round housing reads as one shape with
+                // the background it is anchored to. Kept inside the band the
+                // button floated in the colour with a seam under it.
+                //
+                // `z-index` because the stretch section is the next sibling
+                // and would otherwise paint over the overhang.
+                div {
+                    style: "position:absolute; left:48px; bottom:-{ARM_OVERHANG}px; \
+                            z-index:2;",
                     RecordArmButton { track: track.guid.clone() }
                 }
                 if shape.show_record_input {

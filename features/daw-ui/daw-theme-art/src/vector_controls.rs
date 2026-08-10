@@ -583,6 +583,14 @@ pub enum FxPart {
     Label,
     /// The lit end — the bypass toggle.
     Toggle,
+    /// Both halves in one element.
+    ///
+    /// The split into two images is REAPER's: it blits `mcp_fx` and
+    /// `mcp_fxbyp` side by side, so the exporter needs each half on its
+    /// own. A live GUI has no such constraint, and composing the halves as
+    /// two positioned `<svg>`s put the toggle's rounded end through the
+    /// `FX` under Blitz. One element cannot be mis-composed.
+    Whole,
 }
 
 /// The measured geometry of one family's FX control.
@@ -690,13 +698,63 @@ pub struct FxControlProps {
 pub fn FxControl(props: FxControlProps) -> Element {
     let t = Theme::default();
     let k = ink(None, props.at, true, 0.35);
-    let p = props.family.pill();
+    let mut p = props.family.pill();
+
+    // Widened by *redrawing*, never by scaling.
+    //
+    // `mcp.fx` is a 43-wide box and the art behind it is 28; `mcp.fxbyp` is
+    // 29 against 18. Asked for those widths with `preserveAspectRatio:
+    // none` the whole drawing stretched — 1.54 across and nothing down —
+    // which elongated the rounded ends into notches and blew the `FX` up to
+    // half again its size. REAPER gets there by nine-slicing: the ends hold
+    // their size and only the flat run grows.
+    //
+    // This is vector art, so it does the same thing the honest way: the
+    // slack goes into the pill's own geometry before anything is drawn. The
+    // corner radius, the letters and the lamp keep their natural size and
+    // the `<svg>` ends up 1:1 with its viewBox.
+    let widen = match (props.pane, props.width) {
+        (None, Some(want)) => {
+            let natural = match props.part {
+                FxPart::Label => p.split,
+                FxPart::Toggle => p.w - p.split,
+                FxPart::Whole => p.w,
+            };
+            (want as f32 - natural).max(0.0)
+        }
+        // A caller drawing bands states each band's width itself, and the
+        // exporter rasterises at the source size — neither wants slack.
+        _ => 0.0,
+    };
+    // The letters do not move with the widening. REAPER grows the flat run
+    // *after* them — its `FX` sits about ten pixels into a 43-wide box, the
+    // same place it sits in the 28-wide art — so re-centring the glyph in
+    // the widened half pushed it to the middle of the pill, which is the
+    // difference that still read as "wrong scaling" once the stretch was
+    // gone.
+    let glyph_split = p.split;
+    match props.part {
+        FxPart::Label => {
+            p.split += widen;
+            p.w += widen;
+        }
+        FxPart::Toggle => p.w += widen,
+        // The label half takes the slack, exactly as it does when the two
+        // are drawn separately, so a whole pill and a composed one are the
+        // same drawing.
+        FxPart::Whole => {
+            p.split += widen;
+            p.w += widen;
+        }
+    }
+
     // The half this image is. The pill is drawn once, at its own
     // proportions, and each image is a window onto it — that is what keeps
     // the two halves from disagreeing about height or material.
     let (part_x, part_w) = match props.part {
         FxPart::Label => (0.0, p.split),
         FxPart::Toggle => (p.split, p.w - p.split),
+        FxPart::Whole => (0.0, p.w),
     };
     // A band *within* that half, when the caller is stretching one. Offset
     // into the half rather than into the pill, so a caller can pass the
@@ -844,7 +902,13 @@ pub fn FxControl(props: FxControlProps) -> Element {
     // at the same offset in both families — which *is* centred in the
     // 16-wide half and a pixel left of centre in the 18-wide one, so
     // centring it put the mixer's a pixel too far right.
-    let (tx, ty) = (p.split + p.h * 0.364, body_y + body_h * 0.5);
+    // 0.364 of the height from the split, which is the middle of the
+    // toggle's natural 18 — so a widened toggle carries the lamp along with
+    // half the slack rather than leaving it against the seam.
+    let (tx, ty) = (
+        p.split + p.h * 0.364 + if props.part == FxPart::Toggle { widen * 0.5 } else { 0.0 },
+        body_y + body_h * 0.5,
+    );
     // Measured: a 4px pill and an 8x8 plus with 2px arms, in both
     // families — so neither scales with the cell width.
     let (pw, ph) = (p.h * 0.182, body_h * 0.5);
@@ -857,6 +921,13 @@ pub fn FxControl(props: FxControlProps) -> Element {
             preserve_aspect_ratio: "none",
             width: "{props.width.unwrap_or(win_w as u32)}",
             height: "{props.height.unwrap_or(p.h as u32)}",
+            // And again in CSS. An `<svg>` is a replaced element and Blitz
+            // sizes it from its box before it looks at the attributes, so
+            // with an auto-width box the two halves divided the pill
+            // between them: the label came out a stub showing only its
+            // rounded end and the toggle stretched across the rest.
+            style: "display:block; width:{props.width.unwrap_or(win_w as u32)}px; \
+                    height:{props.height.unwrap_or(p.h as u32)}px;",
             // The window is the only thing that differs between the two
             // images: same drawing, different slice of it.
             view_box: "{win_x} 0 {win_w} {p.h}",
@@ -921,7 +992,7 @@ pub fn FxControl(props: FxControlProps) -> Element {
                 // carry. Measured against the F's stem, a plain centre
                 // lands the pair two columns left of where the art puts
                 // them in both families.
-                x: "{p.split * 0.5 + 1.5}", y: "{body_y + body_h * 0.5}",
+                x: "{glyph_split * 0.5 + 1.5}", y: "{body_y + body_h * 0.5}",
                 text_anchor: "middle", dominant_baseline: "central",
                 font_family: "Fira Sans, DejaVu Sans, sans-serif",
                 // 0.51, not 0.44. The peak colour is right either way —

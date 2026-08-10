@@ -127,8 +127,16 @@ fn a_wider_pill_grows_its_flat_run_and_not_its_ends() {
 }
 
 /// A wider button renders more pixels of flat run, not a wider glyph.
+/// The pill is one shape, drawn at the width it was asked for.
+///
+/// Two things this pins. It is a *single* `<svg>`: the split into `mcp.fx`
+/// and `mcp.fxbyp` is REAPER's blitting constraint, and composing the two
+/// halves as positioned elements put the toggle's rounded end through the
+/// `FX` under Blitz. And it is drawn 1:1 rather than scaled — asked for 71
+/// with `preserveAspectRatio: none`, a 46-wide drawing stretched by half
+/// again, which elongated the rounded ends and blew up the lettering.
 #[test]
-fn the_pill_is_two_halves_and_only_the_label_half_widens() {
+fn the_pill_is_one_shape_drawn_at_its_asked_for_width() {
     fn app(width: f32) -> Element {
         let mut store = use_hook(TrackStore::new);
         use_hook(|| {
@@ -148,18 +156,12 @@ fn the_pill_is_two_halves_and_only_the_label_half_widens() {
     let wide = render(43.0);
     assert_ne!(narrow, wide);
 
-    // Two `<svg>`s, always: `mcp.fx` and the `mcp.fxbyp` butted onto it.
-    // One is a pill with no bypass, which is what drawing the 86-wide
-    // source slice instead of the two boxes produced.
-    assert_eq!(wide.matches("<svg").count(), 2, "the bypass half is missing:\n{wide}");
+    assert_eq!(wide.matches("<svg").count(), 1, "the pill is not one shape:\n{wide}");
 
-    // The label half takes the width it was asked for; the toggle keeps
-    // `mcp.fxbyp`'s own 28 whatever the pill does.
-    assert!(wide.contains("width=\"43\""), "the label half did not widen:\n{wide}");
-    assert!(narrow.contains("width=\"28\""), "the narrow pill lost its width:\n{narrow}");
-    assert_eq!(
-        wide.matches("width=\"28\"").count(),
-        1,
-        "the toggle half is not the only 28-wide band:\n{wide}"
-    );
+    // 43 of label plus `mcp.fxbyp`'s 28, and a viewBox to match — which is
+    // what makes it 1:1.
+    assert!(wide.contains("width=\"71\""), "the pill did not take its width:\n{wide}");
+    assert!(wide.contains("viewBox=\"0 0 71 22\""), "the pill is being scaled:\n{wide}");
+    assert!(narrow.contains("viewBox=\"0 0 56 22\""), "the narrow pill is scaled:\n{narrow}");
 }
+

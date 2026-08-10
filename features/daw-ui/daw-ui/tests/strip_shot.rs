@@ -90,10 +90,14 @@ const BODY_MARGIN: u32 = 8;
 /// Trim the margin off, so the PNG is the strip and nothing else and a
 /// column of it can be measured against a crop of REAPER's own.
 fn crop_to_strip(path: &std::path::Path, height: u32) {
+    crop_to_strip_sized(path, 86, height)
+}
+
+fn crop_to_strip_sized(path: &std::path::Path, width: u32, height: u32) {
     let status = std::process::Command::new("magick")
         .arg(path)
         .arg("-crop")
-        .arg(format!("86x{height}+{BODY_MARGIN}+{BODY_MARGIN}"))
+        .arg(format!("{width}x{height}+{BODY_MARGIN}+{BODY_MARGIN}"))
         .arg("+repage")
         .arg(path)
         .status();
@@ -103,4 +107,65 @@ fn crop_to_strip(path: &std::path::Path, height: u32) {
         // just with its margin on.
         _ => eprintln!("note: `magick` unavailable, {} keeps its margin", path.display()),
     }
+}
+
+/// The FX pill on its own, for the same loop.
+#[test]
+fn paint_the_fx_pill() {
+    fn app() -> Element {
+        let mut store = use_hook(TrackStore::new);
+        use_hook(|| {
+            store.seed([kick()]);
+            provide_context(store);
+        });
+        rsx! {
+            div {
+                style: "position:absolute; left:0; top:0; background:#1e1e1e; width:86px; height:33px;",
+                div { style: "position:absolute; left:7px; top:7px;",
+                    daw_ui::controls::FxButton { track: "kick", width: 43.0 }
+                }
+            }
+        }
+    }
+
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/theme-shots");
+    let path = out.join("fx-pill.png");
+    dioxus_test::render(app)
+        .with_window_size(86 + BODY_MARGIN * 2, 33 + BODY_MARGIN * 2)
+        .build()
+        .render_png(&path);
+    crop_to_strip_sized(&path, 86, 33);
+    println!("wrote {}", path.display());
+}
+
+/// The label half alone, to isolate the pill's own geometry from the
+/// button's placement of it.
+#[test]
+fn paint_the_fx_label_half() {
+    fn app() -> Element {
+        rsx! {
+            div { style: "position:absolute; left:0; top:0; background:#1e1e1e; width:60px; height:30px;",
+                div { style: "position:absolute; left:5px; top:4px;",
+                    daw_theme_art::vector_controls::FxControl {
+                        pane: None,
+                        part: daw_theme_art::vector_controls::FxPart::Label,
+                        chain: daw_theme_art::vector_controls::FxChain::Empty,
+                        bypass: daw_theme_art::vector_controls::FxBypass::Empty,
+                        family: daw_theme_art::vector_controls::FxFamily::Mixer,
+                        width: Some(43),
+                        height: Some(22),
+                        at: daw_theme_art::vector_controls::Interaction::Normal,
+                    }
+                }
+            }
+        }
+    }
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/theme-shots");
+    let path = out.join("fx-label.png");
+    dioxus_test::render(app)
+        .with_window_size(60 + BODY_MARGIN * 2, 30 + BODY_MARGIN * 2)
+        .build()
+        .render_png(&path);
+    crop_to_strip_sized(&path, 60, 30);
+    println!("wrote {}", path.display());
 }
