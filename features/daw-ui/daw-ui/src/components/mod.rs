@@ -11,6 +11,8 @@
 
 pub mod arrangement_view;
 pub mod fx_chain_tree;
+#[cfg(feature = "web")]
+pub mod main_window;
 pub mod fx_parameter_browser;
 pub mod mixer;
 pub mod tcp;

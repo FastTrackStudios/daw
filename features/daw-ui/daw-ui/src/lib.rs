@@ -7,7 +7,8 @@
 //! Provides panels for interacting with a connected DAW:
 //! - MixerPanel — horizontal track strips with volume/pan/mute/solo
 //! - TrackControlPanel (TCP) — vertical track list with folder hierarchy
-//! - ArrangementView — timeline placeholder with track lanes
+//! - ArrangementView — native arrange: ruler, lanes on the TCP's pitch, items
+//! - MainWindowPreview — the whole REAPER shape: transport, TCP | arrange, docked mixer
 //! - FxParameterBrowser — live FX parameter browser with bidirectional control
 //! - FxBrowserDockPanel — dock-ready wrapper for the FX browser
 //!

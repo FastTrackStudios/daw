@@ -18,7 +18,9 @@ pub enum ItemRef {
 }
 
 /// Complete item state
-#[derive(Clone, Debug, Facet)]
+// PartialEq so a Vec<Item> can be a Dioxus prop (memoisation compares
+// props), the same reason Track carries it.
+#[derive(Clone, Debug, PartialEq, Facet)]
 pub struct Item {
     /// Unique identifier
     pub guid: String,
