@@ -145,12 +145,32 @@ fn duration_ticks(d: &guitarpro::model::legacy::key_signature::Duration) -> f64 
 pub fn notes_of(track: &guitarpro::model::legacy::track::Track, strings: usize) -> Vec<GpNote> {
     let mut out = Vec::new();
 
+    // One clock for the whole track, advanced by each beat's duration.
+    //
+    // Neither `measure.start` nor `beat.start` can be trusted: the
+    // library leaves both at defaults on read, so a real file comes back
+    // with every measure claiming the same start and every beat the
+    // same tick. Found by importing an actual Guitar Pro file — the
+    // synthetic fixtures set those fields themselves and so hid it.
+    let mut clock = 0.0_f64;
     for measure in &track.measures {
+        // Voices are parallel within a measure, so each restarts at the
+        // measure's own beginning and the longest one advances it.
+        let measure_start = clock;
+        let mut measure_end = clock;
         for voice in &measure.voices {
-            let mut tick = measure.start.max(0) as f64;
+            let mut tick = measure_start;
             for beat in &voice.beats {
                 let length = duration_ticks(&beat.duration);
-                let start = beat.start.map(|s| s as f64).unwrap_or(tick);
+                // Accumulate rather than trusting `beat.start`.
+                //
+                // The library leaves it at a default on read — every
+                // beat in a real file comes back with the same value —
+                // so using it collapses a whole part onto one tick with
+                // one length. Found by importing an actual Guitar Pro
+                // file; no synthetic fixture showed it, because the
+                // synthetic ones set `start` themselves.
+                let start = tick;
 
                 for note in &beat.notes {
                     // GP numbers strings from 1, highest first; the roll
@@ -188,7 +208,9 @@ pub fn notes_of(track: &guitarpro::model::legacy::track::Track, strings: usize) 
                 }
                 tick = start + length;
             }
+            measure_end = measure_end.max(tick);
         }
+        clock = measure_end;
     }
 
     out.sort_by(|a, b| {

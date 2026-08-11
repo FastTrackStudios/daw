@@ -695,3 +695,26 @@ async fn shoot_stack() {
 
     shoot(ed, "stack-multitrack").await;
 }
+
+/// A screenshot of a **real** Guitar Pro file — one Guitar Pro itself
+/// wrote, not a model built in code (#168).
+///
+/// `Effects.gp3` from PyGuitarPro's fixture corpus: 47 notes across six
+/// strings, twelve articulations, and one bend that survives at full
+/// fidelity. Skips if the corpus is not checked out.
+#[tokio::test]
+async fn real_guitar_pro_file() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../expression-editor-guitarpro/tests/fixtures/Effects.gp3");
+    if !path.exists() {
+        return;
+    }
+    let imported = expression_editor_guitarpro::import_file(&path.to_string_lossy())
+        .expect("a real Guitar Pro file must import");
+
+    let mut ed = Editor::new(imported.doc, demo::default_viewport());
+    ed.set_mode(expression_editor_core::Mode::Guitar);
+    ed.reset_view();
+
+    shoot(ed, "45-real-guitar-pro").await;
+}
