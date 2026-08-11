@@ -8,7 +8,8 @@
 
 use std::collections::HashMap;
 
-use daw_proto::{Item, Track};
+use daw_proto::{Fx, Item, Track};
+use daw_ui::controls::{EmbeddedFx, use_embedded_fx_guis};
 use daw_ui::components::arrangement_view::{EnvelopePreview, ItemPreview, NotePreview};
 use daw_ui::components::main_window::MainWindowPreview;
 use daw_ui::components::media_browser::{MediaEntry, MediaKind};
@@ -175,6 +176,84 @@ fn envelopes() -> HashMap<String, Vec<EnvelopePreview>> {
     ])
 }
 
+/// FX chains for the dock's insert band: the Keys track carries the FTS
+/// EQ (which has an embedded GUI registered) plus a compressor, the Bass
+/// a bypassed saturator.
+fn fx() -> HashMap<String, Vec<Fx>> {
+    let fx = |guid: &str, name: &str, plugin: &str, enabled: bool, index: u32| Fx {
+        guid: guid.into(),
+        index,
+        name: name.into(),
+        plugin_name: plugin.into(),
+        enabled,
+        ..Default::default()
+    };
+    HashMap::from([
+        (
+            "keys".to_string(),
+            vec![
+                fx("fx-eq", "FTS EQ", "CLAP: FTS EQ (FastTrackStudio)", true, 0),
+                fx("fx-comp", "FTS Comp", "CLAP: FTS Comp (FastTrackStudio)", true, 1),
+            ],
+        ),
+        (
+            "bass".to_string(),
+            vec![fx("fx-sat", "FTS Saturate", "CLAP: FTS Saturate", false, 0)],
+        ),
+        (
+            "kick".to_string(),
+            vec![fx("fx-gate", "FTS Gate", "CLAP: FTS Gate", true, 0)],
+        ),
+    ])
+}
+
+/// The stand-in embedded GUI for the FTS EQ: the analyzer well, the dB
+/// grid, a low-shelf/bell/high-boost curve with its three handles. What
+/// the real plugin GUI crate will replace when the app registers it —
+/// the *seam* (registry, cell, expansion) is what this proves.
+fn fts_eq_embed(cell: EmbeddedFx) -> Element {
+    let (w, h) = (cell.width, cell.height);
+    let curve = format!(
+        "M 0 {m} C {c1} {m}, {c1} {lo}, {x1} {lo} S {x2} {dip}, {x3} {dip} \
+         S {x4} {hi}, {w} {hi}",
+        m = h * 0.55,
+        c1 = w * 0.10,
+        lo = h * 0.42,
+        x1 = w * 0.22,
+        x2 = w * 0.42,
+        dip = h * 0.72,
+        x3 = w * 0.55,
+        x4 = w * 0.78,
+        hi = h * 0.30,
+    );
+    rsx! {
+        div {
+            style: "position:relative; width:{w}px; height:{h}px; \
+                    background:#141719; overflow:hidden;",
+            svg {
+                width: "{w}", height: "{h}", view_box: "0 0 {w} {h}",
+                xmlns: "http://www.w3.org/2000/svg",
+                // dB grid.
+                for i in 1..4 {
+                    rect { key: "g{i}", x: "0", y: "{h * i as f32 / 4.0}",
+                           width: "{w}", height: "0.5",
+                           fill: "#ffffff", fill_opacity: "0.07" }
+                }
+                path { d: "{curve} L {w} {h} L 0 {h} Z",
+                       fill: "#46b9fe", fill_opacity: "0.12" }
+                path { d: "{curve}", fill: "none",
+                       stroke: "#46b9fe", stroke_width: "1.4" }
+                circle { cx: "{w * 0.22}", cy: "{h * 0.42}", r: "3",
+                         fill: "#46b9fe" }
+                circle { cx: "{w * 0.485}", cy: "{h * 0.72}", r: "3",
+                         fill: "#e0a842" }
+                circle { cx: "{w * 0.85}", cy: "{h * 0.32}", r: "3",
+                         fill: "#5ec88f" }
+            }
+        }
+    }
+}
+
 #[test]
 fn paint_the_main_window() {
     fn app() -> Element {
@@ -183,6 +262,10 @@ fn paint_the_main_window() {
             store.seed(tracks());
             provide_context(store);
         });
+        // The app registers its embedded FX GUIs; the slots find them
+        // through context — the seam under test.
+        let mut guis = use_embedded_fx_guis();
+        use_hook(move || guis.register("FTS EQ", fts_eq_embed));
         rsx! {
             div {
                 style: "position:absolute; left:0; top:0;",
@@ -191,6 +274,8 @@ fn paint_the_main_window() {
                     items: items(),
                     previews: previews(),
                     envelopes: envelopes(),
+                    fx: fx(),
+                    fx_expanded: Some(("keys".to_string(), "fx-eq".to_string())),
                     media: media(),
                     media_selected: Some("F#MIN 92bpm [SHARK].mid".to_string()),
                 }

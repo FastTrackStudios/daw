@@ -18,6 +18,8 @@ use std::collections::HashMap;
 use crate::components::arrangement_view::{ArrangePreview, EnvelopePreview, ItemPreview};
 use crate::components::media_browser::{MediaBrowserPanel, MediaEntry};
 use crate::components::mixer::ChannelStripPreview;
+use crate::controls::FxSlotStack;
+use daw_proto::Fx;
 use crate::components::tcp::TrackRow;
 use crate::panels::native::NativeTransportBar;
 use crate::prelude::*;
@@ -34,6 +36,9 @@ const TRANSPORT_H: f32 = 40.0;
 /// (`Collapse` swaps to a knob below ~130 of stretch), short enough to
 /// leave the arrangement most of a 768-row window.
 const MIXER_H: f32 = 230.0;
+/// The FX insert band above the strips, when any track has a chain.
+/// Sized for three slot rows plus one expanded embedded GUI.
+const FX_BAND_H: f32 = 144.0;
 /// The media browser sidebar, when media is passed.
 const BROWSER_W: f32 = 260.0;
 
@@ -52,6 +57,13 @@ pub fn MainWindowPreview(
     /// Visible envelopes by track guid — see `ArrangePreview`.
     #[props(default)]
     envelopes: HashMap<String, Vec<EnvelopePreview>>,
+    /// FX chains by track guid. Any non-empty chain grows the FX band
+    /// above the mixer strips.
+    #[props(default)]
+    fx: HashMap<String, Vec<Fx>>,
+    /// The initially expanded FX slot: `(track guid, fx guid)`.
+    #[props(default)]
+    fx_expanded: Option<(String, String)>,
     /// Media browser library entries. Empty hides the sidebar entirely.
     #[props(default)]
     media: Vec<MediaEntry>,
@@ -69,7 +81,8 @@ pub fn MainWindowPreview(
 
     let playing = use_signal(|| false);
 
-    let middle_h = height - TRANSPORT_H - MIXER_H;
+    let fx_band = if fx.values().any(|c| !c.is_empty()) { FX_BAND_H } else { 0.0 };
+    let middle_h = height - TRANSPORT_H - MIXER_H - fx_band;
     // The browser takes its column off the project area, full height
     // under the transport — a sidebar, not a fourth dock row.
     let browser_w = if media.is_empty() { 0.0 } else { BROWSER_W };
@@ -123,6 +136,40 @@ pub fn MainWindowPreview(
                             width: arrange_w,
                             height: middle_h,
                             bpm,
+                        }
+                    }
+
+                    // ── The FX insert band, above the strips ──
+                    //
+                    // REAPER's MCP puts the chain above the strip; ours
+                    // is a band across the dock so an expanded embedded
+                    // GUI has the full slot column to grow into.
+                    if fx_band > 0.0 {
+                        div {
+                            style: "height:{FX_BAND_H}px; flex:0 0 auto; display:flex; \
+                                    align-items:flex-end; border-top:1px solid {rule}; \
+                                    overflow:hidden; background:{bar_bg};",
+                            for track in tracks.iter() {
+                                {
+                                    let chain = fx.get(&track.guid).cloned().unwrap_or_default();
+                                    let open = fx_expanded
+                                        .as_ref()
+                                        .filter(|(t, _)| t == &track.guid)
+                                        .map(|(_, f)| f.clone());
+                                    rsx! {
+                                        div {
+                                            key: "{track.guid}",
+                                            style: "width:{daw_theme_art::geometry::mcp::STRIP_W}px; \
+                                                    flex:0 0 auto; overflow:hidden;",
+                                            FxSlotStack {
+                                                fx: chain,
+                                                width: daw_theme_art::geometry::mcp::STRIP_W,
+                                                expanded: open,
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
 

@@ -121,7 +121,8 @@ pub enum FxType {
 }
 
 /// Complete FX state returned from queries
-#[derive(Clone, Debug, Facet)]
+// PartialEq so a Vec<Fx> can be a Dioxus prop, like Track and Item.
+#[derive(Clone, Debug, PartialEq, Facet)]
 pub struct Fx {
     /// Unique GUID for stable identification
     pub guid: String,
