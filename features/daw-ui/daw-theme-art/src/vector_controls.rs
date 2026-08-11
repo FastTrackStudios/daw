@@ -5165,13 +5165,33 @@ pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
 
-            // The rim the ring is inset into.
-            circle { cx: "{cx}", cy: "{cy}", r: "{rim}", fill: "{ink.border.shade(-0.35).css()}" }
+            defs {
+                // The same drop the pan knob casts, so the two controls
+                // sit on the row the same way. REAPER's knob is not flat
+                // against the field: it throws a soft shadow below it and
+                // is ringed in near-black, which is most of what makes it
+                // read as a knob rather than a printed circle.
+                radialGradient { id: "voldrop",
+                    stop { offset: "0.90", stop_color: "#000000", stop_opacity: "0.15" }
+                    stop { offset: "1", stop_color: "#000000", stop_opacity: "0" }
+                }
+            }
+            ellipse {
+                cx: "{cx}", cy: "{cy + vh * 0.055}",
+                rx: "{rim * 1.07}", ry: "{rim * 1.23}",
+                fill: "url(#voldrop)",
+            }
+            // The black outline, and the rim the ring is inset into.
+            circle { cx: "{cx}", cy: "{cy}", r: "{rim}", fill: "#0d0d0d" }
             // The unlit track, all the way round.
             path {
                 d: "{arc(START, START + SWEEP)}",
                 fill: "none",
-                stroke: "{t.chrome.accent.shade(-0.62).css()}",
+                // #3E4A51, measured off the unlit side of REAPER's ring —
+                // a slate that stays legible against the body. Derived from
+                // the accent it was too dark to see, so the knob looked
+                // like a lit arc floating on nothing.
+                stroke: "#3e4a51",
                 stroke_width: "{stroke}",
                 stroke_linecap: "butt",
             }
