@@ -63,16 +63,31 @@ fn a_seven_string_file_gets_seven_rows() {
 }
 
 #[test]
-fn the_row_is_the_string_not_the_pitch() {
-    // #161's prototype: on a string roll the vertical axis carries no
-    // pitch. Fret 5 and fret 12 on one string sit at the same height,
-    // and that is what makes a bend and a slide different problems.
+fn the_row_is_the_pitch_and_the_string_rides_on_the_note() {
+    // A guitar roll is a full MIDI roll. #161's prototype put the
+    // string on the vertical axis; that was reversed, because a guitar
+    // part is notes first and fingering second — the string is what
+    // colours a note and makes its fret computable, not where it sits.
+    let t = standard();
     let out = to_document(
         &[note(2, 5, 0.0, 960.0), note(2, 12, 960.0, 960.0)],
-        standard(),
+        t.clone(),
     );
-    assert_eq!(out.doc.notes[0].row, 2);
-    assert_eq!(out.doc.notes[1].row, 2, "same string, same row");
+    assert_eq!(out.doc.notes[0].row, t.open(2) + 5);
+    assert_eq!(
+        out.doc.notes[1].row,
+        t.open(2) + 12,
+        "the twelfth fret sounds an octave above the fifth, and the \
+         roll has to show that"
+    );
+    for n in &out.doc.notes {
+        assert_eq!(n.string, Some(2), "both are played on the D string");
+    }
+    // And the fret comes back out.
+    assert_eq!(
+        expression_editor_core::rows::fret_of(&out.doc.notes[1], &t),
+        Some(12)
+    );
 }
 
 #[test]

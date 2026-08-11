@@ -1429,8 +1429,9 @@ fn moving_a_note_to_another_string_keeps_its_sounding_pitch() {
     let tuning = StringTuning::guitar_standard();
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
     doc.row_space = RowSpace::Strings(tuning.clone());
-    let mut n = Note::new(NoteId(1), 0.0, PPQ, 5); // high E string
-    n.fret = Some(5); // A4
+    // 5th fret of the high E string = A4 (69). The row is the pitch.
+    let mut n = Note::new(NoteId(1), 0.0, PPQ, tuning.open(5) + 5);
+    n.string = Some(5);
     doc.push(n);
     let before = doc.row_space.pitch_of(doc.note(NoteId(1)).unwrap());
 
@@ -1443,26 +1444,26 @@ fn moving_a_note_to_another_string_keeps_its_sounding_pitch() {
     );
 
     let n = doc.note(NoteId(1)).unwrap();
-    assert_eq!(n.row, 4);
     assert_eq!(
         doc.row_space.pitch_of(n),
         before,
         "changing string re-fingers, it does not transpose"
     );
-    assert_eq!(n.fret, Some(10));
+    assert_eq!(n.string, Some(4), "it is on the B string now");
+    assert_eq!(
+        expression_editor_core::rows::fret_of(n, &tuning),
+        Some(10),
+        "A4 on the B string is the tenth fret"
+    );
 }
 
 #[test]
 fn an_unreachable_string_refuses_the_move() {
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
     doc.row_space = RowSpace::Strings(StringTuning::guitar_standard());
-    let mut n = Note::new(NoteId(1), 0.0, PPQ, 5);
-    n.fret = Some(0); // E4 — below the low E string's open pitch? no, above
-    doc.push(n);
-    // E4 = 64 cannot be played on the high E string at a negative fret,
-    // and moving a low note up a string can go out of range.
-    let mut n2 = Note::new(NoteId(2), 0.0, PPQ, 0);
-    n2.fret = Some(0); // E2 = 40
+    // E2 = 40, open on the low E string.
+    let mut n2 = Note::new(NoteId(2), 0.0, PPQ, 40);
+    n2.string = Some(0);
     doc.push(n2);
     assert!(
         !Edit::SetString {
@@ -1477,10 +1478,14 @@ fn an_unreachable_string_refuses_the_move() {
 #[test]
 fn a_string_roll_labels_notes_with_their_fret() {
     let space = RowSpace::Strings(StringTuning::guitar_standard());
-    let mut n = Note::new(NoteId(1), 0.0, 100.0, 2);
-    n.fret = Some(7);
+    let tuning = StringTuning::guitar_standard();
+    // Seventh fret of the D string.
+    let mut n = Note::new(NoteId(1), 0.0, 100.0, tuning.open(2) + 7);
+    n.string = Some(2);
     assert_eq!(space.note_label(&n), Some("7".to_string()));
-    assert_eq!(space.row_label(2), "D", "third string is D");
+    // Rows are pitches now, so they are named as pitches — a row does
+    // not belong to a string, because several strings reach it.
+    assert_eq!(space.row_label(tuning.open(2)), "D3");
 }
 
 #[test]
@@ -2251,9 +2256,14 @@ fn a_string_roll_reports_sounding_pitches_not_string_numbers() {
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
     doc.row_space = RowSpace::Strings(tuning.clone());
     // An open C major shape on the top three strings: G B E.
-    for (i, (string, fret)) in [(3usize, 0u8), (4, 1), (5, 0)].iter().enumerate() {
-        let mut n = Note::new(NoteId(i as u64 + 1), 0.0, PPQ, *string as i32);
-        n.fret = Some(*fret);
+    for (i, (string, fret)) in [(3usize, 0i32), (4, 1), (5, 0)].iter().enumerate() {
+        let mut n = Note::new(
+            NoteId(i as u64 + 1),
+            0.0,
+            PPQ,
+            tuning.open(*string) + fret,
+        );
+        n.string = Some(*string as u8);
         doc.push(n);
     }
     let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
@@ -2504,10 +2514,16 @@ fn row_colour_follows_what_the_row_means() {
     // because that is the thing being tracked.
     assert!(RowSpace::Pitch.row_color(60).is_none());
 
+    // A string roll's rows are pitches, and a pitch is reachable on
+    // several strings — so the row has no colour and the *note* carries
+    // it, which is what shows a phrase crossing the neck.
     let strings = RowSpace::Strings(StringTuning::guitar_standard());
-    let low = strings.row_color(0).unwrap();
-    let high = strings.row_color(5).unwrap();
-    assert_ne!(low, high, "strings must be told apart by colour");
+    assert!(strings.row_color(64).is_none());
+    assert_ne!(
+        expression_editor_core::rows::string_color(0),
+        expression_editor_core::rows::string_color(5),
+        "strings must be told apart by colour"
+    );
 
     let kit = RowSpace::Drums(DrumMap::general_midi());
     let map = DrumMap::general_midi();

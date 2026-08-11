@@ -327,27 +327,44 @@ fn scenario_4_a_guitar_pro_file_becomes_a_string_roll() {
         track.name
     );
 
-    // A six-string roll: a row *is* a string here, not a pitch. That is
-    // the whole point of the guitar row space — six rows, and the fret
-    // lives on the note rather than in its vertical position.
+    // A guitar roll is a full MIDI roll: the row is the sounding pitch,
+    // and the string rides on the note so the part can be coloured by
+    // where it was played and the fret can be computed.
     let strings = imported.tuning.strings();
     assert_eq!(strings, 6, "expected a six-string tuning");
+    let (lo, hi) = imported.doc.row_space.bounds();
     for n in &imported.doc.notes {
         assert!(
-            n.row >= 0 && (n.row as usize) < strings,
-            "a note on row {} is not one of the {strings} strings",
+            n.row >= lo && n.row <= hi,
+            "a note at pitch {} is off the neck ({lo}..={hi})",
             n.row
+        );
+        let s = n.string.expect("every imported note knows its string");
+        let fret = expression_editor_core::rows::fret_of(n, &imported.tuning)
+            .expect("a note with a string has a fret");
+        assert!(
+            (0..=imported.tuning.frets as i32).contains(&fret),
+            "a note on string {s} computes to fret {fret}"
         );
     }
 
-    // Every string should be played — a transcription that collapsed
-    // onto one row would satisfy the bound above and be useless.
-    let used: std::collections::BTreeSet<i32> =
+    // The part must actually move across the neck and across pitch —
+    // either collapsing alone would pass the bounds above and be a
+    // transcription of nothing.
+    let used_strings: std::collections::BTreeSet<u8> =
+        imported.doc.notes.iter().filter_map(|n| n.string).collect();
+    let used_pitches: std::collections::BTreeSet<i32> =
         imported.doc.notes.iter().map(|n| n.row).collect();
     assert!(
-        used.len() >= 4,
-        "only {} of {strings} strings carry notes: {used:?}",
-        used.len()
+        used_strings.len() >= 4,
+        "only {} of {strings} strings are played: {used_strings:?}",
+        used_strings.len()
+    );
+    assert!(
+        used_pitches.len() > 12,
+        "only {} distinct pitches — a pitch roll that flat is a lane, \
+         not a melody",
+        used_pitches.len()
     );
 
     // Bend flow is the part scenario 4 names specifically: the file has

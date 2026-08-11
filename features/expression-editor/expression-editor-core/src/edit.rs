@@ -765,30 +765,35 @@ impl Edit {
                 let RowSpace::Strings(tuning) = doc.row_space.clone() else {
                     return false;
                 };
-                let Some(n) = doc.note(*note).cloned() else {
-                    return false;
-                };
                 let target = (*string).clamp(0, tuning.strings() as i32 - 1);
-                // Keep the sounding pitch and re-finger it: moving a
-                // note to another string means playing the same note
-                // somewhere else, not transposing it.
-                let pitch = tuning.pitch(n.row.max(0) as usize, n.fret.unwrap_or(0));
-                let Some(fret) = tuning.fret_for(target as usize, pitch) else {
-                    return false;
-                };
                 let Some(n) = doc.note_mut(*note) else {
                     return false;
                 };
-                n.row = target;
-                n.fret = Some(fret);
+                // Re-fingering only. The row is the sounding pitch and
+                // must not move: playing the same note on another
+                // string is a different fret, not a different note.
+                // Refused when the pitch is not reachable there — the
+                // 5th fret of the low E is not on the high E at all.
+                let fret = n.row - tuning.open(target as usize);
+                if fret < 0 || fret > tuning.frets as i32 {
+                    return false;
+                }
+                n.string = Some(target as u8);
                 true
             }
             Edit::SetFret { notes, fret } => {
-                let max = match &doc.row_space {
-                    RowSpace::Strings(t) => t.frets,
-                    _ => return false,
+                let RowSpace::Strings(tuning) = doc.row_space.clone() else {
+                    return false;
                 };
-                map_notes(doc, notes, |n| n.fret = Some((*fret).min(max)))
+                let fret = (*fret).min(tuning.frets) as i32;
+                // The fret is derived, so setting one *transposes*: it
+                // keeps the string and moves the pitch, which is what
+                // sliding a finger up the neck does.
+                map_notes(doc, notes, |n| {
+                    if let Some(s) = n.string {
+                        n.row = tuning.open(s as usize) + fret;
+                    }
+                })
             }
             Edit::AddNote(note) => {
                 doc.push((**note).clone());

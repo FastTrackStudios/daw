@@ -289,11 +289,18 @@ fn guitar_riff(doc: &mut ExpressionDoc) {
     // squeezed to fit rather than reset-view'd into a size nobody would
     // actually work at. The phrase is the subject; the tempo is not.
     const FIT: f64 = 0.72;
+    let tuning = StringTuning::guitar_standard();
     for (i, &(string, fret, start, len, art, bend)) in riff.iter().enumerate() {
         let (start, len) = (start * FIT, len * FIT);
         let (s, e) = (PPQ * start, PPQ * (start + len));
-        let mut n = Note::new(NoteId(i as u64 + 1), s, e, string as i32);
-        n.fret = Some(fret);
+        // Row is the sounding pitch; the string rides along on the note.
+        let mut n = Note::new(
+            NoteId(i as u64 + 1),
+            s,
+            e,
+            tuning.open(string) + fret as i32,
+        );
+        n.string = Some(string as u8);
         n.velocity = 0.8;
         n.articulation = art;
         n.legato = art.is_some_and(|a| a.is_legato());
@@ -320,7 +327,7 @@ fn guitar_riff(doc: &mut ExpressionDoc) {
         }
         doc.push(n);
     }
-    doc.row_space = RowSpace::Strings(StringTuning::guitar_standard());
+    doc.row_space = RowSpace::Strings(tuning.clone());
 }
 
 /// Build the editor for a scene, sized to `viewport`.

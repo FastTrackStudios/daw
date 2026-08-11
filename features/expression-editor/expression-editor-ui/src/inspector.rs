@@ -74,6 +74,14 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
     let lanes = ed.doc.cc.lanes.clone();
     let cc_edit = ed.cc_edit;
     let is_strings = matches!(space, RowSpace::Strings(_));
+    // Derived, not stored: the fret is the pitch less the string's open
+    // pitch, so it cannot disagree with the note it labels.
+    let fret_label: String = match (&space, &note) {
+        (RowSpace::Strings(t), Some(n)) => expression_editor_core::rows::fret_of(n, t)
+            .map(|f| f.to_string())
+            .unwrap_or_else(|| "—".into()),
+        _ => "—".into(),
+    };
     let is_drums = matches!(space, RowSpace::Drums(_));
     let color_by_string = ed.color_by_string;
     // What `f` will do to the selected hit, so the button can say it
@@ -285,7 +293,8 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                 // ── technique ────────────────────────────────────────
                 if is_strings {
                     {section("Technique")}
-                    {row("Fret", n.fret.map(|f| f.to_string()).unwrap_or_else(|| "—".into()))}
+                    {row("String", n.string.map(|s| (s + 1).to_string()).unwrap_or_else(|| "—".into()))}
+                    {row("Fret", fret_label.clone())}
                     {row("Legato", if n.legato { "yes".into() } else { "no".into() })}
                     div {
                         style: "display: flex; flex-wrap: wrap; gap: 3px; padding: 4px 10px 8px;",
