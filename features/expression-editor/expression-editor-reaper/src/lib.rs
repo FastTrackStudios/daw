@@ -90,6 +90,24 @@ pub fn loaded_label() -> String {
     label().lock().unwrap().clone()
 }
 
+/// The item the session was loaded from, so the open action can tell
+/// "e on the same item" (close) from "e on a different one" (switch).
+static LOADED_GUID: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+
+fn loaded_guid() -> &'static Mutex<Option<String>> {
+    LOADED_GUID.get_or_init(|| Mutex::new(None))
+}
+
+/// The first selected item's guid, if any.
+fn selected_item_guid() -> Option<String> {
+    use daw::service::Items;
+    daw::reaper::Reaper
+        .get_selected_items(ProjectContext::Current)
+        .into_iter()
+        .next()
+        .map(|i| i.guid)
+}
+
 /// Load the selected item into the panel.
 ///
 /// Audio is tried first, then MIDI. The order matters only because a
@@ -106,13 +124,15 @@ pub fn load_selected() -> bool {
     let reaper = daw::reaper::Reaper;
     let viewport = Viewport::new(1100.0, 520.0);
 
-    // The item's own label, resolved up front so both session kinds
-    // share it. Falls back to the kind of take below.
-    let item_label = reaper
+    // The item's own identity, resolved up front so both session kinds
+    // share it: the label feeds the header (falling back to the kind of
+    // take below), the guid feeds the open action's same-item check.
+    let item = reaper
         .get_selected_items(ProjectContext::Current)
         .into_iter()
-        .next()
-        .and_then(|i| i.label.filter(|l| !l.is_empty()));
+        .next();
+    let item_guid = item.as_ref().map(|i| i.guid.clone());
+    let item_label = item.and_then(|i| i.label.filter(|l| !l.is_empty()));
 
     if let Some(s) = AudioSession::load_selected(
         &reaper,
@@ -126,6 +146,7 @@ pub fn load_selected() -> bool {
             "analysed audio take into editor"
         );
         *label().lock().unwrap() = item_label.unwrap_or_else(|| "Audio take".into());
+        *loaded_guid().lock().unwrap() = item_guid;
         *session().lock().unwrap() = Some(Loaded::Audio(Box::new(s)));
         return true;
     }
@@ -139,6 +160,7 @@ pub fn load_selected() -> bool {
         Some(s) => {
             tracing::info!(notes = s.editor.doc.notes.len(), "loaded MIDI take into editor");
             *label().lock().unwrap() = item_label.unwrap_or_else(|| "MIDI take".into());
+            *loaded_guid().lock().unwrap() = item_guid;
             *session().lock().unwrap() = Some(Loaded::Midi(Box::new(s)));
             true
         }
@@ -198,6 +220,94 @@ pub fn write_back() -> bool {
                 false
             }
         },
+    }
+}
+
+/// State for the live-sync poll: the last document the poll saw, so a
+/// write only happens once a gesture has settled, not mid-drag.
+struct PollState {
+    last_seen: Option<expression_editor_core::ExpressionDoc>,
+    stable_ticks: u32,
+}
+
+static POLL: OnceLock<Mutex<PollState>> = OnceLock::new();
+
+fn poll_state() -> &'static Mutex<PollState> {
+    POLL.get_or_init(|| {
+        Mutex::new(PollState {
+            last_seen: None,
+            stable_ticks: 0,
+        })
+    })
+}
+
+/// How many ~30Hz ticks a document must sit unchanged before it is
+/// written to the take. ~250ms: short enough to feel live, long enough
+/// that a drag in progress is not rendered on every frame — which
+/// matters for audio, where a settled pitch edit is a resynthesis.
+const WRITE_AFTER_STABLE_TICKS: u32 = 8;
+
+/// The live-sync tick, called from the extension timer (~30Hz).
+///
+/// The editor has no Load/Write/Reload chrome; this is what replaces
+/// it. While the panel is visible:
+///
+/// - **Selection follow**: selecting a different item in REAPER loads
+///   it into the editor (flushing any settled-but-unwritten edits to
+///   the old take first). Deselecting everything keeps the current
+///   take — an editor that blanked on every arrange-view click would
+///   be unusable.
+/// - **Auto write-back**: once the document has been stable for
+///   [`WRITE_AFTER_STABLE_TICKS`], it is written to the take. MIDI
+///   replaces the take's events; audio timing goes out as stretch
+///   markers, and a settled pitch edit renders once, not per frame.
+pub fn poll() {
+    if !daw::reaper_ui::dock::is_panel_visible(PANEL_ID) {
+        return;
+    }
+
+    // Follow the selection.
+    if let Some(sel) = selected_item_guid() {
+        let current = loaded_guid().lock().unwrap().clone();
+        if current.as_deref() != Some(sel.as_str()) {
+            if is_dirty() {
+                write_back();
+            }
+            if load_selected() {
+                daw::reaper_ui::dock::remount_panel(PANEL_ID);
+                let mut st = poll_state().lock().unwrap();
+                st.last_seen = None;
+                st.stable_ticks = 0;
+            }
+            return;
+        }
+    }
+
+    // Debounced write-back of settled edits.
+    let (dirty, doc) = {
+        let guard = session().lock().unwrap();
+        match guard.as_ref() {
+            Some(s) => (s.is_dirty(), Some(s.editor().doc.clone())),
+            None => (false, None),
+        }
+    };
+    let mut st = poll_state().lock().unwrap();
+    if !dirty {
+        st.last_seen = None;
+        st.stable_ticks = 0;
+        return;
+    }
+    if st.last_seen.as_ref() == doc.as_ref() {
+        st.stable_ticks += 1;
+        if st.stable_ticks >= WRITE_AFTER_STABLE_TICKS {
+            st.last_seen = None;
+            st.stable_ticks = 0;
+            drop(st);
+            write_back();
+        }
+    } else {
+        st.last_seen = doc;
+        st.stable_ticks = 0;
     }
 }
 
@@ -266,18 +376,20 @@ impl DawModule for ExpressionEditorModule {
                 "FTS_EXPRESSION_EDITOR_OPEN",
                 "FTS: Open Expression Editor on selected item",
                 || {
-                    let was_visible = daw::reaper_ui::dock::is_panel_visible(PANEL_ID);
-                    let loaded = load_selected();
-                    // Show even when nothing loaded: the panel's empty
-                    // state says what to do next, which is more help
-                    // than a key that silently does nothing.
-                    daw::reaper_ui::dock::show_panel(PANEL_ID);
-                    // `show_panel` remounts only on the hidden→visible
-                    // transition; a panel that was already open would
-                    // otherwise keep rendering the previous take.
-                    if was_visible && loaded {
-                        daw::reaper_ui::dock::remount_panel(PANEL_ID);
+                    // One key in, same key out. While the panel is
+                    // open the live-sync poll already follows the item
+                    // selection, so the only job `e` has left on an
+                    // open panel is to close it.
+                    if daw::reaper_ui::dock::is_panel_visible(PANEL_ID) {
+                        daw::reaper_ui::dock::hide_panel(PANEL_ID);
+                        return;
                     }
+                    // Load before showing so the panel mounts on the
+                    // selection; shown even when nothing loads, because
+                    // the empty state explains what to do next — more
+                    // help than a key that silently does nothing.
+                    load_selected();
+                    daw::reaper_ui::dock::show_panel(PANEL_ID);
                 },
             )
             .in_menu(),
@@ -360,7 +472,7 @@ pub fn EditorPanel() -> Element {
     // hook's state; instead they remount this panel (see the OPEN
     // action), which re-runs these initializers against the fresh
     // global.
-    let mut editor = use_signal(|| {
+    let editor = use_signal(|| {
         session()
             .lock()
             .unwrap()
@@ -368,11 +480,14 @@ pub fn EditorPanel() -> Element {
             .map(|s| s.editor().clone())
             .unwrap_or_else(empty_editor)
     });
-    let mut loaded = use_signal(|| session().lock().unwrap().is_some());
-    let mut take_label = use_signal(loaded_label);
-    let mut take_kind = use_signal(|| loaded_kind().unwrap_or(""));
+    let loaded = use_signal(|| session().lock().unwrap().is_some());
+    let take_label = use_signal(loaded_label);
+    let take_kind = use_signal(|| loaded_kind().unwrap_or(""));
 
-    // Push edits back to the session so a write action sees them.
+    // Push edits down to the session. The live-sync poll ([`poll`])
+    // owns everything from there: it writes settled edits to the take
+    // and follows the REAPER selection, remounting this component when
+    // a different take comes in.
     use_effect(move || {
         let mut guard = session().lock().unwrap();
         if let Some(s) = guard.as_mut() {
@@ -382,72 +497,43 @@ pub fn EditorPanel() -> Element {
         }
     });
 
-    // Shared by the header button and (via remount) the OPEN action.
-    let mut sync_from_session = move || {
-        if let Some(s) = session().lock().unwrap().as_ref() {
-            editor.set(s.editor().clone());
-            loaded.set(true);
-        } else {
-            loaded.set(false);
-        }
-        take_label.set(loaded_label());
-        take_kind.set(loaded_kind().unwrap_or(""));
-    };
-
     let note_count = editor.read().doc.notes.len();
 
     rsx! {
+        document::Style { {PANEL_CSS} }
         div {
-            style: "width: 100%; height: 100%; display: flex; flex-direction: column; \
+            // Viewport units, not `height: 100%`: the panel's Blitz
+            // document has no definite height on the root element, so a
+            // percentage chain collapses to zero (a black panel under
+            // the header). 100vh is the panel surface itself — the same
+            // root the standalone runner uses. Everything inside is an
+            // ordinary responsive flex column.
+            style: "width: 100vw; height: 100vh; display: flex; flex-direction: column; \
                     background: #101016;",
             div {
                 style: "display: flex; align-items: center; gap: 6px; padding: 4px 8px; \
                         flex: 0 0 auto; background: #15151c; border-bottom: 1px solid #2b2b38; \
                         color: #c8cede; font-size: 11px; font-family: system-ui, sans-serif;",
-                button {
-                    style: BUTTON,
-                    onclick: move |_| {
-                        if load_selected() {
-                            sync_from_session();
-                        }
-                    },
-                    "Load selected item"
-                }
-                button {
-                    style: BUTTON,
-                    onclick: move |_| {
-                        // Push the panel's document down before writing,
-                        // or the action writes whatever was last synced.
-                        if let Some(s) = session().lock().unwrap().as_mut() {
-                            *s.editor_mut() = editor.read().clone();
-                        }
-                        write_back();
-                    },
-                    "Write to take"
-                }
-                button {
-                    style: BUTTON,
-                    onclick: move |_| {
-                        if reload() {
-                            sync_from_session();
-                        }
-                    },
-                    "Reload"
-                }
                 if loaded() {
                     span {
-                        style: "margin-left: 10px; color: #e8ecf6; font-weight: 600; \
-                                overflow: hidden; text-overflow: ellipsis; white-space: nowrap;",
+                        // No text-overflow: Blitz doesn't support it;
+                        // overflow:hidden alone truncates a long label.
+                        style: "color: #e8ecf6; font-weight: 600; overflow: hidden;",
                         "{take_label}"
                     }
                     span {
                         style: "color: #7b8397;",
                         "{take_kind} · {note_count} notes"
                     }
+                } else {
+                    span {
+                        style: "color: #7b8397;",
+                        "no item"
+                    }
                 }
                 span {
                     style: "margin-left: auto; color: #7b8397;",
-                    if is_dirty() { "unsaved edits" } else { "in sync" }
+                    if is_dirty() { "syncing…" } else { "live" }
                 }
             }
             div {
@@ -464,8 +550,8 @@ pub fn EditorPanel() -> Element {
                             style: "font-size: 15px; color: #c8cede;",
                             "Nothing loaded"
                         }
-                        span { "Select an audio or MIDI item in REAPER and press E," }
-                        span { "or click \"Load selected item\" above." }
+                        span { "Select an audio or MIDI item in REAPER — the editor" }
+                        span { "follows your selection. Press E to close it." }
                     }
                 }
             }
@@ -473,9 +559,13 @@ pub fn EditorPanel() -> Element {
     }
 }
 
-const BUTTON: &str = "height: 22px; padding: 0 9px; background: #1c1c26; \
-                      border: 1px solid #2b2b38; border-radius: 5px; \
-                      color: #c8cede; font-size: 11px; cursor: pointer;";
+/// Document-level fixes for the embedded Blitz view, mirroring the
+/// standalone runner's shell: a definite root size for the percentage
+/// chain, and dark-scheme defaults.
+const PANEL_CSS: &str = "html, body { width: 100%; height: 100%; margin: 0; padding: 0; \
+                         background: #101016; } \
+                         button { cursor: pointer; } \
+                         :root { color-scheme: dark; }";
 
 fn empty_editor() -> expression_editor_core::Editor {
     use expression_editor_core::{ExpressionDoc, TimeBase};
