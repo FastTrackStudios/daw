@@ -98,9 +98,12 @@ fn a_strip_meter_draws_both_channels_and_its_scale() {
     let html = dioxus_ssr::render(&dom);
 
     assert_eq!(html.matches("<svg").count(), 1, "the meter is one widget:\n{html}");
-    // The scale REAPER prints down its left, inside the same box.
-    assert!(html.contains("-inf"), "no dB scale:\n{html}");
-    assert!(html.contains("-18-"), "the scale is incomplete:\n{html}");
+    // The scale REAPER prints inside the block. Which marks depends on
+    // the room — the ladder thins as the meter shortens — so what is
+    // pinned is the readout at the top and the floor at the bottom, not a
+    // particular rung.
+    assert!(html.contains("-inf"), "no readout:\n{html}");
+    assert!(html.contains("-60-"), "the scale never reaches its floor:\n{html}");
     assert!(!html.contains("<img"), "the meter is blitting:\n{html}");
     assert!(!html.contains("currentColor"), "a colour is left to CSS:\n{html}");
 }

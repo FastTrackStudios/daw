@@ -345,6 +345,9 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
         )))
         .unwrap_or(theme.chrome.surface_raised);
     let tint = tint_colour.css();
+    // The fields the input section holds, darkened out of the tint the way
+    // the track panel's are — measured there at 0.75 of it.
+    let field = tint_colour.shade(-0.25).css();
     // One row of highlight along the band's top edge — `mcp.custom.bg_hl_t`.
     // Without it the band starts flat where the source starts lit.
     let tint_hl = tint_colour.shade(0.13).css();
@@ -503,11 +506,32 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                             bottom:-{ARM_OVERHANG}px; z-index:2;",
                     RecordArmButton { track: track.guid.clone() }
                 }
+                // The input section, which `rtconfig` fills with two
+                // 16-row fields rather than leaving as colour:
+                //
+                //     mcp.recinput = in_sec + [6 0 75 16]
+                //     mcp.recmode  = in_sec + [6 4 42 16] + [0 16]
+                //
+                // Drawn as one small label and otherwise empty, its 54
+                // rows read as a slab of colour that had grown too tall —
+                // the section was the right height and had nothing in it.
                 if shape.show_record_input {
                     div {
-                        class: "absolute w-full text-center",
-                        style: "top:{pan_h}px;",
+                        style: "position:absolute; left:6px; top:{pan_h}px; \
+                                width:{STRIP_W - 12.0}px; height:16px; background:{field};",
                         RecordInputLabel { track: track.guid.clone() }
+                    }
+                    div {
+                        style: "position:absolute; left:6px; top:{pan_h + 20.0}px; \
+                                width:42px; height:16px; background:{field};",
+                        // "IN" — `mcp.recmode`. A label rather than a
+                        // control until the DAW reports the mode.
+                        div {
+                            style: "line-height:16px; font-size:9px; text-align:center; \
+                                    color:{theme.chrome.hardware_mark.shade(0.2).css()}; \
+                                    font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                            "IN"
+                        }
                     }
                 }
             }

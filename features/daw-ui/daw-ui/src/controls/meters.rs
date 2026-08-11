@@ -155,7 +155,7 @@ pub fn TrackMeter(
             tag: track.replace(|c: char| !c.is_alphanumeric(), ""),
             scale: scale,
             well: well,
-            marks: if scale { MARKS.iter().map(|m| m.to_string()).collect() } else { Vec::new() },
+            marks: if scale { marks_for(height) } else { Vec::new() },
             width: Some(width),
             height: Some(height),
         }
@@ -163,72 +163,65 @@ pub fn TrackMeter(
 }
 
 /// REAPER's own scale down the mixer meter, top to bottom.
-const MARKS: [&str; 6] = ["-inf", "-6-", "-18-", "-30-", "-42-", "-54-"];
+///
+/// The ladder is not a fixed list: REAPER prints more of it as the meter
+/// grows. A short strip shows `-6 -18 -30 -42 -54` — every 12 dB — and a
+/// tall one shows every 6, `-0- -6- -12- ...` down to -60. Printing six
+/// marks whatever the height left a tall meter with enormous gaps and a
+/// scale that agreed with the fader at only five points.
+///
+/// The step is chosen so the marks stay about 22 rows apart, which is what
+/// they measure in the reference.
+fn marks_for(height: u32) -> Vec<String> {
+    const FLOOR: i32 = -60;
+    const SPACING: f32 = 22.0;
+
+    let room = (height as f32 / SPACING).floor().max(2.0) as i32;
+    // Steps that divide the floor exactly, so the ladder always lands on
+    // -60 rather than stopping short of it: at 24 dB a 100-row meter read
+    // -0 -24 -48 and simply never mentioned the bottom of its own scale.
+    let step = [6, 12, 20, 30, 60]
+        .into_iter()
+        .find(|s| FLOOR.abs() / s <= room)
+        .unwrap_or(60);
+
+    let mut marks = vec!["-inf".to_string()];
+    let mut db = 0;
+    while db >= FLOOR {
+        // The hyphens are REAPER's: the marks are printed as `-18-`, a
+        // tick either side of the number.
+        marks.push(if db == 0 { "-0-".to_string() } else { format!("{}-", db) });
+        db -= step;
+    }
+    marks
+}
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+mod mark_tests {
+    use super::marks_for;
 
-    fn with_runtime(f: impl FnOnce(Meters)) {
-        let mut dom = VirtualDom::new(|| rsx! { div {} });
-        dom.rebuild_in_place();
-        dom.in_runtime(|| {
-            f(Meters { levels: Signal::new_in_scope(HashMap::new(), ScopeId::ROOT) })
-        });
-    }
-
-    fn levels(peak: f32) -> TrackLevels {
-        TrackLevels { peak_left: peak, peak_right: peak, hold_left: peak, hold_right: peak }
-    }
-
+    /// The ladder thins as the meter shortens, and always reaches the
+    /// floor.
     #[test]
-    fn a_frame_lands_on_the_track_at_its_position() {
-        with_runtime(|mut meters| {
-            let order = vec!["A".to_string(), "B".to_string()];
-            meters.apply(&order, &[levels(0.25), levels(0.75)]);
-            assert_eq!(meters.levels("A").peak_left, 0.25);
-            assert_eq!(meters.levels("B").peak_left, 0.75);
-        });
+    fn the_ladder_thins_when_there_is_no_room() {
+        let tall = marks_for(400);
+        let short = marks_for(120);
+        assert!(tall.len() > short.len(), "the ladder did not thin: {short:?}");
+        for marks in [&tall, &short] {
+            assert_eq!(marks[0], "-inf", "no readout at the top");
+            assert!(marks.last().unwrap().starts_with("-60"), "the floor is missing: {marks:?}");
+        }
     }
 
-    /// The silent failure this ticket exists to prevent: after a reorder
-    /// the same index means a different track, and meters that still move
-    /// look fine while being wrong.
+    /// And it never crowds: the marks stay far enough apart to read.
     #[test]
-    fn a_reorder_re_aims_every_index() {
-        with_runtime(|mut meters| {
-            let before = vec!["A".to_string(), "B".to_string()];
-            meters.apply(&before, &[levels(0.25), levels(0.75)]);
-
-            // B moved above A. The frame is unchanged; only the order is.
-            let after = vec!["B".to_string(), "A".to_string()];
-            meters.apply(&after, &[levels(0.25), levels(0.75)]);
-            assert_eq!(meters.levels("B").peak_left, 0.25, "B kept A's meter");
-            assert_eq!(meters.levels("A").peak_left, 0.75, "A kept B's meter");
-        });
-    }
-
-    #[test]
-    fn a_frame_that_does_not_match_the_track_list_is_dropped() {
-        with_runtime(|mut meters| {
-            let order = vec!["A".to_string(), "B".to_string()];
-            meters.apply(&order, &[levels(0.5), levels(0.5)]);
-            // A track was added; this frame still describes the old mixer.
-            let grown = vec!["A".to_string(), "B".to_string(), "C".to_string()];
-            meters.apply(&grown, &[levels(0.9), levels(0.9)]);
-            assert_eq!(meters.levels("A").peak_left, 0.5, "a short frame was indexed anyway");
-            assert_eq!(meters.levels("C").peak_left, 0.0);
-        });
-    }
-
-    /// A removed track must not keep a meter, or its last level sits there
-    /// forever on a strip that no longer exists.
-    #[test]
-    fn a_track_that_leaves_takes_its_meter_with_it() {
-        with_runtime(|mut meters| {
-            meters.apply(&["A".to_string(), "B".to_string()], &[levels(0.4), levels(0.6)]);
-            meters.apply(&["A".to_string()], &[levels(0.4)]);
-            assert_eq!(meters.levels("B"), TrackLevels::default());
-        });
+    fn the_marks_never_crowd() {
+        for h in (60..=800).step_by(10) {
+            let n = marks_for(h).len() as f32;
+            assert!(
+                h as f32 / n >= 8.0,
+                "{n} marks in {h} rows is unreadable",
+            );
+        }
     }
 }

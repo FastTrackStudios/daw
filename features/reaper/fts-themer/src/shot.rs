@@ -463,11 +463,16 @@ fn write_startup_actions(profile: &Path, actions: &[String]) -> Result<()> {
         lua.push_str(&format!("pending[#pending+1] = \"{bare}\"\n"));
         println!("  action:  {bare}");
     }
+    // REAPER's own commands are numbers, not names — `40078` is "View:
+    // toggle mixer visible" — and `NamedCommandLookup` does not resolve
+    // them. Without this the tool can only drive our own extension, which
+    // is exactly the wrong half when what you need photographed is
+    // REAPER's mixer.
     lua.push_str(
         "local function run()\n\
         \x20 local left = {}\n\
         \x20 for _, name in ipairs(pending) do\n\
-        \x20   local id = reaper.NamedCommandLookup(\"_\" .. name)\n\
+        \x20   local id = tonumber(name) or reaper.NamedCommandLookup(\"_\" .. name)\n\
         \x20   if id == 0 then id = reaper.NamedCommandLookup(name) end\n\
         \x20   if id ~= 0 then reaper.Main_OnCommand(id, 0)\n\
         \x20   else left[#left+1] = name end\n\
