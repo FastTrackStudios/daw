@@ -27,8 +27,8 @@ use daw_theme_art::dress::Panel;
 use daw_theme_art::vector_controls as art;
 
 use crate::controls::{
-    EnvelopeButton, FxButton, IoButton, MuteButton, PanKnob, PhaseButton, RecordArmButton,
-    SoloButton, TrackMeter, use_track_store,
+    Caret, EnvelopeButton, FxButton, IoButton, MuteButton, PanKnob, PhaseButton, RecordArmButton,
+    SoloButton, TrackMeter, record_input_name, use_live_track, use_track_store,
 };
 use crate::prelude::*;
 
@@ -63,16 +63,10 @@ pub fn TrackRow(
     #[props(default = ROW_H)]
     height: f32,
 ) -> Element {
-    // The store first, the prop as the seed — a rename or a recolour in
-    // REAPER reaches the row on the track stream rather than on a poll.
-    // The mixer strip read its colour off the prop and sat a poll behind
-    // every button beside it.
+    // The store first, the prop as the seed — see `use_live_track`.
     let row_h = height;
-    let store = use_track_store();
-    let guid = track.guid.clone();
-    let live = use_memo(use_reactive!(|guid| store.track(&guid)));
-    let live = live.read();
-    let track = live.as_ref().unwrap_or(&track);
+    let track = use_live_track(&track);
+    let track = &track;
 
     let theme = daw_theme::Theme::default();
     let tint = track
@@ -243,16 +237,10 @@ pub fn TrackRow(
                     style: "line-height:{FIELD_H}px; font-size:11px; text-align:center; \
                             color:{combo_ink}; white-space:nowrap; overflow:hidden; \
                             font-family:Fira Sans, DejaVu Sans, sans-serif;",
-                    "{input_label(track)}"
+                    "{record_input_name(track)}"
                 }
-                // The combo's caret. A triangle rather than a glyph, so it
-                // does not depend on a font having one.
-                svg {
-                    style: "position:absolute; left:181px; top:8px;",
-                    width: "7", height: "4", view_box: "0 0 7 4",
-                    xmlns: "http://www.w3.org/2000/svg",
-                    path { d: "M 0 0 h 7 l -3.5 4 z", fill: "{caret}" }
-                }
+                // The combo's caret — the shared triangle, not a glyph.
+                Caret { x: 181.0, y: 8.0, ink: caret }
             }
 
             // ── The meter section: the meter, then mute over solo ──
@@ -305,26 +293,6 @@ pub fn TrackRow(
                 }
             }
         }
-    }
-}
-
-/// What the input combo reads.
-///
-/// The row shows the track's record input, which is the same fact the
-/// mixer's `RecordInputLabel` shows — spelled out here rather than
-/// abbreviated, because the field is 186 wide instead of 86.
-fn input_label(track: &Track) -> String {
-    use daw_proto::track::RecordInput;
-    match track.record_input {
-        RecordInput::None => "No input".to_string(),
-        RecordInput::Audio { channel } => format!("Input {}", channel + 1),
-        RecordInput::Midi { device_id, channel } => match (device_id, channel) {
-            (Some(d), Some(c)) => format!("MIDI {d} ch {}", c + 1),
-            (Some(d), None) => format!("MIDI {d}"),
-            (None, Some(c)) => format!("MIDI all ch {}", c + 1),
-            (None, None) => "MIDI".to_string(),
-        },
-        RecordInput::Raw(v) => format!("Input #{v}"),
     }
 }
 

@@ -258,6 +258,20 @@ pub fn use_track(guid: String) -> Memo<Option<Track>> {
     use_memo(use_reactive!(|guid| store.track(&guid)))
 }
 
+/// The store first, the prop as the seed.
+///
+/// Both panels render from a `Track` prop but follow the track stream:
+/// reading colour and name off the prop left the band and the plate a poll
+/// behind the buttons beside them — a recolour in REAPER took up to two
+/// seconds to arrive. This is that dance in one place: the live track when
+/// the store has it, the seed until the first event lands (or forever, in
+/// a test that seeds nothing).
+pub fn use_live_track(seed: &Track) -> Track {
+    let live = use_track(seed.guid.clone());
+    let live = live.read();
+    live.clone().unwrap_or_else(|| seed.clone())
+}
+
 /// Keep `store` fed from the connected DAW.
 ///
 /// Call once, high up — a strip's worth of controls share the one store.

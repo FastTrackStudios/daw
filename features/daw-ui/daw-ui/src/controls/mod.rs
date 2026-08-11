@@ -30,6 +30,7 @@
 //! [`Drafts`], drained by [`ControlSync`].
 
 mod collapse;
+mod combo;
 mod drafts;
 mod fader;
 mod fx;
@@ -49,6 +50,7 @@ pub use collapse::{
     Bands, Collapse, PanAnchor, Thresholds, VolumeWidget, REAPER as REAPER_THRESHOLDS,
     REAPER_BANDS,
 };
+pub use combo::{Caret, record_input_name};
 pub use drafts::{Drafts, Held};
 pub use fader::{VolumeFader, fader_position};
 pub use fx::FxButton;
@@ -57,4 +59,4 @@ pub use mute::MuteButton;
 pub use pan::{PanKnob, RecordInputLabel, TrackName};
 pub use toggles::{EnvelopeButton, IoButton, MonitorButton, PhaseButton, RecordArmButton, SoloButton};
 pub use sync::ControlSync;
-pub use track_store::{TrackStore, use_daw_tracks, use_track, use_track_store};
+pub use track_store::{TrackStore, use_daw_tracks, use_live_track, use_track, use_track_store};

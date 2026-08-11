@@ -225,14 +225,17 @@ fn paint_the_track_row() {
 #[test]
 fn paint_the_panels() {
     fn demo() -> Vec<Track> {
+        // Built on the reference fixtures above rather than a third
+        // hand-rolled Track: `tcp_kick` already carries the reference's
+        // volume and record input, so the montage's tracks differ from it
+        // only where the montage means them to.
         let t = |guid: &str, name: &str, colour: u32, index: u32| Track {
             guid: guid.into(),
             name: name.into(),
             color: Some(colour),
             index,
-            volume: 1.0,
             record_input: daw_proto::track::RecordInput::Audio { channel: index },
-            ..Default::default()
+            ..tcp_kick()
         };
         vec![
             Track { armed: true, ..t("kick", "Kick", 0xe0_56_7a, 0) },

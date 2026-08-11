@@ -9,9 +9,10 @@
 //! - Track name + number
 
 use crate::controls::{
-    Collapse, EnvelopeButton, ControlSync, FxButton, IoButton, MeterFeed, MonitorButton, MuteButton, PanAnchor,
-    PanKnob, PhaseButton, RecordArmButton, RecordInputLabel, SoloButton, TrackMeter, TrackName,
-    VolumeFader, VolumeWidget, use_daw_tracks, use_track_store,
+    Caret, Collapse, EnvelopeButton, ControlSync, FxButton, IoButton, MeterFeed, MonitorButton,
+    MuteButton, PanAnchor, PanKnob, PhaseButton, RecordArmButton, RecordInputLabel, SoloButton,
+    TrackMeter, TrackName, VolumeFader, VolumeWidget, record_input_name, use_daw_tracks,
+    use_live_track, use_track_store,
 };
 use crate::prelude::*;
 use daw_proto::Track;
@@ -243,15 +244,9 @@ impl PartialEq for ChannelStripProps {
 
 #[component]
 fn ChannelStrip(props: ChannelStripProps) -> Element {
-    // The store first, the prop as the seed. Everything else on the strip
-    // already follows the track stream, so reading colour and name off the
-    // prop left the band and the plate a poll behind the buttons beside
-    // them — a recolour in REAPER took up to two seconds to arrive.
-    let store = use_track_store();
-    let guid = props.track.guid.clone();
-    let live = use_memo(use_reactive!(|guid| store.track(&guid)));
-    let live = live.read();
-    let track = live.as_ref().unwrap_or(&props.track);
+    // The store first, the prop as the seed — see `use_live_track`.
+    let track = use_live_track(&props.track);
+    let track = &track;
 
     let vol_db = if track.volume > 0.0 {
         20.0 * track.volume.log10()
@@ -472,7 +467,7 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                                     font-size:9px; color:{ink}; white-space:nowrap; \
                                     overflow:hidden; text-overflow:ellipsis; \
                                     font-family:Fira Sans, DejaVu Sans, sans-serif;",
-                            "{input_name(track)}"
+                            "{record_input_name(track)}"
                         }
                         Caret { x: STRIP_W - 12.0 - 10.0, y: INPUT_FIELD_H / 2.0 - 2.0, ink: caret.clone() }
                     }
@@ -607,32 +602,3 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
     }
 }
 
-/// What the record-input field reads.
-fn input_name(track: &Track) -> String {
-    use daw_proto::track::RecordInput;
-    match track.record_input {
-        RecordInput::None => "No input".to_string(),
-        RecordInput::Audio { channel } => format!("Input {}", channel + 1),
-        RecordInput::Midi { device_id, channel } => match (device_id, channel) {
-            (Some(d), Some(c)) => format!("MIDI {d} ch {}", c + 1),
-            (Some(d), None) => format!("MIDI {d}"),
-            (None, Some(c)) => format!("MIDI all ch {}", c + 1),
-            (None, None) => "MIDI".to_string(),
-        },
-        RecordInput::Raw(v) => format!("Input #{v}"),
-    }
-}
-
-/// A dropdown's caret. A triangle rather than a glyph, so it does not
-/// depend on a font having one.
-#[component]
-fn Caret(x: f32, y: f32, ink: String) -> Element {
-    rsx! {
-        svg {
-            style: "position:absolute; left:{x}px; top:{y}px;",
-            width: "7", height: "4", view_box: "0 0 7 4",
-            xmlns: "http://www.w3.org/2000/svg",
-            path { d: "M 0 0 h 7 l -3.5 4 z", fill: "{ink}" }
-        }
-    }
-}
