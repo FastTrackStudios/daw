@@ -66,10 +66,18 @@ fn at(x: f32, y: f32, svg: &str) -> String {
     let n = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let svg = svg.replace("id=\"", &format!("id=\"u{n}"));
     let svg = svg.replace("url(#", &format!("url(#u{n}"));
+    // Only add `preserveAspectRatio` if the component did not state one.
+    // Some now do — the sliced controls have to, since a stretch band that
+    // letterboxes is the bug the slice exists to prevent — and a duplicate
+    // attribute is not a warning: resvg rejects the whole document, and the
+    // sheet silently keeps yesterday's PNG.
+    let stretch = if svg.contains("preserveAspectRatio") {
+        ""
+    } else {
+        "preserveAspectRatio=\"none\" "
+    };
     svg.strip_prefix("<svg ")
-        .map(|s| {
-            format!("<svg x=\"{x}\" y=\"{y}\" preserveAspectRatio=\"none\" {s}")
-        })
+        .map(|s| format!("<svg x=\"{x}\" y=\"{y}\" {stretch}{s}"))
         .unwrap_or_else(|| svg.to_string())
 }
 
@@ -149,6 +157,8 @@ fn meter(x: f32, y: f32, w: f32, h: f32, levels: Vec<f32>, marks: &[&str]) -> St
         &render_svg(
             v::Meter,
             v::MeterProps {
+                well: None,
+                tag: String::new(),
                 levels,
                 cell: (w, h),
                 scale: !marks.is_empty(),

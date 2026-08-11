@@ -42,14 +42,17 @@ where
 ///
 /// The two long-lived subscriptions — the track stream and the meter feed —
 /// both start this way, and both used to carry their own copy of the loop.
-/// `architect::platform::sleep`, not `tokio::time`: this runs in the browser
-/// build too, where tokio's timer compiles and then panics.
+/// The delay is `futures_timer`, not `tokio::time` and not
+/// `architect::platform::sleep` (which is `tokio::time` on native). A Dioxus
+/// panel's futures run on dioxus's own scheduler with no tokio runtime
+/// behind them, so a tokio timer aborts the host process the moment the
+/// panel opens — a non-unwinding panic, taking REAPER with it.
 pub async fn connected_project() -> Option<daw_control::Project> {
     loop {
         if daw_control::Daw::try_get().is_some() {
             break;
         }
-        architect::platform::sleep(std::time::Duration::from_millis(500)).await;
+        futures_timer::Delay::new(std::time::Duration::from_millis(500)).await;
     }
     match daw_control::Daw::get().current_project().await {
         Ok(p) => Some(p),

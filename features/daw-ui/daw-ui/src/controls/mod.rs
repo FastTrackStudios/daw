@@ -50,11 +50,11 @@ pub use collapse::{
     REAPER_BANDS,
 };
 pub use drafts::{Drafts, Held};
-pub use fader::VolumeFader;
+pub use fader::{VolumeFader, fader_position};
 pub use fx::FxButton;
 pub use meters::{MeterFeed, Meters, TrackMeter, use_meters};
 pub use mute::MuteButton;
 pub use pan::{PanKnob, RecordInputLabel, TrackName};
-pub use toggles::{IoButton, MonitorButton, PhaseButton, RecordArmButton, SoloButton};
+pub use toggles::{EnvelopeButton, IoButton, MonitorButton, PhaseButton, RecordArmButton, SoloButton};
 pub use sync::ControlSync;
 pub use track_store::{TrackStore, use_daw_tracks, use_track, use_track_store};

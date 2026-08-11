@@ -127,8 +127,16 @@ fn a_wider_pill_grows_its_flat_run_and_not_its_ends() {
 }
 
 /// A wider button renders more pixels of flat run, not a wider glyph.
+/// The pill is one shape, drawn at the width it was asked for.
+///
+/// Two things this pins. It is a *single* `<svg>`: the split into `mcp.fx`
+/// and `mcp.fxbyp` is REAPER's blitting constraint, and composing the two
+/// halves as positioned elements put the toggle's rounded end through the
+/// `FX` under Blitz. And it is drawn 1:1 rather than scaled — asked for 71
+/// with `preserveAspectRatio: none`, a 46-wide drawing stretched by half
+/// again, which elongated the rounded ends and blew up the lettering.
 #[test]
-fn the_wider_button_puts_the_extra_pixels_in_one_band() {
+fn the_pill_is_one_shape_drawn_at_its_asked_for_width() {
     fn app(width: f32) -> Element {
         let mut store = use_hook(TrackStore::new);
         use_hook(|| {
@@ -147,11 +155,13 @@ fn the_wider_button_puts_the_extra_pixels_in_one_band() {
     let narrow = render(28.0);
     let wide = render(43.0);
     assert_ne!(narrow, wide);
-    // The fixed band is the same width in both; only the growing one moved.
-    assert_eq!(
-        narrow.matches("width=\"23\"").count(),
-        wide.matches("width=\"23\"").count(),
-        "the fixed band changed width:\n{wide}"
-    );
-    assert!(wide.contains("width=\"20\""), "the flat run did not take the slack:\n{wide}");
+
+    assert_eq!(wide.matches("<svg").count(), 1, "the pill is not one shape:\n{wide}");
+
+    // 43 of label plus `mcp.fxbyp`'s 28, and a viewBox to match — which is
+    // what makes it 1:1.
+    assert!(wide.contains("width=\"71\""), "the pill did not take its width:\n{wide}");
+    assert!(wide.contains("viewBox=\"0 0 71 22\""), "the pill is being scaled:\n{wide}");
+    assert!(narrow.contains("viewBox=\"0 0 56 22\""), "the narrow pill is scaled:\n{narrow}");
 }
+

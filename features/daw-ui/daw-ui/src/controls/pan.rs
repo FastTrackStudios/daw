@@ -138,6 +138,11 @@ pub fn TrackName(
     /// The track's GUID.
     track: String,
     #[props(default = 72)] width: u32,
+    /// `mcp.label`'s own height. Left to the text the plate is whatever
+    /// one line of 10px type happens to be, which is not the band REAPER
+    /// reserves for it.
+    #[props(default = 26)]
+    height: u32,
 ) -> Element {
     let info = use_track(track.clone());
     let (name, colour) = info
@@ -146,13 +151,19 @@ pub fn TrackName(
         .map(|t| (t.name.clone(), t.color))
         .unwrap_or_default();
 
-    // An uncoloured track takes the panel's own grey rather than a colour
-    // invented for it: REAPER shows no colour at all there, and picking one
-    // would make every track look assigned.
-    let t = daw_theme::Theme::default();
-    let plate = colour
-        .map(|c| daw_theme::Color::rgb((c >> 16) as u8, (c >> 8) as u8, c as u8))
-        .unwrap_or(t.chrome.surface_raised);
+    // The name plate is dark, whatever the track's colour. `mcp_namebg` is
+    // a plain plate and only `mcp_idxbg` below it carries the tint — the
+    // strip shows the colour once, as a band under the name, and painting
+    // both doubled the block and made the bottom of every strip read twice
+    // as heavy as REAPER's.
+    //
+    // The colour is still read: it decides the ink, because a themer can
+    // point the plate at a light surface.
+    // `mcp_namebg` is #262626 — a shade darker than the raised surface the
+    // plate used, which read as a light bar across the bottom of every
+    // strip next to REAPER's.
+    let plate = daw_theme::Color::rgb(0x26, 0x26, 0x26);
+    let _ = colour;
     // Black text on a light colour, white on a dark one — a track painted
     // yellow is unreadable otherwise. Rec. 601 luma, which is what a
     // contrast decision this coarse needs.
@@ -161,9 +172,10 @@ pub fn TrackName(
 
     rsx! {
         div {
-            style: "width:{width}px; background:{plate.css()}; color:{ink}; \
+            style: "width:{width}px; height:{height}px; line-height:{height}px; \
+                    background:{plate.css()}; color:{ink}; \
                     font-family:Fira Sans, DejaVu Sans, sans-serif; font-size:10px; \
-                    padding:2px 3px; text-align:center; white-space:nowrap; \
+                    padding:0 3px; text-align:center; white-space:nowrap; \
                     overflow:hidden; text-overflow:ellipsis;",
             title: "{name}",
             "{name}"

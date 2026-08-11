@@ -39,6 +39,16 @@ pub fn VolumeFader(
     /// The height comes from the parent box.
     #[props(default = 1.0)]
     scale: f32,
+    /// The rail's height in px, when the caller knows it.
+    ///
+    /// The stretch band is `flex:1` with `height:100%`, and Blitz resolves
+    /// that percentage against an auto height — so the band's *box* grew
+    /// and the `<svg>` inside it stayed 23 rows tall, leaving the groove a
+    /// short dash in the middle of a tall fader. Given the number, the
+    /// bands are arithmetic instead: the caps keep their size and the run
+    /// takes what is left.
+    #[props(default)]
+    height: Option<f32>,
 ) -> Element {
     let store = use_track_store();
     let mut drafts = store.drafts();
@@ -69,13 +79,14 @@ pub fn VolumeFader(
     // Four places: enough that a pixel of travel is never lost on a tall
     // fader, few enough that the style string does not churn on float noise
     // every render.
-    let travel = format!("calc((100% - {}px) * {:.4})", cap_px.1, 1.0 - value().clamp(0.0, 1.0));
+    let travel =
+        format!("calc((100% - {}px) * {:.4})", cap_px.1, 1.0 - position(value()));
 
     let guid = track.clone();
     let press = move |e: MouseEvent| {
         dragging.set(true);
         grab_y.set(e.client_coordinates().y as f32);
-        grab_value.set(store.volume(&guid));
+        grab_value.set(position(store.volume(&guid)));
     };
     let guid = track.clone();
     let drag = move |e: MouseEvent| {
@@ -89,7 +100,10 @@ pub fn VolumeFader(
         }
         // Up is louder: screen y grows downward and the fader does not.
         let moved = -(dy / span) as f64;
-        drafts.set_volume(&guid, (grab_value() + moved).clamp(0.0, 1.0));
+        // The drag moves the cap, and the cap's position is what the taper
+        // is expressed in — dragging the gain directly made the top half of
+        // the rail cover 0 dB..+12 and the bottom half everything else.
+        drafts.set_volume(&guid, gain((grab_value() + moved).clamp(0.0, 1.0)));
     };
     let guid = track.clone();
     let release = move |_| {
@@ -116,7 +130,7 @@ pub fn VolumeFader(
             // The rail, decomposed. One `<svg>` per band: the caps state
             // their height in pixels, the run takes what is left.
             for (i, pane) in rail.stack().into_iter().enumerate() {
-                RailBand { key: "{i}", pane, width: w }
+                RailBand { key: "{i}", pane, width: w, height: band_px(pane, &rail, height, scale) }
             }
 
             // The cap, riding on top.
@@ -134,8 +148,86 @@ pub fn VolumeFader(
 /// A component rather than an inline call so each band is its own scope and
 /// Dioxus diffs them independently — and so the `key` above means something.
 #[component]
-fn RailBand(pane: Pane, width: u32) -> Element {
+fn RailBand(pane: Pane, width: u32, height: Option<u32>) -> Element {
     rsx! {
-        art::VolumeFaderTrack { pane: Some(pane), width: Some(width) }
+        art::VolumeFaderTrack { pane: Some(pane), width: Some(width), height }
+    }
+}
+
+/// A band's height in pixels, when the fader knows its own.
+///
+/// The fixed caps keep their source height; the growing run takes the
+/// remainder. `None` when the caller did not say — the band then falls
+/// back to the flex layout, which is right in a browser and short in
+/// Blitz.
+fn band_px(pane: Pane, rail: &slice::NamedArt, total: Option<f32>, scale: f32) -> Option<u32> {
+    let total = total?;
+    if !pane.grow {
+        return Some((pane.view.3 * scale).round() as u32);
+    }
+    let fixed: f32 = rail
+        .stack()
+        .into_iter()
+        .filter(|p| !p.grow)
+        .map(|p| p.view.3 * scale)
+        .sum();
+    Some((total - fixed).max(1.0).round() as u32)
+}
+
+/// REAPER's fader taper, in both directions.
+///
+/// `Track::volume` is linear gain with 1.0 at 0 dB, and the rail's top is
+/// **+12 dB**, not unity — so a fader that treated the gain as its position
+/// pinned every default track to the very top of the rail, where REAPER puts
+/// unity a little under three-quarters of the way up.
+///
+/// The curve is a fourth root over 0..+12 dB, which is the shape REAPER's own
+/// fader has: it puts unity at 0.708 of travel against the 0.744 measured off
+/// a screenshot of REAPER's mixer, and it is exact at both ends.
+mod taper {
+    /// +12 dB as gain — the top of the rail.
+    pub const TOP: f64 = 3.981_071_705_534_972;
+    pub const CURVE: f64 = 4.0;
+}
+
+/// Gain to cap position, 0 at the bottom of the rail and 1 at the top.
+///
+/// Public as `fader_position`: the track panel's volume knob has to swing
+/// on the same taper the fader rides, or the two controls disagree about
+/// where unity is.
+pub fn fader_position(gain: f64) -> f64 {
+    position(gain)
+}
+
+fn position(gain: f64) -> f64 {
+    (gain.max(0.0) / taper::TOP).powf(1.0 / taper::CURVE).clamp(0.0, 1.0)
+}
+
+/// The inverse, for a drag — which moves the cap, not the gain.
+fn gain(position: f64) -> f64 {
+    taper::TOP * position.clamp(0.0, 1.0).powf(taper::CURVE)
+}
+
+#[cfg(test)]
+mod taper_tests {
+    use super::{gain, position, taper};
+
+    /// Unity is where REAPER puts it — not at the top of the rail.
+    #[test]
+    fn unity_sits_below_the_top_of_the_rail() {
+        let p = position(1.0);
+        assert!((0.69..0.73).contains(&p), "unity at {p}, not ~0.71");
+        assert_eq!(position(0.0), 0.0);
+        assert!((position(taper::TOP) - 1.0).abs() < 1e-9);
+    }
+
+    /// And a drag round-trips: the position a gain shows at is the position
+    /// that produces it again.
+    #[test]
+    fn the_taper_round_trips() {
+        for g in [0.0, 0.25, 0.5, 1.0, 2.0, taper::TOP] {
+            let back = gain(position(g));
+            assert!((back - g).abs() < 1e-9, "{g} came back as {back}");
+        }
     }
 }

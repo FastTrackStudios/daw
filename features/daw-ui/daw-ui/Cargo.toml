@@ -14,6 +14,13 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 # subscription waits for a connection, and it has to do that in the browser
 # build too, where tokio's timer compiles and panics.
 architect = { workspace = true }
+# The wait-for-connection delay. Not `tokio::time` and not
+# `architect::platform::sleep` (which is `tokio::time` on native): a Dioxus
+# panel's futures run on dioxus's own scheduler, and dioxus_native does not
+# bring up a tokio runtime — so a tokio timer panics the moment the panel
+# opens, which is exactly how it presented. futures-timer's `Delay` owns its
+# timer thread and works on any executor. Same reason as `eq-ui`.
+futures-timer = "3"
 daw-control = { workspace = true }
 daw-proto = { workspace = true }
 dock-dioxus = { workspace = true, default-features = false }

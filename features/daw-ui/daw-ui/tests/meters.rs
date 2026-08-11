@@ -68,9 +68,14 @@ fn the_track_order_follows_adds_removes_and_moves() {
     });
 }
 
-/// The meter draws two channels and their holds, as vectors.
+/// The meter draws both channels and REAPER's dB scale, as vectors.
+///
+/// One `<svg>`, not two: `mcp.meter` is a single rect covering the bars
+/// *and* the scale, and REAPER draws the numbers as part of the widget.
+/// Split into a column per channel the bars had nowhere to go but under
+/// the button stack.
 #[test]
-fn a_strip_meter_draws_both_channels_and_their_holds() {
+fn a_strip_meter_draws_both_channels_and_its_scale() {
     fn app() -> Element {
         let mut meters = use_hook(Meters::new);
         use_hook(|| {
@@ -92,10 +97,13 @@ fn a_strip_meter_draws_both_channels_and_their_holds() {
     dom.rebuild_in_place();
     let html = dioxus_ssr::render(&dom);
 
-    assert_eq!(html.matches("<svg").count(), 2, "not two channels:\n{html}");
-    // Two bars, two holds, two backgrounds — the hold marks are the 1px
-    // rects, and without them the meter is peak-only.
-    assert!(html.contains("height=\"1\""), "no peak-hold mark:\n{html}");
+    assert_eq!(html.matches("<svg").count(), 1, "the meter is one widget:\n{html}");
+    // The scale REAPER prints inside the block. Which marks depends on
+    // the room — the ladder thins as the meter shortens — so what is
+    // pinned is the readout at the top and the floor at the bottom, not a
+    // particular rung.
+    assert!(html.contains("-inf"), "no readout:\n{html}");
+    assert!(html.contains("-60-"), "the scale never reaches its floor:\n{html}");
     assert!(!html.contains("<img"), "the meter is blitting:\n{html}");
     assert!(!html.contains("currentColor"), "a colour is left to CSS:\n{html}");
 }
@@ -107,5 +115,45 @@ fn a_meter_with_no_frames_yet_draws_silence() {
     let mut dom = VirtualDom::new(|| rsx! { TrackMeter { track: "T1" } });
     dom.rebuild_in_place();
     let html = dioxus_ssr::render(&dom);
-    assert_eq!(html.matches("<svg").count(), 2);
+    assert_eq!(html.matches("<svg").count(), 1);
+}
+
+/// The scale is printed inside the meter, over the bars.
+///
+/// REAPER's meter is one wide rectangle with its numbers on it — the green
+/// fills the whole block as it climbs past them. Reserving a column for
+/// the scale beside the bars left two hairlines and a strip of type, which
+/// is a different control.
+#[test]
+fn the_scale_is_printed_inside_the_block() {
+    let mut dom = VirtualDom::new(|| rsx! { TrackMeter { track: "T1", width: 26, height: 120 } });
+    dom.rebuild_in_place();
+    let html = dioxus_ssr::render(&dom);
+
+    // Both bars span the block between them: two of them, and the last
+    // one reaches its right edge.
+    let widths: Vec<f32> = html
+        .match_indices(r#"<rect x=""#)
+        .filter_map(|(i, m)| {
+            let rest = &html[i + m.len()..];
+            let x: f32 = rest.split('"').next()?.parse().ok()?;
+            let w: f32 = rest.split(r#"width=""#).nth(1)?.split('"').next()?.parse().ok()?;
+            Some(x + w)
+        })
+        .collect();
+    assert!(
+        widths.iter().any(|edge| (*edge - 26.0).abs() < 0.6),
+        "no bar reaches the block's right edge:\n{html}"
+    );
+
+    // And the marks are anchored inside it, not off its left.
+    let anchors: Vec<f32> = html
+        .match_indices(r#"<text x=""#)
+        .filter_map(|(i, m)| html[i + m.len()..].split('"').next()?.parse().ok())
+        .collect();
+    assert!(!anchors.is_empty(), "the scale is missing:\n{html}");
+    assert!(
+        anchors.iter().all(|x| *x > 1.0 && *x <= 26.0),
+        "the scale is anchored outside the block: {anchors:?}"
+    );
 }

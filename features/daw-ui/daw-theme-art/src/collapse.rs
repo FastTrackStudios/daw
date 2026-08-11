@@ -41,7 +41,12 @@ pub struct Thresholds {
     /// Stretch-section heights at which padding steps down: below the
     /// first it is 3px, below the second 2px, otherwise 4px.
     pub padding_steps: (f32, f32),
-    /// Below this, the fader becomes a knob.
+    /// Fader-area height below which the fader becomes a knob.
+    ///
+    /// REAPER's `min_vol_h`, and it is a threshold on the *fader area* —
+    /// `set mcp.volume.fadermode vol_h<min_vol_h` — not on the strip. Read
+    /// as a strip height it was 280, which turned the fader into a knob on
+    /// strips where REAPER still draws a fader. See [`fader_area`].
     pub fader_swap: f32,
 }
 
@@ -56,8 +61,29 @@ pub const REAPER: Thresholds = Thresholds {
     envelope: 125.0,
     phase: 144.0,
     padding_steps: (350.0, 250.0),
-    fader_swap: 280.0,
+    fader_swap: 45.0,
 };
+
+/// The height REAPER gives the fader itself, out of the stretch section.
+///
+/// `vol_t` starts below the IO button and `vol_b` stops above whichever of
+/// phase / envelope / the name label comes first, so the fader gets what the
+/// button column leaves — which is why the knob swap has to be asked of this
+/// number and not of the strip.
+///
+/// The button heights are the ones `rtconfig` states in their own offset
+/// chains: IO `[-1 23 23 30]`, envelope `[1 -22 21 22]`, phase the same.
+pub fn fader_area(stretch: f32, io: bool, envelope: bool, phase: bool) -> f32 {
+    const IO_H: f32 = 30.0;
+    const ENV_H: f32 = 22.0;
+    const PHASE_H: f32 = 22.0;
+    // `vol_margin_t` 3 and `vol_margin_b` 3-or-1.
+    const MARGINS: f32 = 4.0;
+    let taken = if io { IO_H } else { 0.0 }
+        + if envelope { ENV_H } else { 0.0 }
+        + if phase { PHASE_H } else { 0.0 };
+    (stretch - taken - MARGINS).max(0.0)
+}
 
 /// The fixed bands the stretch section is the residual of, in REAPER's
 /// pixels.
