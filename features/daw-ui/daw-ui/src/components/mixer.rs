@@ -1,7 +1,7 @@
 //! Mixer Panel — DAW mixer with channel strips resembling REAPER's mixer.
 //!
 //! Each channel strip shows (top to bottom):
-//! - FX container blocks (colored rectangles with container names)
+//! - The FX pill
 //! - Mute / Solo / FX buttons
 //! - Volume fader
 //! - dB readout + pan label
@@ -14,14 +14,7 @@ use crate::controls::{
     VolumeFader, VolumeWidget, use_daw_tracks, use_track_store,
 };
 use crate::prelude::*;
-use daw_control::{FxNodeKind, FxTree};
 use daw_proto::Track;
-
-/// Per-track FX data fetched alongside the track list.
-#[derive(Clone, Debug, Default)]
-struct TrackFxData {
-    tree: FxTree,
-}
 
 /// Mixer panel that polls the DAW for track state.
 #[component]
@@ -33,20 +26,26 @@ pub fn MixerPanel(
     /// disagree silently — the strip resolved its bands for one height and
     /// was stretched to another, so every measured offset landed in the
     /// wrong band.
+    ///
+    /// The default is a *seed*, not the answer: the panel measures its own
+    /// strip row on mount and draws at what it finds, so a short dock does
+    /// not clip the name plate and a tall one actually reaches the
+    /// [`Collapse`] thresholds. The prop remains for a caller that knows
+    /// its box better than a measurement would.
     #[props(default = 371.0)]
     height: f32,
 ) -> Element {
     let mut tracks = use_signal(Vec::<Track>::new);
-    let mut fx_data = use_signal(Vec::<(String, TrackFxData)>::new);
     let mut error_msg = use_signal(|| Option::<String>::None);
     let mut connected = use_signal(|| false);
+    let mut measured_h = use_signal(|| Option::<f32>::None);
 
     // The vector controls read their track from here, and it is fed by the
     // track-event subscription rather than by this panel's two-second poll:
     // a mute performed in REAPER shows up as soon as the event lands.
     use_daw_tracks(use_track_store());
 
-    // Poll for tracks + FX trees
+    // Poll for tracks
     use_future(move || async move {
         loop {
             if daw_control::Daw::try_get().is_some() {
@@ -66,21 +65,7 @@ pub fn MixerPanel(
             match daw.current_project().await {
                 Ok(project) => match project.tracks().all().await {
                     Ok(track_list) => {
-                        // Fetch FX tree for each track (for the FX block display)
-                        let mut fx_entries = Vec::new();
-                        for t in &track_list {
-                            let tree = if t.fx_count > 0 {
-                                match project.tracks().by_guid(&t.guid).await {
-                                    Ok(Some(th)) => th.fx_chain().tree().await.unwrap_or_default(),
-                                    _ => FxTree::default(),
-                                }
-                            } else {
-                                FxTree::default()
-                            };
-                            fx_entries.push((t.guid.clone(), TrackFxData { tree }));
-                        }
                         tracks.set(track_list);
-                        fx_data.set(fx_entries);
                         error_msg.set(None);
                     }
                     Err(e) => {
@@ -119,7 +104,9 @@ pub fn MixerPanel(
     }
 
     let track_list = tracks.read().clone();
-    let fx_list = fx_data.read().clone();
+    // Measured beats seeded: the strips draw at the row the dock actually
+    // gave them, or the prop until the measurement lands.
+    let strip_h = measured_h.read().unwrap_or(height);
 
     rsx! {
         div { class: "h-full w-full flex flex-col bg-zinc-900 overflow-hidden",
@@ -137,23 +124,27 @@ pub fn MixerPanel(
             }
 
             // Channel strips — horizontal scroll
-            div { class: "flex-1 overflow-x-auto overflow-y-hidden",
+            div {
+                class: "flex-1 overflow-x-auto overflow-y-hidden",
+                // The same measurement arrange_view takes: the strips are
+                // drawn — and collapsed — at the row's real height, not at
+                // a number chosen before the dock existed.
+                onmounted: move |evt| {
+                    spawn(async move {
+                        if let Ok(rect) = evt.get_client_rect().await {
+                            if rect.size.height > 0.0 {
+                                measured_h.set(Some(rect.size.height as f32));
+                            }
+                        }
+                    });
+                },
                 div { class: "flex h-full",
                     for (i, track) in track_list.iter().enumerate() {
-                        {
-                            let fx = fx_list.iter()
-                                .find(|(g, _)| g == &track.guid)
-                                .map(|(_, d)| d.tree.clone())
-                                .unwrap_or_default();
-                            rsx! {
-                                ChannelStrip {
-                                    key: "{track.guid}",
-                                    track: track.clone(),
-                                    fx_tree: fx,
-                                    index: i as u32,
-                                    height,
-                                }
-                            }
+                        ChannelStrip {
+                            key: "{track.guid}",
+                            track: track.clone(),
+                            index: i as u32,
+                            height: strip_h,
                         }
                     }
                 }
@@ -178,7 +169,7 @@ pub fn ChannelStripPreview(
     height: f32,
 ) -> Element {
     rsx! {
-        ChannelStrip { track, fx_tree: FxTree::default(), index, height }
+        ChannelStrip { track, index, height }
     }
 }
 
@@ -187,7 +178,11 @@ pub fn ChannelStripPreview(
 /// `mcp_w` is 86 and the sections are a function of height — which is the
 /// thing to know about this panel, and what [`Collapse`] resolves.
 const STRIP_W: f32 = 86.0;
-const FX_SECTION: f32 = 33.0;
+// The section heights come from the same constants `Collapse` computes the
+// stretch residual with — stated once, in `daw_theme_art::collapse`, so a
+// remeasurement there cannot leave the drawn sections and the residual
+// arithmetic disagreeing.
+use daw_theme_art::collapse::{BOTTOM_SECTION, FX_SECTION};
 /// Where the pill sits inside the FX section — measured, not nominal.
 const FX_PILL_TOP: f32 = 9.0;
 /// The meter's block, scale included. It starts at x=4 and REAPER's fader
@@ -201,7 +196,6 @@ const PAN_KNOB_W: f32 = 24.0;
 /// gap between them — at 42 with a 12-column right pad the two were
 /// almost touching.
 const IN_FIELD_W: f32 = 38.0;
-const BOTTOM_SECTION: f32 = 47.0;
 /// The axis the right-hand column centres on: `mcp.recmon` and everything
 /// anchored to it. The record arm's ring sits at 0.486 of its own 36-wide
 /// cell rather than in the middle, which is why it is placed separately.
@@ -287,7 +281,6 @@ const BODY_GREY: &str = "#262626";
 #[derive(Props, Clone)]
 struct ChannelStripProps {
     track: Track,
-    fx_tree: FxTree,
     index: u32,
     /// The height the strip is drawn at, which is what it collapses by.
     ///
@@ -314,24 +307,11 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
     let live = use_memo(use_reactive!(|guid| store.track(&guid)));
     let live = live.read();
     let track = live.as_ref().unwrap_or(&props.track);
-    let fx_tree = &props.fx_tree;
-
-    let color_css = track
-        .color
-        .map(|c| format!("#{:06x}", c & 0xFFFFFF))
-        .unwrap_or_else(|| "#6b7280".to_string());
 
     let vol_db = if track.volume > 0.0 {
         20.0 * track.volume.log10()
     } else {
         -100.0
-    };
-    let pan_label = if track.pan.abs() < 0.01 {
-        "C".to_string()
-    } else if track.pan < 0.0 {
-        format!("{:.0}L", track.pan.abs() * 100.0)
-    } else {
-        format!("{:.0}R", track.pan * 100.0)
     };
 
     let db_label = if vol_db > -100.0 {

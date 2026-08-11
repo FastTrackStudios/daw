@@ -4320,6 +4320,11 @@ pub fn EnvcpBypassButton(props: EnvcpBypassProps) -> Element {
 pub struct MeterProps {
     /// One value per bar, 0 at silence and 1 at the top of the scale.
     pub levels: Vec<f32>,
+    /// Decaying peak-hold, one value per bar in the same units as
+    /// `levels`. The feed computes these publisher-side; a bar with no
+    /// entry — or a hold at silence — draws no mark.
+    #[props(default)]
+    pub holds: Vec<f32>,
     /// Cell size. `mcp.meter` is `[4 4 22 -4]` of the stretch section and
     /// two wider again in wide mode, so 24 by whatever is left.
     pub cell: (f32, f32),
@@ -4412,6 +4417,7 @@ pub fn Meter(props: MeterProps) -> Element {
                 {
                     let x = bars_x + i as f32 * (bar_w + gap);
                     let lit = vh * level.clamp(0.0, 1.0);
+                    let hold = props.holds.get(i).copied().unwrap_or(0.0).clamp(0.0, 1.0);
                     rsx! {
                         g { key: "b{i}",
                             rect {
@@ -4423,6 +4429,15 @@ pub fn Meter(props: MeterProps) -> Element {
                                 x: "{x}", y: "{vh - lit}", width: "{bar_w}", height: "{lit}",
                                 rx: "{bar_w * 0.25}",
                                 fill: "url(#mtr)",
+                            }
+                            // The peak-hold mark — one row, held where the
+                            // peak was while the bar falls away under it.
+                            if hold > 0.0 {
+                                rect {
+                                    x: "{x}", y: "{(vh - vh * hold).min(vh - 1.0)}",
+                                    width: "{bar_w}", height: "1",
+                                    fill: "#ffffff", fill_opacity: "0.7",
+                                }
                             }
                         }
                     }
