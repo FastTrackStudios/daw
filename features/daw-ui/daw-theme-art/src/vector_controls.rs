@@ -5276,3 +5276,74 @@ mod volume_knob_tests {
         assert!((60.0..70.0).contains(&deg), "that is not past two o'clock");
     }
 }
+
+// ── track panel: the left column's glyphs ───────────────────────────────
+
+#[derive(Props, Clone, PartialEq)]
+pub struct GlyphProps {
+    /// The ink. REAPER draws both of these in the row's own colour
+    /// darkened — measured #762D40 against a #9D3C55 tint, the same 0.75
+    /// the input combo is — so they read as pressed into the panel rather
+    /// than printed on it.
+    pub colour: String,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+}
+
+/// The pin at the top of a track panel's left column.
+///
+/// A five-pointed star, which is what REAPER draws for "pinned" — measured
+/// at seven columns across, at the top of the column the track number runs
+/// down.
+#[component]
+pub fn TrackPin(props: GlyphProps) -> Element {
+    let (vw, vh) = (9.0f32, 9.0f32);
+    let (cx, cy) = (vw * 0.5, vh * 0.52);
+    let r = vw * 0.5;
+    // Five points, alternating outer and inner radius.
+    let mut d = String::new();
+    for i in 0..10 {
+        let rr = if i % 2 == 0 { r } else { r * 0.42 };
+        let a = (-90.0 + i as f32 * 36.0).to_radians();
+        let (x, y) = (cx + rr * a.cos(), cy + rr * a.sin());
+        d.push_str(&format!("{} {x:.2} {y:.2} ", if i == 0 { "M" } else { "L" }));
+    }
+    d.push('Z');
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            style: "display:block;",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            path { d: "{d}", fill: "{props.colour}" }
+        }
+    }
+}
+
+/// The folder mark at the bottom of that column.
+///
+/// A tab and a body, nine columns across — REAPER's folder-state glyph,
+/// drawn rather than traced because it is nine pixels of two rectangles
+/// and a sprite for it would be silly.
+#[component]
+pub fn TrackFolder(props: GlyphProps) -> Element {
+    let (vw, vh) = (9.0f32, 7.0f32);
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            style: "display:block;",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            // The tab, then the body under it.
+            path {
+                d: "M 0 1 H 3.6 L 4.6 2.2 H 9 V 7 H 0 Z",
+                fill: "{props.colour}",
+            }
+        }
+    }
+}

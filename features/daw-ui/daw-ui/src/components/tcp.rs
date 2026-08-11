@@ -82,6 +82,8 @@ const VOLUME_KNOB_X: f32 = 157.0;
 /// Centred at 195, between the field's end and the routing widget —
 /// measured, its chord runs 191..200 at a row above the knobs' centres.
 const PAN_KNOB_X: f32 = 183.0;
+/// The rule between the left column and the row, at 20.
+const COLUMN_RULE_X: f32 = 20.0;
 const ROUTING_X: f32 = 214.0;
 const FX_IN_X: f32 = 248.0;
 /// The panel's own grey — the same one the mixer strip's body and name
@@ -153,7 +155,29 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
                         width:{GUTTER_W}px; height:{ROW_H}px; background:{gutter};",
             }
 
-            // The track number, down the left edge.
+            // ── The left column ──
+            //
+            // Measured: a #323232 edge at 0..2, then the tint, then a
+            // one-pixel rule at 20 dividing the column from the row. The
+            // rule and both glyphs are the tint at 0.75 — the same
+            // darkening the input combo gets — so they read as pressed
+            // into the panel rather than printed on it.
+            div {
+                style: "position:absolute; left:0; top:0; width:3px; height:{ROW_H}px; \
+                        background:#323232;",
+            }
+            div {
+                style: "position:absolute; left:{COLUMN_RULE_X}px; top:0; \
+                        width:1px; height:{ROW_H}px; background:{combo};",
+            }
+            div { style: "position:absolute; left:8px; top:6px;",
+                art::TrackPin { colour: combo.clone() }
+            }
+            div { style: "position:absolute; left:7px; top:{ROW_H - 10.0}px;",
+                art::TrackFolder { colour: combo.clone() }
+            }
+
+            // The track number, between them.
             div {
                 class: "absolute font-mono",
                 style: "position:absolute; left:9px; top:{ROW_H / 2.0 - 8.0}px; \
