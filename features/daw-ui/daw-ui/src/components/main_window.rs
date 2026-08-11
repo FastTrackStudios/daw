@@ -16,6 +16,7 @@
 use std::collections::HashMap;
 
 use crate::components::arrangement_view::{ArrangePreview, ItemPreview};
+use crate::components::media_browser::{MediaBrowserPanel, MediaEntry};
 use crate::components::mixer::ChannelStripPreview;
 use crate::components::tcp::TrackRow;
 use crate::panels::native::NativeTransportBar;
@@ -33,6 +34,8 @@ const TRANSPORT_H: f32 = 40.0;
 /// (`Collapse` swaps to a knob below ~130 of stretch), short enough to
 /// leave the arrangement most of a 768-row window.
 const MIXER_H: f32 = 230.0;
+/// The media browser sidebar, when media is passed.
+const BROWSER_W: f32 = 260.0;
 
 /// The whole window, for a caller with the data in hand.
 ///
@@ -46,6 +49,12 @@ pub fn MainWindowPreview(
     /// Item content previews, by item guid — see `ArrangePreview`.
     #[props(default)]
     previews: HashMap<String, ItemPreview>,
+    /// Media browser entries. Empty hides the sidebar entirely.
+    #[props(default)]
+    media: Vec<MediaEntry>,
+    /// The browser's selected row.
+    #[props(default)]
+    media_selected: Option<usize>,
     #[props(default = 1024.0)] width: f32,
     #[props(default = 768.0)] height: f32,
     #[props(default = 120.0)] bpm: f64,
@@ -58,7 +67,11 @@ pub fn MainWindowPreview(
     let playing = use_signal(|| false);
 
     let middle_h = height - TRANSPORT_H - MIXER_H;
-    let arrange_w = width - ROW_W;
+    // The browser takes its column off the project area, full height
+    // under the transport — a sidebar, not a fourth dock row.
+    let browser_w = if media.is_empty() { 0.0 } else { BROWSER_W };
+    let project_w = width - browser_w;
+    let arrange_w = project_w - ROW_W;
 
     rsx! {
         div {
@@ -74,44 +87,63 @@ pub fn MainWindowPreview(
                 NativeTransportBar { playing, bpm }
             }
 
-            // ── TCP | arrangement ──
+            // ── Project | media browser ──
             div {
-                style: "height:{middle_h}px; flex:0 0 auto; display:flex; \
-                        overflow:hidden;",
+                style: "flex:1 1 0; min-height:0; display:flex; overflow:hidden;",
+
                 div {
-                    style: "width:{ROW_W}px; flex:0 0 auto; overflow:hidden;",
-                    // The ruler's height in empty panel, so row one starts
-                    // where lane one does.
-                    div { style: "height:{RULER_H + 1.0}px;" }
-                    for (i, track) in tracks.iter().enumerate() {
-                        TrackRow {
-                            key: "{track.guid}",
-                            track: track.clone(),
-                            index: i as u32,
+                    style: "width:{project_w}px; flex:0 0 auto; display:flex; \
+                            flex-direction:column; overflow:hidden;",
+
+                    // ── TCP | arrangement ──
+                    div {
+                        style: "height:{middle_h}px; flex:0 0 auto; display:flex; \
+                                overflow:hidden;",
+                        div {
+                            style: "width:{ROW_W}px; flex:0 0 auto; overflow:hidden;",
+                            // The ruler's height in empty panel, so row one
+                            // starts where lane one does.
+                            div { style: "height:{RULER_H + 1.0}px;" }
+                            for (i, track) in tracks.iter().enumerate() {
+                                TrackRow {
+                                    key: "{track.guid}",
+                                    track: track.clone(),
+                                    index: i as u32,
+                                }
+                            }
+                        }
+                        ArrangePreview {
+                            tracks: tracks.clone(),
+                            items,
+                            previews,
+                            width: arrange_w,
+                            height: middle_h,
+                            bpm,
+                        }
+                    }
+
+                    // ── The docked mixer ──
+                    div {
+                        style: "height:{MIXER_H}px; flex:0 0 auto; display:flex; \
+                                border-top:1px solid {rule}; overflow:hidden; \
+                                background:{bar_bg};",
+                        for (i, track) in tracks.iter().enumerate() {
+                            ChannelStripPreview {
+                                key: "{track.guid}",
+                                track: track.clone(),
+                                index: i as u32,
+                                height: MIXER_H,
+                            }
                         }
                     }
                 }
-                ArrangePreview {
-                    tracks: tracks.clone(),
-                    items,
-                    previews,
-                    width: arrange_w,
-                    height: middle_h,
-                    bpm,
-                }
-            }
 
-            // ── The docked mixer ──
-            div {
-                style: "height:{MIXER_H}px; flex:0 0 auto; display:flex; \
-                        border-top:1px solid {rule}; overflow:hidden; \
-                        background:{bar_bg};",
-                for (i, track) in tracks.iter().enumerate() {
-                    ChannelStripPreview {
-                        key: "{track.guid}",
-                        track: track.clone(),
-                        index: i as u32,
-                        height: MIXER_H,
+                if !media.is_empty() {
+                    MediaBrowserPanel {
+                        entries: media,
+                        selected: media_selected,
+                        width: BROWSER_W,
+                        height: height - TRANSPORT_H,
                     }
                 }
             }

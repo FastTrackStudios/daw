@@ -319,7 +319,7 @@ fn ArrangeItem(
 /// to the item — `preserve_aspect_ratio: none`, the same move the fader's
 /// stretch band makes.
 #[component]
-fn Waveform(amps: Vec<f32>, width: f32, top: f32, height: f32, colour: String) -> Element {
+pub fn Waveform(amps: Vec<f32>, width: f32, top: f32, height: f32, colour: String) -> Element {
     let n = amps.len();
     // Above ~4 blocks per pixel the polygon outruns what the pixel can
     // show; fold blocks together so the shape stays a few hundred points.
@@ -376,7 +376,7 @@ fn Waveform(amps: Vec<f32>, width: f32, top: f32, height: f32, colour: String) -
 /// semitone either side, so a two-note bassline does not draw as two
 /// hairlines at the bottom of a 128-row grid.
 #[component]
-fn NoteRoll(
+pub fn NoteRoll(
     notes: Vec<NotePreview>,
     length: f32,
     width: f32,

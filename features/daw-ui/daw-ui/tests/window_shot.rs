@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use daw_proto::{Item, Track};
 use daw_ui::components::arrangement_view::{ItemPreview, NotePreview};
 use daw_ui::components::main_window::MainWindowPreview;
+use daw_ui::components::media_browser::{MediaEntry, MediaKind};
 use daw_ui::controls::TrackStore;
 use dioxus::prelude::*;
 
@@ -103,6 +104,53 @@ fn previews() -> HashMap<String, ItemPreview> {
     ])
 }
 
+/// The browser's shelf: pack-style names carrying their BPM and key, so
+/// the chips exercise the filename parser, with a MIDI file among the
+/// audio and one entry still waiting on its preview.
+fn media() -> Vec<MediaEntry> {
+    let wave = |n: usize, seed: u32| -> Vec<f32> {
+        (0..n)
+            .map(|i| {
+                let x = i as f32 * 0.13 + seed as f32;
+                (x.sin() * (x * 0.31).cos()).abs() * 0.8 + 0.08
+            })
+            .collect()
+    };
+    let audio = |name: &str, dur: f32, seed: u32| MediaEntry {
+        name: name.into(),
+        kind: MediaKind::Audio,
+        duration: dur,
+        preview: Some(ItemPreview::Waveform(wave(160, seed))),
+    };
+    let riff = vec![
+        NotePreview { pitch: 57, start: 0.0, length: 0.4 },
+        NotePreview { pitch: 60, start: 0.5, length: 0.4 },
+        NotePreview { pitch: 64, start: 1.0, length: 0.4 },
+        NotePreview { pitch: 65, start: 1.5, length: 0.4 },
+        NotePreview { pitch: 64, start: 2.0, length: 0.9 },
+        NotePreview { pitch: 60, start: 3.0, length: 0.9 },
+    ];
+    vec![
+        audio("Am_140_groove.wav", 6.9, 3),
+        audio("kick_punchy.wav", 0.8, 7),
+        MediaEntry {
+            name: "F#MIN 92bpm [SHARK].mid".into(),
+            kind: MediaKind::Midi,
+            duration: 4.0,
+            preview: Some(ItemPreview::Notes(riff)),
+        },
+        audio("D 175bpm break.wav", 5.5, 11),
+        audio("vocal_chop_Em_128.wav", 3.7, 17),
+        MediaEntry {
+            name: "chords_Cmaj_pad.mid".into(),
+            kind: MediaKind::Midi,
+            duration: 8.0,
+            preview: None,
+        },
+        audio("snare_tight.wav", 0.5, 23),
+    ]
+}
+
 #[test]
 fn paint_the_main_window() {
     fn app() -> Element {
@@ -114,7 +162,13 @@ fn paint_the_main_window() {
         rsx! {
             div {
                 style: "position:absolute; left:0; top:0;",
-                MainWindowPreview { tracks: tracks(), items: items(), previews: previews() }
+                MainWindowPreview {
+                    tracks: tracks(),
+                    items: items(),
+                    previews: previews(),
+                    media: media(),
+                    media_selected: Some(2),
+                }
             }
         }
     }
