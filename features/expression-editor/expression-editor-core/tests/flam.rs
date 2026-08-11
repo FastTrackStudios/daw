@@ -30,7 +30,7 @@ fn doc_with_hit(row: usize) -> ExpressionDoc {
 #[test]
 fn kick_snare_and_every_tom_are_two_handed() {
     let m = map();
-    for name in ["K", "S", "T1", "T2", "T3", "T4"] {
+    for name in ["K R", "K L", "T1 R", "T2 R", "T3 R", "T4 R"] {
         let r = row_of(&m, name);
         assert!(m.is_two_handed(r), "{name} should have both hands");
         assert!(m.other_hand_row(r).is_some(), "{name} has no counterpart");
@@ -41,7 +41,9 @@ fn kick_snare_and_every_tom_are_two_handed() {
 fn cymbals_and_hats_are_not() {
     // Nothing about a hi-hat depends on which stick got there.
     let m = map();
-    for name in ["H-Clsd Tip", "C-L", "R-Bell", "Stack"] {
+    // The snare is here on purpose: this map has no `S L`, so it is a
+    // one-handed piece until the map gains one.
+    for name in ["H-Clsd Tip", "C-L", "R-Bell", "Stack", "S", "S Rim"] {
         let r = row_of(&m, name);
         assert!(!m.is_two_handed(r), "{name} should be a single row");
     }
@@ -64,13 +66,13 @@ fn the_pairing_is_symmetric() {
 }
 
 #[test]
-fn the_unmarked_half_of_a_pair_is_the_right_hand() {
+fn both_halves_of_a_pair_carry_their_hand() {
     // The map leaves the lead hand unlabelled — `K`, `S`, `T1`.
     let m = map();
-    assert_eq!(m.hand_of(row_of(&m, "K")), Some(Hand::Right));
+    assert_eq!(m.hand_of(row_of(&m, "K R")), Some(Hand::Right));
     assert_eq!(m.hand_of(row_of(&m, "K L")), Some(Hand::Left));
-    assert_eq!(m.hand_of(row_of(&m, "S")), Some(Hand::Right));
-    assert_eq!(m.hand_of(row_of(&m, "S R")), Some(Hand::Right));
+    // Not a pair in this map, so no hand at all.
+    assert_eq!(m.hand_of(row_of(&m, "S")), None);
 }
 
 #[test]
@@ -78,7 +80,7 @@ fn a_piece_is_one_row_until_it_is_split() {
     let m = map();
     let visible = m.visible_rows(&[]);
     // Both halves of a pair are never both visible while collapsed.
-    let k = row_of(&m, "K");
+    let k = row_of(&m, "K R");
     let kl = row_of(&m, "K L");
     assert!(visible.contains(&k));
     assert!(!visible.contains(&kl), "the left kick showed unasked");
@@ -95,7 +97,7 @@ fn a_flam_puts_the_grace_note_on_the_other_hand() {
     // A flam played with one hand twice is a drag; the roll has to show
     // the difference.
     let m = map();
-    let snare = row_of(&m, "S");
+    let snare = row_of(&m, "T1 R");
     let doc = doc_with_hit(snare);
     let edit = flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap();
 
@@ -108,7 +110,7 @@ fn a_flam_puts_the_grace_note_on_the_other_hand() {
 #[test]
 fn flam_before_lands_early_and_flam_after_lands_late() {
     let m = map();
-    let doc = doc_with_hit(row_of(&m, "S"));
+    let doc = doc_with_hit(row_of(&m, "T1 R"));
     // First press: before.
     let expression_editor_core::Edit::AddNote(g) =
         flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap()
@@ -137,7 +139,7 @@ fn the_offset_is_the_measured_one() {
     // #176 swept real flams: 75% sit at 25-35 ms, nothing below 15.
     // 30 ms at 120bpm is 0.03 * 2 quarters/sec * 960 = 57.6 ticks.
     let m = map();
-    let doc = doc_with_hit(row_of(&m, "S"));
+    let doc = doc_with_hit(row_of(&m, "T1 R"));
     let expression_editor_core::Edit::AddNote(g) =
         flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap()
     else {
@@ -155,7 +157,7 @@ fn the_offset_is_wall_clock_not_musical() {
     // A flam is two sticks and one wrist; it does not scale with tempo
     // the way a subdivision does.
     let m = map();
-    let doc = doc_with_hit(row_of(&m, "S"));
+    let doc = doc_with_hit(row_of(&m, "T1 R"));
     let ticks_at = |bpm| {
         let expression_editor_core::Edit::AddNote(g) =
             flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, bpm).unwrap()
@@ -175,7 +177,7 @@ fn the_grace_note_is_quieter() {
     // Which is what makes a flam read as one gesture rather than two
     // hits — but not silent, or it disappears.
     let m = map();
-    let doc = doc_with_hit(row_of(&m, "S"));
+    let doc = doc_with_hit(row_of(&m, "T1 R"));
     let expression_editor_core::Edit::AddNote(g) =
         flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap()
     else {
@@ -199,7 +201,7 @@ fn the_cycle_is_none_then_before_then_after_then_none() {
     // The third press removing the flam is what makes it a cycle rather
     // than a trap: changing your mind should not mean reaching for undo.
     let m = map();
-    let mut doc = doc_with_hit(row_of(&m, "S"));
+    let mut doc = doc_with_hit(row_of(&m, "T1 R"));
 
     // 1: nothing there yet.
     assert_eq!(
@@ -248,7 +250,7 @@ fn a_grace_note_nudged_by_hand_is_still_that_hits_flam() {
     // Otherwise the next press adds a second one, silently, and the
     // part has two grace notes where the player wanted one.
     let m = map();
-    let mut doc = doc_with_hit(row_of(&m, "S"));
+    let mut doc = doc_with_hit(row_of(&m, "T1 R"));
     let expression_editor_core::Edit::AddNote(g) =
         flam(&doc, &m, NoteId(1), DEFAULT_FLAM_MS, BPM).unwrap()
     else {
@@ -270,7 +272,7 @@ fn a_grace_note_nudged_by_hand_is_still_that_hits_flam() {
 
 fn drum_editor() -> Editor {
     let m = map();
-    let snare = row_of(&m, "S");
+    let snare = row_of(&m, "T1 R");
     let mut ed = Editor::new(doc_with_hit(snare), Viewport::new(900.0, 500.0));
     ed.set_mode(Mode::Drums);
     ed.row_space = RowSpace::Drums(m);
@@ -341,7 +343,7 @@ fn flamming_opens_the_piece_so_the_grace_note_is_visible() {
 fn a_piece_can_be_split_and_collapsed_by_hand() {
     let mut ed = drum_editor();
     let m = map();
-    let k = row_of(&m, "K");
+    let k = row_of(&m, "K R");
     ed.toggle_piece_split(k);
     assert!(ed.split_pieces.contains(&k));
     ed.toggle_piece_split(k);
@@ -439,4 +441,155 @@ fn only_drum_rolls_are_banded() {
             .is_none()
     );
     assert!(RowSpace::Drums(map()).row_background(0).is_some());
+}
+
+// ── Pieces and hands ─────────────────────────────────────────────────
+
+#[test]
+fn a_collapsed_piece_is_labelled_with_the_drum_not_a_hand() {
+    // Showing `T1 L` and `T1` side by side was the thing that made you
+    // work out they were one drum.
+    let m = map();
+    let t1 = row_of(&m, "T1 R");
+    let t1l = row_of(&m, "T1 L");
+    assert_eq!(m.display_name(t1, false), "T1");
+    assert_eq!(m.display_name(t1l, false), "T1");
+}
+
+#[test]
+fn a_split_piece_labels_its_rows_by_hand() {
+    let m = map();
+    assert_eq!(m.display_name(row_of(&m, "T1 R"), true), "R");
+    assert_eq!(m.display_name(row_of(&m, "T1 L"), true), "L");
+    // ...and the piece is still available for a bracket.
+    assert_eq!(m.group_name(row_of(&m, "T1 L")), Some("T1"));
+}
+
+#[test]
+fn one_handed_pieces_keep_their_own_names() {
+    let m = map();
+    let hh = row_of(&m, "H-Clsd Tip");
+    assert_eq!(m.display_name(hh, false), "H-Clsd Tip");
+    assert_eq!(m.display_name(hh, true), "H-Clsd Tip");
+    assert_eq!(m.group_name(hh), None);
+}
+
+#[test]
+fn the_editor_labels_by_what_is_actually_open() {
+    let mut ed = drum_editor();
+    let m = map();
+    let t1 = row_of(&m, "T1 R");
+    assert_eq!(ed.row_header(t1 as i32), "T1");
+    ed.toggle_piece_split(t1);
+    assert_eq!(ed.row_header(t1 as i32), "R", "open, it shows the hand");
+    assert_eq!(ed.row_group(t1 as i32).as_deref(), Some("T1"));
+}
+
+#[test]
+fn a_hit_can_be_switched_to_the_other_hand() {
+    // The sticking control: notated drum music says which hand plays
+    // what, and dragging notes between rows by eye is how you get it
+    // wrong.
+    let mut ed = drum_editor();
+    let m = map();
+    let snare = row_of(&m, "T1 R");
+    assert_eq!(ed.hand_of_note(NoteId(1)), Some(Hand::Right));
+
+    assert_eq!(ed.set_hand_of_selection(Hand::Left), 1);
+    assert_eq!(ed.hand_of_note(NoteId(1)), Some(Hand::Left));
+    assert_ne!(ed.doc.note(NoteId(1)).unwrap().row as usize, snare);
+
+    // And back.
+    assert_eq!(ed.set_hand_of_selection(Hand::Right), 1);
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().row as usize, snare);
+}
+
+#[test]
+fn switching_to_the_hand_it_already_is_moves_nothing() {
+    let mut ed = drum_editor();
+    assert_eq!(ed.hand_of_note(NoteId(1)), Some(Hand::Right));
+    assert_eq!(ed.set_hand_of_selection(Hand::Right), 0);
+}
+
+#[test]
+fn switching_hands_opens_the_piece() {
+    // A note that moved to a row you cannot see has vanished as far as
+    // the user is concerned.
+    let mut ed = drum_editor();
+    assert!(ed.split_pieces.is_empty());
+    ed.set_hand_of_selection(Hand::Left);
+    assert!(ed.split_pieces.len() >= 2);
+}
+
+#[test]
+fn a_one_handed_piece_cannot_be_switched() {
+    let m = map();
+    let hh = row_of(&m, "H-Clsd Tip");
+    let mut ed = Editor::new(doc_with_hit(hh), Viewport::new(900.0, 500.0));
+    ed.set_mode(Mode::Drums);
+    ed.row_space = RowSpace::Drums(m);
+    ed.selection.set_single(NoteId(1));
+
+    assert_eq!(ed.hand_of_note(NoteId(1)), None);
+    assert_eq!(ed.set_hand_of_selection(Hand::Left), 0);
+}
+
+// --- the fold: a collapsed piece is one lane on screen ---------------
+
+use expression_editor_core::camera::RowFold;
+
+#[test]
+fn an_empty_fold_is_the_identity() {
+    let f = RowFold::default();
+    assert!(f.is_identity());
+    for r in [-3.0, 0.0, 23.5, 127.0] {
+        assert_eq!(f.slot(r), r);
+        assert_eq!(f.row(r), r);
+    }
+}
+
+#[test]
+fn a_hidden_row_shares_its_siblings_slot() {
+    // 23 is `K L`, folded onto `K R` at 24.
+    let f = RowFold::new(vec![23]);
+    assert_eq!(f.slot(23.0), f.slot(24.0));
+    // Everything below is untouched, everything above shifts down one.
+    assert_eq!(f.slot(22.0), 22.0);
+    assert_eq!(f.slot(25.0), 24.0);
+}
+
+#[test]
+fn a_click_on_a_folded_lane_lands_on_the_visible_hand() {
+    let f = RowFold::new(vec![23]);
+    // The slot the kick now occupies resolves to the right hand, not
+    // the hand that was folded away.
+    assert_eq!(f.row(f.slot(24.0)), 24.0);
+    assert_eq!(f.row(f.slot(25.0)), 25.0);
+}
+
+#[test]
+fn the_fold_keeps_fractional_offsets() {
+    // A note bent a quarter row sharp still draws a quarter row up.
+    let f = RowFold::new(vec![23]);
+    assert!((f.slot(25.25) - 24.25).abs() < 1e-9);
+}
+
+#[test]
+fn splitting_a_piece_unfolds_exactly_that_piece() {
+    let mut ed = drum_editor();
+    let m = map();
+    let t1r = row_of(&m, "T1 R");
+    let t1l = row_of(&m, "T1 L");
+    let kl = row_of(&m, "K L");
+
+    ed.refresh_fold();
+    let before = ed.camera.fold;
+    assert_ne!(before.slot(t1l as f64), before.slot(t1r as f64 + 1.0));
+
+    ed.toggle_piece_split(t1r);
+    let after = ed.camera.fold;
+    // The tom now has two slots of its own...
+    assert_ne!(after.slot(t1l as f64), after.slot(t1r as f64));
+    // ...and the kick, untouched, still has one.
+    assert_eq!(after.slot(kl as f64), after.slot(kl as f64 + 1.0));
 }

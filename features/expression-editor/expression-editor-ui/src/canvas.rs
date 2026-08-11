@@ -29,14 +29,17 @@ pub struct Row {
 
 /// Background rows across the visible pitch span.
 pub fn rows(ed: &Editor) -> Vec<Row> {
-    let (lo, hi) = ed.camera.pitch_span(ed.viewport);
+    let (lo, hi) = ed.camera.slot_span(ed.viewport);
     let h = ed.camera.vertical.px_per_row;
     // Clamped to the row space's own bounds, not to 0..127. A six-string
     // roll has six rows and painting a hundred and twenty-two phantom
     // ones above and below them says there is somewhere else to put a
     // note, which there is not.
-    let (rlo, rhi) = ed.row_space.bounds();
+    //
+    // Iteration is in *slots*, so a folded piece is drawn once.
+    let (rlo, rhi) = ed.camera.fold.slot_bounds(ed.row_space.bounds());
     ((lo.floor() as i32).max(rlo)..=(hi.ceil() as i32).min(rhi))
+        .map(|slot| ed.camera.fold.row(slot as f64) as i32)
         .map(|row| Row {
             row,
             y: ed.camera.y(row as f64 + 0.5, ed.viewport),
@@ -921,21 +924,22 @@ pub struct Key {
 }
 
 pub fn keyboard(ed: &Editor) -> Vec<Key> {
-    let (lo, hi) = ed.camera.pitch_span(ed.viewport);
+    let (lo, hi) = ed.camera.slot_span(ed.viewport);
     let h = ed.camera.vertical.px_per_row;
-    let (rlo, rhi) = ed.row_space.bounds();
+    let (rlo, rhi) = ed.camera.fold.slot_bounds(ed.row_space.bounds());
     // Named rows always carry their label — a drum lane called nothing
     // is unusable, where an unlabelled piano key can still be counted.
     let named = !matches!(ed.row_space, expression_editor_core::RowSpace::Pitch);
     let label_rows = h >= 8.0;
     ((lo.floor() as i32).max(rlo)..=(hi.ceil() as i32).min(rhi))
+        .map(|slot| ed.camera.fold.row(slot as f64) as i32)
         .map(|row| Key {
             row,
             y: ed.camera.y(row as f64 + 0.5, ed.viewport),
             h,
             black: ed.row_space.is_accidental(row),
             label: (label_rows && (named || row.rem_euclid(12) == 0 || h >= 18.0))
-                .then(|| ed.row_space.row_label(row)),
+                .then(|| ed.row_header(row)),
         })
         .collect()
 }

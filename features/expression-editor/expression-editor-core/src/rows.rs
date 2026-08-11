@@ -121,6 +121,14 @@ pub struct DrumLane {
     /// two-handed only when something needs it — a flam, or notation
     /// that specifies sticking.
     pub hand: Option<Hand>,
+    /// The **piece** this row belongs to — `T1`, `S`, `K`.
+    ///
+    /// The piece is what the player thinks of as a drum; the hands are
+    /// how it splits. So a collapsed row is labelled with this, and a
+    /// split one is labelled `L` or `R` *under* it, rather than the roll
+    /// showing two rows called `T1 L` and `T1` and leaving you to work
+    /// out that they are the same drum.
+    pub piece: Option<String>,
     /// The pitch of the same piece played by the other hand.
     ///
     /// This is what makes a split reversible and a flam possible: the
@@ -262,58 +270,68 @@ impl DrumMap {
     /// that showed both hands for every drum would be twice as tall for
     /// no reason on most material.
     pub fn fts() -> Self {
-        // (pitch, name, group, hand, other-hand pitch)
-        let lanes: Vec<(i32, &str, Option<u8>, Option<Hand>, Option<i32>)> = vec![
-            (23, "K L", None, Some(Hand::Left), Some(24)),
-            (24, "K", None, None, Some(23)),
-            (25, "S-Cross", None, None, None),
-            (26, "S", None, None, Some(28)),
-            (27, "S-Buzz", None, None, None),
-            (28, "S R", None, Some(Hand::Right), Some(26)),
-            (29, "T1 L", None, Some(Hand::Left), Some(30)),
-            (30, "T1", None, None, Some(29)),
-            (31, "T2 L", None, Some(Hand::Left), Some(32)),
-            (32, "T2", None, None, Some(31)),
-            (33, "T3 L", None, Some(Hand::Left), Some(34)),
-            (34, "T3", None, None, Some(33)),
-            (35, "T4 L", None, Some(Hand::Left), Some(36)),
-            (36, "T4", None, None, Some(35)),
-            (37, "H-Tight Tip", Some(1), None, None),
-            (38, "H-Tight Edg", Some(1), None, None),
-            (39, "H-Clsd Tip", Some(1), None, None),
-            (40, "H-Clsd Edg", Some(1), None, None),
-            (41, "H-Open1", Some(1), None, None),
-            (42, "H-Open2", Some(1), None, None),
-            (43, "H-Open3", Some(1), None, None),
-            (44, "H-Chick", Some(1), None, None),
-            (45, "H-Ching", Some(1), None, None),
-            (48, "C-L", Some(2), None, None),
-            (49, "C-L Choke", Some(2), None, None),
-            (50, "C-C", Some(3), None, None),
-            (51, "C-C Choke", Some(3), None, None),
-            (52, "C-R", Some(4), None, None),
-            (53, "C-R Choke", Some(4), None, None),
-            (54, "H-Bell", Some(1), None, None),
-            (56, "R-Bow Lo", Some(5), None, None),
-            (57, "R-Bell", Some(5), None, None),
-            (58, "R-Crash", Some(5), None, None),
-            (59, "R-Choke", Some(5), None, None),
-            (62, "China", Some(6), None, None),
-            (63, "China Choke", Some(6), None, None),
-            (64, "Splash", Some(7), None, None),
-            (65, "Splash Choke", Some(7), None, None),
-            (71, "Stack", None, None, None),
+        // (pitch, name, group, hand, other-hand pitch, piece)
+        let lanes: Vec<(i32, &str, Option<u8>, Option<Hand>, Option<i32>, Option<&str>)> = vec![
+            // Kick is a pair for the same reason the toms are: a double
+            // pedal is two feet, and a part that specifies which is
+            // notated the same way sticking is.
+            (23, "K L", None, Some(Hand::Left), Some(24), Some("K")),
+            (24, "K R", None, Some(Hand::Right), Some(23), Some("K")),
+            (25, "S-Cross", None, None, None, None),
+            // The snare is deliberately **not** paired. The map has
+            // `S`, `SR`, `S-Buzz`, `S-Cross` and no `S L` — `SR` is the
+            // *rim*, not the right hand. Pairing them would put a
+            // rimshot on the other stick every time you asked for
+            // sticking. Add an `S L` to the map and give it
+            // `Some(Hand::Left)` here to turn the snare two-handed.
+            (26, "S", None, None, None, None),
+            (27, "S-Buzz", None, None, None, None),
+            (28, "S Rim", None, None, None, None),
+            (29, "T1 L", None, Some(Hand::Left), Some(30), Some("T1")),
+            (30, "T1 R", None, Some(Hand::Right), Some(29), Some("T1")),
+            (31, "T2 L", None, Some(Hand::Left), Some(32), Some("T2")),
+            (32, "T2 R", None, Some(Hand::Right), Some(31), Some("T2")),
+            (33, "T3 L", None, Some(Hand::Left), Some(34), Some("T3")),
+            (34, "T3 R", None, Some(Hand::Right), Some(33), Some("T3")),
+            (35, "T4 L", None, Some(Hand::Left), Some(36), Some("T4")),
+            (36, "T4 R", None, Some(Hand::Right), Some(35), Some("T4")),
+            (37, "H-Tight Tip", Some(1), None, None, None),
+            (38, "H-Tight Edg", Some(1), None, None, None),
+            (39, "H-Clsd Tip", Some(1), None, None, None),
+            (40, "H-Clsd Edg", Some(1), None, None, None),
+            (41, "H-Open1", Some(1), None, None, None),
+            (42, "H-Open2", Some(1), None, None, None),
+            (43, "H-Open3", Some(1), None, None, None),
+            (44, "H-Chick", Some(1), None, None, None),
+            (45, "H-Ching", Some(1), None, None, None),
+            (48, "C-L", Some(2), None, None, None),
+            (49, "C-L Choke", Some(2), None, None, None),
+            (50, "C-C", Some(3), None, None, None),
+            (51, "C-C Choke", Some(3), None, None, None),
+            (52, "C-R", Some(4), None, None, None),
+            (53, "C-R Choke", Some(4), None, None, None),
+            (54, "H-Bell", Some(1), None, None, None),
+            (56, "R-Bow Lo", Some(5), None, None, None),
+            (57, "R-Bell", Some(5), None, None, None),
+            (58, "R-Crash", Some(5), None, None, None),
+            (59, "R-Choke", Some(5), None, None, None),
+            (62, "China", Some(6), None, None, None),
+            (63, "China Choke", Some(6), None, None, None),
+            (64, "Splash", Some(7), None, None, None),
+            (65, "Splash Choke", Some(7), None, None, None),
+            (71, "Stack", None, None, None, None),
         ];
         Self {
             name: "FTS",
             lanes: lanes
                 .into_iter()
-                .map(|(pitch, name, group, hand, other_hand)| DrumLane {
+                .map(|(pitch, name, group, hand, other_hand, piece)| DrumLane {
                     pitch,
                     name: name.to_string(),
                     group,
                     hand,
                     other_hand,
+                    piece: piece.map(str::to_string),
                 })
                 .collect(),
         }
@@ -349,13 +367,52 @@ impl DrumMap {
         }
     }
 
-    /// Which hand `row` is, treating an unmarked half of a pair as the
-    /// right — the hand most parts lead with, and the one the map leaves
-    /// unlabelled (`K`, `S`, `T1`).
+    /// What to write in the row header.
+    ///
+    /// Collapsed, a two-handed piece shows the **piece** — `T1` — because
+    /// that is the drum. Split, each row shows its hand — `L`, `R` —
+    /// with the piece carried by [`DrumMap::group_name`] so a renderer
+    /// can bracket the pair. Showing `T1 L` and `T1` side by side was
+    /// the thing that made you work out they were one drum.
+    pub fn display_name(&self, row: usize, split: bool) -> String {
+        let Some(lane) = self.lanes.get(row) else {
+            return String::new();
+        };
+        match (&lane.piece, split) {
+            (Some(piece), false) => piece.clone(),
+            (Some(_), true) => self
+                .hand_of(row)
+                .map(|h| h.label().to_string())
+                .unwrap_or_else(|| lane.name.clone()),
+            (None, _) => lane.name.clone(),
+        }
+    }
+
+    /// The piece a row belongs to, for a renderer that brackets the two
+    /// hands together.
+    pub fn group_name(&self, row: usize) -> Option<&str> {
+        self.lanes.get(row)?.piece.as_deref()
+    }
+
+    /// The row for a piece played by a given hand.
+    pub fn row_for_hand(&self, row: usize, hand: Hand) -> Option<usize> {
+        if self.hand_of(row) == Some(hand) {
+            return Some(row);
+        }
+        self.other_hand_row(row)
+            .filter(|&o| self.hand_of(o) == Some(hand))
+    }
+
+    /// Which hand `row` is played with, for a two-handed piece.
+    ///
+    /// Both halves of a pair carry their hand explicitly. An earlier
+    /// version inferred "unmarked means right", which quietly made both
+    /// halves of the snare pair report Right — the bug that revealed the
+    /// snare was not a pair at all.
     pub fn hand_of(&self, row: usize) -> Option<Hand> {
         let lane = self.lanes.get(row)?;
         lane.other_hand?;
-        Some(lane.hand.unwrap_or(Hand::Right))
+        lane.hand
     }
 
     /// Rows currently shown: every single-handed piece, plus both halves
@@ -372,11 +429,14 @@ impl DrumMap {
                 match lane.other_hand {
                     None => true,
                     Some(_) => {
-                        // Shown when its piece is split, or when it is
-                        // the piece's default row.
+                        // Split: both halves show. Collapsed: the right
+                        // hand stands for the piece, because that is the
+                        // hand most parts lead with — and *some* row has
+                        // to be the one you draw on when sticking does
+                        // not matter.
                         split.contains(&i)
                             || self.other_hand_row(i).is_some_and(|o| split.contains(&o))
-                            || lane.hand.is_none()
+                            || lane.hand == Some(Hand::Right)
                     }
                 }
             })
@@ -419,6 +479,7 @@ impl DrumMap {
                     group,
                     hand: None,
                     other_hand: None,
+                    piece: None,
                 })
                 .collect(),
         }
@@ -529,11 +590,10 @@ impl RowSpace {
     pub fn row_label(&self, row: i32) -> String {
         match self {
             RowSpace::Pitch => tuning::note_name(row),
-            RowSpace::Drums(m) => m
-                .lanes
-                .get(row.max(0) as usize)
-                .map(|l| l.name.clone())
-                .unwrap_or_default(),
+            // Collapsed by default here; the editor's own labelling
+            // knows which pieces are open and calls `display_name`
+            // directly.
+            RowSpace::Drums(m) => m.display_name(row.max(0) as usize, false),
             RowSpace::Strings(t) => {
                 let open = t.open(row.max(0) as usize);
                 // Pitch class only: "E", "A" — the string's name, not

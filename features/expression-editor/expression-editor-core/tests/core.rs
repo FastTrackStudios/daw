@@ -643,7 +643,7 @@ fn test_content() -> Content {
 #[test]
 fn zoom_pins_the_anchor_under_the_pointer() {
     let vp = Viewport::new(800.0, 480.0);
-    let mut cam = camera::reset_view(test_content(), vp, 0.03, 0.35);
+    let mut cam = camera::reset_view(test_content(), vp, 0.03, 0.35, Default::default());
     let anchor_t = cam.t_at(200.0);
     cam.zoom_time_about(anchor_t, 2.0);
     assert!(
@@ -660,7 +660,7 @@ fn zoom_pins_the_anchor_under_the_pointer() {
 fn reset_view_frames_the_content_with_headroom() {
     let vp = Viewport::new(800.0, 480.0);
     let c = test_content();
-    let cam = camera::reset_view(c, vp, 0.03, 0.35);
+    let cam = camera::reset_view(c, vp, 0.03, 0.35, Default::default());
     let (lo, hi) = cam.pitch_span(vp);
     assert!(
         lo < c.pitch_lo && hi > c.pitch_hi,
@@ -677,15 +677,16 @@ fn reset_view_frames_the_content_with_headroom() {
 #[test]
 fn blending_with_no_influences_is_the_identity() {
     let vp = Viewport::new(800.0, 480.0);
-    let cam = camera::reset_view(test_content(), vp, 0.03, 0.35);
+    let cam = camera::reset_view(test_content(), vp, 0.03, 0.35, Default::default());
     assert_eq!(camera::blend(cam, &[]), cam);
 }
 
 #[test]
 fn a_full_weight_influence_fully_replaces_the_base() {
     let vp = Viewport::new(800.0, 480.0);
-    let base = camera::reset_view(test_content(), vp, 0.03, 0.35);
+    let base = camera::reset_view(test_content(), vp, 0.03, 0.35, Default::default());
     let target = Camera {
+        fold: Default::default(),
         t0: 1234.0,
         units_per_px: 2.0,
         vertical: VerticalCamera { center: 70.0, px_per_row: 20.0 },
@@ -704,11 +705,13 @@ fn a_full_weight_influence_fully_replaces_the_base() {
 #[test]
 fn scales_blend_geometrically_so_zoom_stays_even() {
     let base = Camera {
+        fold: Default::default(),
         t0: 0.0,
         units_per_px: 1.0,
         vertical: VerticalCamera { center: 60.0, px_per_row: 10.0 },
     };
     let target = Camera {
+        fold: Default::default(),
         units_per_px: 100.0,
         ..base
     };
@@ -732,7 +735,7 @@ fn scales_blend_geometrically_so_zoom_stays_even() {
 fn the_edge_magnet_is_inert_in_the_middle_of_the_item() {
     let vp = Viewport::new(800.0, 480.0);
     let c = test_content();
-    let cam = camera::reset_view(c, vp, 0.03, 0.35);
+    let cam = camera::reset_view(c, vp, 0.03, 0.35, Default::default());
     assert!(
         camera::edge_magnet(cam, 2000.0, c, vp, 0.35, 0.2).is_none(),
         "no pull at the item center"
@@ -747,9 +750,10 @@ fn the_edge_magnet_is_inert_in_the_middle_of_the_item() {
 #[test]
 fn the_reset_tail_stays_out_until_the_final_stretch() {
     let vp = Viewport::new(800.0, 480.0);
-    let reset = camera::reset_view(test_content(), vp, 0.03, 0.35);
+    let reset = camera::reset_view(test_content(), vp, 0.03, 0.35, Default::default());
     // Deep zoom-in: nowhere near reset.
     let deep = Camera {
+        fold: Default::default(),
         units_per_px: reset.units_per_px / 50.0,
         vertical: VerticalCamera { px_per_row: reset.vertical.px_per_row * 50.0, ..reset.vertical },
         ..reset
@@ -760,6 +764,7 @@ fn the_reset_tail_stays_out_until_the_final_stretch() {
     );
     // Essentially there.
     let close = Camera {
+        fold: Default::default(),
         units_per_px: reset.units_per_px * 0.98,
         ..reset
     };
@@ -775,6 +780,7 @@ fn constrain_never_shows_more_than_the_cushioned_item() {
         ..Bounds::default()
     };
     let mut cam = Camera {
+        fold: Default::default(),
         t0: -99999.0,
         units_per_px: 1000.0,
         vertical: VerticalCamera { center: 200.0, px_per_row: 0.001 },
@@ -1754,7 +1760,7 @@ fn restricting_to_the_item_slides_the_view_rather_than_squashing_it() {
         pitch_lo: 55.0,
         pitch_hi: 67.0,
     };
-    let cam = camera::reset_view(content, vp, 0.03, 0.35);
+    let cam = camera::reset_view(content, vp, 0.03, 0.35, Default::default());
     let spans = spans_at(&[0.0, 240.0, 480.0], 240.0, 60);
 
     let free = zoom::apply_horizontal(
@@ -1792,6 +1798,7 @@ fn restricting_to_the_item_slides_the_view_rather_than_squashing_it() {
 fn vertical_fit_respects_the_row_floor_and_ceiling() {
     let vp = Viewport::new(800.0, 480.0);
     let cam = Camera {
+        fold: Default::default(),
         t0: 0.0,
         units_per_px: 10.0,
         vertical: VerticalCamera { center: 60.0, px_per_row: 10.0 },
@@ -1820,6 +1827,7 @@ fn vertical_fit_respects_the_row_floor_and_ceiling() {
 fn notes_in_view_ignores_notes_outside_the_horizontal_span() {
     let vp = Viewport::new(800.0, 480.0);
     let cam = Camera {
+        fold: Default::default(),
         t0: 0.0,
         units_per_px: 1.0,
         vertical: VerticalCamera { center: 60.0, px_per_row: 10.0 },

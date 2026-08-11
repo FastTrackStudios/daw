@@ -14,6 +14,7 @@ use dioxus::prelude::*;
 use expression_editor_core::cc::{standard_name, CC_COLORS};
 use expression_editor_core::doc::NoteId;
 use expression_editor_core::flam::FlamStep;
+use expression_editor_core::rows::Hand;
 use expression_editor_core::rows::Articulation;
 use expression_editor_core::{blob, chord, tuning, Edit, Editor, RowSpace};
 
@@ -82,6 +83,7 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
         .notes
         .first()
         .and_then(|id| ed.flam_step(*id));
+    let hand = ed.selection.notes.first().and_then(|id| ed.hand_of_note(*id));
     drop(ed);
 
     let decomposition = note
@@ -215,8 +217,39 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                     }
                 }
 
-                // ── flam ─────────────────────────────────────────────
+                // ── sticking ─────────────────────────────────────────
                 if is_drums {
+                    {section("Hand")}
+                    div {
+                        style: "display: flex; gap: 4px; padding: 0 10px 8px;",
+                        for h in [Hand::Left, Hand::Right] {
+                            button {
+                                key: "hand{h:?}",
+                                style: format!(
+                                    "flex: 1; height: 22px; font-size: 10px; \
+                                     border-radius: 4px; \
+                                     border: 1px solid {}; background: {}; color: {}; \
+                                     cursor: {};",
+                                    if hand == Some(h) { theme::ACCENT } else { theme::PANEL_BORDER },
+                                    if hand == Some(h) { theme::CONTROL_ACTIVE } else { theme::SURFACE_INSET },
+                                    if hand.is_some() { theme::TEXT } else { theme::TEXT_DIM },
+                                    if hand.is_some() { "pointer" } else { "default" },
+                                ),
+                                disabled: hand.is_none(),
+                                title: if hand.is_some() {
+                                    "Which hand plays this hit — moves it to that row"
+                                } else {
+                                    "This piece is played with one hand"
+                                },
+                                onclick: move |_| {
+                                    editor.write().set_hand_of_selection(h);
+                                },
+                                {if h == Hand::Left { "L" } else { "R" }}
+                            }
+                        }
+                    }
+
+                    // ── flam ─────────────────────────────────────────
                     {section("Flam")}
                     div {
                         style: "padding: 0 10px 8px;",

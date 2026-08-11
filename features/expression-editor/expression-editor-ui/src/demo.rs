@@ -441,13 +441,18 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
                 }
                 hit(&mut doc, &mut id, row("K"), b, 0.95);
                 hit(&mut doc, &mut id, row("K"), b + 2.5, 0.9);
-                let s1 = hit(&mut doc, &mut id, row("S"), b + 1.0, 1.0);
-                let s2 = hit(&mut doc, &mut id, row("S"), b + 3.0, 1.0);
+                hit(&mut doc, &mut id, row("S"), b + 1.0, 1.0);
+                hit(&mut doc, &mut id, row("S"), b + 3.0, 1.0);
+                // Flams go on a tom: this map pairs the toms and the
+                // kick, but not the snare — it has no `S L`, and `SR`
+                // is the rim.
+                let s1 = hit(&mut doc, &mut id, row("T1 R"), b + 1.75, 0.9);
+                let s2 = hit(&mut doc, &mut id, row("T1 R"), b + 3.75, 0.9);
 
                 // Grace notes on the other hand, stored as flams.
-                for (principal, at) in [(s1, b + 1.0), (s2, b + 3.0)] {
+                for (principal, at) in [(s1, b + 1.75), (s2, b + 3.75)] {
                     let t = PPQ * at - PPQ * 0.06;
-                    let mut g = Note::new(NoteId(id), t, t + PPQ * 0.1, row("S R"));
+                    let mut g = Note::new(NoteId(id), t, t + PPQ * 0.1, row("T1 L"));
                     g.velocity = 0.55;
                     g.grace_of = Some(principal);
                     doc.push(g);
@@ -684,11 +689,13 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             // Both hands of the snare showing, since that is what a
             // flam needs you to see.
             if let expression_editor_core::RowSpace::Drums(m) = ed.row_space.clone() {
-                if let Some(r) = m.lanes.iter().position(|l| l.name == "S") {
+                if let Some(r) = m.lanes.iter().position(|l| l.name == "T1 R") {
                     ed.toggle_piece_split(r);
                 }
             }
-            ed.selection.set_single(NoteId(11));
+            // A flammed tom, so the Hand and Flam controls have
+            // something to act on.
+            ed.selection.set_single(NoteId(13));
         }
         Scene::GuitarPro => {
             ed.set_mode(expression_editor_core::Mode::Guitar);
