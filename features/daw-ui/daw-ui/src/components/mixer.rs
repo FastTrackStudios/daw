@@ -531,7 +531,16 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 // to nothing — the meter looked right only because its own
                 // art carries pixel dimensions.
                 div { style: "position:absolute; left:4px; top:4px; height:{meter_h}px;",
-                    TrackMeter { track: track.guid.clone(), width: METER_W, height: meter_h }
+                    TrackMeter {
+                        track: track.guid.clone(),
+                        width: METER_W,
+                        height: meter_h,
+                        // The strip's own grey, not a dark trough: REAPER's
+                        // meter is the panel until something lights it, and
+                        // a well made the block read as a cut-out sitting
+                        // on the strip rather than part of it.
+                        well: BODY_GREY.to_string(),
+                    }
                 }
                 div { style: "position:absolute; left:28px; top:4px; height:{meter_h}px;",
                     match shape.volume {
