@@ -15,9 +15,51 @@
 //! the lane area rather than a sticky header, and scrolling is deferred
 //! until the panel needs it (the preview draws a window, not a viewport).
 
+use std::collections::HashMap;
+
 use crate::controls::{use_daw_tracks, use_track_store};
 use crate::prelude::*;
 use daw_proto::{Item, Track};
+
+/// What an item shows of its content — REAPER's waveform or note preview.
+///
+/// Carried per item, keyed by guid, and *pre-resolved to render units*:
+/// amplitudes 0..1 for audio, seconds-from-item-start for notes. The
+/// fetch does the PPQ and tempo arithmetic once so the render is a pure
+/// projection, and a fixture can state a preview without a tempo map.
+#[derive(Clone, PartialEq, Debug)]
+pub enum ItemPreview {
+    /// Peak amplitudes, 0..1, evenly spaced across the take — one per
+    /// block, drawn stretched to the item's box and mirrored about the
+    /// centre line. Under REAPER these come off the `.reapeaks` cache
+    /// via `PCM_source::GetPeaks` (see `TakeHandle::peaks`).
+    Waveform(Vec<f32>),
+    /// MIDI notes, in seconds from the item start.
+    Notes(Vec<NotePreview>),
+}
+
+/// One note in a MIDI preview.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub struct NotePreview {
+    pub pitch: u8,
+    /// Seconds from the item's start.
+    pub start: f32,
+    /// Seconds.
+    pub length: f32,
+}
+
+/// Fold a take's peak frame into per-block amplitudes.
+///
+/// The REAPER backend returns one peak per channel per block (interleaved
+/// `[ch0, ch1, ch0, ch1, …]`); the preview takes the loudest channel and
+/// mirrors it, which is how a single-lane waveform is usually drawn.
+pub fn waveform_from_peaks(data: &daw_proto::TakePeakData) -> Vec<f32> {
+    let ch = data.num_channels.max(1) as usize;
+    data.peaks
+        .chunks(ch)
+        .map(|block| block.iter().fold(0.0f32, |a, v| a.max(v.abs() as f32)).min(1.0))
+        .collect()
+}
 
 /// The ruler's band, above the lanes.
 const RULER_H: f32 = 26.0;
@@ -38,6 +80,10 @@ const PX_PER_SECOND: f32 = 40.0;
 pub fn ArrangePreview(
     tracks: Vec<Track>,
     #[props(default)] items: Vec<Item>,
+    /// Item content previews, by item guid. An item with no entry draws
+    /// its plain block — previews arrive as they are fetched.
+    #[props(default)]
+    previews: HashMap<String, ItemPreview>,
     width: f32,
     height: f32,
     /// Zoom, as pixels per second of timeline.
@@ -164,6 +210,7 @@ pub fn ArrangePreview(
                                     top: i as f32 * (row_h + 1.0),
                                     height: row_h,
                                     pixels_per_second,
+                                    preview: previews.get(&item.guid).cloned(),
                                 }
                             },
                             // An item whose track is not in the list draws
@@ -190,6 +237,7 @@ fn ArrangeItem(
     top: f32,
     height: f32,
     pixels_per_second: f32,
+    #[props(default)] preview: Option<ItemPreview>,
 ) -> Element {
     let t = daw_theme::Theme::default();
     let left = item.position.as_seconds() as f32 * pixels_per_second;
@@ -212,20 +260,154 @@ fn ArrangeItem(
     let ink = body.shade(0.6).css();
     let alpha = if item.muted { 0.45 } else { 1.0 };
     let label = item.label.clone().unwrap_or_default();
+    let box_h = height - 3.0;
+    // The content band: the label's row belongs to the label, the rest to
+    // the preview, which is how REAPER divides an item.
+    let band_top = if label.is_empty() { 2.0 } else { 12.0 };
+    let band_h = (box_h - band_top - 2.0).max(0.0);
+    // Peaks are the item's own colour pulled dark — content on the block,
+    // not a second surface.
+    let mark = body.shade(-0.38);
 
     rsx! {
         div {
             style: "position:absolute; left:{left}px; top:{top + 1.0}px; \
-                    width:{w}px; height:{height - 3.0}px; \
+                    width:{w}px; height:{box_h}px; \
                     background:{body.css()}; border:1px solid {edge}; \
                     border-radius:3px; opacity:{alpha}; overflow:hidden;",
+            match &preview {
+                Some(ItemPreview::Waveform(amps)) if !amps.is_empty() && band_h > 3.0 => rsx! {
+                    Waveform {
+                        amps: amps.clone(),
+                        width: w,
+                        top: band_top,
+                        height: band_h,
+                        colour: mark.css(),
+                    }
+                },
+                Some(ItemPreview::Notes(notes)) if !notes.is_empty() && band_h > 3.0 => rsx! {
+                    NoteRoll {
+                        notes: notes.clone(),
+                        length: item.length.as_seconds() as f32,
+                        width: w,
+                        top: band_top,
+                        height: band_h,
+                        colour: mark.css(),
+                    }
+                },
+                _ => rsx! {},
+            }
             if !label.is_empty() {
                 div {
-                    style: "padding:1px 4px; font-size:9px; line-height:11px; \
+                    style: "position:absolute; left:0; top:0; width:{w}px; \
+                            padding:1px 4px; font-size:9px; line-height:11px; \
                             color:{ink}; white-space:nowrap; overflow:hidden; \
                             text-overflow:ellipsis; \
                             font-family:Fira Sans, DejaVu Sans, sans-serif;",
                     "{label}"
+                }
+            }
+        }
+    }
+}
+
+/// The waveform, as one filled shape mirrored about the centre line.
+///
+/// A polygon rather than per-column strokes: the skill's stroke trap
+/// (resvg halves a stroke over its own path) and one shape instead of
+/// hundreds. The viewBox is one unit per block and the `<svg>` stretches
+/// to the item — `preserve_aspect_ratio: none`, the same move the fader's
+/// stretch band makes.
+#[component]
+fn Waveform(amps: Vec<f32>, width: f32, top: f32, height: f32, colour: String) -> Element {
+    let n = amps.len();
+    // Above ~4 blocks per pixel the polygon outruns what the pixel can
+    // show; fold blocks together so the shape stays a few hundred points.
+    let max_points = (width as usize).clamp(64, 512);
+    let folded: Vec<f32> = if n > max_points {
+        let per = n as f32 / max_points as f32;
+        (0..max_points)
+            .map(|i| {
+                let a = (i as f32 * per) as usize;
+                let b = (((i + 1) as f32 * per) as usize).min(n);
+                amps[a..b.max(a + 1)].iter().fold(0.0f32, |m, v| m.max(*v))
+            })
+            .collect()
+    } else {
+        amps
+    };
+    let count = folded.len().max(2);
+    let span = count - 1;
+
+    // Top edge left to right, bottom edge right to left — one closed shape.
+    let mut d = String::with_capacity(count * 24);
+    for (i, a) in folded.iter().enumerate() {
+        let y = 1.0 - (*a).clamp(0.0, 1.0) * 0.96;
+        d.push_str(if i == 0 { "M" } else { "L" });
+        d.push_str(&format!(" {i} {y:.3} "));
+    }
+    for (i, a) in folded.iter().enumerate().rev() {
+        let y = 1.0 + (*a).clamp(0.0, 1.0) * 0.96;
+        d.push_str(&format!("L {i} {y:.3} "));
+    }
+    d.push('Z');
+
+    rsx! {
+        svg {
+            style: "position:absolute; left:0; top:{top}px; display:block; \
+                    width:{width}px; height:{height}px;",
+            width: "{width}",
+            height: "{height}",
+            preserve_aspect_ratio: "none",
+            view_box: "0 0 {span} 2",
+            xmlns: "http://www.w3.org/2000/svg",
+            path { d: "{d}", fill: "{colour}", fill_opacity: "0.85" }
+            // The centre line survives silence — an empty bar still reads
+            // as audio, which is REAPER's behaviour.
+            rect { x: "0", y: "0.985", width: "{span}", height: "0.03",
+                   fill: "{colour}", fill_opacity: "0.5" }
+        }
+    }
+}
+
+/// The note preview — pitch rows across the item, REAPER's MIDI block.
+///
+/// Rows are normalised to the notes the item actually has, padded a
+/// semitone either side, so a two-note bassline does not draw as two
+/// hairlines at the bottom of a 128-row grid.
+#[component]
+fn NoteRoll(
+    notes: Vec<NotePreview>,
+    length: f32,
+    width: f32,
+    top: f32,
+    height: f32,
+    colour: String,
+) -> Element {
+    let lo = notes.iter().map(|n| n.pitch).min().unwrap_or(60).saturating_sub(1);
+    let hi = notes.iter().map(|n| n.pitch).max().unwrap_or(72).saturating_add(1);
+    let rows = (hi - lo + 1).max(2) as f32;
+    let secs = length.max(0.001);
+
+    rsx! {
+        svg {
+            style: "position:absolute; left:0; top:{top}px; display:block; \
+                    width:{width}px; height:{height}px;",
+            width: "{width}",
+            height: "{height}",
+            preserve_aspect_ratio: "none",
+            view_box: "0 0 {secs} {rows}",
+            xmlns: "http://www.w3.org/2000/svg",
+            for (i, n) in notes.iter().enumerate() {
+                rect {
+                    key: "{i}",
+                    x: "{n.start}",
+                    // Row 0 at the top is the highest pitch.
+                    y: "{(hi - n.pitch) as f32 + 0.15}",
+                    width: "{n.length.max(secs * 0.004)}",
+                    height: "0.7",
+                    fill: "{colour}",
+                    fill_opacity: "0.9",
                 }
             }
         }
@@ -246,6 +428,7 @@ pub fn ArrangementView() -> Element {
     use_daw_tracks(store);
 
     let mut items = use_signal(Vec::<Item>::new);
+    let mut previews = use_signal(HashMap::<String, ItemPreview>::new);
     let mut connected = use_signal(|| false);
     let mut size = use_signal(|| Option::<(f32, f32)>::None);
 
@@ -256,6 +439,18 @@ pub fn ArrangementView() -> Element {
         connected.set(true);
         loop {
             if let Ok(list) = project.items().all().await {
+                // Fetch content previews for items that do not have one
+                // yet — once per (guid, length), so an edit that changes
+                // the take refetches and everything else stays cached.
+                for item in &list {
+                    let key = item.guid.clone();
+                    if previews.read().contains_key(&key) {
+                        continue;
+                    }
+                    if let Some(preview) = fetch_preview(&project, item).await {
+                        previews.write().insert(key, preview);
+                    }
+                }
                 items.set(list);
             }
             futures_timer::Delay::new(std::time::Duration::from_secs(2)).await;
@@ -296,7 +491,62 @@ pub fn ArrangementView() -> Element {
                     }
                 });
             },
-            ArrangePreview { tracks, items: item_list, width: w, height: h }
+            ArrangePreview {
+                tracks,
+                items: item_list,
+                previews: previews.read().clone(),
+                width: w,
+                height: h,
+            }
         }
+    }
+}
+
+/// One item's content preview, from whichever kind of take it holds.
+///
+/// Audio goes through [`TakeHandle::peaks`] — under REAPER that is
+/// `PCM_source::GetPeaks`, served from the `.reapeaks` cache REAPER has
+/// already built for its own arrange view, so no media is decoded. MIDI
+/// reads the take's notes and converts PPQ to seconds at the project's
+/// tempo. Anything else (empty, video, a backend with no peak store)
+/// yields `None` and the item draws its plain block.
+///
+/// [`TakeHandle::peaks`]: daw_control::TakeHandle::peaks
+async fn fetch_preview(
+    project: &daw_control::Project,
+    item: &Item,
+) -> Option<ItemPreview> {
+    let handle = project.items().by_guid(&item.guid).await.ok()??;
+    let take = handle.active_take();
+    let info = take.info().await.ok()?;
+    match info.source_type {
+        daw_proto::SourceType::Audio => {
+            // ~86 peaks a second at 44.1k: enough for any zoom the panel
+            // draws, small enough to ship for every item in a project.
+            let data = take.peaks(512).await.ok()?;
+            let amps = waveform_from_peaks(&data);
+            (!amps.is_empty()).then(|| ItemPreview::Waveform(amps))
+        }
+        daw_proto::SourceType::Midi => {
+            let notes = handle.active_take().midi().notes().await.ok()?;
+            // Quarter-notes to seconds at the tempo the item starts in.
+            // One tempo, not the map — the preview is a thumbnail.
+            let bpm = project
+                .tempo_map()
+                .tempo_at(item.position.as_seconds())
+                .await
+                .unwrap_or(120.0);
+            let spq = (60.0 / bpm.max(1.0)) as f32;
+            let notes: Vec<NotePreview> = notes
+                .iter()
+                .map(|n| NotePreview {
+                    pitch: n.pitch,
+                    start: n.start_ppq as f32 * spq,
+                    length: n.length_ppq as f32 * spq,
+                })
+                .collect();
+            (!notes.is_empty()).then(|| ItemPreview::Notes(notes))
+        }
+        _ => None,
     }
 }

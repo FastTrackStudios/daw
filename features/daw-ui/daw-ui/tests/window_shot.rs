@@ -6,7 +6,10 @@
 //! strips docked underneath. The same blitz-dom pipeline as `strip_shot`,
 //! so the picture is what REAPER's renderer would draw.
 
+use std::collections::HashMap;
+
 use daw_proto::{Item, Track};
+use daw_ui::components::arrangement_view::{ItemPreview, NotePreview};
 use daw_ui::components::main_window::MainWindowPreview;
 use daw_ui::controls::TrackStore;
 use dioxus::prelude::*;
@@ -57,6 +60,49 @@ fn items() -> Vec<Item> {
     ]
 }
 
+/// Synthetic content previews: a few beats of drum-like transients, a
+/// sustained pad, and a MIDI riff — enough to show the waveform and note
+/// renderers doing their jobs in one picture.
+fn previews() -> HashMap<String, ItemPreview> {
+    // A transient every half bar, decaying — reads as drums.
+    let hits = |blocks: usize, period: usize| -> Vec<f32> {
+        (0..blocks)
+            .map(|i| {
+                let phase = (i % period) as f32 / period as f32;
+                (1.0 - phase).powi(3) * 0.9 + 0.05
+            })
+            .collect()
+    };
+    // A slow swell — reads as a pad or bass.
+    let swell = |blocks: usize| -> Vec<f32> {
+        (0..blocks)
+            .map(|i| {
+                let x = i as f32 / blocks as f32 * std::f32::consts::PI;
+                x.sin() * 0.7 + 0.1
+            })
+            .collect()
+    };
+    let riff = vec![
+        NotePreview { pitch: 60, start: 0.0, length: 0.9 },
+        NotePreview { pitch: 64, start: 1.0, length: 0.9 },
+        NotePreview { pitch: 67, start: 2.0, length: 0.9 },
+        NotePreview { pitch: 72, start: 3.0, length: 0.9 },
+        NotePreview { pitch: 67, start: 4.0, length: 1.9 },
+        NotePreview { pitch: 64, start: 6.0, length: 1.9 },
+    ];
+
+    HashMap::from([
+        ("i1".to_string(), ItemPreview::Waveform(hits(512, 32))),
+        ("i2".to_string(), ItemPreview::Waveform(hits(448, 64))),
+        ("i3".to_string(), ItemPreview::Waveform(swell(512))),
+        ("i4".to_string(), ItemPreview::Waveform(swell(256))),
+        ("i5".to_string(), ItemPreview::Waveform(swell(256))),
+        ("i6".to_string(), ItemPreview::Waveform(hits(192, 48))),
+        ("i7".to_string(), ItemPreview::Waveform(hits(192, 48))),
+        ("i8".to_string(), ItemPreview::Notes(riff)),
+    ])
+}
+
 #[test]
 fn paint_the_main_window() {
     fn app() -> Element {
@@ -68,7 +114,7 @@ fn paint_the_main_window() {
         rsx! {
             div {
                 style: "position:absolute; left:0; top:0;",
-                MainWindowPreview { tracks: tracks(), items: items() }
+                MainWindowPreview { tracks: tracks(), items: items(), previews: previews() }
             }
         }
     }

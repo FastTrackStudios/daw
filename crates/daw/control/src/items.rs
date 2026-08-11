@@ -715,6 +715,23 @@ impl TakeHandle {
             .ok_or_else(|| Error::Other("Take not found".to_string()))
     }
 
+    /// Waveform peak data for this take.
+    ///
+    /// `block_size` is samples per peak — 1024 to 4096 is typical; larger
+    /// is fewer peaks. Under REAPER this goes through
+    /// `PCM_source::GetPeaks`, which serves from the `.reapeaks` cache
+    /// when one exists — the same data REAPER's own arrange view draws,
+    /// with no decoding of the media file. The standalone backend has no
+    /// peak store yet and returns an empty frame.
+    pub async fn peaks(&self, block_size: u32) -> Result<daw_proto::TakePeakData> {
+        let peaks = self
+            .clients
+            .peaks
+            .take_peaks(self.context(), self.item_ref(), self.take_ref.clone(), block_size)
+            .await?;
+        Ok(peaks)
+    }
+
     // =========================================================================
     // Metadata
     // =========================================================================

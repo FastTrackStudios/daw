@@ -13,7 +13,9 @@
 //! TCP column carries a spacer the height of the arrange ruler, because in
 //! REAPER the first track begins below the ruler line, not beside it.
 
-use crate::components::arrangement_view::ArrangePreview;
+use std::collections::HashMap;
+
+use crate::components::arrangement_view::{ArrangePreview, ItemPreview};
 use crate::components::mixer::ChannelStripPreview;
 use crate::components::tcp::TrackRow;
 use crate::panels::native::NativeTransportBar;
@@ -41,6 +43,9 @@ const MIXER_H: f32 = 230.0;
 pub fn MainWindowPreview(
     tracks: Vec<Track>,
     #[props(default)] items: Vec<Item>,
+    /// Item content previews, by item guid — see `ArrangePreview`.
+    #[props(default)]
+    previews: HashMap<String, ItemPreview>,
     #[props(default = 1024.0)] width: f32,
     #[props(default = 768.0)] height: f32,
     #[props(default = 120.0)] bpm: f64,
@@ -89,6 +94,7 @@ pub fn MainWindowPreview(
                 ArrangePreview {
                     tracks: tracks.clone(),
                     items,
+                    previews,
                     width: arrange_w,
                     height: middle_h,
                     bpm,
