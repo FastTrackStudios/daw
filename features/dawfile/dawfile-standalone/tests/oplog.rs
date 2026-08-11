@@ -4,7 +4,10 @@
 //! and a hand-edited `.daw` loading with its oplog discarded — plus the
 //! properties they depend on.
 
+use dawfile_standalone::document::DawDocument;
+use dawfile_standalone::objects::ObjectStore;
 use dawfile_standalone::oplog::{self, OplogRef, hash_text};
+use dawfile_standalone::{DawProject, DocumentEdit};
 use loro::LoroDoc;
 
 /// A doc with one map entry, standing in for a project edit.
@@ -140,4 +143,97 @@ fn a_corrupt_oplog_costs_history_and_nothing_else() {
     };
     // Right text, unreadable bytes.
     assert!(oplog::load_if_current(Some(&stored), Some(b"not loro"), "text").is_none());
+}
+
+/// A fresh directory per test, matching the idiom the sibling suites
+/// use — the tree does not carry `tempfile`.
+fn scratch(tag: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!(
+        "fts-oplog-{tag}-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&d);
+    d
+}
+
+// ── the oplog wired into the project lifecycle ───────────────────────
+//
+// The module above was fully implemented and tested and *nothing in the
+// project lifecycle called it*: `DawProject` held no doc, `save` never
+// exported one, `load` never restored one. So the trade #173 documents
+// — hand edits win, at the cost of that project's merge history — was
+// not a trade anybody was making, because there was no history to lose.
+
+#[test]
+fn history_survives_save_and_load() {
+    let dir = scratch("hist");
+    let mut project = DawProject::new(DawDocument::new("Hist"), ObjectStore::new());
+    project.edit(|d| {
+        d.add_track("Lead Vox");
+    });
+    project.save(&dir).expect("save");
+
+    assert!(
+        project.document().oplog.is_some(),
+        "saving must record where the history went"
+    );
+
+    let reopened = DawProject::load(&dir).expect("load");
+    assert!(
+        reopened.history().is_some(),
+        "a project saved and reopened untouched must keep its history"
+    );
+}
+
+#[test]
+fn a_hand_edited_manifest_discards_history_on_load() {
+    // The whole point of storing the text hash. Replaying a log built
+    // from text a human has since changed would resurrect what they
+    // overwrote.
+    let dir = scratch("hand");
+    let mut project = DawProject::new(DawDocument::new("Hand"), ObjectStore::new());
+    project.edit(|d| {
+        d.add_track("Lead Vox");
+    });
+    project.save(&dir).expect("save");
+
+    let manifest = dawfile_standalone::project::manifest_path(&dir, "Hand");
+    let text = std::fs::read_to_string(&manifest).expect("read");
+    std::fs::write(&manifest, text.replace("Lead Vox", "Lead Vocal")).expect("hand edit");
+
+    let reopened = DawProject::load(&dir).expect("load");
+    assert!(
+        reopened.history().is_none(),
+        "a hand-edited manifest must start fresh history, not replay over the edit"
+    );
+    // And the hand edit is what survives, which is the property the
+    // trade exists to protect.
+    assert_eq!(reopened.document().tracks[0].track.name, "Lead Vocal");
+}
+
+#[test]
+fn a_project_that_was_never_saved_has_no_history() {
+    let project = DawProject::new(DawDocument::new("Fresh"), ObjectStore::new());
+    assert!(project.history().is_none());
+    assert!(project.document().oplog.is_none());
+}
+
+#[test]
+fn compaction_keeps_the_history_it_finds() {
+    // The oplog is a blob like any other, so it has to be reachable or
+    // the garbage collector eats the project's history.
+    let dir = scratch("compact");
+    let mut project = DawProject::new(DawDocument::new("Keep"), ObjectStore::new());
+    project.edit(|d| {
+        d.add_track("Lead Vox");
+    });
+    project.save(&dir).expect("save");
+    project.compact_on_disk(&dir, None).expect("compact");
+
+    let reopened = DawProject::load(&dir).expect("load");
+    assert!(
+        reopened.history().is_some(),
+        "compaction deleted the oplog it was supposed to keep"
+    );
 }

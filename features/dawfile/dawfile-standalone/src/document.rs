@@ -98,6 +98,13 @@ pub struct DawDocument {
     /// decision 4). The per-user/per-project split is #157; this is the
     /// hook it will hang from.
     pub editor: EditorState,
+    /// The persisted loro oplog, when this project has history (#173).
+    ///
+    /// `None` on a project that has never been saved, and on one whose
+    /// manifest was hand-edited since the log was built — in both cases
+    /// history starts fresh from the text, which is the trade the
+    /// oplog module documents.
+    pub oplog: Option<crate::oplog::OplogRef>,
 }
 
 /// A track, its envelopes and its items.
@@ -266,6 +273,7 @@ impl DawDocument {
             tracks: Vec::new(),
             provenance: None,
             editor: EditorState::default(),
+            oplog: None,
         }
     }
 
@@ -399,6 +407,12 @@ impl DawDocument {
         let mut objects = Vec::new();
         if let Some(provenance) = &self.provenance {
             objects.push(provenance.source.clone());
+        }
+        // The oplog is referenced by the manifest, so it is reachable —
+        // without this a compaction silently deletes the project's
+        // history and the next load starts fresh from the text.
+        if let Some(oplog) = &self.oplog {
+            objects.push(oplog.object.clone());
         }
         for track_node in &self.tracks {
             objects.extend(track_node.fx_chain.clone());
