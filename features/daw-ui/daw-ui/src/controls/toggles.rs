@@ -248,6 +248,7 @@ pub fn MonitorButton(
 pub fn IoButton(
     /// The track's GUID.
     track: String,
+    #[props(default)] panel: Panel,
     #[props(default)] has_sends: bool,
     #[props(default)] has_receives: bool,
     #[props(default = 1.0)] scale: f32,
@@ -260,7 +261,7 @@ pub fn IoButton(
     // `_dis` badge on every strip for the first frame.
     let sends_to_parent = info.read().as_ref().map(|t| t.parent_send).unwrap_or(true);
 
-    let named = slice::expect_art(io_art(has_sends, has_receives, !sends_to_parent));
+    let named = slice::expect_art(io_art(panel, has_sends, has_receives, !sends_to_parent));
     let (w, h) = px(named, scale);
     let guid = track.clone();
 
@@ -281,6 +282,10 @@ pub fn IoButton(
                 has_receives,
                 disabled: !sends_to_parent,
                 art: named,
+                // The mixer stacks the lanes; the track panel sets them in
+                // a row, which is the whole difference between the two
+                // images and the reason the component takes an axis.
+                axis: if panel.is_track() { art::Axis::Horizontal } else { art::Axis::Vertical },
                 width: Some(w),
                 height: Some(h),
                 at: at(),
@@ -291,7 +296,19 @@ pub fn IoButton(
 
 /// REAPER's eight IO images: sends and receives crossed with whether the
 /// track still reaches its parent.
-fn io_art(sends: bool, receives: bool, disabled: bool) -> &'static str {
+fn io_art(panel: Panel, sends: bool, receives: bool, disabled: bool) -> &'static str {
+    if panel.is_track() {
+        return match (sends, receives, disabled) {
+            (false, false, false) => "track_io",
+            (false, false, true) => "track_io_dis",
+            (true, false, false) => "track_io_s",
+            (true, false, true) => "track_io_s_dis",
+            (false, true, false) => "track_io_r",
+            (false, true, true) => "track_io_r_dis",
+            (true, true, false) => "track_io_s_r",
+            (true, true, true) => "track_io_s_r_dis",
+        };
+    }
     match (sends, receives, disabled) {
         (false, false, false) => "mcp_io",
         (false, false, true) => "mcp_io_dis",

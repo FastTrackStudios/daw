@@ -27,7 +27,8 @@ use daw_theme_art::dress::Panel;
 use daw_theme_art::vector_controls as art;
 
 use crate::controls::{
-    MuteButton, PanKnob, RecordArmButton, SoloButton, TrackMeter, use_track_store,
+    FxButton, IoButton, MuteButton, PanKnob, RecordArmButton, SoloButton, TrackMeter,
+    use_track_store,
 };
 use crate::prelude::*;
 
@@ -78,7 +79,10 @@ const NAME_FIELD_H: f32 = 24.0;
 /// Centred on the field's right edge at 169, so the knob is 24 wide from
 /// 157 — the same 24 the field is tall, and sharing its top and bottom.
 const VOLUME_KNOB_X: f32 = 157.0;
-const PAN_KNOB_X: f32 = 205.0;
+/// Centred at 195, between the field's end and the routing widget —
+/// measured, its chord runs 191..200 at a row above the knobs' centres.
+const PAN_KNOB_X: f32 = 183.0;
+const ROUTING_X: f32 = 214.0;
 const FX_IN_X: f32 = 248.0;
 /// The panel's own grey — the same one the mixer strip's body and name
 /// plate use.
@@ -199,8 +203,17 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
             div { style: "position:absolute; left:{PAN_KNOB_X}px; top:4px;",
                 PanKnob { track: track.guid.clone() }
             }
+            // The routing widget, and then the FX pill — both measured,
+            // both drawn by the components the mixer already uses. The
+            // routing button's lanes lie in a row here rather than stacked,
+            // which is the only difference between REAPER's two images, and
+            // the pill is the track panel's 36-wide family rather than the
+            // mixer's 46.
+            div { style: "position:absolute; left:{ROUTING_X}px; top:6px;",
+                IoButton { track: track.guid.clone(), panel: Panel::Track }
+            }
             div { style: "position:absolute; left:{FX_IN_X}px; top:6px;",
-                FxInButton { has_input_fx: track.input_fx_count > 0 }
+                FxButton { track: track.guid.clone(), panel: Panel::Track }
             }
 
             // ── Row two: envelope, the FX slot, the input combo ──
@@ -280,27 +293,6 @@ fn input_label(track: &Track) -> String {
             (None, None) => "MIDI".to_string(),
         },
         RecordInput::Raw(v) => format!("Input #{v}"),
-    }
-}
-
-/// The FX-in button — the *input* chain, which is a different chain from
-/// the one the row's FX slot reports.
-#[component]
-fn FxInButton(has_input_fx: bool) -> Element {
-    let mut at = use_signal(art::Interaction::default);
-    rsx! {
-        div {
-            style: "display:inline-block; line-height:0; cursor:pointer;",
-            onmouseenter: move |_| at.set(art::Interaction::Hover),
-            onmouseleave: move |_| at.set(art::Interaction::Normal),
-            art::FxInButton {
-                loaded: has_input_fx,
-                cell: (29.0, 20.0),
-                width: Some(29),
-                height: Some(20),
-                at: at(),
-            }
-        }
     }
 }
 

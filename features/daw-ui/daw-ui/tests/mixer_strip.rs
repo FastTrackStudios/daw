@@ -415,3 +415,46 @@ fn the_band_is_painted_at_reapers_tint() {
     assert!(html.contains(&panel_tint(raw).to_hex()), "the band is not tinted");
     assert!(!html.contains(&raw.to_hex()), "the band painted the raw track colour");
 }
+
+/// The track panel draws its own family of every shared control.
+///
+/// The same components serve both panels, and each has an image per panel
+/// — `track_io*` against `mcp_io*`, a 36-wide pill against a 46-wide one,
+/// lanes in a row against lanes stacked. Reaching for the mixer's by
+/// default is silent: the control draws, at the wrong size, in a row that
+/// then looks mysteriously cramped.
+#[test]
+fn the_track_panel_asks_for_its_own_images() {
+    use daw_proto::Track;
+    use daw_ui::components::tcp::TrackRow;
+    use daw_ui::controls::TrackStore;
+
+    fn app() -> Element {
+        let mut store = use_hook(TrackStore::new);
+        use_hook(|| {
+            store.seed([Track {
+                guid: "T".into(),
+                name: "Kick".into(),
+                color: Some(0xc4446a),
+                ..Default::default()
+            }]);
+            provide_context(store);
+        });
+        rsx! {
+            TrackRow {
+                track: Track { guid: "T".into(), name: "Kick".into(), ..Default::default() },
+            }
+        }
+    }
+
+    let mut dom = VirtualDom::new(app);
+    dom.rebuild_in_place();
+    let html = dioxus_ssr::render(&dom);
+
+    // `track_fx_norm` is 36 wide where `mcp_fx_norm` is 86, and the pill
+    // is drawn 1:1, so its viewBox is the tell.
+    assert!(html.contains("viewBox=\"0 0 36 22\""), "the mixer's pill is in the row:\n{html}");
+    // And the routing lanes lie in a row rather than stacked: the track
+    // image is wider than it is tall, the mixer's the other way round.
+    assert!(!html.contains("<img"), "the row is blitting:\n{html}");
+}

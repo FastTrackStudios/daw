@@ -39,6 +39,11 @@ pub fn FxButton(
     /// restated here, so it follows a remeasurement.
     #[props(default)]
     width: Option<f32>,
+    /// Which panel's pill: the mixer's is 46 wide against the track
+    /// panel's 36, and they print their letters differently — the mixer's
+    /// on plastic, the track panel's on a scrim.
+    #[props(default)]
+    panel: daw_theme_art::dress::Panel,
     /// Pixels per art pixel.
     #[props(default = 1.0)]
     scale: f32,
@@ -55,7 +60,9 @@ pub fn FxButton(
     // toggle: the join is arithmetically at 43 + the art's own leading
     // seam column, and placed at the join the strip shows through a bare
     // pixel between the halves.
-    let w = width.unwrap_or(LABEL_W);
+    let family = if panel.is_track() { art::FxFamily::TrackPanel } else { art::FxFamily::Mixer };
+    let toggle_w = if panel.is_track() { TRACK_TOGGLE_W } else { TOGGLE_W };
+    let w = width.unwrap_or(if panel.is_track() { TRACK_LABEL_W } else { LABEL_W });
     let h = (SRC_H * scale).round() as u32;
     let chain = if has_fx { art::FxChain::Active } else { art::FxChain::Empty };
     let accent = daw_theme::Theme::default().chrome.accent.css();
@@ -72,10 +79,10 @@ pub fn FxButton(
                 part: art::FxPart::Whole,
                 chain,
                 bypass: art::FxBypass::Empty,
-                family: art::FxFamily::Mixer,
+                family,
                 // `mcp.fx` plus `mcp.fxbyp`, as one shape. The widening
                 // goes into the label half, which is where REAPER puts it.
-                width: Some(((w + TOGGLE_W) * scale).round() as u32),
+                width: Some(((w + toggle_w) * scale).round() as u32),
                 height: Some(h),
                 at: at(),
             }
@@ -96,5 +103,9 @@ pub fn FxButton(
 /// `mcp.fx`, `mcp.fxbyp` and the art's own height, from `rtconfig.txt`.
 const LABEL_W: f32 = 43.0;
 const TOGGLE_W: f32 = 28.0;
+/// The track panel's, measured: its pill runs 248..283, and the toggle
+/// takes the same share of it that `track_fx_norm` gives its own.
+const TRACK_LABEL_W: f32 = 22.0;
+const TRACK_TOGGLE_W: f32 = 14.0;
 const SRC_H: f32 = 22.0;
 
