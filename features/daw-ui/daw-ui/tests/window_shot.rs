@@ -116,8 +116,9 @@ fn media() -> Vec<MediaEntry> {
             })
             .collect()
     };
-    let audio = |name: &str, dur: f32, seed: u32| MediaEntry {
+    let audio = |name: &str, folder: &str, dur: f32, seed: u32| MediaEntry {
         name: name.into(),
+        folder: folder.into(),
         kind: MediaKind::Audio,
         duration: dur,
         preview: Some(ItemPreview::Waveform(wave(160, seed))),
@@ -131,23 +132,25 @@ fn media() -> Vec<MediaEntry> {
         NotePreview { pitch: 60, start: 3.0, length: 0.9 },
     ];
     vec![
-        audio("Am_140_groove.wav", 6.9, 3),
-        audio("kick_punchy.wav", 0.8, 7),
+        audio("Am_140_groove.wav", "Loops", 6.9, 3),
+        audio("kick_punchy.wav", "Drums", 0.8, 7),
         MediaEntry {
             name: "F#MIN 92bpm [SHARK].mid".into(),
+            folder: "MIDI".into(),
             kind: MediaKind::Midi,
             duration: 4.0,
             preview: Some(ItemPreview::Notes(riff)),
         },
-        audio("D 175bpm break.wav", 5.5, 11),
-        audio("vocal_chop_Em_128.wav", 3.7, 17),
+        audio("D 175bpm break.wav", "Loops", 5.5, 11),
+        audio("vocal_chop_Em_128.wav", "Vocals", 3.7, 17),
         MediaEntry {
             name: "chords_Cmaj_pad.mid".into(),
+            folder: "MIDI".into(),
             kind: MediaKind::Midi,
             duration: 8.0,
             preview: None,
         },
-        audio("snare_tight.wav", 0.5, 23),
+        audio("snare_tight.wav", "Drums", 0.5, 23),
     ]
 }
 
@@ -167,7 +170,7 @@ fn paint_the_main_window() {
                     items: items(),
                     previews: previews(),
                     media: media(),
-                    media_selected: Some(2),
+                    media_selected: Some("F#MIN 92bpm [SHARK].mid".to_string()),
                 }
             }
         }

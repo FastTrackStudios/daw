@@ -512,7 +512,7 @@ pub fn ArrangementView() -> Element {
 /// yields `None` and the item draws its plain block.
 ///
 /// [`TakeHandle::peaks`]: daw_control::TakeHandle::peaks
-async fn fetch_preview(
+pub(crate) async fn fetch_preview(
     project: &daw_control::Project,
     item: &Item,
 ) -> Option<ItemPreview> {

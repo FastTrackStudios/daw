@@ -49,12 +49,12 @@ pub fn MainWindowPreview(
     /// Item content previews, by item guid — see `ArrangePreview`.
     #[props(default)]
     previews: HashMap<String, ItemPreview>,
-    /// Media browser entries. Empty hides the sidebar entirely.
+    /// Media browser library entries. Empty hides the sidebar entirely.
     #[props(default)]
     media: Vec<MediaEntry>,
-    /// The browser's selected row.
+    /// The browser's selected entry, by name.
     #[props(default)]
-    media_selected: Option<usize>,
+    media_selected: Option<String>,
     #[props(default = 1024.0)] width: f32,
     #[props(default = 768.0)] height: f32,
     #[props(default = 120.0)] bpm: f64,
@@ -140,7 +140,7 @@ pub fn MainWindowPreview(
 
                 if !media.is_empty() {
                     MediaBrowserPanel {
-                        entries: media,
+                        library: media,
                         selected: media_selected,
                         width: BROWSER_W,
                         height: height - TRANSPORT_H,

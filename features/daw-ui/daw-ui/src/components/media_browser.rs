@@ -36,11 +36,80 @@ pub enum MediaKind {
 pub struct MediaEntry {
     /// The filename, as it is on disk.
     pub name: String,
+    /// The folder the entry groups under — a display name, not a full
+    /// path. Empty means ungrouped.
+    pub folder: String,
     pub kind: MediaKind,
     /// Length in seconds, for the duration chip.
     pub duration: f32,
     /// Content preview, same currency as the arrange items'.
     pub preview: Option<ItemPreview>,
+}
+
+/// Which shelf the browser is showing.
+///
+/// **Project** is the files the open project actually uses — every take's
+/// source, deduplicated — so the browser doubles as the project's file
+/// manager. **Library** is the sample and MIDI assets being auditioned
+/// for it. The distinction is TK Media Browser's locations-vs-collections
+/// idea folded to the two scopes that matter.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum MediaScope {
+    Project,
+    #[default]
+    Library,
+}
+
+/// Does an entry answer a search?
+///
+/// Every whitespace-separated term must land somewhere: the filename, the
+/// folder, the kind, or the *parsed* metadata — `f#m` finds
+/// `"F#MIN [SHARK].mid"` even though the substring never occurs, because
+/// the query is matched against the normalised key too. Case-blind.
+pub fn entry_matches(entry: &MediaEntry, query: &str) -> bool {
+    let meta = parse_media_name(&entry.name);
+    let name = entry.name.to_ascii_lowercase();
+    let folder = entry.folder.to_ascii_lowercase();
+    let key = meta.key.as_deref().unwrap_or("").to_ascii_lowercase();
+    let bpm = meta.bpm.map(|b| b.to_string()).unwrap_or_default();
+    let kind = match entry.kind {
+        MediaKind::Audio => "audio wav",
+        MediaKind::Midi => "midi mid",
+    };
+    query.split_whitespace().all(|term| {
+        let term = term.to_ascii_lowercase();
+        name.contains(&term)
+            || folder.contains(&term)
+            || key == term
+            || bpm == term
+            || kind.contains(&term)
+    })
+}
+
+/// The rows the panel shows: filtered, then grouped by folder in first-
+/// appearance order. Pure so it is testable — the panel body is a map of
+/// this.
+pub fn shelve(
+    entries: &[MediaEntry],
+    query: &str,
+    kind: Option<MediaKind>,
+) -> Vec<(String, Vec<MediaEntry>)> {
+    let mut groups: Vec<(String, Vec<MediaEntry>)> = Vec::new();
+    for entry in entries {
+        if let Some(k) = kind {
+            if entry.kind != k {
+                continue;
+            }
+        }
+        if !query.is_empty() && !entry_matches(entry, query) {
+            continue;
+        }
+        match groups.iter_mut().find(|(f, _)| *f == entry.folder) {
+            Some((_, list)) => list.push(entry.clone()),
+            None => groups.push((entry.folder.clone(), vec![entry.clone()])),
+        }
+    }
+    groups
 }
 
 /// What a filename says about its media, in the conventions sample packs
@@ -127,15 +196,27 @@ fn parse_key(token: &str) -> Option<String> {
 }
 
 /// The browser panel.
+///
+/// Owns its interaction state — the props seed it, clicks and typing move
+/// it — so the same component is a controlled screenshot in a test and a
+/// working browser in the app.
 #[component]
 pub fn MediaBrowserPanel(
-    entries: Vec<MediaEntry>,
-    /// The selected row, expanded in place.
+    /// The open project's files — every take's source, deduplicated.
     #[props(default)]
-    selected: Option<usize>,
-    /// The folder shown in the location row.
-    #[props(default = String::from("Samples"))]
-    location: String,
+    project: Vec<MediaEntry>,
+    /// The sample/MIDI assets being auditioned.
+    #[props(default)]
+    library: Vec<MediaEntry>,
+    /// The shelf shown first.
+    #[props(default)]
+    scope: MediaScope,
+    /// The search the panel starts with.
+    #[props(default)]
+    query: String,
+    /// The selected entry, by name, expanded in place.
+    #[props(default)]
+    selected: Option<String>,
     width: f32,
     height: f32,
 ) -> Element {
@@ -147,7 +228,64 @@ pub fn MediaBrowserPanel(
     let field = t.chrome.surface_sunken.css();
     let ink = t.chrome.text.css();
     let dim = t.chrome.text_dim.css();
-    let count = entries.len();
+    let accent = t.chrome.accent.css();
+
+    let mut scope = use_signal(move || scope);
+    let mut query = use_signal(move || query);
+    let mut kind_filter = use_signal(|| Option::<MediaKind>::None);
+    let mut selected = use_signal(move || selected);
+
+    let entries = match scope() {
+        MediaScope::Project => &project,
+        MediaScope::Library => &library,
+    };
+    let total = entries.len();
+    let q = query();
+    let shelves = shelve(entries, &q, kind_filter());
+    let shown: usize = shelves.iter().map(|(_, l)| l.len()).sum();
+    let footer = if shown == total {
+        format!("{total} files")
+    } else {
+        format!("{shown} of {total} files")
+    };
+
+    let tab = |this: MediaScope, label: &str| {
+        let on = scope() == this;
+        let (colour, weight, line) = if on {
+            (ink.clone(), 700, accent.clone())
+        } else {
+            (dim.clone(), 400, "transparent".to_string())
+        };
+        rsx! {
+            div {
+                style: "flex:1 1 0; text-align:center; padding:5px 0 4px 0; \
+                        font-size:10px; font-weight:{weight}; color:{colour}; \
+                        border-bottom:2px solid {line}; cursor:pointer; \
+                        letter-spacing:0.04em; \
+                        font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                onclick: move |_| scope.set(this),
+                "{label}"
+            }
+        }
+    };
+    let chip = |this: Option<MediaKind>, label: &str| {
+        let on = kind_filter() == this;
+        let (colour, border) = if on {
+            (ink.clone(), accent.clone())
+        } else {
+            (dim.clone(), rule.clone())
+        };
+        rsx! {
+            div {
+                style: "flex:0 0 auto; font-size:8px; color:{colour}; \
+                        border:1px solid {border}; border-radius:8px; \
+                        padding:1px 7px; line-height:11px; cursor:pointer; \
+                        font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                onclick: move |_| kind_filter.set(this),
+                "{label}"
+            }
+        }
+    };
 
     rsx! {
         div {
@@ -155,18 +293,20 @@ pub fn MediaBrowserPanel(
                     flex-direction:column; background:{bg}; \
                     border-left:1px solid {rule}; overflow:hidden;",
 
-            // ── Header: title + search ──
+            // ── The two shelves ──
             div {
-                style: "flex:0 0 auto; padding:8px 10px 6px 10px;",
-                div {
-                    style: "font-size:11px; font-weight:600; color:{ink}; \
-                            letter-spacing:0.06em; margin-bottom:6px; \
-                            font-family:Fira Sans, DejaVu Sans, sans-serif;",
-                    "MEDIA"
-                }
+                style: "flex:0 0 auto; display:flex; border-bottom:1px solid {rule};",
+                {tab(MediaScope::Project, "PROJECT")}
+                {tab(MediaScope::Library, "LIBRARY")}
+            }
+
+            // ── Search + kind chips ──
+            div {
+                style: "flex:0 0 auto; padding:7px 10px 6px 10px;",
                 div {
                     style: "height:22px; background:{field}; border-radius:11px; \
-                            display:flex; align-items:center; padding:0 9px;",
+                            display:flex; align-items:center; padding:0 9px; \
+                            margin-bottom:6px;",
                     svg {
                         width: "10", height: "10", view_box: "0 0 10 10",
                         xmlns: "http://www.w3.org/2000/svg",
@@ -175,31 +315,68 @@ pub fn MediaBrowserPanel(
                         path { d: "M 6.6 6.6 L 9.2 9.2", stroke: "{dim}",
                                stroke_width: "1.4", stroke_linecap: "round" }
                     }
-                    div {
-                        style: "margin-left:6px; font-size:10px; color:{dim}; \
+                    input {
+                        style: "margin-left:6px; flex:1 1 auto; min-width:0; \
+                                font-size:10px; color:{ink}; background:transparent; \
+                                border:none; outline:none; \
                                 font-family:Fira Sans, DejaVu Sans, sans-serif;",
-                        "Search"
+                        r#type: "text",
+                        placeholder: "Search name, key, bpm…",
+                        value: "{q}",
+                        oninput: move |evt| query.set(evt.value()),
                     }
+                }
+                div {
+                    style: "display:flex; gap:4px;",
+                    {chip(None, "All")}
+                    {chip(Some(MediaKind::Audio), "Audio")}
+                    {chip(Some(MediaKind::Midi), "MIDI")}
                 }
             }
 
-            // ── Location row ──
+            // ── The shelves' rows, grouped by folder ──
             div {
-                style: "flex:0 0 auto; padding:0 10px 6px 10px; font-size:10px; \
-                        color:{dim}; border-bottom:1px solid {rule}; \
-                        font-family:Fira Sans, DejaVu Sans, sans-serif;",
-                "▸ {location}"
-            }
-
-            // ── The rows ──
-            div {
-                style: "flex:1 1 0; min-height:0; overflow:hidden; padding:4px 6px;",
-                for (i, entry) in entries.iter().enumerate() {
-                    MediaRow {
-                        key: "{entry.name}",
-                        entry: entry.clone(),
-                        selected: selected == Some(i),
-                        width: width - 12.0,
+                style: "flex:1 1 0; min-height:0; overflow:hidden; padding:2px 6px;",
+                if shown == 0 {
+                    div {
+                        style: "padding:18px 10px; font-size:10px; color:{dim}; \
+                                text-align:center; \
+                                font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                        if total == 0 && scope() == MediaScope::Project {
+                            "No media in this project yet"
+                        } else if total == 0 {
+                            "No library locations added"
+                        } else {
+                            "Nothing matches"
+                        }
+                    }
+                }
+                for (folder, list) in shelves.iter() {
+                    if !folder.is_empty() {
+                        div {
+                            key: "h{folder}",
+                            style: "padding:5px 4px 2px 4px; font-size:9px; \
+                                    color:{dim}; letter-spacing:0.03em; \
+                                    font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                            "▾ {folder}"
+                        }
+                    }
+                    for entry in list.iter() {
+                        {
+                            let name = entry.name.clone();
+                            rsx! {
+                                div {
+                                    key: "{folder}/{entry.name}",
+                                    onclick: move |_| selected.set(Some(name.clone())),
+                                    MediaRow {
+                                        entry: entry.clone(),
+                                        selected: selected.read().as_deref()
+                                            == Some(entry.name.as_str()),
+                                        width: width - 12.0,
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -209,7 +386,7 @@ pub fn MediaBrowserPanel(
                 style: "flex:0 0 auto; padding:5px 10px; font-size:9px; color:{dim}; \
                         border-top:1px solid {rule}; \
                         font-family:Fira Sans, DejaVu Sans, sans-serif;",
-                "{count} files"
+                "{footer}"
             }
         }
     }
@@ -345,6 +522,97 @@ fn format_duration(secs: f32) -> String {
     }
 }
 
+/// The live browser: the panel fed from the connected DAW.
+///
+/// The **Project** shelf is real: every take's source file, walked off
+/// the item list, deduplicated by path, grouped by its parent folder, and
+/// carrying the same content preview the arrange items draw (audio
+/// through the reapeaks-backed `take_peaks`, MIDI through the take's
+/// notes). The **Library** shelf stays empty until a filesystem/location
+/// service exists — the panel says so rather than pretending.
+#[component]
+pub fn MediaBrowser() -> Element {
+    let mut project_files = use_signal(Vec::<MediaEntry>::new);
+    let mut size = use_signal(|| Option::<(f32, f32)>::None);
+
+    use_future(move || async move {
+        let Some(project) = crate::controls::reach::connected_project().await else {
+            return;
+        };
+        loop {
+            if let Ok(items) = project.items().all().await {
+                let mut entries: Vec<MediaEntry> = Vec::new();
+                for item in &items {
+                    let Ok(Some(handle)) = project.items().by_guid(&item.guid).await else {
+                        continue;
+                    };
+                    let Ok(info) = handle.active_take().info().await else {
+                        continue;
+                    };
+                    // MIDI takes have no file; they list under the take's
+                    // own name so the project shelf is complete.
+                    let (name, folder) = match &info.source_file_path {
+                        Some(path) => split_path(path),
+                        None if info.source_type == daw_proto::SourceType::Midi => {
+                            (format!("{}.mid", info.name), "In-project MIDI".to_string())
+                        }
+                        None => continue,
+                    };
+                    if entries.iter().any(|e| e.name == name && e.folder == folder) {
+                        continue;
+                    }
+                    let kind = match info.source_type {
+                        daw_proto::SourceType::Audio => MediaKind::Audio,
+                        daw_proto::SourceType::Midi => MediaKind::Midi,
+                        _ => continue,
+                    };
+                    let duration = info
+                        .source_length
+                        .map(|d| d.as_seconds() as f32)
+                        .unwrap_or(item.length.as_seconds() as f32);
+                    let preview =
+                        crate::components::arrangement_view::fetch_preview(&project, item)
+                            .await;
+                    entries.push(MediaEntry { name, folder, kind, duration, preview });
+                }
+                project_files.set(entries);
+            }
+            futures_timer::Delay::new(std::time::Duration::from_secs(5)).await;
+        }
+    });
+
+    let (w, h) = size.read().unwrap_or((260.0, 600.0));
+    rsx! {
+        div {
+            style: "height:100%; width:100%; overflow:hidden;",
+            onmounted: move |evt| {
+                spawn(async move {
+                    if let Ok(rect) = evt.get_client_rect().await {
+                        if rect.size.width > 0.0 && rect.size.height > 0.0 {
+                            size.set(Some((rect.size.width as f32, rect.size.height as f32)));
+                        }
+                    }
+                });
+            },
+            MediaBrowserPanel {
+                project: project_files.read().clone(),
+                scope: MediaScope::Project,
+                width: w,
+                height: h,
+            }
+        }
+    }
+}
+
+/// A path's file name and its parent folder's display name.
+fn split_path(path: &str) -> (String, String) {
+    let path = path.replace('\\', "/");
+    let mut parts = path.rsplit('/');
+    let name = parts.next().unwrap_or(&path).to_string();
+    let folder = parts.next().unwrap_or("").to_string();
+    (name, folder)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -380,5 +648,67 @@ mod tests {
     fn durations_format_both_sides_of_a_minute() {
         assert_eq!(format_duration(3.4), "3.4s");
         assert_eq!(format_duration(83.0), "1:23.0");
+    }
+
+    fn entry(name: &str, folder: &str, kind: MediaKind) -> MediaEntry {
+        MediaEntry {
+            name: name.into(),
+            folder: folder.into(),
+            kind,
+            duration: 1.0,
+            preview: None,
+        }
+    }
+
+    /// Search matches the *parse*, not just the substring: `f#m` finds a
+    /// file spelling its key `F#MIN`, `92` finds the bpm token, and every
+    /// term of a multi-word query must land.
+    #[test]
+    fn search_reaches_the_parsed_metadata() {
+        let e = entry("F#MIN 92bpm [SHARK].mid", "Loops", MediaKind::Midi);
+        assert!(entry_matches(&e, "f#m"));
+        assert!(entry_matches(&e, "92"));
+        assert!(entry_matches(&e, "shark 92"));
+        assert!(entry_matches(&e, "loops"));
+        assert!(entry_matches(&e, "midi"));
+        assert!(!entry_matches(&e, "am"), "F#m is not A minor");
+        assert!(!entry_matches(&e, "shark 93"), "one dead term kills the match");
+    }
+
+    /// Shelving filters then groups, keeping folder first-appearance
+    /// order — the shape the panel body maps over.
+    #[test]
+    fn shelving_filters_and_groups() {
+        let entries = vec![
+            entry("kick.wav", "Drums", MediaKind::Audio),
+            entry("riff.mid", "Loops", MediaKind::Midi),
+            entry("snare.wav", "Drums", MediaKind::Audio),
+        ];
+
+        let all = shelve(&entries, "", None);
+        assert_eq!(all.len(), 2);
+        assert_eq!(all[0].0, "Drums");
+        assert_eq!(all[0].1.len(), 2);
+        assert_eq!(all[1].0, "Loops");
+
+        let audio = shelve(&entries, "", Some(MediaKind::Audio));
+        assert_eq!(audio.len(), 1, "the empty Loops group is not shown");
+
+        let hit = shelve(&entries, "snare", None);
+        assert_eq!(hit.len(), 1);
+        assert_eq!(hit[0].1[0].name, "snare.wav");
+    }
+
+    /// Windows and POSIX paths both split into name + parent folder.
+    #[test]
+    fn paths_split_into_name_and_folder() {
+        assert_eq!(
+            split_path("/media/Loops/kick.wav"),
+            ("kick.wav".to_string(), "Loops".to_string())
+        );
+        assert_eq!(
+            split_path(r"C:\Samples\Drums\snare.wav"),
+            ("snare.wav".to_string(), "Drums".to_string())
+        );
     }
 }
