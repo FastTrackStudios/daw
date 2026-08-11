@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use daw_proto::{Item, Track};
-use daw_ui::components::arrangement_view::{ItemPreview, NotePreview};
+use daw_ui::components::arrangement_view::{EnvelopePreview, ItemPreview, NotePreview};
 use daw_ui::components::main_window::MainWindowPreview;
 use daw_ui::components::media_browser::{MediaEntry, MediaKind};
 use daw_ui::controls::TrackStore;
@@ -154,6 +154,27 @@ fn media() -> Vec<MediaEntry> {
     ]
 }
 
+/// A volume ride on the Bass (dipping through Bass B) and a pan sweep on
+/// OH — the two envelope colours, both holds visible at the edges.
+fn envelopes() -> HashMap<String, Vec<EnvelopePreview>> {
+    HashMap::from([
+        (
+            "bass".to_string(),
+            vec![EnvelopePreview {
+                name: "Volume".into(),
+                points: vec![(1.0, 0.8), (7.0, 0.8), (9.0, 0.35), (12.0, 0.35), (14.0, 0.75)],
+            }],
+        ),
+        (
+            "oh".to_string(),
+            vec![EnvelopePreview {
+                name: "Pan".into(),
+                points: vec![(0.0, 0.5), (4.0, 0.15), (8.0, 0.85), (12.0, 0.5)],
+            }],
+        ),
+    ])
+}
+
 #[test]
 fn paint_the_main_window() {
     fn app() -> Element {
@@ -169,6 +190,7 @@ fn paint_the_main_window() {
                     tracks: tracks(),
                     items: items(),
                     previews: previews(),
+                    envelopes: envelopes(),
                     media: media(),
                     media_selected: Some("F#MIN 92bpm [SHARK].mid".to_string()),
                 }

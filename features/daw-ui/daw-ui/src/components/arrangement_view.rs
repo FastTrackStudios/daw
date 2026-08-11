@@ -61,6 +61,35 @@ pub fn waveform_from_peaks(data: &daw_proto::TakePeakData) -> Vec<f32> {
         .collect()
 }
 
+/// One visible envelope on a track's lane, pre-resolved to render units.
+///
+/// The same currency idea as [`ItemPreview`]: `(seconds, 0..1)` points,
+/// so the render is a projection and a fixture needs no automation API.
+/// Values arrive normalised from `daw_proto::EnvelopePoint` already.
+#[derive(Clone, PartialEq, Debug)]
+pub struct EnvelopePreview {
+    /// The envelope's display name — also decides its colour, the way
+    /// REAPER inks volume green and pan orange.
+    pub name: String,
+    /// `(time in seconds, value 0..1)`, in time order.
+    pub points: Vec<(f32, f32)>,
+}
+
+impl EnvelopePreview {
+    /// REAPER's convention, in the theme's tokens: volume is the meter
+    /// green, pan the meter amber, anything else the accent.
+    fn colour(&self, t: &daw_theme::Theme) -> daw_theme::Color {
+        let name = self.name.to_ascii_lowercase();
+        if name.contains("volume") {
+            t.signal.meter_safe
+        } else if name.contains("pan") || name.contains("width") {
+            t.signal.meter_warn
+        } else {
+            t.chrome.accent
+        }
+    }
+}
+
 /// The ruler's band, above the lanes.
 const RULER_H: f32 = 26.0;
 
@@ -84,6 +113,10 @@ pub fn ArrangePreview(
     /// its plain block — previews arrive as they are fetched.
     #[props(default)]
     previews: HashMap<String, ItemPreview>,
+    /// Visible envelopes, by track guid, drawn over the lane the way
+    /// REAPER overlays them (separate envelope lanes come later).
+    #[props(default)]
+    envelopes: HashMap<String, Vec<EnvelopePreview>>,
     width: f32,
     height: f32,
     /// Zoom, as pixels per second of timeline.
@@ -215,6 +248,29 @@ pub fn ArrangePreview(
                             },
                             // An item whose track is not in the list draws
                             // nothing — better than inventing a lane.
+                            None => rsx! {},
+                        }
+                    }
+                }
+
+                // Envelopes over their lanes, above the items — REAPER's
+                // overlay order.
+                for (guid, lanes) in envelopes.iter() {
+                    {
+                        let lane = tracks.iter().position(|tr| &tr.guid == guid);
+                        match lane {
+                            Some(i) => rsx! {
+                                for (e, env) in lanes.iter().enumerate() {
+                                    EnvelopeLane {
+                                        key: "{guid}/{e}",
+                                        envelope: env.clone(),
+                                        top: i as f32 * (row_h + 1.0),
+                                        height: row_h,
+                                        width,
+                                        pixels_per_second,
+                                    }
+                                }
+                            },
                             None => rsx! {},
                         }
                     }
@@ -414,6 +470,77 @@ pub fn NoteRoll(
     }
 }
 
+/// One envelope drawn over its lane: the line, and a square at each point.
+///
+/// Drawn in pixel space — the `<svg>`'s viewBox is its own box, no
+/// stretching — so the stroke stays a true 1.2px whatever the zoom, which
+/// a `preserve_aspect_ratio: none` band cannot promise. Only the value
+/// line for now: REAPER's fill-free look. Square shapes step, everything
+/// else draws linear until curves matter.
+#[component]
+fn EnvelopeLane(
+    envelope: EnvelopePreview,
+    top: f32,
+    height: f32,
+    width: f32,
+    pixels_per_second: f32,
+) -> Element {
+    let t = daw_theme::Theme::default();
+    let ink = envelope.colour(&t).css();
+    // Two rows of margin so a full-scale envelope does not sit on the
+    // lane divider.
+    let (pad, h) = (2.0, height - 4.0);
+    let y_of = |v: f32| pad + (1.0 - v.clamp(0.0, 1.0)) * h;
+
+    // Linear between points, with the first value held back to the
+    // origin and the last held to the end of the view — REAPER's rule.
+    // Shape (square, bezier) refines this later; the *hold* semantics are
+    // the part a viewer misreads if absent.
+    let mut d = String::new();
+    let mut last_y = None;
+    for (i, (time, value)) in envelope.points.iter().enumerate() {
+        let x = time * pixels_per_second;
+        let y = y_of(*value);
+        if i == 0 {
+            d.push_str(&format!("M 0 {y:.2} L {x:.2} {y:.2} "));
+        } else {
+            d.push_str(&format!("L {x:.2} {y:.2} "));
+        }
+        last_y = Some(y);
+    }
+    if let Some(y) = last_y {
+        d.push_str(&format!("L {width:.2} {y:.2}"));
+    }
+
+    rsx! {
+        svg {
+            style: "position:absolute; left:0; top:{top}px; display:block; \
+                    width:{width}px; height:{height}px; pointer-events:none;",
+            width: "{width}",
+            height: "{height}",
+            view_box: "0 0 {width} {height}",
+            xmlns: "http://www.w3.org/2000/svg",
+            path {
+                d: "{d}",
+                fill: "none",
+                stroke: "{ink}",
+                stroke_width: "1.2",
+                stroke_opacity: "0.9",
+            }
+            for (i, (time, value)) in envelope.points.iter().enumerate() {
+                rect {
+                    key: "{i}",
+                    x: "{time * pixels_per_second - 2.0}",
+                    y: "{y_of(*value) - 2.0}",
+                    width: "4",
+                    height: "4",
+                    fill: "{ink}",
+                }
+            }
+        }
+    }
+}
+
 /// The live arrangement view: [`ArrangePreview`] fed from the DAW.
 ///
 /// Tracks arrive on the track stream through the shared store, like every
@@ -429,6 +556,7 @@ pub fn ArrangementView() -> Element {
 
     let mut items = use_signal(Vec::<Item>::new);
     let mut previews = use_signal(HashMap::<String, ItemPreview>::new);
+    let mut envelopes = use_signal(HashMap::<String, Vec<EnvelopePreview>>::new);
     let mut connected = use_signal(|| false);
     let mut size = use_signal(|| Option::<(f32, f32)>::None);
 
@@ -452,6 +580,42 @@ pub fn ArrangementView() -> Element {
                     }
                 }
                 items.set(list);
+            }
+            // Visible envelopes, refreshed on the same cadence — an
+            // automation pass in REAPER shows up within a poll. Only the
+            // ones REAPER shows: `visible` is the arrange-view flag.
+            if let Ok(track_list) = project.tracks().all().await {
+                let mut fetched = HashMap::new();
+                for track in &track_list {
+                    let Ok(Some(handle)) = project.tracks().by_guid(&track.guid).await
+                    else {
+                        continue;
+                    };
+                    let Ok(all) = handle.envelopes().all().await else { continue };
+                    let mut lanes = Vec::new();
+                    for env in all.iter().filter(|e| e.visible && e.point_count > 0) {
+                        let Ok(Some(eh)) =
+                            handle.envelopes().by_type(env.envelope_type).await
+                        else {
+                            continue;
+                        };
+                        if let Ok(points) = eh.points().await {
+                            lanes.push(EnvelopePreview {
+                                name: env.name.clone(),
+                                points: points
+                                    .iter()
+                                    .map(|p| {
+                                        (p.time.as_seconds() as f32, p.value as f32)
+                                    })
+                                    .collect(),
+                            });
+                        }
+                    }
+                    if !lanes.is_empty() {
+                        fetched.insert(track.guid.clone(), lanes);
+                    }
+                }
+                envelopes.set(fetched);
             }
             futures_timer::Delay::new(std::time::Duration::from_secs(2)).await;
         }
@@ -495,6 +659,7 @@ pub fn ArrangementView() -> Element {
                 tracks,
                 items: item_list,
                 previews: previews.read().clone(),
+                envelopes: envelopes.read().clone(),
                 width: w,
                 height: h,
             }

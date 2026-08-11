@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use crate::components::arrangement_view::{ArrangePreview, ItemPreview};
+use crate::components::arrangement_view::{ArrangePreview, EnvelopePreview, ItemPreview};
 use crate::components::media_browser::{MediaBrowserPanel, MediaEntry};
 use crate::components::mixer::ChannelStripPreview;
 use crate::components::tcp::TrackRow;
@@ -49,6 +49,9 @@ pub fn MainWindowPreview(
     /// Item content previews, by item guid — see `ArrangePreview`.
     #[props(default)]
     previews: HashMap<String, ItemPreview>,
+    /// Visible envelopes by track guid — see `ArrangePreview`.
+    #[props(default)]
+    envelopes: HashMap<String, Vec<EnvelopePreview>>,
     /// Media browser library entries. Empty hides the sidebar entirely.
     #[props(default)]
     media: Vec<MediaEntry>,
@@ -116,6 +119,7 @@ pub fn MainWindowPreview(
                             tracks: tracks.clone(),
                             items,
                             previews,
+                            envelopes,
                             width: arrange_w,
                             height: middle_h,
                             bpm,
