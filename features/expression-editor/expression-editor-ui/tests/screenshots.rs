@@ -718,3 +718,31 @@ async fn real_guitar_pro_file() {
 
     shoot(ed, "45-real-guitar-pro").await;
 }
+
+/// Richer real music, when a corpus is staged at `/tmp/gp-music`.
+///
+/// Not committed: several of alphaTab's fixtures are copyrighted
+/// transcriptions. These are public-domain compositions, rendered
+/// locally for a look rather than checked in.
+#[tokio::test]
+async fn staged_real_music() {
+    let dir = std::path::Path::new("/tmp/gp-music");
+    if !dir.exists() {
+        return;
+    }
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        let name = path.to_string_lossy().to_string();
+        if expression_editor_guitarpro::parse::Format::of_path(&name).is_none() {
+            continue;
+        }
+        let Ok(imported) = expression_editor_guitarpro::import_file(&name) else {
+            continue;
+        };
+        let stem = path.file_stem().unwrap().to_string_lossy().replace('.', "-");
+        let mut ed = Editor::new(imported.doc, demo::default_viewport());
+        ed.set_mode(expression_editor_core::Mode::Guitar);
+        ed.reset_view();
+        shoot(ed, Box::leak(format!("50-{stem}").into_boxed_str())).await;
+    }
+}

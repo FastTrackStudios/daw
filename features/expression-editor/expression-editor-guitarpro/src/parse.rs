@@ -18,7 +18,14 @@ pub enum Format {
     Gp3,
     Gp4,
     Gp5,
-    /// GP6 `.gpx` and GP7/8 `.gp`, both wrapping GPIF.
+    /// GP6 `.gpx` — GPIF inside a **BCFZ/BCFS** container.
+    ///
+    /// Split from `.gp` because they are different containers with the
+    /// same payload: routing both to the ZIP reader makes every GP6
+    /// file fail with "Could not find EOCD". Found by importing real
+    /// files; the synthetic tests never exercised a container at all.
+    Gpx,
+    /// GP7/8 `.gp` — GPIF inside a ZIP.
     Gpif,
 }
 
@@ -29,7 +36,8 @@ impl Format {
             "gp3" => Some(Format::Gp3),
             "gp4" => Some(Format::Gp4),
             "gp5" => Some(Format::Gp5),
-            "gpx" | "gp" => Some(Format::Gpif),
+            "gpx" => Some(Format::Gpx),
+            "gp" => Some(Format::Gpif),
             _ => None,
         }
     }
@@ -40,7 +48,7 @@ impl Format {
     /// destination, so a curve authored with a hold comes back as a
     /// straight line (#160).
     pub fn keeps_bend_shape(&self) -> bool {
-        !matches!(self, Format::Gpif)
+        !matches!(self, Format::Gpif | Format::Gpx)
     }
 }
 
@@ -51,6 +59,7 @@ pub fn read(bytes: &[u8], format: Format) -> Result<Song, String> {
         Format::Gp3 => song.read_gp3(bytes),
         Format::Gp4 => song.read_gp4(bytes),
         Format::Gp5 => song.read_gp5(bytes),
+        Format::Gpx => song.read_gpx(bytes),
         Format::Gpif => song.read_gp(bytes),
     };
     result.map_err(|e| format!("{e:?}"))?;
