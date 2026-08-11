@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use auth_proto::{
     AuthAccount, AuthAccountCreate, AuthApiKey, AuthApiKeyCreate, AuthFlowError, AuthInvitation,
+    email_change::AuthEmailChange,
     AuthInvitationCreate, AuthMember, AuthMemberCreate, AuthOrganization, AuthOrganizationCreate,
     AuthOrganizationRole, AuthOrganizationRoleCreate, AuthPasskey, AuthPasskeyCreate, AuthSession,
     AuthSessionCreate, AuthTeam, AuthTeamCreate, AuthTeamMember, AuthTeamMemberCreate,
@@ -114,6 +115,32 @@ pub trait AuthStorage: Clone + Send + Sync + 'static {
         email: String,
         email_verified: bool,
     ) -> Result<AuthUser, AuthFlowError>;
+
+    /// Append an entry to the account's email trail. Called by every path
+    /// that changes an address, so the history is complete rather than
+    /// best-effort — see `auth_proto::email_change`.
+    async fn record_email_change(
+        &self,
+        user_id: uuid::Uuid,
+        previous_email: Option<String>,
+        new_email: String,
+        changed_by: Option<uuid::Uuid>,
+        reason: Option<String>,
+    ) -> Result<AuthEmailChange, AuthFlowError>;
+
+    /// Every address this account has held, oldest first.
+    async fn list_email_history(
+        &self,
+        user_id: uuid::Uuid,
+    ) -> Result<Vec<AuthEmailChange>, AuthFlowError>;
+
+    /// The account that once held `email`, if any — the reverse lookup
+    /// ("who was old@example.com?"). Most recent change wins when an
+    /// address has been used more than once.
+    async fn find_user_id_by_previous_email(
+        &self,
+        email: &str,
+    ) -> Result<Option<uuid::Uuid>, AuthFlowError>;
 
     #[allow(clippy::too_many_arguments)]
     async fn update_user_profile(

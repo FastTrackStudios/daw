@@ -30,7 +30,7 @@ pub use commands::{
     AuthenticateApiKey, AuthenticateBearerToken, AuthorizeApiKey, AuthorizeMcpRequest,
     AuthorizeOidc, AuthorizeOrganizationAction, BanUser, BearerTokenBundle, BearerTokenStrategy,
     BeginOAuthAuthorization, BeginOAuthProxyAuthorization, BeginPasskeyAuthentication,
-    BeginPasskeyRegistration, CaptchaVerification, ChangeEmail, ChangePassword,
+    BeginPasskeyRegistration, CaptchaVerification, ChangeEmail, ChangePassword, MigrateUserEmail,
     CheckPasswordBreach, CleanupAnonymousUsers, CleanupAnonymousUsersResult, ClearLastLoginMethod,
     CompletePasskeyAuthentication, CompletePasskeyRegistration, CompletePasswordReset,
     ConfirmTwoFactor, ConsumeOAuthProxyCallback, CreateApiKey, CreateDeviceAuthorization,
@@ -57,7 +57,8 @@ pub use commands::{
     SendPhoneNumberOtp, SetActiveDeviceSession, SetActiveOrganization, SetMemberRole, SetUserRole,
     SignInAnonymous, SignInOAuthAccount, SignInUsername, SignOut, StartTwoFactorSetup,
     StopImpersonating, UnbanUser, UnlinkOAuthAccount, UpdateApiKey, UpdateOrganizationRole,
-    UpdatePhoneNumber, UpdateTeam, UpdateUsername, VerificationToken, VerifyApiKey, VerifyCaptcha,
+    UpdatePhoneNumber, UpdateProfile, UpdateTeam, UpdateUsername, VerificationToken, VerifyApiKey,
+    VerifyCaptcha,
     VerifyDeviceCode, VerifyEmail, VerifyEmailOtp, VerifyJwt, VerifyMagicLink, VerifyOAuthState,
     VerifyOneTimeToken, VerifyPhoneNumberOtp, VerifySiweMessage, VerifyTwoFactor,
 };

@@ -45,7 +45,7 @@ impl Scale {
     }
 
     /// Build from a keyflow-style STEP interval pattern (e.g. major =
-    /// [2,2,1,2,2,2,1]) — the bridge to `keyflow_proto::ScaleMode::
+    /// `[2,2,1,2,2,2,1]`) — the bridge to `keyflow_proto::ScaleMode::
     /// interval_pattern()` without a keyflow dependency here.
     pub fn from_intervals(root_pc: u8, steps: &[u8]) -> Self {
         let mut mask: u16 = 1; // degree 1

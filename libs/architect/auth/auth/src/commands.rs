@@ -41,6 +41,17 @@ pub struct UpdateUsername {
     pub display_username: Option<String>,
 }
 
+/// Set the session owner's display name / avatar. `None` leaves a
+/// field untouched; `Some("")` clears it — a distinction federated
+/// callers depend on, since "not mentioned" and "deliberately cleared"
+/// must not become the same write.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UpdateProfile {
+    pub session_token: String,
+    pub name: Option<String>,
+    pub image: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkAnonymousEmailPassword {
     pub session_token: String,
@@ -469,6 +480,22 @@ pub struct OidcUserInfo {
 pub struct ChangeEmail {
     pub session_token: String,
     pub new_email: String,
+}
+
+/// Move an account onto a different address, keeping its user id.
+///
+/// Identified by `user_id`, not a session: the usual reason to migrate an
+/// address is that the person cannot sign in with the old one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MigrateUserEmail {
+    pub user_id: uuid::Uuid,
+    pub new_email: String,
+    /// The operator performing it. `None` records the change as
+    /// self-service.
+    pub changed_by: Option<uuid::Uuid>,
+    /// Free text for the trail — worth filling in for bulk migrations, so
+    /// the record explains itself months later.
+    pub reason: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

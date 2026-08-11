@@ -19,6 +19,7 @@
 //! `ArchitectAuth` directly, and adding them later is purely additive —
 //! new trait methods, no re-mount.
 
+use crate::email_change::AuthEmailChange;
 use crate::{AuthFlowError, AuthSessionBundle, AuthUser, SignInEmailPassword, SignUpEmailPassword};
 use uuid::Uuid;
 
@@ -40,6 +41,47 @@ pub struct OrgMember {
 /// `AuthClientMiddleware` / `auth-client`'s `TokenStoreMiddleware`);
 /// `AuthServerMiddleware` parses it back out on the server side.
 pub const AUTHORIZATION_METADATA_KEY: &str = "authorization";
+
+/// Wire form of a self-service email change.
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+pub struct ChangeEmailRequest {
+    /// Identifies the account; the change always applies to the
+    /// session's own user.
+    pub session_token: String,
+    pub new_email: String,
+}
+
+/// Wire form of a self-service password change.
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+pub struct ChangePasswordRequest {
+    /// Identifies the account. The change always applies to the session's
+    /// own user — there is no target parameter, by design.
+    pub session_token: String,
+    /// Proof of possession. Required even with a valid session, so a
+    /// stolen token alone cannot take an account over.
+    pub current_password: String,
+    pub new_password: String,
+}
+
+/// Wire form of an operator-performed email migration.
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+pub struct MigrateUserEmailRequest {
+    /// Authorizes the call AND identifies who to record as `changed_by`.
+    pub session_token: String,
+    /// The account being moved. Not the caller's own id — an operator
+    /// migrates someone else.
+    pub user_id: uuid::Uuid,
+    pub new_email: String,
+    /// Free text for the trail; worth filling in on bulk migrations.
+    pub reason: Option<String>,
+}
+
+/// Wire form of a history read.
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+pub struct EmailHistoryRequest {
+    pub session_token: String,
+    pub user_id: uuid::Uuid,
+}
 
 // r[impl auth.transport.vox-schema]
 #[architect::rpc]
@@ -84,4 +126,74 @@ pub trait AuthService {
     /// implementations fall back to enumerating the org store's users
     /// with role `"member"` so the list is never spuriously empty.
     async fn list_org_members(&self, token: String) -> Result<Vec<OrgMember>, AuthFlowError>;
+
+    /// Move an account onto a different email, keeping its user id, and
+    /// append to its history trail (`auth_proto::email_change`).
+    ///
+    /// Takes the TARGET's `user_id` rather than deriving it from the
+    /// session, because the common case is an operator migrating someone
+    /// who can no longer sign in with the old address. The session is the
+    /// AUTHORIZATION — the caller must hold a valid one for this org —
+    /// and is recorded as `changed_by`, so the trail says who did it.
+    async fn migrate_user_email(
+        &self,
+        input: MigrateUserEmailRequest,
+    ) -> Result<AuthUser, AuthFlowError>;
+
+    /// Every address an account has held, oldest first. Same
+    /// authorization as the migration itself.
+    async fn list_email_history(
+        &self,
+        input: EmailHistoryRequest,
+    ) -> Result<Vec<AuthEmailChange>, AuthFlowError>;
+
+    /// Change your OWN password.
+    ///
+    /// Self-service by construction: the session names the account, and
+    /// the current password must be supplied — so holding a stolen
+    /// session is not enough to lock the owner out, and knowing the
+    /// password is not enough without a session. The flow also enforces
+    /// strength and rejects known-breached passwords.
+    ///
+    /// Distinct from an operator reset, which needs neither and is
+    /// therefore not exposed here at all.
+    async fn change_password(&self, input: ChangePasswordRequest) -> Result<(), AuthFlowError>;
+
+    /// Change your OWN email.
+    ///
+    /// Self-service counterpart to the operator migration: the session
+    /// names the account, so there is no target parameter and no way to
+    /// move someone else's address. Appends to the same history trail,
+    /// recorded with no `changed_by` because the owner did it.
+    ///
+    /// The new address starts unverified — it has not been proven to
+    /// belong to anyone yet.
+    async fn change_email(&self, input: ChangeEmailRequest) -> Result<AuthUser, AuthFlowError>;
+
+    /// Set your OWN display profile — the name and avatar other people
+    /// see. Self-service like the two above: the session names the
+    /// account, so there is no target parameter.
+    ///
+    /// `None` leaves a field alone; `Some("")` clears it. That
+    /// distinction matters for a federated fan-out, where "the home
+    /// didn't mention the avatar" and "the home cleared the avatar"
+    /// must not collapse into the same write.
+    ///
+    /// Username is deliberately NOT here — it is an identifier with a
+    /// uniqueness constraint, not display text, and it has its own
+    /// flow.
+    async fn update_profile(&self, input: UpdateProfileRequest) -> Result<AuthUser, AuthFlowError>;
+}
+
+/// Wire form of a self-service profile change.
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+#[repr(C)]
+pub struct UpdateProfileRequest {
+    /// Identifies the account; the change always applies to the
+    /// session's own user.
+    pub session_token: String,
+    /// Display name. `None` = leave unchanged, `Some("")` = clear.
+    pub name: Option<String>,
+    /// Avatar URL. `None` = leave unchanged, `Some("")` = clear.
+    pub image: Option<String>,
 }

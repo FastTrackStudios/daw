@@ -20,7 +20,10 @@ pub struct TakePeakData {
 /// magnitudes (NOT dB; convert client-side, see
 /// `daw_standalone::metering::linear_to_db` for the reference curve).
 /// Instantaneous block peak + decaying peak-hold, per channel.
-#[derive(Clone, Copy, Debug, Default, Facet)]
+// `PartialEq` so a UI can memo on it: a meter frame arrives thirty times a
+// second and most strips are unchanged in most frames, so "did this track's
+// levels actually move?" is the question that decides whether to re-render.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Facet)]
 pub struct TrackLevels {
     /// Instantaneous block peak, left channel (linear `0..1`).
     pub peak_left: f32,

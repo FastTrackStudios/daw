@@ -12,6 +12,7 @@ use daw_proto::{
     BeatAttachMode, DawError, DawResult, Duration, FadeShape, Item, ItemRef, PositionInSeconds,
     ProjectContext, TrackRef,
 };
+use uuid::Uuid;
 
 use crate::sync::{ItemEntry, ProjectState, Standalone};
 
@@ -276,6 +277,27 @@ impl Items for Standalone {
                         item: new_item.clone(),
                     },
                 );
+
+                // The takes come with it. An item without them is not a
+                // duplicate of anything: `item.take_count` was copied
+                // and says 1, so the copy *claims* a take, and every
+                // take call on it then fails with "item not found" —
+                // which reads as the item being missing rather than as
+                // its takes never having been made.
+                //
+                // Take guids are minted fresh. Two takes sharing a guid
+                // means `TakeRef::Guid` resolves to whichever comes
+                // first, so an edit aimed at the copy lands on the
+                // original.
+                if let Some(src_takes) = p.takes.get(&item_guid).cloned() {
+                    let mut takes = src_takes;
+                    for take in &mut takes.takes {
+                        take.guid = Uuid::new_v4().to_string();
+                        take.item_guid = new_guid.clone();
+                    }
+                    p.takes.insert(new_guid.clone(), takes);
+                }
+
                 Some((new_guid, new_item))
             })
             .ok()

@@ -143,7 +143,7 @@ fn render_cell(svg: &str, st: &StateStyle, scale: f32, cw: u32, ch: u32) -> Resu
 /// Rounded rect between two corners.
 fn round_rect(x0: f32, y0: f32, x1: f32, y1: f32, radius: f32) -> Path {
     let r = radius.clamp(0.0, (x1 - x0).min(y1 - y0) / 2.0);
-    const K: f32 = 0.552_284_75; // cubic approximation of a quarter circle
+    const K: f32 = 0.552_284_8; // cubic approximation of a quarter circle
     let kr = K * r;
     let mut pb = PathBuilder::new();
     pb.move_to(x0 + r, y0);

@@ -3,17 +3,19 @@
 //! Wraps a [`LayerRouter`](crate::layer::LayerRouter) so every inbound call
 //! is checked against an [`architect_permissions::PermissionEngine`] BEFORE
 //! dispatch. vox's `ServerMiddleware` can observe requests but cannot refuse
-//! them; a wrapping [`Handler`] can — it owns the reply sink, so a denied
+//! them; a wrapping [`vox::Handler`] can — it owns the reply sink, so a denied
 //! call is answered with an error and the inner handler never runs.
 //!
 //! Granularity: METHOD-level. Each service registers a
-//! [`ServicePermits`] table mapping method → (action, resource template);
-//! the gate checks the template's [`coarse_resource`]
+//! [`architect_permissions::ServicePermits`] table mapping method →
+//! (action, resource template);
+//! the gate checks the template's `coarse_resource`
 //! (`vault/{path}` → `vault/**`). Argument-level distinctions (the exact
 //! `{path}`) are the service impl's job via a direct
-//! [`PermissionEngine::check`] — same engine, finer resource. Methods
+//! [`architect_permissions::PermissionEngine::check`] — same engine, finer
+//! resource. Methods
 //! missing from a registered table are DENIED (fail-closed); services with
-//! no table follow the gate's [`UnlistedPolicy`].
+//! no table follow the gate's `UnlistedPolicy`.
 //!
 //! Deny wire form: `VoxError::InvalidPayload("permission denied: …")`,
 //! encoded in the METHOD'S OWN response wire shape
@@ -155,13 +157,42 @@ impl PermissionsGate {
         PermissionedRouter {
             inner,
             gate: Arc::new(self),
+            connection_bearer: None,
         }
     }
 
     /// Wrap with an ALREADY-SHARED gate (one gate, many lanes/connections —
     /// the per-connection serve path).
     pub fn wrap_shared<H>(gate: Arc<PermissionsGate>, inner: H) -> PermissionedRouter<H> {
-        PermissionedRouter { inner, gate }
+        PermissionedRouter {
+            inner,
+            gate,
+            connection_bearer: None,
+        }
+    }
+
+    /// [`wrap_shared`](Self::wrap_shared) with a **connection-scoped**
+    /// bearer: the identity presented ONCE at transport establish (a
+    /// WebSocket upgrade header or subprotocol) rather than on each call.
+    ///
+    /// Browsers cannot set arbitrary WebSocket headers and must not put a
+    /// token in the URL (it lands in proxy + access logs), so the token
+    /// rides the handshake and applies to every call on that connection.
+    /// Per-call `authorization` metadata still WINS where present, so a
+    /// per-typed-client [`ClientMiddleware`] and this can coexist — a
+    /// connection carrying one identity can still make a call as another.
+    ///
+    /// [`ClientMiddleware`]: vox::ClientMiddleware
+    pub fn wrap_shared_with_bearer<H>(
+        gate: Arc<PermissionsGate>,
+        inner: H,
+        bearer: Option<String>,
+    ) -> PermissionedRouter<H> {
+        PermissionedRouter {
+            inner,
+            gate,
+            connection_bearer: bearer.map(Arc::from),
+        }
     }
 
     /// The engine this gate consults — for mounting a `PermissionsService`
@@ -254,6 +285,10 @@ enum GateOutcome {
 pub struct PermissionedRouter<H = LayerRouter> {
     inner: H,
     gate: Arc<PermissionsGate>,
+    /// Identity presented at transport establish, applied to every call on
+    /// this connection when the call itself carries no `authorization`
+    /// metadata. See [`PermissionsGate::wrap_shared_with_bearer`].
+    connection_bearer: Option<Arc<str>>,
 }
 
 impl<H> PermissionedRouter<H> {
@@ -284,6 +319,10 @@ where
             let c = call.get();
             (c.method_id, PermissionsGate::bearer_from(&c.metadata))
         };
+        // Per-call metadata wins; the connection's establish-time bearer is
+        // the fallback. Browsers can't set WebSocket headers per call, so
+        // for the web client this IS the identity on every call.
+        let token = token.or_else(|| self.connection_bearer.as_deref().map(str::to_owned));
         // Everything below runs inside ONE span, which is the call's wide
         // event. This matters for ordering: `decide` resolves the identity
         // and audits the permission decision BEFORE dispatching, so it runs

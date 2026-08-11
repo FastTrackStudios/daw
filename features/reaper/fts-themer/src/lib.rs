@@ -22,16 +22,25 @@
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
+#[cfg(feature = "apply")]
+pub mod apply;
 pub mod color;
+#[cfg(feature = "generate")]
+pub mod generate;
 pub mod groups;
 pub mod ini;
 #[cfg(feature = "fs")]
 pub mod recolor;
+#[cfg(feature = "apply")]
+pub mod restyle;
 pub mod rtconfig;
 #[cfg(feature = "shot")]
 pub mod shot;
 #[cfg(feature = "fs")]
 pub mod theme;
+pub mod thresholds;
+#[cfg(feature = "apply")]
+pub mod walter_colors;
 
 pub use color::Rgb;
 pub use groups::Group;

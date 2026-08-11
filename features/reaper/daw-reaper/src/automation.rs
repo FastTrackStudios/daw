@@ -11,6 +11,7 @@
 //! need state-chunk parsing or REAPER APIs not exposed in the pinned
 //! reaper-rs version. Logged at debug so the trait still wires up.
 
+use crate::item::{ReaperItem, ReaperTake};
 use crate::safe_wrappers::envelope as env_sw;
 use crate::track::{resolve_project, resolve_track};
 use daw_proto::{
@@ -22,8 +23,10 @@ use daw_proto::{
     primitives::{AutomationMode, PositionInSeconds},
     track::TrackRef,
 };
+use daw_proto::{ItemRef, TakeEnvelopeKind, TakeRef};
 use reaper_high::Reaper;
 use reaper_low::raw::TrackEnvelope;
+use reaper_medium::ProjectContext as ReaperProjectContext;
 use tracing::debug;
 
 /// Map a raw REAPER shape index to the proto enum. Unknown values
@@ -64,6 +67,16 @@ fn envelope_type_chunk_tag(ty: EnvelopeType) -> &'static str {
         EnvelopeType::WidthPrefx => "<WIDTHENV",
         EnvelopeType::Mute => "<MUTEENV",
         EnvelopeType::FxParam => "<PARMENV",
+        // Take envelopes. REAPER exposes these on the take rather than the
+        // track, so they never reach a track-envelope lookup; the tags are
+        // here so the mapping is total and the `.daw` format's envelope
+        // types all have a REAPER counterpart.
+        EnvelopeType::PlayRate => "<SPEEDENV",
+        EnvelopeType::Pitch => "<PITCHENV",
+        // An envelope kind this enum does not name yet, carried through the
+        // `.daw` format by its original chunk name. There is nothing to
+        // disambiguate for one, so it falls back to the display-name lookup.
+        EnvelopeType::Custom => "",
     }
 }
 
@@ -81,20 +94,58 @@ const TRACK_ENVELOPE_TYPES: &[EnvelopeType] = &[
     EnvelopeType::Mute,
 ];
 
+/// Whether a lookup may bring the envelope into existence.
+///
+/// Only take envelopes can be created by a lookup at all — track
+/// envelopes are always present — but the distinction has to be made
+/// here because the *creation* is a side effect of resolving. Reading
+/// an envelope must never conjure one: a caller asking what points a
+/// take has would otherwise leave a new envelope behind on every take
+/// it looked at, and the undo history to match.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum IfMissing {
+    /// Run the action that makes it. For writes only.
+    Create,
+    /// Report `None`.
+    Decline,
+}
+
 /// Resolve a `TrackEnvelope*` from a [`EnvelopeLocation`]. Must be called
 /// on the REAPER main thread.
 fn resolve_envelope(
     project_ctx: &ProjectContext,
     location: &EnvelopeLocation,
+    if_missing: IfMissing,
 ) -> Option<*mut TrackEnvelope> {
     let project = resolve_project(project_ctx)?;
-    let track = resolve_track(&project, &location.track)?;
     let low = Reaper::get().medium_reaper().low();
+
+    // Take envelopes are resolved before the track is, because they do
+    // not have one to speak of: `EnvelopeLocation.track` is documented
+    // as ignored for them, and a caller with only an item guid should
+    // not have to invent a track ref to satisfy a lookup it does not
+    // use.
+    if let EnvelopeRef::Take {
+        item_guid,
+        take_guid,
+        kind,
+    } = &location.envelope
+    {
+        return resolve_take_envelope(item_guid, take_guid, *kind, if_missing);
+    }
+
+    let track = resolve_track(&project, &location.track)?;
     let track_ptr = track.raw().ok()?.as_ptr();
 
     match &location.envelope {
         EnvelopeRef::Type(ty) => {
             let tag = envelope_type_chunk_tag(*ty);
+            if tag.is_empty() {
+                // `EnvelopeType::Custom` has no chunk tag to look up — it is
+                // only meaningful when the caller also knows the name, which
+                // is what `EnvelopeRef::ByName` is for.
+                return None;
+            }
             let env = env_sw::get_track_envelope_by_chunk_name(low, track_ptr, tag);
             if !env.is_null() { Some(env) } else { None }
         }
@@ -113,12 +164,131 @@ fn resolve_envelope(
             // backend supports them; REAPER backend follow-up.
             None
         }
-        EnvelopeRef::Take { .. } => {
-            // Take envelopes need `GetTakeEnvelope` / `GetTakeEnvelopeByName`;
-            // not yet ported. Standalone backend supports them.
-            None
+        // Handled above, before the track lookup.
+        EnvelopeRef::Take { .. } => None,
+    }
+}
+
+/// REAPER's display name for a take envelope kind.
+fn take_envelope_name(kind: TakeEnvelopeKind) -> &'static str {
+    match kind {
+        TakeEnvelopeKind::Volume => "Volume",
+        TakeEnvelopeKind::Pan => "Pan",
+        TakeEnvelopeKind::Mute => "Mute",
+        TakeEnvelopeKind::Pitch => "Pitch",
+    }
+}
+
+/// The action that toggles a take envelope into existence.
+///
+/// There is no `CreateTakeEnvelope` in the API — a take envelope is
+/// brought into being by running the same action the user would, on the
+/// selected item. Only the two verified in the wild are claimed here;
+/// guessing the others would produce an action id that silently does
+/// something else.
+fn take_envelope_toggle_action(kind: TakeEnvelopeKind) -> Option<u32> {
+    match kind {
+        TakeEnvelopeKind::Volume => Some(40693),
+        TakeEnvelopeKind::Pitch => Some(41612),
+        TakeEnvelopeKind::Pan | TakeEnvelopeKind::Mute => None,
+    }
+}
+
+/// Find a take envelope by kind, without creating it.
+fn find_take_envelope(
+    take: reaper_medium::MediaItemTake,
+    kind: TakeEnvelopeKind,
+) -> Option<*mut TrackEnvelope> {
+    let low = Reaper::get().medium_reaper().low();
+    let want = take_envelope_name(kind);
+
+    // By name first, since it is one call...
+    if let Ok(name) = std::ffi::CString::new(want) {
+        let env = unsafe { low.GetTakeEnvelopeByName(take.as_ptr(), name.as_ptr()) };
+        if !env.is_null() {
+            return Some(env);
         }
     }
+    // ...then by enumeration, because the name lookup is unreliable
+    // across REAPER versions and localisations, and the enumeration is
+    // what actually works.
+    let count = unsafe { low.CountTakeEnvelopes(take.as_ptr()) };
+    for i in 0..count {
+        let env = unsafe { low.GetTakeEnvelope(take.as_ptr(), i) };
+        if env.is_null() {
+            continue;
+        }
+        let mut buf = vec![0i8; 128];
+        let ok = unsafe { low.GetEnvelopeName(env, buf.as_mut_ptr(), buf.len() as i32) };
+        if !ok {
+            continue;
+        }
+        let name = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) };
+        if name.to_string_lossy() == want {
+            return Some(env);
+        }
+    }
+    None
+}
+
+/// Resolve a take envelope, creating it if the take has none.
+///
+/// Creation is the interesting part. REAPER exposes no API for it, so
+/// the envelope is toggled into existence by running the same action a
+/// user would — which means the item has to be *selected* first, since
+/// that is what the action operates on. The previous selection is put
+/// back afterwards: an editor that silently reselects the user's items
+/// is worse than one that cannot make an envelope.
+fn resolve_take_envelope(
+    item_guid: &str,
+    take_guid: &str,
+    kind: TakeEnvelopeKind,
+    if_missing: IfMissing,
+) -> Option<*mut TrackEnvelope> {
+    let item = ReaperItem::resolve_item(
+        &ItemRef::Guid(item_guid.to_string()),
+        ReaperProjectContext::CurrentProject,
+    )?;
+    let take_ref = if take_guid.is_empty() {
+        TakeRef::Active
+    } else {
+        TakeRef::Guid(take_guid.to_string())
+    };
+    let take = ReaperTake::resolve_take(item, &take_ref)?;
+
+    if let Some(env) = find_take_envelope(take, kind) {
+        return Some(env);
+    }
+
+    if if_missing == IfMissing::Decline {
+        return None;
+    }
+
+    // Note this is a *toggle*. It is only reached when the envelope was
+    // not found, so it can only turn one on — but that is why the
+    // `find` above is not merely an optimisation.
+    let action = take_envelope_toggle_action(kind)?;
+    let medium = Reaper::get().medium_reaper();
+    let low = medium.low();
+
+    // Select only this item, run the toggle, restore the selection.
+    let previously: Vec<_> = (0..unsafe { low.CountSelectedMediaItems(std::ptr::null_mut()) })
+        .filter_map(|i| {
+            let p = unsafe { low.GetSelectedMediaItem(std::ptr::null_mut(), i) };
+            (!p.is_null()).then_some(p)
+        })
+        .collect();
+    unsafe {
+        low.Main_OnCommand(40289, 0); // Item: Unselect all items
+        low.SetMediaItemSelected(item.as_ptr(), true);
+        low.Main_OnCommand(action as i32, 0);
+        low.SetMediaItemSelected(item.as_ptr(), false);
+        for p in previously {
+            low.SetMediaItemSelected(p, true);
+        }
+    }
+
+    find_take_envelope(take, kind)
 }
 
 /// Build an [`Envelope`] proto struct from a track + envelope handle.
@@ -221,7 +391,7 @@ impl Automation for crate::Reaper {
 
     fn envelope(&self, project: ProjectContext, location: EnvelopeLocation) -> Option<Envelope> {
         debug!("Reaper::envelope");
-        let env = resolve_envelope(&project, &location)?;
+        let env = resolve_envelope(&project, &location, IfMissing::Decline)?;
         let proj = resolve_project(&project)?;
         let track = resolve_track(&proj, &location.track)?;
         let track_guid = track.guid().to_string_without_braces();
@@ -251,7 +421,7 @@ impl Automation for crate::Reaper {
 
     fn points(&self, project: ProjectContext, location: EnvelopeLocation) -> Vec<EnvelopePoint> {
         debug!("Reaper::points");
-        let Some(env) = resolve_envelope(&project, &location) else {
+        let Some(env) = resolve_envelope(&project, &location, IfMissing::Decline) else {
             return Vec::new();
         };
         collect_points(env)
@@ -283,7 +453,7 @@ impl Automation for crate::Reaper {
     ) -> f64 {
         debug!("Reaper::value_at");
         (|| -> Option<f64> {
-            let env = resolve_envelope(&project, &location)?;
+            let env = resolve_envelope(&project, &location, IfMissing::Decline)?;
             let low = Reaper::get().medium_reaper().low();
             let (value, _, _, _) =
                 env_sw::evaluate_envelope(low, env, time.as_seconds(), 44100.0, 1)?;
@@ -300,7 +470,10 @@ impl Automation for crate::Reaper {
     ) -> u32 {
         debug!("Reaper::add_point");
         (|| -> Option<u32> {
-            let env = resolve_envelope(&project, &location)?;
+            // The one lookup allowed to create: adding a point to a
+            // take envelope is exactly the moment the envelope should
+            // start existing.
+            let env = resolve_envelope(&project, &location, IfMissing::Create)?;
             let low = Reaper::get().medium_reaper().low();
             let ok = env_sw::insert_envelope_point(
                 low,
@@ -337,7 +510,7 @@ impl Automation for crate::Reaper {
 
     fn delete_point(&self, project: ProjectContext, location: EnvelopeLocation, index: u32) {
         debug!("Reaper::delete_point index={index}");
-        if let Some(env) = resolve_envelope(&project, &location) {
+        if let Some(env) = resolve_envelope(&project, &location, IfMissing::Decline) {
             let low = Reaper::get().medium_reaper().low();
             let _ = env_sw::delete_envelope_point(low, env, index);
         }
@@ -350,7 +523,7 @@ impl Automation for crate::Reaper {
         params: SetPointParams,
     ) {
         debug!("Reaper::set_point index={}", params.index);
-        if let Some(env) = resolve_envelope(&project, &location) {
+        if let Some(env) = resolve_envelope(&project, &location, IfMissing::Decline) {
             let low = Reaper::get().medium_reaper().low();
             let _ = env_sw::set_envelope_point(
                 low,
@@ -373,7 +546,7 @@ impl Automation for crate::Reaper {
         range: TimeRangeParams,
     ) {
         debug!("Reaper::delete_points_in_range");
-        if let Some(env) = resolve_envelope(&project, &location) {
+        if let Some(env) = resolve_envelope(&project, &location, IfMissing::Decline) {
             let low = Reaper::get().medium_reaper().low();
             let _ = env_sw::delete_envelope_points_in_range(
                 low,

@@ -210,8 +210,99 @@ impl MidiPitchBendCreate {
     }
 }
 
+/// Everything in a take, in one round trip.
+///
+/// Per-index accessors are fine for a tweak but unusable for an editor:
+/// loading a 500-note take through `notes()` plus a `ccs()` call per
+/// controller plus `pitch_bends()` is a request storm, and writing an
+/// edit back one setter at a time is worse. A surface that wants to
+/// *own* a take reads one of these and writes one back.
+#[derive(Clone, Debug, Facet, Default)]
+pub struct MidiTakeSnapshot {
+    pub notes: Vec<MidiNote>,
+    pub ccs: Vec<MidiCC>,
+    pub pitch_bends: Vec<MidiPitchBend>,
+    pub channel_pressures: Vec<MidiChannelPressure>,
+    pub poly_pressures: Vec<MidiPolyPressure>,
+    pub note_expressions: Vec<MidiNoteExpression>,
+    /// Ticks per quarter note the positions are expressed in.
+    pub ppq: f64,
+    /// Take length in PPQ.
+    pub length_ppq: f64,
+}
+
+/// A take's contents to write, without indices.
+///
+/// Separate from [`MidiTakeSnapshot`] because a write has no meaningful
+/// indices to supply — they are assigned by the backend — and reusing
+/// the read type would invite round-tripping stale ones.
+#[derive(Clone, Debug, Facet, Default)]
+pub struct MidiTakeContent {
+    pub notes: Vec<MidiNoteCreate>,
+    pub ccs: Vec<MidiCCCreate>,
+    pub pitch_bends: Vec<MidiPitchBendCreate>,
+    pub note_expressions: Vec<MidiNoteExpressionCreate>,
+    /// Channel pressure (mono aftertouch).
+    ///
+    /// Added for #167: without it, an MPE editor had to write pressure
+    /// out as CC11 while reading it back from real channel pressure, so
+    /// the dimension silently did not survive a round trip. A field per
+    /// event kind the snapshot already reads is the shape that makes
+    /// read and write symmetrical.
+    #[facet(default)]
+    pub channel_pressures: Vec<MidiChannelPressureCreate>,
+}
+
+/// How a write treats what is already in the take.
+#[derive(Clone, Copy, Debug, Facet, Default, PartialEq, Eq)]
+#[repr(u8)]
+pub enum WriteMode {
+    /// Replace the take's contents entirely.
+    #[default]
+    Replace,
+    /// Add to what is there.
+    Merge,
+    /// Replace only within the written span, leaving the rest — the
+    /// mode an editor working on a selection wants.
+    ReplaceRange,
+}
+
 #[architect::rpc]
 pub trait Midi {
+    // ── Bulk take access ───────────────────────────────────────────
+
+    /// Read everything in a take in one call.
+    fn read_take(&self, location: MidiTakeLocation) -> MidiTakeSnapshot;
+
+    /// Write a take's contents in one call, as a single undo point.
+    ///
+    /// Returns the notes' new indices, in the order supplied.
+    fn write_take(
+        &self,
+        location: MidiTakeLocation,
+        content: MidiTakeContent,
+        mode: WriteMode,
+    ) -> Vec<u32>;
+
+    /// Replace a PPQ span, leaving everything outside it untouched.
+    fn replace_range(
+        &self,
+        location: MidiTakeLocation,
+        range: PpqRange,
+        content: MidiTakeContent,
+    ) -> Vec<u32>;
+
+    /// Read a standard MIDI file into a take snapshot.
+    ///
+    /// Goes through the DAW API rather than a separate file path so a
+    /// caller reads a `.mid` and a live take through one surface, and
+    /// gets the same types back either way.
+    fn read_midi_file(&self, path: String, track_index: u32) -> Option<MidiTakeSnapshot>;
+
+    /// Write a snapshot out as a standard MIDI file.
+    fn write_midi_file(&self, path: String, content: MidiTakeContent, ppq: f64) -> bool;
+
+
     // ── Notes ──────────────────────────────────────────────────────
 
     fn notes(&self, location: MidiTakeLocation) -> Vec<MidiNote>;

@@ -32,7 +32,7 @@ use fragile::Fragile;
 use reaper_high::Reaper as HighReaper;
 use reaper_low::{PluginContext, Reaper as LowReaper, Swell};
 use reaper_macros::reaper_extension_plugin;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// REAPER's built-in misc timer id (the one driven by `plugin_register("timer", ...)`).
 const MISC_TIMER_ID: usize = 666;
@@ -122,6 +122,14 @@ impl App {
     }
 
     fn timer(&self) {
+        // Everything below runs with this extension's tokio runtime in
+        // context. A panel's futures are polled by dioxus's scheduler on
+        // this thread, and the daw subscriptions they start call
+        // `tokio::task::spawn` — which aborts the process, non-unwinding,
+        // when no runtime is current. That took REAPER down with it the
+        // first time a panel actually opened.
+        let _guard = self.runtime.handle().enter();
+
         self.runtime.process_tasks();
         // Drain pending actions on the main thread — handlers touch the
         // thread-local dock panel registry, so they MUST run here, not
@@ -137,33 +145,22 @@ impl App {
     }
 }
 
-async fn drive_action_events(mut rx: vox::Rx<ActionEvent>, tx: Sender<String>) {
+async fn drive_action_events(
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<ActionEvent>,
+    tx: Sender<String>,
+) {
     info!("FTS UI action dispatch loop started");
-    loop {
-        match rx.recv().await {
-            Ok(Some(event_ref)) => {
-                let mut event = None;
-                let _ = event_ref.map(|value| {
-                    event = Some(value.clone());
-                });
-                let Some(ActionEvent::Triggered { command_name }) = event else {
-                    continue;
-                };
-                if tx.send(command_name).is_err() {
-                    info!("FTS UI dispatch channel closed");
-                    break;
-                }
-            }
-            Ok(None) => {
-                info!("FTS UI action stream closed");
-                break;
-            }
-            Err(e) => {
-                warn!("FTS UI action stream error: {e:?}");
-                break;
-            }
+    while let Some(event) = rx.recv().await {
+        let ActionEvent::Triggered { command_name } = event else {
+            continue;
+        };
+        debug!(%command_name, "action received");
+        if tx.send(command_name).is_err() {
+            info!("FTS UI dispatch channel closed");
+            break;
         }
     }
+    info!("FTS UI action stream closed");
 }
 
 extern "C" fn timer_callback() {
@@ -208,18 +205,60 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+/// Logs to a file *and* to stderr.
+///
+/// The file is what a human tails while REAPER runs. Stderr is what an
+/// automated capture gets: a screenshot harness redirects REAPER's output
+/// and would otherwise see nothing at all from this extension, which makes
+/// "the panel did not open" indistinguishable from "the extension never
+/// loaded". Both destinations, because they answer different questions.
+///
+/// The path follows `$XDG_STATE_HOME` like the other FTS extension rather
+/// than being hardcoded under `/tmp`, and `FTS_DIOXUS_EXT_LOG` overrides it
+/// outright — a harness running REAPER against a throwaway profile wants
+/// the log somewhere it chose, not somewhere it has to go looking for.
 fn init_tracing() {
-    let Ok(log_file) = std::fs::File::create("/tmp/daw-reaper-dioxus-ext.log") else {
-        return;
+    use tracing_subscriber::layer::{Layer, SubscriberExt};
+
+    let path = std::env::var("FTS_DIOXUS_EXT_LOG")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| log_dir().join("daw-reaper-dioxus-ext.log"));
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+
+    let filter = || {
+        tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
     };
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(std::sync::Mutex::new(log_file))
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .finish();
-    let _ = tracing::subscriber::set_global_default(subscriber);
+    let stderr = tracing_subscriber::fmt::layer()
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .with_filter(filter());
+
+    let registry = tracing_subscriber::registry().with(stderr);
+    let _ = match std::fs::File::create(&path) {
+        Ok(file) => {
+            let to_file = tracing_subscriber::fmt::layer()
+                .with_writer(std::sync::Mutex::new(file))
+                .with_ansi(false)
+                .with_filter(filter());
+            tracing::subscriber::set_global_default(registry.with(to_file))
+        }
+        Err(_) => tracing::subscriber::set_global_default(registry),
+    };
+    info!(log = %path.display(), "tracing initialised");
+}
+
+/// `$XDG_STATE_HOME/fasttrackstudio`, falling back to `~/.local/state`.
+fn log_dir() -> std::path::PathBuf {
+    std::env::var("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/tmp".into()))
+                .join(".local/state")
+        })
+        .join("fasttrackstudio")
 }
 
 /// Bump REAPER's `MISC_TIMER` (id 666) on the main HWND from ~30Hz to 60Hz.

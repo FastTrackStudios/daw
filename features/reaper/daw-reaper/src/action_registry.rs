@@ -211,7 +211,12 @@ fn titlecase_underscored(s: &str) -> String {
 /// Uses a broadcast channel so this is non-blocking.
 fn notify_action_triggered(command_name: String) {
     let tx = action_broadcaster();
-    if tx.receiver_count() == 0 {
+    // Logged either way: "REAPER never called us" and "REAPER called us and
+    // nobody was listening" are different bugs that look identical from the
+    // outside — an action that appears to do nothing.
+    let receivers = tx.receiver_count();
+    debug!(%command_name, receivers, "action triggered");
+    if receivers == 0 {
         return;
     }
     let _ = tx.send(command_name);
@@ -999,9 +1004,11 @@ pub fn register_action_in_section_main_thread(
         .insert(id, trigger);
 
     info!(command_name, section_id, id, "Registered action in section");
-    // Held for the process lifetime: dropping a `RegisteredAction`
-    // unregisters it, and these actions live as long as the extension.
-    std::mem::forget(action);
+    // The handle is deliberately not kept: `RegisteredAction` has no
+    // `Drop` impl (unregistering is the explicit `unregister()` call),
+    // so letting it fall out of scope leaves the action registered, and
+    // these live as long as the extension. This used to `mem::forget`
+    // it, which did the same thing while implying the opposite.
     id
 }
 

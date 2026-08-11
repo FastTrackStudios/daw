@@ -12,9 +12,22 @@ const CORPUS: &[(&str, &str)] = &[
     ("imperial", "extracted/imperial"),
 ];
 
+/// Where the third-party themes live.
+///
+/// `REAPER_THEME_CORPUS` wins; otherwise the checkout beside this one, then
+/// the old hardcoded path. The hardcoded default was one absolute home
+/// directory, so the corpus silently vanished for everyone else — and the
+/// test then failed rather than skipping, which is the opposite of what its
+/// own doc comment promises.
 fn corpus_root() -> String {
-    std::env::var("REAPER_THEME_CORPUS")
-        .unwrap_or_else(|_| "/home/cody/Development/FastTrackStudio/reaper-theme".to_string())
+    if let Ok(from_env) = std::env::var("REAPER_THEME_CORPUS") {
+        return from_env;
+    }
+    let beside = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../../reaper-theme");
+    if std::path::Path::new(beside).is_dir() {
+        return beside.to_string();
+    }
+    "/home/cody/Development/FastTrackStudio/reaper-theme".to_string()
 }
 
 fn env_for(rt: &ReaperTheme, w: f32, h: f32) -> Env {
@@ -103,5 +116,14 @@ fn corpus_layouts_resolve_sane_mcp_geometry() {
             layouts.len()
         );
     }
-    assert!(themes_checked > 0, "no corpus themes available");
+    // Skipped, not failed, when the corpus is not on this machine — the
+    // themes are third-party and not vendored, and a developer without them
+    // should still get a green suite. A theme that IS present and resolves
+    // nothing still fails, above.
+    if themes_checked == 0 {
+        eprintln!(
+            "no corpus themes under {} — set REAPER_THEME_CORPUS to run this",
+            corpus_root()
+        );
+    }
 }

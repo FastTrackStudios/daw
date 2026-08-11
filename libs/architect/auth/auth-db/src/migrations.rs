@@ -7,7 +7,10 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(m20260513_000001_create_auth_tables::Migration)]
+        vec![
+            Box::new(m20260513_000001_create_auth_tables::Migration),
+            Box::new(m20260809_000001_create_email_history::Migration),
+        ]
     }
 }
 
@@ -833,5 +836,112 @@ mod tests {
             .into_iter()
             .map(|row| row.try_get::<String>("", "name").expect("schema name"))
             .collect()
+    }
+}
+
+/// Append-only trail of every email an account has held.
+///
+/// A SEPARATE migration rather than a column on the original table: that
+/// one has already run everywhere, and editing an applied migration means
+/// existing databases silently never get the change. Sea-orm tracks these
+/// by name, so a new one is the only thing that reaches a live server.
+mod m20260809_000001_create_email_history {
+    use sea_orm_migration::prelude::*;
+
+    pub struct Migration;
+
+    // NOT `#[derive(DeriveMigrationName)]`. That derives the name from the
+    // FILE, and both migrations live in this one — so deriving gives them
+    // the same version string and the second insert trips
+    // `UNIQUE constraint failed: seaql_migrations.version`, taking auth
+    // down on boot. Named explicitly instead, which is also what makes it
+    // safe to keep adding migrations to this file.
+    impl MigrationName for Migration {
+        fn name(&self) -> &str {
+            "m20260809_000001_create_email_history"
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MigrationTrait for Migration {
+        async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .create_table(
+                    Table::create()
+                        .table(AuthUserEmailHistory::Table)
+                        .if_not_exists()
+                        .col(
+                            ColumnDef::new(AuthUserEmailHistory::Id)
+                                .uuid()
+                                .not_null()
+                                .primary_key(),
+                        )
+                        .col(ColumnDef::new(AuthUserEmailHistory::UserId).uuid().not_null())
+                        // Nullable: `auth_users.email` is nullable, so an
+                        // account can genuinely have had no address before.
+                        .col(ColumnDef::new(AuthUserEmailHistory::PreviousEmail).string())
+                        .col(
+                            ColumnDef::new(AuthUserEmailHistory::NewEmail)
+                                .string()
+                                .not_null(),
+                        )
+                        // NULL = the user changed their own address.
+                        .col(ColumnDef::new(AuthUserEmailHistory::ChangedBy).uuid())
+                        .col(ColumnDef::new(AuthUserEmailHistory::Reason).text())
+                        .col(
+                            ColumnDef::new(AuthUserEmailHistory::CreatedAt)
+                                .timestamp_with_time_zone()
+                                .not_null(),
+                        )
+                        .to_owned(),
+                )
+                .await?;
+
+            // Both directions are real queries: "what has this account
+            // been called" and "who was old@example.com".
+            manager
+                .create_index(
+                    Index::create()
+                        .name("idx_auth_user_email_history_user_id")
+                        .table(AuthUserEmailHistory::Table)
+                        .col(AuthUserEmailHistory::UserId)
+                        .if_not_exists()
+                        .to_owned(),
+                )
+                .await?;
+            manager
+                .create_index(
+                    Index::create()
+                        .name("idx_auth_user_email_history_previous_email")
+                        .table(AuthUserEmailHistory::Table)
+                        .col(AuthUserEmailHistory::PreviousEmail)
+                        .if_not_exists()
+                        .to_owned(),
+                )
+                .await
+        }
+
+        async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+            manager
+                .drop_table(
+                    Table::drop()
+                        .table(AuthUserEmailHistory::Table)
+                        .if_exists()
+                        .to_owned(),
+                )
+                .await
+        }
+    }
+
+    #[derive(Iden)]
+    enum AuthUserEmailHistory {
+        Table,
+        Id,
+        UserId,
+        PreviousEmail,
+        NewEmail,
+        ChangedBy,
+        Reason,
+        CreatedAt,
     }
 }

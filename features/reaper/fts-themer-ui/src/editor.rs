@@ -147,7 +147,7 @@ fn Swatch(name: String) -> Element {
     let mut editor = use_context::<Editor>();
     let is_color = groups::is_color(&name);
     let raw = editor.ini.read().int(&name).unwrap_or(0);
-    let dirty = editor.dirty.read().iter().any(|k| *k == name);
+    let dirty = editor.dirty.read().contains(&name);
 
     if !is_color {
         return rsx! {
@@ -162,7 +162,7 @@ fn Swatch(name: String) -> Element {
                             if let Ok(v) = e.value().parse::<i32>() {
                                 editor.ini.write().set_int(&name, v);
                                 let mut d = editor.dirty.write();
-                                if !d.iter().any(|k| *k == name) { d.push(name.clone()); }
+                                if !d.contains(&name) { d.push(name.clone()); }
                             }
                         }
                     },

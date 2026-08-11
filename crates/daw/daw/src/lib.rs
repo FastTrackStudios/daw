@@ -428,6 +428,12 @@ pub mod dawproject {
 #[cfg(feature = "test-harness")]
 pub mod test;
 
+/// Versioning a REAPER configuration — the ~350 KB that actually
+/// defines "your REAPER", filtered out of a ~360 MB resource directory.
+///
+/// Plain file work: no DAW connection, no feature gate.
+pub mod reaper_config;
+
 // ── CLI ─────────────────────────────────────────────────────────────────────
 //
 // The `daw` command-line surface (former `apps/daw-cli`), folded in behind

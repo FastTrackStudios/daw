@@ -308,6 +308,7 @@ impl Effects for Standalone {
             .ok()
             .flatten();
         if let Some(fx) = added {
+            self.republish_fx_counts(&guid, &chain);
             self.publish_fx_event(&guid, daw_proto::FxEvent::Added { context: chain, fx });
         }
         Some(new_guid)
@@ -368,6 +369,7 @@ impl Effects for Standalone {
         if let Some(plugin) = real_plugin {
             self.insert_plugin_instance(new_guid.clone(), plugin);
         }
+        self.republish_fx_counts(&guid, &request.context);
         Some(new_guid)
     }
 
@@ -388,6 +390,7 @@ impl Effects for Standalone {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&removed_guid);
+        self.republish_fx_counts(&guid, &target.context);
         self.publish_fx_event(
             &guid,
             daw_proto::FxEvent::Removed {

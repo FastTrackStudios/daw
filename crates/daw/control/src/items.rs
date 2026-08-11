@@ -1070,6 +1070,21 @@ impl TakeHandle {
     /// # Ok(())
     /// # }
     /// ```
+    /// This take's own envelopes — volume, pan, mute, pitch.
+    ///
+    /// Async because the envelope reference is by take *guid*, and a
+    /// handle built from a `TakeRef::Active` does not know it yet. One
+    /// lookup here beats every caller doing it.
+    pub async fn envelopes(&self) -> Result<crate::automation::TakeEnvelopes> {
+        let take = self.info().await?;
+        Ok(crate::automation::TakeEnvelopes::new(
+            self.item_guid.clone(),
+            take.guid,
+            self.project_id.clone(),
+            self.clients.clone(),
+        ))
+    }
+
     pub fn midi(&self) -> MidiEditor {
         MidiEditor::new(
             self.item_guid.clone(),

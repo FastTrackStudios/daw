@@ -1,7 +1,7 @@
 //! Construction layer — lazy, composable builders for the backends a
-//! [`Layer`](crate::layer::Layer) binds.
+//! `Layer` binds.
 //!
-//! [`Layer<B>`](crate::layer::Layer) answers "given a backend, mount its
+//! `Layer<B>` answers "given a backend, mount its
 //! services." This module answers the step *before* that: **build** the
 //! backend — `config → pool → repo → service` — with dependencies,
 //! build-once sharing, and ordered teardown. It's the Effect-`Layer`
@@ -125,7 +125,7 @@ type BuildFn<T, E> = Box<dyn FnOnce(Arc<Scope>) -> BoxFuture<'static, Result<T, 
 
 /// A lazy, composable recipe that builds a `T`, optionally registering
 /// cleanup on a [`Scope`]. The construction analog of
-/// [`Layer`](crate::layer::Layer): a `Layer` *binds* services; a
+/// `Layer`: a `Layer` *binds* services; a
 /// `Resource` *builds* the backend they bind to.
 ///
 /// `E` defaults to [`eyre::Report`]; name a concrete error for typed

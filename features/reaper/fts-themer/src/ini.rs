@@ -131,6 +131,15 @@ impl ThemeIni {
     }
 
     /// Every color-section key, in file order.
+    /// Does this theme define `key` at all?
+    ///
+    /// REAPER ignores keys it does not know, so writing one is silent —
+    /// which makes a typo in an override indistinguishable from a colour
+    /// that "didn't take". Callers check first and report instead.
+    pub fn has(&self, key: &str) -> bool {
+        self.int(key).is_some()
+    }
+
     pub fn keys(&self) -> Vec<&str> {
         let mut keys: Vec<(usize, &str)> = self
             .index

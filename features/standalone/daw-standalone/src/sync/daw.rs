@@ -221,6 +221,12 @@ fn envelope_default_name(t: EnvelopeType) -> &'static str {
         EnvelopeType::WidthPrefx => "Width (Pre-FX)",
         EnvelopeType::Mute => "Mute",
         EnvelopeType::FxParam => "FX Param",
+        EnvelopeType::PlayRate => "Playrate",
+        EnvelopeType::Pitch => "Pitch",
+        // A kind the enum does not name yet — the `.daw` format carries the
+        // originating name alongside, so this default is only ever seen by
+        // an envelope created without one.
+        EnvelopeType::Custom => "Envelope",
     }
 }
 
@@ -261,6 +267,20 @@ pub struct ProjectState {
     pub midi_program_changes: HashMap<String, Vec<daw_proto::midi::MidiProgramChange>>,
     /// Per-take MIDI System Exclusive events (full F0..F7 frames).
     pub midi_sysex: HashMap<String, Vec<daw_proto::midi::MidiSysEx>>,
+    /// Stretch markers per take guid, kept sorted by position.
+    ///
+    /// Keyed by take rather than item because a take is what carries
+    /// timing: two takes of one item are two performances and warp
+    /// independently.
+    pub stretch_markers: HashMap<String, Vec<daw_proto::StretchMarker>>,
+    /// Per-take stretch algorithm.
+    pub stretch_modes: HashMap<String, daw_proto::StretchMode>,
+    /// Take markers per take guid, kept sorted by source position.
+    ///
+    /// Annotations on the audio itself — a breath here, a sibilant
+    /// there, a rating on a comp take. Anchored in *source* time so
+    /// they stay on the sound when the item is trimmed or moved.
+    pub take_markers: HashMap<String, Vec<daw_proto::TakeMarker>>,
     /// Per-take channel-pressure (mono aftertouch) events.
     pub midi_channel_pressures: HashMap<String, Vec<daw_proto::midi::MidiChannelPressure>>,
     /// Per-take poly-pressure (per-note aftertouch) events.
@@ -347,6 +367,9 @@ impl ProjectState {
             midi_pitch_bends: HashMap::new(),
             midi_program_changes: HashMap::new(),
             midi_sysex: HashMap::new(),
+            stretch_markers: HashMap::new(),
+            stretch_modes: HashMap::new(),
+            take_markers: HashMap::new(),
             midi_channel_pressures: HashMap::new(),
             midi_poly_pressures: HashMap::new(),
             midi_note_expressions: HashMap::new(),

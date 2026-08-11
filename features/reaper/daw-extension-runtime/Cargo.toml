@@ -14,6 +14,9 @@ rustdoc-args = ["--html-in-header", "arborium-header.html"]
 [dependencies]
 # Depend on internal crates directly so `daw` can re-export this crate
 # under `daw::extension_runtime` without a dependency cycle.
+# `platform::spawn` — the wasm-cfg-split task seam, used to park the
+# action-broadcast bridge for the life of the extension.
+architect = { workspace = true }
 daw-control = { workspace = true }
 daw-module = { workspace = true }
 daw-proto = { workspace = true }

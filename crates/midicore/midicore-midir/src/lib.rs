@@ -314,8 +314,8 @@ pub fn output_devices() -> Vec<PortInfo> {
 
 /// An open MIDI **output** connection — send raw bytes or encoded
 /// [`MidiEvent`]s. Drop to close the port. The output analogue of
-/// [`MidiInput`]; each open gets a process-unique client name (see
-/// [`client_name`]).
+/// [`MidiInput`]; each open gets a process-unique client name (see the
+/// private `client_name` helper).
 pub struct MidiOutput {
     conn: MidiOutputConnection,
     /// Name of the port actually opened (for UI / logs).

@@ -35,7 +35,16 @@ pub fn has_ext_state(low: &ReaperLow, section: &CString, key: &CString) -> bool 
     unsafe { low.HasExtState(section.as_ptr(), key.as_ptr()) }
 }
 
+/// Largest project ext-state value we will read back. Project-scoped state is
+/// meant to be small and textual, but "small" is a convention, not a limit —
+/// this is a sanity ceiling, not an expected size.
+const MAX_PROJ_EXT_STATE: usize = 16 << 20;
+
 /// Get a project-scoped ext state value.
+///
+/// `buf_size` is only the *starting* guess: `GetProjExtState` silently truncates
+/// to whatever buffer it is handed, so the read grows and retries rather than
+/// returning a short string. See [`super::buffer::with_growing_string_buffer_i32`].
 pub fn get_proj_ext_state(
     low: &ReaperLow,
     project: ProjectContext,
@@ -43,7 +52,7 @@ pub fn get_proj_ext_state(
     key: &CString,
     buf_size: usize,
 ) -> Option<String> {
-    super::buffer::with_string_buffer_i32(buf_size, |buf, len| unsafe {
+    super::buffer::with_growing_string_buffer_i32(buf_size, MAX_PROJ_EXT_STATE, |buf, len| unsafe {
         low.GetProjExtState(project.to_raw(), section.as_ptr(), key.as_ptr(), buf, len)
     })
 }

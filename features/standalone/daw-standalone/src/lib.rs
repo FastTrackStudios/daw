@@ -26,8 +26,7 @@
 #![allow(
     clippy::field_reassign_with_default,
     clippy::manual_clamp,
-    clippy::needless_range_loop,
-    dead_code
+    clippy::needless_range_loop
 )]
 
 mod action_registry;
@@ -42,6 +41,7 @@ pub mod audio_engine;
 mod audio_engine_svc;
 mod automation;
 mod automation_touch;
+mod stretch_marker;
 pub use automation_touch::TouchableParam;
 mod batch;
 #[cfg(feature = "bootstrap")]

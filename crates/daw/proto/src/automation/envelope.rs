@@ -25,6 +25,18 @@ pub enum EnvelopeType {
     Mute = 6,
     /// FX parameter (uses fx_guid + param_index)
     FxParam = 7,
+    /// Take playback rate (REAPER's `SPEEDENV`).
+    PlayRate = 8,
+    /// Take pitch in semitones (REAPER's `PITCHENV`).
+    Pitch = 9,
+    /// An envelope kind this enum does not name yet.
+    ///
+    /// The `.rpp` corpus carries envelope chunks the facade has no variant
+    /// for, and #156 forbids silently dropping what a real project holds.
+    /// The originating chunk name is kept in
+    /// [`Envelope::name`], so a `Custom` envelope still round-trips exactly
+    /// and promoting one to its own variant later is a pure addition.
+    Custom = 255,
 }
 
 /// Which property of a send the envelope automates.
