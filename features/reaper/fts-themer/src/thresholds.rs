@@ -95,6 +95,96 @@ pub fn section_heights_agree(text: &str) -> Vec<String> {
     wrong
 }
 
+/// Do the theme's stated offsets still match the geometry constants?
+///
+/// #239: the strip lays out on `daw_theme_art::geometry::mcp`, whose
+/// numbers come off `rtconfig.txt`'s `[dx dy w h]` literals — the column
+/// chain, the record arm's cell, the input fields. Those literals sit
+/// inside expressions this tool must not rewrite, so like
+/// [`section_heights_agree`] they are checked rather than written: find the
+/// lines that define each name, and ask whether any of them still states
+/// the group the constant came from. Coarse on purpose — the question is
+/// only "has one of these numbers moved without the other".
+///
+/// A name may be `set` many times (scale variants, mode branches); the
+/// group only has to appear on one of them, because that is the line the
+/// constant was read from.
+pub fn offsets_agree(text: &str) -> Vec<String> {
+    use daw_theme_art::geometry::mcp as g;
+
+    let quad = |a: f32, b: f32, c: f32, d: f32| {
+        format!(
+            "[{} {} {} {}]",
+            format_value(a),
+            format_value(b),
+            format_value(c),
+            format_value(d)
+        )
+    };
+
+    // Each entry: the WALTER name, the literal the geometry constant was
+    // read from, and what it positions.
+    let stated = [
+        ("mcp.recarm", quad(0.0, 0.0, g::ARM_CELL_W, g::ARM_CELL_H), "the record arm's cell"),
+        (
+            "mcp.recmon",
+            quad(7.0, g::RECMON_FROM_ARM, g::BUTTON_W, 20.0),
+            "recmon's step off the arm",
+        ),
+        (
+            "mcp.mute",
+            quad(0.0, g::MUTE_FROM_RECMON, g::BUTTON_W, 20.0),
+            "mute's step off recmon",
+        ),
+        (
+            "mcp.solo",
+            quad(0.0, g::SOLO_FROM_MUTE, g::BUTTON_W, 20.0),
+            "solo's step off mute",
+        ),
+        ("mcp.io", quad(-1.0, g::IO_FROM_SOLO, 23.0, 30.0), "io's step off solo"),
+        (
+            "mcp.env",
+            quad(1.0, -g::ENV_FROM_FLOOR, 21.0, g::ENV_FROM_FLOOR),
+            "envelope's hang above the stretch floor",
+        ),
+        (
+            "mcp.phase",
+            quad(3.0, -g::PHASE_FROM_ENV, g::PHASE_W, g::PHASE_FROM_ENV),
+            "phase's step off envelope",
+        ),
+        (
+            "mcp.recinput",
+            quad(6.0, 0.0, 75.0, g::INPUT_FIELD_H),
+            "the record-input field",
+        ),
+    ];
+
+    let mut wrong = Vec::new();
+    for (name, group, what) in stated {
+        let mut lines = text.lines().filter(|l| is_set_of(l, name)).peekable();
+        if lines.peek().is_none() {
+            wrong.push(format!("{what}: `set {name}` is not in the layout file"));
+            continue;
+        }
+        if !lines.any(|l| l.contains(&group)) {
+            wrong.push(format!("{what}: no `set {name}` line states {group}"));
+        }
+    }
+
+    // The strip's width is a bare value in the same kind of expression, so
+    // it gets the section-heights treatment: word-wise, `@`-suffix aside.
+    let wanted = format_value(g::STRIP_W);
+    let stated_somewhere = text
+        .lines()
+        .filter(|l| is_set_of(l, "mcp_w"))
+        .any(|l| l.split_whitespace().any(|w| w.trim_end_matches("@h") == wanted));
+    if !stated_somewhere {
+        wrong.push(format!("strip width: no `set mcp_w` line states {wanted}"));
+    }
+
+    wrong
+}
+
 /// Rewrite the generated values in `text`, leaving everything else alone.
 ///
 /// Returns the patched text and how many lines actually changed — zero on a
@@ -314,5 +404,19 @@ mod tests {
     fn an_unknown_threshold_is_an_error_not_an_insertion() {
         let bogus = [Threshold { name: "hide_nothing", value: 1.0 }];
         assert!(splice(&sample(), &bogus).is_err());
+    }
+
+    /// The offsets guard is not vacuous: a line whose group has moved is
+    /// reported, by name. (The shipped file passing is the other half,
+    /// tested in `thresholds_match_the_theme`.)
+    #[test]
+    fn a_moved_offset_is_reported() {
+        // recmon's dy nudged from 20 to 21 — one number, one row of drift.
+        let text = "set mcp.recmon + + [0 padding] [mcp.recarm mcp.recarm] * scale [7 21 21 20]\n";
+        let wrong = offsets_agree(text);
+        assert!(
+            wrong.iter().any(|w| w.contains("mcp.recmon")),
+            "the moved recmon step went unreported: {wrong:#?}"
+        );
     }
 }

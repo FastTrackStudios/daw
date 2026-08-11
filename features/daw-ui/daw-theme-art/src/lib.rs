@@ -38,6 +38,7 @@ pub mod collapse;
 pub mod components;
 pub mod dress;
 pub mod generated;
+pub mod geometry;
 pub mod mixer_controls;
 pub mod primitives;
 pub mod slice;

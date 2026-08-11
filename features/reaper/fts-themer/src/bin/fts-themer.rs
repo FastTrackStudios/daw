@@ -401,7 +401,8 @@ fn main() -> Result<()> {
 
             let wanted = thresholds::generated_lines();
             let (patched, changed) = thresholds::splice(&text, &wanted)?;
-            let drifted = thresholds::section_heights_agree(&text);
+            let mut drifted = thresholds::section_heights_agree(&text);
+            drifted.extend(thresholds::offsets_agree(&text));
 
             for line in &drifted {
                 eprintln!("  DRIFT: {line}");
@@ -415,7 +416,7 @@ fn main() -> Result<()> {
                 }
                 if !drifted.is_empty() {
                     anyhow::bail!(
-                        "{} section height(s) disagree with the Rust constant",
+                        "{} stated value(s) disagree with the Rust constants",
                         drifted.len()
                     );
                 }

@@ -48,6 +48,16 @@ fn the_section_heights_agree_with_the_constant() {
     assert!(wrong.is_empty(), "section heights drifted: {wrong:#?}");
 }
 
+/// The stated offsets — the column chain, the arm's cell, the input
+/// field — sit inside expressions too, so they get the same treatment:
+/// the shipped file must still state the literal each geometry constant
+/// was read from. #239's other half.
+#[test]
+fn the_stated_offsets_agree_with_the_geometry() {
+    let wrong = thresholds::offsets_agree(&theme());
+    assert!(wrong.is_empty(), "stated offsets drifted: {wrong:#?}");
+}
+
 /// Splicing the shipped file must be a no-op: the theme is already at the
 /// constant's values, so the generator has nothing to write. This is what
 /// makes running it safe on a file a themer edits by hand.

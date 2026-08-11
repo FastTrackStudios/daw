@@ -32,89 +32,19 @@ use crate::controls::{
 };
 use crate::prelude::*;
 
-/// The row's own geometry, measured off REAPER itself rather than off the
-/// panel sheet.
-///
-/// The sheet is a useful reference for *drawing* the controls, but it puts
-/// the meter inside the tint, and REAPER does not: with `meterRight` set —
-/// which this theme sets — `rtconfig` moves the whole meter section to the
-/// right edge of the panel, past mute and solo. Measured in a REAPER
-/// screenshot, a row's tint ends at 296, the gutter runs to 343, mute and
-/// solo occupy 318..339, and what is left at the end of the row is the
-/// meter's.
-const ROW_H: f32 = 70.0;
-/// The tinted part. Everything after it is REAPER's meter section.
-const TINT_W: f32 = 296.0;
-/// The meter section: mute and solo, then the meter at the very end.
-const GUTTER_W: f32 = 47.0;
-const ROW_W: f32 = TINT_W + GUTTER_W;
-/// Mute and solo, 21 into the section — measured at 318 against a section
-/// starting at 297.
-const GUTTER_BUTTON_X: f32 = 21.0;
-/// Solo's top, measured at 25 of the row — mute is 21 above it.
-const SOLO_TOP: f32 = 25.0;
-/// The meter: a vertical strip at the *start* of the section, before mute
-/// and solo rather than after them. Measured at 297..316 against a section
-/// starting at 297 — grey at rest, which is why it is easy to mistake for
-/// the section's own background.
-/// Where phase and the fixed-lanes button sit, and the heights below
-/// which each goes. From the theme:
-///
-///     phaseHide_h            = 12 + element_h + tcp.solo{1} + tcp.solo{3}
-///     phaseHide_h           += 17 when the lanes button is shown
-///     fixed_lanes_hide_h     = phaseHide_h - 17
-///     tcp.phase              = [tcp.solo meter_sec{3}] + [3 -24 16 20]
-///     tcp.custom.fixed_lanes = [tcp.solo meter_sec{3}] + [1 -47 20 24]
-///
-/// Both hang off the *bottom* of the meter section, which is why they end
-/// up in the row's bottom-right corner with the lanes button above phase.
-/// A 70-row row is below both thresholds and shows neither — REAPER's own
-/// rows at that height do not have them either.
-const PHASE_HIDE_H: f32 = 12.0 + 20.0 + 25.0 + 20.0 + 17.0;
-const LANES_HIDE_H: f32 = PHASE_HIDE_H - 17.0;
-const PHASE_FROM_FLOOR: f32 = 24.0;
-const LANES_FROM_FLOOR: f32 = 47.0;
+// The row's geometry — measured off REAPER itself rather than off the
+// panel sheet — lives in `daw_theme_art::geometry::tcp`, one home for the
+// panel's facts. The measurement notes travel with the numbers.
+use daw_theme_art::geometry::tcp::{
+    COLUMN_RULE_X, FIELD_H, FX_IN_X, GUTTER_BUTTON_X, GUTTER_W, LANES_FROM_FLOOR, LANES_HIDE_H,
+    METER_W as TCP_METER_W, METER_X as TCP_METER_X, NAME_FIELD_H, NAME_FIELD_W, NAME_FIELD_X,
+    PAN_KNOB_X, PHASE_FROM_FLOOR, PHASE_HIDE_H, ROUTING_X, ROW_H, ROW_ONE, ROW_TWO, ROW_W,
+    SOLO_TOP, TINT_W, VOLUME_KNOB_X,
+};
 
-const TCP_METER_X: f32 = 1.0;
-const TCP_METER_W: u32 = 19;
-/// Row one's field, which the record arm and the volume knob sit on.
-/// Measured: it runs 26..230 and is 24 tall, not the 17 the other fields
-/// are.
-/// Measured across one of REAPER's rows at a scanline above the text:
-/// the field runs 33..161, the volume knob follows it at 159..180, pan at
-/// 183..207, the routing widget 214..239 and the FX pill 248..283, with
-/// the tint ending at 296.
-const NAME_FIELD_X: f32 = 33.0;
-const NAME_FIELD_W: f32 = 136.0;
-const NAME_FIELD_H: f32 = 24.0;
-/// The field stops *midway through* the knob, and its right edge is square.
-///
-/// The two scanlines that looked like a field wrapping the knob say this
-/// instead: above the knob's centre the dark ends at 161, and across the
-/// centre it runs to 179 — which is the knob's own body, not the field.
-/// A circle straddling a square edge reads exactly like a rounded end from
-/// one row and exactly like a longer box from another. So the field runs
-/// 33..169, ending at the knob's centre, and the knob is a plain circle
-/// sitting half on it and half on the tint.
-/// Centred on the field's right edge at 169, so the knob is 24 wide from
-/// 157 — the same 24 the field is tall, and sharing its top and bottom.
-const VOLUME_KNOB_X: f32 = 157.0;
-/// Centred at 195, between the field's end and the routing widget —
-/// measured, its chord runs 191..200 at a row above the knobs' centres.
-const PAN_KNOB_X: f32 = 184.0;
-/// The rule between the left column and the row, at 20.
-const COLUMN_RULE_X: f32 = 20.0;
-const ROUTING_X: f32 = 214.0;
-const FX_IN_X: f32 = 248.0;
 /// The panel's own grey — the same one the mixer strip's body and name
 /// plate use.
 const BODY_GREY: &str = "#262626";
-/// Both rows of fields are 17 tall, at these tops.
-const ROW_ONE: f32 = 6.0;
-const ROW_TWO: f32 = 34.0;
-/// 20, measured — the sheet's 17 left a three-row gap under every field
-/// in the second row.
-const FIELD_H: f32 = 20.0;
 
 /// One track's row in the panel.
 ///
