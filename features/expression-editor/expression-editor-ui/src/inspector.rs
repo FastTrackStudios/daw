@@ -76,6 +76,19 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
     let is_strings = matches!(space, RowSpace::Strings(_));
     // Derived, not stored: the fret is the pitch less the string's open
     // pitch, so it cannot disagree with the note it labels.
+    let is_bands = matches!(space, RowSpace::Bands(_));
+    let bands = match &space {
+        RowSpace::Bands(b) => b.clone(),
+        _ => Default::default(),
+    };
+    let editing_lyric = ed.editing_lyric;
+    let lyric = note.as_ref().and_then(|n| n.text.clone()).unwrap_or_default();
+    let selected_id = single;
+    let fret_now: Option<u8> = match (&space, &note) {
+        (RowSpace::Strings(t), Some(n)) => expression_editor_core::rows::fret_of(n, t)
+            .and_then(|f| u8::try_from(f).ok()),
+        _ => None,
+    };
     let fret_label: String = match (&space, &note) {
         (RowSpace::Strings(t), Some(n)) => expression_editor_core::rows::fret_of(n, t)
             .map(|f| f.to_string())
@@ -200,6 +213,73 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                     }
                 }
 
+                // ── lyric ────────────────────────────────────────────
+                // A syllable *is* the note's identity in a vocal
+                // editor, so this is the one field that has to be
+                // typable rather than picked.
+                if selected_id.is_some() {
+                    {section("Lyric")}
+                    div {
+                        style: "padding: 0 10px 8px;",
+                        input {
+                            style: format!(
+                                "width: 100%; height: 22px; font-size: 11px; \
+                                 border-radius: 4px; padding: 0 6px; \
+                                 border: 1px solid {}; background: {}; color: {};",
+                                if editing_lyric.is_some() { theme::ACCENT } else { theme::PANEL_BORDER },
+                                theme::SURFACE_INSET,
+                                theme::TEXT,
+                            ),
+                            value: "{lyric}",
+                            placeholder: "syllable",
+                            onfocus: move |_| {
+                                if let Some(id) = selected_id {
+                                    editor.write().editing_lyric = Some(id);
+                                }
+                            },
+                            // Committed on every keystroke rather than
+                            // on Enter: a lyric is short, and losing one
+                            // to a missed Enter is the worse failure.
+                            oninput: move |e| {
+                                if let Some(id) = selected_id {
+                                    editor.write().set_lyric(id, &e.value());
+                                }
+                            },
+                        }
+                    }
+                }
+
+                // ── band splits ──────────────────────────────────────
+                // Moving a split re-sorts every slice from the centroid
+                // it already carries — lossless, and no analysis reruns.
+                if is_bands && !bands.splits.is_empty() {
+                    {section("Band splits")}
+                    for (i, hz) in bands.splits.iter().copied().enumerate() {
+                        div {
+                            style: "display: flex; align-items: center; gap: 4px; \
+                                    padding: 0 10px 6px;",
+                            span {
+                                style: format!("font-size: 10px; width: 54px; color: {};", theme::TEXT_DIM),
+                                "{hz:.0} Hz"
+                            }
+                            for (label, factor) in [("−", 0.917f64), ("+", 1.09)] {
+                                button {
+                                    style: "flex: 1; height: 20px; font-size: 10px; \
+                                            border-radius: 4px; cursor: pointer;",
+                                    // Proportional, not additive: pitch
+                                    // is logarithmic, so a fixed 100 Hz
+                                    // step is a semitone up top and an
+                                    // octave down the bottom.
+                                    onclick: move |_| {
+                                        editor.write().move_band_split(i, (hz * factor).clamp(20.0, 20_000.0));
+                                    },
+                                    "{label}"
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // ── guitar colour ────────────────────────────────────
                 if is_strings {
                     {section("Colour")}
@@ -295,6 +375,25 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                     {section("Technique")}
                     {row("String", n.string.map(|s| (s + 1).to_string()).unwrap_or_else(|| "—".into()))}
                     {row("Fret", fret_label.clone())}
+                    // Setting a fret *transposes* — the string is kept
+                    // and the pitch moves, which is what sliding the
+                    // shape up the neck does.
+                    div {
+                        style: "display: flex; gap: 4px; padding: 0 10px 8px;",
+                        for (label, delta) in [("−12", -12i32), ("−1", -1), ("+1", 1), ("+12", 12)] {
+                            button {
+                                style: "flex: 1; height: 20px; font-size: 10px; \
+                                        border-radius: 4px; cursor: pointer;",
+                                disabled: fret_now.is_none(),
+                                onclick: move |_| {
+                                    let Some(f) = fret_now else { return };
+                                    let next = (f as i32 + delta).clamp(0, 24) as u8;
+                                    editor.write().set_fret_of_selection(next);
+                                },
+                                "{label}"
+                            }
+                        }
+                    }
                     {row("Legato", if n.legato { "yes".into() } else { "no".into() })}
                     div {
                         style: "display: flex; flex-wrap: wrap; gap: 3px; padding: 4px 10px 8px;",

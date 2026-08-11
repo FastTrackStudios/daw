@@ -491,6 +491,14 @@ pub struct Note {
     /// Joined to the following note on the same string. Riffer's rule:
     /// the legato is marked on the *first* note of the pair.
     pub legato: bool,
+    /// Unpitched audio: the slice's energy-weighted mean frequency.
+    ///
+    /// Kept on the note so band splits can be moved without re-running
+    /// the analysis — which is the whole point of `reband` being cheap
+    /// and lossless. Before this the centroids lived only inside the
+    /// analyser's own struct, so nothing the editor held could reband
+    /// and the operation was unreachable.
+    pub centroid_hz: Option<f64>,
     /// Guitar/bass: which string the note is fingered on.
     ///
     /// The row is the **sounding MIDI pitch**, exactly as in every other
@@ -542,6 +550,7 @@ impl Note {
             articulation: None,
             grace_of: None,
             legato: false,
+            centroid_hz: None,
             string: None,
             pitch: Curve::new(),
             pressure: Curve::new(),

@@ -3025,9 +3025,13 @@ fn the_menu_offers_what_the_mode_can_actually_carry() {
 fn commands_needing_a_panel_report_that_they_did_not_run() {
     let mut ed = menu_editor();
     ed.set_mode(Mode::Vocals);
-    // The core cannot invent a syllable, so it must say so rather than
-    // return true and leave the UI thinking a lyric was set.
-    assert!(!ed.run_command(&Command::EditLyric(NoteId(1)), Some(NoteId(1))));
+    // `EditLyric` now *opens the field* rather than inventing a
+    // syllable, so it runs — and still writes nothing, which is the
+    // property this test was really protecting.
+    assert!(ed.run_command(&Command::EditLyric(NoteId(1)), Some(NoteId(1))));
+    assert_eq!(ed.editing_lyric, Some(NoteId(1)));
+    assert_eq!(ed.doc.note(NoteId(1)).and_then(|n| n.text.clone()), None);
+    // Properties still has no panel to open.
     assert!(!ed.run_command(&Command::Properties, Some(NoteId(1))));
 }
 
@@ -4218,4 +4222,96 @@ fn the_left_point_owns_the_segment() {
         (c.sample(5.0, 0.0) - 0.5).abs() < 1e-9,
         "the trailing point's shape is not read"
     );
+}
+
+// ── the three operations that had no way in ──────────────────────────
+
+#[test]
+fn a_lyric_can_be_typed_and_cleared() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0);
+    doc.push(Note::new(NoteId(1), 0.0, PPQ, 60));
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+
+    assert!(ed.set_lyric(NoteId(1), "ho"));
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().text.as_deref(), Some("ho"));
+
+    // Blank clears rather than storing an empty syllable — deleting is
+    // the same gesture as typing.
+    assert!(ed.set_lyric(NoteId(1), "   "));
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().text, None);
+}
+
+#[test]
+fn opening_the_lyric_field_does_not_write_anything() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0);
+    doc.push(Note::new(NoteId(1), 0.0, PPQ, 60));
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+
+    assert!(ed.run_command(&expression_editor_core::menu::Command::EditLyric(NoteId(1)), None));
+    assert_eq!(ed.editing_lyric, Some(NoteId(1)));
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().text, None);
+
+    ed.cancel_lyric();
+    assert_eq!(ed.editing_lyric, None);
+}
+
+#[test]
+fn setting_a_fret_transposes_and_keeps_the_string() {
+    let tuning = StringTuning::guitar_standard();
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 4.0);
+    doc.row_space = RowSpace::Strings(tuning.clone());
+    let mut n = Note::new(NoteId(1), 0.0, PPQ, tuning.open(2) + 5);
+    n.string = Some(2);
+    doc.push(n);
+
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+    ed.selection.set_single(NoteId(1));
+    assert!(ed.set_fret_of_selection(7));
+
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    assert_eq!(n.string, Some(2), "the hand stayed on the same string");
+    assert_eq!(n.row, tuning.open(2) + 7, "and the note sounds higher");
+}
+
+#[test]
+fn moving_a_band_split_resorts_slices_without_reanalysing() {
+    use expression_editor_core::rows::SliceBands;
+
+    let bands = SliceBands::default();
+    let mut doc = ExpressionDoc::new(TimeBase::Frames { frame_rate: 100.0 }, 0.0, 100.0);
+    doc.row_space = RowSpace::Bands(bands.clone());
+    // One slice just under the first split, so a small move of that
+    // split is enough to reband it.
+    let split = bands.splits[0];
+    let mut n = Note::new(NoteId(1), 0.0, 4.0, bands.band_of(split * 0.9) as i32);
+    n.centroid_hz = Some(split * 0.9);
+    let before = n.row;
+    doc.push(n);
+
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+    assert!(ed.move_band_split(0, split * 0.5));
+
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    assert_ne!(n.row, before, "the slice moved to the band above");
+    assert_eq!(
+        n.centroid_hz,
+        Some(split * 0.9),
+        "rebanding is a re-sort: the measured centroid is untouched"
+    );
+}
+
+#[test]
+fn a_slice_with_no_centroid_stays_put_when_bands_move() {
+    use expression_editor_core::rows::SliceBands;
+
+    let bands = SliceBands::default();
+    let mut doc = ExpressionDoc::new(TimeBase::Frames { frame_rate: 100.0 }, 0.0, 100.0);
+    doc.row_space = RowSpace::Bands(bands.clone());
+    // A hand-drawn slice has no measured centroid; it must not collapse
+    // onto band zero the moment somebody drags a split.
+    doc.push(Note::new(NoteId(1), 0.0, 4.0, 2));
+
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+    assert!(ed.move_band_split(0, bands.splits[0] * 0.5));
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().row, 2);
 }

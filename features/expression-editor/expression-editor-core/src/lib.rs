@@ -140,6 +140,8 @@ pub struct Editor {
     /// piece splits only when a part needs the sticking, so the roll
     /// does not carry twice the rows for material that never asks.
     pub split_pieces: Vec<usize>,
+    /// The note whose lyric is being typed, if the field is open.
+    pub editing_lyric: Option<doc::NoteId>,
     /// Context × modifier → action. Editable, so a host can ship a
     /// REAPER-matching profile or its own.
     pub mouse: MouseMap,
@@ -232,6 +234,7 @@ impl Editor {
             strip_lane: StripLane::Velocity,
             color_by_string: true,
             split_pieces: Vec::new(),
+            editing_lyric: None,
             mouse: MouseMap::default(),
             tuning: Tuning::default(),
             grid: Grid::default(),
@@ -541,6 +544,62 @@ impl Editor {
             return None;
         }
         m.group_name(r).map(str::to_string)
+    }
+
+    /// Commit a typed syllable and close the field.
+    ///
+    /// An empty string clears the lyric rather than storing one, so
+    /// deleting a syllable is the same gesture as typing one.
+    pub fn set_lyric(&mut self, id: doc::NoteId, text: &str) -> bool {
+        self.editing_lyric = None;
+        self.apply(&Edit::SetText {
+            note: id,
+            text: (!text.trim().is_empty()).then(|| text.trim().to_string()),
+        })
+    }
+
+    /// Abandon the lyric field without writing anything.
+    pub fn cancel_lyric(&mut self) {
+        self.editing_lyric = None;
+    }
+
+    /// Put the selection on `fret`, keeping each note's string.
+    ///
+    /// The fret is derived, so this transposes — it is the "slide the
+    /// shape up the neck" gesture, not a relabelling.
+    pub fn set_fret_of_selection(&mut self, fret: u8) -> bool {
+        let notes: Vec<doc::NoteId> = self.selection.notes.to_vec();
+        if notes.is_empty() {
+            return false;
+        }
+        self.apply(&Edit::SetFret { notes, fret })
+    }
+
+    /// Move one band split and re-sort every slice into its new band.
+    pub fn move_band_split(&mut self, index: usize, hz: f64) -> bool {
+        // The document's row space is the authority — every edit reads
+        // that one, and `Editor::row_space` is a view of it that is not
+        // populated until a mode is applied.
+        let RowSpace::Bands(bands) = &self.doc.row_space else {
+            return false;
+        };
+        let mut bands = bands.clone();
+        let Some(slot) = bands.splits.get_mut(index) else {
+            return false;
+        };
+        *slot = hz;
+        // Splits are ascending by contract; dragging one past its
+        // neighbour is a reorder, not an error.
+        bands
+            .splits
+            .sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
+        let ok = self.apply(&Edit::SetBands {
+            bands: bands.clone(),
+        });
+        if ok {
+            self.row_space = RowSpace::Bands(bands);
+        }
+        ok
     }
 
     /// Which hand a hit is played with, when its piece has two.
@@ -1240,9 +1299,13 @@ impl Editor {
                 let Some(n) = self.doc.note(*id) else {
                     return false;
                 };
+                // The string is on the note; the row is the pitch. Using
+                // the row here cycled to a "string" that was a MIDI
+                // pitch number.
+                let next = n.string.map(|s| s as i32 + 1).unwrap_or(0);
                 self.apply(&Edit::SetString {
                     note: *id,
-                    string: n.row + 1,
+                    string: next,
                 })
             }
             C::ToggleLegato(id) => {
@@ -1257,8 +1320,14 @@ impl Editor {
             }
             C::SplitNote(id, t) => self.apply(&Edit::SplitNote { note: *id, t: *t }),
             C::MergeNotes(id) => self.merge_with_next(*id),
-            // These need UI: a text field, a submenu, a panel.
-            C::EditLyric(_) | C::SetArticulation(_) | C::Properties => false,
+            // `EditLyric` opens the field rather than applying: the
+            // text arrives later, through `set_lyric`.
+            C::EditLyric(id) => {
+                self.editing_lyric = Some(*id);
+                true
+            }
+            // These still need UI: a submenu, a panel.
+            C::SetArticulation(_) | C::Properties => false,
         }
     }
 

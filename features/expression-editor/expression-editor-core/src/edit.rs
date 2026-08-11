@@ -218,6 +218,13 @@ pub enum Edit {
         notes: Vec<NoteId>,
         articulation: Option<Articulation>,
     },
+    /// Unpitched audio: move the band splits and re-sort every slice.
+    ///
+    /// Lossless — each slice keeps the centroid it was analysed with,
+    /// so this is a re-sort rather than a re-analysis.
+    SetBands {
+        bands: crate::rows::SliceBands,
+    },
     /// Guitar/bass: move to another string, keeping sounding pitch.
     SetString {
         note: NoteId,
@@ -779,6 +786,22 @@ impl Edit {
                     return false;
                 }
                 n.string = Some(target as u8);
+                true
+            }
+            Edit::SetBands { bands } => {
+                if !matches!(doc.row_space, RowSpace::Bands(_)) {
+                    return false;
+                }
+                // Every slice re-sorts into its new band from the
+                // centroid it already carries. No analysis re-runs, and
+                // a slice with no centroid stays where it is rather
+                // than collapsing onto band zero.
+                for n in &mut doc.notes {
+                    if let Some(hz) = n.centroid_hz {
+                        n.row = bands.band_of(hz) as i32;
+                    }
+                }
+                doc.row_space = RowSpace::Bands(bands.clone());
                 true
             }
             Edit::SetFret { notes, fret } => {
