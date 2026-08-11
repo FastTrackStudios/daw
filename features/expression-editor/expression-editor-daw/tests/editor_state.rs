@@ -371,9 +371,11 @@ fn applying_a_view_leaves_ephemeral_state_alone() {
 
 #[test]
 fn a_tuning_is_stored_by_name_not_by_value() {
-    let mut t = expression_editor_core::Tuning::default();
-    t.temperament = tuning::RAST.clone();
-    t.key_pc = 2;
+    let t = expression_editor_core::Tuning {
+        temperament: tuning::RAST.clone(),
+        key_pc: 2,
+        ..Default::default()
+    };
 
     let stored = TuningRef::of(&t);
     assert_eq!(stored.temperament, tuning::RAST.name);
@@ -484,8 +486,10 @@ fn a_hand_arranged_layout_survives_a_save() {
     ws.merge_lanes(0, 1);
     assert_eq!(ws.layout().len(), 2);
 
-    let mut state = EditorState::default();
-    state.layout = StoredLayout::capture(&ws);
+    let state = EditorState {
+        layout: StoredLayout::capture(&ws),
+        ..Default::default()
+    };
     state::save(&d, project.clone(), &state).unwrap();
 
     let mut fresh = reopened(&["A", "B", "C"]);

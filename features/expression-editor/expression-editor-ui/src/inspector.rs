@@ -259,7 +259,7 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                                  border-radius: 4px; \
                                  border: 1px solid {}; background: {}; color: {}; \
                                  cursor: {};",
-                                if flam_step.is_some() { theme::PANEL_BORDER } else { theme::PANEL_BORDER },
+                                theme::PANEL_BORDER,
                                 theme::SURFACE_INSET,
                                 if flam_step.is_some() { theme::TEXT } else { theme::TEXT_DIM },
                                 if flam_step.is_some() { "pointer" } else { "default" },

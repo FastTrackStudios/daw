@@ -331,12 +331,11 @@ pub fn normalize_track_name(name: &str) -> String {
     // Only a *trailing* role token is dropped, and only one. "Vox MIDI"
     // is a MIDI guide for a vocal; "MIDI Vox" is a track called MIDI
     // Vox, and guessing otherwise would pair things that are not pairs.
-    if words.len() > 1 {
-        if let Some(last) = words.last() {
-            if ROLE_TOKENS.contains(&last.as_str()) {
-                words.pop();
-            }
-        }
+    if words.len() > 1
+        && let Some(last) = words.last()
+        && ROLE_TOKENS.contains(&last.as_str())
+    {
+        words.pop();
     }
 
     words.concat()
@@ -516,10 +515,10 @@ impl Workspace {
         match anchor {
             Some(anchor) => {
                 self.layout.forget(guid);
-                if let Some(i) = self.layout.lane_of(&anchor) {
-                    if let Some(lane) = self.layout.lane_mut(i) {
-                        lane.tracks.push(guid.to_string());
-                    }
+                if let Some(i) = self.layout.lane_of(&anchor)
+                    && let Some(lane) = self.layout.lane_mut(i)
+                {
+                    lane.tracks.push(guid.to_string());
                 }
             }
             None if self.layout.lane_of(guid).is_none() => {

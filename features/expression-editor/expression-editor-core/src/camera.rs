@@ -151,10 +151,12 @@ impl RowFold {
         hidden.sort_unstable();
         hidden.dedup();
         hidden.truncate(MAX_FOLD);
-        let mut out = Self::default();
-        out.len = hidden.len();
-        out.hidden[..hidden.len()].copy_from_slice(&hidden);
-        out
+        let mut rows = [0; MAX_FOLD];
+        rows[..hidden.len()].copy_from_slice(&hidden);
+        Self {
+            hidden: rows,
+            len: hidden.len(),
+        }
     }
 
     fn rows(&self) -> &[i32] {

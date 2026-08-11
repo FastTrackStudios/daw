@@ -393,10 +393,9 @@ impl Editor {
         if let Some((lo, hi)) = self
             .tracks
             .lane_row_range(lane, &self.doc, Self::LANE_FIT_PAD)
+            && let Some(slot) = self.lane_cameras.get_mut(lane)
         {
-            if let Some(slot) = self.lane_cameras.get_mut(lane) {
-                *slot = camera::VerticalCamera::fitted(lo, hi, height);
-            }
+            *slot = camera::VerticalCamera::fitted(lo, hi, height);
         }
     }
 

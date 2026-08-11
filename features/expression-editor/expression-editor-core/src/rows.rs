@@ -196,7 +196,7 @@ impl DrumFamily {
 /// wrong band.
 pub fn drum_family(name: &str) -> DrumFamily {
     let n = name.to_ascii_lowercase();
-    let head = n.split(|c: char| c == ' ' || c == '-').next().unwrap_or("");
+    let head = n.split([' ', '-']).next().unwrap_or("");
     match head {
         "k" | "kl" => return DrumFamily::Kick,
         "s" | "sr" => return DrumFamily::Snare,
@@ -255,6 +255,17 @@ pub struct DrumMap {
     pub lanes: Vec<DrumLane>,
 }
 
+/// One row of the `fts()` table: pitch, name, group, hand, the pitch of
+/// the other hand, and the piece both hands belong to.
+type LaneRow = (
+    i32,
+    &'static str,
+    Option<u8>,
+    Option<Hand>,
+    Option<i32>,
+    Option<&'static str>,
+);
+
 impl DrumMap {
     /// General MIDI, trimmed to the kit pieces people actually
     /// sequence. A full 47-dimension GM map is unusable as a roll.
@@ -271,7 +282,7 @@ impl DrumMap {
     /// no reason on most material.
     pub fn fts() -> Self {
         // (pitch, name, group, hand, other-hand pitch, piece)
-        let lanes: Vec<(i32, &str, Option<u8>, Option<Hand>, Option<i32>, Option<&str>)> = vec![
+        let lanes: Vec<LaneRow> = vec![
             // Kick is a pair for the same reason the toms are: a double
             // pedal is two feet, and a part that specifies which is
             // notated the same way sticking is.
@@ -779,7 +790,7 @@ fn drum_color(name: &str) -> &'static str {
     // would colour half the kit by accident — and without this every
     // FTS row falls through to the same purple, which is how the whole
     // kit came out one colour the first time it was drawn.
-    let head = n.split(|c: char| c == ' ' || c == '-').next().unwrap_or("");
+    let head = n.split([' ', '-']).next().unwrap_or("");
     match head {
         "k" | "kl" => return "#ef4444",
         "s" | "sr" => return "#f59e0b",

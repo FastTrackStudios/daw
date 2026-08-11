@@ -189,8 +189,10 @@ fn the_top_of_the_range_lands_in_the_last_bin_not_off_the_end() {
 #[test]
 fn the_threshold_is_placed_on_the_same_scale_as_the_bins() {
     // What makes the slider legible against the material's own floor.
-    let mut cfg = QuantizeConfig::default();
-    cfg.min_strength = 0.3;
+    let mut cfg = QuantizeConfig {
+        min_strength: 0.3,
+        ..Default::default()
+    };
     assert_eq!(threshold_position(&cfg), 0.3);
     cfg.min_strength = 5.0;
     assert_eq!(threshold_position(&cfg), 1.0, "clamped onto the axis");
@@ -203,8 +205,10 @@ fn the_panel_can_say_how_much_it_is_excluding() {
         Hit { at: 1.0, weight: 0.2 },
         Hit { at: 2.0, weight: 0.9 },
     ];
-    let mut cfg = QuantizeConfig::default();
-    cfg.min_strength = 0.5;
+    let cfg = QuantizeConfig {
+        min_strength: 0.5,
+        ..Default::default()
+    };
     assert_eq!(excluded_count(&hits, &cfg), 2);
 }
 

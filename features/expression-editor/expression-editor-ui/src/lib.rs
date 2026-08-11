@@ -286,10 +286,11 @@ fn Canvas(
     let sep_lines = canvas::separators(&ed);
     // Prototype (#161): the string roll's bend flow.
     let flow_mode = try_consume_context::<BendFlow>().unwrap_or_default();
-    let flow = flow_mode
-        .on_row()
-        .then(|| guitar::flow_paths(&ed))
-        .unwrap_or_default();
+    let flow = if flow_mode.on_row() {
+        guitar::flow_paths(&ed)
+    } else {
+        Default::default()
+    };
     let joins = guitar::joins(&ed);
     let bend_lane = flow_mode.draws_in_lane().then(|| guitar::bend_lane(&ed)).flatten();
     let midi_ref = canvas::midi_reference_rects(&ed);
@@ -1471,7 +1472,6 @@ fn Canvas(
                         // exactly where the seam between the two keys
                         // falls — so it gets its own chip to sit on.
                         rect {
-                            key: "gc{g.label}",
                             x: "1",
                             y: "{g.y + g.h * 0.5 - 6.0:.1}",
                             width: "20",
@@ -1482,7 +1482,6 @@ fn Canvas(
                         // an SVG transform to text, so a rotated label
                         // renders as nothing at all.
                         text {
-                            key: "gl{g.label}",
                             x: "4",
                             y: "{g.y + g.h * 0.5 + 3.0:.1}",
                             text_anchor: "start",
