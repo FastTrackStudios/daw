@@ -5120,12 +5120,21 @@ pub struct VolumeKnobProps {
 #[component]
 pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
     let t = Theme::default();
-    let (vw, vh) = (21.0f32, 21.0f32);
+    let (vw, vh) = (22.0f32, 22.0f32);
     let (cx, cy) = (vw * 0.5, vh * 0.5);
-    // The ring sits just inside the cell, and the body just inside it.
-    let r = vw * 0.40;
-    let stroke = vw * 0.14;
-    let body = r - stroke * 0.9;
+    // Measured off REAPER pixel by pixel across the knob's centre row and
+    // down its centre column: a 22-wide cell, the ring's outer edge at 11
+    // from centre with a 4-wide stroke, and a body of 7.5. Drawn thinner —
+    // a 2.9 stroke on a 5.8 body — the ring read as a hairline and the
+    // knob as a smaller control than the one beside it.
+    // The ring is inset by a dark rim — REAPER's knob starts with one
+    // near-black column at 158 and only then the blue. Without it the ring
+    // runs to the cell's edge and the knob reads a size larger than the
+    // one beside it even when the two measure the same.
+    let rim = vw * 0.5;
+    let r = vw * 0.386;
+    let stroke = vw * 0.18;
+    let body = vw * 0.34;
 
     /// A point on the ring, by angle clockwise from twelve o'clock.
     fn on(cx: f32, cy: f32, r: f32, deg: f32) -> (f32, f32) {
@@ -5156,6 +5165,8 @@ pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
 
+            // The rim the ring is inset into.
+            circle { cx: "{cx}", cy: "{cy}", r: "{rim}", fill: "{ink.border.shade(-0.35).css()}" }
             // The unlit track, all the way round.
             path {
                 d: "{arc(START, START + SWEEP)}",
@@ -5213,11 +5224,21 @@ mod volume_knob_tests {
 
     /// Unity lands a little past two o'clock, which is what says the 300°
     /// sweep and the fader's taper agree about where 0 dB is.
+    ///
+    /// Computed rather than pasted: the arc's end is a function of the
+    /// cell, and a literal here turns a resize of the knob into a failing
+    /// test about nothing.
     #[test]
     fn unity_lands_past_two_oclock() {
-        // -150 + 300 * 0.708 = 62.4 degrees clockwise from twelve, and at
-        // r = 8.4 that is x = cx + 8.4*sin(62.4) = 17.9, y = cy - 8.4*cos(62.4) = 6.6.
+        let (vw, r) = (22.0f32, 22.0f32 * 0.386);
+        let deg: f32 = -150.0 + 300.0 * 0.708;
+        assert!((60.0..70.0).contains(&deg), "unity is not past two o'clock: {deg}");
+
+        let x = vw * 0.5 + r * deg.to_radians().sin();
         let html = render(0.708);
-        assert!(html.contains("17.9"), "the value arc does not end past two:\n{html}");
+        assert!(
+            html.contains(&format!("{x}")),
+            "the value arc does not end at {x}:\n{html}"
+        );
     }
 }

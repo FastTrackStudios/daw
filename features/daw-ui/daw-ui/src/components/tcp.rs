@@ -71,7 +71,7 @@ const NAME_FIELD_H: f32 = 24.0;
 /// the knob and out the other side, where a row above it stops at 161. So
 /// the field is not a 129-wide box with a knob beside it — it is a
 /// 152-wide box whose rounded end encloses the knob.
-const VOLUME_KNOB_X: f32 = 159.0;
+const VOLUME_KNOB_X: f32 = 158.0;
 const PAN_KNOB_X: f32 = 205.0;
 const FX_IN_X: f32 = 248.0;
 /// The panel's own grey — the same one the mixer strip's body and name
@@ -338,8 +338,8 @@ fn VolumeKnob(track: String) -> Element {
             onmouseleave: move |_| at.set(art::Interaction::Normal),
             art::VolumeKnob {
                 value: crate::controls::fader_position(gain()) as f32,
-                width: Some(21),
-                height: Some(21),
+                width: Some(22),
+                height: Some(22),
                 at: at(),
             }
         }
