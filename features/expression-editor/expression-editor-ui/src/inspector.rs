@@ -83,6 +83,16 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
     };
     let editing_lyric = ed.editing_lyric;
     let lyric = note.as_ref().and_then(|n| n.text.clone()).unwrap_or_default();
+    // The field's own text while it is being typed. Held here rather
+    // than written through on each keystroke so the input is not
+    // fighting a trimmed value, and so one syllable is one undo step.
+    let mut draft_lyric = use_signal(String::new);
+    use_effect(move || {
+        let current = lyric.clone();
+        if editor.read().editing_lyric.is_none() {
+            draft_lyric.set(current);
+        }
+    });
     let selected_id = single;
     let fret_now: Option<u8> = match (&space, &note) {
         (RowSpace::Strings(t), Some(n)) => expression_editor_core::rows::fret_of(n, t)
@@ -230,19 +240,36 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                                 theme::SURFACE_INSET,
                                 theme::TEXT,
                             ),
-                            value: "{lyric}",
+                            value: "{draft_lyric}",
                             placeholder: "syllable",
                             onfocus: move |_| {
                                 if let Some(id) = selected_id {
                                     editor.write().editing_lyric = Some(id);
                                 }
                             },
-                            // Committed on every keystroke rather than
-                            // on Enter: a lyric is short, and losing one
-                            // to a missed Enter is the worse failure.
-                            oninput: move |e| {
+                            // Committed on blur and on Enter, not on
+                            // every keystroke. Per-keystroke looked
+                            // friendlier and was two bugs: each
+                            // character pushed an undo snapshot, and
+                            // with a history limit of ten an
+                            // eleven-letter syllable evicted every
+                            // other undo step in the session; and
+                            // committing a trimmed value into a
+                            // controlled input ate the space, so
+                            // multi-word text could not be typed.
+                            onkeydown: move |e| {
                                 if let Some(id) = selected_id {
-                                    editor.write().set_lyric(id, &e.value());
+                                    if e.key() == Key::Enter {
+                                        let text = draft_lyric.read().clone();
+                                        editor.write().set_lyric(id, &text);
+                                    }
+                                }
+                            },
+                            oninput: move |e| draft_lyric.set(e.value()),
+                            onblur: move |_| {
+                                if let Some(id) = selected_id {
+                                    let text = draft_lyric.read().clone();
+                                    editor.write().set_lyric(id, &text);
                                 }
                             },
                         }

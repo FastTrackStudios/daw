@@ -228,12 +228,32 @@ fn compaction_keeps_the_history_it_finds() {
     project.edit(|d| {
         d.add_track("Lead Vox");
     });
-    project.save(&dir).expect("save");
-    project.compact_on_disk(&dir, None).expect("compact");
+    // Several saves, so compaction actually *trims* something and the
+    // manifest text changes. The first version of this test compacted a
+    // single-save project, nothing moved, and it passed while the bug
+    // it was guarding was live.
+    for i in 0..4 {
+        project.edit(|d| {
+            d.add_track(&format!("Extra {i}"));
+        });
+        project.save(&dir).expect("save");
+    }
+    let before = std::fs::read_to_string(
+        dawfile_standalone::project::manifest_path(&dir, "Keep"),
+    )
+    .expect("read");
+
+    project.compact_on_disk(&dir, Some(1)).expect("compact");
+    let after = std::fs::read_to_string(
+        dawfile_standalone::project::manifest_path(&dir, "Keep"),
+    )
+    .expect("read");
+    assert_ne!(before, after, "compaction must have rewritten the manifest");
 
     let reopened = DawProject::load(&dir).expect("load");
     assert!(
         reopened.history().is_some(),
-        "compaction deleted the oplog it was supposed to keep"
+        "compaction rewrote the manifest and left the hash stale, so \
+         history was silently discarded on the next load"
     );
 }

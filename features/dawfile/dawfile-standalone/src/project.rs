@@ -194,9 +194,7 @@ impl DawProject {
         let bytes = crate::oplog::export(&history)?;
         let object = self.objects.put(bytes);
 
-        self.document.oplog = None;
-        let text_hash = crate::oplog::hash_text(&self.to_text()?);
-        self.document.oplog = Some(crate::oplog::OplogRef { object, text_hash });
+        self.install_oplog(object)?;
         let text = self.to_text()?;
         self.history = Some(history);
 
@@ -266,9 +264,39 @@ impl DawProject {
                 }
             }
         }
+        // Compaction rewrites the manifest, so the stored hash no
+        // longer describes it. Left alone, the next load sees a
+        // mismatch and silently drops history — indistinguishable from
+        // the hand-edit case, and nothing like what the caller asked
+        // for.
+        if let Some(oplog) = self.document.oplog.clone() {
+            self.install_oplog(oplog.object)?;
+        }
         std::fs::write(manifest_path(dir, &self.document.name), self.to_text()?)?;
         self.modified = false;
         Ok(removed)
+    }
+
+    /// Point the manifest at `object` and re-hash it.
+    ///
+    /// The hash covers the manifest with its own oplog ref removed: a
+    /// manifest holding a hash of itself is a fixpoint with no
+    /// solution, and the ref is the one part of the text a hand edit
+    /// never touches.
+    ///
+    /// The object is also added to the newest save entry, so a retained
+    /// save still reaches the history it was written with rather than
+    /// having it collected the next time somebody compacts.
+    fn install_oplog(&mut self, object: crate::id::ObjectId) -> DawResult<()> {
+        self.document.oplog = None;
+        if let Some(entry) = self.document.saves.last_mut()
+            && !entry.objects.contains(&object)
+        {
+            entry.objects.push(object.clone());
+        }
+        let text_hash = crate::oplog::hash_text(&self.to_text()?);
+        self.document.oplog = Some(crate::oplog::OplogRef { object, text_hash });
+        Ok(())
     }
 
     /// Open a project directory.

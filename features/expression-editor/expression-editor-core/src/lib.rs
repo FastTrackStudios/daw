@@ -1016,11 +1016,30 @@ impl Editor {
     }
 
     pub fn undo(&mut self) -> bool {
-        self.history.undo(&mut self.doc)
+        let ok = self.history.undo(&mut self.doc);
+        self.resync_row_space(ok);
+        ok
     }
 
     pub fn redo(&mut self) -> bool {
-        self.history.redo(&mut self.doc)
+        let ok = self.history.redo(&mut self.doc);
+        self.resync_row_space(ok);
+        ok
+    }
+
+    /// Bring the editor's row-space view back in line with the
+    /// document after history moves underneath it.
+    ///
+    /// Some edits change the row space itself — `SetBands` moves the
+    /// band splits — and the document is the authority. Without this an
+    /// undo restored the old splits in the document while the roll and
+    /// the inspector kept drawing the new ones, and every later edit
+    /// resorted against a row space nobody could see.
+    fn resync_row_space(&mut self, changed: bool) {
+        if changed && self.row_space != self.doc.row_space {
+            self.row_space = self.doc.row_space.clone();
+            self.refresh_fold();
+        }
     }
 
     pub fn can_undo(&self) -> bool {

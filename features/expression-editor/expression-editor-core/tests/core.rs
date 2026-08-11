@@ -4315,3 +4315,29 @@ fn a_slice_with_no_centroid_stays_put_when_bands_move() {
     assert!(ed.move_band_split(0, bands.splits[0] * 0.5));
     assert_eq!(ed.doc.note(NoteId(1)).unwrap().row, 2);
 }
+
+#[test]
+fn undo_brings_the_row_space_view_back_with_the_document() {
+    // `SetBands` changes the row space itself. Undo restored the
+    // document and left the editor's view on the new splits, so the
+    // roll drew one thing while every later edit resorted against
+    // another.
+    use expression_editor_core::rows::SliceBands;
+
+    let bands = SliceBands::default();
+    let mut doc = ExpressionDoc::new(TimeBase::Frames { frame_rate: 100.0 }, 0.0, 100.0);
+    doc.row_space = RowSpace::Bands(bands.clone());
+    let mut n = Note::new(NoteId(1), 0.0, 4.0, 0);
+    n.centroid_hz = Some(bands.splits[0] * 0.9);
+    doc.push(n);
+
+    let mut ed = Editor::new(doc, Viewport::new(800.0, 400.0));
+    ed.row_space = RowSpace::Bands(bands.clone());
+    assert!(ed.move_band_split(0, bands.splits[0] * 0.5));
+    assert!(ed.undo());
+
+    assert_eq!(
+        ed.row_space, ed.doc.row_space,
+        "the view kept the undone splits"
+    );
+}

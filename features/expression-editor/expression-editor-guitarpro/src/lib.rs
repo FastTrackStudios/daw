@@ -148,6 +148,11 @@ pub fn to_document(notes: &[GpNote], tuning: StringTuning) -> Imported {
             row_of(&tuning, gp.string, gp.fret),
         );
         note.string = Some(gp.string as u8);
+        // The channel too, and not as a duplicate of the string: MPE
+        // export attributes per-note bend by channel, and a part whose
+        // notes all sit on channel 0 has every bend overwriting every
+        // other one on any chord.
+        note.channel = Some(gp.string as u8);
         note.articulation = gp.articulation;
 
         if !gp.bend.is_empty() {
