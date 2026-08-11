@@ -462,3 +462,61 @@ fn the_track_panel_asks_for_its_own_images() {
     // image is wider than it is tall, the mixer's the other way round.
     assert!(!html.contains("<img"), "the row is blitting:\n{html}");
 }
+
+/// The coloured band is fixed; only the stretch section grows.
+///
+/// `rtconfig` writes `pan_sec` and `in_sec` as three-way choices — 6/33
+/// and 22/42/54 — and `stretch_sec_h` as everything left over. So a strip
+/// twice as tall has the same band and twice the fader, and the band's
+/// share of the strip falls as it grows.
+#[test]
+fn the_band_is_fixed_and_the_stretch_takes_the_height() {
+    use daw_ui::controls::Collapse;
+
+    // Both above every section threshold, so the only thing that differs
+    // between them is height.
+    let short = Collapse::at(500.0);
+    let tall = Collapse::at(900.0);
+
+    assert_eq!(
+        (short.pan_band, short.input_band),
+        (tall.pan_band, tall.input_band),
+        "the band grew with the strip"
+    );
+    assert!(tall.stretch - short.stretch >= 399.0, "the stretch did not take the height");
+    assert!(
+        tall.pan_band + tall.input_band < 0.12 * 900.0,
+        "the band is most of a tall strip"
+    );
+
+    // And the band is never the 50 that belongs to REAPER's pan-labels
+    // mode, which is a setting rather than a height.
+    for h in (120..=900).step_by(10) {
+        let c = Collapse::at(h as f32);
+        assert!(
+            c.pan_band == 6.0 || c.pan_band == 33.0,
+            "pan section is {} at {h}",
+            c.pan_band
+        );
+    }
+}
+
+/// Phase hangs off the stretch section's floor, so the column spreads as
+/// the strip grows rather than staying a cluster at the top.
+#[test]
+fn the_column_spreads_as_the_strip_grows() {
+    fn phase_top(html: &str) -> f32 {
+        html.split("position:absolute; left:57.5px; top:")
+            .nth(1)
+            .and_then(|rest| rest.split("px").next())
+            .and_then(|v| v.parse().ok())
+            .expect("a phase button")
+    }
+
+    let short = phase_top(&strip_at(500.0));
+    let tall = phase_top(&strip_at(700.0));
+    assert!(
+        tall - short >= 190.0,
+        "phase stayed put as the strip grew: {short} then {tall}"
+    );
+}

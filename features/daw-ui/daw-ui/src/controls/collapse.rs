@@ -42,7 +42,7 @@
 pub use daw_theme_art::collapse::{Bands, Thresholds, REAPER, REAPER_BANDS};
 use daw_theme_art::collapse::{
     BOTTOM_SECTION, FX_SECTION, INPUT_SECTION_FULL, INPUT_SECTION_MINIMAL, INPUT_SECTION_NO_FX,
-    PAN_SECTION_COLLAPSED, PAN_SECTION_FULL, PAN_SECTION_UNLABELLED,
+    PAN_SECTION_COLLAPSED, PAN_SECTION_UNLABELLED,
 };
 
 /// Where the pan control lives at a given height.
@@ -82,6 +82,12 @@ pub struct Collapse {
     pub volume: VolumeWidget,
     /// Vertical padding between the stacked controls, in px.
     pub padding: f32,
+    /// The pan section's own height — 6, 33 or 50, never anything
+    /// between. `rtconfig` writes it as a three-way choice and the stretch
+    /// section absorbs every other pixel.
+    pub pan_band: f32,
+    /// The input section's, the same way: 22, 42 or 54.
+    pub input_band: f32,
     /// The height left for the fader and meter after the fixed bands.
     pub stretch: f32,
 }
@@ -103,12 +109,22 @@ impl Collapse {
         // The stretch section is a *residual*: what the height has left
         // after the bands above and below it. Which is why the collapses
         // that key off it cannot be written as a query on the strip.
-        let pan_band = if !show_pan_section {
-            PAN_SECTION_COLLAPSED
-        } else if show_pan_labels {
-            PAN_SECTION_FULL
-        } else {
+        // 6 or 33, never 50. `rtconfig` writes the section as
+        //
+        //     !panLabelsMode (h<hide_pan_s ? 6 : 33) : 50
+        //
+        // and `panLabelsMode` is a *mode* the user turns on, not a height —
+        // the 50 belongs to it and to nothing else. Reading it as "tall
+        // strips get 50" made the band grow by seventeen rows at exactly
+        // the heights where there is most room for it to look wrong, which
+        // is why a tall strip was mostly colour.
+        //
+        // `show_pan_labels` still decides whether the word "pan" is
+        // printed; that is `hide_pan_labels`, a different line.
+        let pan_band = if show_pan_section {
             PAN_SECTION_UNLABELLED
+        } else {
+            PAN_SECTION_COLLAPSED
         };
         let input_band = if !show_record_input {
             INPUT_SECTION_MINIMAL
@@ -130,6 +146,8 @@ impl Collapse {
             // The other half of the re-anchor: when pan moves into the
             // input area it takes record mode's place, so record mode goes.
             show_record_mode: show_pan_section,
+            pan_band,
+            input_band,
             pan: if show_pan_section { PanAnchor::PanSection } else { PanAnchor::InputArea },
             // Asked of the fader area, which is what REAPER asks it of.
             volume: if daw_theme_art::collapse::fader_area(

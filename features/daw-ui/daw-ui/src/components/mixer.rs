@@ -218,10 +218,10 @@ const RECMON_FROM_ARM: f32 = 20.0;
 const MUTE_FROM_RECMON: f32 = 19.0;
 const SOLO_FROM_MUTE: f32 = 21.0;
 const IO_FROM_SOLO: f32 = 23.0;
-/// Not REAPER's: it anchors `mcp.env` and `mcp.phase` off the *bottom* of
-/// the stretch section, and we do not draw an envelope button yet. The IO
-/// button's own 30 rows is the honest stand-in until we do.
-const PHASE_FROM_IO: f32 = 30.0;
+/// `mcp.env`'s own height, which is the gap it leaves above the stretch
+/// section's floor, and phase's above that.
+const ENV_FROM_FLOOR: f32 = 30.0;
+const PHASE_FROM_ENV: f32 = 18.0;
 
 /// One control in the right-hand column.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -349,14 +349,12 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
     // Without it the band starts flat where the source starts lit.
     let tint_hl = tint_colour.shade(0.13).css();
 
-    let pan_h = if shape.pan == PanAnchor::PanSection { 33.0 } else { 6.0 };
-    let input_h = if !shape.show_record_input {
-        22.0
-    } else if !shape.show_input_fx {
-        42.0
-    } else {
-        54.0
-    };
+    // The band's height comes from the same place the stretch residual
+    // does. It used to be worked out twice — 33-or-6 here against
+    // `Collapse`'s 50/33/6 there — so the sections did not tile the strip
+    // and the meter was seventeen rows shorter than the band it sat in.
+    // Exactly the bug the strip's own height had, one level down.
+    let (pan_h, input_h) = (shape.pan_band, shape.input_band);
     let band = pan_h + input_h;
 
     // The button column, resolved on REAPER's chain. `mcp.recmon` hangs off
@@ -369,12 +367,27 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
             (MUTE_FROM_RECMON, Stacked::Mute, true),
             (SOLO_FROM_MUTE, Stacked::Solo, true),
             (IO_FROM_SOLO, Stacked::Io, shape.show_io),
-            (PHASE_FROM_IO, Stacked::Phase, shape.show_phase),
         ] {
             at += shape.padding + step;
             if shown {
                 out.push((at, control));
             }
+        }
+        // Phase hangs off the *bottom* of the stretch section, not off the
+        // chain above it — which is why REAPER's column spreads as a strip
+        // grows instead of staying a cluster at the top:
+        //
+        //     mcp.env   = mcp.io + [0 stretch_sec{3}] + [1 -30 21 30]
+        //     mcp.phase = mcp.env - [0 padding] + [3 -18 16 18]
+        //
+        // `stretch_sec{3}` is the section's height, so env sits 30 above
+        // its floor and phase 18 above env. We do not draw an envelope
+        // button yet; its slot is still reserved, because phase's position
+        // is measured from it and closing the gap would move phase to
+        // where REAPER never puts it.
+        if shape.show_phase {
+            let floor = shape.stretch - ENV_FROM_FLOOR;
+            out.push((floor - shape.padding - PHASE_FROM_ENV, Stacked::Phase));
         }
         out
     };
