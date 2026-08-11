@@ -278,3 +278,61 @@ fn slices_and_drum_hits_draw_as_triangles_and_sung_notes_do_not() {
     let vox = lanes.iter().find(|l| l.name == "Lead Vox").unwrap();
     assert!(vox.notes.iter().all(|n| !n.triangle));
 }
+
+// ── Guitar colour by string, or by pitch class ───────────────────────
+
+#[test]
+fn guitar_notes_colour_by_string_by_default_and_by_pitch_when_off() {
+    use expression_editor_core::rows::{RowSpace, StringTuning};
+
+    let tuning = StringTuning::guitar_standard();
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: 960.0 }, 0.0, 3840.0);
+    doc.row_space = RowSpace::Strings(tuning.clone());
+    // Two notes on *different* strings. By string they differ; by pitch
+    // class they are both open strings a fourth apart, so they differ
+    // there too — what matters is that the two modes disagree.
+    doc.push(Note::new(NoteId(1), 0.0, 480.0, 0));
+    doc.push(Note::new(NoteId(2), 960.0, 1440.0, 1));
+
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
+    ed.set_mode(expression_editor_core::Mode::Guitar);
+    ed.reset_view();
+
+    assert!(ed.color_by_string, "on by default — the row is the string");
+
+    let by_string = expression_editor_ui::stack::lanes(&ed, 1.0, 20.0);
+    ed.color_by_string = false;
+    let by_pitch = expression_editor_ui::stack::lanes(&ed, 1.0, 20.0);
+
+    let fills = |ls: &[expression_editor_ui::stack::LaneView]| -> Vec<String> {
+        ls.iter().flat_map(|l| l.notes.iter().map(|n| n.fill.clone())).collect()
+    };
+    assert_ne!(
+        fills(&by_string),
+        fills(&by_pitch),
+        "the toggle changed nothing"
+    );
+}
+
+#[test]
+fn the_toggle_leaves_non_guitar_rows_alone() {
+    // Drums and bands carry their own row colours; the option is about
+    // string rolls only.
+    use expression_editor_core::rows::{DrumMap, RowSpace};
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: 960.0 }, 0.0, 3840.0);
+    doc.row_space = RowSpace::Drums(DrumMap::fts());
+    doc.push(Note::new(NoteId(1), 0.0, 120.0, 1));
+
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
+    ed.set_mode(expression_editor_core::Mode::Drums);
+    ed.reset_view();
+
+    let on = expression_editor_ui::stack::lanes(&ed, 1.0, 20.0);
+    ed.color_by_string = false;
+    let off = expression_editor_ui::stack::lanes(&ed, 1.0, 20.0);
+
+    let fill = |ls: &[expression_editor_ui::stack::LaneView]| {
+        ls.iter().flat_map(|l| l.notes.iter().map(|n| n.fill.clone())).collect::<Vec<_>>()
+    };
+    assert_eq!(fill(&on), fill(&off));
+}

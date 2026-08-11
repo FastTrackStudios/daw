@@ -418,6 +418,16 @@ fn Canvas(
                     e.prevent_default();
                     return;
                 }
+                // Drum-mode keys, before the general ones: `f` means
+                // flam here and nothing elsewhere.
+                if key == "f" && !m.ctrl && editor.read().mode == expression_editor_core::Mode::Drums {
+                    let made = editor.write().flam_selection();
+                    if made > 0 {
+                        e.prevent_default();
+                        return;
+                    }
+                }
+
                 if multi.read().armed {
                     match key.as_str() {
                         "m" => {

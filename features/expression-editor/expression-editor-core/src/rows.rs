@@ -113,6 +113,44 @@ pub struct DrumLane {
     pub name: String,
     /// Lanes sharing a group choke each other (hi-hat open/closed).
     pub group: Option<u8>,
+    /// Which hand plays this row, when the kit distinguishes them.
+    ///
+    /// `None` is the ordinary case and the default: for most parts it
+    /// does not matter which hand hit the snare, and a roll that always
+    /// asked would be twice as tall for no reason. A piece becomes
+    /// two-handed only when something needs it — a flam, or notation
+    /// that specifies sticking.
+    pub hand: Option<Hand>,
+    /// The pitch of the same piece played by the other hand.
+    ///
+    /// This is what makes a split reversible and a flam possible: the
+    /// row knows its counterpart rather than a gesture having to guess
+    /// at one.
+    pub other_hand: Option<i32>,
+}
+
+/// Which hand plays a drum.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum Hand {
+    Left,
+    Right,
+}
+
+impl Hand {
+    pub fn other(self) -> Hand {
+        match self {
+            Hand::Left => Hand::Right,
+            Hand::Right => Hand::Left,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Hand::Left => "L",
+            Hand::Right => "R",
+        }
+    }
 }
 
 /// An ordered set of drum lanes — the rows of a drum editor.
@@ -126,6 +164,120 @@ pub struct DrumMap {
 impl DrumMap {
     /// General MIDI, trimmed to the kit pieces people actually
     /// sequence. A full 47-dimension GM map is unusable as a roll.
+    /// The FTS kit, as `midi-note-maps/FTS Drum Map.txt` defines it.
+    ///
+    /// Kick, snare and all four toms are **two-handed pieces**: each has
+    /// a left and a right note. Everything else is a single row, because
+    /// nothing about a hi-hat or a crash depends on which stick got
+    /// there.
+    ///
+    /// The two-handed pieces are collapsed by default —
+    /// [`DrumMap::split_piece`] opens one when a part needs it. A roll
+    /// that showed both hands for every drum would be twice as tall for
+    /// no reason on most material.
+    pub fn fts() -> Self {
+        // (pitch, name, group, hand, other-hand pitch)
+        let lanes: Vec<(i32, &str, Option<u8>, Option<Hand>, Option<i32>)> = vec![
+            (23, "K L", None, Some(Hand::Left), Some(24)),
+            (24, "K", None, None, Some(23)),
+            (25, "S-Cross", None, None, None),
+            (26, "S", None, None, Some(28)),
+            (27, "S-Buzz", None, None, None),
+            (28, "S R", None, Some(Hand::Right), Some(26)),
+            (29, "T1 L", None, Some(Hand::Left), Some(30)),
+            (30, "T1", None, None, Some(29)),
+            (31, "T2 L", None, Some(Hand::Left), Some(32)),
+            (32, "T2", None, None, Some(31)),
+            (33, "T3 L", None, Some(Hand::Left), Some(34)),
+            (34, "T3", None, None, Some(33)),
+            (35, "T4 L", None, Some(Hand::Left), Some(36)),
+            (36, "T4", None, None, Some(35)),
+            (37, "H-Tight Tip", Some(1), None, None),
+            (38, "H-Tight Edg", Some(1), None, None),
+            (39, "H-Clsd Tip", Some(1), None, None),
+            (40, "H-Clsd Edg", Some(1), None, None),
+            (41, "H-Open1", Some(1), None, None),
+            (42, "H-Open2", Some(1), None, None),
+            (43, "H-Open3", Some(1), None, None),
+            (44, "H-Chick", Some(1), None, None),
+            (45, "H-Ching", Some(1), None, None),
+            (48, "C-L", Some(2), None, None),
+            (49, "C-L Choke", Some(2), None, None),
+            (50, "C-C", Some(3), None, None),
+            (51, "C-C Choke", Some(3), None, None),
+            (52, "C-R", Some(4), None, None),
+            (53, "C-R Choke", Some(4), None, None),
+            (54, "H-Bell", Some(1), None, None),
+            (56, "R-Bow Lo", Some(5), None, None),
+            (57, "R-Bell", Some(5), None, None),
+            (58, "R-Crash", Some(5), None, None),
+            (59, "R-Choke", Some(5), None, None),
+            (62, "China", Some(6), None, None),
+            (63, "China Choke", Some(6), None, None),
+            (64, "Splash", Some(7), None, None),
+            (65, "Splash Choke", Some(7), None, None),
+            (71, "Stack", None, None, None),
+        ];
+        Self {
+            name: "FTS",
+            lanes: lanes
+                .into_iter()
+                .map(|(pitch, name, group, hand, other_hand)| DrumLane {
+                    pitch,
+                    name: name.to_string(),
+                    group,
+                    hand,
+                    other_hand,
+                })
+                .collect(),
+        }
+    }
+
+    /// Whether a row is one hand of a two-handed piece.
+    pub fn is_two_handed(&self, row: usize) -> bool {
+        self.lanes.get(row).is_some_and(|l| l.other_hand.is_some())
+    }
+
+    /// The row holding the other hand of `row`'s piece.
+    pub fn other_hand_row(&self, row: usize) -> Option<usize> {
+        let other = self.lanes.get(row)?.other_hand?;
+        self.lanes.iter().position(|l| l.pitch == other)
+    }
+
+    /// Which hand `row` is, treating an unmarked half of a pair as the
+    /// right — the hand most parts lead with, and the one the map leaves
+    /// unlabelled (`K`, `S`, `T1`).
+    pub fn hand_of(&self, row: usize) -> Option<Hand> {
+        let lane = self.lanes.get(row)?;
+        lane.other_hand?;
+        Some(lane.hand.unwrap_or(Hand::Right))
+    }
+
+    /// Rows currently shown: every single-handed piece, plus both halves
+    /// of any piece in `split`.
+    ///
+    /// A two-handed piece the caller has not split contributes only its
+    /// unmarked row, so the roll stays the height it was.
+    pub fn visible_rows(&self, split: &[usize]) -> Vec<usize> {
+        (0..self.lanes.len())
+            .filter(|&i| {
+                let Some(lane) = self.lanes.get(i) else {
+                    return false;
+                };
+                match lane.other_hand {
+                    None => true,
+                    Some(_) => {
+                        // Shown when its piece is split, or when it is
+                        // the piece's default row.
+                        split.contains(&i)
+                            || self.other_hand_row(i).is_some_and(|o| split.contains(&o))
+                            || lane.hand.is_none()
+                    }
+                }
+            })
+            .collect()
+    }
+
     pub fn general_midi() -> Self {
         let lanes = [
             (35, "Kick 2", None),
@@ -160,6 +312,8 @@ impl DrumMap {
                     pitch,
                     name: name.to_string(),
                     group,
+                    hand: None,
+                    other_hand: None,
                 })
                 .collect(),
         }

@@ -180,6 +180,19 @@ fn lane_view(ed: &Editor, row: &StackRow) -> Option<LaneView> {
     })
 }
 
+/// The sounding pitch of a note, for colour that means harmony.
+///
+/// On a string roll the row is a string, not a pitch, so pitch-class
+/// colour has to go through the tuning or every note on one string
+/// would share a colour — which is the thing the toggle exists to turn
+/// off.
+fn pitch_of(space: &RowSpace, n: &Note) -> i32 {
+    match space {
+        RowSpace::Strings(t) => t.open(n.row.max(0) as usize),
+        _ => n.row,
+    }
+}
+
 /// The row range a lane shows: its own content, padded.
 fn fit(doc: &ExpressionDoc, mode: &Mode) -> (f64, f64) {
     let (bound_lo, bound_hi) = doc.row_space.bounds();
@@ -230,10 +243,18 @@ fn lane_note(
     // the purpose of showing the track at all.
     let w = (x1 - x0).max(1.5);
 
-    let base = space
-        .row_color(n.row)
+    // On a string roll the row *is* the string, so colouring by it
+    // shows the shape of a part at a glance. Turned off, pitch-class
+    // colour reads harmony instead — the more useful signal when you
+    // are looking at what the notes *are* rather than where they sit.
+    let by_row = if matches!(space, RowSpace::Strings(_)) && !ed.color_by_string {
+        None
+    } else {
+        space.row_color(n.row)
+    };
+    let base = by_row
         .map(str::to_string)
-        .unwrap_or_else(|| theme::pitch_class_color(n.row).to_string());
+        .unwrap_or_else(|| theme::pitch_class_color(pitch_of(space, n)).to_string());
     let fill = if active {
         base
     } else {

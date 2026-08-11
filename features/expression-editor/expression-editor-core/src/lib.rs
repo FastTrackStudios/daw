@@ -32,6 +32,7 @@ pub mod clipboard;
 pub mod doc;
 pub mod draft;
 pub mod edit;
+pub mod flam;
 pub mod handles;
 pub mod menu;
 pub mod mode;
@@ -125,6 +126,22 @@ pub struct Editor {
     pub lane_strip_h: f64,
     /// Which dimension the strip shows.
     pub strip_lane: StripLane,
+    /// Colour guitar notes by string rather than by pitch class.
+    ///
+    /// On by default: on a string roll the row *is* the string, so
+    /// colouring by it makes the shape of a part legible at a glance —
+    /// which run is on the B, where it crosses to the G. Turn it off to
+    /// read harmony instead, where pitch-class colour is the more useful
+    /// signal.
+    pub color_by_string: bool,
+    /// Which drum pieces are shown as two rows instead of one.
+    ///
+    /// Row indices into the drum map. Empty is the ordinary case: a
+    /// piece splits only when a part needs the sticking, so the roll
+    /// does not carry twice the rows for material that never asks.
+    pub split_pieces: Vec<usize>,
+    /// Which way the next flam goes. Pressing the key again flips it.
+    pub flam_side: flam::FlamSide,
     /// Context × modifier → action. Editable, so a host can ship a
     /// REAPER-matching profile or its own.
     pub mouse: MouseMap,
@@ -215,6 +232,9 @@ impl Editor {
             cc_edit: None,
             lane_strip_h: 96.0,
             strip_lane: StripLane::Velocity,
+            color_by_string: true,
+            split_pieces: Vec::new(),
+            flam_side: flam::FlamSide::default(),
             mouse: MouseMap::default(),
             tuning: Tuning::default(),
             grid: Grid::default(),
@@ -380,6 +400,91 @@ impl Editor {
             if let Some(slot) = self.lane_cameras.get_mut(lane) {
                 *slot = camera::VerticalCamera::fitted(lo, hi, height);
             }
+        }
+    }
+
+    /// Flam the selected drum hits, and flip which way the next one
+    /// goes.
+    ///
+    /// One key does both, which is the point: you press it, look at the
+    /// result, and press it again if you wanted the grace note on the
+    /// other side. A separate before/after control would be two things
+    /// to find for a decision you make by ear in a second.
+    ///
+    /// Silent about pieces that cannot flam — a hi-hat in the selection
+    /// is skipped rather than refusing the whole gesture.
+    pub fn flam_selection(&mut self) -> usize {
+        let RowSpace::Drums(map) = self.row_space.clone() else {
+            return 0;
+        };
+        let side = self.flam_side;
+        let ids: Vec<doc::NoteId> = self.selection.notes.clone();
+
+        let mut made = 0;
+        for id in ids {
+            match flam::flam(
+                &self.doc,
+                &map,
+                id,
+                side,
+                flam::DEFAULT_FLAM_MS,
+                self.bpm,
+            ) {
+                Ok(edit) => {
+                    self.apply(&edit);
+                    made += 1;
+                }
+                Err(_) => continue,
+            }
+        }
+
+        if made > 0 {
+            // Splitting the affected pieces is what makes the flam
+            // *visible*: a grace note on a hidden row is a note you
+            // cannot see or select.
+            self.show_hands_for_selection(&map);
+        }
+        self.flam_side = side.toggled();
+        made
+    }
+
+    /// Open both hands for every two-handed piece in the selection.
+    fn show_hands_for_selection(&mut self, map: &rows::DrumMap) {
+        let rows: Vec<usize> = self
+            .selection
+            .notes
+            .iter()
+            .filter_map(|id| self.doc.note(*id))
+            .map(|n| n.row.max(0) as usize)
+            .collect();
+        for row in rows {
+            if let Some(other) = map.other_hand_row(row) {
+                for r in [row, other] {
+                    if !self.split_pieces.contains(&r) {
+                        self.split_pieces.push(r);
+                    }
+                }
+            }
+        }
+        self.split_pieces.sort_unstable();
+        self.split_pieces.dedup();
+    }
+
+    /// Show or collapse a two-handed piece.
+    pub fn toggle_piece_split(&mut self, row: usize) {
+        let RowSpace::Drums(map) = self.row_space.clone() else {
+            return;
+        };
+        let Some(other) = map.other_hand_row(row) else {
+            return;
+        };
+        if self.split_pieces.contains(&row) {
+            self.split_pieces.retain(|r| *r != row && *r != other);
+        } else {
+            self.split_pieces.push(row);
+            self.split_pieces.push(other);
+            self.split_pieces.sort_unstable();
+            self.split_pieces.dedup();
         }
     }
 
