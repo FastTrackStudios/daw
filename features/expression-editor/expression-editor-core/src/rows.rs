@@ -129,6 +129,92 @@ pub struct DrumLane {
     pub other_hand: Option<i32>,
 }
 
+/// The part of the kit a lane belongs to.
+///
+/// Grouping is what makes a real kit navigable: the FTS map is 39 rows,
+/// and a wall of evenly-striped lanes gives the eye nothing to steer by.
+/// Banding by family means you find the toms by *shape* rather than by
+/// reading every label.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DrumFamily {
+    Kick,
+    Snare,
+    Tom,
+    HiHat,
+    Cymbal,
+    /// Ride is its own band rather than a cymbal, because it is played
+    /// like a hat — a continuous part — not struck like a crash.
+    Ride,
+    Other,
+}
+
+impl DrumFamily {
+    /// Background tint for the row band.
+    ///
+    /// Deliberately near-black: this sits *under* the notes, and a band
+    /// strong enough to notice on its own would compete with the
+    /// material it exists to organise. The hue is the signal; the value
+    /// stays almost flat.
+    pub fn band(self) -> &'static str {
+        match self {
+            DrumFamily::Kick => "#1e1416",
+            DrumFamily::Snare => "#1e1a13",
+            DrumFamily::Tom => "#161c14",
+            DrumFamily::HiHat => "#131b1e",
+            DrumFamily::Cymbal => "#1c1520",
+            DrumFamily::Ride => "#14181f",
+            DrumFamily::Other => "#16161a",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            DrumFamily::Kick => "Kick",
+            DrumFamily::Snare => "Snare",
+            DrumFamily::Tom => "Toms",
+            DrumFamily::HiHat => "Hi-hat",
+            DrumFamily::Cymbal => "Cymbals",
+            DrumFamily::Ride => "Ride",
+            DrumFamily::Other => "Other",
+        }
+    }
+}
+
+/// Which family a lane name belongs to.
+///
+/// Reads the FTS abbreviations first and exactly — `K`, `S`, `T1`, `H-`,
+/// `C-`, `R-` — then falls back to the words a General MIDI map uses.
+/// Matching a single letter by substring would put half the kit in the
+/// wrong band.
+pub fn drum_family(name: &str) -> DrumFamily {
+    let n = name.to_ascii_lowercase();
+    let head = n.split(|c: char| c == ' ' || c == '-').next().unwrap_or("");
+    match head {
+        "k" | "kl" => return DrumFamily::Kick,
+        "s" | "sr" => return DrumFamily::Snare,
+        "t1" | "t2" | "t3" | "t4" => return DrumFamily::Tom,
+        "h" => return DrumFamily::HiHat,
+        "r" => return DrumFamily::Ride,
+        "c" => return DrumFamily::Cymbal,
+        _ => {}
+    }
+    if n.contains("kick") {
+        DrumFamily::Kick
+    } else if n.contains("snare") || n.contains("stick") || n.contains("clap") {
+        DrumFamily::Snare
+    } else if n.contains("tom") {
+        DrumFamily::Tom
+    } else if n.contains("hh") || n.contains("hat") {
+        DrumFamily::HiHat
+    } else if n.contains("ride") {
+        DrumFamily::Ride
+    } else if n.contains("crash") || n.contains("china") || n.contains("splash") {
+        DrumFamily::Cymbal
+    } else {
+        DrumFamily::Other
+    }
+}
+
 /// Which hand plays a drum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -242,6 +328,25 @@ impl DrumMap {
     pub fn other_hand_row(&self, row: usize) -> Option<usize> {
         let other = self.lanes.get(row)?.other_hand?;
         self.lanes.iter().position(|l| l.pitch == other)
+    }
+
+    /// The family a row belongs to.
+    pub fn family_of(&self, row: usize) -> Option<DrumFamily> {
+        self.lanes.get(row).map(|l| drum_family(&l.name))
+    }
+
+    /// Whether `row` is the first of its family, reading upward.
+    ///
+    /// What a renderer needs to draw one divider per group instead of
+    /// one per row — the line that makes a band read as a band.
+    pub fn starts_family(&self, row: usize) -> bool {
+        let Some(here) = self.family_of(row) else {
+            return false;
+        };
+        match row.checked_sub(1).and_then(|r| self.family_of(r)) {
+            Some(below) => below != here,
+            None => true,
+        }
     }
 
     /// Which hand `row` is, treating an unmarked half of a pair as the
@@ -544,6 +649,26 @@ impl RowSpace {
     /// tracking, and pitch-class colour would scatter one string's part
     /// across six hues. Drums colour by kit section for the same
     /// reason. Pitch space returns `None` and keeps pitch-class colour.
+    /// Background tint for a row band.
+    ///
+    /// Only drum rolls have one: a piano roll already has black and
+    /// white keys to steer by, and a string roll has six rows. A kit has
+    /// thirty-nine and needs the grouping.
+    pub fn row_background(&self, row: i32) -> Option<&'static str> {
+        match self {
+            RowSpace::Drums(m) => m.family_of(row.max(0) as usize).map(|f| f.band()),
+            _ => None,
+        }
+    }
+
+    /// Whether a row opens a new family — where a divider goes.
+    pub fn starts_group(&self, row: i32) -> bool {
+        match self {
+            RowSpace::Drums(m) => m.starts_family(row.max(0) as usize),
+            _ => false,
+        }
+    }
+
     pub fn row_color(&self, row: i32) -> Option<&'static str> {
         match self {
             RowSpace::Pitch => None,

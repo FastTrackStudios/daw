@@ -355,3 +355,88 @@ fn the_key_does_nothing_outside_drum_mode() {
     ed.row_space = RowSpace::Pitch;
     assert_eq!(ed.flam_selection(), 0);
 }
+
+// ── Family banding ───────────────────────────────────────────────────
+//
+// The FTS map is 39 rows. Evenly-striped lanes give the eye nothing to
+// steer by, so the roll bands by part of the kit.
+
+use expression_editor_core::rows::{DrumFamily, drum_family};
+
+#[test]
+fn the_fts_abbreviations_land_in_the_right_families() {
+    // Matched exactly on the head, not by substring: a single-letter
+    // `contains` would put half the kit in the wrong band.
+    assert_eq!(drum_family("K"), DrumFamily::Kick);
+    assert_eq!(drum_family("K L"), DrumFamily::Kick);
+    assert_eq!(drum_family("S"), DrumFamily::Snare);
+    assert_eq!(drum_family("S-Cross"), DrumFamily::Snare);
+    assert_eq!(drum_family("T3 L"), DrumFamily::Tom);
+    assert_eq!(drum_family("H-Clsd Tip"), DrumFamily::HiHat);
+    assert_eq!(drum_family("C-L Choke"), DrumFamily::Cymbal);
+    assert_eq!(drum_family("R-Bell"), DrumFamily::Ride);
+    assert_eq!(drum_family("Stack"), DrumFamily::Other);
+}
+
+#[test]
+fn general_midi_names_still_work() {
+    assert_eq!(drum_family("Kick"), DrumFamily::Kick);
+    assert_eq!(drum_family("HH Closed"), DrumFamily::HiHat);
+    assert_eq!(drum_family("Tom Floor L"), DrumFamily::Tom);
+    assert_eq!(drum_family("Crash"), DrumFamily::Cymbal);
+    assert_eq!(drum_family("Ride Bell"), DrumFamily::Ride);
+}
+
+#[test]
+fn ride_is_its_own_band_not_a_cymbal() {
+    // It is played like a hat — a continuous part — not struck like a
+    // crash, so it reads better on its own.
+    assert_ne!(drum_family("R-Bow Lo"), DrumFamily::Cymbal);
+    assert_ne!(drum_family("Ride"), DrumFamily::Cymbal);
+}
+
+#[test]
+fn every_family_has_a_distinct_band() {
+    let all = [
+        DrumFamily::Kick,
+        DrumFamily::Snare,
+        DrumFamily::Tom,
+        DrumFamily::HiHat,
+        DrumFamily::Cymbal,
+        DrumFamily::Ride,
+        DrumFamily::Other,
+    ];
+    for (i, a) in all.iter().enumerate() {
+        for b in &all[i + 1..] {
+            assert_ne!(a.band(), b.band(), "{a:?} and {b:?} look the same");
+        }
+    }
+}
+
+#[test]
+fn a_divider_falls_once_per_group_not_once_per_row() {
+    // The line that makes a band read as a band.
+    let m = map();
+    let starts: Vec<usize> = (0..m.lanes.len()).filter(|&r| m.starts_family(r)).collect();
+    assert!(
+        starts.len() < m.lanes.len() / 3,
+        "{} dividers for {} rows is per-row, not per-group",
+        starts.len(),
+        m.lanes.len()
+    );
+    assert!(m.starts_family(0), "the first row opens its family");
+}
+
+#[test]
+fn only_drum_rolls_are_banded() {
+    // A piano roll has black and white keys to steer by; a string roll
+    // has six rows. Neither needs it.
+    use expression_editor_core::rows::{RowSpace, StringTuning};
+    assert!(RowSpace::Pitch.row_background(60).is_none());
+    assert!(
+        RowSpace::Strings(StringTuning::guitar_standard())
+            .row_background(2)
+            .is_none()
+    );
+    assert!(RowSpace::Drums(map()).row_background(0).is_some());
+}

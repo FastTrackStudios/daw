@@ -19,6 +19,12 @@ pub struct Row {
     pub h: f64,
     pub fill: &'static str,
     pub is_c: bool,
+    /// This row opens a new part of the kit — draw a divider above it.
+    ///
+    /// One line per group rather than per row: thirty-nine evenly-ruled
+    /// lanes give the eye nothing to steer by, which is the whole
+    /// problem banding solves.
+    pub starts_group: bool,
 }
 
 /// Background rows across the visible pitch span.
@@ -35,12 +41,18 @@ pub fn rows(ed: &Editor) -> Vec<Row> {
             row,
             y: ed.camera.y(row as f64 + 0.5, ed.viewport),
             h,
-            fill: if theme::is_black_key(row) {
-                theme::ROW_BLACK
-            } else {
-                theme::ROW_WHITE
-            },
+            // A drum roll bands by family; everything else keeps the
+            // keyboard's black/white, which is the thing a pitch roll
+            // is already navigated by.
+            fill: ed.row_space.row_background(row).unwrap_or_else(|| {
+                if theme::is_black_key(row) {
+                    theme::ROW_BLACK
+                } else {
+                    theme::ROW_WHITE
+                }
+            }),
             is_c: row.rem_euclid(12) == 0,
+            starts_group: ed.row_space.starts_group(row),
         })
         .collect()
 }

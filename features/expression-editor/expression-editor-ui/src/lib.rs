@@ -665,6 +665,19 @@ fn Canvas(
                         fill: r.fill,
                     }
                 }
+                // One divider per family, so a kit reads as groups
+                // rather than thirty-nine identical lanes.
+                for r in rows.iter().filter(|r| r.starts_group) {
+                    line {
+                        key: "grp{r.row}",
+                        x1: "0",
+                        y1: "{r.y:.1}",
+                        x2: "{vp.w:.0}",
+                        y2: "{r.y:.1}",
+                        stroke: theme::OCTAVE_LINE,
+                        stroke_width: "1",
+                    }
+                }
                 for r in rows.iter().filter(|r| r.is_c) {
                     line {
                         key: "c{r.row}",
