@@ -5,9 +5,10 @@
 //! asserted in tests without mounting a DOM, and it keeps the component
 //! body about events rather than arithmetic.
 
-use expression_editor_core::doc::{Lane, Note, NoteId};
+use expression_editor_core::doc::{Dimension, Note, NoteId};
+use expression_editor_core::handles;
 use expression_editor_core::tools;
-use expression_editor_core::Editor;
+use expression_editor_core::{Editor, RefColor};
 
 use crate::theme;
 
@@ -18,23 +19,43 @@ pub struct Row {
     pub h: f64,
     pub fill: &'static str,
     pub is_c: bool,
+    /// This row opens a new part of the kit — draw a divider above it.
+    ///
+    /// One line per group rather than per row: thirty-nine evenly-ruled
+    /// lanes give the eye nothing to steer by, which is the whole
+    /// problem banding solves.
+    pub starts_group: bool,
 }
 
 /// Background rows across the visible pitch span.
 pub fn rows(ed: &Editor) -> Vec<Row> {
-    let (lo, hi) = ed.camera.pitch_span(ed.viewport);
-    let h = ed.camera.px_per_semitone;
-    ((lo.floor() as i32).max(0)..=(hi.ceil() as i32).min(127))
+    let (lo, hi) = ed.camera.slot_span(ed.viewport);
+    let h = ed.camera.vertical.px_per_row;
+    // Clamped to the row space's own bounds, not to 0..127. A six-string
+    // roll has six rows and painting a hundred and twenty-two phantom
+    // ones above and below them says there is somewhere else to put a
+    // note, which there is not.
+    //
+    // Iteration is in *slots*, so a folded piece is drawn once.
+    let (rlo, rhi) = ed.camera.fold.slot_bounds(ed.row_space.bounds());
+    ((lo.floor() as i32).max(rlo)..=(hi.ceil() as i32).min(rhi))
+        .map(|slot| ed.camera.fold.row(slot as f64) as i32)
         .map(|row| Row {
             row,
             y: ed.camera.y(row as f64 + 0.5, ed.viewport),
             h,
-            fill: if theme::is_black_key(row) {
-                theme::ROW_BLACK
-            } else {
-                theme::ROW_WHITE
-            },
+            // A drum roll bands by family; everything else keeps the
+            // keyboard's black/white, which is the thing a pitch roll
+            // is already navigated by.
+            fill: ed.row_space.row_background(row).unwrap_or_else(|| {
+                if theme::is_black_key(row) {
+                    theme::ROW_BLACK
+                } else {
+                    theme::ROW_WHITE
+                }
+            }),
             is_c: row.rem_euclid(12) == 0,
+            starts_group: ed.row_space.starts_group(row),
         })
         .collect()
 }
@@ -98,13 +119,131 @@ pub struct NoteRect {
     pub badge: Option<&'static str>,
     /// Triangle points, when this space draws heads instead of bars.
     pub head: Option<String>,
+    /// Amplitude-blob polygon, when this mode draws sung notes instead
+    /// of rectangles. Takes precedence over both `head` and the bar.
+    pub blob: Option<String>,
+    /// Y of the blob's centre line — the note's own pitch, drawn as a
+    /// hairline through the body so the pitch track can be read against
+    /// it. `None` when there is no blob.
+    pub blob_center: Option<f64>,
     /// Joined to the next note on its row.
     pub legato: bool,
 }
 
+/// The handle set for one note, positioned.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NoteHandles {
+    pub id: NoteId,
+    pub rects: Vec<handles::HandleRect>,
+    /// The temporary-note range in pixels, when one is open here.
+    pub scope: Option<(f64, f64)>,
+}
+
+/// Handles for the notes that should carry them.
+///
+/// Only the selected notes, and only in a mode whose notes have a
+/// contour to shape. Handles on every note at once is a wall of
+/// targets — Vovious draws them on what you are working on.
+pub fn note_handles(ed: &Editor) -> Vec<NoteHandles> {
+    if !ed.mode.has_handles() {
+        return Vec::new();
+    }
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let h = ed.camera.vertical.px_per_row;
+    ed.doc
+        .notes
+        .iter()
+        .filter(|n| n.end >= t0 && n.start <= t1)
+        .filter(|n| ed.selection.notes.contains(&n.id))
+        .map(|n| {
+            let raw_x = ed.camera.x(n.start);
+            let raw_end = ed.camera.x(n.end);
+            // Lay the handles out over the note's *visible* extent, not
+            // its true one. A note longer than the viewport — routine
+            // for a held vocal at working zoom — would otherwise put
+            // its right-hand handles off-screen and leave three of the
+            // seven unreachable until you scrolled.
+            let x = raw_x.max(0.0);
+            let w = (raw_end.min(ed.viewport.w) - x).max(2.0);
+            let y = ed.camera.y(n.row as f64 + 0.5, ed.viewport);
+            let scope = match ed.scope_for(n.id) {
+                handles::Scope::Range { t0, t1 } => Some((ed.camera.x(t0), ed.camera.x(t1))),
+                handles::Scope::Note => None,
+            };
+            NoteHandles {
+                id: n.id,
+                rects: handles::layout(x, y, w, h),
+                scope,
+            }
+        })
+        .collect()
+}
+
+/// A note belonging to another track, drawn behind the active one.
+///
+/// Deliberately not a [`NoteRect`]: a reference has no zones, no
+/// ribbon, no cents readout and no selection state, and giving it those
+/// fields would invite code that treats it as editable.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RefRect {
+    /// Which track it came from, so a double-click can promote it.
+    pub track: usize,
+    pub id: NoteId,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub stroke: String,
+    /// `None` for outline-only (`RefColor::Shadow`).
+    pub fill: Option<String>,
+    pub label: Option<String>,
+}
+
+/// Notes from every track marked as a reference.
+///
+/// Ordered back-to-front by track index so the overlay is stable: a
+/// reference that jumped in front of another when you switched tracks
+/// would be unreadable.
+pub fn reference_rects(ed: &Editor) -> Vec<RefRect> {
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let h = ed.camera.vertical.px_per_row;
+    let mut out = Vec::new();
+    for (i, track) in ed.tracks.references() {
+        let Some(doc) = ed.tracks.doc_of(i) else {
+            continue;
+        };
+        // Host colour when asked for and available; the surface's own
+        // reference grey otherwise, so a host that supplies no colours
+        // still renders something legible.
+        let colour = match track.ref_color {
+            RefColor::Host => track
+                .color
+                .clone()
+                .unwrap_or_else(|| theme::REFERENCE.into()),
+            RefColor::Default | RefColor::Shadow => theme::REFERENCE.into(),
+        };
+        let fill = (track.ref_color != RefColor::Shadow).then(|| colour.clone());
+        for n in doc.notes.iter().filter(|n| n.end >= t0 && n.start <= t1) {
+            let x = ed.camera.x(n.start);
+            out.push(RefRect {
+                track: i,
+                id: n.id,
+                x,
+                w: (ed.camera.x(n.end) - x).max(2.0),
+                y: ed.camera.y(n.row as f64 + 0.5, ed.viewport),
+                h,
+                stroke: colour.clone(),
+                fill: fill.clone(),
+                label: n.text.clone(),
+            });
+        }
+    }
+    out
+}
+
 pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
     let (t0, t1) = ed.camera.time_span(ed.viewport);
-    let h = ed.camera.px_per_semitone;
+    let h = ed.camera.vertical.px_per_row;
     ed.doc
         .notes
         .iter()
@@ -155,12 +294,19 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
                     top + size * 0.5,
                 )
             });
+            let blob_shape = ed.mode.draws_blobs().then(|| blob_polygon(ed, n)).flatten();
             // A string roll colours by string, a kit by section; pitch
-            // space keeps its pitch-class hue.
-            let fill = ed
-                .row_space
-                .row_color(n.row)
-                .unwrap_or_else(|| theme::pitch_class_color(n.row));
+            // space keeps its pitch-class hue. A sung note instead
+            // colours by how far out of tune it is, which is the one
+            // thing you are looking for on this surface — pitch class
+            // is already the row.
+            let fill = if blob_shape.is_some() {
+                theme::tune_color(blob_cents(ed, n))
+            } else {
+                ed.row_space
+                    .row_color(n.row)
+                    .unwrap_or_else(|| theme::pitch_class_color(n.row))
+            };
             NoteRect {
                 id: n.id,
                 row: n.row,
@@ -174,14 +320,328 @@ pub fn note_rects(ed: &Editor) -> Vec<NoteRect> {
                 ambiguous: n.ambiguous,
                 zones,
                 cents,
-                ribbon: note_ribbon(ed, n),
+                // The blob already *is* the amplitude envelope, so the
+                // ribbon would draw the same information twice — and
+                // draw it in the wrong place, since the ribbon sits in
+                // the row while the blob rides the pitch.
+                ribbon: if blob_shape.is_some() {
+                    None
+                } else {
+                    note_ribbon(ed, n)
+                },
                 label,
                 badge,
                 head,
+                blob_center: blob_shape.as_ref().map(|_| blob_center_y(ed, n)),
+                blob: blob_shape,
                 legato: n.legato,
             }
         })
         .collect()
+}
+
+/// Samples across a blob body. Enough that a vibrato reads as a wave
+/// rather than a zigzag, few enough that a screen of notes stays cheap.
+const BLOB_SAMPLES: usize = 48;
+
+/// A timing separator, positioned.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SeparatorLine {
+    pub sep: expression_editor_core::Separator,
+    pub x: f64,
+    /// Y of the tick that splits the two drag laws.
+    pub tick_y: f64,
+    /// Colour by how far off the beat the boundary sits.
+    pub color: &'static str,
+}
+
+/// Where the tick sits on a separator, as a fraction of roll height.
+pub const SEPARATOR_TICK: f64 = 0.5;
+/// How close to a separator counts as grabbing it.
+pub const SEPARATOR_GRAB_PX: f64 = 6.0;
+
+/// Separators for the visible boundaries.
+///
+/// Only in timing mode: a full-height line at every note join would be
+/// a picket fence across a screen that is otherwise about pitch.
+pub fn separators(ed: &Editor) -> Vec<SeparatorLine> {
+    if !ed.timing_mode {
+        return Vec::new();
+    }
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let step = ed.grid.step(ed.units_per_beat());
+    expression_editor_core::timing::separators(&ed.doc, ed.camera.units_per_px * 2.0)
+        .into_iter()
+        .filter(|s| s.t >= t0 && s.t <= t1)
+        .map(|sep| {
+            // Deviation as a fraction of half a division: dead on at
+            // zero, worst when it sits between two divisions.
+            let dev = expression_editor_core::timing::beat_deviation(sep.t, ed.doc.start, step);
+            let off = if step > 0.0 {
+                (dev.abs() / (step * 0.5)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            SeparatorLine {
+                sep,
+                x: ed.camera.x(sep.t),
+                tick_y: ed.viewport.h * SEPARATOR_TICK,
+                // The same ramp the notes use, so "off" means the same
+                // thing everywhere on this surface — just measured
+                // against the beat instead of against a pitch.
+                color: theme::TUNE_RAMP[(off * 4.0).round() as usize % 5],
+            }
+        })
+        .collect()
+}
+
+/// A MIDI reference note, positioned.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RefNoteRect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// The loaded MIDI reference, as outlines behind the sung notes.
+pub fn midi_reference_rects(ed: &Editor) -> Vec<RefNoteRect> {
+    let Some(r) = ed.reference.as_ref() else {
+        return Vec::new();
+    };
+    if !r.visible || r.is_empty() {
+        return Vec::new();
+    }
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    let h = ed.camera.vertical.px_per_row;
+    r.notes()
+        .filter(|n| n.end >= t0 && n.start <= t1)
+        .map(|n| {
+            let x = ed.camera.x(n.start);
+            RefNoteRect {
+                x,
+                w: (ed.camera.x(n.end) - x).max(2.0),
+                y: ed.camera.y(n.row as f64 + 0.5, ed.viewport),
+                h,
+            }
+        })
+        .collect()
+}
+
+/// A pitch drawing, ready to draw.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DraftView {
+    /// Anchor handles, in pixels.
+    pub anchors: Vec<(f64, f64)>,
+    /// The drawn line.
+    pub line: String,
+    /// The curve as it was before drawing began — the thin line
+    /// underneath, which is how you can see what you are changing.
+    pub original: String,
+}
+
+/// Geometry for an open pitch drawing.
+pub fn draft_view(ed: &Editor, draft: &expression_editor_core::PitchDraft) -> DraftView {
+    let row = ed
+        .doc
+        .note(draft.note)
+        .map(|n| n.row as f64)
+        .unwrap_or(60.0);
+    let to_px = |p: &expression_editor_core::Point| {
+        (ed.camera.x(p.t), ed.camera.y(row + p.value, ed.viewport))
+    };
+    let polyline = |pts: &[expression_editor_core::Point]| {
+        pts.iter()
+            .map(|p| {
+                let (x, y) = to_px(p);
+                format!("{x:.1},{y:.1}")
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+
+    let span = draft.dirty_span();
+    let line = match span {
+        Some((t0, t1)) => polyline(&draft.rendered(t0, t1)),
+        None => String::new(),
+    };
+    DraftView {
+        anchors: draft.anchors().iter().map(to_px).collect(),
+        line,
+        original: polyline(draft.original()),
+    }
+}
+
+/// The take's own waveform, drawn full-height behind the roll.
+///
+/// Everything *between* the notes — breaths, consonants, room tone — as
+/// itself rather than as absence. That is the difference between "the
+/// tracker missed a note here" and "nothing was sung here", and without
+/// it the two look identical: empty canvas.
+///
+/// Returns the polygon points, or `None` when the take carries no
+/// waveform (every domain except audio).
+pub fn take_waveform(ed: &Editor) -> Option<String> {
+    if ed.doc.peaks.is_empty() || !ed.mode.draws_blobs() {
+        return None;
+    }
+    let peaks = &ed.doc.peaks;
+    let span = ed.doc.end - ed.doc.start;
+    if span <= 0.0 {
+        return None;
+    }
+    // Mirrored about the middle of the roll, which is where a waveform
+    // display puts zero. It is a backdrop, not a pitch reading, so it
+    // deliberately does *not* follow any note.
+    let mid = ed.viewport.h * 0.5;
+    let max_half = ed.viewport.h * 0.46;
+
+    let count = (ed.viewport.w.ceil() as usize).clamp(2, 2048);
+    let mut top = String::new();
+    let mut bottom = Vec::with_capacity(count);
+    for i in 0..count {
+        let x = ed.viewport.w * (i as f64 / (count - 1) as f64);
+        let t = ed.camera.t_at(x);
+        let f = ((t - ed.doc.start) / span).clamp(0.0, 1.0);
+        let idx = ((f * (peaks.len() - 1) as f64).round() as usize).min(peaks.len() - 1);
+        let half = max_half * (peaks[idx] as f64).clamp(0.0, 1.0);
+        if i > 0 {
+            top.push(' ');
+        }
+        top.push_str(&format!("{:.1},{:.1}", x, mid - half));
+        bottom.push(format!("{:.1},{:.1}", x, mid + half));
+    }
+    bottom.reverse();
+    Some(format!("{top} {}", bottom.join(" ")))
+}
+
+/// Unvoiced spans as pixel rectangles, for shading sibilants.
+///
+/// Only while sibilant editing is armed. Shading them all the time
+/// would put dark bars across a screen that is mostly about pitch.
+pub fn sibilant_bands(ed: &Editor) -> Vec<(f64, f64)> {
+    if !ed.sibilant_scope || !ed.mode.draws_blobs() {
+        return Vec::new();
+    }
+    let (t0, t1) = ed.camera.time_span(ed.viewport);
+    ed.doc
+        .unvoiced
+        .iter()
+        .filter(|(a, b)| *b >= t0 && *a <= t1)
+        .map(|(a, b)| (ed.camera.x(*a), ed.camera.x(*b)))
+        .collect()
+}
+
+/// A sung note's body: the recorded waveform, drawn as the note.
+///
+/// This is what makes the audio surface read as audio rather than as
+/// MIDI with different colours. The body sits **flat**, centred on the
+/// note's own pitch the way a MIDI note sits on its row, and its
+/// vertical extent is the amplitude envelope mirrored about that
+/// centre — a waveform, not a smooth ribbon. A breathy tail visibly
+/// thins, a hard consonant bulges, and the shape of the sound is
+/// legible before you read anything else.
+///
+/// The pitch contour is deliberately **not** folded into this. It is
+/// drawn separately as the white pitch track, which wanders through and
+/// out of the body — and that relationship, between where the note is
+/// and where the voice actually went, is the thing being edited.
+///
+/// Returns the polygon points, or `None` where the note is too small to
+/// be worth the samples.
+fn blob_polygon(ed: &Editor, n: &Note) -> Option<String> {
+    let x0 = ed.camera.x(n.start);
+    let x1 = ed.camera.x(n.end);
+    if x1 - x0 < 2.0 {
+        return None;
+    }
+    let row_h = ed.camera.vertical.px_per_row;
+    // Half a row at full amplitude, with a floor so a quiet passage
+    // still leaves something to aim at rather than a hairline.
+    let max_half = (row_h * 0.5).max(3.0);
+    let min_half = (row_h * 0.08).max(1.0);
+    let cy = blob_center_y(ed, n);
+
+    // One sample per pixel where the note is wide, so the recorded
+    // envelope's jaggedness survives instead of being smoothed into a
+    // lozenge by too few samples.
+    let count = ((x1 - x0).ceil() as usize).clamp(BLOB_SAMPLES, 1024);
+
+    let mut top = String::new();
+    let mut bottom = Vec::with_capacity(count);
+    for i in 0..count {
+        let f = i as f64 / (count - 1) as f64;
+        let t = n.start + (n.end - n.start) * f;
+        let half = min_half + (max_half - min_half) * note_amplitude(n, f, t);
+        let x = ed.camera.x(t);
+        if i > 0 {
+            top.push(' ');
+        }
+        top.push_str(&format!("{:.1},{:.1}", x, cy - half));
+        bottom.push(format!("{:.1},{:.1}", x, cy + half));
+    }
+    // Down the top edge, back along the bottom: one closed polygon.
+    bottom.reverse();
+    Some(format!("{top} {}", bottom.join(" ")))
+}
+
+/// Where a sung note's body is centred, in pixels.
+///
+/// The note's own pitch — its row plus the contour's centre — so the
+/// body sits where the note *is*, and the pitch track can be read
+/// against it.
+fn blob_center_y(ed: &Editor, n: &Note) -> f64 {
+    let row_h = ed.camera.vertical.px_per_row;
+    let center = expression_editor_core::blob::decompose(
+        &n.pitch,
+        n.start,
+        n.end,
+        BLOB_SAMPLES,
+        ed.doc.time_base.units_per_second(ed.bpm),
+        0.0,
+    )
+    .center;
+    ed.camera.y(n.row as f64 + center + 0.5, ed.viewport) + row_h * 0.5
+}
+
+/// Amplitude at fraction `f` through the note, 0..1.
+///
+/// The recorded envelope where there is one — that is the waveform, and
+/// no curve of control points could carry its detail. Authored Pressure
+/// where there is not, so an MPE note still shapes. Analysis weight as
+/// the last resort, so a freshly-loaded note is not a hairline.
+fn note_amplitude(n: &Note, f: f64, t: f64) -> f64 {
+    if !n.envelope.is_empty() {
+        let i = ((f * (n.envelope.len() - 1) as f64).round() as usize).min(n.envelope.len() - 1);
+        return (n.envelope[i] as f64).clamp(0.0, 1.0);
+    }
+    if !n.pressure.is_empty() {
+        return n
+            .pressure
+            .sample(t, Dimension::Pressure.default_value())
+            .clamp(0.0, 1.0);
+    }
+    n.weight.clamp(0.0, 1.0)
+}
+
+/// How far a blob sits from its target, in cents.
+///
+/// The *centre* of the contour, not its value at any instant — a note
+/// is in or out of tune as a whole, and colouring it from a point that
+/// the vibrato happens to be passing through would make a perfectly
+/// good note flash red twice a second.
+fn blob_cents(ed: &Editor, n: &Note) -> f64 {
+    let center = expression_editor_core::blob::decompose(
+        &n.pitch,
+        n.start,
+        n.end,
+        BLOB_SAMPLES,
+        ed.doc.time_base.units_per_second(ed.bpm),
+        0.0,
+    )
+    .center;
+    let target = ed.tuning.cents(n.row) / 100.0;
+    (center - target) * 100.0
 }
 
 /// How far the note actually sounds from 12-TET, if it does.
@@ -215,7 +675,7 @@ pub fn note_ribbon(ed: &Editor, n: &Note) -> Option<String> {
         return None;
     }
     let top = ed.camera.y(n.row as f64 + 0.5, ed.viewport);
-    let h = ed.camera.px_per_semitone;
+    let h = ed.camera.vertical.px_per_row;
     if h < 6.0 {
         return None;
     }
@@ -244,14 +704,14 @@ pub fn note_ribbon(ed: &Editor, n: &Note) -> Option<String> {
 /// A rendered expression curve.
 pub struct CurvePath {
     pub note: NoteId,
-    pub lane: Lane,
+    pub dimension: Dimension,
     pub points: String,
     pub color: &'static str,
     pub active: bool,
     pub selected: bool,
 }
 
-/// Polyline paths for every visible note on every drawn lane, back to
+/// Polyline paths for every visible note on every drawn dimension, back to
 /// front.
 ///
 /// Pitch uses the full piano-roll height; Pressure and Timbre are
@@ -260,33 +720,89 @@ pub struct CurvePath {
 pub fn curve_paths(ed: &Editor) -> Vec<CurvePath> {
     let (t0, t1) = ed.camera.time_span(ed.viewport);
     let mut out = Vec::new();
-    for lane in ed.draw_order() {
-        let active = lane == ed.lane;
+    // On a string roll the pitch dimension belongs to `guitar::flow_paths`,
+    // which draws it as the string lifting off its row rather than as a
+    // thin expression polyline. Drawing both would double the line.
+    let strings = matches!(ed.row_space, expression_editor_core::RowSpace::Strings(_));
+    for dimension in ed.draw_order() {
+        if strings && dimension == Dimension::Pitch {
+            continue;
+        }
+        let active = dimension == ed.dimension;
         for n in ed.doc.notes.iter().filter(|n| n.end >= t0 && n.start <= t1) {
-            let curve = n.lane(lane);
+            let curve = n.curve(dimension);
             if curve.is_empty() {
                 continue;
             }
+            // The pitch track stops where there was no pitch. Drawing a
+            // line across a consonant invents a reading, and a line
+            // through a sibilant is the single most misleading thing
+            // this surface could show — the manual makes the same
+            // point: no pitch track *means* unvoiced.
+            let break_unvoiced = dimension == Dimension::Pitch && ed.mode.draws_blobs();
+            // A curve is in semitones; a row is only a semitone in pitch
+            // space. See `RowSpace::semitones_per_row`.
+            let spr = ed.row_space.semitones_per_row();
             let mut s = String::new();
+            let mut prev_voiced = true;
             for p in curve.points() {
+                if break_unvoiced && is_unvoiced(ed, p.t) {
+                    prev_voiced = false;
+                    continue;
+                }
                 let x = ed.camera.x(p.t);
-                let y = match lane {
-                    Lane::Pitch => ed.camera.y(n.row as f64 + p.value, ed.viewport),
+                let y = match dimension {
+                    Dimension::Pitch => ed.camera.y(n.row as f64 + p.value / spr, ed.viewport),
                     _ => tools::lane_box_y(&ed.camera, ed.viewport, n.row, p.value),
                 };
+                // A polyline cannot express a gap, so a run that
+                // resumes after silence starts a new path rather than
+                // reaching back across it.
+                if !prev_voiced && !s.is_empty() {
+                    out.push(CurvePath {
+                        note: n.id,
+                        dimension,
+                        points: core::mem::take(&mut s),
+                        color: track_color(ed, dimension),
+                        active,
+                        selected: ed.selection.contains(n.id),
+                    });
+                }
+                prev_voiced = true;
                 s.push_str(&format!("{x:.1},{y:.1} "));
+            }
+            if s.is_empty() {
+                continue;
             }
             out.push(CurvePath {
                 note: n.id,
-                lane,
+                dimension,
                 points: s,
-                color: theme::lane_color(lane),
+                color: track_color(ed, dimension),
                 active,
                 selected: ed.selection.contains(n.id),
             });
         }
     }
     out
+}
+
+/// Whether `t` falls in a span with no detected pitch.
+fn is_unvoiced(ed: &Editor, t: f64) -> bool {
+    ed.doc.unvoiced.iter().any(|(a, b)| t >= *a && t <= *b)
+}
+
+/// On the audio surface the pitch track is white, not the dimension's hue.
+///
+/// It is the one line that has to stay legible over a body whose colour
+/// is already saying something else — how far out of tune the note is —
+/// and a coloured track competes with that reading.
+fn track_color(ed: &Editor, dimension: Dimension) -> &'static str {
+    if dimension == Dimension::Pitch && ed.mode.draws_blobs() {
+        theme::PITCH_TRACK
+    } else {
+        theme::lane_color(dimension)
+    }
 }
 
 /// The editing box Pressure and Timbre are drawn inside.
@@ -298,7 +814,7 @@ pub struct LaneBox {
 }
 
 pub fn lane_boxes(ed: &Editor) -> Vec<LaneBox> {
-    if ed.lane == Lane::Pitch {
+    if ed.dimension == Dimension::Pitch {
         return Vec::new();
     }
     ed.doc
@@ -364,7 +880,7 @@ pub struct ZoneGuide {
 }
 
 pub fn zone_guides(ed: &Editor) -> Vec<ZoneGuide> {
-    if ed.lane != Lane::Pitch {
+    if ed.dimension != Dimension::Pitch {
         return Vec::new();
     }
     let mut out = Vec::new();
@@ -407,22 +923,61 @@ pub struct Key {
     pub label: Option<String>,
 }
 
+/// A brace over the rows of one split piece, so `L` and `R` read as two
+/// hands of a `T1` rather than two unrelated lanes.
+pub struct KeyGroup {
+    pub label: String,
+    /// Top edge and height of the whole span.
+    pub y: f64,
+    pub h: f64,
+}
+
+/// Group braces for whatever is on screen.
+///
+/// Built from the already-computed keys so the brace cannot drift from
+/// the rows it spans — including when a span is half scrolled off.
+pub fn key_groups(ed: &Editor, keys: &[Key]) -> Vec<KeyGroup> {
+    let mut out: Vec<KeyGroup> = Vec::new();
+    for k in keys {
+        let Some(label) = ed.row_group(k.row) else {
+            continue;
+        };
+        // Keys arrive in slot order, so a repeat of the same label is
+        // always the continuation of the span above it.
+        match out.last_mut() {
+            Some(g) if g.label == label => {
+                let top = g.y.min(k.y);
+                let bottom = (g.y + g.h).max(k.y + k.h);
+                g.y = top;
+                g.h = bottom - top;
+            }
+            _ => out.push(KeyGroup {
+                label,
+                y: k.y,
+                h: k.h,
+            }),
+        }
+    }
+    out
+}
+
 pub fn keyboard(ed: &Editor) -> Vec<Key> {
-    let (lo, hi) = ed.camera.pitch_span(ed.viewport);
-    let h = ed.camera.px_per_semitone;
-    let (rlo, rhi) = ed.row_space.bounds();
+    let (lo, hi) = ed.camera.slot_span(ed.viewport);
+    let h = ed.camera.vertical.px_per_row;
+    let (rlo, rhi) = ed.camera.fold.slot_bounds(ed.row_space.bounds());
     // Named rows always carry their label — a drum lane called nothing
     // is unusable, where an unlabelled piano key can still be counted.
     let named = !matches!(ed.row_space, expression_editor_core::RowSpace::Pitch);
     let label_rows = h >= 8.0;
     ((lo.floor() as i32).max(rlo)..=(hi.ceil() as i32).min(rhi))
+        .map(|slot| ed.camera.fold.row(slot as f64) as i32)
         .map(|row| Key {
             row,
             y: ed.camera.y(row as f64 + 0.5, ed.viewport),
             h,
             black: ed.row_space.is_accidental(row),
             label: (label_rows && (named || row.rem_euclid(12) == 0 || h >= 18.0))
-                .then(|| ed.row_space.row_label(row)),
+                .then(|| ed.row_header(row)),
         })
         .collect()
 }
@@ -498,7 +1053,7 @@ pub struct RazorRect {
 /// where notes get sliced, so they have to read as exact boundaries
 /// rather than as a soft highlight.
 pub fn razor_rects(ed: &Editor) -> Vec<RazorRect> {
-    let h = ed.camera.px_per_semitone;
+    let h = ed.camera.vertical.px_per_row;
     ed.razor
         .areas
         .iter()
@@ -559,7 +1114,13 @@ pub fn stems(ed: &Editor, h: f64) -> Vec<Stem> {
                 w: bar,
                 y: h * (1.0 - v),
                 h: h * v,
-                color: theme::pitch_class_color(n.row),
+                // Same rule as the note body: where the row itself
+                // carries meaning, the strip has to agree with the roll
+                // or two colours name the same note.
+                color: ed
+                    .row_space
+                    .row_color(n.row)
+                    .unwrap_or_else(|| theme::pitch_class_color(n.row)),
                 selected: ed.selection.contains(n.id),
                 muted: n.muted,
             }
@@ -574,29 +1135,29 @@ pub fn stems(ed: &Editor, h: f64) -> Vec<Stem> {
 /// rather than as a set of disconnected per-note boxes.
 pub fn strip_curves(ed: &Editor, h: f64) -> Vec<CurvePath> {
     use expression_editor_core::StripLane;
-    let StripLane::Expression(lane) = ed.strip_lane else {
+    let StripLane::Expression(dimension) = ed.strip_lane else {
         return Vec::new();
     };
     let (t0, t1) = ed.camera.time_span(ed.viewport);
-    let (lo, hi) = match lane {
-        Lane::Pitch => (-2.0, 2.0),
+    let (lo, hi) = match dimension {
+        Dimension::Pitch => (-2.0, 2.0),
         _ => (0.0, 1.0),
     };
     ed.doc
         .notes
         .iter()
-        .filter(|n| n.end >= t0 && n.start <= t1 && !n.lane(lane).is_empty())
+        .filter(|n| n.end >= t0 && n.start <= t1 && !n.curve(dimension).is_empty())
         .map(|n| {
             let mut s = String::new();
-            for p in n.lane(lane).points() {
+            for p in n.curve(dimension).points() {
                 let y = h * (1.0 - ((p.value - lo) / (hi - lo)).clamp(0.0, 1.0));
                 s.push_str(&format!("{:.1},{y:.1} ", ed.camera.x(p.t)));
             }
             CurvePath {
                 note: n.id,
-                lane,
+                dimension,
                 points: s,
-                color: theme::lane_color(lane),
+                color: theme::lane_color(dimension),
                 active: true,
                 selected: ed.selection.contains(n.id),
             }
@@ -642,13 +1203,13 @@ pub fn cc_paths(ed: &Editor) -> Vec<CcPath> {
     ed.doc
         .cc
         .pinned()
-        .map(|lane| {
-            let active = ed.cc_edit == Some(lane.number);
-            let default = lane.default_value();
+        .map(|dimension| {
+            let active = ed.cc_edit == Some(dimension.number);
+            let default = dimension.default_value();
 
             let mut ts: Vec<f64> = vec![t0];
             ts.extend(
-                lane.curve
+                dimension.curve
                     .points()
                     .iter()
                     .map(|p| p.t)
@@ -658,7 +1219,7 @@ pub fn cc_paths(ed: &Editor) -> Vec<CcPath> {
 
             let mut line = String::new();
             for &t in &ts {
-                let v = lane.curve.sample(t, default);
+                let v = dimension.curve.sample(t, default);
                 line.push_str(&format!(
                     "{:.1},{:.1} ",
                     ed.camera.x(t),
@@ -676,10 +1237,10 @@ pub fn cc_paths(ed: &Editor) -> Vec<CcPath> {
             );
 
             CcPath {
-                number: lane.number,
-                label: lane.label(),
+                number: dimension.number,
+                label: dimension.label(),
                 color: expression_editor_core::cc::CC_COLORS
-                    [lane.color % expression_editor_core::cc::CC_COLORS.len()],
+                    [dimension.color % expression_editor_core::cc::CC_COLORS.len()],
                 points: line,
                 fill,
                 opacity: if active {

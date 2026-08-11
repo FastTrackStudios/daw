@@ -143,10 +143,24 @@ fn dto_to_blitz_event(dto: UiEventDto) -> Option<blitz_traits::events::UiEvent> 
 #[derive(Default, Clone, Copy)]
 pub struct ReaperDockHost;
 
-/// Same shape as `daw_reaper::ReaperMainThreadDispatcher` — duplicated
-/// here to avoid the daw-reaper-dioxus → daw-reaper crate cycle. The
-/// dock host always runs from REAPER's main thread so an immediate
-/// dispatcher is correct.
+/// Bounces every dock-host call onto REAPER's main thread.
+///
+/// Not optional, and the reason is subtle enough to be worth stating: the
+/// dock module keeps its live panels in a `thread_local!` (`dock::PANELS`).
+/// A panel is created on REAPER's main thread, so that is the only thread
+/// where it exists. An RPC from another process arrives on a tokio worker,
+/// where the map is empty — and an empty map is indistinguishable from "no
+/// such panel", so `is_visible` answered `false` for a panel that was
+/// plainly on screen, and `show`/`hide` silently did nothing.
+///
+/// This is the same body as `daw_reaper::ReaperMainThreadDispatcher`. The
+/// *type* is still duplicated to avoid a daw-reaper-dioxus → daw-reaper
+/// cycle, but the machinery it needs is not in daw-reaper at all: the
+/// executor registry lives in `daw_proto::main_thread`, which this crate
+/// already depends on. An earlier version of this dispatcher ran the
+/// closure inline, on the stated assumption that the host is always called
+/// from the main thread. That holds for panels driving themselves; it does
+/// not hold for anything reaching the host over RPC.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DockHostDispatcher;
 
@@ -165,7 +179,16 @@ impl architect::dispatch::Dispatcher for DockHostDispatcher {
                 + 'static,
         >,
     > {
-        Box::pin(async move { Ok(f()) })
+        Box::pin(async move {
+            // `None` means no executor is installed — the extension has
+            // not bootstrapped, or is being torn down. A clean error beats
+            // running the closure on the wrong thread and reporting the
+            // empty answer as if it were real.
+            match daw_proto::main_thread::query(f).await {
+                Some(any) => Ok(any),
+                None => Err(architect::dispatch::DispatchError::ShutDown),
+            }
+        })
     }
 }
 

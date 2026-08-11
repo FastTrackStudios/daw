@@ -9,8 +9,9 @@
 //! zones are just a colourful rectangle.
 
 use dioxus::prelude::*;
+use expression_editor_core::Point;
 use expression_editor_core::multitool::{self, Bend, Capture, Drag as MtDrag, Pt, Steepness, Zone};
-use expression_editor_core::{Editor, Lane, NoteId};
+use expression_editor_core::{Editor, Dimension, NoteId};
 
 use crate::theme;
 
@@ -29,7 +30,7 @@ pub struct MultiTool {
     pub amount: f64,
     /// Captured points per note, so every frame recomputes from the
     /// same input instead of compounding.
-    captures: Vec<(NoteId, Lane, Capture)>,
+    captures: Vec<(NoteId, Dimension, Capture)>,
     origin: (f64, f64),
 }
 
@@ -85,12 +86,12 @@ impl MultiTool {
         };
     }
 
-    /// Begin a gesture in `zone`, capturing the lane's current state.
+    /// Begin a gesture in `zone`, capturing the dimension's current state.
     pub fn begin(&mut self, ed: &mut Editor, zone: Zone, x: f64, y: f64) {
         let Some((t0, t1, ..)) = self.bounds else {
             return;
         };
-        let lane = ed.lane;
+        let dimension = ed.dimension;
         self.captures = ed
             .selection
             .notes
@@ -98,7 +99,7 @@ impl MultiTool {
             .filter_map(|id| {
                 let n = ed.doc.note(*id)?;
                 let pts: Vec<Pt> = n
-                    .lane(lane)
+                    .curve(dimension)
                     .points()
                     .iter()
                     .map(|p| Pt {
@@ -106,7 +107,7 @@ impl MultiTool {
                         value: p.value,
                     })
                     .collect();
-                Capture::new(pts).map(|c| (*id, lane, c))
+                Capture::new(pts).map(|c| (*id, dimension, c))
             })
             .collect();
         let _ = (t0, t1);
@@ -137,9 +138,9 @@ impl MultiTool {
         };
         let captures = self.snapshot(ed);
         ed.begin_gesture();
-        for (id, lane, cap) in captures {
+        for (id, dimension, cap) in captures {
             let out = multitool::apply_wheel(zone, &cap);
-            write_back(ed, id, lane, &cap, &out);
+            write_back(ed, id, dimension, &cap, &out);
         }
     }
 
@@ -150,21 +151,21 @@ impl MultiTool {
             amount: self.amount,
             symmetric: self.symmetric,
         };
-        for (id, lane, cap) in &self.captures {
+        for (id, dimension, cap) in &self.captures {
             let out = multitool::apply(zone, cap, drag, self.bend, self.steep);
-            write_back(ed, *id, *lane, cap, &out);
+            write_back(ed, *id, *dimension, cap, &out);
         }
     }
 
-    fn snapshot(&self, ed: &Editor) -> Vec<(NoteId, Lane, Capture)> {
-        let lane = ed.lane;
+    fn snapshot(&self, ed: &Editor) -> Vec<(NoteId, Dimension, Capture)> {
+        let dimension = ed.dimension;
         ed.selection
             .notes
             .iter()
             .filter_map(|id| {
                 let n = ed.doc.note(*id)?;
                 let pts: Vec<Pt> = n
-                    .lane(lane)
+                    .curve(dimension)
                     .points()
                     .iter()
                     .map(|p| Pt {
@@ -172,7 +173,7 @@ impl MultiTool {
                         value: p.value,
                     })
                     .collect();
-                Capture::new(pts).map(|c| (*id, lane, c))
+                Capture::new(pts).map(|c| (*id, dimension, c))
             })
             .collect()
     }
@@ -199,23 +200,22 @@ impl MultiTool {
     }
 }
 
-/// Splice a transformed capture back into its note's lane.
-fn write_back(ed: &mut Editor, id: NoteId, lane: Lane, cap: &Capture, out: &[Pt]) {
+/// Splice a transformed capture back into its note's dimension.
+fn write_back(ed: &mut Editor, id: NoteId, dimension: Dimension, cap: &Capture, out: &[Pt]) {
     let points: Vec<expression_editor_core::Point> = out
         .iter()
         .map(|p| expression_editor_core::Point {
             t: p.t,
-            value: lane.clamp(p.value),
-        })
+            value: dimension.clamp(p.value), ..Point::default() })
         .collect();
     // Splice the union of the original and transformed spans, so a
     // stretch that moved points outside the capture still clears where
     // they came from.
     let t0 = cap.t0.min(out.iter().map(|p| p.t).fold(f64::MAX, f64::min));
     let t1 = cap.t1.max(out.iter().map(|p| p.t).fold(f64::MIN, f64::max));
-    ed.apply_live(&expression_editor_core::Edit::DrawLane {
+    ed.apply_live(&expression_editor_core::Edit::DrawDimension {
         note: id,
-        lane,
+        dimension,
         t0,
         t1,
         points,

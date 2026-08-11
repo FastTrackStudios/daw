@@ -31,6 +31,70 @@ impl Viewport {
     }
 }
 
+/// The vertical half of a camera, owned by one lane.
+///
+/// Time is shared across every lane and stays on [`Camera`] — two
+/// instruments doubling a line are only comparable on a common time
+/// axis, and that invariant is enforced structurally here rather than
+/// by convention, so no stray call can break it.
+///
+/// Vertical is per lane, because that is the whole feature: a bass and a
+/// piccolo are both readable only if each lane fits its own range.
+///
+/// **Ephemeral.** Never persisted — re-fitted on load, which is what
+/// makes it free to keep out of the project file. See #192's ephemeral
+/// bucket.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct VerticalCamera {
+    /// Row at the vertical centre of the lane.
+    pub center: f64,
+    /// Height of one row, in pixels.
+    pub px_per_row: f64,
+}
+
+impl VerticalCamera {
+    /// Fit a row range into a lane of `height` pixels.
+    pub fn fitted(lo: f64, hi: f64, height: f64) -> Self {
+        let span = (hi - lo).max(1e-6);
+        Self {
+            center: (lo + hi) / 2.0,
+            px_per_row: (height / span).max(1e-6),
+        }
+    }
+
+    /// Screen y for a row, within a lane whose top edge is `y0`.
+    pub fn y(&self, row: f64, y0: f64, height: f64) -> f64 {
+        y0 + height / 2.0 - (row - self.center) * self.px_per_row
+    }
+
+    /// The row under a screen y.
+    pub fn row_at(&self, y: f64, y0: f64, height: f64) -> f64 {
+        self.center - (y - y0 - height / 2.0) / self.px_per_row.max(1e-6)
+    }
+
+    /// Rows visible in a lane of `height` pixels.
+    pub fn span(&self, height: f64) -> (f64, f64) {
+        let half = height / (2.0 * self.px_per_row.max(1e-6));
+        (self.center - half, self.center + half)
+    }
+
+    /// Zoom about a fixed row, so the row under the cursor stays put.
+    pub fn zoom_about(&mut self, anchor_row: f64, factor: f64) {
+        let f = factor.max(1e-6);
+        self.center = anchor_row + (self.center - anchor_row) / f;
+        self.px_per_row = (self.px_per_row * f).max(1e-6);
+    }
+}
+
+impl Default for VerticalCamera {
+    fn default() -> Self {
+        Self {
+            center: 60.0,
+            px_per_row: 8.0,
+        }
+    }
+}
+
 /// Where the canvas is looking.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Camera {
@@ -38,10 +102,122 @@ pub struct Camera {
     pub t0: f64,
     /// Horizontal scale.
     pub units_per_px: f64,
-    /// MIDI pitch at the vertical center.
-    pub pitch_center: f64,
-    /// Vertical scale — the height of one semitone row.
-    pub px_per_semitone: f64,
+    /// The vertical half.
+    ///
+    /// One type, shared with lanes: the roll is a second consumer of
+    /// vertical position, so this is a *move* rather than the deletion
+    /// #197 first assumed. Two implementations of the same arithmetic
+    /// was the thing worth removing, not the fields.
+    pub vertical: VerticalCamera,
+    /// Rows the roll folds away, so a collapsed drum piece occupies one
+    /// lane instead of two.
+    ///
+    /// This lives on the camera rather than at the call sites because
+    /// row-to-y runs through `y`/`pitch_at` in about thirty places, and
+    /// a fold applied in twenty-nine of them is a roll whose notes do
+    /// not sit on the lane you clicked.
+    pub fold: RowFold,
+}
+
+/// A monotonic row -> slot map: hidden rows collapse onto the visible
+/// row above them, and everything higher shifts down to close the gap.
+///
+/// Empty is the identity, which is every mode but drums.
+/// A fold holds one hidden row per two-handed piece. The FTS map has
+/// five (kick and four toms); the cap is generous and fixed so that
+/// `Camera` stays `Copy`, which it is at every call site.
+pub const MAX_FOLD: usize = 32;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RowFold {
+    /// Hidden model rows, ascending, `len` of them meaningful.
+    hidden: [i32; MAX_FOLD],
+    len: usize,
+}
+
+impl Default for RowFold {
+    fn default() -> Self {
+        Self {
+            hidden: [0; MAX_FOLD],
+            len: 0,
+        }
+    }
+}
+
+impl RowFold {
+    /// `hidden` need not be sorted or unique. Rows past `MAX_FOLD` are
+    /// dropped: showing an extra lane beats refusing to draw the roll.
+    pub fn new(mut hidden: Vec<i32>) -> Self {
+        hidden.sort_unstable();
+        hidden.dedup();
+        hidden.truncate(MAX_FOLD);
+        let mut rows = [0; MAX_FOLD];
+        rows[..hidden.len()].copy_from_slice(&hidden);
+        Self {
+            hidden: rows,
+            len: hidden.len(),
+        }
+    }
+
+    fn rows(&self) -> &[i32] {
+        &self.hidden[..self.len]
+    }
+
+    pub fn is_identity(&self) -> bool {
+        self.len == 0
+    }
+
+    fn is_hidden(&self, row: i32) -> bool {
+        self.rows().binary_search(&row).is_ok()
+    }
+
+    /// Hidden rows strictly below `row`.
+    fn below(&self, row: i32) -> i32 {
+        self.rows().partition_point(|&h| h < row) as i32
+    }
+
+    /// Display slot for a model row. Fractional parts survive, so a
+    /// note bent a quarter-row sharp still draws a quarter-row up.
+    pub fn slot(&self, row: f64) -> f64 {
+        if self.len == 0 {
+            return row;
+        }
+        let base = row.floor();
+        let frac = row - base;
+        let mut r = base as i32;
+        // A hidden row shares the slot of the first visible row above
+        // it — the fold only ever hides a left hand, which sits
+        // directly below its right.
+        while self.is_hidden(r) {
+            r += 1;
+        }
+        (r - self.below(r)) as f64 + frac
+    }
+
+    /// The model row occupying a display slot — the inverse of `slot`
+    /// for visible rows, and the reason a click on a collapsed piece
+    /// lands on the hand that stands for it.
+    pub fn row(&self, slot: f64) -> f64 {
+        if self.len == 0 {
+            return slot;
+        }
+        let base = slot.floor();
+        let frac = slot - base;
+        let mut r = base as i32;
+        for &h in self.rows() {
+            if h <= r {
+                r += 1;
+            } else {
+                break;
+            }
+        }
+        r as f64 + frac
+    }
+
+    /// A row-space range expressed in slots.
+    pub fn slot_bounds(&self, (lo, hi): (i32, i32)) -> (i32, i32) {
+        (self.slot(lo as f64) as i32, self.slot(hi as f64) as i32)
+    }
 }
 
 /// Hard limits applied after every navigation. These are clamps, not
@@ -81,12 +257,23 @@ impl Camera {
         self.t0 + x * self.units_per_px
     }
 
+    /// Takes a *model* row; the fold is applied here.
     pub fn y(&self, pitch: f64, vp: Viewport) -> f64 {
-        vp.h * 0.5 - (pitch - self.pitch_center) * self.px_per_semitone
+        let slot = self.fold.slot(pitch);
+        vp.h * 0.5 - (slot - self.vertical.center) * self.vertical.px_per_row
     }
 
+    /// Returns a *model* row.
     pub fn pitch_at(&self, y: f64, vp: Viewport) -> f64 {
-        self.pitch_center + (vp.h * 0.5 - y) / self.px_per_semitone
+        let slot = self.vertical.center + (vp.h * 0.5 - y) / self.vertical.px_per_row;
+        self.fold.row(slot)
+    }
+
+    /// The visible span in *slots*, which is what a renderer iterates:
+    /// folded rows have no slot of their own to draw.
+    pub fn slot_span(&self, vp: Viewport) -> (f64, f64) {
+        let half = vp.h * 0.5 / self.vertical.px_per_row;
+        (self.vertical.center - half, self.vertical.center + half)
     }
 
     /// `(t_left, t_right)`.
@@ -96,8 +283,8 @@ impl Camera {
 
     /// `(pitch_low, pitch_high)`.
     pub fn pitch_span(&self, vp: Viewport) -> (f64, f64) {
-        let half = vp.h * 0.5 / self.px_per_semitone;
-        (self.pitch_center - half, self.pitch_center + half)
+        let half = vp.h * 0.5 / self.vertical.px_per_row;
+        (self.vertical.center - half, self.vertical.center + half)
     }
 
     /// Zoom time by `factor` (>1 zooms in) keeping `anchor_t` pinned to
@@ -111,13 +298,13 @@ impl Camera {
     /// Zoom pitch by `factor` keeping `anchor_pitch` pinned.
     pub fn zoom_pitch_about(&mut self, anchor_pitch: f64, factor: f64, vp: Viewport) {
         let y = self.y(anchor_pitch, vp);
-        self.px_per_semitone *= factor.max(1e-6);
-        self.pitch_center = anchor_pitch - (vp.h * 0.5 - y) / self.px_per_semitone;
+        self.vertical.px_per_row *= factor.max(1e-6);
+        self.vertical.center = anchor_pitch - (vp.h * 0.5 - y) / self.vertical.px_per_row;
     }
 
     pub fn pan_px(&mut self, dx: f64, dy: f64) {
         self.t0 -= dx * self.units_per_px;
-        self.pitch_center += dy / self.px_per_semitone;
+        self.vertical.center += dy / self.vertical.px_per_row;
     }
 
     /// Clamp to `bounds`. Applied once, after blending.
@@ -130,14 +317,15 @@ impl Camera {
         }
         let visible = vp.w * self.units_per_px;
         let slack = visible * bounds.edge_whitespace;
-        self.t0 = self
-            .t0
-            .clamp(bounds.t_min - slack, (bounds.t_max + slack - visible).max(bounds.t_min - slack));
+        self.t0 = self.t0.clamp(
+            bounds.t_min - slack,
+            (bounds.t_max + slack - visible).max(bounds.t_min - slack),
+        );
 
-        self.px_per_semitone = self
-            .px_per_semitone
+        self.vertical.px_per_row = self
+            .vertical.px_per_row
             .clamp(bounds.min_px_per_semitone, bounds.max_px_per_semitone);
-        self.pitch_center = self.pitch_center.clamp(0.0, 127.0);
+        self.vertical.center = self.vertical.center.clamp(0.0, 127.0);
     }
 }
 
@@ -165,23 +353,28 @@ pub fn blend(base: Camera, influences: &[Influence]) -> Camera {
     let base_w = (1.0 - total * norm).max(0.0);
 
     let mut t0 = base.t0 * base_w;
-    let mut pitch_center = base.pitch_center * base_w;
+    let mut center = base.vertical.center * base_w;
     let mut log_upp = base.units_per_px.max(1e-12).ln() * base_w;
-    let mut log_pps = base.px_per_semitone.max(1e-12).ln() * base_w;
+    let mut log_pps = base.vertical.px_per_row.max(1e-12).ln() * base_w;
 
     for i in influences {
         let w = i.weight.clamp(0.0, 1.0) * norm;
         t0 += i.camera.t0 * w;
-        pitch_center += i.camera.pitch_center * w;
+        center += i.camera.vertical.center * w;
         log_upp += i.camera.units_per_px.max(1e-12).ln() * w;
-        log_pps += i.camera.px_per_semitone.max(1e-12).ln() * w;
+        log_pps += i.camera.vertical.px_per_row.max(1e-12).ln() * w;
     }
 
     Camera {
         t0,
         units_per_px: log_upp.exp(),
-        pitch_center,
-        px_per_semitone: log_pps.exp(),
+        vertical: VerticalCamera {
+            center,
+            px_per_row: log_pps.exp(),
+        },
+        // The fold is a property of the row space, not of any camera
+        // being blended toward, so it comes from the base unchanged.
+        fold: base.fold,
     }
 }
 
@@ -200,21 +393,28 @@ pub struct Content {
 ///
 /// Fits the content with `pad` fractional headroom above and below
 /// (0.35 in the shipped feel) and a small horizontal cushion.
-pub fn reset_view(content: Content, vp: Viewport, cushion: f64, pad: f64) -> Camera {
+pub fn reset_view(content: Content, vp: Viewport, cushion: f64, pad: f64, fold: RowFold) -> Camera {
     let span = (content.t_end - content.t_start).max(1e-6);
     let t0 = content.t_start - span * cushion;
     let units_per_px = (span * (1.0 + 2.0 * cushion)) / vp.w;
 
-    let pitch_span = (content.pitch_hi - content.pitch_lo).max(1.0) * (1.0 + 2.0 * pad);
+    // Framing happens in slot space: folding two lanes into one makes
+    // the content shorter on screen, and fitting the unfolded height
+    // would leave a band of empty roll under it.
+    let (slot_lo, slot_hi) = (fold.slot(content.pitch_lo), fold.slot(content.pitch_hi));
+    let pitch_span = (slot_hi - slot_lo).max(1.0) * (1.0 + 2.0 * pad);
     // Reset View keeps a readable floor of its own, above the manual
     // zoom-out floor, so `V` always lands somewhere legible.
-    let px_per_semitone = (vp.h / pitch_span).max(7.0);
+    let px_per_row = (vp.h / pitch_span).max(7.0);
 
     Camera {
         t0,
         units_per_px,
-        pitch_center: (content.pitch_lo + content.pitch_hi) * 0.5,
-        px_per_semitone,
+        vertical: VerticalCamera {
+            center: (slot_lo + slot_hi) * 0.5,
+            px_per_row,
+        },
+        fold,
     }
 }
 
@@ -263,7 +463,7 @@ pub fn edge_magnet(
 /// the reset camera.
 pub fn reset_progress(current: Camera, reset: Camera) -> f64 {
     let h = axis_progress(current.units_per_px, reset.units_per_px);
-    let v = axis_progress(reset.px_per_semitone, current.px_per_semitone);
+    let v = axis_progress(reset.vertical.px_per_row, current.vertical.px_per_row);
     h.max(v)
 }
 
@@ -308,7 +508,7 @@ pub fn pitch_focus(
     if let Some(p) = local_pitch {
         out.push(Influence {
             camera: Camera {
-                pitch_center: p,
+                vertical: VerticalCamera { center: p, ..base.vertical },
                 ..base
             },
             weight: local_weight,
@@ -316,7 +516,7 @@ pub fn pitch_focus(
     }
     out.push(Influence {
         camera: Camera {
-            pitch_center: mouse_pitch,
+            vertical: VerticalCamera { center: mouse_pitch, ..base.vertical },
             ..base
         },
         weight: mouse_weight,
@@ -332,11 +532,14 @@ pub fn deep_zoom_center(
     onset: f64,
     max_px_per_semitone: f64,
 ) -> Option<Influence> {
-    let depth = base.px_per_semitone / max_px_per_semitone.max(1e-6);
+    let depth = base.vertical.px_per_row / max_px_per_semitone.max(1e-6);
     let weight = smoothstep(smoothstep_between(onset, 1.0, depth));
     (weight > 0.0).then_some(Influence {
         camera: Camera {
-            pitch_center: (content.pitch_lo + content.pitch_hi) * 0.5,
+            vertical: VerticalCamera {
+                center: (content.pitch_lo + content.pitch_hi) * 0.5,
+                ..base.vertical
+            },
             ..base
         },
         weight,

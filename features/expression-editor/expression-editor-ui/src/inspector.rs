@@ -13,6 +13,8 @@
 use dioxus::prelude::*;
 use expression_editor_core::cc::{standard_name, CC_COLORS};
 use expression_editor_core::doc::NoteId;
+use expression_editor_core::flam::FlamStep;
+use expression_editor_core::rows::Hand;
 use expression_editor_core::rows::Articulation;
 use expression_editor_core::{blob, chord, tuning, Edit, Editor, RowSpace};
 
@@ -72,6 +74,16 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
     let lanes = ed.doc.cc.lanes.clone();
     let cc_edit = ed.cc_edit;
     let is_strings = matches!(space, RowSpace::Strings(_));
+    let is_drums = matches!(space, RowSpace::Drums(_));
+    let color_by_string = ed.color_by_string;
+    // What `f` will do to the selected hit, so the button can say it
+    // rather than the user finding out by pressing.
+    let flam_step = ed
+        .selection
+        .notes
+        .first()
+        .and_then(|id| ed.flam_step(*id));
+    let hand = ed.selection.notes.first().and_then(|id| ed.hand_of_note(*id));
     drop(ed);
 
     let decomposition = note
@@ -180,6 +192,96 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                     }
                 }
 
+                // ── guitar colour ────────────────────────────────────
+                if is_strings {
+                    {section("Colour")}
+                    div {
+                        style: "padding: 0 10px 8px;",
+                        button {
+                            style: format!(
+                                "height: 22px; width: 100%; font-size: 10px; \
+                                 border-radius: 4px; cursor: pointer; \
+                                 border: 1px solid {}; background: {}; color: {};",
+                                if color_by_string { theme::ACCENT } else { theme::PANEL_BORDER },
+                                if color_by_string { theme::CONTROL_ACTIVE } else { theme::SURFACE_INSET },
+                                theme::TEXT,
+                            ),
+                            title: "On: colour shows which string a run is on. \
+                                    Off: colour shows pitch class, so you read harmony.",
+                            onclick: move |_| {
+                                let now = editor.read().color_by_string;
+                                editor.write().color_by_string = !now;
+                            },
+                            if color_by_string { "By string" } else { "By pitch class" }
+                        }
+                    }
+                }
+
+                // ── sticking ─────────────────────────────────────────
+                if is_drums {
+                    {section("Hand")}
+                    div {
+                        style: "display: flex; gap: 4px; padding: 0 10px 8px;",
+                        for h in [Hand::Left, Hand::Right] {
+                            button {
+                                key: "hand{h:?}",
+                                style: format!(
+                                    "flex: 1; height: 22px; font-size: 10px; \
+                                     border-radius: 4px; \
+                                     border: 1px solid {}; background: {}; color: {}; \
+                                     cursor: {};",
+                                    if hand == Some(h) { theme::ACCENT } else { theme::PANEL_BORDER },
+                                    if hand == Some(h) { theme::CONTROL_ACTIVE } else { theme::SURFACE_INSET },
+                                    if hand.is_some() { theme::TEXT } else { theme::TEXT_DIM },
+                                    if hand.is_some() { "pointer" } else { "default" },
+                                ),
+                                disabled: hand.is_none(),
+                                title: if hand.is_some() {
+                                    "Which hand plays this hit — moves it to that row"
+                                } else {
+                                    "This piece is played with one hand"
+                                },
+                                onclick: move |_| {
+                                    editor.write().set_hand_of_selection(h);
+                                },
+                                {if h == Hand::Left { "L" } else { "R" }}
+                            }
+                        }
+                    }
+
+                    // ── flam ─────────────────────────────────────────
+                    {section("Flam")}
+                    div {
+                        style: "padding: 0 10px 8px;",
+                        button {
+                            style: format!(
+                                "height: 22px; width: 100%; font-size: 10px; \
+                                 border-radius: 4px; \
+                                 border: 1px solid {}; background: {}; color: {}; \
+                                 cursor: {};",
+                                theme::PANEL_BORDER,
+                                theme::SURFACE_INSET,
+                                if flam_step.is_some() { theme::TEXT } else { theme::TEXT_DIM },
+                                if flam_step.is_some() { "pointer" } else { "default" },
+                            ),
+                            disabled: flam_step.is_none(),
+                            title: "F — cycles none, before, after, none",
+                            onclick: move |_| {
+                                editor.write().flam_selection();
+                            },
+                            {match flam_step {
+                                Some(FlamStep::Add(_)) => "Add flam  ·  F",
+                                Some(FlamStep::Move { .. }) => "Move after  ·  F",
+                                Some(FlamStep::Remove(_)) => "Remove flam  ·  F",
+                                // A hi-hat has no other hand to flam
+                                // with, and saying so beats a dead
+                                // button with no explanation.
+                                None => "One-handed piece",
+                            }}
+                        }
+                    }
+                }
+
                 // ── technique ────────────────────────────────────────
                 if is_strings {
                     {section("Technique")}
@@ -247,51 +349,51 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
             {section("Controller lanes")}
             div {
                 style: "display: flex; flex-direction: column; gap: 3px; padding: 0 10px 8px;",
-                for lane in lanes.iter() {
+                for dimension in lanes.iter() {
                     div {
-                        key: "cc{lane.number}",
+                        key: "cc{dimension.number}",
                         style: format!(
                             "display: flex; align-items: center; gap: 6px; \
                              border: 1px solid {}; border-radius: 5px; padding: 4px 6px; \
                              background: {};",
-                            if cc_edit == Some(lane.number) { theme::ACCENT } else { theme::PANEL_BORDER },
-                            if cc_edit == Some(lane.number) { theme::CONTROL_SELECTED } else { theme::SURFACE_INSET },
+                            if cc_edit == Some(dimension.number) { theme::ACCENT } else { theme::PANEL_BORDER },
+                            if cc_edit == Some(dimension.number) { theme::CONTROL_SELECTED } else { theme::SURFACE_INSET },
                         ),
                         // The colour swatch is how a background curve is
-                        // matched to its lane, so it has to be here.
+                        // matched to its dimension, so it has to be here.
                         div {
                             style: format!(
                                 "width: 10px; height: 10px; border-radius: 2px; \
                                  background: {}; flex: 0 0 auto;",
-                                CC_COLORS[lane.color % CC_COLORS.len()],
+                                CC_COLORS[dimension.color % CC_COLORS.len()],
                             ),
                         }
                         span {
                             style: "flex: 1; font-size: 10px;",
-                            "CC{lane.number} {lane.name}"
+                            "CC{dimension.number} {dimension.name}"
                         }
                         button {
                             style: format!(
                                 "background: none; border: none; cursor: pointer; \
                                  font-size: 11px; color: {};",
-                                if lane.pinned { theme::ACCENT } else { theme::BORDER_STRONG },
+                                if dimension.pinned { theme::ACCENT } else { theme::BORDER_STRONG },
                             ),
                             title: "Pin behind the roll",
                             onclick: {
-                                let number = lane.number;
+                                let number = dimension.number;
                                 move |_| { editor.write().doc.cc.toggle_pin(number); }
                             },
-                            if lane.pinned { "◉" } else { "○" }
+                            if dimension.pinned { "◉" } else { "○" }
                         }
                         button {
                             style: format!(
                                 "background: none; border: none; cursor: pointer; \
                                  font-size: 10px; color: {};",
-                                if cc_edit == Some(lane.number) { theme::ACCENT } else { theme::TEXT_DIM },
+                                if cc_edit == Some(dimension.number) { theme::ACCENT } else { theme::TEXT_DIM },
                             ),
                             title: "Edit this controller on the roll",
                             onclick: {
-                                let number = lane.number;
+                                let number = dimension.number;
                                 move |_| {
                                     let mut e = editor;
                                     if e.read().cc_edit == Some(number) {

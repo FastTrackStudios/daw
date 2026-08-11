@@ -5,7 +5,7 @@
 //! PNG harness show *the same thing*. A screenshot that drifted from
 //! what the app actually launches would be worse than no screenshot.
 
-use expression_editor_core::doc::{ExpressionDoc, Lane, Marker, Note, NoteId, TimeBase};
+use expression_editor_core::doc::{ExpressionDoc, Dimension, Marker, Note, NoteId, TimeBase};
 use expression_editor_core::{Editor, Viewport};
 
 pub const PPQ: f64 = 960.0;
@@ -20,10 +20,10 @@ pub enum Scene {
     Zones,
     /// The same phrase read under Maqam Rast.
     Microtonal,
-    /// Pressure lane active, showing the fixed two-semitone lane box.
+    /// Pressure dimension active, showing the fixed two-semitone dimension box.
     Pressure,
     /// All three MPE dimensions overlaid at once.
-    AllLanes,
+    AllDimensions,
     /// Two sounding notes sharing a member channel — ownership is
     /// undecidable and the editor says so.
     Ambiguous,
@@ -34,6 +34,11 @@ pub enum Scene {
     /// A guitar riff on a string roll: fret numbers, per-string colour,
     /// articulation badges and legato ties.
     Guitar,
+    /// The same riff with its bend flow in a dimension below the roll
+    /// instead of on the string rows (#161).
+    GuitarLane,
+    /// The same riff with both at once (#161).
+    GuitarBoth,
     /// A sung line carrying lyric syllables.
     Lyrics,
     /// Orchestral: held notes with CC1 and CC11 riding behind them.
@@ -44,15 +49,24 @@ pub enum Scene {
     /// A part whose note density changes across it — sixteenths at the
     /// start, held notes at the end. What contextual zoom is for.
     Density,
+    /// Unpitched audio: hits on spectral bands rather than notes on a
+    /// scale. The seventh mode, and the one #162 was missing.
+    Percussive,
+    /// A riff as it arrives from a Guitar Pro import — the file's own
+    /// tuning driving the rows, bends as per-note curves (#168).
+    GuitarPro,
+    /// The FTS kit with flams: two-handed pieces opened, grace notes
+    /// drawn small and slashed, principals badged.
+    Flams,
 }
 
 impl Scene {
-    pub const ALL: [Scene; 13] = [
+    pub const ALL: [Scene; 18] = [
         Scene::Phrase,
         Scene::Zones,
         Scene::Microtonal,
         Scene::Pressure,
-        Scene::AllLanes,
+        Scene::AllDimensions,
         Scene::Ambiguous,
         Scene::Empty,
         Scene::Density,
@@ -60,7 +74,12 @@ impl Scene {
         Scene::Orchestral,
         Scene::Drums,
         Scene::Guitar,
+        Scene::GuitarLane,
+        Scene::GuitarBoth,
         Scene::Lyrics,
+        Scene::Percussive,
+        Scene::GuitarPro,
+        Scene::Flams,
     ];
 
     /// Stable file-name stem for screenshots.
@@ -70,7 +89,7 @@ impl Scene {
             Scene::Zones => "02-zones",
             Scene::Microtonal => "03-microtonal",
             Scene::Pressure => "04-pressure",
-            Scene::AllLanes => "05-all-lanes",
+            Scene::AllDimensions => "05-all-lanes",
             Scene::Ambiguous => "06-ambiguous",
             Scene::Empty => "07-empty",
             Scene::Density => "16-density",
@@ -78,7 +97,12 @@ impl Scene {
             Scene::Orchestral => "21-orchestral",
             Scene::Drums => "25-drums",
             Scene::Guitar => "26-guitar",
+            Scene::GuitarLane => "26b-guitar-bend-dimension",
+            Scene::GuitarBoth => "26c-guitar-bend-both",
             Scene::Lyrics => "27-lyrics",
+            Scene::Percussive => "28-percussive",
+            Scene::GuitarPro => "29-guitar-pro",
+            Scene::Flams => "46-flams",
         }
     }
 
@@ -87,8 +111,8 @@ impl Scene {
             Scene::Phrase => "Sung phrase",
             Scene::Zones => "Q zones",
             Scene::Microtonal => "Maqam Rast",
-            Scene::Pressure => "Pressure lane",
-            Scene::AllLanes => "All lanes",
+            Scene::Pressure => "Pressure dimension",
+            Scene::AllDimensions => "All lanes",
             Scene::Ambiguous => "Channel conflict",
             Scene::Empty => "Empty",
             Scene::Density => "Mixed density",
@@ -96,7 +120,26 @@ impl Scene {
             Scene::Orchestral => "Orchestral CC",
             Scene::Drums => "Drum groove",
             Scene::Guitar => "Guitar riff",
+            Scene::GuitarLane => "Guitar — bend dimension",
+            Scene::GuitarBoth => "Guitar — row + dimension",
             Scene::Lyrics => "Vocal lyrics",
+            Scene::Percussive => "Unpitched audio",
+            Scene::GuitarPro => "Guitar Pro import",
+            Scene::Flams => "Drum flams",
+        }
+    }
+
+    /// **Prototype (#161).** Which bend-flow variant this scene mounts.
+    ///
+    /// Lives on the scene rather than in the harness so the runnable
+    /// example and the PNGs cannot disagree about which picture is
+    /// which — the whole reason `demo` exists.
+    pub fn bend_flow(&self) -> crate::guitar::BendFlow {
+        use crate::guitar::BendFlow;
+        match self {
+            Scene::GuitarLane => BendFlow::Lane,
+            Scene::GuitarBoth => BendFlow::Both,
+            _ => BendFlow::OnRow,
         }
     }
 }
@@ -121,7 +164,163 @@ fn sung_note(id: u64, start: f64, len: f64, row: i32, channel: u8, scoop: f64) -
             .set(t, (0.35 + 0.6 * (f * 3.1).sin().abs()).clamp(0.0, 1.0));
         n.timbre.set(t, (0.2 + 0.7 * f).clamp(0.0, 1.0));
     }
+    // A recorded-looking amplitude envelope, so the audio surface draws
+    // a waveform rather than a smooth lozenge. Deliberately jagged: the
+    // point of showing the waveform is the detail a control-point curve
+    // could not carry, and a demo that smooths it over would make the
+    // rendering look right when it is not.
+    const ENV: usize = 220;
+    n.envelope = (0..ENV)
+        .map(|k| {
+            let f = k as f64 / (ENV - 1) as f64;
+            // Attack, body, release.
+            let shell = (f / 0.06).min(1.0) * (1.0 - f).powf(0.35);
+            // Glottal ripple plus a little noise-ish texture, which is
+            // what gives a vocal envelope its grain.
+            let ripple = 0.72 + 0.28 * (f * 90.0).sin() * (f * 13.0).cos();
+            let grain = 0.9 + 0.1 * (f * 211.0).sin();
+            ((shell * ripple * grain).clamp(0.0, 1.0)) as f32
+        })
+        .collect();
     n
+}
+
+/// **Prototype (#161).** A tab phrase carrying the whole Guitar Pro
+/// articulation vocabulary that has *pitch motion* in it, across all six
+/// strings.
+///
+/// Deliberately not a nice-sounding riff: it is one of everything, so
+/// that a single picture shows a full bend, a half bend, a bend-release,
+/// a prebend, a slide, a hammer-on, a pull-off, vibrato, palm mutes and
+/// a harmonic side by side. If a rendering can carry this it can carry a
+/// real tab; if it cannot, the failure is visible rather than argued.
+///
+/// Bend curve values are **semitones**, matching the note model — the GP
+/// side is quarter-tones and halves at import (#160).
+fn guitar_riff(doc: &mut ExpressionDoc) {
+    use expression_editor_core::{Articulation as A, RowSpace, StringTuning};
+
+    /// `(string, fret, start, len, articulation, bend points)` where a
+    /// bend point is `(fraction through the note, semitones)`.
+    type Hit = (usize, u8, f64, f64, Option<A>, &'static [(f64, f64)]);
+
+    // string 0 = low E, 5 = high E.
+    let riff: [Hit; 12] = [
+        // Palm-muted chugs: no pitch motion at all, the baseline case.
+        (0, 0, 0.00, 0.42, Some(A::PalmMute), &[]),
+        (0, 0, 0.50, 0.42, Some(A::PalmMute), &[]),
+        // Hammer-on 3→5, then the target note.
+        (0, 3, 1.00, 0.45, Some(A::HammerOn), &[]),
+        (0, 5, 1.50, 0.45, None, &[]),
+        // Legato slide 5→7: the origin carries the motion as a ramp,
+        // because a fret change has no vertical distance on this axis.
+        (
+            1,
+            5,
+            2.00,
+            0.70,
+            Some(A::LegatoSlide),
+            &[(0.0, 0.0), (0.55, 0.0), (1.0, 2.0)],
+        ),
+        (1, 7, 2.75, 0.20, None, &[]),
+        // The headline: full bend up, held, released. Four beats wide so
+        // the shape is unmistakable.
+        (
+            2,
+            7,
+            3.00,
+            0.95,
+            Some(A::Bend),
+            &[(0.0, 0.0), (0.30, 2.0), (0.72, 2.0), (1.0, 0.0)],
+        ),
+        // Half bend with vibrato on top of it — the two modulations that
+        // have to coexist.
+        (
+            3,
+            8,
+            4.00,
+            0.90,
+            Some(A::Bend),
+            &[
+                (0.0, 0.0),
+                (0.25, 1.0),
+                (0.45, 1.15),
+                (0.6, 0.85),
+                (0.75, 1.15),
+                (0.9, 0.85),
+                (1.0, 1.0),
+            ],
+        ),
+        // Pull-off 10→8.
+        (3, 10, 5.00, 0.42, Some(A::PullOff), &[]),
+        (3, 8, 5.45, 0.42, None, &[]),
+        // Prebend: already bent at the attack, released down to pitch.
+        // The one case where the note's sounding pitch at onset is not
+        // `tuning + fret`.
+        (
+            4,
+            10,
+            6.00,
+            0.85,
+            Some(A::Bend),
+            &[(0.0, 2.0), (0.45, 2.0), (1.0, 0.0)],
+        ),
+        // Twelfth-fret harmonic with slow vibrato, ringing out.
+        (
+            5,
+            12,
+            7.00,
+            0.95,
+            Some(A::NaturalHarmonic),
+            &[
+                (0.0, 0.0),
+                (0.3, 0.0),
+                (0.45, 0.25),
+                (0.6, -0.25),
+                (0.75, 0.25),
+                (0.9, -0.25),
+                (1.0, 0.0),
+            ],
+        ),
+    ];
+
+    // The riff is written in beats but the roll only ever shows about
+    // six of them once the inspector has taken its width, so it is
+    // squeezed to fit rather than reset-view'd into a size nobody would
+    // actually work at. The phrase is the subject; the tempo is not.
+    const FIT: f64 = 0.72;
+    for (i, &(string, fret, start, len, art, bend)) in riff.iter().enumerate() {
+        let (start, len) = (start * FIT, len * FIT);
+        let (s, e) = (PPQ * start, PPQ * (start + len));
+        let mut n = Note::new(NoteId(i as u64 + 1), s, e, string as i32);
+        n.fret = Some(fret);
+        n.velocity = 0.8;
+        n.articulation = art;
+        n.legato = art.is_some_and(|a| a.is_legato());
+        // Resample the authored points onto the curve. GP hands us two
+        // to five points over normalised note time; the renderer wants a
+        // shape, so densify here rather than in the drawing code.
+        if !bend.is_empty() {
+            const STEPS: usize = 48;
+            for k in 0..STEPS {
+                let f = k as f64 / (STEPS - 1) as f64;
+                // Linear between authored points — the same law the
+                // Curve itself samples with, so nothing is invented.
+                let v = match bend.iter().position(|&(p, _)| p >= f) {
+                    None => bend[bend.len() - 1].1,
+                    Some(0) => bend[0].1,
+                    Some(j) => {
+                        let (p0, v0) = bend[j - 1];
+                        let (p1, v1) = bend[j];
+                        v0 + (v1 - v0) * ((f - p0) / (p1 - p0).max(1e-9))
+                    }
+                };
+                n.pitch.set(s + (e - s) * f, v);
+            }
+        }
+        doc.push(n);
+    }
+    doc.row_space = RowSpace::Strings(StringTuning::guitar_standard());
 }
 
 /// Build the editor for a scene, sized to `viewport`.
@@ -194,6 +393,105 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             n.target = expression_editor_core::Target::Zone(1);
             doc.push(n);
         }
+        Scene::Percussive => {
+            // The seventh mode: hits on spectral bands, not notes on a
+            // scale. A pitch contour taken from unpitched material is
+            // noise, so there is deliberately no curve here.
+            use expression_editor_core::rows::{RowSpace, SliceBands};
+            let bands = SliceBands::default();
+            let rows = bands.count().max(1) as i32;
+            let mut id = 1u64;
+            for i in 0..24 {
+                let t = PPQ * 0.25 * i as f64;
+                let row = (i * 7) % rows as usize;
+                let mut n = Note::new(NoteId(id), t, t + PPQ * 0.12, row as i32);
+                n.velocity = 0.4 + ((i % 5) as f64) * 0.12;
+                doc.push(n);
+                id += 1;
+            }
+            doc.row_space = RowSpace::Bands(bands);
+        }
+        Scene::Flams => {
+            use expression_editor_core::rows::{DrumMap, RowSpace};
+            let map = DrumMap::fts();
+            let row = |name: &str| {
+                map.lanes.iter().position(|l| l.name == name).unwrap_or(0) as i32
+            };
+            let mut id = 1u64;
+            fn hit(
+                doc: &mut ExpressionDoc,
+                id: &mut u64,
+                r: i32,
+                beat: f64,
+                vel: f64,
+            ) -> NoteId {
+                let t = PPQ * beat;
+                let mut n = Note::new(NoteId(*id), t, t + PPQ * 0.1, r);
+                n.velocity = vel;
+                doc.push(n);
+                *id += 1;
+                NoteId(*id - 1)
+            }
+            // A backbeat with flammed snares — the case the whole
+            // two-handed model exists for.
+            for bar in 0..2 {
+                let b = bar as f64 * 4.0;
+                for e in 0..8 {
+                    hit(&mut doc, &mut id, row("H-Clsd Tip"), b + e as f64 * 0.5, 0.5);
+                }
+                hit(&mut doc, &mut id, row("K"), b, 0.95);
+                hit(&mut doc, &mut id, row("K"), b + 2.5, 0.9);
+                hit(&mut doc, &mut id, row("S"), b + 1.0, 1.0);
+                hit(&mut doc, &mut id, row("S"), b + 3.0, 1.0);
+                // Flams go on a tom: this map pairs the toms and the
+                // kick, but not the snare — it has no `S L`, and `SR`
+                // is the rim.
+                let s1 = hit(&mut doc, &mut id, row("T1 R"), b + 1.75, 0.9);
+                let s2 = hit(&mut doc, &mut id, row("T1 R"), b + 3.75, 0.9);
+
+                // Grace notes on the other hand, stored as flams.
+                for (principal, at) in [(s1, b + 1.75), (s2, b + 3.75)] {
+                    let t = PPQ * at - PPQ * 0.06;
+                    let mut g = Note::new(NoteId(id), t, t + PPQ * 0.1, row("T1 L"));
+                    g.velocity = 0.55;
+                    g.grace_of = Some(principal);
+                    doc.push(g);
+                    id += 1;
+                }
+            }
+            doc.row_space = RowSpace::Drums(map);
+        }
+        Scene::GuitarPro => {
+            // What an import looks like on arrival: the file's own
+            // tuning driving the rows, a bend as a per-note curve.
+            use expression_editor_core::rows::{RowSpace, StringTuning};
+            let tuning = StringTuning::guitar_standard();
+            let mut id = 1u64;
+            let mut fretted = |doc: &mut ExpressionDoc, string: i32, beat: f64, len: f64| {
+                let t = PPQ * beat;
+                let n = Note::new(NoteId(id), t, t + PPQ * len, string);
+                doc.push(n);
+                id += 1;
+            };
+            fretted(&mut doc, 5, 0.0, 0.5);
+            fretted(&mut doc, 4, 0.5, 0.5);
+            fretted(&mut doc, 2, 1.0, 1.5);
+            fretted(&mut doc, 2, 2.5, 0.5);
+            fretted(&mut doc, 1, 3.0, 1.0);
+
+            // The bend on the third note: up a tone, held, released —
+            // the shape the two middle offsets exist to carry.
+            if let Some(n) = doc.note_mut(NoteId(3)) {
+                *n.curve_mut(expression_editor_core::Dimension::Pitch) =
+                    expression_editor_core::Curve::from_points(vec![
+                        expression_editor_core::Point::new(PPQ * 1.0, 0.0),
+                        expression_editor_core::Point::new(PPQ * 1.4, 2.0),
+                        expression_editor_core::Point::new(PPQ * 2.1, 2.0),
+                        expression_editor_core::Point::new(PPQ * 2.5, 0.0),
+                    ]);
+            }
+            doc.row_space = RowSpace::Strings(tuning);
+        }
         Scene::Drums => {
             use expression_editor_core::{DrumMap, RowSpace};
             let map = DrumMap::general_midi();
@@ -233,37 +531,7 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             }
             doc.row_space = RowSpace::Drums(map);
         }
-        Scene::Guitar => {
-            use expression_editor_core::{Articulation, RowSpace, StringTuning};
-            let tuning = StringTuning::guitar_standard();
-            // A riff on the low strings: fret numbers, techniques, and
-            // a hammer-on/pull-off pair.
-            let riff: [(usize, u8, f64, f64, Option<Articulation>); 9] = [
-                (0, 0, 0.0, 0.45, Some(Articulation::PalmMute)),
-                (0, 0, 0.5, 0.45, Some(Articulation::PalmMute)),
-                (0, 3, 1.0, 0.5, Some(Articulation::HammerOn)),
-                (0, 5, 1.5, 0.5, None),
-                (1, 5, 2.0, 0.9, None),
-                (2, 7, 3.0, 0.9, Some(Articulation::Vibrato)),
-                (2, 5, 4.0, 0.5, Some(Articulation::PullOff)),
-                (2, 3, 4.5, 0.5, None),
-                (5, 12, 5.0, 1.6, Some(Articulation::NaturalHarmonic)),
-            ];
-            for (i, &(string, fret, start, len, art)) in riff.iter().enumerate() {
-                let mut n = Note::new(
-                    NoteId(i as u64 + 1),
-                    PPQ * start,
-                    PPQ * (start + len),
-                    string as i32,
-                );
-                n.fret = Some(fret);
-                n.velocity = 0.8;
-                n.articulation = art;
-                n.legato = art.is_some_and(|a| a.is_legato());
-                doc.push(n);
-            }
-            doc.row_space = RowSpace::Strings(tuning);
-        }
+        Scene::Guitar | Scene::GuitarLane | Scene::GuitarBoth => guitar_riff(&mut doc),
         Scene::Lyrics => {
             let words = [
                 ("A", 62, 0.0, 0.75),
@@ -385,11 +653,11 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             ed.selection.set_single(NoteId(3));
         }
         Scene::Pressure => {
-            ed.lane = Lane::Pressure;
+            ed.dimension = Dimension::Pressure;
             ed.selection.set_single(NoteId(3));
         }
-        Scene::AllLanes => {
-            ed.overlays = vec![Lane::Pitch, Lane::Pressure, Lane::Timbre];
+        Scene::AllDimensions => {
+            ed.overlays = vec![Dimension::Pitch, Dimension::Pressure, Dimension::Timbre];
             ed.selection.set_single(NoteId(3));
         }
         Scene::Ambiguous => {
@@ -401,15 +669,36 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             ed.selection.set_single(NoteId(2));
         }
         Scene::Drums => ed.set_mode(expression_editor_core::Mode::Drums),
-        Scene::Guitar => {
+        Scene::Guitar | Scene::GuitarLane | Scene::GuitarBoth => {
             ed.set_mode(expression_editor_core::Mode::Guitar);
-            ed.selection.set_single(NoteId(6));
+            // The full bend — the note the whole prototype is about.
+            ed.selection.set_single(NoteId(7));
         }
         Scene::Lyrics => {
             ed.set_mode(expression_editor_core::Mode::Vocals);
             ed.selection.set_single(NoteId(3));
         }
         Scene::Phrase => {
+            ed.selection.set_single(NoteId(3));
+        }
+        Scene::Percussive => {
+            ed.set_mode(expression_editor_core::Mode::UnpitchedAudio);
+        }
+        Scene::Flams => {
+            ed.set_mode(expression_editor_core::Mode::Drums);
+            // Both hands of the snare showing, since that is what a
+            // flam needs you to see.
+            if let expression_editor_core::RowSpace::Drums(m) = ed.row_space.clone() {
+                if let Some(r) = m.lanes.iter().position(|l| l.name == "T1 R") {
+                    ed.toggle_piece_split(r);
+                }
+            }
+            // A flammed tom, so the Hand and Flam controls have
+            // something to act on.
+            ed.selection.set_single(NoteId(13));
+        }
+        Scene::GuitarPro => {
+            ed.set_mode(expression_editor_core::Mode::Guitar);
             ed.selection.set_single(NoteId(3));
         }
     }

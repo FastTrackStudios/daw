@@ -10,6 +10,9 @@ description = "REAPER module for the expression editor — dockable panel plus a
 daw = { workspace = true, features = ["reaper", "standalone", "reaper-ui"] }
 expression-editor-core = { workspace = true }
 expression-editor-daw = { workspace = true }
+# The audio half. `render` because writing a take back means producing
+# audio; `daw` because the session drives the facade.
+expression-editor-audio = { workspace = true, features = ["daw", "render"] }
 expression-editor-ui = { workspace = true }
 dioxus = { workspace = true }
 tracing = { workspace = true }

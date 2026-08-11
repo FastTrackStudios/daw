@@ -16,22 +16,34 @@
 use dioxus::prelude::*;
 use dioxus_elements::input_data::MouseButton;
 use expression_editor_core::tools::Mods;
-use expression_editor_core::{Editor, Lane, Viewport};
+use expression_editor_core::{Editor, Dimension, Viewport};
 use keyboard_types::Modifiers;
 
 pub mod canvas;
 pub mod demo;
 pub mod drawer;
+pub mod arp_panel;
+pub mod curve_editor;
+pub mod drag;
+pub mod envelopes;
+pub mod velocity_panel;
+pub mod guitar;
 pub mod inspector;
 pub mod interaction;
+pub mod menu_ui;
 pub mod multitool_ui;
+pub mod quantize_panel;
+pub mod stack;
+pub mod switcher;
 pub mod theme;
 pub mod toolbar;
 pub mod widgets;
 
 pub use drawer::ModDrawer;
+pub use guitar::BendFlow;
 pub use expression_editor_core as core;
 pub use interaction::Drag;
+pub use menu_ui::ContextMenu;
 pub use multitool_ui::MultiTool;
 
 /// The editor: toolbar over canvas.
@@ -52,11 +64,34 @@ pub fn ExpressionEditor(
     /// that is otherwise only produced by a key press.
     #[props(default)]
     initial_multi: Option<MultiTool>,
+    /// Open a pitch drawing on mount. Same purpose again: restore a
+    /// session, and let the screenshot harness reach a modal state that
+    /// is otherwise only produced by a key press and several clicks.
+    #[props(default)]
+    initial_draft: Option<expression_editor_core::PitchDraft>,
+    /// **Prototype (#161).** Where a string roll draws its bend flow.
+    /// Ignored outside `RowSpace::Strings`.
+    #[props(default)]
+    bend_flow: Option<BendFlow>,
 ) -> Element {
+    // Context rather than a prop chain: the flow variant is read deep
+    // inside the canvas and nothing between here and there cares.
+    use_context_provider(|| bend_flow.unwrap_or_default());
     let drag = use_signal(Drag::default);
     let drawer = use_signal(|| initial_drawer.clone().unwrap_or_default());
-    let inspector_open = use_signal(|| true);
+    let mut inspector_open = use_signal(|| true);
     let multi = use_signal(|| initial_multi.clone().unwrap_or_default());
+    let menu_state = use_signal(ContextMenu::default);
+    let draft = use_signal(|| initial_draft.clone());
+    let mut pending = use_signal(|| None::<menu_ui::Pending>);
+
+    // Menu items the core could not finish become UI: Properties simply
+    // opens the inspector, which is where the note's fields already
+    // live. The rest are picked up by the panels that own them.
+    if matches!(*pending.read(), Some(menu_ui::Pending::Properties)) {
+        inspector_open.set(true);
+        pending.set(None);
+    }
 
     rsx! {
         div {
@@ -68,19 +103,102 @@ pub fn ExpressionEditor(
                     min-height: 0; overflow: hidden; background: {theme::BG}; \
                     color: {theme::TEXT}; font-family: system-ui, sans-serif;",
             toolbar::Toolbar { editor, drag, drawer }
+            switcher::TrackSwitcher { editor }
             toolbar::ChordBox { editor }
             div {
                 style: "display: flex; flex: 1 1 auto; min-height: 0;",
                 div {
                     style: "display: flex; flex-direction: column; flex: 1 1 auto; \
                             min-width: 0; min-height: 0;",
-                    Canvas { editor, drag, drawer, multi }
-                    LaneStrip { editor }
+                    if editor.read().stacked {
+                        stack::StackView { editor }
+                    } else {
+                        Canvas { editor, drag, drawer, multi, menu_state, pending, draft }
+                        LaneStrip { editor }
+                    }
                 }
                 inspector::Inspector { editor, open: inspector_open }
             }
             toolbar::StatusBar { editor }
         }
+    }
+}
+
+/// The glyph drawn on a handle, as an SVG path.
+///
+/// Each mark says what the handle *does* rather than naming it: the
+/// slopes are the slope they apply, fine pitch is a tick, formant a
+/// bar, amplitude a dot, vibrato a wave. At fourteen pixels there is no
+/// room for a word, and a shape is faster to read than one anyway.
+/// `hollow` draws the amplitude handle as an empty circle, which is how
+/// the manual signals that a drag will hit only the sibilants rather
+/// than the whole note.
+fn handle_mark(
+    handle: expression_editor_core::Handle,
+    cx: f64,
+    cy: f64,
+    r: f64,
+    hollow: bool,
+) -> String {
+    use expression_editor_core::Handle as H;
+    match handle {
+        H::LeftSlope => format!(
+            "M {:.1} {:.1} L {:.1} {:.1}",
+            cx - r,
+            cy + r * 0.5,
+            cx + r,
+            cy - r * 0.5
+        ),
+        H::RightSlope => format!(
+            "M {:.1} {:.1} L {:.1} {:.1}",
+            cx - r,
+            cy - r * 0.5,
+            cx + r,
+            cy + r * 0.5
+        ),
+        H::FinePitch => format!(
+            "M {:.1} {:.1} L {:.1} {:.1}",
+            cx - r * 0.6,
+            cy,
+            cx + r * 0.6,
+            cy
+        ),
+        H::Formant => format!(
+            "M {:.1} {:.1} L {:.1} {:.1}",
+            cx,
+            cy - r * 0.7,
+            cx,
+            cy + r * 0.7
+        ),
+        H::Amplitude => {
+            // A small circle, drawn as two arcs so it stays one path.
+            // Larger when hollow, since an outline reads smaller than a
+            // filled dot at this size.
+            let d = if hollow { r * 0.58 } else { r * 0.42 };
+            format!(
+                "M {:.1} {:.1} a {:.1} {:.1} 0 1 0 {:.1} 0 a {:.1} {:.1} 0 1 0 {:.1} 0",
+                cx - d,
+                cy,
+                d,
+                d,
+                d * 2.0,
+                d,
+                d,
+                -d * 2.0
+            )
+        }
+        H::Vibrato => format!(
+            "M {:.1} {:.1} q {:.1} {:.1} {:.1} 0 q {:.1} {:.1} {:.1} 0",
+            cx - r,
+            cy,
+            r * 0.25,
+            -r * 0.9,
+            r,
+            r * 0.25,
+            r * 0.9,
+            r
+        ),
+        H::Pitch => String::new(),
     }
 }
 
@@ -129,11 +247,16 @@ fn Canvas(
     drag: Signal<Drag>,
     drawer: Signal<ModDrawer>,
     multi: Signal<MultiTool>,
+    menu_state: Signal<ContextMenu>,
+    pending: Signal<Option<menu_ui::Pending>>,
+    draft: Signal<Option<expression_editor_core::PitchDraft>>,
 ) -> Element {
     let mut multi = multi;
     let mut editor = editor;
     let mut drag = drag;
     let mut drawer = drawer;
+    let mut menu_state = menu_state;
+    let mut draft = draft;
     // While the drawer is open its target is locked: editing gestures
     // are blocked, but every navigation path stays live so the preview
     // can be auditioned in context.
@@ -149,13 +272,36 @@ fn Canvas(
     let guides = canvas::tuning_guides(&ed);
     let zone_guides = canvas::zone_guides(&ed);
     let keys = canvas::keyboard(&ed);
+    let key_groups = canvas::key_groups(&ed, &keys);
     let ticks = canvas::ruler(&ed);
     let marker_flags = canvas::markers(&ed);
     let playhead = ed.playhead.map(|t| ed.camera.x(t));
     let razors = canvas::razor_rects(&ed);
+    let refs = canvas::reference_rects(&ed);
+    let handle_sets = canvas::note_handles(&ed);
+    let take_wave = canvas::take_waveform(&ed);
+    let sibilants = canvas::sibilant_bands(&ed);
+    let sibilant_scope = ed.sibilant_scope;
+    let draft_view = draft.read().as_ref().map(|d| canvas::draft_view(&ed, d));
+    let sep_lines = canvas::separators(&ed);
+    // Prototype (#161): the string roll's bend flow.
+    let flow_mode = try_consume_context::<BendFlow>().unwrap_or_default();
+    let flow = if flow_mode.on_row() {
+        guitar::flow_paths(&ed)
+    } else {
+        Default::default()
+    };
+    let joins = guitar::joins(&ed);
+    let bend_lane = flow_mode.draws_in_lane().then(|| guitar::bend_lane(&ed)).flatten();
+    let midi_ref = canvas::midi_reference_rects(&ed);
+    let midi_ref_front = ed.reference_to_front;
+    // `R` brings references forward, the way `M` does for the MIDI
+    // reference — with several parts on screen the quiet default is
+    // sometimes too quiet to read against.
+    let ref_opacity = if ed.refs_to_front { 0.95 } else { 0.45 };
     let cc_paths = canvas::cc_paths(&ed);
     // Notes recede while a controller is being edited: the roll is that
-    // lane's editing surface for the moment, and full-strength notes
+    // dimension's editing surface for the moment, and full-strength notes
     // would compete with the curve for the same pixels.
     let note_opacity = if ed.cc_editing() {
         ed.cc_display.note_dim
@@ -165,7 +311,7 @@ fn Canvas(
     let cc_editing = ed.cc_edit;
     let microtonal = !ed.tuning.temperament.is_equal();
     let temperament_name = ed.tuning.temperament.name;
-    let lane = ed.lane;
+    let dimension = ed.dimension;
     let empty = ed.doc.notes.is_empty();
     drop(ed);
 
@@ -194,6 +340,59 @@ fn Canvas(
             onkeydown: move |e: KeyboardEvent| {
                 let key = e.key().to_string();
                 let m = mods_of(e.modifiers());
+
+                // A pitch drawing is modal, so it takes its keys first
+                // and Ctrl+Z means *its* undo — the document's history
+                // has nothing in it to undo yet, by design.
+                if draft.read().is_some() {
+                    let mut handled = true;
+                    match (key.as_str(), m.ctrl) {
+                        ("Enter", _) => {
+                            let d = draft.read().clone();
+                            if let Some(d) = d {
+                                editor.write().apply_draft(&d);
+                            }
+                            draft.set(None);
+                        }
+                        ("Escape", _) => {
+                            let d = draft.read().clone();
+                            if let Some(d) = d {
+                                editor.write().dismiss_draft(&d);
+                            }
+                            draft.set(None);
+                        }
+                        ("z", true) => {
+                            let mut dw = draft.write();
+                            if let Some(dr) = dw.as_mut() {
+                                if m.shift { dr.redo(); } else { dr.undo(); }
+                                let preview = dr.clone();
+                                drop(dw);
+                                editor.write().preview_draft(&mut { preview });
+                            }
+                        }
+                        _ => handled = false,
+                    }
+                    if handled {
+                        e.prevent_default();
+                        return;
+                    }
+                }
+
+                // Open a drawing on the selected note.
+                if key == "3" && !m.ctrl {
+                    let opened = {
+                        let ed = editor.read();
+                        ed.selection
+                            .notes
+                            .first()
+                            .and_then(|id| expression_editor_core::PitchDraft::open(&ed.doc, *id))
+                    };
+                    if opened.is_some() {
+                        draft.set(opened);
+                        e.prevent_default();
+                        return;
+                    }
+                }
                 // B opens the drawer; Escape closes it. Both work
                 // whether or not it is already open.
                 if key == "b" && !m.ctrl {
@@ -221,6 +420,16 @@ fn Canvas(
                     e.prevent_default();
                     return;
                 }
+                // Drum-mode keys, before the general ones: `f` means
+                // flam here and nothing elsewhere.
+                if key == "f" && !m.ctrl && editor.read().mode == expression_editor_core::Mode::Drums {
+                    let made = editor.write().flam_selection();
+                    if made > 0 {
+                        e.prevent_default();
+                        return;
+                    }
+                }
+
                 if multi.read().armed {
                     match key.as_str() {
                         "m" => {
@@ -256,22 +465,75 @@ fn Canvas(
                     e.prevent_default();
                 }
             },
+            onkeyup: move |e: KeyboardEvent| {
+                // `R` is momentary: references drop back the instant it
+                // is released, so it can never be left on by accident.
+                match e.key().to_string().as_str() {
+                    "r" => editor.write().refs_to_front = false,
+                    "m" => editor.write().reference_to_front = false,
+                    _ => {}
+                }
+            },
             svg {
+                // The roll is the surface every gesture lands on, so it
+                // carries an id a test can aim a pointer at (#167).
+                "data-testid": "roll",
                 style: "display: block; width: 100%; height: 100%; \
                         touch-action: none; user-select: none; cursor: crosshair;",
                 view_box: "0 0 {vp.w + canvas::GUTTER_W:.0} {vp.h + canvas::RULER_H:.0}",
                 preserve_aspect_ratio: "none",
-                onmounted: move |e| {
-                    let data = e.data();
-                    spawn(async move {
-                        if let Ok(r) = data.get_client_rect().await {
-                            editor.write().resize(Viewport::new(
-                                r.width() - canvas::GUTTER_W,
-                                r.height() - canvas::RULER_H,
-                            ));
+                // Measured by `onresize`, not by a spawned
+                // `get_client_rect().await`.
+                //
+                // The old code spawned a task to measure; that future
+                // resolves inside a later event dispatch and re-enters
+                // dioxus's document, panicking with "RefCell already
+                // borrowed" at `native-dom/src/events.rs:164` — taking
+                // the canvas down on the first click under Blitz, the
+                // renderer REAPER uses (#167). dioxus documents the
+                // constraint itself: background tasks must not touch
+                // the document during event handling, and
+                // `get_client_rect` has no `try_` form.
+                //
+                // `onresize` carries its size in the event, so there is
+                // no task and nothing to re-enter — and unlike a
+                // mount-time measurement it fires again when a REAPER
+                // dock is dragged, which is the behaviour the spawned
+                // version was reaching for in the first place.
+                onresize: move |e: Event<ResizeData>| {
+                    if let Ok(size) = e.data().get_content_box_size() {
+                        let want = Viewport::new(
+                            size.width - canvas::GUTTER_W,
+                            size.height - canvas::RULER_H,
+                        );
+                        // Guarded: a no-op resize would invalidate the
+                        // view for nothing, and `try_write` keeps a
+                        // contended frame from panicking rather than
+                        // relying on dispatch order.
+                        if let Ok(mut ed) = editor.try_write() {
+                            if ed.viewport != want {
+                                ed.resize(want);
+                            }
                         }
-                    });
+                    }
                 },
+                // (the old onmounted measurement lived here)
+                //
+                // It used to `spawn` a `get_client_rect().await` and
+                // resize from the result. That future resolves inside a
+                // later event dispatch and re-enters dioxus's document,
+                // which panics with "RefCell already borrowed" at
+                // `native-dom/src/events.rs:164` — taking the canvas
+                // down on the first click under Blitz, the renderer
+                // REAPER uses (#167). dioxus documents the constraint
+                // itself: background tasks must not touch the document
+                // during event handling, and `get_client_rect` has no
+                // `try_` form.
+                //
+                // The viewport comes from the host instead, through
+                // `Editor::resize` — which the standalone runner and
+                // the REAPER panel both already call. One source for
+                // the size, and no background task racing the pointer.
                 onpointerdown: move |e: PointerEvent| {
                     let raw = e.data().element_coordinates();
                     // Resolve against a snapshot: the read guard must
@@ -308,7 +570,27 @@ fn Canvas(
                     } else {
                         0
                     };
+                    // A pitch drawing owns the surface while it is up:
+                    // a click is an anchor and nothing else.
+                    if draft.read().is_some() {
+                        let mut dw = draft.write();
+                        let Some(dr) = dw.as_mut() else { return };
+                        let next = interaction::draft_press(&editor.read(), dr, x, y);
+                        let preview = dr.clone();
+                        drop(dw);
+                        editor.write().preview_draft(&mut { preview });
+                        drag.set(next);
+                        return;
+                    }
                     let d = interaction::pointer_down(&mut editor.write(), x, y, m, button);
+                    // A right-click resolves to a menu request rather
+                    // than a drag. Opening it here — not in `interaction`
+                    // — keeps the core pointer path free of UI state.
+                    if let Drag::ContextMenu { x, y, under, t } = d {
+                        menu_state.write().show(x, y, under, t);
+                        return;
+                    }
+                    menu_state.write().close();
                     drag.set(d);
                 },
                 onpointermove: move |e: PointerEvent| {
@@ -317,6 +599,23 @@ fn Canvas(
                     }
                     let (x, y) = local(&e);
                     let m = mods_of(e.modifiers());
+                    // Read the drag out before touching it: the guard
+                    // would otherwise still be alive when `drag.set`
+                    // wants the mutable borrow.
+                    let current = drag.read().clone();
+                    if let Drag::DraftAnchor { index } = current {
+                        let mut dw = draft.write();
+                        if let Some(dr) = dw.as_mut() {
+                            let moved = interaction::draft_move(&editor.read(), dr, index, x, y);
+                            let preview = dr.clone();
+                            drop(dw);
+                            editor.write().preview_draft(&mut { preview });
+                            if let Some(i) = moved {
+                                drag.set(Drag::DraftAnchor { index: i });
+                            }
+                        }
+                        return;
+                    }
                     let mut d = drag.write();
                     interaction::pointer_move(&mut editor.write(), &mut d, x, y, m);
                 },
@@ -366,6 +665,19 @@ fn Canvas(
                         width: "{vp.w:.0}",
                         height: "{r.h:.2}",
                         fill: r.fill,
+                    }
+                }
+                // One divider per family, so a kit reads as groups
+                // rather than thirty-nine identical lanes.
+                for r in rows.iter().filter(|r| r.starts_group) {
+                    line {
+                        key: "grp{r.row}",
+                        x1: "0",
+                        y1: "{r.y:.1}",
+                        x2: "{vp.w:.0}",
+                        y2: "{r.y:.1}",
+                        stroke: theme::OCTAVE_LINE,
+                        stroke_width: "1",
                     }
                 }
                 for r in rows.iter().filter(|r| r.is_c) {
@@ -447,11 +759,91 @@ fn Canvas(
                         y: "{b.y:.1}",
                         width: "{b.w:.1}",
                         height: "{b.h:.1}",
-                        fill: theme::lane_color(lane),
+                        fill: theme::lane_color(dimension),
                         fill_opacity: "0.05",
-                        stroke: theme::lane_color(lane),
+                        stroke: theme::lane_color(dimension),
                         stroke_opacity: "0.25",
                         stroke_width: "1",
+                    }
+                }
+
+                // The take's own waveform, behind everything. Faint on
+                // purpose: it is context, and it covers the full height
+                // of the roll, so at any real strength it would fight
+                // every note on screen.
+                if let Some(wave) = take_wave.as_ref() {
+                    polygon {
+                        points: "{wave}",
+                        fill: theme::REFERENCE,
+                        fill_opacity: "0.13",
+                        pointer_events: "none",
+                    }
+                }
+
+                // Sibilants, shaded while their scope is armed — the
+                // manual's "dark areas in the waveform", and the only
+                // way to see what an amplitude drag is about to hit.
+                for (i, (sx, ex)) in sibilants.iter().enumerate() {
+                    {
+                        let sw = (ex - sx).max(1.0);
+                        rsx! {
+                            // Darkened *and* edged. A dark band over an
+                            // already-dark backdrop is nearly invisible,
+                            // and the whole point is knowing exactly
+                            // which spans an amplitude drag will hit.
+                            rect {
+                                key: "sib{i}",
+                                x: "{sx:.1}", y: "0",
+                                width: "{sw:.1}", height: "{vp.h:.0}",
+                                fill: theme::SURFACE_DEEP,
+                                fill_opacity: "0.72",
+                                stroke: theme::BORDER_STRONG,
+                                stroke_opacity: "0.85",
+                                stroke_width: "1",
+                                pointer_events: "none",
+                            }
+                        }
+                    }
+                }
+
+                // The MIDI reference, behind the sung notes: outlines
+                // rather than fills, because it is a target to agree
+                // with and must never be mistaken for something the
+                // pointer can grab.
+                for (i, r) in midi_ref.iter().enumerate() {
+                    rect {
+                        key: "mref{i}",
+                        x: "{r.x:.1}", y: "{r.y:.1}",
+                        width: "{r.w:.1}", height: "{r.h:.1}",
+                        rx: "2",
+                        fill: theme::SURFACE_DEEP,
+                        fill_opacity: if midi_ref_front { "0.85" } else { "0.5" },
+                        stroke: theme::TEXT_BRIGHT,
+                        stroke_opacity: if midi_ref_front { "0.95" } else { "0.45" },
+                        stroke_width: "1",
+                        pointer_events: "none",
+                    }
+                }
+
+                // Reference tracks, behind the notes and never on top of
+                // them: a reference you cannot edit must never be the
+                // thing your pointer lands on first.
+                for r in refs.iter() {
+                    g {
+                        key: "ref{r.track}-{r.id.0}",
+                        opacity: "{ref_opacity:.2}",
+                        rect {
+                            x: "{r.x:.1}",
+                            y: "{r.y:.1}",
+                            width: "{r.w:.1}",
+                            height: "{r.h:.1}",
+                            rx: "2",
+                            fill: r.fill.clone().unwrap_or_else(|| "none".into()),
+                            fill_opacity: "0.20",
+                            stroke: "{r.stroke}",
+                            stroke_opacity: "0.75",
+                            stroke_width: "1",
+                        }
                     }
                 }
 
@@ -460,7 +852,32 @@ fn Canvas(
                     g {
                         key: "n{n.id.0}",
                         opacity: "{note_opacity:.2}",
-                        if let Some(head) = n.head.as_ref() {
+                        if let Some(blob) = n.blob.as_ref() {
+                            // A sung note: the body follows the
+                            // amplitude envelope and rides the pitch
+                            // contour, so the shape *is* the reading.
+                            polygon {
+                                points: "{blob}",
+                                fill: n.fill,
+                                fill_opacity: "{n.opacity + 0.25:.2}",
+                                stroke: if n.selected { theme::SELECTED } else { n.fill },
+                                stroke_width: if n.selected { "1.5" } else { "0.75" },
+                            }
+                            // The note's own pitch, as a hairline
+                            // through the body. Without it there is
+                            // nothing to read the wandering pitch track
+                            // *against*, and the whole surface is about
+                            // that difference.
+                            if let Some(cy) = n.blob_center {
+                                line {
+                                    x1: "{n.x:.1}", y1: "{cy:.1}",
+                                    x2: "{n.x + n.w:.1}", y2: "{cy:.1}",
+                                    stroke: theme::TEXT_FAINT,
+                                    stroke_opacity: "0.7",
+                                    stroke_width: "0.75",
+                                }
+                            }
+                        } else if let Some(head) = n.head.as_ref() {
                             polygon {
                                 points: "{head}",
                                 fill: n.fill,
@@ -596,6 +1013,117 @@ fn Canvas(
                     }
                 }
 
+                // ── #161 prototype: bend flow ───────────────────────
+                //
+                // The string's own line, lifted off its row by the
+                // bend. Drawn thick and in the string's colour so it
+                // reads as "the string moved", not as an overlay.
+                for (i, f) in flow.iter().enumerate() {
+                    g {
+                        key: "flow{i}",
+                        polyline {
+                            points: "{f.points}",
+                            fill: "none",
+                            stroke: f.color,
+                            stroke_width: if f.selected { "3.5" } else { "2.5" },
+                            stroke_linecap: "round",
+                            stroke_linejoin: "round",
+                            stroke_opacity: "0.95",
+                            pointer_events: "none",
+                        }
+                        // The height of the bend, where it peaks. A
+                        // guitarist reads bends as "full" and "half",
+                        // not as a shape — the number is the datum and
+                        // the curve is how it got there.
+                        if let Some(label) = f.peak_label.as_ref() {
+                            text {
+                                x: "{f.peak_at.0 + 3.0:.1}",
+                                y: "{f.peak_at.1 - 4.0:.1}",
+                                fill: theme::ACCENT,
+                                font_size: "9",
+                                font_weight: "600",
+                                pointer_events: "none",
+                                "{label}"
+                            }
+                        }
+                    }
+                }
+
+                // Joins between two notes on one string. A hammer-on
+                // gets an arc and a letter; a slide gets a straight
+                // connector — deliberately two different marks, so the
+                // pictures can be compared.
+                for (i, j) in joins.iter().enumerate() {
+                    g {
+                        key: "join{i}",
+                        path {
+                            d: "{j.d}",
+                            fill: "none",
+                            stroke: j.color,
+                            stroke_width: "1.5",
+                            pointer_events: "none",
+                        }
+                        if let guitar::JoinKind::Hopo(letter) = j.kind {
+                            text {
+                                x: "{j.label_at.0 - 3.0:.1}",
+                                y: "{j.label_at.1:.1}",
+                                fill: theme::ACCENT,
+                                font_size: "9",
+                                font_weight: "700",
+                                pointer_events: "none",
+                                "{letter}"
+                            }
+                        }
+                    }
+                }
+
+                // The dimension variant: the same motion on an absolute
+                // semitone axis, under the roll.
+                if let Some(dimension) = bend_lane.as_ref() {
+                    g {
+                        rect {
+                            x: "0", y: "{dimension.y:.1}",
+                            width: "{vp.w:.0}", height: "{dimension.h:.1}",
+                            fill: theme::SURFACE_DEEP,
+                            fill_opacity: "0.9",
+                            stroke: theme::BORDER_STRONG,
+                            stroke_width: "1",
+                            pointer_events: "none",
+                        }
+                        for (gi, (gy, label)) in dimension.guides.iter().enumerate() {
+                            g {
+                                key: "bg{gi}",
+                                line {
+                                    x1: "0", y1: "{gy:.1}",
+                                    x2: "{vp.w:.0}", y2: "{gy:.1}",
+                                    stroke: theme::BORDER_STRONG,
+                                    stroke_width: "1",
+                                    stroke_dasharray: "4 4",
+                                    pointer_events: "none",
+                                }
+                                text {
+                                    x: "3", y: "{gy - 2.0:.1}",
+                                    fill: theme::TEXT_FAINT,
+                                    font_size: "8",
+                                    pointer_events: "none",
+                                    "{label}"
+                                }
+                            }
+                        }
+                        for (pi, f) in dimension.paths.iter().enumerate() {
+                            polyline {
+                                key: "bp{pi}",
+                                points: "{f.points}",
+                                fill: "none",
+                                stroke: f.color,
+                                stroke_width: "2",
+                                stroke_linecap: "round",
+                                pointer_events: "none",
+                            }
+                        }
+                    }
+                }
+
                 // Effective-pitch guides, one per zone.
                 for (i, z) in zone_guides.iter().enumerate() {
                     line {
@@ -611,7 +1139,7 @@ fn Canvas(
                     }
                 }
 
-                // Expression curves — overlays first, active lane last.
+                // Expression curves — overlays first, active dimension last.
                 for (i, c) in curves.iter().enumerate() {
                     polyline {
                         key: "cv{i}",
@@ -644,6 +1172,153 @@ fn Canvas(
                 // Razor areas sit above the notes: they are a
                 // statement about a region, and the region has to be
                 // legible even where it is dense with material.
+                // Note handles, in front of the notes they belong to.
+                // Pointer events stay off: `pointer_down` hit-tests them
+                // from the same layout, so letting the SVG intercept
+                // would give two competing answers.
+                for set in handle_sets.iter() {
+                    g {
+                        key: "hs{set.id.0}",
+                        pointer_events: "none",
+                        // The temporary note, when one is open here.
+                        if let Some((sx, ex)) = set.scope {
+                            {
+                                let body = set.rects.first();
+                                let (ty, th) = body.map(|b| (b.y, b.h)).unwrap_or((0.0, 0.0));
+                                let sw = (ex - sx).abs().max(1.0);
+                                let sxx = sx.min(ex);
+                                rsx! {
+                                    rect {
+                                        x: "{sxx:.1}", y: "{ty:.1}",
+                                        width: "{sw:.1}", height: "{th:.1}",
+                                        fill: theme::ACCENT, fill_opacity: "0.28",
+                                        stroke: theme::ACCENT, stroke_width: "1",
+                                    }
+                                }
+                            }
+                        }
+                        for hr in set.rects.iter() {
+                            {
+                                // The body handle is the note itself and
+                                // needs no chrome; only the strips draw.
+                                let is_body = hr.handle
+                                    == expression_editor_core::Handle::Pitch;
+                                let (cx, cy) = hr.center();
+                                let half = (hr.w * 0.28).min(9.0);
+                                rsx! {
+                                    if !is_body {
+                                        g {
+                                            key: "h{set.id.0}-{hr.handle:?}",
+                                            rect {
+                                                x: "{hr.x:.1}", y: "{hr.y:.1}",
+                                                width: "{hr.w:.1}", height: "{hr.h:.1}",
+                                                rx: "2",
+                                                fill: theme::CONTROL,
+                                                fill_opacity: "0.92",
+                                                stroke: theme::BORDER_STRONG,
+                                                stroke_opacity: "0.9",
+                                                stroke_width: "1",
+                                            }
+                                            // A glyph rather than a
+                                            // label: at this size text
+                                            // is unreadable, and the
+                                            // mark says which axis the
+                                            // handle moves.
+                                            {
+                                                let hollow = hr.handle
+                                                    == expression_editor_core::Handle::Amplitude
+                                                    && sibilant_scope;
+                                                let mark =
+                                                    handle_mark(hr.handle, cx, cy, half, hollow);
+                                                // Filled unless it is
+                                                // the hollow amplitude
+                                                // circle, whose whole
+                                                // job is to be empty.
+                                                let fill = if hr.handle
+                                                    == expression_editor_core::Handle::Amplitude
+                                                    && !hollow
+                                                {
+                                                    theme::HANDLE
+                                                } else {
+                                                    "none"
+                                                };
+                                                rsx! {
+                                                    path {
+                                                        d: "{mark}",
+                                                        stroke: theme::HANDLE,
+                                                        stroke_width: "1.6",
+                                                        fill,
+                                                        stroke_linecap: "round",
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // The pitch drawing, over everything it edits.
+                if let Some(dv) = draft_view.as_ref() {
+                    g {
+                        pointer_events: "none",
+                        // What was there before, thin and underneath, so
+                        // the change is visible rather than remembered.
+                        if !dv.original.is_empty() {
+                            polyline {
+                                points: "{dv.original}",
+                                fill: "none",
+                                stroke: theme::TEXT_FAINT,
+                                stroke_width: "1",
+                                stroke_opacity: "0.8",
+                            }
+                        }
+                        if !dv.line.is_empty() {
+                            polyline {
+                                points: "{dv.line}",
+                                fill: "none",
+                                stroke: theme::ACCENT,
+                                stroke_width: "2",
+                            }
+                        }
+                        for (i, (ax, ay)) in dv.anchors.iter().enumerate() {
+                            circle {
+                                key: "anch{i}",
+                                cx: "{ax:.1}", cy: "{ay:.1}", r: "4",
+                                fill: theme::BG,
+                                stroke: theme::ACCENT,
+                                stroke_width: "2",
+                            }
+                        }
+                    }
+                }
+
+                // Timing separators, over everything: in timing mode
+                // the boundary is what the pointer is addressing.
+                for (i, s) in sep_lines.iter().enumerate() {
+                    g {
+                        key: "sep{i}",
+                        pointer_events: "none",
+                        line {
+                            x1: "{s.x:.1}", y1: "0",
+                            x2: "{s.x:.1}", y2: "{vp.h:.0}",
+                            stroke: s.color,
+                            stroke_width: "2",
+                        }
+                        // The tick that splits the two drag laws. Above
+                        // it the left side stretches and the rest
+                        // slides; below it both sides stretch.
+                        line {
+                            x1: "{s.x - 6.0:.1}", y1: "{s.tick_y:.1}",
+                            x2: "{s.x + 6.0:.1}", y2: "{s.tick_y:.1}",
+                            stroke: theme::SELECTED,
+                            stroke_width: "2",
+                        }
+                    }
+                }
+
                 for (i, r) in razors.iter().enumerate() {
                     g {
                         key: "rz{i}",
@@ -782,6 +1457,39 @@ fn Canvas(
                             }
                         }
                     }
+                    // The piece name, braced over its hands. Drawn after
+                    // the hand labels so the brace sits on top of the
+                    // key fills rather than under them.
+                    for g in key_groups.iter() {
+                        path {
+                            key: "gb{g.label}",
+                            d: "M 26 {g.y + 1.5:.1} L 22 {g.y + 1.5:.1} L 22 {g.y + g.h - 1.5:.1} L 26 {g.y + g.h - 1.5:.1}",
+                            fill: "none",
+                            stroke: theme::TEXT_DIM,
+                            stroke_width: "1",
+                        }
+                        // The label is centred on the span, which is
+                        // exactly where the seam between the two keys
+                        // falls — so it gets its own chip to sit on.
+                        rect {
+                            x: "1",
+                            y: "{g.y + g.h * 0.5 - 6.0:.1}",
+                            width: "20",
+                            height: "12",
+                            fill: theme::KEY_WHITE,
+                        }
+                        // Horizontal, not rotated: Blitz does not apply
+                        // an SVG transform to text, so a rotated label
+                        // renders as nothing at all.
+                        text {
+                            x: "4",
+                            y: "{g.y + g.h * 0.5 + 3.0:.1}",
+                            text_anchor: "start",
+                            fill: theme::KEY_LABEL,
+                            font_size: "9",
+                            "{g.label}"
+                        }
+                    }
                     line {
                         x1: "{canvas::GUTTER_W:.0}", y1: "0",
                         x2: "{canvas::GUTTER_W:.0}", y2: "{vp.h:.0}",
@@ -812,6 +1520,8 @@ fn Canvas(
             }
 
             multitool_ui::MultiToolOverlay { editor, tool: multi }
+
+            menu_ui::ContextMenuOverlay { editor, menu_state, pending }
 
             drawer::ModulationDrawer { editor, drawer }
 
@@ -1006,6 +1716,18 @@ fn LaneStrip(editor: Signal<Editor>) -> Element {
 ///
 /// Only Pitch: three overlaid curves on a first look is noise, and the
 /// other two are one click away in the toolbar.
-pub fn default_overlays() -> Vec<Lane> {
-    vec![Lane::Pitch]
+pub fn default_overlays() -> Vec<Dimension> {
+    vec![Dimension::Pitch]
 }
+
+/// The raw widgets, for tests that need to drive one in isolation.
+///
+/// Not part of the panel API — exported so `tests/slider_drag.rs` can
+/// mount a single control without the whole panel around it. Absorbed
+/// with the panels from `midi-tools-ui` (#153).
+pub mod test_support {
+    pub use crate::drag::{BarEditor, RangeSlider, Slider};
+}
+
+pub use arp_panel::{ArpPanel, ArpSinkHandle};
+pub use velocity_panel::{SinkHandle, VelocityPanel};

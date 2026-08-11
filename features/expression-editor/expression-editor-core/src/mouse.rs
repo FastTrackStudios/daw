@@ -28,7 +28,7 @@ pub enum Context {
     ZoneSplit,
     /// The velocity/CC lane strip below the roll.
     CcLane,
-    /// An event already in a CC lane.
+    /// An event already in a CC dimension.
     CcEvent,
     /// The piano-key gutter.
     Keys,
@@ -128,7 +128,17 @@ pub enum Action {
     PenOverride,
     ScaleExpression,
     TransposeSnapped,
+    /// Freehand into the active controller lane.
     EditCcEvents,
+    /// A straight ramp between the drag's two ends, restyled by the
+    /// toolbar shape. Stays live after release so the shape buttons can
+    /// change their mind, exactly like the note-dimension `Curve` gesture.
+    DrawCcLine,
+    /// Splice the dimension's default back in across the swept range.
+    EraseCcEvents,
+    /// Ride the fader: scale the swept range about a pivot, keeping its
+    /// shape and changing only its depth.
+    ScaleCcEvents,
 
     // ── domain-specific ──────────────────────────────────────────────
     /// Vocal editor: type a syllable onto the note.
@@ -406,13 +416,22 @@ impl MouseMap {
                 b(C::ZoneSplit, G::Drag, N, A::ActiveTool),
                 b(C::ZoneSplit, G::Click, AL, A::None),
                 b(C::ZoneSplit, G::RightClick, N, A::ContextMenu),
-                // ── velocity / CC lane ───────────────────────────────
+                // ── velocity / CC dimension ───────────────────────────────
+                // Shift is deliberately unbound here: it is the
+                // snap-reverse modifier for every CC gesture, the way it
+                // is everywhere else in the surface. Binding it to a
+                // tool would cost the only consistent "other behaviour"
+                // key.
                 b(C::CcLane, G::Drag, N, A::EditCcEvents),
-                b(C::CcLane, G::Drag, CT, A::PenOverride),
-                b(C::CcLane, G::Drag, S, A::MarqueeSelect),
+                b(C::CcLane, G::Drag, AL, A::DrawCcLine),
+                b(C::CcLane, G::Drag, CT, A::ScaleCcEvents),
                 b(C::CcLane, G::Click, N, A::EditCcEvents),
+                b(C::CcLane, G::RightClick, N, A::EraseCcEvents),
                 b(C::CcEvent, G::Drag, N, A::EditCcEvents),
+                b(C::CcEvent, G::Drag, AL, A::DrawCcLine),
+                b(C::CcEvent, G::Drag, CT, A::ScaleCcEvents),
                 b(C::CcEvent, G::Click, N, A::SelectNote),
+                b(C::CcEvent, G::RightClick, N, A::EraseCcEvents),
                 // ── chrome ───────────────────────────────────────────
                 b(C::Keys, G::Click, N, A::SelectRow),
                 b(C::Keys, G::Click, AL, A::Audition),
@@ -471,7 +490,12 @@ impl MouseMap {
         let mut m = Self::reaper_like();
         m.name = "Riffer (Ample)";
         m.set(C::PianoRoll, G::Click, ModKey::NONE, A::InsertNote);
-        m.set(C::PianoRoll, G::Drag, ModKey::NONE, A::InsertNoteDragToExtend);
+        m.set(
+            C::PianoRoll,
+            G::Drag,
+            ModKey::NONE,
+            A::InsertNoteDragToExtend,
+        );
         m.set(C::Note, G::Click, ModKey::NONE, A::SelectNote);
         m.set(C::Note, G::DoubleClick, ModKey::NONE, A::EraseNote);
         m.set(C::Note, G::Drag, ModKey::NONE, A::MoveNoteVertically);

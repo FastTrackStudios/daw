@@ -25,15 +25,29 @@
 //!   core already models, so bends are attributed to the note sounding
 //!   on that channel and flagged ambiguous when two are.
 
+pub mod midi_tools_sink;
+pub mod shapes;
+pub mod state;
+pub mod fixture;
 pub mod session;
 
 pub use session::Session;
 
+/// MPE's per-note bend range convention, in semitones.
+///
+/// Lives here rather than in each caller because it has to be the same
+/// number on both sides of a conversion: a document read at one range
+/// and written at another has every pitch curve rescaled silently. The
+/// REAPER module loads takes with it and [`fixture`] declares it on the
+/// wire, so the two cannot drift apart.
+pub const DEFAULT_BEND_RANGE: f64 = 48.0;
+
 use daw::service::midi::{
+    MidiChannelPressureCreate,
     MidiCCCreate, MidiNoteCreate, MidiPitchBendCreate, MidiTakeContent, MidiTakeSnapshot,
 };
 use expression_editor_core::cc::CcLane;
-use expression_editor_core::doc::{ExpressionDoc, Lane, Note, NoteId, TimeBase};
+use expression_editor_core::doc::{ExpressionDoc, Dimension, Note, NoteId, TimeBase};
 use expression_editor_core::tuning;
 
 /// Convert a take snapshot into an editable document.
@@ -85,11 +99,11 @@ pub fn to_doc(snapshot: &MidiTakeSnapshot, bend_range: f64) -> ExpressionDoc {
 
     // Channel pressure and CC74 are the MPE expression dimensions.
     for cp in &snapshot.channel_pressures {
-        set_lane(&mut doc, cp.channel + 1, cp.position_ppq, Lane::Pressure, cp.pressure);
+        set_lane(&mut doc, cp.channel + 1, cp.position_ppq, Dimension::Pressure, cp.pressure);
     }
     for cc in &snapshot.ccs {
         if cc.controller == 74 {
-            set_lane(&mut doc, cc.channel + 1, cc.position_ppq, Lane::Timbre, cc.value);
+            set_lane(&mut doc, cc.channel + 1, cc.position_ppq, Dimension::Timbre, cc.value);
         }
     }
 
@@ -112,7 +126,7 @@ pub fn to_doc(snapshot: &MidiTakeSnapshot, bend_range: f64) -> ExpressionDoc {
     doc
 }
 
-fn set_lane(doc: &mut ExpressionDoc, channel: u8, t: f64, lane: Lane, value: u8) {
+fn set_lane(doc: &mut ExpressionDoc, channel: u8, t: f64, dimension: Dimension, value: u8) {
     let owners: Vec<NoteId> = doc
         .notes
         .iter()
@@ -123,7 +137,7 @@ fn set_lane(doc: &mut ExpressionDoc, channel: u8, t: f64, lane: Lane, value: u8)
         return;
     }
     if let Some(n) = doc.note_mut(owners[0]) {
-        n.lane_mut(lane).set(t, value as f64 / 127.0);
+        n.curve_mut(dimension).set(t, value as f64 / 127.0);
     }
 }
 
@@ -140,6 +154,7 @@ pub fn to_content(doc: &ExpressionDoc) -> MidiTakeContent {
     let mut notes = Vec::with_capacity(doc.notes.len());
     let mut bends = Vec::new();
     let mut ccs = Vec::new();
+    let mut pressures = Vec::new();
 
     for n in &doc.notes {
         // Ambiguous ownership means the writer cannot know which note a
@@ -159,33 +174,34 @@ pub fn to_content(doc: &ExpressionDoc) -> MidiTakeContent {
         }
 
         let steps = EXPRESSION_SAMPLES_PER_NOTE;
-        for lane in Lane::ALL {
-            if n.lane(lane).is_empty() {
+        for dimension in Dimension::ALL {
+            if n.curve(dimension).is_empty() {
                 continue;
             }
             for k in 0..=steps {
                 let f = k as f64 / steps as f64;
                 let t = n.start + n.len() * f;
-                let v = n.lane(lane).sample(t, lane.default_value());
-                match lane {
-                    Lane::Pitch => bends.push(MidiPitchBendCreate {
+                let v = n.curve(dimension).sample(t, dimension.default_value());
+                match dimension {
+                    Dimension::Pitch => bends.push(MidiPitchBendCreate {
                         channel,
                         value: tuning::semitones_to_bend14(v, doc.bend_range) as i16 - 8192,
                         position_ppq: t,
                     }),
-                    Lane::Timbre => ccs.push(MidiCCCreate {
+                    Dimension::Timbre => ccs.push(MidiCCCreate {
                         channel,
                         controller: 74,
                         value: (v * 127.0).round().clamp(0.0, 127.0) as u8,
                         position_ppq: t,
                     }),
-                    // Channel pressure has no `Create` in the bulk
-                    // content type; it goes out as CC11 instead, which
-                    // is what most instruments read anyway.
-                    Lane::Pressure => ccs.push(MidiCCCreate {
+                    // Real channel pressure, not CC11. It used to go
+                    // out as CC11 because the bulk content type had no
+                    // field for it — but the snapshot reads pressure
+                    // from `channel_pressures`, so the dimension did not
+                    // survive a round trip (#167).
+                    Dimension::Pressure => pressures.push(MidiChannelPressureCreate {
                         channel,
-                        controller: 11,
-                        value: (v * 127.0).round().clamp(0.0, 127.0) as u8,
+                        pressure: (v * 127.0).round().clamp(0.0, 127.0) as u8,
                         position_ppq: t,
                     }),
                 }
@@ -195,11 +211,11 @@ pub fn to_content(doc: &ExpressionDoc) -> MidiTakeContent {
 
     // Document-level controllers, written as authored rather than
     // resampled — these are already the shape the user drew.
-    for lane in &doc.cc.lanes {
-        for p in lane.curve.points() {
+    for dimension in &doc.cc.lanes {
+        for p in dimension.curve.points() {
             ccs.push(MidiCCCreate {
                 channel: 0,
-                controller: lane.number,
+                controller: dimension.number,
                 value: (p.value * 127.0).round().clamp(0.0, 127.0) as u8,
                 position_ppq: p.t,
             });
@@ -211,6 +227,7 @@ pub fn to_content(doc: &ExpressionDoc) -> MidiTakeContent {
         ccs,
         pitch_bends: bends,
         note_expressions: Vec::new(),
+        channel_pressures: pressures,
     }
 }
 

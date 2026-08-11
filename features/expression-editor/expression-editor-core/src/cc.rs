@@ -43,7 +43,9 @@ impl CcLane {
 
     /// The 0..127 value at `t`.
     pub fn value(&self, t: f64) -> u8 {
-        (self.curve.sample(t, self.default_value()) * 127.0).round().clamp(0.0, 127.0) as u8
+        (self.curve.sample(t, self.default_value()) * 127.0)
+            .round()
+            .clamp(0.0, 127.0) as u8
     }
 
     /// Where a lane rests when nothing is authored.
@@ -171,7 +173,7 @@ impl CcSet {
 }
 
 /// How pinned lanes are drawn behind the notes.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, facet::Facet)]
 pub struct CcDisplay {
     /// Opacity of a pinned lane that is not being edited. Low on
     /// purpose — several controllers at full strength turn the roll

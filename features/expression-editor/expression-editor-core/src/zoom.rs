@@ -119,7 +119,11 @@ pub fn weighted_note_length(spans: &[Span], at: f64, cfg: SmartZoom) -> Option<f
         return None;
     }
     let mut sorted: Vec<Span> = spans.to_vec();
-    sorted.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(core::cmp::Ordering::Equal));
+    sorted.sort_by(|a, b| {
+        a.start
+            .partial_cmp(&b.start)
+            .unwrap_or(core::cmp::Ordering::Equal)
+    });
 
     let mut length_sum = 0.0;
     let mut weight_sum = 0.0;
@@ -268,38 +272,38 @@ pub fn apply_vertical(
             };
             let (lo, hi) = extent(set).unwrap_or((cfg.base_row as f64, cfg.base_row as f64));
             let rows = (hi - lo + 1.0).max(cfg.min_rows);
-            cam.px_per_semitone = (vp.h / rows).min(cfg.max_px_per_row);
-            cam.pitch_center = (lo + hi) * 0.5;
+            cam.vertical.px_per_row = (vp.h / rows).min(cfg.max_px_per_row);
+            cam.vertical.center = (lo + hi) * 0.5;
         }
-        VerticalMode::ScrollToRow => cam.pitch_center = anchor_row,
+        VerticalMode::ScrollToRow => cam.vertical.center = anchor_row,
         VerticalMode::CenterOfNotesInView => {
             if let Some((lo, hi)) = extent(&in_view) {
-                cam.pitch_center = (lo + hi) * 0.5;
+                cam.vertical.center = (lo + hi) * 0.5;
             }
         }
         VerticalMode::CenterOfAllNotes => {
             if let Some((lo, hi)) = extent(&all) {
-                cam.pitch_center = (lo + hi) * 0.5;
+                cam.vertical.center = (lo + hi) * 0.5;
             }
         }
         VerticalMode::LowestInView => {
             if let Some((lo, _)) = extent(&in_view) {
-                cam.pitch_center = lo + vp.h * 0.5 / cam.px_per_semitone - 1.0;
+                cam.vertical.center = lo + vp.h * 0.5 / cam.vertical.px_per_row - 1.0;
             }
         }
         VerticalMode::HighestInView => {
             if let Some((_, hi)) = extent(&in_view) {
-                cam.pitch_center = hi - vp.h * 0.5 / cam.px_per_semitone + 1.0;
+                cam.vertical.center = hi - vp.h * 0.5 / cam.vertical.px_per_row + 1.0;
             }
         }
         VerticalMode::LowestInItem => {
             if let Some((lo, _)) = extent(&all) {
-                cam.pitch_center = lo + vp.h * 0.5 / cam.px_per_semitone - 1.0;
+                cam.vertical.center = lo + vp.h * 0.5 / cam.vertical.px_per_row - 1.0;
             }
         }
         VerticalMode::HighestInItem => {
             if let Some((_, hi)) = extent(&all) {
-                cam.pitch_center = hi - vp.h * 0.5 / cam.px_per_semitone + 1.0;
+                cam.vertical.center = hi - vp.h * 0.5 / cam.vertical.px_per_row + 1.0;
             }
         }
     }
@@ -335,7 +339,7 @@ impl ZoomModes {
         horizontal: HorizontalMode::SmartNotes,
         vertical: VerticalMode::Keep,
     };
-    /// Pointer over a CC lane: keep pitch alone entirely.
+    /// Pointer over a CC dimension: keep pitch alone entirely.
     pub const CC_LANE: ZoomModes = ZoomModes {
         horizontal: HorizontalMode::SmartNotes,
         vertical: VerticalMode::Keep,

@@ -14,7 +14,9 @@ default = []
 native = ["dep:nice-plug-dioxus", "dep:fts-ui"]
 
 [dependencies]
+expression-editor-tools.workspace = true
 expression-editor-core = { workspace = true }
+level-dsp.workspace = true
 # The canonical FTS palette — every colour below comes from here.
 daw-theme = { workspace = true }
 dioxus = { workspace = true }
@@ -22,6 +24,8 @@ fts-ui = { workspace = true, optional = true }
 nice-plug-dioxus = { workspace = true, optional = true }
 
 [dev-dependencies]
+expression-editor-guitarpro.workspace = true
+level-dsp.workspace = true
 dioxus-ssr = { git = "https://github.com/DioxusLabs/dioxus", rev = "f717a8e184a522d078b70bb4b4d62a5f9a99ddfc", default-features = false }
 # The PNG harness paints the real editor on a headless Blitz DOM via the
 # vendored dioxus-test — CPU rasterizer, so it needs no GPU runner.

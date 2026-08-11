@@ -17,8 +17,22 @@ use crate::track::resolve_track_pub;
 use aa_sw::SendableAccessorPtr;
 use daw_control::lock::LockExt;
 
+/// One open accessor, plus the format of what it reads.
+///
+/// The format is carried separately because REAPER's accessor cannot be
+/// asked: `GetAudioAccessorSamples` *converts* to whatever rate and
+/// channel count you name, and never tells you what the source was. A
+/// caller that guesses gets a resampled take, and edits made against a
+/// resampled take land in the wrong place.
+#[derive(Clone, Copy)]
+struct Accessor {
+    ptr: SendableAccessorPtr,
+    /// `None` for track accessors, which have no single source.
+    format: Option<(f64, u32)>,
+}
+
 struct AccessorRegistry {
-    accessors: Mutex<HashMap<String, SendableAccessorPtr>>,
+    accessors: Mutex<HashMap<String, Accessor>>,
     next_id: Mutex<u64>,
 }
 
@@ -39,6 +53,10 @@ fn next_id() -> String {
 }
 
 pub fn store(ptr: SendableAccessorPtr) -> Option<String> {
+    store_with_format(ptr, None)
+}
+
+fn store_with_format(ptr: SendableAccessorPtr, format: Option<(f64, u32)>) -> Option<String> {
     if ptr.is_null() {
         return None;
     }
@@ -46,11 +64,11 @@ pub fn store(ptr: SendableAccessorPtr) -> Option<String> {
     registry()
         .accessors
         .lock_recoverable("audio_accessor")
-        .insert(id.clone(), ptr);
+        .insert(id.clone(), Accessor { ptr, format });
     Some(id)
 }
 
-pub fn get_ptr(id: &str) -> Option<SendableAccessorPtr> {
+fn get_entry(id: &str) -> Option<Accessor> {
     registry()
         .accessors
         .lock_recoverable("audio_accessor")
@@ -58,11 +76,16 @@ pub fn get_ptr(id: &str) -> Option<SendableAccessorPtr> {
         .copied()
 }
 
+pub fn get_ptr(id: &str) -> Option<SendableAccessorPtr> {
+    get_entry(id).map(|a| a.ptr)
+}
+
 pub fn remove_ptr(id: &str) -> Option<SendableAccessorPtr> {
     registry()
         .accessors
         .lock_recoverable("audio_accessor")
         .remove(id)
+        .map(|a| a.ptr)
 }
 
 fn resolve_project(ctx: &ProjectContext) -> Option<reaper_high::Project> {
@@ -100,8 +123,9 @@ impl AudioAccessors for crate::Reaper {
         let midi_item = crate::midi::resolve_item(medium, reaper_project_ctx, &item)?;
         let midi_take = crate::midi::resolve_take(medium, midi_item, &take)?;
         let low = medium.low();
+        let format = crate::safe_wrappers::item::get_take_source_format(medium, midi_take);
         let accessor = aa_sw::create_take_audio_accessor(low, midi_take);
-        store(SendableAccessorPtr::new(accessor))
+        store_with_format(SendableAccessorPtr::new(accessor), format)
     }
 
     fn has_state_changed(&self, accessor_id: &str) -> bool {
@@ -114,10 +138,26 @@ impl AudioAccessors for crate::Reaper {
     }
 
     fn get_samples(&self, request: GetSamplesRequest) -> AudioSampleData {
-        let Some(ptr) = get_ptr(&request.accessor_id) else {
+        let Some(entry) = get_entry(&request.accessor_id) else {
             warn!("get_samples: unknown accessor ID '{}'", request.accessor_id);
             return AudioSampleData::default();
         };
+        let ptr = entry.ptr;
+
+        // A zero in either field means "tell me what you have", which is
+        // how a caller discovers the source format before reading in
+        // earnest — and the only way it can avoid naming a rate that
+        // would silently resample.
+        if request.sample_rate <= 0.0 || request.num_channels == 0 {
+            let (rate, channels) = entry.format.unwrap_or((0.0, 0));
+            return AudioSampleData {
+                samples: Vec::new(),
+                sample_rate: rate,
+                num_channels: channels,
+                num_samples: 0,
+            };
+        }
+
         let low = Reaper::get().medium_reaper().low();
         let buf_size = (request.num_channels * request.num_samples) as usize;
         let mut buf = vec![0.0f64; buf_size];
@@ -130,17 +170,18 @@ impl AudioAccessors for crate::Reaper {
             request.num_samples as i32,
             &mut buf,
         );
+        // `GetAudioAccessorSamples` returns 0 for "no audio here" and 1
+        // for "filled the buffer" — it is *not* a sample count. Reading
+        // it as one truncated every read to a single frame, which looked
+        // like a take with no audio in it rather than like a bug.
         if result <= 0 {
             return AudioSampleData::default();
         }
-        let actual_samples = result as u32;
-        let actual_size = (request.num_channels * actual_samples) as usize;
-        buf.truncate(actual_size);
         AudioSampleData {
             samples: buf,
             sample_rate: request.sample_rate,
             num_channels: request.num_channels,
-            num_samples: actual_samples,
+            num_samples: request.num_samples,
         }
     }
 

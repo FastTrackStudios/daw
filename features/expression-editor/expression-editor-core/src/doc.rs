@@ -56,24 +56,25 @@ impl TimeBase {
 
 /// The three MPE expression dimensions. Audio reads them as pitch,
 /// dynamics, and formant.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Lane {
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, facet::Facet)]
+pub enum Dimension {
     Pitch,
     Pressure,
     Timbre,
 }
 
-impl Lane {
-    pub const ALL: [Lane; 3] = [Lane::Pitch, Lane::Pressure, Lane::Timbre];
+impl Dimension {
+    pub const ALL: [Dimension; 3] = [Dimension::Pitch, Dimension::Pressure, Dimension::Timbre];
 
-    /// Value a lane holds where nothing has been authored.
+    /// Value a dimension holds where nothing has been authored.
     ///
     /// Pitch rests at the note's own row; Pressure/Timbre default to
     /// the MPE convention of 100/127 rather than full scale.
     pub fn default_value(&self) -> f64 {
         match self {
-            Lane::Pitch => 0.0,
-            Lane::Pressure | Lane::Timbre => 100.0 / 127.0,
+            Dimension::Pitch => 0.0,
+            Dimension::Pressure | Dimension::Timbre => 100.0 / 127.0,
         }
     }
 
@@ -81,8 +82,8 @@ impl Lane {
     /// normalized.
     pub fn range(&self) -> (f64, f64) {
         match self {
-            Lane::Pitch => (-127.0, 127.0),
-            Lane::Pressure | Lane::Timbre => (0.0, 1.0),
+            Dimension::Pitch => (-127.0, 127.0),
+            Dimension::Pressure | Dimension::Timbre => (0.0, 1.0),
         }
     }
 
@@ -92,14 +93,117 @@ impl Lane {
     }
 }
 
+/// How a curve travels from one point to the next.
+///
+/// Mirrors `daw_proto::EnvelopeShape` variant for variant. Core cannot
+/// depend on the DAW proto crate, so this is a deliberate copy rather
+/// than a re-export — and it is exact precisely so the conversion at the
+/// boundary is total and lossless. Adding a variant here that the DAW
+/// cannot express would silently degrade on export.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CurveShape {
+    /// Straight line to the next point. What every curve was before
+    /// shapes existed, and still the default, so MIDI and CC are
+    /// unaffected.
+    #[default]
+    Linear,
+    /// Hold, then jump at the next point.
+    ///
+    /// Matters as much as [`CurveShape::Bezier`] for envelopes: a gate is
+    /// on/off with an attack and a release, and forcing that through
+    /// linear interpolation is what makes a decimated curve need far
+    /// more points than the shape it is describing.
+    Square,
+    /// Ease in and out — an S-curve.
+    SlowStartEnd,
+    /// Fast at the start, logarithmic.
+    FastStart,
+    /// Fast at the end, exponential.
+    FastEnd,
+    /// Bezier, bent by the point's `tension`.
+    Bezier,
+}
+
 /// One point on an expression curve.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Point {
     /// Document time, absolute (not note-relative) — keeps edits that
     /// span note boundaries honest.
     pub t: f64,
-    /// Lane-native value. Pitch: semitones from the note row.
+    /// Dimension-native value. Pitch: semitones from the note row.
     pub value: f64,
+    /// How the curve reaches the *next* point. Trailing points'
+    /// shapes are never read, which matches how the DAW stores it.
+    pub shape: CurveShape,
+    /// Bezier bend, -1.0..=1.0. Read only by [`CurveShape::Bezier`].
+    pub tension: f64,
+}
+
+impl Point {
+    /// A linear point — the overwhelmingly common case.
+    pub fn new(t: f64, value: f64) -> Self {
+        Self {
+            t,
+            value,
+            ..Self::default()
+        }
+    }
+
+    pub fn shaped(t: f64, value: f64, shape: CurveShape) -> Self {
+        Self {
+            t,
+            value,
+            shape,
+            tension: 0.0,
+        }
+    }
+
+    pub fn bezier(t: f64, value: f64, tension: f64) -> Self {
+        Self {
+            t,
+            value,
+            shape: CurveShape::Bezier,
+            tension: tension.clamp(-1.0, 1.0),
+        }
+    }
+}
+
+/// Map linear progress `x` in 0..=1 through a segment's shape.
+///
+/// Returns the fraction of the way from the left value to the right one,
+/// so every shape is expressed as an easing and the caller's lerp is
+/// unchanged. Every shape returns 0 at x=0 and 1 at x=1 except
+/// [`CurveShape::Square`], which holds the left value until it arrives —
+/// that discontinuity is the point of it.
+fn shape_ease(shape: CurveShape, x: f64, tension: f64) -> f64 {
+    let x = x.clamp(0.0, 1.0);
+    match shape {
+        CurveShape::Linear => x,
+        CurveShape::Square => {
+            if x >= 1.0 {
+                1.0
+            } else {
+                0.0
+            }
+        }
+        // Smoothstep: zero slope at both ends.
+        CurveShape::SlowStartEnd => x * x * (3.0 - 2.0 * x),
+        // Fast off the mark, easing into the target.
+        CurveShape::FastStart => 1.0 - (1.0 - x) * (1.0 - x),
+        // Slow to leave, arriving quickly.
+        CurveShape::FastEnd => x * x,
+        // Rational bezier bend. Tension 0 is linear; positive pushes the
+        // curve toward the far value early, negative holds it back.
+        CurveShape::Bezier => {
+            let k = tension.clamp(-1.0, 1.0);
+            if k.abs() < f64::EPSILON {
+                x
+            } else {
+                let w = 1.0 + k;
+                (w * x) / (1.0 + (w - 1.0) * x)
+            }
+        }
+    }
 }
 
 /// A sampled expression curve: points sorted by `t`, at most one per
@@ -153,7 +257,7 @@ impl Curve {
     pub fn set(&mut self, t: f64, value: f64) {
         match self.index_of(t) {
             Ok(i) => self.points[i].value = value,
-            Err(i) => self.points.insert(i, Point { t, value }),
+            Err(i) => self.points.insert(i, Point { t, value, ..Point::default() }),
         }
     }
 
@@ -162,6 +266,34 @@ impl Curve {
         let before = self.points.len();
         self.points.retain(|p| p.t < t0 || p.t > t1);
         before - self.points.len()
+    }
+
+    /// Clear `[t0, t1]` so it reads as unauthored.
+    ///
+    /// Deleting the points inside a range is not the same as clearing
+    /// it: the curve holds a straight line between whatever survives on
+    /// either side, so a swell defined by two points *outside* the
+    /// range sails straight through it with nothing to delete. Splicing
+    /// the default in at both edges is what makes the region actually
+    /// read as cleared.
+    ///
+    /// Clearing the whole curve is the exception — there is nothing
+    /// outside to bleed in, so it empties rather than leaving two
+    /// default points behind and calling an untouched lane "authored".
+    ///
+    /// Returns whether anything changed.
+    pub fn clear_range(&mut self, t0: f64, t1: f64, default: f64) -> bool {
+        if self.points.is_empty() {
+            return false;
+        }
+        let covers_all = self.points.iter().all(|p| p.t >= t0 && p.t <= t1);
+        let removed = self.remove_range(t0, t1) > 0;
+        if covers_all {
+            return removed;
+        }
+        self.set(t0, default);
+        self.set(t1, default);
+        true
     }
 
     /// Linear sample. Before the first / after the last point the curve
@@ -182,7 +314,11 @@ impl Curve {
                 if span <= 0.0 {
                     b.value
                 } else {
-                    a.value + (b.value - a.value) * ((t - a.t) / span)
+                    // The *left* point owns the segment's shape, matching
+                    // how the DAW stores it: a point describes how the
+                    // curve leaves it, not how it arrives.
+                    let x = (t - a.t) / span;
+                    a.value + (b.value - a.value) * shape_ease(a.shape, x, a.tension)
                 }
             }
         }
@@ -231,6 +367,9 @@ impl Curve {
                 Point {
                     t: t0 + (t1 - t0) * x,
                     value: v0 + (v1 - v0) * shape.amount(x),
+                    // The pen bakes its curve into the point *values*,
+                    // so each segment between them is linear.
+                    ..Point::default()
                 }
             })
             .collect();
@@ -334,6 +473,21 @@ pub struct Note {
     pub text: Option<String>,
     /// Playing technique (guitar/bass, and percussion dead notes).
     pub articulation: Option<Articulation>,
+    /// This note is the **grace note of a flam**, and the hit it
+    /// ornaments.
+    ///
+    /// Stored rather than inferred from two notes landing near each
+    /// other. A flam is a *notated* thing — engraving draws it as a
+    /// small slashed grace note slurred to its principal — so the
+    /// document has to carry the relationship, not a renderer's guess
+    /// at it. Proximity would also be fragile in both directions: a
+    /// grace note nudged by hand stops being one, and two ordinary hits
+    /// that happen to fall close together become a flam nobody wrote.
+    ///
+    /// Which side it falls on is not stored, because the note's own
+    /// start already says: before the principal is an ordinary flam,
+    /// after is a drag.
+    pub grace_of: Option<NoteId>,
     /// Joined to the following note on the same string. Riffer's rule:
     /// the legato is marked on the *first* note of the pair.
     pub legato: bool,
@@ -353,6 +507,15 @@ pub struct Note {
     pub ambiguous: bool,
     /// Display weight 0..1 (analysis RMS in the audio domain).
     pub weight: f64,
+    /// Per-frame amplitude across the note, 0..1, for drawing a sung
+    /// note's body as the waveform it actually is.
+    ///
+    /// Deliberately separate from the Pressure dimension. Pressure is an
+    /// *edit* — a smooth trim the user applies — where this is what was
+    /// recorded, and it is jagged in a way a curve of control points
+    /// could not represent without thousands of them. Empty outside the
+    /// audio domain, where there is no waveform to show.
+    pub envelope: Vec<f32>,
 }
 
 impl Note {
@@ -368,6 +531,7 @@ impl Note {
             muted: false,
             text: None,
             articulation: None,
+            grace_of: None,
             legato: false,
             fret: None,
             pitch: Curve::new(),
@@ -377,6 +541,7 @@ impl Note {
             target: Target::WholeNote,
             ambiguous: false,
             weight: 1.0,
+            envelope: Vec::new(),
         }
     }
 
@@ -384,19 +549,36 @@ impl Note {
         self.end - self.start
     }
 
-    pub fn lane(&self, lane: Lane) -> &Curve {
-        match lane {
-            Lane::Pitch => &self.pitch,
-            Lane::Pressure => &self.pressure,
-            Lane::Timbre => &self.timbre,
+    /// Move the note and everything anchored to its timeline.
+    ///
+    /// The curves and zone splits live in document time, so shifting
+    /// the rectangle alone would leave a note's own expression behind —
+    /// exactly the bug a bare `start += delta` produces.
+    pub fn shift_time(&mut self, delta: f64) {
+        let (s, e) = (self.start, self.end);
+        self.start += delta;
+        self.end += delta;
+        for split in self.splits.iter_mut() {
+            *split += delta;
+        }
+        for dimension in Dimension::ALL {
+            self.curve_mut(dimension).shift_time(s, e, delta);
         }
     }
 
-    pub fn lane_mut(&mut self, lane: Lane) -> &mut Curve {
-        match lane {
-            Lane::Pitch => &mut self.pitch,
-            Lane::Pressure => &mut self.pressure,
-            Lane::Timbre => &mut self.timbre,
+    pub fn curve(&self, dimension: Dimension) -> &Curve {
+        match dimension {
+            Dimension::Pitch => &self.pitch,
+            Dimension::Pressure => &self.pressure,
+            Dimension::Timbre => &self.timbre,
+        }
+    }
+
+    pub fn curve_mut(&mut self, dimension: Dimension) -> &mut Curve {
+        match dimension {
+            Dimension::Pitch => &mut self.pitch,
+            Dimension::Pressure => &mut self.pressure,
+            Dimension::Timbre => &mut self.timbre,
         }
     }
 
@@ -434,7 +616,11 @@ impl Note {
     pub fn target_span(&self) -> (f64, f64) {
         match self.target {
             Target::WholeNote => (self.start, self.end),
-            Target::Zone(i) => self.zones().get(i).copied().unwrap_or((self.start, self.end)),
+            Target::Zone(i) => self
+                .zones()
+                .get(i)
+                .copied()
+                .unwrap_or((self.start, self.end)),
         }
     }
 
@@ -444,15 +630,14 @@ impl Note {
         if t <= self.start || t >= self.end || self.splits.iter().any(|&s| (s - t).abs() < 1e-6) {
             return false;
         }
-        let i = self
-            .splits
-            .partition_point(|&s| s < t);
+        let i = self.splits.partition_point(|&s| s < t);
         self.splits.insert(i, t);
         // A split inserted before the active zone shifts its index.
         if let Target::Zone(z) = self.target
-            && i <= z {
-                self.target = Target::Zone(z + 1);
-            }
+            && i <= z
+        {
+            self.target = Target::Zone(z + 1);
+        }
         true
     }
 
@@ -505,6 +690,36 @@ pub struct ExpressionDoc {
     /// edits (fret, string) are meaningless without the tuning, and
     /// edits only ever see the document.
     pub row_space: crate::rows::RowSpace,
+    /// The take's own amplitude, 0..1, sampled uniformly across
+    /// `[start, end]`.
+    ///
+    /// The whole recording, including everything *between* notes —
+    /// breaths, consonants, room. Drawn as a backdrop so silence and
+    /// noise are visible as themselves rather than as absence, which is
+    /// how you tell "the tracker missed a note" from "nothing was
+    /// sung". Empty outside the audio domain.
+    pub peaks: Vec<f32>,
+    /// The analyzed pitch across the whole take, in **absolute** MIDI.
+    ///
+    /// Display-only, and deliberately so. The notes own the editable
+    /// curves; this is what the tracker heard, kept because two things
+    /// need it and neither is an edit:
+    ///
+    /// - the pitch track runs *between* notes as well as through them,
+    ///   and there is no note there to own that stretch;
+    /// - pitch drawing shows the original underneath as a thin line for
+    ///   the whole session, which has to survive the edits made on top.
+    ///
+    /// Absolute rather than row-relative because it spans notes on
+    /// different rows, and no single row is the right origin.
+    pub contour: Curve,
+    /// Spans with no detected pitch, in document time.
+    ///
+    /// Sibilants and silence. The pitch track is not drawn across
+    /// these, because there was no pitch — drawing one would invent a
+    /// reading, and a line through a consonant is the single most
+    /// misleading thing this surface could show.
+    pub unvoiced: Vec<(f64, f64)>,
     next_id: u64,
 }
 
@@ -519,6 +734,9 @@ impl ExpressionDoc {
             markers: Vec::new(),
             cc: crate::cc::CcSet::default(),
             row_space: crate::rows::RowSpace::Pitch,
+            peaks: Vec::new(),
+            contour: Curve::new(),
+            unvoiced: Vec::new(),
             next_id: 1,
         }
     }
@@ -541,6 +759,26 @@ impl ExpressionDoc {
 
     pub fn note_mut(&mut self, id: NoteId) -> Option<&mut Note> {
         self.notes.iter_mut().find(|n| n.id == id)
+    }
+
+    /// The grace notes ornamenting a hit.
+    ///
+    /// What an engraver asks: this note is a principal, and these are
+    /// the small notes slurred to it. Returns them in time order, so a
+    /// renderer does not have to sort.
+    pub fn grace_notes_of(&self, id: NoteId) -> Vec<&Note> {
+        let mut out: Vec<&Note> = self
+            .notes
+            .iter()
+            .filter(|n| n.grace_of == Some(id))
+            .collect();
+        out.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(core::cmp::Ordering::Equal));
+        out
+    }
+
+    /// Whether a hit is a flam — it has at least one grace note.
+    pub fn is_flam(&self, id: NoteId) -> bool {
+        self.notes.iter().any(|n| n.grace_of == Some(id))
     }
 
     pub fn remove(&mut self, id: NoteId) -> Option<Note> {

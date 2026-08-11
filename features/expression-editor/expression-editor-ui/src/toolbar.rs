@@ -1,7 +1,7 @@
 //! The top bar, the chord box, and the status bar.
 //!
 //! The top bar carries only what changes *what a gesture does* — tool,
-//! lane, curve shape, history, view. Everything that is a setting
+//! dimension, curve shape, history, view. Everything that is a setting
 //! rather than a mode (grid, key, tuning, bend range, lane strip) moved
 //! to the status bar, because those get set once a session and were
 //! crowding the controls that get touched constantly.
@@ -10,8 +10,8 @@
 //! at plugin width, so the canvas no longer loses a wrapped second row.
 
 use dioxus::prelude::*;
-use expression_editor_core::doc::Lane;
-use expression_editor_core::{chord, Editor, Mode, Shape, StripLane, Tool};
+use expression_editor_core::doc::Dimension;
+use expression_editor_core::{chord, Editor, ModeFamily, Shape, StripLane, Tool};
 
 use crate::drawer::ModDrawer;
 use crate::interaction::{self, Drag};
@@ -48,7 +48,11 @@ fn shape_glyph(shape: Shape) -> &'static str {
 fn Segment(children: Element) -> Element {
     rsx! {
         div {
-            style: "display: flex; align-items: stretch; \
+            // `flex: 0 0 auto` is load-bearing. A segment allowed to
+            // shrink does not drop cells or ellipsize — it compresses
+            // each one until the icon overlaps its own label, which
+            // reads as a rendering bug rather than as a full toolbar.
+            style: "display: flex; flex: 0 0 auto; align-items: stretch; \
                     border: 1px solid {theme::PANEL_BORDER}; border-radius: 6px; \
                     overflow: hidden; background: {theme::SURFACE_BAR};",
             {children}
@@ -115,54 +119,112 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
 
     let ed = editor.read();
     let tool = ed.tool;
-    let lane = ed.lane;
+    let dimension = ed.dimension;
     let overlays = ed.overlays.clone();
     let shape = ed.shape;
     let can_undo = ed.can_undo();
     let can_redo = ed.can_redo();
     let mod_open = drawer.read().open;
     let mode = ed.mode;
+    let stacked = ed.stacked;
     let bend = ed.doc.bend_range;
     drop(ed);
 
     rsx! {
         div {
-            style: "display: flex; flex: 0 0 auto; align-items: center; gap: 5px; \
+            // Wraps rather than clips. With seven modes plus the tool,
+            // dimension and view segments the bar does not fit a narrow
+            // plugin window, and the alternatives are both worse:
+            // `overflow: hidden` silently amputates whatever is on the
+            // right, and letting the segments shrink collides each
+            // icon with its own label.
+            style: "display: flex; flex: 0 0 auto; flex-wrap: wrap; \
+                    align-items: center; gap: 5px; \
                     padding: 5px 8px; background: {theme::PANEL}; \
                     border-bottom: 1px solid {theme::PANEL_BORDER}; \
-                    font-family: system-ui, sans-serif; overflow: hidden;",
+                    font-family: system-ui, sans-serif;",
 
             // The mode leads: everything after it is conditional on
             // what the editor currently is.
-            Segment {
-                for m in Mode::ALL {
-                    Seg {
-                        key: "m{m:?}",
-                        active: mode == m,
-                        accent: true,
-                        title: format!("{} mode", m.label()),
-                        onclick: move |_| editor.write().set_mode(m),
-                        span {
-                            style: "display: flex; align-items: center; gap: 5px;",
-                            svg {
-                                view_box: "0 0 16 16",
-                                style: "width: 13px; height: 13px; flex: 0 0 auto;",
-                                path {
-                                    d: theme::mode_icon(m),
-                                    fill: "none",
-                                    stroke: "currentColor",
-                                    stroke_width: "1.3",
-                                    stroke_linecap: "round",
-                                    stroke_linejoin: "round",
+            //
+            // One segment per family, so the switcher reads as "which
+            // kind of material is this" before "which surface" — the
+            // MIDI-shaped modes on the left, the two analysed-audio
+            // ones on the right.
+            for (i, family) in ModeFamily::ALL.into_iter().enumerate() {
+                // Separator *between* groups, not after each: a
+                // trailing divider would collide with the fixed one
+                // below and read as a double rule.
+                if i > 0 {
+                    {divider()}
+                }
+                Segment {
+                    for m in family.modes().iter().copied() {
+                        Seg {
+                            key: "m{m:?}",
+                            active: mode == m,
+                            accent: true,
+                            title: format!("{} mode ({} family)", m.label(), family.label()),
+                            onclick: move |_| editor.write().set_mode(m),
+                            span {
+                                style: "display: flex; align-items: center; gap: 5px;",
+                                svg {
+                                    view_box: "0 0 16 16",
+                                    style: "width: 13px; height: 13px; flex: 0 0 auto;",
+                                    path {
+                                        d: theme::mode_icon(m),
+                                        fill: "none",
+                                        stroke: "currentColor",
+                                        stroke_width: "1.3",
+                                        stroke_linecap: "round",
+                                        stroke_linejoin: "round",
+                                    }
                                 }
+                                "{m.label()}"
                             }
-                            "{m.label()}"
                         }
                     }
                 }
             }
 
             {divider()}
+
+            // Stack toggle. Next to the mode buttons because it answers
+            // the same question from the other side: those pick how one
+            // track is drawn, this shows every track drawn its own way.
+            // Hidden with one track, where a stack of one is just the
+            // roll with less room.
+            if editor.read().tracks.len() > 1 {
+                Segment {
+                    Seg {
+                        active: stacked,
+                        accent: true,
+                        title: "Show every track on one timeline".to_string(),
+                        onclick: move |_| {
+                            let now = editor.read().stacked;
+                            editor.write().stacked = !now;
+                        },
+                        // Icon only. The toolbar is already full at the
+                        // width a plugin window gets, and this is a view
+                        // toggle rather than something you hunt for by
+                        // name.
+                        svg {
+                            view_box: "0 0 16 16",
+                            style: "width: 13px; height: 13px; flex: 0 0 auto;",
+                            path {
+                                // Three stacked lanes.
+                                d: "M2 4h12 M2 8h12 M2 12h12",
+                                fill: "none",
+                                stroke: "currentColor",
+                                stroke_width: "1.3",
+                                stroke_linecap: "round",
+                            }
+                        }
+                    }
+                }
+
+                {divider()}
+            }
 
             Segment {
                 for t in Tool::ALL {
@@ -179,25 +241,25 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
 
             {divider()}
 
-            // Lane selection and overlay visibility, joined: the name
-            // picks the lane to edit, the dot toggles it as an overlay.
+            // Dimension selection and overlay visibility, joined: the name
+            // picks the dimension to edit, the dot toggles it as an overlay.
             // Hidden outside MPE and Audio — plain MIDI cannot carry
             // per-note pressure, so offering the control would promise
             // an edit the format will drop.
             if mode.has_expression_lanes() {
             Segment {
-                for l in Lane::ALL {
-                    // One wrapper per lane so the key lands on a single
+                for l in Dimension::ALL {
+                    // One wrapper per dimension so the key lands on a single
                     // node; Dioxus only honours a key on the first node
                     // in a block, and this loop emits a pair.
                     div {
-                        key: "lane{l:?}",
+                        key: "dimension{l:?}",
                         style: "display: flex; align-items: stretch;",
                     Seg {
-                        active: lane == l,
+                        active: dimension == l,
                         color: theme::lane_color(l).to_string(),
                         title: format!("Edit {}", theme::lane_label(l)),
-                        onclick: move |_| editor.write().lane = l,
+                        onclick: move |_| editor.write().dimension = l,
                         "{theme::lane_label(l)}"
                     }
                     Seg {
@@ -338,7 +400,7 @@ pub fn Toolbar(editor: Signal<Editor>, drag: Signal<Drag>, drawer: Signal<ModDra
                                 (
                                     ed.playhead
                                         .unwrap_or_else(|| ed.camera.t_at(ed.viewport.w * 0.5)),
-                                    ed.camera.pitch_center,
+                                    ed.camera.vertical.center,
                                 )
                             };
                             editor.write().smart_zoom(
@@ -579,7 +641,7 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                 Seg {
                     active: strip_on,
                     accent: true,
-                    title: "Show the velocity / CC lane".to_string(),
+                    title: "Show the velocity / CC dimension".to_string(),
                     onclick: move |_| {
                         let h = editor.read().lane_strip_h;
                         editor.write().lane_strip_h = if h > 0.0 { 0.0 } else { 96.0 };
@@ -588,7 +650,7 @@ pub fn StatusBar(editor: Signal<Editor>) -> Element {
                 }
                 Seg {
                     active: false,
-                    title: "Which lane the strip shows".to_string(),
+                    title: "Which dimension the strip shows".to_string(),
                     onclick: move |_| {
                         let cur = editor.read().strip_lane;
                         let all = StripLane::ALL;

@@ -1153,7 +1153,7 @@ pub mod username {
     use auth_proto::{AuthFlowError, AuthSessionBundle, AuthUser};
 
     use crate::{
-        ArchitectAuth, AuthStorage, CurrentSession, SignInUsername, UpdateUsername,
+        ArchitectAuth, AuthStorage, CurrentSession, SignInUsername, UpdateProfile, UpdateUsername,
         crypto::verify_password, flows::last_login_method::record_last_login_method,
     };
 
@@ -1219,6 +1219,40 @@ pub mod username {
         // r[impl auth.username.unique]
         // r[impl auth.username.reserved]
         // r[impl auth.username.validation]
+        /// Set the session owner's display name / avatar.
+        ///
+        /// Username, display_username and metadata are read back from
+        /// the session's user and written unchanged: the storage
+        /// primitive takes the whole profile row, so omitting them
+        /// would silently blank an identifier this flow has no
+        /// business touching.
+        pub async fn update_profile(
+            &self,
+            input: UpdateProfile,
+        ) -> Result<AuthUser, AuthFlowError> {
+            let bundle = self
+                .current_session(CurrentSession {
+                    token: input.session_token,
+                })
+                .await?;
+            // `Some("")` clears; `None` leaves the current value.
+            let merge = |new: Option<String>, current: Option<String>| match new {
+                Some(v) if v.trim().is_empty() => None,
+                Some(v) => Some(v),
+                None => current,
+            };
+            self.storage
+                .update_user_profile(
+                    bundle.user.id,
+                    merge(input.name, bundle.user.name),
+                    bundle.user.username,
+                    bundle.user.display_username,
+                    merge(input.image, bundle.user.image),
+                    bundle.user.metadata_json,
+                )
+                .await
+        }
+
         pub async fn update_username(
             &self,
             input: UpdateUsername,
@@ -1428,10 +1462,11 @@ pub mod email_password {
     use chrono::{Duration, Utc};
 
     use crate::{
-        ArchitectAuth, AuthService, AuthStorage, ChangeEmail, ChangePassword, MigrateUserEmail,
+        ArchitectAuth, AuthService, AuthStorage, ChangeEmail, ChangePassword,
         CompletePasswordReset, CreateEmailPasswordUser, DeleteUser, ListAccounts, ListSessions,
-        RefreshSession, RequestEmailVerification, RequestPasswordReset, RevokeOtherSessions,
-        RevokeSession, SignInEmailPassword, VerificationToken, VerifyEmail,
+        MigrateUserEmail, RefreshSession, RequestEmailVerification, RequestPasswordReset,
+        RevokeOtherSessions, RevokeSession, SignInEmailPassword, UpdateProfile, VerificationToken,
+        VerifyEmail,
         commands::{CurrentSession, SignOut},
         config::CaptchaFlow,
         crypto::{generate_token, hash_password, hash_token, verify_password},
@@ -2096,6 +2131,21 @@ pub mod email_password {
                 ChangeEmail {
                     session_token: input.session_token,
                     new_email: input.new_email,
+                },
+            )
+            .await
+        }
+
+        async fn update_profile(
+            &self,
+            input: auth_proto::service::UpdateProfileRequest,
+        ) -> Result<auth_proto::AuthUser, AuthFlowError> {
+            ArchitectAuth::update_profile(
+                self,
+                UpdateProfile {
+                    session_token: input.session_token,
+                    name: input.name,
+                    image: input.image,
                 },
             )
             .await

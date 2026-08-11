@@ -90,7 +90,7 @@ impl Zone {
     /// Zones that move events in time rather than changing values.
     ///
     /// These are the only ones available when several lanes are being
-    /// edited together, because a value transform needs a single lane's
+    /// edited together, because a value transform needs a single dimension's
     /// range to be meaningful.
     pub fn is_positional(&self) -> bool {
         matches!(

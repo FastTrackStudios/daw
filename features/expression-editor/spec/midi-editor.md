@@ -235,16 +235,29 @@ sine/power, `S` toggles symmetric. Transforms always run from a captured
 snapshot, never the live state — the Lua original calls this out as why
 it keeps float positions between steps.
 
-**Modes** (`mode.rs`) — MIDI / MPE / Drums / Guitar / Vocals / Audio.
-Each is a *preset*, not a lock: it sets the row space, mouse map,
-visible lanes and strip, all of which stay editable. The top bar is
-conditional on it, so MPE channel controls and the per-note expression
-lanes only appear where the format can carry them. Audio is the
-Melodyne surface — same components, notes sourced from pitch tracking.
+**Modes** (`mode.rs`) — MIDI / MPE / Vocals / Drums / Guitar, then
+PitchedAudio / UnpitchedAudio. Each is a *preset*, not a lock: it sets
+the row space, mouse map, visible lanes and strip, all of which stay
+editable. The top bar is conditional on it, so MPE channel controls and
+the per-note expression lanes only appear where the format can carry
+them. PitchedAudio is the Melodyne surface — same components, notes
+sourced from pitch tracking. The switcher groups them by
+`Mode::family()`: the first five are `ModeFamily::Midi`, the last two
+`ModeFamily::Audio`. Quantize and Align are *tools*, not modes.
 
-Next:
+**Controller lanes are done.** `EditCcEvents` was bound in the preset
+and handled nowhere, and `ShapeCc` / `ScaleCc` / `EraseCc` were
+implemented in core but unreachable. CC now routes through the mouse map
+like everything else: `context_at` returns `CcLane` / `CcEvent` by
+proximity to the drawn curve, plain drag freehands, alt draws a shaped
+ramp that survives release, ctrl rides the fader from a captured
+snapshot, and right-drag erases. Shift stays unbound as the snap-reverse
+key.
 
-1. **Remaining row-space polish** — drum diamonds, string roll with fret
-   numbers, lyric labels, articulation badges.
-6. **Note context menu** (Riffer §6.2.2: cut/copy/paste/delete/select
-   all/clear/copy measure + note properties).
+**The note context menu is done** (`menu.rs` + `menu_ui.rs`), with the
+clipboard it needs. Riffer §6.2.2 supplies the core set and each mode
+adds what its note actually carries. A right-click on an unselected note
+acts on *that* note, and items grey out rather than disappearing — a
+menu whose shape moves with the selection is one you cannot learn.
+
+Next: the audio surface, specified in [`audio-editor.md`](audio-editor.md).

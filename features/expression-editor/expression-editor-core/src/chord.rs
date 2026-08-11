@@ -9,7 +9,7 @@
 //! pitches, keyflow wants timed `MidiNote`s, so we hand it a synthetic
 //! simultaneity and take the reading back.
 
-use keyflow_proto::chord::midi::{detect_chords_from_midi_notes, MidiNote};
+use keyflow_proto::chord::midi::{MidiNote, detect_chords_from_midi_notes};
 
 pub use keyflow_proto::chord::Chord;
 

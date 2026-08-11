@@ -4,8 +4,10 @@
 //! which is the point of keeping the engine dependency-free.
 
 use expression_editor_core::blob;
-use expression_editor_core::camera::{self, Bounds, Camera, Content, Viewport};
-use expression_editor_core::doc::{Curve, ExpressionDoc, Lane, Note, NoteId, Point, Target, TimeBase};
+use expression_editor_core::camera::{self, Bounds, Camera, Content, VerticalCamera, Viewport};
+use expression_editor_core::doc::{
+    Curve, ExpressionDoc, Dimension, Note, NoteId, Point, Target, TimeBase,
+};
 use expression_editor_core::edit::{Edit, History};
 use expression_editor_core::modulation::{CurveTarget, Row, Stack, Wave};
 use expression_editor_core::shape::{self, Shape};
@@ -59,12 +61,24 @@ fn curve_holds_its_endpoints_outside_the_authored_range() {
 #[test]
 fn splice_preserves_points_outside_the_interval() {
     let mut c = Curve::from_points(vec![
-        Point { t: 0.0, value: 0.0 },
-        Point { t: 100.0, value: 1.0 },
-        Point { t: 200.0, value: 2.0 },
-        Point { t: 300.0, value: 3.0 },
+        Point { t: 0.0, value: 0.0, ..Point::default() },
+        Point {
+            t: 100.0,
+            value: 1.0, ..Point::default() },
+        Point {
+            t: 200.0,
+            value: 2.0, ..Point::default() },
+        Point {
+            t: 300.0,
+            value: 3.0, ..Point::default() },
     ]);
-    c.splice(100.0, 200.0, &[Point { t: 150.0, value: 9.0 }]);
+    c.splice(
+        100.0,
+        200.0,
+        &[Point {
+            t: 150.0,
+            value: 9.0, ..Point::default() }],
+    );
     let pts: Vec<(f64, f64)> = c.points().iter().map(|p| (p.t, p.value)).collect();
     assert_eq!(pts, vec![(0.0, 0.0), (150.0, 9.0), (300.0, 3.0)]);
 }
@@ -85,8 +99,10 @@ fn reshape_preserves_endpoints_exactly() {
 #[test]
 fn scale_about_below_zero_inverts_the_gesture() {
     let mut c = Curve::from_points(vec![
-        Point { t: 0.0, value: 0.0 },
-        Point { t: 100.0, value: 2.0 },
+        Point { t: 0.0, value: 0.0, ..Point::default() },
+        Point {
+            t: 100.0,
+            value: 2.0, ..Point::default() },
     ]);
     c.scale_about(0.0, 100.0, 1.0, -1.0);
     assert_eq!(c.sample(0.0, 0.0), 2.0);
@@ -96,8 +112,10 @@ fn scale_about_below_zero_inverts_the_gesture() {
 #[test]
 fn remap_time_stretches_owned_expression_onto_new_bounds() {
     let mut c = Curve::from_points(vec![
-        Point { t: 0.0, value: 0.0 },
-        Point { t: 100.0, value: 1.0 },
+        Point { t: 0.0, value: 0.0, ..Point::default() },
+        Point {
+            t: 100.0,
+            value: 1.0, ..Point::default() },
     ]);
     c.remap_time(0.0, 100.0, 0.0, 400.0);
     assert_eq!(c.points().last().unwrap().t, 400.0);
@@ -149,7 +167,10 @@ fn splits_stay_sorted_and_interior() {
     let mut n = Note::new(NoteId(1), 0.0, 100.0, 60);
     assert!(n.add_split(60.0));
     assert!(n.add_split(30.0));
-    assert!(!n.add_split(0.0), "a split at the note start is not interior");
+    assert!(
+        !n.add_split(0.0),
+        "a split at the note start is not interior"
+    );
     assert!(!n.add_split(100.0), "nor at the end");
     assert!(!n.add_split(30.0), "nor a duplicate");
     assert_eq!(n.splits, vec![30.0, 60.0]);
@@ -178,14 +199,18 @@ fn target_toggles_between_one_zone_and_the_whole_note() {
 #[test]
 fn drawing_extends_to_the_note_edges_so_no_gap_is_left() {
     let mut doc = doc_with_note();
-    let edit = Edit::DrawLane {
+    let edit = Edit::DrawDimension {
         note: NoteId(1),
-        lane: Lane::Pitch,
+        dimension: Dimension::Pitch,
         t0: 500.0,
         t1: 1000.0,
         points: vec![
-            Point { t: 500.0, value: 1.0 },
-            Point { t: 1000.0, value: 2.0 },
+            Point {
+                t: 500.0,
+                value: 1.0, ..Point::default() },
+            Point {
+                t: 1000.0,
+                value: 2.0, ..Point::default() },
         ],
     };
     assert!(edit.apply(&mut doc));
@@ -197,23 +222,25 @@ fn drawing_extends_to_the_note_edges_so_no_gap_is_left() {
 #[test]
 fn erasing_one_lane_leaves_the_others_untouched() {
     let mut doc = doc_with_note();
-    for lane in Lane::ALL {
-        Edit::DrawLane {
+    for dimension in Dimension::ALL {
+        Edit::DrawDimension {
             note: NoteId(1),
-            lane,
+            dimension,
             t0: 0.0,
             t1: 1000.0,
             points: vec![
-                Point { t: 0.0, value: 0.5 },
-                Point { t: 1000.0, value: 0.5 },
+                Point { t: 0.0, value: 0.5, ..Point::default() },
+                Point {
+                    t: 1000.0,
+                    value: 0.5, ..Point::default() },
             ],
         }
         .apply(&mut doc);
     }
     let before = doc.note(NoteId(1)).unwrap().pitch.clone();
-    Edit::EraseLane {
+    Edit::EraseDimension {
         note: NoteId(1),
-        lane: Lane::Pressure,
+        dimension: Dimension::Pressure,
         // The whole note: drawing held the curve out to the note edges,
         // so erasing only the drawn interval would leave those.
         t0: 0.0,
@@ -221,7 +248,10 @@ fn erasing_one_lane_leaves_the_others_untouched() {
     }
     .apply(&mut doc);
     let n = doc.note(NoteId(1)).unwrap();
-    assert_eq!(n.pitch, before, "pitch must survive a pressure edit byte-for-byte");
+    assert_eq!(
+        n.pitch, before,
+        "pitch must survive a pressure edit byte-for-byte"
+    );
     assert!(n.pressure.is_empty());
 }
 
@@ -234,12 +264,14 @@ fn resize_stretches_expression_and_zones_together() {
         n.pitch.set(0.0, 0.0);
         n.pitch.set(PPQ * 2.0, 4.0);
     }
-    assert!(Edit::Resize {
-        note: NoteId(1),
-        start: 0.0,
-        end: PPQ * 4.0,
-    }
-    .apply(&mut doc));
+    assert!(
+        Edit::Resize {
+            note: NoteId(1),
+            start: 0.0,
+            end: PPQ * 4.0,
+        }
+        .apply(&mut doc)
+    );
     let n = doc.note(NoteId(1)).unwrap();
     assert_eq!(n.splits, vec![PPQ * 2.0], "the split scales with the note");
     assert_eq!(n.pitch.points().last().unwrap().t, PPQ * 4.0);
@@ -253,11 +285,13 @@ fn splitting_a_note_gives_both_halves_the_boundary_value() {
         n.pitch.set(0.0, 0.0);
         n.pitch.set(PPQ * 2.0, 4.0);
     }
-    assert!(Edit::SplitNote {
-        note: NoteId(1),
-        t: PPQ,
-    }
-    .apply(&mut doc));
+    assert!(
+        Edit::SplitNote {
+            note: NoteId(1),
+            t: PPQ,
+        }
+        .apply(&mut doc)
+    );
     assert_eq!(doc.notes.len(), 2);
     let left = doc.note(NoteId(1)).unwrap();
     assert_eq!(left.end, PPQ);
@@ -333,11 +367,13 @@ fn channel_assignment_separates_overlapping_and_consecutive_notes() {
     doc.push(Note::new(NoteId(3), PPQ * 2.0, PPQ * 6.0, 67));
     doc.push(Note::new(NoteId(4), PPQ * 4.0, PPQ * 8.0, 72));
     let ids: Vec<NoteId> = doc.notes.iter().map(|n| n.id).collect();
-    assert!(Edit::AssignChannels {
-        notes: ids,
-        seed: 42
-    }
-    .apply(&mut doc));
+    assert!(
+        Edit::AssignChannels {
+            notes: ids,
+            seed: 42
+        }
+        .apply(&mut doc)
+    );
 
     for n in &doc.notes {
         let ch = n.channel.expect("every note gets a member channel");
@@ -364,10 +400,7 @@ fn channel_assignment_is_deterministic_per_seed() {
         }
         let ids: Vec<NoteId> = doc.notes.iter().map(|n| n.id).collect();
         Edit::AssignChannels { notes: ids, seed }.apply(&mut doc);
-        doc.notes
-            .iter()
-            .map(|n| n.channel)
-            .collect::<Vec<_>>()
+        doc.notes.iter().map(|n| n.channel).collect::<Vec<_>>()
     };
     assert_eq!(build(7), build(7));
 }
@@ -488,7 +521,10 @@ fn drift_and_vibrato_separate_at_the_three_hertz_line() {
     );
     let drift_pp = d.drift.iter().cloned().fold(f64::MIN, f64::max)
         - d.drift.iter().cloned().fold(f64::MAX, f64::min);
-    assert!(drift_pp > 1.0, "the 0.5 Hz slide belongs to drift, got {drift_pp}");
+    assert!(
+        drift_pp > 1.0,
+        "the 0.5 Hz slide belongs to drift, got {drift_pp}"
+    );
 }
 
 #[test]
@@ -517,17 +553,23 @@ fn reblending_pitch_flattens_vibrato_without_moving_the_center() {
             n.pitch.set(t, 0.4 * (i as f64 * 0.4).sin());
         }
     }
-    assert!(Edit::ReblendPitch {
-        note: NoteId(1),
-        t0: 0.0,
-        t1: PPQ * 2.0,
-        drift_amount: 0.0,
-        modulation_amount: 0.0,
-    }
-    .apply(&mut doc));
+    assert!(
+        Edit::ReblendPitch {
+            note: NoteId(1),
+            t0: 0.0,
+            t1: PPQ * 2.0,
+            drift_amount: 0.0,
+            modulation_amount: 0.0,
+        }
+        .apply(&mut doc)
+    );
     let n = doc.note(NoteId(1)).unwrap();
     let (lo, hi) = n.pitch.value_bounds().unwrap();
-    assert!(hi - lo < 1e-6, "robot mode should be flat, spread {}", hi - lo);
+    assert!(
+        hi - lo < 1e-6,
+        "robot mode should be flat, spread {}",
+        hi - lo
+    );
 }
 
 // ── history ──────────────────────────────────────────────────────────
@@ -538,10 +580,13 @@ fn undo_restores_zones_notes_and_expression_as_one_step() {
     let mut history = History::new(10);
     let before = doc.clone();
 
-    history.apply(&mut doc, &Edit::AddZoneSplit {
-        note: NoteId(1),
-        t: PPQ,
-    });
+    history.apply(
+        &mut doc,
+        &Edit::AddZoneSplit {
+            note: NoteId(1),
+            t: PPQ,
+        },
+    );
     assert_eq!(doc.note(NoteId(1)).unwrap().splits.len(), 1);
 
     assert!(history.undo(&mut doc));
@@ -554,10 +599,13 @@ fn undo_restores_zones_notes_and_expression_as_one_step() {
 fn a_failed_edit_records_no_undo_step() {
     let mut doc = doc_with_note();
     let mut history = History::new(10);
-    assert!(!history.apply(&mut doc, &Edit::Transpose {
-        notes: vec![NoteId(999)],
-        semitones: 1
-    }));
+    assert!(!history.apply(
+        &mut doc,
+        &Edit::Transpose {
+            notes: vec![NoteId(999)],
+            semitones: 1
+        }
+    ));
     assert!(!history.can_undo());
 }
 
@@ -566,10 +614,13 @@ fn history_is_bounded() {
     let mut doc = doc_with_note();
     let mut history = History::new(3);
     for i in 0..10 {
-        history.apply(&mut doc, &Edit::AddZoneSplit {
-            note: NoteId(1),
-            t: 10.0 + i as f64 * 10.0,
-        });
+        history.apply(
+            &mut doc,
+            &Edit::AddZoneSplit {
+                note: NoteId(1),
+                t: 10.0 + i as f64 * 10.0,
+            },
+        );
     }
     let mut count = 0;
     while history.undo(&mut doc) {
@@ -592,7 +643,7 @@ fn test_content() -> Content {
 #[test]
 fn zoom_pins_the_anchor_under_the_pointer() {
     let vp = Viewport::new(800.0, 480.0);
-    let mut cam = camera::reset_view(test_content(), vp, 0.03, 0.35);
+    let mut cam = camera::reset_view(test_content(), vp, 0.03, 0.35, Default::default());
     let anchor_t = cam.t_at(200.0);
     cam.zoom_time_about(anchor_t, 2.0);
     assert!(
@@ -609,13 +660,16 @@ fn zoom_pins_the_anchor_under_the_pointer() {
 fn reset_view_frames_the_content_with_headroom() {
     let vp = Viewport::new(800.0, 480.0);
     let c = test_content();
-    let cam = camera::reset_view(c, vp, 0.03, 0.35);
+    let cam = camera::reset_view(c, vp, 0.03, 0.35, Default::default());
     let (lo, hi) = cam.pitch_span(vp);
-    assert!(lo < c.pitch_lo && hi > c.pitch_hi, "content must fit inside");
+    assert!(
+        lo < c.pitch_lo && hi > c.pitch_hi,
+        "content must fit inside"
+    );
     let (t0, t1) = cam.time_span(vp);
     assert!(t0 < c.t_start && t1 > c.t_end);
     assert!(
-        (cam.pitch_center - 64.0).abs() < 1e-6,
+        (cam.vertical.center - 64.0).abs() < 1e-6,
         "centered on the content midpoint"
     );
 }
@@ -623,70 +677,85 @@ fn reset_view_frames_the_content_with_headroom() {
 #[test]
 fn blending_with_no_influences_is_the_identity() {
     let vp = Viewport::new(800.0, 480.0);
-    let cam = camera::reset_view(test_content(), vp, 0.03, 0.35);
+    let cam = camera::reset_view(test_content(), vp, 0.03, 0.35, Default::default());
     assert_eq!(camera::blend(cam, &[]), cam);
 }
 
 #[test]
 fn a_full_weight_influence_fully_replaces_the_base() {
     let vp = Viewport::new(800.0, 480.0);
-    let base = camera::reset_view(test_content(), vp, 0.03, 0.35);
+    let base = camera::reset_view(test_content(), vp, 0.03, 0.35, Default::default());
     let target = Camera {
+        fold: Default::default(),
         t0: 1234.0,
         units_per_px: 2.0,
-        pitch_center: 70.0,
-        px_per_semitone: 20.0,
+        vertical: VerticalCamera { center: 70.0, px_per_row: 20.0 },
     };
-    let out = camera::blend(base, &[camera::Influence {
-        camera: target,
-        weight: 1.0,
-    }]);
+    let out = camera::blend(
+        base,
+        &[camera::Influence {
+            camera: target,
+            weight: 1.0,
+        }],
+    );
     assert!((out.t0 - target.t0).abs() < 1e-6);
-    assert!((out.px_per_semitone - target.px_per_semitone).abs() < 1e-6);
+    assert!((out.vertical.px_per_row - target.vertical.px_per_row).abs() < 1e-6);
 }
 
 #[test]
 fn scales_blend_geometrically_so_zoom_stays_even() {
     let base = Camera {
+        fold: Default::default(),
         t0: 0.0,
         units_per_px: 1.0,
-        pitch_center: 60.0,
-        px_per_semitone: 10.0,
+        vertical: VerticalCamera { center: 60.0, px_per_row: 10.0 },
     };
     let target = Camera {
+        fold: Default::default(),
         units_per_px: 100.0,
         ..base
     };
-    let out = camera::blend(base, &[camera::Influence {
-        camera: target,
-        weight: 0.5,
-    }]);
+    let out = camera::blend(
+        base,
+        &[camera::Influence {
+            camera: target,
+            weight: 0.5,
+        }],
+    );
     // Geometric midpoint of 1 and 100 is 10, not the arithmetic 50.5 —
     // an arithmetic blend would bias every magnet toward zoomed-out.
-    assert!((out.units_per_px - 10.0).abs() < 1e-6, "got {}", out.units_per_px);
+    assert!(
+        (out.units_per_px - 10.0).abs() < 1e-6,
+        "got {}",
+        out.units_per_px
+    );
 }
 
 #[test]
 fn the_edge_magnet_is_inert_in_the_middle_of_the_item() {
     let vp = Viewport::new(800.0, 480.0);
     let c = test_content();
-    let cam = camera::reset_view(c, vp, 0.03, 0.35);
+    let cam = camera::reset_view(c, vp, 0.03, 0.35, Default::default());
     assert!(
         camera::edge_magnet(cam, 2000.0, c, vp, 0.35, 0.2).is_none(),
         "no pull at the item center"
     );
     let near_edge = camera::edge_magnet(cam, 3950.0, c, vp, 0.35, 0.2);
-    assert!(near_edge.is_some_and(|i| i.weight > 0.9), "full pull at the edge");
+    assert!(
+        near_edge.is_some_and(|i| i.weight > 0.9),
+        "full pull at the edge"
+    );
 }
 
 #[test]
 fn the_reset_tail_stays_out_until_the_final_stretch() {
     let vp = Viewport::new(800.0, 480.0);
-    let reset = camera::reset_view(test_content(), vp, 0.03, 0.35);
+    let reset = camera::reset_view(test_content(), vp, 0.03, 0.35, Default::default());
     // Deep zoom-in: nowhere near reset.
     let deep = Camera {
+        fold: Default::default(),
         units_per_px: reset.units_per_px / 50.0,
-        px_per_semitone: reset.px_per_semitone * 50.0,
+        vertical: VerticalCamera { px_per_row: reset.vertical.px_per_row * 50.0, ..reset.vertical },
         ..reset
     };
     assert!(
@@ -695,6 +764,7 @@ fn the_reset_tail_stays_out_until_the_final_stretch() {
     );
     // Essentially there.
     let close = Camera {
+        fold: Default::default(),
         units_per_px: reset.units_per_px * 0.98,
         ..reset
     };
@@ -710,16 +780,16 @@ fn constrain_never_shows_more_than_the_cushioned_item() {
         ..Bounds::default()
     };
     let mut cam = Camera {
+        fold: Default::default(),
         t0: -99999.0,
         units_per_px: 1000.0,
-        pitch_center: 200.0,
-        px_per_semitone: 0.001,
+        vertical: VerticalCamera { center: 200.0, px_per_row: 0.001 },
     };
     cam.constrain(bounds, vp);
     let (t0, t1) = cam.time_span(vp);
     assert!(t1 - t0 <= 4000.0 + 1e-6);
-    assert!(cam.pitch_center <= 127.0 && cam.pitch_center >= 0.0);
-    assert!(cam.px_per_semitone >= bounds.min_px_per_semitone);
+    assert!(cam.vertical.center <= 127.0 && cam.vertical.center >= 0.0);
+    assert!(cam.vertical.px_per_row >= bounds.min_px_per_semitone);
     assert!(t0 >= bounds.t_min - (t1 - t0) * bounds.edge_whitespace - 1e-6);
 }
 
@@ -747,7 +817,7 @@ fn a_new_editor_frames_its_content() {
     let (lo, hi) = ed.camera.pitch_span(ed.viewport);
     assert!(lo <= c.pitch_lo && hi >= c.pitch_hi);
     assert_eq!(ed.tool, Tool::Curve, "Curve is the default tool");
-    assert_eq!(ed.lane, Lane::Pitch);
+    assert_eq!(ed.dimension, Dimension::Pitch);
 }
 
 #[test]
@@ -812,7 +882,10 @@ fn hit_testing_prefers_an_edge_handle_over_the_body() {
     let y = ed.camera.y(n.row as f64, ed.viewport);
     assert!(matches!(
         ed.hit_test(x, y),
-        expression_editor_core::Hit::NoteEdge { start_edge: false, .. }
+        expression_editor_core::Hit::NoteEdge {
+            start_edge: false,
+            ..
+        }
     ));
 }
 
@@ -861,11 +934,20 @@ fn a_drag_belongs_to_the_selection_not_the_note_under_the_pointer() {
 #[test]
 fn gestures_clamp_directionally_when_they_start_outside_the_span() {
     // Starting left of the note extends only to the left boundary.
-    assert_eq!(tools::clamp_gesture((100.0, 200.0), 50.0, 50.0, 150.0), (100.0, 150.0));
+    assert_eq!(
+        tools::clamp_gesture((100.0, 200.0), 50.0, 50.0, 150.0),
+        (100.0, 150.0)
+    );
     // Starting right extends only to the right boundary.
-    assert_eq!(tools::clamp_gesture((100.0, 200.0), 250.0, 150.0, 250.0), (150.0, 200.0));
+    assert_eq!(
+        tools::clamp_gesture((100.0, 200.0), 250.0, 150.0, 250.0),
+        (150.0, 200.0)
+    );
     // Starting inside clamps both ends.
-    assert_eq!(tools::clamp_gesture((100.0, 200.0), 150.0, 50.0, 250.0), (100.0, 200.0));
+    assert_eq!(
+        tools::clamp_gesture((100.0, 200.0), 150.0, 50.0, 250.0),
+        (100.0, 200.0)
+    );
 }
 
 #[test]
@@ -905,9 +987,9 @@ fn pressure_and_timbre_map_into_a_fixed_two_semitone_box() {
 #[test]
 fn the_active_lane_draws_last_and_overlays_never_duplicate_it() {
     let mut ed = test_editor();
-    ed.lane = Lane::Pressure;
-    ed.overlays = vec![Lane::Pitch, Lane::Pressure];
-    assert_eq!(ed.draw_order(), vec![Lane::Pitch, Lane::Pressure]);
+    ed.dimension = Dimension::Pressure;
+    ed.overlays = vec![Dimension::Pitch, Dimension::Pressure];
+    assert_eq!(ed.draw_order(), vec![Dimension::Pitch, Dimension::Pressure]);
 }
 
 // ── modulation ───────────────────────────────────────────────────────
@@ -960,13 +1042,23 @@ fn a_rate_curve_accelerates_phase_instead_of_stepping_it() {
     // Count zero crossings in the first and last quarter: an
     // accelerating vibrato has more cycles late than early.
     let r = stack.render(2000);
-    let crossings = |s: &[f64]| s.windows(2).filter(|w| w[0].signum() != w[1].signum()).count();
+    let crossings = |s: &[f64]| {
+        s.windows(2)
+            .filter(|w| w[0].signum() != w[1].signum())
+            .count()
+    };
     let early = crossings(&r[..500]);
     let late = crossings(&r[1500..]);
     assert!(late > early, "rate should ramp up: {early} → {late}");
     // And the output stays continuous — no jump between cycles.
-    let max_step = r.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f64, f64::max);
-    assert!(max_step < 0.2, "phase must integrate smoothly, max step {max_step}");
+    let max_step = r
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0.0f64, f64::max);
+    assert!(
+        max_step < 0.2,
+        "phase must integrate smoothly, max step {max_step}"
+    );
 }
 
 #[test]
@@ -1005,16 +1097,18 @@ fn applying_modulation_tapers_at_the_span_edges() {
             rate: 8.0,
         }],
     };
-    assert!(Edit::ApplyModulation {
-        note: NoteId(1),
-        lane: Lane::Pitch,
-        t0: 0.0,
-        t1: PPQ * 2.0,
-        stack,
-        taper: 0.1,
-        samples: 128,
-    }
-    .apply(&mut doc));
+    assert!(
+        Edit::ApplyModulation {
+            note: NoteId(1),
+            dimension: Dimension::Pitch,
+            t0: 0.0,
+            t1: PPQ * 2.0,
+            stack,
+            taper: 0.1,
+            samples: 128,
+        }
+        .apply(&mut doc)
+    );
 
     let n = doc.note(NoteId(1)).unwrap();
     // No step at the boundaries — a modulation dropped in cold at a
@@ -1036,7 +1130,7 @@ fn modulation_preserves_data_outside_its_target_range() {
     // Target only the second half.
     Edit::ApplyModulation {
         note: NoteId(1),
-        lane: Lane::Pitch,
+        dimension: Dimension::Pitch,
         t0: PPQ,
         t1: PPQ * 2.0,
         stack: Stack::growing_vibrato(),
@@ -1045,8 +1139,15 @@ fn modulation_preserves_data_outside_its_target_range() {
     }
     .apply(&mut doc);
     let n = doc.note(NoteId(1)).unwrap();
-    assert_eq!(n.pitch.sample(0.0, 0.0), 3.0, "the untouched half is intact");
-    assert!((n.pitch.sample(PPQ, 0.0) - 3.0).abs() < 1e-6, "and the seam");
+    assert_eq!(
+        n.pitch.sample(0.0, 0.0),
+        3.0,
+        "the untouched half is intact"
+    );
+    assert!(
+        (n.pitch.sample(PPQ, 0.0) - 3.0).abs() < 1e-6,
+        "and the seam"
+    );
 }
 
 #[test]
@@ -1062,7 +1163,7 @@ fn restore_puts_a_captured_curve_back_exactly() {
 
     Edit::ApplyModulation {
         note: NoteId(1),
-        lane: Lane::Pitch,
+        dimension: Dimension::Pitch,
         t0: 0.0,
         t1: PPQ * 2.0,
         stack: Stack::growing_vibrato(),
@@ -1072,9 +1173,9 @@ fn restore_puts_a_captured_curve_back_exactly() {
     .apply(&mut doc);
     assert_ne!(doc.note(NoteId(1)).unwrap().pitch, captured);
 
-    Edit::RestoreLane {
+    Edit::RestoreDimension {
         note: NoteId(1),
-        lane: Lane::Pitch,
+        dimension: Dimension::Pitch,
         t0: 0.0,
         t1: PPQ * 2.0,
         points: captured.points().to_vec(),
@@ -1090,9 +1191,7 @@ fn restore_puts_a_captured_curve_back_exactly() {
 // ── full MIDI editing ────────────────────────────────────────────────
 
 use expression_editor_core::mouse::{Action, Context, Gesture, ModKey, MouseMap};
-use expression_editor_core::rows::{
-    Articulation, DrumMap, NoteShape, RowSpace, StringTuning,
-};
+use expression_editor_core::rows::{Articulation, DrumMap, NoteShape, RowSpace, StringTuning};
 
 fn doc_with_notes(n: usize) -> ExpressionDoc {
     let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 16.0);
@@ -1195,7 +1294,11 @@ fn stretching_positions_arpeggiates_about_the_pivot() {
         factor: 2.0,
     }
     .apply(&mut doc);
-    assert_eq!(doc.note(NoteId(1)).unwrap().start, 0.0, "the pivot is fixed");
+    assert_eq!(
+        doc.note(NoteId(1)).unwrap().start,
+        0.0,
+        "the pivot is fixed"
+    );
     assert!((doc.note(NoteId(2)).unwrap().start - PPQ * 2.0).abs() < 1e-6);
     assert!((doc.note(NoteId(3)).unwrap().start - PPQ * 4.0).abs() < 1e-6);
 }
@@ -1214,8 +1317,16 @@ fn copying_notes_leaves_the_originals_and_carries_expression() {
     let copy = doc.notes.iter().find(|n| n.id != NoteId(1)).unwrap();
     assert_eq!(copy.row, 72);
     assert_eq!(copy.start, PPQ * 4.0);
-    assert_eq!(copy.pitch.sample(PPQ * 4.0, 0.0), 0.75, "expression came too");
-    assert_eq!(doc.note(NoteId(1)).unwrap().start, 0.0, "original untouched");
+    assert_eq!(
+        copy.pitch.sample(PPQ * 4.0, 0.0),
+        0.75,
+        "expression came too"
+    );
+    assert_eq!(
+        doc.note(NoteId(1)).unwrap().start,
+        0.0,
+        "original untouched"
+    );
 }
 
 #[test]
@@ -1306,7 +1417,10 @@ fn fingering_prefers_the_position_nearest_the_hand() {
     // A4 = 69 is reachable on several strings.
     let low = t.best_position(69, 0).unwrap();
     let high = t.best_position(69, 14).unwrap();
-    assert_ne!(low, high, "the preferred fret must actually steer the choice");
+    assert_ne!(
+        low, high,
+        "the preferred fret must actually steer the choice"
+    );
     assert!(low.1 < high.1, "a hand at the nut plays the lower fret");
 }
 
@@ -1320,11 +1434,13 @@ fn moving_a_note_to_another_string_keeps_its_sounding_pitch() {
     doc.push(n);
     let before = doc.row_space.pitch_of(doc.note(NoteId(1)).unwrap());
 
-    assert!(Edit::SetString {
-        note: NoteId(1),
-        string: 4,
-    }
-    .apply(&mut doc));
+    assert!(
+        Edit::SetString {
+            note: NoteId(1),
+            string: 4,
+        }
+        .apply(&mut doc)
+    );
 
     let n = doc.note(NoteId(1)).unwrap();
     assert_eq!(n.row, 4);
@@ -1377,10 +1493,12 @@ fn legato_articulations_are_marked_as_such() {
         assert_eq!(a.is_legato(), legato, "{a:?}");
     }
     // Natural harmonics only speak at certain frets.
-    assert!(Articulation::NaturalHarmonic
-        .valid_frets()
-        .unwrap()
-        .contains(&12));
+    assert!(
+        Articulation::NaturalHarmonic
+            .valid_frets()
+            .unwrap()
+            .contains(&12)
+    );
     assert!(Articulation::PalmMute.valid_frets().is_none());
 }
 
@@ -1412,7 +1530,10 @@ fn drum_rows_map_to_their_pitches_both_ways() {
     let mut n = Note::new(NoteId(1), 0.0, 100.0, kick_row as i32);
     assert_eq!(space.pitch_of(&n), 36);
     assert_eq!(space.row_label(kick_row as i32), "Kick");
-    assert_eq!(space.row_of_pitch(38), map.row_of_pitch(38).map(|r| r as i32));
+    assert_eq!(
+        space.row_of_pitch(38),
+        map.row_of_pitch(38).map(|r| r as i32)
+    );
     n.row = 0;
     // A drum hit has no meaningful length, so it gets a fixed head
     // whose flat edge marks the attack.
@@ -1449,7 +1570,10 @@ fn modifiers_resolve_to_their_bound_action() {
         m.resolve(Context::Note, Gesture::Drag, ctrl),
         Action::EditNoteVelocity
     );
-    assert_eq!(m.resolve(Context::Note, Gesture::Drag, alt), Action::CopyNote);
+    assert_eq!(
+        m.resolve(Context::Note, Gesture::Drag, alt),
+        Action::CopyNote
+    );
     assert_eq!(
         m.resolve(Context::NoteEdge, Gesture::Drag, none),
         Action::MoveNoteEdge
@@ -1533,7 +1657,9 @@ fn edits_are_distinguished_from_navigation_for_undo_grouping() {
 
 // ── contextual zoom (MeMagic) ────────────────────────────────────────
 
-use expression_editor_core::zoom::{self, HorizontalMode, SmartZoom, Span, VerticalMode, ZoomModes};
+use expression_editor_core::zoom::{
+    self, HorizontalMode, SmartZoom, Span, VerticalMode, ZoomModes,
+};
 
 fn spans_at(starts: &[f64], len: f64, row: i32) -> Vec<Span> {
     starts
@@ -1634,7 +1760,7 @@ fn restricting_to_the_item_slides_the_view_rather_than_squashing_it() {
         pitch_lo: 55.0,
         pitch_hi: 67.0,
     };
-    let cam = camera::reset_view(content, vp, 0.03, 0.35);
+    let cam = camera::reset_view(content, vp, 0.03, 0.35, Default::default());
     let spans = spans_at(&[0.0, 240.0, 480.0], 240.0, 60);
 
     let free = zoom::apply_horizontal(
@@ -1657,7 +1783,10 @@ fn restricting_to_the_item_slides_the_view_rather_than_squashing_it() {
         3840.0,
         SmartZoom::default(),
     );
-    assert!(free.t0 < content.t_start, "unclamped runs off the item start");
+    assert!(
+        free.t0 < content.t_start,
+        "unclamped runs off the item start"
+    );
     assert_eq!(clamped.t0, content.t_start, "clamped starts at the item");
     assert!(
         (free.units_per_px - clamped.units_per_px).abs() < 1e-9,
@@ -1669,10 +1798,10 @@ fn restricting_to_the_item_slides_the_view_rather_than_squashing_it() {
 fn vertical_fit_respects_the_row_floor_and_ceiling() {
     let vp = Viewport::new(800.0, 480.0);
     let cam = Camera {
+        fold: Default::default(),
         t0: 0.0,
         units_per_px: 10.0,
-        pitch_center: 60.0,
-        px_per_semitone: 10.0,
+        vertical: VerticalCamera { center: 60.0, px_per_row: 10.0 },
     };
     // One note: without a floor this would fill the screen with a
     // single row.
@@ -1687,9 +1816,9 @@ fn vertical_fit_respects_the_row_floor_and_ceiling() {
         (0.0, 8000.0),
         cfg,
     );
-    assert!(out.px_per_semitone <= cfg.max_px_per_row);
+    assert!(out.vertical.px_per_row <= cfg.max_px_per_row);
     assert!(
-        vp.h / out.px_per_semitone >= cfg.min_rows - 1e-6,
+        vp.h / out.vertical.px_per_row >= cfg.min_rows - 1e-6,
         "at least min_rows must stay visible"
     );
 }
@@ -1698,10 +1827,10 @@ fn vertical_fit_respects_the_row_floor_and_ceiling() {
 fn notes_in_view_ignores_notes_outside_the_horizontal_span() {
     let vp = Viewport::new(800.0, 480.0);
     let cam = Camera {
+        fold: Default::default(),
         t0: 0.0,
         units_per_px: 1.0,
-        pitch_center: 60.0,
-        px_per_semitone: 10.0,
+        vertical: VerticalCamera { center: 60.0, px_per_row: 10.0 },
     };
     let mut spans = spans_at(&[0.0], 240.0, 60);
     spans.extend(spans_at(&[50_000.0], 240.0, 100)); // far away, high
@@ -1715,7 +1844,7 @@ fn notes_in_view_ignores_notes_outside_the_horizontal_span() {
         SmartZoom::default(),
     );
     assert!(
-        (out.pitch_center - 60.0).abs() < 1e-6,
+        (out.vertical.center - 60.0).abs() < 1e-6,
         "the offscreen note must not drag the view up"
     );
 }
@@ -1749,9 +1878,9 @@ fn contextual_modes_zoom_differently_per_pointer_region() {
     );
 
     // The ruler leaves pitch alone entirely.
-    let before = ed.camera.px_per_semitone;
+    let before = ed.camera.vertical.px_per_row;
     ed.smart_zoom(ZoomModes::RULER, anchor, 62.0);
-    assert_eq!(ed.camera.px_per_semitone, before);
+    assert_eq!(ed.camera.vertical.px_per_row, before);
 }
 
 #[test]
@@ -1822,7 +1951,9 @@ fn deleting_an_area_leaves_a_hole_and_keeps_the_rest() {
     let row60: Vec<_> = doc.notes.iter().filter(|n| n.row == 60).collect();
     assert_eq!(row60.len(), 2, "before and after survive");
     assert!(
-        !row60.iter().any(|n| n.start < PPQ * 4.0 && n.end > PPQ * 2.0),
+        !row60
+            .iter()
+            .any(|n| n.start < PPQ * 4.0 && n.end > PPQ * 2.0),
         "nothing is left inside the hole"
     );
 }
@@ -1950,8 +2081,8 @@ fn clearing_a_lane_across_an_area_keeps_the_notes() {
     let mut doc = held_doc();
     let before = doc.notes.len();
     let area = RazorArea::new(PPQ * 2.0, PPQ * 4.0, 60, 60);
-    assert!(razor::clear_lane(&mut doc, area, Lane::Pitch));
-    assert_eq!(doc.notes.len(), before, "notes survive a lane clear");
+    assert!(razor::clear_lane(&mut doc, area, Dimension::Pitch));
+    assert_eq!(doc.notes.len(), before, "notes survive a dimension clear");
 }
 
 #[test]
@@ -2183,22 +2314,26 @@ fn pinning_toggles_and_removal_works() {
 #[test]
 fn cc_edits_are_document_level_not_per_note() {
     let mut doc = doc_with_notes(1);
-    assert!(Edit::DrawCc {
-        number: 11,
-        t0: 0.0,
-        t1: PPQ * 4.0,
-        points: vec![
-            Point { t: 0.0, value: 0.2 },
-            Point { t: PPQ * 4.0, value: 1.0 },
-        ],
-    }
-    .apply(&mut doc));
+    assert!(
+        Edit::DrawCc {
+            number: 11,
+            t0: 0.0,
+            t1: PPQ * 4.0,
+            points: vec![
+                Point { t: 0.0, value: 0.2, ..Point::default() },
+                Point {
+                    t: PPQ * 4.0,
+                    value: 1.0, ..Point::default() },
+            ],
+        }
+        .apply(&mut doc)
+    );
 
-    let lane = doc.cc.get(11).unwrap();
+    let dimension = doc.cc.get(11).unwrap();
     // The swell exists independently of where notes start and end.
-    assert_eq!(lane.value(0.0), 25);
-    assert_eq!(lane.value(PPQ * 4.0), 127);
-    assert_eq!(lane.value(PPQ * 2.0), 76, "linear between authored points");
+    assert_eq!(dimension.value(0.0), 25);
+    assert_eq!(dimension.value(PPQ * 4.0), 127);
+    assert_eq!(dimension.value(PPQ * 2.0), 76, "linear between authored points");
 }
 
 #[test]
@@ -2209,8 +2344,10 @@ fn scaling_a_controller_cannot_push_it_past_the_wire_range() {
         t0: 0.0,
         t1: PPQ * 4.0,
         points: vec![
-            Point { t: 0.0, value: 0.9 },
-            Point { t: PPQ * 4.0, value: 0.1 },
+            Point { t: 0.0, value: 0.9, ..Point::default() },
+            Point {
+                t: PPQ * 4.0,
+                value: 0.1, ..Point::default() },
         ],
     }
     .apply(&mut doc);
@@ -2224,16 +2361,16 @@ fn scaling_a_controller_cannot_push_it_past_the_wire_range() {
     }
     .apply(&mut doc);
 
-    let lane = doc.cc.get(1).unwrap();
-    for p in lane.curve.points() {
+    let dimension = doc.cc.get(1).unwrap();
+    for p in dimension.curve.points() {
         assert!(
             (0.0..=1.0).contains(&p.value),
             "a controller must not clip on export, got {}",
             p.value
         );
     }
-    assert_eq!(lane.value(0.0), 127);
-    assert_eq!(lane.value(PPQ * 4.0), 0);
+    assert_eq!(dimension.value(0.0), 127);
+    assert_eq!(dimension.value(PPQ * 4.0), 0);
 }
 
 #[test]
@@ -2243,26 +2380,106 @@ fn erasing_a_controller_leaves_the_notes_alone() {
         number: 11,
         t0: 0.0,
         t1: PPQ * 4.0,
-        points: vec![Point { t: PPQ, value: 0.5 }],
+        points: vec![Point { t: PPQ, value: 0.5, ..Point::default() }],
     }
     .apply(&mut doc);
     let before = doc.notes.len();
-    assert!(Edit::EraseCc {
-        number: 11,
-        t0: 0.0,
-        t1: PPQ * 4.0,
-    }
-    .apply(&mut doc));
+    assert!(
+        Edit::EraseCc {
+            number: 11,
+            t0: 0.0,
+            t1: PPQ * 4.0,
+        }
+        .apply(&mut doc)
+    );
     assert_eq!(doc.notes.len(), before);
     // Erased back to its resting value, not to zero.
     assert_eq!(doc.cc.get(11).unwrap().value(PPQ), 127);
 }
 
 #[test]
+fn clearing_part_of_a_curve_splices_the_default_in_at_both_edges() {
+    // The case that only deleting interior points cannot handle: the
+    // shape is defined entirely by points *outside* the cleared range,
+    // so there is nothing in it to delete and the curve would sail
+    // straight through untouched.
+    let mut c = Curve::new();
+    c.set(0.0, 0.0);
+    c.set(PPQ * 4.0, 1.0);
+
+    assert!(c.clear_range(PPQ, PPQ * 3.0, 0.0));
+    assert!(
+        c.sample(PPQ * 2.0, 0.0).abs() < 1e-9,
+        "the middle reads as cleared, got {}",
+        c.sample(PPQ * 2.0, 0.0)
+    );
+    assert!(
+        (c.sample(PPQ * 4.0, 0.0) - 1.0).abs() < 1e-9,
+        "and the ramp outside it is untouched"
+    );
+}
+
+#[test]
+fn clearing_a_whole_curve_empties_it_rather_than_authoring_defaults() {
+    // The exception: with nothing outside to bleed in, leaving two
+    // default points behind would call an untouched lane "authored".
+    let mut c = Curve::new();
+    c.set(PPQ, 0.5);
+    c.set(PPQ * 2.0, 0.8);
+
+    assert!(c.clear_range(0.0, PPQ * 4.0, 0.0));
+    assert!(c.is_empty());
+    assert!(
+        !c.clear_range(0.0, PPQ * 4.0, 0.0),
+        "and clearing an already-empty curve changes nothing"
+    );
+}
+
+#[test]
+fn erasing_part_of_a_controller_reads_as_cleared() {
+    let mut doc = doc_with_notes(2);
+    // A swell whose only points are outside the range about to be
+    // erased — the shape EraseCc used to miss entirely.
+    Edit::DrawCc {
+        number: 1,
+        t0: 0.0,
+        t1: PPQ * 4.0,
+        points: vec![
+            Point { t: 0.0, value: 0.0, ..Point::default() },
+            Point {
+                t: PPQ * 4.0,
+                value: 1.0, ..Point::default() },
+        ],
+    }
+    .apply(&mut doc);
+    assert!(doc.cc.get(1).unwrap().value(PPQ * 2.0) > 60);
+
+    assert!(
+        Edit::EraseCc {
+            number: 1,
+            t0: PPQ,
+            t1: PPQ * 3.0,
+        }
+        .apply(&mut doc)
+    );
+
+    assert_eq!(
+        doc.cc.get(1).unwrap().value(PPQ * 2.0),
+        0,
+        "CC1 rests at 0, and the erased range has to read that way"
+    );
+    assert_eq!(
+        doc.cc.get(1).unwrap().value(PPQ * 4.0),
+        127,
+        "outside the erased range the swell stands"
+    );
+}
+
+#[test]
 fn entering_cc_edit_mode_pins_the_lane_it_edits() {
     let mut ed = test_editor();
     assert!(!ed.cc_editing());
-    // Editing a lane you cannot see is a trap, so entering must pin it.
+    // Editing a dimension you cannot see is a trap, so entering must pin it.
     ed.edit_cc(11);
     assert!(ed.cc_editing());
     assert!(ed.doc.cc.get(11).unwrap().pinned);
@@ -2294,15 +2511,16 @@ fn row_colour_follows_what_the_row_means() {
 
     let kit = RowSpace::Drums(DrumMap::general_midi());
     let map = DrumMap::general_midi();
-    let row_of = |name: &str| {
-        map.lanes.iter().position(|l| l.name == name).unwrap() as i32
-    };
+    let row_of = |name: &str| map.lanes.iter().position(|l| l.name == name).unwrap() as i32;
     // Kit sections, not individual lanes: both snares read as snare.
     assert_eq!(
         kit.row_color(row_of("Snare")),
         kit.row_color(row_of("Snare 2"))
     );
-    assert_ne!(kit.row_color(row_of("Kick")), kit.row_color(row_of("Snare")));
+    assert_ne!(
+        kit.row_color(row_of("Kick")),
+        kit.row_color(row_of("Snare"))
+    );
     assert_ne!(
         kit.row_color(row_of("HH Closed")),
         kit.row_color(row_of("Kick"))
@@ -2470,7 +2688,10 @@ fn every_curve_stays_within_the_unit_box() {
             assert!((s.curve(1.0, bend) - 1.0).abs() < 1e-6, "{bend:?} {k} at 1");
             for i in 0..=20 {
                 let v = s.curve(i as f64 / 20.0, bend);
-                assert!((-1e-9..=1.0 + 1e-9).contains(&v), "{bend:?} {k} escaped: {v}");
+                assert!(
+                    (-1e-9..=1.0 + 1e-9).contains(&v),
+                    "{bend:?} {k} escaped: {v}"
+                );
             }
         }
     }
@@ -2516,7 +2737,7 @@ fn zones_are_hit_testable_and_corners_beat_the_field() {
 
 #[test]
 fn positional_zones_are_the_ones_safe_across_lanes() {
-    // A value transform needs one lane's range to be meaningful; a
+    // A value transform needs one dimension's range to be meaningful; a
     // positional one does not.
     assert!(Zone::Warp.is_positional());
     assert!(Zone::Move.is_positional());
@@ -2543,9 +2764,9 @@ fn each_mode_brings_its_own_preset() {
 
     ed.set_mode(Mode::Midi);
     assert!(matches!(ed.row_space, RowSpace::Pitch));
-    // Plain MIDI cannot carry per-note pressure, so the active lane
+    // Plain MIDI cannot carry per-note pressure, so the active dimension
     // must not be left pointing at it.
-    assert_eq!(ed.lane, Lane::Pitch);
+    assert_eq!(ed.dimension, Dimension::Pitch);
     assert!(ed.overlays.is_empty());
 }
 
@@ -2559,11 +2780,42 @@ fn modes_declare_which_controls_apply() {
     assert!(Mode::Vocals.has_lyrics());
     // The blend controls need a contour to decompose; a plain MIDI
     // note's is flat, so they would do nothing.
-    assert!(Mode::Audio.has_pitch_shape());
+    assert!(Mode::PitchedAudio.has_pitch_shape());
     assert!(!Mode::Midi.has_pitch_shape());
     // Tuning targets mean nothing on a drum kit.
     assert!(!Mode::Drums.has_tuning());
     assert!(Mode::Vocals.has_tuning());
+}
+
+/// The switcher groups by family, so every mode must land in exactly one
+/// and the two lists together must be `Mode::ALL`.
+///
+/// The invariant is easy to break by hand: adding a mode compiles fine
+/// while `ModeFamily::modes` still returns the old list, and the only
+/// symptom is a button that never appears.
+#[test]
+fn every_mode_belongs_to_exactly_one_family() {
+    use expression_editor_core::ModeFamily;
+
+    let mut listed: Vec<Mode> = Vec::new();
+    for family in ModeFamily::ALL {
+        for m in family.modes() {
+            assert_eq!(m.family(), family, "{m:?} listed under the wrong family");
+            assert!(!listed.contains(m), "{m:?} listed twice");
+            listed.push(*m);
+        }
+    }
+    assert_eq!(listed, Mode::ALL.to_vec());
+
+    // The split is where the notes came from, and `is_analysed_audio`
+    // must agree with it.
+    assert_eq!(ModeFamily::Audio.modes().len(), 2);
+    assert!(Mode::PitchedAudio.is_analysed_audio());
+    assert!(Mode::UnpitchedAudio.is_analysed_audio());
+    assert!(!Mode::Guitar.is_analysed_audio());
+    // Only the unpitched one gives up pitch editing.
+    assert!(Mode::PitchedAudio.has_pitch());
+    assert!(!Mode::UnpitchedAudio.has_pitch());
 }
 
 #[test]
@@ -2572,6 +2824,1382 @@ fn switching_modes_is_reversible() {
     ed.set_mode(Mode::Guitar);
     ed.set_mode(Mode::Mpe);
     assert!(matches!(ed.row_space, RowSpace::Pitch));
-    assert_eq!(ed.overlays, vec![Lane::Pitch]);
+    assert_eq!(ed.overlays, vec![Dimension::Pitch]);
     assert_eq!(ed.mouse.name, "REAPER-like");
+}
+
+// ── clipboard and the context menu ───────────────────────────────────
+
+use expression_editor_core::menu::{self, Command};
+
+/// An editor with four notes, each carrying real expression, so a copy
+/// that drops curves is distinguishable from one that keeps them.
+fn menu_editor() -> Editor {
+    let mut doc = doc_with_notes(4);
+    for n in doc.notes.iter_mut() {
+        n.pitch.set(n.start, -0.5);
+        n.pitch.set(n.end, 0.25);
+    }
+    Editor::new(doc, Viewport::new(900.0, 500.0))
+}
+
+#[test]
+fn a_copied_note_brings_its_curves_and_its_spacing() {
+    let mut ed = menu_editor();
+    let picked = vec![NoteId(2), NoteId(3)];
+    assert!(ed.clipboard.copy_from(&ed.doc, &picked));
+
+    // Normalized to the earliest note, so the phrase can land anywhere.
+    let placed = ed.clipboard.placed(PPQ * 10.0, 60);
+    assert_eq!(placed.len(), 2);
+    assert!((placed[0].start - PPQ * 10.0).abs() < 1e-9);
+    // The gap between the two notes is preserved, not flattened.
+    let gap = placed[1].start - placed[0].start;
+    assert!((gap - PPQ).abs() < 1e-9, "spacing survived: {gap}");
+    // And the curve travelled with the note it belongs to.
+    assert!(
+        !placed[0].pitch.is_empty(),
+        "a copied note is the whole note, not a rectangle"
+    );
+    assert!(
+        (placed[0].pitch.points()[0].t - placed[0].start).abs() < 1e-9,
+        "the curve moved with the note rather than staying behind"
+    );
+}
+
+#[test]
+fn pasting_mints_fresh_ids_so_a_double_paste_is_two_phrases() {
+    let mut ed = menu_editor();
+    ed.clipboard.copy_from(&ed.doc, &[NoteId(1)]);
+    let before = ed.doc.notes.len();
+
+    ed.apply(&Edit::PasteNotes(ed.clipboard.placed(PPQ * 8.0, 60)));
+    ed.apply(&Edit::PasteNotes(ed.clipboard.placed(PPQ * 12.0, 60)));
+
+    assert_eq!(ed.doc.notes.len(), before + 2);
+    let all: Vec<NoteId> = ids(&ed.doc);
+    let mut uniq = all.clone();
+    uniq.sort_by_key(|i| i.0);
+    uniq.dedup();
+    assert_eq!(all.len(), uniq.len(), "every pasted note got its own id");
+}
+
+#[test]
+fn cut_copies_before_it_deletes() {
+    let mut ed = menu_editor();
+    ed.selection.notes = vec![NoteId(1), NoteId(2)];
+    let before = ed.doc.notes.len();
+
+    assert!(ed.run_command(&Command::Cut, None));
+    assert_eq!(ed.doc.notes.len(), before - 2);
+    assert_eq!(ed.clipboard.len(), 2, "and what was cut is pasteable");
+
+    assert!(ed.run_command(&Command::Paste, None));
+    assert_eq!(ed.doc.notes.len(), before);
+}
+
+#[test]
+fn a_command_on_an_unselected_note_acts_on_that_note() {
+    let mut ed = menu_editor();
+    ed.selection.notes = vec![NoteId(1)];
+
+    // Right-clicking note 3 while note 1 is selected must not delete
+    // note 1 — the classic "menu ate the wrong thing" bug.
+    assert_eq!(ed.command_targets(Some(NoteId(3))), vec![NoteId(3)]);
+    assert!(ed.run_command(&Command::Delete, Some(NoteId(3))));
+    assert!(ed.doc.note(NoteId(1)).is_some());
+    assert!(ed.doc.note(NoteId(3)).is_none());
+
+    // But right-clicking *inside* the selection acts on all of it.
+    ed.selection.notes = vec![NoteId(1), NoteId(2)];
+    assert_eq!(ed.command_targets(Some(NoteId(1))).len(), 2);
+}
+
+#[test]
+fn a_failed_copy_leaves_the_clipboard_alone() {
+    let mut ed = menu_editor();
+    ed.clipboard.copy_from(&ed.doc, &[NoteId(1)]);
+    assert_eq!(ed.clipboard.len(), 1);
+
+    // Copying nothing must not destroy what was already held.
+    assert!(!ed.clipboard.copy_from(&ed.doc, &[]));
+    assert_eq!(ed.clipboard.len(), 1);
+}
+
+#[test]
+fn the_menu_greys_items_out_rather_than_hiding_them() {
+    let mut ed = menu_editor();
+    ed.selection.clear();
+    let empty = menu::note_menu(&ed, None, 0.0);
+
+    let paste = empty.iter().find(|i| i.command == Command::Paste).unwrap();
+    assert!(!paste.enabled, "nothing on the clipboard yet");
+    let copy = empty.iter().find(|i| i.command == Command::Copy).unwrap();
+    assert!(!copy.enabled, "nothing selected");
+
+    ed.selection.notes = vec![NoteId(1)];
+    ed.run_command(&Command::Copy, None);
+    let ready = menu::note_menu(&ed, None, 0.0);
+    assert_eq!(
+        ready.len(),
+        empty.len(),
+        "a menu whose shape moves with the selection is one you cannot learn"
+    );
+    assert!(
+        ready
+            .iter()
+            .find(|i| i.command == Command::Paste)
+            .unwrap()
+            .enabled
+    );
+}
+
+#[test]
+fn the_menu_offers_what_the_mode_can_actually_carry() {
+    let mut ed = menu_editor();
+
+    ed.set_mode(Mode::Midi);
+    let midi = menu::note_menu(&ed, Some(NoteId(1)), 0.0);
+    assert!(
+        !midi
+            .iter()
+            .any(|i| matches!(i.command, Command::EditLyric(_)))
+    );
+
+    ed.set_mode(Mode::Vocals);
+    let vocals = menu::note_menu(&ed, Some(NoteId(1)), 0.0);
+    assert!(
+        vocals
+            .iter()
+            .any(|i| matches!(i.command, Command::EditLyric(_)))
+    );
+
+    ed.set_mode(Mode::Guitar);
+    let guitar = menu::note_menu(&ed, Some(NoteId(1)), 0.0);
+    assert!(
+        guitar
+            .iter()
+            .any(|i| matches!(i.command, Command::CycleString(_)))
+    );
+    assert!(
+        guitar
+            .iter()
+            .any(|i| matches!(i.command, Command::ToggleLegato(_)))
+    );
+
+    ed.set_mode(Mode::PitchedAudio);
+    let audio = menu::note_menu(&ed, Some(NoteId(1)), 0.0);
+    assert!(
+        audio
+            .iter()
+            .any(|i| matches!(i.command, Command::SplitNote(_, _)))
+    );
+
+    // Mode-specific items need a concrete note; clicking empty canvas
+    // offers only what works without one.
+    let nowhere = menu::note_menu(&ed, None, 0.0);
+    assert!(
+        !nowhere
+            .iter()
+            .any(|i| matches!(i.command, Command::SplitNote(_, _)))
+    );
+}
+
+#[test]
+fn commands_needing_a_panel_report_that_they_did_not_run() {
+    let mut ed = menu_editor();
+    ed.set_mode(Mode::Vocals);
+    // The core cannot invent a syllable, so it must say so rather than
+    // return true and leave the UI thinking a lyric was set.
+    assert!(!ed.run_command(&Command::EditLyric(NoteId(1)), Some(NoteId(1))));
+    assert!(!ed.run_command(&Command::Properties, Some(NoteId(1))));
+}
+
+#[test]
+fn merging_extends_the_survivor_instead_of_rebuilding_it() {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let mut a = Note::new(NoteId(1), 0.0, PPQ, 60);
+    a.pitch.set(0.0, -0.4);
+    doc.push(a);
+    doc.push(Note::new(NoteId(2), PPQ, PPQ * 2.0, 60));
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
+
+    assert!(ed.run_command(&Command::MergeNotes(NoteId(1)), Some(NoteId(1))));
+    assert!(ed.doc.note(NoteId(2)).is_none());
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    assert!((n.end - PPQ * 2.0).abs() < 1e-9, "the survivor covers both");
+    assert!(
+        !n.pitch.is_empty(),
+        "and keeps its own expression rather than being re-derived"
+    );
+}
+
+#[test]
+fn clearing_expression_keeps_the_notes() {
+    let mut ed = menu_editor();
+    ed.selection.notes = vec![NoteId(1), NoteId(2)];
+    let before = ed.doc.notes.len();
+
+    assert!(ed.run_command(&Command::ClearExpression, None));
+    assert_eq!(ed.doc.notes.len(), before);
+    assert!(ed.doc.note(NoteId(1)).unwrap().pitch.is_empty());
+    assert!(
+        !ed.doc.note(NoteId(3)).unwrap().pitch.is_empty(),
+        "and only the selection"
+    );
+}
+
+#[test]
+fn a_measure_command_reads_the_bar_under_the_pointer() {
+    let mut ed = menu_editor();
+    // doc_with_notes puts one note per quarter at rows 60.., so bar 1
+    // (4 beats at PPQ each) holds all four.
+    let in_bar_1 = ed.notes_in_measure(PPQ * 0.5);
+    assert_eq!(in_bar_1.len(), 4);
+
+    ed.playhead = Some(PPQ * 0.5);
+    assert!(ed.run_command(&Command::CopyMeasure, None));
+    assert_eq!(ed.clipboard.len(), 4);
+}
+
+// ── multitrack ───────────────────────────────────────────────────────
+
+use expression_editor_core::tracks::{RefColor, Track};
+
+#[test]
+fn each_track_keeps_its_own_undo_history() {
+    let mut ed = menu_editor();
+    let other = doc_with_notes(2);
+    let b = ed.add_track("Harmony", other);
+
+    // Edit track A, then switch away and back.
+    ed.apply(&Edit::DeleteNotes(vec![NoteId(1)]));
+    assert!(ed.can_undo());
+    let a_notes = ed.doc.notes.len();
+
+    assert!(ed.switch_track(b));
+    assert!(
+        !ed.can_undo(),
+        "a fresh track starts with a clean history — an undo here would \
+         otherwise reach into the track you just left"
+    );
+    assert_eq!(ed.doc.notes.len(), 2);
+
+    // Edit B, then go back to A: A's history is exactly where it was.
+    ed.apply(&Edit::DeleteNotes(vec![NoteId(1)]));
+    assert!(ed.switch_track(0));
+    assert_eq!(ed.doc.notes.len(), a_notes, "A came back as it was left");
+    assert!(ed.can_undo(), "and with its own history intact");
+    ed.undo();
+    assert_eq!(ed.doc.notes.len(), a_notes + 1);
+}
+
+#[test]
+fn switching_parks_edits_rather_than_discarding_them() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+
+    ed.apply(&Edit::DeleteNotes(vec![NoteId(1), NoteId(2)]));
+    let left_with = ed.doc.notes.len();
+    ed.switch_track(b);
+    ed.switch_track(0);
+    assert_eq!(ed.doc.notes.len(), left_with);
+}
+
+#[test]
+fn the_view_does_not_move_when_the_track_does() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+    ed.zoom_in_at(400.0, 200.0, 1.6);
+    let camera = ed.camera;
+
+    ed.switch_track(b);
+    assert_eq!(
+        ed.camera, camera,
+        "switching changes what you edit, not where you are looking"
+    );
+}
+
+#[test]
+fn a_switch_drops_state_that_names_the_old_document() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+    ed.selection.notes = vec![NoteId(1), NoteId(2)];
+    ed.edit_cc(1);
+
+    ed.switch_track(b);
+    assert!(
+        ed.selection.is_empty(),
+        "note ids are per-document; a carried selection points at strangers"
+    );
+    assert!(!ed.cc_editing());
+}
+
+#[test]
+fn the_active_slots_parked_copy_is_never_handed_out() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+
+    assert!(ed.tracks.doc_of(ed.active_track()).is_none());
+    assert!(ed.tracks.doc_of(b).is_some());
+
+    // After a switch the refusal follows the active slot.
+    ed.switch_track(b);
+    assert!(ed.tracks.doc_of(b).is_none());
+    assert!(ed.tracks.doc_of(0).is_some());
+}
+
+#[test]
+fn a_rejected_switch_leaves_the_editor_whole() {
+    let mut ed = menu_editor();
+    let before = ed.doc.clone();
+    ed.apply(&Edit::DeleteNotes(vec![NoteId(1)]));
+
+    assert!(!ed.switch_track(ed.active_track()), "already there");
+    assert!(!ed.switch_track(99), "out of range");
+
+    // The guard runs before anything is moved out, so the document and
+    // its history both survive a refused switch.
+    assert_ne!(ed.doc, before);
+    assert!(ed.can_undo());
+    ed.undo();
+    assert_eq!(ed.doc, before);
+}
+
+#[test]
+fn only_marked_tracks_are_references_and_never_the_active_one() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+    let c = ed.add_track("Bass", doc_with_notes(1));
+
+    assert_eq!(ed.tracks.references().count(), 0);
+    ed.tracks.track_mut(b).unwrap().reference = true;
+    ed.tracks.track_mut(c).unwrap().reference = true;
+    assert_eq!(ed.tracks.references().count(), 2);
+
+    // Switching onto a reference track drops it from the overlay: it is
+    // the thing being edited now, not a backdrop.
+    ed.switch_track(b);
+    let refs: Vec<usize> = ed.tracks.references().map(|(i, _)| i).collect();
+    assert_eq!(refs, vec![c]);
+}
+
+#[test]
+fn removing_a_track_keeps_the_active_index_pointing_at_the_same_track() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+    let _c = ed.add_track("Bass", doc_with_notes(1));
+    ed.switch_track(b);
+    assert_eq!(ed.active_track(), b);
+
+    // Removing a track *before* the active one shifts it down by one.
+    assert!(ed.tracks.remove(0));
+    assert_eq!(ed.active_track(), b - 1);
+    assert_eq!(ed.tracks.len(), 2);
+
+    // And the active track can never be closed from in here.
+    assert!(!ed.tracks.remove(ed.active_track()));
+}
+
+#[test]
+fn a_reference_track_carries_its_own_colour_choice() {
+    let mut ed = menu_editor();
+    let b = ed.add_track("Harmony", doc_with_notes(2));
+    let t = ed.tracks.track_mut(b).unwrap();
+    t.reference = true;
+    t.ref_color = RefColor::Shadow;
+    t.color = Some("#ff8800".into());
+
+    let (_, track) = ed.tracks.references().next().unwrap();
+    assert_eq!(track.ref_color, RefColor::Shadow);
+    assert_eq!(track.color.as_deref(), Some("#ff8800"));
+}
+
+#[test]
+fn tracks_are_named_and_findable_in_switcher_order() {
+    let mut ed = menu_editor();
+    ed.add_track("Harmony", doc_with_notes(2));
+    ed.add_track("Bass", doc_with_notes(1));
+
+    assert_eq!(ed.tracks.names(), vec!["Track 1", "Harmony", "Bass"]);
+    assert_eq!(ed.tracks.index_of("Bass"), Some(2));
+    assert!(ed.tracks.rename(0, "Lead"));
+    assert_eq!(ed.tracks.names()[0], "Lead");
+    assert_eq!(ed.tracks.index_of("Track 1"), None);
+}
+
+#[test]
+fn a_pushed_track_starts_with_an_empty_history_of_its_own() {
+    let mut ed = menu_editor();
+    let doc = doc_with_notes(2);
+    let b = ed.tracks.push(Track::new("Harmony", doc));
+    ed.switch_track(b);
+    assert!(!ed.can_undo());
+    assert!(!ed.can_redo());
+}
+
+// ── note handles and the temporary note ──────────────────────────────
+
+use expression_editor_core::handles::{self, Handle, HandleDrag, Scope};
+
+/// One note with a scoop in and a vibrato — enough shape that a handle
+/// which flattens the contour is distinguishable from one that moves it.
+fn handle_editor() -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let mut n = Note::new(NoteId(1), 0.0, PPQ * 4.0, 60);
+    // The note is 4 quarters = 2 s at 120 bpm. Ten cycles across it is
+    // 5 Hz, which is real vibrato; anything under the 3 Hz cutoff would
+    // be classified as drift and the vibrato handle would not see it.
+    for k in 0..256 {
+        let f = k as f64 / 255.0;
+        let t = n.start + (n.end - n.start) * f;
+        let scoop = -1.5 * (1.0 - (f / 0.15_f64).min(1.0)).powi(3);
+        let vib = 0.25 * (f * core::f64::consts::TAU * 10.0).sin();
+        n.pitch.set(t, scoop + vib);
+    }
+    doc.push(n);
+    let mut ed = Editor::new(doc, Viewport::new(900.0, 500.0));
+    ed.snap_pitch = false;
+    ed
+}
+
+fn sounding(ed: &Editor, t: f64) -> f64 {
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    n.row as f64 + n.pitch.sample(t, 0.0)
+}
+
+fn center_of(ed: &Editor) -> f64 {
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    n.row as f64
+        + expression_editor_core::blob::decompose(
+            &n.pitch,
+            n.start,
+            n.end,
+            128,
+            ed.doc.time_base.units_per_second(ed.bpm),
+            0.0,
+        )
+        .center
+}
+
+fn drag_to(ed: &mut Editor, handle: Handle, scope: Scope, dy: f64) -> HandleDrag {
+    let note = ed.doc.note(NoteId(1)).unwrap().clone();
+    let mut d = HandleDrag::begin(handle, &note, scope, 250.0);
+    ed.begin_gesture();
+    ed.drag_handle(&mut d, 250.0 - dy, ed.snap_pitch);
+    d
+}
+
+#[test]
+fn the_pitch_handle_moves_the_contour_without_flattening_it() {
+    let mut ed = handle_editor();
+    let before_scoop = sounding(&ed, 0.0) - center_of(&ed);
+    let before_center = center_of(&ed);
+
+    // Drag up a fifth of the viewport: 24 semitones of range.
+    let mut d = drag_to(&mut ed, Handle::Pitch, Scope::Note, 100.0);
+    ed.end_handle_drag(&d);
+    d.applied = 0.0;
+
+    let after_center = center_of(&ed);
+    assert!(
+        after_center > before_center + 3.0,
+        "the note moved: {before_center} -> {after_center}"
+    );
+    let after_scoop = sounding(&ed, 0.0) - after_center;
+    assert!(
+        (after_scoop - before_scoop).abs() < 0.05,
+        "the scoop travelled with it rather than being flattened: \
+         {before_scoop} -> {after_scoop}"
+    );
+}
+
+#[test]
+fn a_pitch_drag_leaves_the_row_as_the_rounded_centre() {
+    let mut ed = handle_editor();
+    let d = drag_to(&mut ed, Handle::Pitch, Scope::Note, 100.0);
+    ed.end_handle_drag(&d);
+
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let center_offset = expression_editor_core::blob::decompose(
+        &n.pitch,
+        n.start,
+        n.end,
+        128,
+        ed.doc.time_base.units_per_second(ed.bpm),
+        0.0,
+    )
+    .center;
+    assert!(
+        center_offset.abs() <= 0.5 + 1e-9,
+        "the whole semitones went into the row; the curve keeps only the \
+         remainder, got {center_offset}"
+    );
+}
+
+#[test]
+fn coarse_pitch_snaps_and_fine_pitch_does_not() {
+    let mut ed = handle_editor();
+    ed.snap_pitch = true;
+    let d = drag_to(&mut ed, Handle::Pitch, Scope::Note, 37.0);
+    ed.end_handle_drag(&d);
+    let snapped = center_of(&ed);
+    assert!(
+        (snapped - snapped.round()).abs() < 0.01,
+        "coarse pitch lands on a tuning degree, got {snapped}"
+    );
+
+    // The fine handle has to be able to sit between them.
+    let mut ed = handle_editor();
+    let d = drag_to(&mut ed, Handle::FinePitch, Scope::Note, 37.0);
+    ed.end_handle_drag(&d);
+    let fine = center_of(&ed);
+    assert!(
+        (fine - fine.round()).abs() > 0.01,
+        "fine pitch is cents-resolution, got {fine}"
+    );
+}
+
+#[test]
+fn a_handle_drag_never_compounds_across_moves() {
+    let mut ed = handle_editor();
+    let note = ed.doc.note(NoteId(1)).unwrap().clone();
+    let mut d = HandleDrag::begin(Handle::FinePitch, &note, Scope::Note, 250.0);
+    ed.begin_gesture();
+
+    // Walk the pointer down in steps and back to where it started. A
+    // drag that applied deltas instead of rebuilding from the snapshot
+    // would have drifted badly by now.
+    let before = center_of(&ed);
+    for step in 1..=10 {
+        ed.drag_handle(&mut d, 250.0 - step as f64 * 5.0, false);
+    }
+    for step in (0..10).rev() {
+        ed.drag_handle(&mut d, 250.0 - step as f64 * 5.0, false);
+    }
+    ed.drag_handle(&mut d, 250.0, false);
+
+    let after = center_of(&ed);
+    assert!(
+        (after - before).abs() < 1e-6,
+        "back where it started: {before} -> {after}"
+    );
+}
+
+#[test]
+fn the_slope_handles_hinge_on_the_far_end() {
+    let mut ed = handle_editor();
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let (start, end) = (n.start, n.end);
+    let before_end = sounding(&ed, end);
+    let before_start = sounding(&ed, start);
+
+    drag_to(&mut ed, Handle::LeftSlope, Scope::Note, 60.0);
+
+    assert!(
+        (sounding(&ed, end) - before_end).abs() < 0.01,
+        "the far end is the hinge and must not move"
+    );
+    assert!(
+        sounding(&ed, start) > before_start + 0.5,
+        "and the near end tilted up: {before_start} -> {}",
+        sounding(&ed, start)
+    );
+}
+
+#[test]
+fn the_right_slope_hinges_on_the_start() {
+    let mut ed = handle_editor();
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let (start, end) = (n.start, n.end);
+    let before_start = sounding(&ed, start);
+    let before_end_r = sounding(&ed, end);
+
+    drag_to(&mut ed, Handle::RightSlope, Scope::Note, 60.0);
+
+    assert!((sounding(&ed, start) - before_start).abs() < 0.01);
+    assert!(sounding(&ed, end) > before_end_r + 0.5);
+}
+
+#[test]
+fn the_vibrato_handle_changes_depth_and_leaves_the_centre() {
+    let mut ed = handle_editor();
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let (start, end) = (n.start, n.end);
+    let before_center = center_of(&ed);
+    let before_depth = expression_editor_core::blob::decompose(
+        &ed.doc.note(NoteId(1)).unwrap().pitch,
+        start,
+        end,
+        128,
+        ed.doc.time_base.units_per_second(ed.bpm),
+        0.0,
+    )
+    .modulation_depth();
+
+    // Drag down: flatten the vibrato toward robotic.
+    drag_to(&mut ed, Handle::Vibrato, Scope::Note, -120.0);
+
+    let after_depth = expression_editor_core::blob::decompose(
+        &ed.doc.note(NoteId(1)).unwrap().pitch,
+        start,
+        end,
+        128,
+        ed.doc.time_base.units_per_second(ed.bpm),
+        0.0,
+    )
+    .modulation_depth();
+    assert!(
+        after_depth < before_depth * 0.8,
+        "vibrato shallowed: {before_depth} -> {after_depth}"
+    );
+    assert!(
+        (center_of(&ed) - before_center).abs() < 0.05,
+        "and the note did not move"
+    );
+}
+
+#[test]
+fn the_trim_handles_set_a_level_rather_than_a_contour() {
+    let mut ed = handle_editor();
+    drag_to(&mut ed, Handle::Amplitude, Scope::Note, 60.0);
+
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let a = n
+        .pressure
+        .sample(n.start + 1.0, Dimension::Pressure.default_value());
+    let b = n
+        .pressure
+        .sample(n.end - 1.0, Dimension::Pressure.default_value());
+    assert!((a - b).abs() < 1e-6, "flat across the note: {a} vs {b}");
+    assert!(a > Dimension::Pressure.default_value());
+}
+
+// ── the temporary note ───────────────────────────────────────────────
+
+#[test]
+fn a_temporary_note_scopes_the_handles_to_a_range() {
+    let mut ed = handle_editor();
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    let (start, end) = (n.start, n.end);
+    let quarter = start + (end - start) * 0.25;
+    let half = start + (end - start) * 0.5;
+    let before_late = sounding(&ed, end - 1.0);
+
+    assert!(ed.set_temp_note(NoteId(1), quarter, half));
+    assert_eq!(
+        ed.scope_for(NoteId(1)),
+        Scope::Range {
+            t0: quarter,
+            t1: half
+        }
+    );
+
+    let scope = ed.scope_for(NoteId(1));
+    drag_to(&mut ed, Handle::FinePitch, scope, 100.0);
+
+    assert!(
+        sounding(&ed, (quarter + half) * 0.5) > before_late,
+        "inside the range moved"
+    );
+    assert!(
+        (sounding(&ed, end - 1.0) - before_late).abs() < 0.05,
+        "and outside it did not"
+    );
+}
+
+#[test]
+fn drawing_a_new_range_discards_the_previous_one() {
+    let mut ed = handle_editor();
+    assert!(ed.set_temp_note(NoteId(1), 0.0, PPQ));
+    assert!(ed.set_temp_note(NoteId(1), PPQ * 2.0, PPQ * 3.0));
+    assert_eq!(
+        ed.temp_note,
+        Some((NoteId(1), PPQ * 2.0, PPQ * 3.0)),
+        "there is only ever one temporary note"
+    );
+    ed.clear_temp_note();
+    assert_eq!(ed.scope_for(NoteId(1)), Scope::Note);
+}
+
+#[test]
+fn a_temporary_note_is_clipped_to_its_note_and_a_stray_click_is_refused() {
+    let mut ed = handle_editor();
+    // Past both edges: clipped, not rejected.
+    assert!(ed.set_temp_note(NoteId(1), -PPQ, PPQ * 99.0));
+    assert_eq!(ed.temp_note, Some((NoteId(1), 0.0, PPQ * 4.0)));
+
+    // Too narrow to see: refused, so no invisible scope is left armed.
+    ed.clear_temp_note();
+    assert!(!ed.set_temp_note(NoteId(1), PPQ, PPQ + 0.001));
+    assert_eq!(ed.temp_note, None);
+}
+
+#[test]
+fn a_temporary_note_belongs_to_one_note_only() {
+    let mut ed = handle_editor();
+    ed.doc.push(Note::new(NoteId(2), PPQ * 5.0, PPQ * 6.0, 62));
+    ed.set_temp_note(NoteId(1), 0.0, PPQ);
+
+    assert!(matches!(ed.scope_for(NoteId(1)), Scope::Range { .. }));
+    assert_eq!(
+        ed.scope_for(NoteId(2)),
+        Scope::Note,
+        "another note is unaffected by a range open on this one"
+    );
+}
+
+// ── layout ───────────────────────────────────────────────────────────
+
+#[test]
+fn a_wide_note_carries_all_seven_handles() {
+    let rects = handles::layout(100.0, 200.0, 200.0, 20.0);
+    assert_eq!(rects.len(), 7);
+    for h in Handle::ALL {
+        assert!(rects.iter().any(|r| r.handle == h), "{h:?} is laid out");
+    }
+    // The strips sit above and below rather than on the body, so the
+    // body stays one large target.
+    let body = rects.iter().find(|r| r.handle == Handle::Pitch).unwrap();
+    let fine = rects
+        .iter()
+        .find(|r| r.handle == Handle::FinePitch)
+        .unwrap();
+    assert!(fine.y + fine.h <= body.y + 1e-9);
+}
+
+#[test]
+fn a_narrow_note_drops_handles_rather_than_shrinking_them() {
+    // Six three-pixel targets on a 32nd note is worse than none.
+    let mid = handles::layout(0.0, 0.0, 30.0, 20.0);
+    assert_eq!(mid.len(), 3);
+    assert!(mid.iter().any(|r| r.handle == Handle::FinePitch));
+    assert!(mid.iter().any(|r| r.handle == Handle::Amplitude));
+    assert!(!mid.iter().any(|r| r.handle == Handle::Vibrato));
+
+    let tiny = handles::layout(0.0, 0.0, 10.0, 20.0);
+    assert_eq!(tiny.len(), 1, "the body handle always survives");
+    assert_eq!(tiny[0].handle, Handle::Pitch);
+}
+
+#[test]
+fn a_strip_handle_outranks_the_body_it_overlaps() {
+    let rects = handles::layout(100.0, 200.0, 200.0, 20.0);
+    // In the band above the note: fine pitch, not the body behind it.
+    assert_eq!(
+        handles::hit(&rects, 200.0, 200.0 - handles::STRIP_H * 0.5),
+        Some(Handle::FinePitch)
+    );
+    // In the body: the body.
+    assert_eq!(handles::hit(&rects, 200.0, 210.0), Some(Handle::Pitch));
+    // The corners are where the manual puts them.
+    assert_eq!(
+        handles::hit(&rects, 110.0, 200.0 - 2.0),
+        Some(Handle::LeftSlope)
+    );
+    assert_eq!(
+        handles::hit(&rects, 290.0, 220.0 + 2.0),
+        Some(Handle::Vibrato)
+    );
+    assert_eq!(handles::hit(&rects, 500.0, 500.0), None);
+}
+
+// ── pitch drawing ────────────────────────────────────────────────────
+
+use expression_editor_core::draft::{self, PitchDraft};
+
+fn draft_editor() -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 8.0);
+    let mut n = Note::new(NoteId(1), 0.0, PPQ * 4.0, 60);
+    for k in 0..32 {
+        let f = k as f64 / 31.0;
+        n.pitch.set(n.start + (n.end - n.start) * f, -0.3);
+    }
+    doc.push(n);
+    Editor::new(doc, Viewport::new(900.0, 500.0))
+}
+
+#[test]
+fn a_drawn_line_eases_rather_than_ramping() {
+    // The shape is the point: a voice accelerates out of one pitch and
+    // decelerates into the next. A linear ramp arrives at full speed
+    // and stops dead, which is what a synthesiser glide sounds like.
+    assert!((draft::sine_ease(0.0)).abs() < 1e-12);
+    assert!((draft::sine_ease(1.0) - 1.0).abs() < 1e-12);
+    assert!((draft::sine_ease(0.5) - 0.5).abs() < 1e-12);
+    // Flat at the ends, steep in the middle — the opposite of linear.
+    let near_start = draft::sine_ease(0.1);
+    let near_mid = draft::sine_ease(0.55) - draft::sine_ease(0.45);
+    assert!(near_start < 0.1, "eases in, got {near_start}");
+    assert!(near_mid > 0.1, "steepest at the middle, got {near_mid}");
+}
+
+#[test]
+fn the_drawing_runs_through_its_anchors() {
+    let ed = draft_editor();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(0.0, -1.0);
+    d.add(PPQ * 2.0, 1.0);
+    d.add(PPQ * 4.0, 0.0);
+
+    let curve = draft::as_curve(&d.rendered(0.0, PPQ * 4.0));
+    for (t, want) in [(0.0, -1.0), (PPQ * 2.0, 1.0), (PPQ * 4.0, 0.0)] {
+        let got = curve.sample(t, 0.0);
+        assert!(
+            (got - want).abs() < 0.02,
+            "at {t}: wanted {want}, got {got}"
+        );
+    }
+}
+
+#[test]
+fn an_anchor_in_an_unvoiced_region_is_allowed() {
+    // Forbidding it would break dragging *through* a consonant, and the
+    // anchor still shapes the voiced line either side of it.
+    let mut ed = draft_editor();
+    ed.doc.unvoiced = vec![(PPQ, PPQ * 2.0)];
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(0.0, 0.0);
+    d.add(PPQ * 1.5, 2.0);
+    d.add(PPQ * 4.0, 0.0);
+    assert_eq!(d.anchors().len(), 3);
+    assert!(!d.rendered(0.0, PPQ * 4.0).is_empty());
+}
+
+#[test]
+fn the_draft_has_its_own_undo_and_the_document_sees_none_of_it() {
+    let mut ed = draft_editor();
+    let before = ed.doc.note(NoteId(1)).unwrap().pitch.clone();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+
+    d.add(0.0, -1.0);
+    d.add(PPQ * 2.0, 1.0);
+    d.add(PPQ * 4.0, 0.5);
+    assert!(d.can_undo());
+
+    // Previews are applied live, so the document changes — but never
+    // records, so the history is untouched.
+    ed.preview_draft(&mut d);
+    assert!(!ed.can_undo(), "a preview is not an undo step");
+
+    d.undo();
+    d.undo();
+    assert_eq!(d.anchors().len(), 1);
+    assert!(d.can_redo());
+    d.redo();
+    assert_eq!(d.anchors().len(), 2);
+
+    // Dismiss puts back exactly what was captured.
+    ed.dismiss_draft(&d);
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().pitch, before);
+}
+
+#[test]
+fn applying_a_whole_drawing_is_one_step_of_history() {
+    let mut ed = draft_editor();
+    let before = ed.doc.note(NoteId(1)).unwrap().pitch.clone();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+
+    // A long session: many anchors, moves and undos.
+    for k in 0..8 {
+        d.add(PPQ * 0.5 * k as f64, (k as f64 * 0.3).sin());
+    }
+    d.begin_move();
+    d.move_to(3, PPQ * 1.6, 1.2);
+    d.undo();
+    d.add(PPQ * 3.7, -0.8);
+    ed.preview_draft(&mut d);
+
+    // Commit through the editor, which rewinds the live preview first
+    // so history snapshots the state before drawing began.
+    assert!(ed.apply_draft(&d));
+    let drawn = ed.doc.note(NoteId(1)).unwrap().pitch.clone();
+    assert_ne!(drawn, before);
+
+    // One undo takes the entire drawing, not its last anchor.
+    assert!(ed.undo());
+    assert_eq!(ed.doc.note(NoteId(1)).unwrap().pitch, before);
+    assert!(!ed.can_undo());
+}
+
+#[test]
+fn the_original_stays_available_for_the_whole_session() {
+    let ed = draft_editor();
+    let original: Vec<_> = ed.doc.note(NoteId(1)).unwrap().pitch.points().to_vec();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(0.0, 3.0);
+    d.add(PPQ * 4.0, -3.0);
+    d.undo();
+    d.add(PPQ * 2.0, 1.0);
+
+    assert_eq!(
+        d.original(),
+        original.as_slice(),
+        "the thin line underneath is what was there before drawing began, \
+         and no amount of drawing changes it"
+    );
+}
+
+#[test]
+fn a_drawing_that_covers_half_a_note_leaves_the_rest_alone() {
+    let mut ed = draft_editor();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(0.0, 2.0);
+    d.add(PPQ * 1.5, 2.0);
+    ed.apply_draft(&d);
+
+    let n = ed.doc.note(NoteId(1)).unwrap();
+    assert!((n.pitch.sample(PPQ * 0.7, 0.0) - 2.0).abs() < 0.05, "drawn");
+    assert!(
+        (n.pitch.sample(PPQ * 3.0, 0.0) - -0.3).abs() < 0.05,
+        "and the half that was sung is still as it was sung"
+    );
+}
+
+#[test]
+fn dragging_an_anchor_past_its_neighbour_reorders_rather_than_inverting() {
+    let ed = draft_editor();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(0.0, 0.0);
+    d.add(PPQ, 1.0);
+    d.add(PPQ * 2.0, 2.0);
+
+    d.begin_move();
+    d.move_to(0, PPQ * 3.0, -1.0);
+
+    let times: Vec<f64> = d.anchors().iter().map(|a| a.t).collect();
+    let mut sorted = times.clone();
+    sorted.sort_by(f64::total_cmp);
+    assert_eq!(times, sorted, "anchors stay in time order");
+}
+
+#[test]
+fn a_drag_is_one_draft_step_however_far_the_pointer_travels() {
+    let ed = draft_editor();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(0.0, 0.0);
+    d.add(PPQ * 2.0, 0.0);
+    let depth = d.anchors().to_vec();
+
+    d.begin_move();
+    for k in 1..=20 {
+        d.move_to(1, PPQ * 2.0, k as f64 * 0.1);
+    }
+    // One undo returns to before the drag, not to its previous frame.
+    assert!(d.undo());
+    assert_eq!(d.anchors(), depth.as_slice());
+}
+
+#[test]
+fn an_empty_draft_writes_nothing() {
+    let ed = draft_editor();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    assert!(d.is_empty());
+    assert!(d.apply_edit().is_none());
+    assert!(d.cancel_edit().is_none());
+    assert!(d.preview_edits().is_empty());
+}
+
+#[test]
+fn an_anchor_is_grabbed_by_proximity_in_time() {
+    let ed = draft_editor();
+    let mut d = PitchDraft::open(&ed.doc, NoteId(1)).unwrap();
+    d.add(PPQ, 0.0);
+    d.add(PPQ * 3.0, 0.0);
+
+    assert_eq!(d.anchor_at(PPQ * 1.05, PPQ * 0.2), Some(0));
+    assert_eq!(d.anchor_at(PPQ * 2.9, PPQ * 0.2), Some(1));
+    assert_eq!(d.anchor_at(PPQ * 2.0, PPQ * 0.2), None);
+    // Between two in range, the nearer one wins.
+    assert_eq!(d.anchor_at(PPQ * 1.4, PPQ * 5.0), Some(0));
+}
+
+// ── timing separators ────────────────────────────────────────────────
+
+use expression_editor_core::timing::{self, StretchLaw};
+
+/// Three abutting notes, one bar each.
+fn timing_editor() -> Editor {
+    let mut doc = ExpressionDoc::new(TimeBase::Ppq { ppq: PPQ }, 0.0, PPQ * 12.0);
+    for i in 0..3u64 {
+        let s = PPQ * 4.0 * i as f64;
+        doc.push(Note::new(NoteId(i + 1), s, s + PPQ * 4.0, 60 + i as i32));
+    }
+    Editor::new(doc, Viewport::new(900.0, 500.0))
+}
+
+fn span(ed: &Editor, id: u64) -> (f64, f64) {
+    let n = ed.doc.note(NoteId(id)).unwrap();
+    (n.start, n.end)
+}
+
+#[test]
+fn separators_sit_only_where_notes_actually_meet() {
+    let ed = timing_editor();
+    let seps = timing::separators(&ed.doc, 1.0);
+    assert_eq!(seps.len(), 2);
+    assert!((seps[0].t - PPQ * 4.0).abs() < 1e-9);
+    assert_eq!(seps[0].left, Some(NoteId(1)));
+    assert_eq!(seps[0].right, Some(NoteId(2)));
+
+    // A gap of silence is not a draggable boundary: there is nothing on
+    // one side of it whose length would change.
+    let mut ed = timing_editor();
+    ed.doc.note_mut(NoteId(2)).unwrap().start = PPQ * 6.0;
+    assert_eq!(timing::separators(&ed.doc, 1.0).len(), 1);
+}
+
+#[test]
+fn grabbing_above_the_tick_stretches_left_and_slides_the_rest() {
+    let mut ed = timing_editor();
+    let sep = timing::separators(&ed.doc, 1.0)[0];
+    assert_eq!(
+        StretchLaw::at(10.0, 100.0),
+        StretchLaw::LeftStretchRightMoves
+    );
+
+    for e in timing::plan(&ed.doc, sep, PPQ * 5.0, StretchLaw::LeftStretchRightMoves) {
+        ed.apply(&e);
+    }
+
+    assert_eq!(span(&ed, 1), (0.0, PPQ * 5.0), "the left note grew");
+    assert_eq!(
+        span(&ed, 2),
+        (PPQ * 5.0, PPQ * 9.0),
+        "the right note kept its length and slid"
+    );
+    assert_eq!(
+        span(&ed, 3),
+        (PPQ * 9.0, PPQ * 13.0),
+        "and so did everything after it"
+    );
+}
+
+#[test]
+fn grabbing_below_the_tick_stretches_both_sides() {
+    let mut ed = timing_editor();
+    let sep = timing::separators(&ed.doc, 1.0)[0];
+    assert_eq!(StretchLaw::at(90.0, 100.0), StretchLaw::BothStretch);
+
+    for e in timing::plan(&ed.doc, sep, PPQ * 5.0, StretchLaw::BothStretch) {
+        ed.apply(&e);
+    }
+
+    assert_eq!(span(&ed, 1), (0.0, PPQ * 5.0));
+    assert_eq!(
+        span(&ed, 2),
+        (PPQ * 5.0, PPQ * 8.0),
+        "the right note absorbed the change instead of moving"
+    );
+    assert_eq!(
+        span(&ed, 3),
+        (PPQ * 8.0, PPQ * 12.0),
+        "so nothing after the pair moved at all"
+    );
+}
+
+#[test]
+fn a_stretch_past_the_limits_refuses_rather_than_degrading() {
+    let ed = timing_editor();
+    let sep = timing::separators(&ed.doc, 1.0)[0];
+
+    // Four times is the ceiling: the left note is 4 beats, so a
+    // boundary at 16 beats is exactly 4x and allowed...
+    assert!(!timing::plan(&ed.doc, sep, PPQ * 16.0, StretchLaw::LeftStretchRightMoves).is_empty());
+    // ...and anything beyond it produces nothing at all.
+    assert!(timing::plan(&ed.doc, sep, PPQ * 17.0, StretchLaw::LeftStretchRightMoves).is_empty());
+
+    // An eighth is the floor.
+    assert!(!timing::plan(&ed.doc, sep, PPQ * 0.5, StretchLaw::LeftStretchRightMoves).is_empty());
+    assert!(timing::plan(&ed.doc, sep, PPQ * 0.4, StretchLaw::LeftStretchRightMoves).is_empty());
+}
+
+#[test]
+fn both_stretch_refuses_when_only_the_far_side_would_break() {
+    let mut ed = timing_editor();
+    // Make the right note short, so a modest drag over-compresses it
+    // even though the left side is well within range.
+    ed.doc.note_mut(NoteId(2)).unwrap().end = PPQ * 4.0 + PPQ * 0.5;
+    ed.doc.note_mut(NoteId(3)).unwrap().start = PPQ * 4.5;
+    let sep = timing::separators(&ed.doc, 1.0)[0];
+
+    let edits = timing::plan(&ed.doc, sep, PPQ * 4.49, StretchLaw::BothStretch);
+    assert!(
+        edits.is_empty(),
+        "the whole gesture refuses; a half-applied stretch would leave \
+         the left side moved and the right side not"
+    );
+}
+
+#[test]
+fn a_boundary_reports_how_far_off_the_beat_it_is() {
+    let step = PPQ;
+    assert!(timing::beat_deviation(PPQ * 2.0, 0.0, step).abs() < 1e-9);
+    assert!((timing::beat_deviation(PPQ * 2.25, 0.0, step) - PPQ * 0.25).abs() < 1e-9);
+    // Past halfway it reads as early against the *next* beat, not late
+    // against the last one.
+    assert!(timing::beat_deviation(PPQ * 2.75, 0.0, step) < 0.0);
+}
+
+#[test]
+fn double_clicking_a_boundary_puts_it_on_the_beat() {
+    assert!((timing::snap_to_beat(PPQ * 2.3, 0.0, PPQ) - PPQ * 2.0).abs() < 1e-9);
+    assert!((timing::snap_to_beat(PPQ * 2.7, 0.0, PPQ) - PPQ * 3.0).abs() < 1e-9);
+    // A disabled grid leaves it where it is rather than snapping to zero.
+    assert!((timing::snap_to_beat(PPQ * 2.3, 0.0, 0.0) - PPQ * 2.3).abs() < 1e-9);
+}
+
+// ── MIDI reference ───────────────────────────────────────────────────
+
+use expression_editor_core::reference::{self, MidiReference, RefNote, SnapSource};
+
+fn reference() -> MidiReference {
+    MidiReference::new(
+        "Vocal.mid",
+        vec!["Track 1".into(), "Track 2".into()],
+        vec![
+            RefNote {
+                start: 0.0,
+                end: PPQ * 2.0,
+                row: 60,
+            },
+            RefNote {
+                start: PPQ * 2.0,
+                end: PPQ * 4.0,
+                row: 64,
+            },
+            RefNote {
+                start: PPQ * 4.0,
+                end: PPQ * 6.0,
+                row: 67,
+            },
+        ],
+    )
+}
+
+#[test]
+fn the_reference_answers_what_is_sounding_now() {
+    let r = reference();
+    assert_eq!(r.at(PPQ, 60.0).map(|n| n.row), Some(60));
+    assert_eq!(r.at(PPQ * 3.0, 60.0).map(|n| n.row), Some(64));
+    assert_eq!(
+        r.at(PPQ * 20.0, 60.0),
+        None,
+        "nothing sounding is not the same as the nearest note"
+    );
+}
+
+#[test]
+fn transposing_is_non_destructive() {
+    let mut r = reference();
+    r.transpose = 3;
+    assert_eq!(r.at(PPQ, 60.0).map(|n| n.row), Some(63));
+    r.transpose = 0;
+    assert_eq!(
+        r.at(PPQ, 60.0).map(|n| n.row),
+        Some(60),
+        "nudged into key and back out with no accumulated error"
+    );
+}
+
+#[test]
+fn a_chord_in_the_reference_tunes_each_voice_to_its_own_part() {
+    let r = MidiReference::new(
+        "chord.mid",
+        vec!["Track 1".into()],
+        vec![
+            RefNote {
+                start: 0.0,
+                end: PPQ,
+                row: 60,
+            },
+            RefNote {
+                start: 0.0,
+                end: PPQ,
+                row: 64,
+            },
+            RefNote {
+                start: 0.0,
+                end: PPQ,
+                row: 67,
+            },
+        ],
+    );
+    // A singer near the fifth must not be dragged to the root just
+    // because the root is listed first.
+    assert_eq!(r.at(PPQ * 0.5, 66.6).map(|n| n.row), Some(67));
+    assert_eq!(r.at(PPQ * 0.5, 60.2).map(|n| n.row), Some(60));
+}
+
+#[test]
+fn the_scale_and_the_reference_present_the_same_way() {
+    let tuning = Tuning::default();
+    let r = reference();
+
+    // Both answer "what should this be?", and the caller cannot tell
+    // which kind it holds.
+    let sources = [SnapSource::Tuning(&tuning), SnapSource::Reference(&r)];
+    for s in sources {
+        assert!(s.is_available());
+        assert!(s.target(PPQ, 60.3).is_some());
+    }
+
+    // Only the reference is time-dependent, which is the one real
+    // difference between them.
+    assert_eq!(
+        SnapSource::Tuning(&tuning).target(PPQ * 99.0, 60.3),
+        SnapSource::Tuning(&tuning).target(PPQ, 60.3)
+    );
+    assert!(SnapSource::Reference(&r).target(PPQ * 99.0, 60.3).is_none());
+}
+
+#[test]
+fn an_empty_reference_is_not_available_as_a_target() {
+    let empty = MidiReference::default();
+    assert!(!SnapSource::Reference(&empty).is_available());
+    assert!(SnapSource::Reference(&empty).target(0.0, 60.0).is_none());
+}
+
+#[test]
+fn correction_blends_rather_than_pinning() {
+    let r = reference();
+    let src = SnapSource::Reference(&r);
+    // Sung a semitone under the reference's E.
+    let notes = [(NoteId(1), PPQ * 3.0, 63.0)];
+
+    let half = reference::plan_corrections(src, notes.iter().copied(), 0.5);
+    assert_eq!(half.len(), 1);
+    assert!((half[0].delta - 0.5).abs() < 1e-9, "halfway there");
+
+    let full = reference::plan_corrections(src, notes.iter().copied(), 1.0);
+    assert!((full[0].delta - 1.0).abs() < 1e-9);
+
+    // Zero is a no-op, not a correction of zero.
+    assert!(reference::plan_corrections(src, notes.iter().copied(), 0.0).is_empty());
+}
+
+#[test]
+fn a_note_with_nothing_to_tune_to_is_left_alone() {
+    let r = reference();
+    let src = SnapSource::Reference(&r);
+    // Well past the end of the reference part.
+    let notes = [(NoteId(1), PPQ * 50.0, 63.0)];
+    assert!(
+        reference::plan_corrections(src, notes.iter().copied(), 1.0).is_empty(),
+        "inventing a target would drag the note to a bar it does not \
+         belong to"
+    );
+}
+
+#[test]
+fn selecting_another_track_swaps_the_notes() {
+    let mut r = reference();
+    assert!(r.set_track(
+        1,
+        vec![RefNote {
+            start: 0.0,
+            end: PPQ,
+            row: 72
+        }]
+    ));
+    assert_eq!(r.active, 1);
+    assert_eq!(r.at(PPQ * 0.5, 60.0).map(|n| n.row), Some(72));
+    assert!(!r.set_track(9, Vec::new()), "no such track in the file");
+}
+
+// ── Curve shapes ─────────────────────────────────────────────────────
+//
+// Shapes exist for envelopes (#186). The bar they have to clear is that
+// adding them changes nothing for the MIDI and CC curves that were here
+// first — hence the default-is-linear tests as well as the shape ones.
+
+use expression_editor_core::CurveShape;
+
+fn two(a: Point, b: Point) -> Curve {
+    Curve::from_points(vec![a, b])
+}
+
+#[test]
+fn a_point_is_linear_unless_told_otherwise() {
+    let p = Point::new(0.0, 1.0);
+    assert_eq!(p.shape, CurveShape::Linear);
+    assert_eq!(p.tension, 0.0);
+    assert_eq!(Point::default().shape, CurveShape::Linear);
+}
+
+#[test]
+fn a_linear_segment_interpolates_exactly_as_before() {
+    let c = two(Point::new(0.0, 0.0), Point::new(10.0, 10.0));
+    for t in [0.0, 2.5, 5.0, 7.5, 10.0] {
+        assert!((c.sample(t, 0.0) - t).abs() < 1e-9, "linear is unchanged at {t}");
+    }
+}
+
+#[test]
+fn a_square_segment_holds_then_jumps() {
+    let c = two(
+        Point::shaped(0.0, 0.0, CurveShape::Square),
+        Point::new(10.0, 1.0),
+    );
+    assert_eq!(c.sample(0.0, 0.0), 0.0);
+    assert_eq!(c.sample(5.0, 0.0), 0.0, "holds across the segment");
+    assert_eq!(c.sample(9.999, 0.0), 0.0, "still holding just before");
+    assert_eq!(c.sample(10.0, 0.0), 1.0, "and jumps at the point");
+}
+
+#[test]
+fn every_shape_starts_and_ends_where_the_points_say() {
+    // Whatever happens in between, a segment must be pinned at both
+    // ends — otherwise a shape change silently moves authored values.
+    for shape in [
+        CurveShape::Linear,
+        CurveShape::Square,
+        CurveShape::SlowStartEnd,
+        CurveShape::FastStart,
+        CurveShape::FastEnd,
+        CurveShape::Bezier,
+    ] {
+        let c = two(Point::shaped(0.0, 3.0, shape), Point::new(8.0, 9.0));
+        assert!((c.sample(0.0, 0.0) - 3.0).abs() < 1e-9, "{shape:?} start");
+        assert!((c.sample(8.0, 0.0) - 9.0).abs() < 1e-9, "{shape:?} end");
+    }
+}
+
+#[test]
+fn the_eases_bend_the_way_their_names_say() {
+    let mid = |shape| {
+        two(Point::shaped(0.0, 0.0, shape), Point::new(10.0, 1.0)).sample(5.0, 0.0)
+    };
+    let linear = mid(CurveShape::Linear);
+    assert!((linear - 0.5).abs() < 1e-9);
+    // S-curve is symmetric, so it also passes through the middle.
+    assert!((mid(CurveShape::SlowStartEnd) - 0.5).abs() < 1e-9);
+    assert!(mid(CurveShape::FastStart) > linear, "fast start is ahead by halfway");
+    assert!(mid(CurveShape::FastEnd) < linear, "fast end is behind by halfway");
+}
+
+#[test]
+fn bezier_tension_zero_is_linear_and_the_sign_picks_a_direction() {
+    let at = |tension| two(Point::bezier(0.0, 0.0, tension), Point::new(10.0, 1.0)).sample(5.0, 0.0);
+    assert!((at(0.0) - 0.5).abs() < 1e-9, "no tension, no bend");
+    assert!(at(1.0) > 0.5, "positive tension runs ahead");
+    assert!(at(-1.0) < 0.5, "negative tension holds back");
+}
+
+#[test]
+fn tension_is_clamped_to_what_the_daw_can_express() {
+    assert_eq!(Point::bezier(0.0, 0.0, 5.0).tension, 1.0);
+    assert_eq!(Point::bezier(0.0, 0.0, -5.0).tension, -1.0);
+}
+
+#[test]
+fn the_left_point_owns_the_segment() {
+    // A point describes how the curve *leaves* it, which is how the DAW
+    // stores it. Setting the shape on the right-hand point must not
+    // change the segment before it.
+    let c = two(Point::new(0.0, 0.0), Point::shaped(10.0, 1.0, CurveShape::Square));
+    assert!(
+        (c.sample(5.0, 0.0) - 0.5).abs() < 1e-9,
+        "the trailing point's shape is not read"
+    );
 }

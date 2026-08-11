@@ -4,13 +4,15 @@
 //! here is a plain function over `&mut Editor`, and the component just
 //! routes events into them.
 
-use expression_editor_core::doc::{Lane, NoteId, Point, Target};
+use expression_editor_core::doc::{Dimension, NoteId, Point, Target};
 use expression_editor_core::edit::Edit;
+use expression_editor_core::handles::{self, Handle};
+use expression_editor_core::menu::Command;
 use expression_editor_core::mouse::{Action, Context, Gesture};
 use expression_editor_core::razor::RazorArea;
 use expression_editor_core::tools::{self, Hit, Mods};
 use expression_editor_core::zoom::ZoomModes;
-use expression_editor_core::{Editor, Shape, Tool};
+use expression_editor_core::{Editor, Mode, Shape, Tool};
 
 /// What the pointer is currently doing. `None` between gestures.
 #[derive(Clone, Debug, PartialEq, Default)]
@@ -104,6 +106,70 @@ pub enum Drag {
         /// leaving a staircase.
         last: Option<(f64, f64)>,
     },
+    /// A shaped ramp across a controller lane. Like [`Drag::Curve`] it
+    /// survives release, so the toolbar's shape buttons restyle the
+    /// stroke you just drew instead of the one before it.
+    CcLine {
+        number: u8,
+        start: (f64, f64),
+        current: (f64, f64),
+    },
+    /// Sweeping a controller lane back to its default.
+    CcErase {
+        number: u8,
+        start_t: f64,
+        current_t: f64,
+    },
+    /// Vertical drag scales the swept range's depth about a pivot.
+    ///
+    /// Rebuilt from `base` on every move rather than scaling the live
+    /// curve, because `apply_live` writes straight through and a chain
+    /// of live scales would compound into an exponential.
+    CcScale {
+        number: u8,
+        t0: f64,
+        t1: f64,
+        /// The dimension's points as they were when the gesture opened.
+        base: Vec<Point>,
+        /// Widest range the drag has covered, so shrinking it back
+        /// restores what the wider sweep had already scaled.
+        spanned: (f64, f64),
+        /// The value the range is scaled about — its own mean, so a
+        /// factor of 0 flattens it to where it already sat rather than
+        /// slamming it to zero.
+        pivot: f64,
+        origin_y: f64,
+    },
+    /// Dragging a pitch-drawing anchor.
+    DraftAnchor {
+        index: usize,
+    },
+    /// Dragging a timing separator. The law is captured at press, from
+    /// where on the line the grab landed — reading it live would let the
+    /// gesture change meaning halfway through.
+    Separator {
+        sep: expression_editor_core::Separator,
+        law: expression_editor_core::StretchLaw,
+    },
+    /// One of the seven note handles.
+    Handle(Box<handles::HandleDrag>),
+    /// Dragging out a temporary note: a range inside one note that the
+    /// handles will then address.
+    TempNote {
+        note: NoteId,
+        origin_t: f64,
+        current_t: f64,
+    },
+    /// Not a drag at all — the signal that the surface should open a
+    /// context menu here. It rides `Drag` because that is already the
+    /// one value `pointer_down` hands back to the component, and a
+    /// second return channel for one gesture is not worth the churn.
+    ContextMenu {
+        x: f64,
+        y: f64,
+        under: Option<NoteId>,
+        t: f64,
+    },
     /// Vertical drag over notes edits velocity.
     Velocity {
         notes: Vec<NoteId>,
@@ -130,9 +196,29 @@ impl Drag {
             _ => None,
         }
     }
+
+    /// The controller ramp the shape buttons target, same contract as
+    /// [`Drag::live_curve`] but for a CC dimension.
+    pub fn live_cc_line(&self) -> Option<(u8, f64, f64)> {
+        match self {
+            Drag::CcLine {
+                number,
+                start,
+                current,
+            } => Some((*number, start.0, current.0)),
+            _ => None,
+        }
+    }
 }
 
+/// How close to the drawn controller curve counts as grabbing it.
+const CC_EVENT_PX: f64 = 5.0;
+
 /// Which mouse-modifier context `(x, y)` falls in.
+///
+/// CC edit mode outranks everything: while it is on, the roll *is* that
+/// controller's dimension, so the razor and the notes behind it are not what
+/// the pointer is addressing.
 ///
 /// Razor areas outrank notes: once you have drawn a rectangle, dragging
 /// inside it must operate on the region, not on whatever note happens
@@ -140,6 +226,26 @@ impl Drag {
 pub fn context_at(ed: &Editor, x: f64, y: f64) -> Context {
     let t = ed.camera.t_at(x);
     let row = ed.camera.pitch_at(y, ed.viewport).round() as i32;
+
+    if let Some(number) = ed.cc_edit {
+        // Near the existing curve is `CcEvent`, open dimension is `CcLane` —
+        // the same distinction REAPER draws, so a mouse map written for
+        // REAPER lands on the right binding without translation.
+        let on_curve = ed
+            .doc
+            .cc
+            .get(number)
+            .map(|l| {
+                let v = l.curve.sample(t, l.default_value());
+                (expression_editor_core::cc::cc_y(v, ed.viewport.h) - y).abs() <= CC_EVENT_PX
+            })
+            .unwrap_or(false);
+        return if on_curve {
+            Context::CcEvent
+        } else {
+            Context::CcLane
+        };
+    }
 
     if let Some((_, area)) = ed.razor.at(t, row) {
         let edge_px = 6.0;
@@ -170,15 +276,20 @@ pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) ->
         1 => Gesture::MiddleClick,
         _ => Gesture::Drag,
     };
-    // CC edit mode takes the roll: while it is on, the surface belongs
-    // to that controller, not to the notes behind it.
-    if let Some(number) = ed.cc_edit {
-        if gesture == Gesture::Drag && !mods.ctrl && !mods.shift {
-            ed.begin_gesture();
-            let mut drag = Drag::CcPen { number, last: None };
-            cc_draw(ed, &mut drag, x, y);
-            return drag;
-        }
+
+    // Timing separators outrank the notes they sit between: in timing
+    // mode the boundary is what the pointer is addressing.
+    if let Some(drag) = separator_press(ed, x, y, gesture) {
+        return drag;
+    }
+
+    // The note handles sit in front of everything, because they are
+    // drawn in front of everything: a press that visibly lands on a
+    // handle must not fall through to the note or the roll behind it.
+    // Right-click is the exception the manual calls out — on the
+    // amplitude handle it mutes rather than dragging.
+    if let Some(drag) = handle_press(ed, x, y, mods, gesture) {
+        return drag;
     }
 
     let context = context_at(ed, x, y);
@@ -408,6 +519,54 @@ fn run_action(
                 .collect();
             Some(Drag::None)
         }
+        // ── controller lanes ─────────────────────────────────────────
+        // All four need a dimension to act on. Outside CC edit mode there is
+        // no active controller, so they fall through to the tool path
+        // rather than inventing one.
+        Action::EditCcEvents => {
+            let number = ed.cc_edit?;
+            let mut drag = Drag::CcPen { number, last: None };
+            cc_draw(ed, &mut drag, x, y);
+            Some(drag)
+        }
+        Action::DrawCcLine => {
+            let number = ed.cc_edit?;
+            Some(Drag::CcLine {
+                number,
+                start: (x, y),
+                current: (x, y),
+            })
+        }
+        Action::EraseCcEvents => {
+            let number = ed.cc_edit?;
+            Some(Drag::CcErase {
+                number,
+                start_t: t,
+                current_t: t,
+            })
+        }
+        Action::ScaleCcEvents => {
+            let number = ed.cc_edit?;
+            // The gesture opens with no width; the range grows as the
+            // drag sweeps sideways while the vertical offset sets depth.
+            Some(Drag::CcScale {
+                number,
+                t0: t,
+                t1: t,
+                base: ed
+                    .doc
+                    .cc
+                    .get(number)
+                    .map(|l| l.curve.points().to_vec())
+                    .unwrap_or_default(),
+                spanned: (t, t),
+                pivot: cc_mean(ed, number, t, t),
+                origin_y: y,
+            })
+        }
+
+        Action::ContextMenu => Some(Drag::ContextMenu { x, y, under, t }),
+
         // Expression tools and anything unmapped stay with the
         // tool-driven path.
         Action::ActiveTool | Action::PenOverride => None,
@@ -416,6 +575,216 @@ fn run_action(
             None
         }
     }
+}
+
+/// Resolve a press against the timing separators.
+///
+/// Returns `None` when the press was not on one, so the caller falls
+/// through to the ordinary path.
+fn separator_press(ed: &mut Editor, x: f64, y: f64, gesture: Gesture) -> Option<Drag> {
+    if !ed.timing_mode {
+        return None;
+    }
+    let grab = crate::canvas::SEPARATOR_GRAB_PX;
+    let line = crate::canvas::separators(ed)
+        .into_iter()
+        .find(|s| (s.x - x).abs() <= grab)?;
+
+    // Double-click puts the boundary on the beat, which is the fastest
+    // way to fix a phrase that drifted.
+    if gesture == Gesture::DoubleClick {
+        let step = ed.grid.step(ed.units_per_beat());
+        let to = expression_editor_core::timing::snap_to_beat(line.sep.t, ed.doc.start, step);
+        ed.begin_gesture();
+        for e in expression_editor_core::timing::plan(
+            &ed.doc,
+            line.sep,
+            to,
+            expression_editor_core::StretchLaw::BothStretch,
+        ) {
+            ed.apply_live(&e);
+        }
+        return Some(Drag::None);
+    }
+
+    let law = expression_editor_core::StretchLaw::at(y, ed.viewport.h);
+    ed.begin_gesture();
+    Some(Drag::Separator { sep: line.sep, law })
+}
+
+/// Route a press while a pitch drawing is open.
+///
+/// The draft owns the surface: while it is up, a click is an anchor and
+/// nothing else. That is deliberate — the drawing is a modal state with
+/// an explicit apply, and letting notes be selected or moved underneath
+/// it would make "what does Escape throw away?" unanswerable.
+pub fn draft_press(
+    ed: &Editor,
+    draft: &mut expression_editor_core::PitchDraft,
+    x: f64,
+    y: f64,
+) -> Drag {
+    let t = ed.camera.t_at(x);
+    let Some(note) = ed.doc.note(draft.note) else {
+        return Drag::None;
+    };
+    // Values are semitones from the note's row, the same units the
+    // pitch curve uses.
+    let value = ed.camera.pitch_at(y, ed.viewport) - note.row as f64;
+    let tolerance = ed.camera.units_per_px * expression_editor_core::draft::GRAB_PX;
+
+    match draft.anchor_at(t, tolerance) {
+        Some(i) => {
+            // One checkpoint for the whole drag, not one per move.
+            draft.begin_move();
+            draft.move_to(i, t, value);
+            Drag::DraftAnchor { index: i }
+        }
+        None => {
+            draft.add(t, value);
+            let i = draft.anchor_at(t, tolerance).unwrap_or(0);
+            Drag::DraftAnchor { index: i }
+        }
+    }
+}
+
+/// Continue an anchor drag.
+pub fn draft_move(
+    ed: &Editor,
+    draft: &mut expression_editor_core::PitchDraft,
+    index: usize,
+    x: f64,
+    y: f64,
+) -> Option<usize> {
+    let note = ed.doc.note(draft.note)?;
+    let t = ed.camera.t_at(x);
+    let value = ed.camera.pitch_at(y, ed.viewport) - note.row as f64;
+    draft.move_to(index, t, value);
+    // Re-sorting can move the grabbed anchor, so the caller has to be
+    // told where it went or the next frame drags the wrong one.
+    let tolerance = ed.camera.units_per_px * expression_editor_core::draft::GRAB_PX;
+    draft.anchor_at(t, tolerance.max(1e-9))
+}
+
+/// Resolve a press against the note handles.
+///
+/// Returns `None` when the press was not on a handle, so the caller
+/// falls through to the ordinary map-driven path.
+fn handle_press(ed: &mut Editor, x: f64, y: f64, mods: Mods, gesture: Gesture) -> Option<Drag> {
+    if !ed.mode.has_handles() {
+        return None;
+    }
+    let sets = crate::canvas::note_handles(ed);
+    let (id, handle) = sets
+        .iter()
+        .find_map(|s| handles::hit(&s.rects, x, y).map(|h| (s.id, h)))?;
+
+    // A horizontal drag across the *body* draws a temporary note rather
+    // than moving pitch: the range gesture has to start somewhere, and
+    // the body is the only handle wide enough to sweep across.
+    // Committing to it on the first horizontal movement is what keeps a
+    // plain vertical pitch drag from being stolen.
+    if handle == Handle::Pitch && mods.alt {
+        let t = ed.camera.t_at(x);
+        return Some(Drag::TempNote {
+            note: id,
+            origin_t: t,
+            current_t: t,
+        });
+    }
+
+    // Right-click on the amplitude handle mutes, exactly as the manual
+    // has it, and opens no drag.
+    if gesture == Gesture::RightClick {
+        if handle == Handle::Amplitude {
+            ed.begin_gesture();
+            ed.apply(&Edit::ToggleMuted { notes: vec![id] });
+            return Some(Drag::None);
+        }
+        return None;
+    }
+
+    let note = ed.doc.note(id)?;
+    let scope = ed.scope_for(id);
+    if !scope.is_valid(note) {
+        return None;
+    }
+    // Captured at press, not read live: releasing Shift mid-drag must
+    // not change which spans a gesture has already started writing.
+    let sibilants = ed.sibilant_scope != mods.shift;
+    let drag = handles::HandleDrag::begin_with(handle, note, scope, y, sibilants);
+    ed.begin_gesture();
+    Some(Drag::Handle(Box::new(drag)))
+}
+
+/// The mean value a controller holds over `[t0, t1]`.
+///
+/// Used as the pivot for [`Drag::CcScale`]: scaling about the range's
+/// own mean is what makes a factor of 0 flatten a swell to its average
+/// level instead of dropping it to silence.
+fn cc_mean(ed: &Editor, number: u8, t0: f64, t1: f64) -> f64 {
+    let Some(dimension) = ed.doc.cc.get(number) else {
+        return 0.0;
+    };
+    let default = dimension.default_value();
+    if (t1 - t0).abs() < f64::EPSILON {
+        return dimension.curve.sample(t0, default);
+    }
+    const STEPS: usize = 32;
+    let sum: f64 = (0..=STEPS)
+        .map(|i| {
+            let f = i as f64 / STEPS as f64;
+            dimension.curve.sample(t0 + (t1 - t0) * f, default)
+        })
+        .sum();
+    sum / (STEPS + 1) as f64
+}
+
+/// Write a shaped ramp between the two ends of a [`Drag::CcLine`].
+///
+/// Endpoints snap to the grid unless shift reverses it, which is the
+/// same rule the razor and note gestures follow. The interior is
+/// resampled through the toolbar shape, so switching shape after
+/// release restyles the ramp without redrawing it.
+fn cc_line(ed: &mut Editor, number: u8, start: (f64, f64), current: (f64, f64), mods: Mods) {
+    let snap = ed.grid.enabled && !mods.shift;
+    let raw0 = ed.camera.t_at(start.0);
+    let raw1 = ed.camera.t_at(current.0);
+    let (mut t0, mut t1) = (raw0, raw1);
+    if snap {
+        t0 = ed.snap_time(t0);
+        t1 = ed.snap_time(t1);
+    }
+    let v0 = expression_editor_core::cc::cc_value(start.1, ed.viewport.h);
+    let v1 = expression_editor_core::cc::cc_value(current.1, ed.viewport.h);
+    let (lo, hi, v_lo, v_hi) = if t0 <= t1 {
+        (t0, t1, v0, v1)
+    } else {
+        (t1, t0, v1, v0)
+    };
+    if (hi - lo).abs() < f64::EPSILON {
+        return;
+    }
+    let steps = (((hi - lo) / ed.camera.units_per_px).abs().ceil() as usize).clamp(2, 256);
+    let shape = ed.shape;
+    let points: Vec<Point> = (0..=steps)
+        .map(|i| {
+            let f = i as f64 / steps as f64;
+            Point {
+                t: lo + (hi - lo) * f,
+                value: v_lo + (v_hi - v_lo) * shape.amount(f),
+                // The pen bakes its curve into the values, so the
+                // segments between the sampled points are linear.
+                ..Point::default()
+            }
+        })
+        .collect();
+    ed.apply_live(&Edit::DrawCc {
+        number,
+        t0: lo,
+        t1: hi,
+        points,
+    });
 }
 
 /// Write one controller sample at the pointer.
@@ -446,8 +815,7 @@ fn cc_draw(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64) {
             let f = i as f64 / steps as f64;
             Point {
                 t: lo + (hi - lo) * f,
-                value: v_lo + (v_hi - v_lo) * f,
-            }
+                value: v_lo + (v_hi - v_lo) * f, ..Point::default() }
         })
         .collect();
     ed.apply_live(&Edit::DrawCc {
@@ -490,10 +858,10 @@ fn paint_at(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64) {
     }
     let id = ed.doc.mint_id();
     let mut note = expression_editor_core::Note::new(id, start, end, row.clamp(0, 127));
-    for lane in Lane::ALL {
-        let v = lane.default_value();
-        note.lane_mut(lane).set(start, v);
-        note.lane_mut(lane).set(end, v);
+    for dimension in Dimension::ALL {
+        let v = dimension.default_value();
+        note.curve_mut(dimension).set(start, v);
+        note.curve_mut(dimension).set(end, v);
     }
     ed.apply_live(&Edit::AddNote(Box::new(note)));
 }
@@ -687,10 +1055,10 @@ fn begin_new_note(ed: &mut Editor, x: f64, y: f64, mods: Mods) -> Drag {
     let mut note = expression_editor_core::Note::new(id, start, end, row.clamp(0, 127));
     // A new note is playable immediately: centered pitch, MPE-default
     // pressure and timbre across its full length.
-    for lane in Lane::ALL {
-        let v = lane.default_value();
-        note.lane_mut(lane).set(start, v);
-        note.lane_mut(lane).set(end, v);
+    for dimension in Dimension::ALL {
+        let v = dimension.default_value();
+        note.curve_mut(dimension).set(start, v);
+        note.curve_mut(dimension).set(end, v);
     }
     ed.begin_gesture();
     ed.apply_live(&Edit::AddNote(Box::new(note)));
@@ -709,7 +1077,8 @@ fn begin_new_note(ed: &mut Editor, x: f64, y: f64, mods: Mods) -> Drag {
 /// Continue a gesture.
 pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods) {
     match drag {
-        Drag::None => {}
+        // Not a drag; the menu is already open and owns the pointer.
+        Drag::None | Drag::ContextMenu { .. } => {}
         Drag::Pan { last } => {
             ed.pan_px(x - last.0, y - last.1);
             *last = (x, y);
@@ -741,9 +1110,9 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             for &id in notes.iter() {
                 let Some(n) = ed.doc.note(id) else { continue };
                 let (s, e) = n.target_span();
-                ed.apply_live(&Edit::EraseLane {
+                ed.apply_live(&Edit::EraseDimension {
                     note: id,
-                    lane: ed.lane,
+                    dimension: ed.dimension,
                     t0: t0.max(s),
                     t1: t1.min(e),
                 });
@@ -821,9 +1190,9 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                     Target::Zone(_) => vec![n.target_span()],
                 };
                 for (t0, t1) in spans {
-                    ed.apply_live(&Edit::ScaleLane {
+                    ed.apply_live(&Edit::ScaleDimension {
                         note: id,
-                        lane: ed.lane,
+                        dimension: ed.dimension,
                         t0,
                         t1,
                         factor: relative,
@@ -916,7 +1285,109 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             }
         }
         Drag::Paint { .. } => paint_at(ed, drag, x, y),
+        Drag::DraftAnchor { .. } => {}
+        Drag::Separator { sep, law } => {
+            // Rebuilt from the separator captured at press, so the
+            // stretch is computed from the original layout every frame
+            // rather than compounding on the last one.
+            let to = if ed.grid.enabled && !mods.shift {
+                ed.snap_time(ed.camera.t_at(x))
+            } else {
+                ed.camera.t_at(x)
+            };
+            let edits = expression_editor_core::timing::plan(&ed.doc, *sep, to, *law);
+            for e in edits {
+                ed.apply_live(&e);
+            }
+        }
+        Drag::Handle(h) => {
+            // Shift reverses the pitch snap, as everywhere else here.
+            let snap = ed.snap_pitch != mods.shift;
+            ed.drag_handle(h, y, snap);
+        }
+        Drag::TempNote {
+            note,
+            origin_t,
+            current_t,
+        } => {
+            *current_t = ed.camera.t_at(x);
+            let (n, t0, t1) = (*note, *origin_t, *current_t);
+            // Live, so the shaded range follows the pointer rather than
+            // appearing on release.
+            ed.set_temp_note(n, t0, t1);
+        }
         Drag::CcPen { .. } => cc_draw(ed, drag, x, y),
+        Drag::CcLine {
+            number,
+            start,
+            current,
+        } => {
+            *current = (x, y);
+            cc_line(ed, *number, *start, *current, mods);
+        }
+        Drag::CcErase {
+            number,
+            start_t,
+            current_t,
+        } => {
+            *current_t = ed.camera.t_at(x);
+            let (t0, t1) = (start_t.min(*current_t), start_t.max(*current_t));
+            ed.apply_live(&Edit::EraseCc {
+                number: *number,
+                t0,
+                t1,
+            });
+        }
+        Drag::CcScale {
+            number,
+            t0,
+            t1,
+            base,
+            spanned,
+            pivot,
+            origin_y,
+        } => {
+            let t = ed.camera.t_at(x);
+            let (lo, hi) = (t0.min(t), t0.max(t));
+            // The pivot is captured the moment the range first has
+            // width and then held — recomputing it as the sweep grows
+            // would move the ground under the vertical drag.
+            if (*t1 - *t0).abs() < f64::EPSILON && (hi - lo).abs() > f64::EPSILON {
+                *pivot = cc_mean(ed, *number, lo, hi);
+            }
+            *t1 = t;
+            spanned.0 = spanned.0.min(lo);
+            spanned.1 = spanned.1.max(hi);
+
+            // A full viewport of travel spans 0x..2x, so the useful
+            // range is reachable without a marathon drag and neutral
+            // stays where the gesture started.
+            let dy = (*origin_y - y) / ed.viewport.h.max(1.0);
+            let factor = (1.0 + dy * 2.0).clamp(0.0, 4.0);
+
+            // Rewrite the whole swept-ever span from the captured
+            // points: scaled inside the current range, verbatim outside
+            // it, so narrowing the sweep puts back what widening it
+            // touched.
+            let (p, s0, s1) = (*pivot, spanned.0, spanned.1);
+            let points: Vec<Point> = base
+                .iter()
+                .filter(|pt| pt.t >= s0 && pt.t <= s1)
+                .map(|pt| Point {
+                    t: pt.t,
+                    value: if pt.t >= lo && pt.t <= hi {
+                        (p + (pt.value - p) * factor).clamp(0.0, 1.0)
+                    } else {
+                        pt.value
+                    }, ..Point::default() })
+                .collect();
+            ed.apply_live(&Edit::DrawCc {
+                number: *number,
+                t0: s0,
+                t1: s1,
+                points,
+            });
+        }
         Drag::Velocity {
             notes,
             origin_y,
@@ -958,8 +1429,28 @@ pub fn pointer_up(ed: &mut Editor, drag: Drag, x: f64, y: f64, mods: Mods) -> Dr
             }
             Drag::None
         }
-        // The Curve gesture survives release.
-        live @ Drag::Curve { .. } => live,
+        // The Curve gesture survives release, and so does its CC twin —
+        // both stay live so the shape buttons restyle the stroke that
+        // was just drawn.
+        live @ (Drag::Curve { .. } | Drag::CcLine { .. }) => live,
+        Drag::Handle(h) => {
+            // Fold whole semitones back into the row, restoring the
+            // invariant the pitch drag was allowed to break while it ran.
+            ed.end_handle_drag(&h);
+            Drag::None
+        }
+        Drag::TempNote {
+            note,
+            origin_t,
+            current_t,
+        } => {
+            // A range too small to see is a click, not a selection, and
+            // leaves no scope armed on the note.
+            if !ed.set_temp_note(note, origin_t, current_t) {
+                ed.clear_temp_note();
+            }
+            Drag::None
+        }
         Drag::RazorCreate { origin, current } => {
             let t0 = ed.camera.t_at(origin.0);
             let t1 = ed.camera.t_at(current.0);
@@ -994,7 +1485,7 @@ fn write_pen(
     samples: &[(f64, f64)],
     mods: Mods,
 ) {
-    let lane = ed.lane;
+    let dimension = ed.dimension;
     let start_t = ed.camera.t_at(start.0);
     for &id in notes {
         let Some(n) = ed.doc.note(id) else { continue };
@@ -1005,10 +1496,10 @@ fn write_pen(
             .iter()
             .map(|&(x, y)| {
                 let t = ed.camera.t_at(x).clamp(span0, span1);
-                let value = match lane {
+                let value = match dimension {
                     // Pitch drawing snaps to semitones unless shift is
                     // held for continuous pitch.
-                    Lane::Pitch => {
+                    Dimension::Pitch => {
                         let p = ed.camera.pitch_at(y, ed.viewport);
                         let p = if mods.shift {
                             p
@@ -1021,16 +1512,15 @@ fn write_pen(
                 };
                 Point {
                     t,
-                    value: lane.clamp(value),
-                }
+                    value: dimension.clamp(value), ..Point::default() }
             })
             .collect();
 
         let (t0, t1) = gesture_bounds(&points);
         let (t0, t1) = tools::clamp_gesture((span0, span1), start_t, t0, t1);
-        ed.apply_live(&Edit::DrawLane {
+        ed.apply_live(&Edit::DrawDimension {
             note: id,
-            lane,
+            dimension,
             t0,
             t1,
             points,
@@ -1047,7 +1537,7 @@ fn write_curve(
     shape: Shape,
 ) {
     const SAMPLES: usize = 48;
-    let lane = ed.lane;
+    let dimension = ed.dimension;
     let start_t = ed.camera.t_at(start.0);
     for &id in notes {
         let Some(n) = ed.doc.note(id) else { continue };
@@ -1055,8 +1545,8 @@ fn write_curve(
         let row = n.row;
 
         let value_at = |y: f64| -> f64 {
-            match lane {
-                Lane::Pitch => ed.camera.pitch_at(y, ed.viewport) - row as f64,
+            match dimension {
+                Dimension::Pitch => ed.camera.pitch_at(y, ed.viewport) - row as f64,
                 _ => tools::lane_box_value(&ed.camera, ed.viewport, row, y),
             }
         };
@@ -1076,13 +1566,14 @@ fn write_curve(
                 let f = i as f64 / (SAMPLES - 1) as f64;
                 Point {
                     t: t0 + (t1 - t0) * f,
-                    value: lane.clamp(from + (to - from) * shape.amount(f)),
+                    value: dimension.clamp(from + (to - from) * shape.amount(f)),
+                    ..Point::default()
                 }
             })
             .collect();
-        ed.apply_live(&Edit::DrawLane {
+        ed.apply_live(&Edit::DrawDimension {
             note: id,
-            lane,
+            dimension,
             t0,
             t1,
             points,
@@ -1124,9 +1615,9 @@ pub fn apply_shape(ed: &mut Editor, drag: &Drag, shape: Shape) {
                 ed.camera.t_at(x0),
                 ed.camera.t_at(x1),
             );
-            ed.apply_live(&Edit::ReshapeLane {
+            ed.apply_live(&Edit::ReshapeDimension {
                 note: id,
-                lane: ed.lane,
+                dimension: ed.dimension,
                 t0,
                 t1,
                 shape,
@@ -1144,9 +1635,9 @@ pub fn apply_shape(ed: &mut Editor, drag: &Drag, shape: Shape) {
     for id in notes {
         let Some(n) = ed.doc.note(id) else { continue };
         let (t0, t1) = n.target_span();
-        ed.apply_live(&Edit::ReshapeLane {
+        ed.apply_live(&Edit::ReshapeDimension {
             note: id,
-            lane: ed.lane,
+            dimension: ed.dimension,
             t0,
             t1,
             shape,
@@ -1224,13 +1715,43 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
         // local passage, Shift+F frames the whole part.
         ("f", false, shift) => {
             let anchor = ed.playhead.unwrap_or(mouse_t);
-            let row = ed.camera.pitch_center;
+            let row = ed.camera.vertical.center;
             let modes = if shift {
                 ZoomModes::KEYS
             } else {
                 ZoomModes::NOTE_AREA
             };
             ed.smart_zoom(modes, anchor, row);
+            true
+        }
+        // Ctrl+X/C/V go through the same command path the context menu
+        // uses, so a keyboard cut and a menu cut cannot diverge.
+        ("x", true, _) => ed.run_command(&Command::Cut, None),
+        ("c", true, _) => ed.run_command(&Command::Copy, None),
+        ("v", true, _) => ed.run_command(&Command::Paste, None),
+        // Timing mode. The manual's `2`, and free here.
+        ("2", false, true) => {
+            ed.timing_mode = !ed.timing_mode;
+            true
+        }
+        // Hold to bring the MIDI reference forward, the manual's `M`.
+        // Momentary for the same reason `Shift+R` is: it is a thing you
+        // check mid-edit, not a mode to be left in.
+        ("m", false, _) if ed.reference.is_some() => {
+            ed.reference_to_front = true;
+            true
+        }
+        // Arm sibilant editing. Only where there are sibilants: in a
+        // MIDI mode this key would toggle an invisible state.
+        ("i", false, _) if ed.mode.draws_blobs() => {
+            ed.sibilant_scope = !ed.sibilant_scope;
+            true
+        }
+        // Shift+R always brings references forward, so the gesture is
+        // reachable from every mode including MPE, where bare `R` is
+        // spoken for.
+        ("r", false, true) => {
+            ed.refs_to_front = true;
             true
         }
         ("s", false, _) => set_tool(ed, Tool::Select),
@@ -1267,6 +1788,15 @@ pub fn key_down(ed: &mut Editor, drag: &Drag, key: &str, mods: Mods) -> bool {
                 note: id,
                 t: mouse_t,
             })
+        }
+        // Bare `R` belongs to whichever meaning the current mode can
+        // actually use. Channel reassignment is MPE-only — audio and
+        // vocal notes have no member channel to assign — so everywhere
+        // else the key is free, and goes to Vovious's meaning:
+        // bring references forward, held rather than toggled.
+        ("r", false, _) if ed.mode != Mode::Mpe => {
+            ed.refs_to_front = true;
+            true
         }
         ("r", false, _) => {
             let notes = ed.selection.notes.clone();

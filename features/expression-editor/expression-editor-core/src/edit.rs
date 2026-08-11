@@ -11,7 +11,7 @@
 //! right for free.
 
 use crate::blob;
-use crate::doc::{Curve, ExpressionDoc, Lane, Note, NoteId, Point, Target};
+use crate::doc::{Curve, ExpressionDoc, Dimension, Note, NoteId, Point, Target};
 use crate::modulation::Stack;
 use crate::rows::{Articulation, RowSpace};
 use crate::shape::Shape;
@@ -19,36 +19,36 @@ use crate::shape::Shape;
 /// One describable change to the document.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Edit {
-    /// Replace `[t0, t1]` of a lane with drawn points (pen, curve).
+    /// Replace `[t0, t1]` of a dimension with drawn points (pen, curve).
     /// Points outside the interval survive untouched.
-    DrawLane {
+    DrawDimension {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         points: Vec<Point>,
     },
-    /// Erase a lane over `[t0, t1]`.
-    EraseLane {
+    /// Erase a dimension over `[t0, t1]`.
+    EraseDimension {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
     },
     /// Restyle `[t0, t1]` between its existing endpoints.
-    ReshapeLane {
+    ReshapeDimension {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         shape: Shape,
         samples: usize,
     },
-    /// Scale a lane about its effective center — the alt-drag gesture.
+    /// Scale a dimension about its effective center — the alt-drag gesture.
     /// `factor` below zero inverts.
-    ScaleLane {
+    ScaleDimension {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         factor: f64,
@@ -62,46 +62,128 @@ pub enum Edit {
         drift_amount: f64,
         modulation_amount: f64,
     },
+    /// Move a dimension's values up or down over a span, keeping its shape.
+    ///
+    /// The pitch handles: dragging a note body or its fine-tune handle
+    /// changes where the contour sits without flattening the scoop and
+    /// vibrato that make it sound sung.
+    ShiftDimension {
+        note: NoteId,
+        dimension: Dimension,
+        t0: f64,
+        t1: f64,
+        delta: f64,
+    },
+    /// Hold a dimension at one value across a span.
+    ///
+    /// The formant and amplitude handles, which are per-note trims
+    /// rather than contours — there is nothing to preserve the shape
+    /// of, and a drag sets a level.
+    SetDimensionLevel {
+        note: NoteId,
+        dimension: Dimension,
+        t0: f64,
+        t1: f64,
+        value: f64,
+    },
+    /// Tilt one end of a span, pivoting on the other.
+    ///
+    /// The left and right slope handles: `amount` in semitones, applied
+    /// at the anchored end and decaying linearly to zero at the far end,
+    /// so the transition into or out of a note steepens without moving
+    /// the note's body.
+    TiltDimension {
+        note: NoteId,
+        dimension: Dimension,
+        t0: f64,
+        t1: f64,
+        amount: f64,
+        /// Tilt hinges at `t1` and moves `t0` when true.
+        from_start: bool,
+    },
+    /// Fold whole semitones of pitch offset into the note's row.
+    ///
+    /// Keeps the invariant the whole surface depends on: the row is the
+    /// *rounded* pitch centre and the curve carries only the remainder.
+    /// A pitch drag can then work purely on the curve and restore the
+    /// invariant once, on release, rather than juggling both every
+    /// frame.
+    NormalizeRow {
+        notes: Vec<NoteId>,
+    },
     /// Add a modulation stack over a span — programmatic vibrato and
     /// swells. `taper` is the fraction of the span eased in and out.
     ApplyModulation {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         stack: Stack,
         taper: f64,
         samples: usize,
     },
-    /// Replace a lane's span with given points — the drawer's cancel
+    /// Replace a dimension's span with given points — the drawer's cancel
     /// path, restoring exactly what was captured.
-    RestoreLane {
+    RestoreDimension {
         note: NoteId,
-        lane: Lane,
+        dimension: Dimension,
         t0: f64,
         t1: f64,
         points: Vec<Point>,
     },
     /// Transpose notes. The pitch gesture moves rigidly with the row.
-    Transpose { notes: Vec<NoteId>, semitones: i32 },
+    Transpose {
+        notes: Vec<NoteId>,
+        semitones: i32,
+    },
     /// Move notes in time, carrying their owned expression.
-    MoveTime { notes: Vec<NoteId>, delta: f64 },
+    MoveTime {
+        notes: Vec<NoteId>,
+        delta: f64,
+    },
     /// Resize a note; owned expression stretches to the new bounds.
-    Resize { note: NoteId, start: f64, end: f64 },
+    Resize {
+        note: NoteId,
+        start: f64,
+        end: f64,
+    },
     /// Set a note's sounding pitch offset from its row — how a
     /// microtonal target is stored.
-    SetPitchOffset { note: NoteId, semitones: f64 },
+    SetPitchOffset {
+        note: NoteId,
+        semitones: f64,
+    },
     /// Velocity, 0..1.
-    SetVelocity { notes: Vec<NoteId>, velocity: f64 },
+    SetVelocity {
+        notes: Vec<NoteId>,
+        velocity: f64,
+    },
     /// Nudge velocity — the drag path, so a gesture can accumulate.
-    NudgeVelocity { notes: Vec<NoteId>, delta: f64 },
-    SetOffVelocity { notes: Vec<NoteId>, velocity: f64 },
-    SetMuted { notes: Vec<NoteId>, muted: bool },
-    ToggleMuted { notes: Vec<NoteId> },
+    NudgeVelocity {
+        notes: Vec<NoteId>,
+        delta: f64,
+    },
+    SetOffVelocity {
+        notes: Vec<NoteId>,
+        velocity: f64,
+    },
+    SetMuted {
+        notes: Vec<NoteId>,
+        muted: bool,
+    },
+    ToggleMuted {
+        notes: Vec<NoteId>,
+    },
     /// Step the MPE member channel, wrapping within 2..=16.
-    NudgeChannel { notes: Vec<NoteId>, delta: i32 },
+    NudgeChannel {
+        notes: Vec<NoteId>,
+        delta: i32,
+    },
     /// Scale note lengths about their own starts.
-    ScaleLength { notes: Vec<NoteId>, factor: f64 },
+    ScaleLength {
+        notes: Vec<NoteId>,
+        factor: f64,
+    },
     /// Scale note *positions* about `pivot` — arpeggiate.
     StretchPositions {
         notes: Vec<NoteId>,
@@ -122,28 +204,65 @@ pub enum Edit {
         strength: f64,
     },
     /// Extend each note to meet the next one on its row.
-    Legato { notes: Vec<NoteId>, gap: f64 },
+    Legato {
+        notes: Vec<NoteId>,
+        gap: f64,
+    },
     /// Vocal editor: the syllable carried by the note.
-    SetText { note: NoteId, text: Option<String> },
+    SetText {
+        note: NoteId,
+        text: Option<String>,
+    },
     /// Guitar/bass technique.
     SetArticulation {
         notes: Vec<NoteId>,
         articulation: Option<Articulation>,
     },
     /// Guitar/bass: move to another string, keeping sounding pitch.
-    SetString { note: NoteId, string: i32 },
-    SetFret { notes: Vec<NoteId>, fret: u8 },
+    SetString {
+        note: NoteId,
+        string: i32,
+    },
+    SetFret {
+        notes: Vec<NoteId>,
+        fret: u8,
+    },
     AddNote(Box<Note>),
+    /// Insert clipboard contents, minting fresh ids. The notes arrive
+    /// already positioned — [`crate::clipboard::Clipboard::placed`] does
+    /// the placing, so paste-at-pointer and paste-in-place are the same
+    /// edit with different arguments.
+    PasteNotes(Vec<Note>),
     DeleteNotes(Vec<NoteId>),
-    SplitNote { note: NoteId, t: f64 },
+    SplitNote {
+        note: NoteId,
+        t: f64,
+    },
     /// Q zones.
-    AddZoneSplit { note: NoteId, t: f64 },
-    RemoveZoneSplit { note: NoteId, t: f64, tolerance: f64 },
-    MoveZoneSplit { note: NoteId, from: f64, to: f64 },
-    SetTarget { note: NoteId, target: Target },
+    AddZoneSplit {
+        note: NoteId,
+        t: f64,
+    },
+    RemoveZoneSplit {
+        note: NoteId,
+        t: f64,
+        tolerance: f64,
+    },
+    MoveZoneSplit {
+        note: NoteId,
+        from: f64,
+        to: f64,
+    },
+    SetTarget {
+        note: NoteId,
+        target: Target,
+    },
     /// Reassign MPE member channels so overlapping notes never share
     /// one.
-    AssignChannels { notes: Vec<NoteId>, seed: u64 },
+    AssignChannels {
+        notes: Vec<NoteId>,
+        seed: u64,
+    },
     SetBendRange(f64),
     /// Replace a controller's values over `[t0, t1]`.
     DrawCc {
@@ -153,7 +272,11 @@ pub enum Edit {
         points: Vec<Point>,
     },
     /// Erase a controller over `[t0, t1]`.
-    EraseCc { number: u8, t0: f64, t1: f64 },
+    EraseCc {
+        number: u8,
+        t0: f64,
+        t1: f64,
+    },
     /// Restyle `[t0, t1]` between its own endpoints.
     ShapeCc {
         number: u8,
@@ -176,7 +299,7 @@ pub enum Edit {
 /// How many samples a reshape or reblend writes per second of audio.
 /// Dense enough that instruments which ignore sparse expression still
 /// track the gesture.
-const DEFAULT_SAMPLES: usize = 64;
+pub const DEFAULT_SAMPLES: usize = 64;
 
 impl Edit {
     /// Apply to `doc`. Returns false if the edit could not be applied
@@ -185,9 +308,9 @@ impl Edit {
     pub fn apply(&self, doc: &mut ExpressionDoc) -> bool {
         let units_per_second = doc.time_base.units_per_second(120.0);
         match self {
-            Edit::DrawLane {
+            Edit::DrawDimension {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 points,
@@ -196,25 +319,21 @@ impl Edit {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                n.lane_mut(*lane).splice(lo, hi, points);
-                extend_to_note_edges(n, *lane);
+                n.curve_mut(*dimension).splice(lo, hi, points);
+                extend_to_note_edges(n, *dimension);
                 true
             }
-            Edit::EraseLane {
-                note,
-                lane,
-                t0,
-                t1,
-            } => {
+            Edit::EraseDimension { note, dimension, t0, t1 } => {
                 let Some(n) = doc.note_mut(*note) else {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                n.lane_mut(*lane).remove_range(lo, hi) > 0
+                let default = dimension.default_value();
+                n.curve_mut(*dimension).clear_range(lo, hi, default)
             }
-            Edit::ReshapeLane {
+            Edit::ReshapeDimension {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 shape,
@@ -224,14 +343,14 @@ impl Edit {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                let default = lane.default_value();
-                n.lane_mut(*lane)
+                let default = dimension.default_value();
+                n.curve_mut(*dimension)
                     .reshape(lo, hi, *shape, (*samples).max(2), default);
                 true
             }
-            Edit::ScaleLane {
+            Edit::ScaleDimension {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 factor,
@@ -240,11 +359,130 @@ impl Edit {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                let default = lane.default_value();
-                let pivot =
-                    blob::effective_center(n.lane(*lane), lo, hi, DEFAULT_SAMPLES, default);
-                n.lane_mut(*lane).scale_about(lo, hi, pivot, *factor);
+                let default = dimension.default_value();
+                let pivot = blob::effective_center(n.curve(*dimension), lo, hi, DEFAULT_SAMPLES, default);
+                n.curve_mut(*dimension).scale_about(lo, hi, pivot, *factor);
                 true
+            }
+            Edit::ShiftDimension {
+                note,
+                dimension,
+                t0,
+                t1,
+                delta,
+            } => {
+                let Some(n) = doc.note_mut(*note) else {
+                    return false;
+                };
+                let (lo, hi) = ordered(*t0, *t1);
+                if hi - lo <= 0.0 || *delta == 0.0 {
+                    return false;
+                }
+                let default = dimension.default_value();
+                // Sample the ends before moving anything: a partial
+                // shift has to leave the values *outside* the span
+                // where they were, and the only way to hold them is to
+                // pin the boundary explicitly.
+                let (v0, v1) = {
+                    let c = n.curve(*dimension);
+                    (c.sample(lo, default), c.sample(hi, default))
+                };
+                let dimension = *dimension;
+                let curve = n.curve_mut(dimension);
+                for p in curve.points_mut() {
+                    if p.t >= lo && p.t <= hi {
+                        p.value = dimension.clamp(p.value + delta);
+                    }
+                }
+                curve.set(lo, dimension.clamp(v0 + delta));
+                curve.set(hi, dimension.clamp(v1 + delta));
+                true
+            }
+            Edit::SetDimensionLevel {
+                note,
+                dimension,
+                t0,
+                t1,
+                value,
+            } => {
+                let Some(n) = doc.note_mut(*note) else {
+                    return false;
+                };
+                let (lo, hi) = ordered(*t0, *t1);
+                if hi - lo <= 0.0 {
+                    return false;
+                }
+                let v = dimension.clamp(*value);
+                n.curve_mut(*dimension).splice(
+                    lo,
+                    hi,
+                    &[Point { t: lo, value: v, ..Point::default() }, Point { t: hi, value: v, ..Point::default() }],
+                );
+                true
+            }
+            Edit::TiltDimension {
+                note,
+                dimension,
+                t0,
+                t1,
+                amount,
+                from_start,
+            } => {
+                let Some(n) = doc.note_mut(*note) else {
+                    return false;
+                };
+                let (lo, hi) = ordered(*t0, *t1);
+                let span = hi - lo;
+                if span <= 0.0 || *amount == 0.0 {
+                    return false;
+                }
+                let default = dimension.default_value();
+                let dimension = *dimension;
+                // Resample: a tilt is a continuous weighting, and
+                // applying it only to existing points would leave a
+                // sparse curve tilting in straight segments between
+                // them rather than as a slope.
+                let n_samples = DEFAULT_SAMPLES;
+                let curve = n.curve(dimension);
+                let pts: Vec<Point> = (0..n_samples)
+                    .map(|i| {
+                        let f = i as f64 / (n_samples - 1) as f64;
+                        let t = lo + span * f;
+                        // Full at the moving end, zero at the hinge.
+                        let w = if *from_start { 1.0 - f } else { f };
+                        Point {
+                            t,
+                            value: dimension.clamp(curve.sample(t, default) + amount * w), ..Point::default() }
+                    })
+                    .collect();
+                n.curve_mut(dimension).splice(lo, hi, &pts);
+                true
+            }
+            Edit::NormalizeRow { notes } => {
+                let mut any = false;
+                for id in notes {
+                    let Some(n) = doc.note_mut(*id) else { continue };
+                    let (lo, hi) = (n.start, n.end);
+                    if hi <= lo {
+                        continue;
+                    }
+                    let center =
+                        blob::decompose(&n.pitch, lo, hi, DEFAULT_SAMPLES, units_per_second, 0.0)
+                            .center;
+                    let whole = center.round();
+                    if whole == 0.0 {
+                        continue;
+                    }
+                    // The row absorbs the whole semitones and the curve
+                    // gives them up, so the sounding pitch is unchanged
+                    // and only its bookkeeping moves.
+                    n.row = (n.row + whole as i32).clamp(0, 127);
+                    for p in n.pitch.points_mut() {
+                        p.value -= whole;
+                    }
+                    any = true;
+                }
+                any
             }
             Edit::ReblendPitch {
                 note,
@@ -260,21 +498,14 @@ impl Edit {
                 if hi - lo <= 0.0 {
                     return false;
                 }
-                let d = blob::decompose(
-                    &n.pitch,
-                    lo,
-                    hi,
-                    DEFAULT_SAMPLES,
-                    units_per_second,
-                    0.0,
-                );
+                let d = blob::decompose(&n.pitch, lo, hi, DEFAULT_SAMPLES, units_per_second, 0.0);
                 let rebuilt = d.recompose(d.center, *drift_amount, *modulation_amount);
                 n.pitch.splice(lo, hi, rebuilt.points());
                 true
             }
             Edit::ApplyModulation {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 stack,
@@ -289,8 +520,8 @@ impl Edit {
                     return false;
                 }
                 let count = (*samples).max(8);
-                let default = lane.default_value();
-                let curve = n.lane(*lane);
+                let default = dimension.default_value();
+                let curve = n.curve(*dimension);
                 let times: Vec<f64> = (0..count)
                     .map(|i| lo + (hi - lo) * (i as f64 / (count - 1) as f64))
                     .collect();
@@ -302,16 +533,15 @@ impl Edit {
                     .zip(&values)
                     .map(|(&t, &v)| Point {
                         t,
-                        value: lane.clamp(v),
-                    })
+                        value: dimension.clamp(v), ..Point::default() })
                     .collect();
                 // Splice, so data outside the target range survives.
-                n.lane_mut(*lane).splice(lo, hi, &points);
+                n.curve_mut(*dimension).splice(lo, hi, &points);
                 true
             }
-            Edit::RestoreLane {
+            Edit::RestoreDimension {
                 note,
-                lane,
+                dimension,
                 t0,
                 t1,
                 points,
@@ -320,7 +550,7 @@ impl Edit {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                n.lane_mut(*lane).splice(lo, hi, points);
+                n.curve_mut(*dimension).splice(lo, hi, points);
                 true
             }
             Edit::Transpose { notes, semitones } => {
@@ -337,15 +567,7 @@ impl Edit {
                 let mut any = false;
                 for id in notes {
                     if let Some(n) = doc.note_mut(*id) {
-                        let (s, e) = (n.start, n.end);
-                        n.start += delta;
-                        n.end += delta;
-                        for s2 in n.splits.iter_mut() {
-                            *s2 += delta;
-                        }
-                        for lane in Lane::ALL {
-                            n.lane_mut(lane).shift_time(s, e, *delta);
-                        }
+                        n.shift_time(*delta);
                         any = true;
                     }
                 }
@@ -367,8 +589,8 @@ impl Edit {
                 for s in n.splits.iter_mut() {
                     *s = new_s + (*s - old_s) * scale;
                 }
-                for lane in Lane::ALL {
-                    n.lane_mut(lane).remap_time(old_s, old_e, new_s, new_e);
+                for dimension in Dimension::ALL {
+                    n.curve_mut(dimension).remap_time(old_s, old_e, new_s, new_e);
                 }
                 n.start = new_s;
                 n.end = new_e;
@@ -386,8 +608,7 @@ impl Edit {
                     // Move the whole gesture rigidly — a microtonal
                     // target shifts the note without reshaping how it
                     // was sung or drawn.
-                    let current =
-                        blob::effective_center(&n.pitch, s, e, DEFAULT_SAMPLES, 0.0);
+                    let current = blob::effective_center(&n.pitch, s, e, DEFAULT_SAMPLES, 0.0);
                     n.pitch.offset(s, e, *semitones - current);
                 }
                 true
@@ -573,6 +794,17 @@ impl Edit {
                 doc.push((**note).clone());
                 true
             }
+            Edit::PasteNotes(notes) => {
+                if notes.is_empty() {
+                    return false;
+                }
+                for n in notes {
+                    let mut c = n.clone();
+                    c.id = doc.mint_id();
+                    doc.push(c);
+                }
+                true
+            }
             Edit::DeleteNotes(ids) => {
                 let before = doc.notes.len();
                 doc.notes.retain(|n| !ids.contains(&n.id));
@@ -583,11 +815,7 @@ impl Edit {
                 .note_mut(*note)
                 .map(|n| n.add_split(*t))
                 .unwrap_or(false),
-            Edit::RemoveZoneSplit {
-                note,
-                t,
-                tolerance,
-            } => doc
+            Edit::RemoveZoneSplit { note, t, tolerance } => doc
                 .note_mut(*note)
                 .map(|n| n.remove_split_near(*t, *tolerance))
                 .unwrap_or(false),
@@ -595,11 +823,7 @@ impl Edit {
                 let Some(n) = doc.note_mut(*note) else {
                     return false;
                 };
-                let Some(i) = n
-                    .splits
-                    .iter()
-                    .position(|s| (s - from).abs() < 1e-6)
-                else {
+                let Some(i) = n.splits.iter().position(|s| (s - from).abs() < 1e-6) else {
                     return false;
                 };
                 // Keep splits ordered and strictly interior; a boundary
@@ -642,7 +866,8 @@ impl Edit {
                     return false;
                 };
                 let (lo, hi) = ordered(*t0, *t1);
-                l.curve.remove_range(lo, hi) > 0
+                let default = l.default_value();
+                l.curve.clear_range(lo, hi, default)
             }
             Edit::ShapeCc {
                 number,
@@ -686,23 +911,23 @@ fn ordered(a: f64, b: f64) -> (f64, f64) {
     if a <= b { (a, b) } else { (b, a) }
 }
 
-/// Hold a lane's first and last authored values out to the note edges.
+/// Hold a dimension's first and last authored values out to the note edges.
 ///
 /// Without this a gesture drawn in the middle of a note leaves a gap
-/// where the lane falls back to its default — audible as a jump to
+/// where the dimension falls back to its default — audible as a jump to
 /// center on either side of the edit.
-fn extend_to_note_edges(note: &mut Note, lane: Lane) {
+fn extend_to_note_edges(note: &mut Note, dimension: Dimension) {
     let (s, e) = (note.start, note.end);
-    let curve = note.lane_mut(lane);
+    let curve = note.curve_mut(dimension);
     let Some((first, last)) = curve.bounds() else {
         return;
     };
     if first > s {
-        let v = curve.sample(first, lane.default_value());
+        let v = curve.sample(first, dimension.default_value());
         curve.set(s, v);
     }
     if last < e {
-        let v = curve.sample(last, lane.default_value());
+        let v = curve.sample(last, dimension.default_value());
         curve.set(e, v);
     }
 }
@@ -720,9 +945,9 @@ fn split_note(doc: &mut ExpressionDoc, id: NoteId, t: f64) -> bool {
     right.start = t;
     right.splits.retain(|&s| s > t);
     right.target = Target::WholeNote;
-    for lane in Lane::ALL {
-        let held = right.lane(lane).sample(t, lane.default_value());
-        let curve = right.lane_mut(lane);
+    for dimension in Dimension::ALL {
+        let held = right.curve(dimension).sample(t, dimension.default_value());
+        let curve = right.curve_mut(dimension);
         curve.remove_range(f64::NEG_INFINITY, t);
         curve.set(t, held);
     }
@@ -733,9 +958,9 @@ fn split_note(doc: &mut ExpressionDoc, id: NoteId, t: f64) -> bool {
     left.end = t;
     left.splits.retain(|&s| s < t);
     left.target = Target::WholeNote;
-    for lane in Lane::ALL {
-        let held = left.lane(lane).sample(t, lane.default_value());
-        let curve = left.lane_mut(lane);
+    for dimension in Dimension::ALL {
+        let held = left.curve(dimension).sample(t, dimension.default_value());
+        let curve = left.curve_mut(dimension);
         curve.remove_range(t, f64::INFINITY);
         curve.set(t, held);
     }
@@ -781,7 +1006,9 @@ fn assign_channels(doc: &mut ExpressionDoc, ids: &[NoteId], seed: u64) -> bool {
                 taken[ch as usize] = true;
             }
         }
-        rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        rng = rng
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let offset = (rng >> 33) as usize % 15;
         let chosen = (0..15)
             .map(|k| 2 + ((offset + k) % 15) as u8)
@@ -869,10 +1096,10 @@ impl Default for History {
 
 /// Build the point list a freehand stroke commits, at one point per
 /// document-time step (screen-pixel resolution at the current zoom).
-pub fn stroke_points(samples: &[(f64, f64)], lane: Lane) -> Vec<Point> {
+pub fn stroke_points(samples: &[(f64, f64)], dimension: Dimension) -> Vec<Point> {
     let mut curve = Curve::new();
     for &(t, v) in samples {
-        curve.set(t, lane.clamp(v));
+        curve.set(t, dimension.clamp(v));
     }
     curve.points().to_vec()
 }

@@ -20,6 +20,7 @@
 //! DSP style matches the sibling fx crates (`comp-dsp`, `pitch-dsp`): plain
 //! `std`, `f64`, allocation confined to construction/`set_sample_rate`.
 
+pub mod envelope;
 pub mod analyze;
 pub mod classify;
 pub mod debreath;
@@ -73,9 +74,16 @@ impl Default for LevelerConfig {
 
 /// The bundled realtime vocal chain: gate → de-breath → ride → de-ess.
 ///
-/// Mono in / mono out. Ordering is deliberate: clean up (gate/de-breath) before
-/// riding so the rider keys off treated audio, then de-ess last so sibilant
-/// energy the rider may have boosted is tamed.
+/// Mono in / mono out. Order is **gate → breath → sibilance → ride**
+/// (#204), with the ride last because it is the curve you will edit most
+/// and it should see everything the cleanup stages did.
+///
+/// This is the *realtime* chain, where each stage genuinely consumes the
+/// previous one's output. The generated **envelopes** are deliberately
+/// different: they are independent, share only one analysis pass, and
+/// never consume each other's gain — because each has to be bypassable
+/// on its own, and a curve keyed off another's output is not honestly
+/// bypassable. See `envelope`.
 pub struct VocalLeveler {
     gate: Option<Gate>,
     debreath: Option<DeBreather>,
@@ -162,11 +170,13 @@ impl VocalLeveler {
         if let Some(d) = &mut self.debreath {
             x = d.process_sample(x);
         }
-        if let Some(r) = &mut self.rider {
-            x = r.process_sample(x);
-        }
+        // Sibilance before the ride: the ride is last so that what it
+        // sees is already cleaned up, which is the reorder #204 made.
         if let Some(d) = &mut self.deess {
             x = d.process_sample(x);
+        }
+        if let Some(r) = &mut self.rider {
+            x = r.process_sample(x);
         }
         x
     }

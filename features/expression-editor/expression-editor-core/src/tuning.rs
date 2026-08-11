@@ -94,10 +94,22 @@ pub const RAST: Temperament = Temperament {
 pub const BAYATI: Temperament = Temperament {
     name: "Maqam Bayati",
     description: "24-EDO approximation (half-flat 2nd)",
-    offsets: [
-        0.0, 0.0, -50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    ],
+    offsets: [0.0, 0.0, -50.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
 };
+
+/// Resolve a temperament by name, for state that was stored by name.
+///
+/// Tuning cannot be persisted by value: `Temperament` holds
+/// `&'static str` and a table of offsets, so round-tripping it would
+/// mean storing the whole table and trusting it. Storing the name and
+/// resolving it here means a preset whose offsets are corrected in a
+/// later build takes effect, which is what you want from a preset.
+///
+/// Returns `None` for a name this build does not know, so the caller can
+/// fall back rather than guess at a tuning.
+pub fn by_name(name: &str) -> Option<&'static Temperament> {
+    PRESETS.iter().copied().find(|t| t.name == name)
+}
 
 pub const PRESETS: [&Temperament; 6] = [
     &EQUAL,

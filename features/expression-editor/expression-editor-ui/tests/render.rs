@@ -6,7 +6,7 @@
 //! this asserts the view actually reaches the screen.
 
 use dioxus::prelude::*;
-use expression_editor_core::doc::{ExpressionDoc, Lane, Note, NoteId, TimeBase};
+use expression_editor_core::doc::{ExpressionDoc, Dimension, Note, NoteId, TimeBase};
 use expression_editor_core::{Editor, Viewport};
 use expression_editor_ui::ExpressionEditor;
 
@@ -68,10 +68,10 @@ fn the_editor_renders_its_toolbar_canvas_and_status_bar() {
     assert!(html.contains("Reset view (V)"), "view controls");
     assert!(html.contains("12TET"), "tuning moved to the status bar");
     assert!(html.contains("Chord"), "the chord box renders");
-    // Lane controls.
-    for lane in Lane::ALL {
-        let label = expression_editor_ui::theme::lane_label(lane);
-        assert!(html.contains(label), "missing lane control: {label}");
+    // Dimension controls.
+    for dimension in Dimension::ALL {
+        let label = expression_editor_ui::theme::lane_label(dimension);
+        assert!(html.contains(label), "missing dimension control: {label}");
     }
     assert!(
         html.contains("1/16"),
@@ -81,7 +81,7 @@ fn the_editor_renders_its_toolbar_canvas_and_status_bar() {
 
 #[test]
 fn the_top_bar_follows_the_mode() {
-    use expression_editor_core::Mode;
+    use expression_editor_core::{Mode, ModeFamily};
 
     let mut mpe = demo_editor(false, false);
     mpe.set_mode(Mode::Mpe);
@@ -110,6 +110,31 @@ fn the_top_bar_follows_the_mode() {
             mode.label()
         );
     }
+    // And it is grouped by family rather than one flat run. The check
+    // is positional because that is the whole point of the grouping:
+    // every MIDI-family label must come before every audio-family one,
+    // so the bar reads "which kind of material" left to right.
+    let at = |label: &str| {
+        midi_html
+            .find(label)
+            .unwrap_or_else(|| panic!("missing mode: {label}"))
+    };
+    let last_midi = ModeFamily::Midi
+        .modes()
+        .iter()
+        .map(|m| at(m.label()))
+        .max()
+        .unwrap();
+    let first_audio = ModeFamily::Audio
+        .modes()
+        .iter()
+        .map(|m| at(m.label()))
+        .min()
+        .unwrap();
+    assert!(
+        last_midi < first_audio,
+        "the two families must render as separate runs, MIDI first"
+    );
 }
 
 #[test]

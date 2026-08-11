@@ -43,6 +43,39 @@ fn resolve_take_index(list: &TakeList, take: &TakeRef) -> Option<usize> {
     }
 }
 
+/// The project and take a marker call addresses.
+fn marker_target(
+    daw: &Standalone,
+    project: &ProjectContext,
+    item: &ItemRef,
+    take: &TakeRef,
+) -> Option<(String, String)> {
+    let proj = resolve_project(daw, project)?;
+    let item_guid = resolve_item_guid(item)?;
+    let list = daw
+        .with_project(&proj, |p| p.takes.get(&item_guid).cloned())
+        .ok()
+        .flatten()?;
+    let idx = resolve_take_index(&list, take)?;
+    Some((proj, list.takes.get(idx)?.guid.clone()))
+}
+
+/// Keep markers in source order and renumber them.
+///
+/// The index is an enumeration position, not an identity — the proto
+/// says so, and REAPER renumbers on every insert too. Sorting here is
+/// what makes "the marker at index 3" mean the fourth one in time
+/// rather than the fourth one added.
+fn renumber(list: &mut [TakeMarker]) {
+    list.sort_by(|a, b| {
+        a.source_position_seconds
+            .total_cmp(&b.source_position_seconds)
+    });
+    for (i, m) in list.iter_mut().enumerate() {
+        m.index = i as u32;
+    }
+}
+
 impl Takes for Standalone {
     fn get_takes(&self, project: ProjectContext, item: ItemRef) -> Vec<Take> {
         let Some(guid) = resolve_project(self, &project) else {
@@ -333,51 +366,120 @@ impl Takes for Standalone {
 
     fn get_take_markers(
         &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _take: TakeRef,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
     ) -> Vec<TakeMarker> {
-        Vec::new()
+        let Some((proj, take_guid)) = marker_target(self, &project, &item, &take) else {
+            return Vec::new();
+        };
+        self.with_project(&proj, |p| {
+            p.take_markers.get(&take_guid).cloned().unwrap_or_default()
+        })
+        .unwrap_or_default()
     }
 
     fn add_take_marker(
         &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _take: TakeRef,
-        _marker: TakeMarkerCreate,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        marker: TakeMarkerCreate,
     ) -> Option<u32> {
-        None
+        let (proj, take_guid) = marker_target(self, &project, &item, &take)?;
+        self.with_project_mut(&proj, |p| {
+            let list = p.take_markers.entry(take_guid).or_default();
+            list.push(TakeMarker {
+                index: 0,
+                name: marker.name,
+                source_position_seconds: marker.source_position_seconds,
+                color: marker.color,
+            });
+            renumber(list);
+            // The index it landed at, not the one it was pushed to:
+            // markers are kept in source order, so an early marker
+            // added late lands in the middle.
+            list.iter()
+                .position(|m| {
+                    (m.source_position_seconds - marker.source_position_seconds).abs() < 1e-12
+                })
+                .unwrap_or(list.len() - 1) as u32
+        })
+        .ok()
     }
 
     fn set_take_marker(
         &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _take: TakeRef,
-        _update: TakeMarkerUpdate,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        update: TakeMarkerUpdate,
     ) -> DawResult<()> {
-        Ok(())
+        let (proj, take_guid) = marker_target(self, &project, &item, &take)
+            .ok_or_else(|| DawError::not_found("Take", "location"))?;
+        self.with_project_mut(&proj, |p| {
+            let list = p.take_markers.entry(take_guid).or_default();
+            let Some(m) = list.get_mut(update.index as usize) else {
+                return Err(DawError::not_found("TakeMarker", &update.index.to_string()));
+            };
+            if let Some(name) = update.name {
+                m.name = name;
+            }
+            if let Some(pos) = update.source_position_seconds {
+                m.source_position_seconds = pos;
+            }
+            // `Some(None)` clears, `None` leaves alone — the partial
+            // update convention the proto documents.
+            if let Some(color) = update.color {
+                m.color = color;
+            }
+            renumber(list);
+            Ok(())
+        })?
     }
 
     fn delete_take_marker(
         &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _take: TakeRef,
-        _index: u32,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        index: u32,
     ) -> DawResult<()> {
-        Ok(())
+        let (proj, take_guid) = marker_target(self, &project, &item, &take)
+            .ok_or_else(|| DawError::not_found("Take", "location"))?;
+        self.with_project_mut(&proj, |p| {
+            let list = p.take_markers.entry(take_guid).or_default();
+            if (index as usize) >= list.len() {
+                return Err(DawError::not_found("TakeMarker", &index.to_string()));
+            }
+            list.remove(index as usize);
+            renumber(list);
+            Ok(())
+        })?
     }
 
     fn add_take_marker_at_position(
         &self,
-        _project: ProjectContext,
-        _item: ItemRef,
-        _take: TakeRef,
-        _request: AddTakeMarkerAtPositionRequest,
+        project: ProjectContext,
+        item: ItemRef,
+        take: TakeRef,
+        request: AddTakeMarkerAtPositionRequest,
     ) -> Option<u32> {
-        None
+        // Taken as a source position directly. Standalone models no
+        // take offset or play rate on this path, so a conversion here
+        // would be inventing one — and inventing one silently is worse
+        // than treating the two as the same number and saying so.
+        let seconds = request.position.seconds().unwrap_or(0.0);
+        self.add_take_marker(
+            project,
+            item,
+            take,
+            TakeMarkerCreate {
+                name: request.name,
+                source_position_seconds: seconds,
+                color: request.color,
+            },
+        )
     }
 
     fn run_take_rating_action(

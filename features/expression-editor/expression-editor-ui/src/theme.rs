@@ -53,6 +53,37 @@ pub const GUTTER_BG: &str = d::GUTTER;
 /// Razor areas. Distinct from ZONE red — a razor is a region you are
 /// about to operate on, not a warning.
 pub const RAZOR: &str = d::RAZOR;
+/// The tracked pitch contour on the audio surface — white, and the
+/// brightest line there.
+pub const PITCH_TRACK: &str = d::PITCH_TRACK;
+
+/// Notes from another track, drawn behind the active one.
+pub const REFERENCE: &str = d::REFERENCE;
+
+/// How well a sung note matches its target, in tune to out of tune.
+pub const TUNE_RAMP: [&str; 5] = d::TUNE_RAMP;
+
+/// The ramp step for a deviation of `cents`.
+///
+/// Twenty cents is about where a held note starts sounding wrong to a
+/// listener, so that is where the ramp reaches its far end. Below five
+/// it reads as dead on — chasing the last few cents of a sung note is
+/// how vocals end up sounding synthetic.
+pub fn tune_color(cents: f64) -> &'static str {
+    let c = cents.abs();
+    let step = if c < 5.0 {
+        0
+    } else if c < 10.0 {
+        1
+    } else if c < 15.0 {
+        2
+    } else if c < 20.0 {
+        3
+    } else {
+        4
+    };
+    TUNE_RAMP[step]
+}
 
 /// A control's resting surface, and the engaged variant.
 pub const CONTROL: &str = d::CONTROL;
@@ -67,7 +98,7 @@ pub const TEXT_BRIGHT: &str = d::TEXT_BRIGHT;
 pub const TEXT_FAINT: &str = d::TEXT_FAINT;
 /// The deepest surface step, below [`BG`].
 pub const SURFACE_DEEP: &str = d::SURFACE_DEEP;
-/// A well or lane cut into a panel.
+/// A well or dimension cut into a panel.
 pub const SURFACE_SUNKEN: &str = d::SURFACE_SUNKEN;
 /// Toolbars and status bars.
 pub const SURFACE_BAR: &str = d::SURFACE_BAR;
@@ -105,22 +136,22 @@ pub fn pitch_class_color(row: i32) -> &'static str {
     PITCH_CLASS[row.rem_euclid(12) as usize]
 }
 
-/// Per-lane curve color.
-pub fn lane_color(lane: expression_editor_core::Lane) -> &'static str {
-    use expression_editor_core::Lane;
-    match lane {
-        Lane::Pitch => d::LANE_PITCH,
-        Lane::Pressure => d::LANE_PRESSURE,
-        Lane::Timbre => d::LANE_TIMBRE,
+/// Per-dimension curve color.
+pub fn lane_color(dimension: expression_editor_core::Dimension) -> &'static str {
+    use expression_editor_core::Dimension;
+    match dimension {
+        Dimension::Pitch => d::LANE_PITCH,
+        Dimension::Pressure => d::LANE_PRESSURE,
+        Dimension::Timbre => d::LANE_TIMBRE,
     }
 }
 
-pub fn lane_label(lane: expression_editor_core::Lane) -> &'static str {
-    use expression_editor_core::Lane;
-    match lane {
-        Lane::Pitch => "Pitch",
-        Lane::Pressure => "Pressure",
-        Lane::Timbre => "Timbre",
+pub fn lane_label(dimension: expression_editor_core::Dimension) -> &'static str {
+    use expression_editor_core::Dimension;
+    match dimension {
+        Dimension::Pitch => "Pitch",
+        Dimension::Pressure => "Pressure",
+        Dimension::Timbre => "Timbre",
     }
 }
 
@@ -200,10 +231,14 @@ pub fn mode_icon(mode: expression_editor_core::Mode) -> &'static str {
                          M4.5 7.5a3.5 3.5 0 007 0 M8 11v3 M6 14h4"
         }
         // Waveform.
-        Mode::Audio => {
+        Mode::PitchedAudio => {
             "M1 8h1.5 M2.5 8v0 M3.5 5v6 M5.5 3v10 M7.5 6v4 \
                         M9.5 2v12 M11.5 5v6 M13.5 7v2 M15 8h0"
         }
+        // Transients: a baseline with decaying spikes on it. The same
+        // family as the pitched-audio waveform, but struck rather than
+        // sung — which is the distinction the mode exists to make.
+        Mode::UnpitchedAudio => "M1 13h14 M3 13V4l1.2 9 M7.5 13V6l1.2 7 M12 13V2l1.2 11",
     }
 }
 

@@ -13,7 +13,7 @@
 //! usable for comping and for rhythmic rearrangement, and it is why the
 //! area — not the note — is the unit of operation.
 
-use crate::doc::{ExpressionDoc, Lane, Note, NoteId};
+use crate::doc::{ExpressionDoc, Dimension, Note, NoteId};
 
 /// A rectangular selection over time and rows.
 ///
@@ -92,9 +92,9 @@ fn slice_at(doc: &mut ExpressionDoc, t: f64, row_lo: i32, row_hi: i32) -> Vec<No
                 .iter()
                 .map(|n| n.id)
                 .find(|id| !before.contains(id))
-            {
-                created.push(new_id);
-            }
+        {
+            created.push(new_id);
+        }
     }
     created
 }
@@ -170,7 +170,9 @@ pub fn move_contents(
     } else {
         // Non-overlapping destination: clear it, then move. Overlapping
         // (a nudge) must not clear the source out from under itself.
-        if dest.t0 >= area.t1 || dest.t1 <= area.t0 || dest.row_lo > area.row_hi
+        if dest.t0 >= area.t1
+            || dest.t1 <= area.t0
+            || dest.row_lo > area.row_hi
             || dest.row_hi < area.row_lo
         {
             delete_contents(doc, dest);
@@ -196,7 +198,12 @@ pub fn move_contents(
 /// Both note positions and lengths scale, so a bar of sixteenths
 /// razored and stretched becomes a bar of eighths — the rhythmic
 /// rearrangement gesture.
-pub fn stretch_contents(doc: &mut ExpressionDoc, area: RazorArea, new_t0: f64, new_t1: f64) -> bool {
+pub fn stretch_contents(
+    doc: &mut ExpressionDoc,
+    area: RazorArea,
+    new_t0: f64,
+    new_t1: f64,
+) -> bool {
     let ids = carve(doc, area);
     if ids.is_empty() || area.width() <= 0.0 || new_t1 - new_t0 <= 0.0 {
         return false;
@@ -257,17 +264,14 @@ pub fn set_velocity(doc: &mut ExpressionDoc, area: RazorArea, velocity: f64) -> 
     .apply(doc)
 }
 
-/// Erase one expression lane across the area, leaving the notes.
+/// Erase one expression dimension across the area, leaving the notes.
 ///
-/// Splices the lane's default in at both edges rather than only
-/// deleting points inside the span. A held note whose curve is defined
-/// by endpoints outside the razor has no points to delete, but the
-/// region still has to *read* as cleared — otherwise the curve just
-/// interpolates straight through the hole and nothing appears to have
-/// happened.
-pub fn clear_lane(doc: &mut ExpressionDoc, area: RazorArea, lane: Lane) -> bool {
+/// The edge-splicing rule this needs is [`crate::doc::Curve::clear_range`], which is
+/// also what the dimension and controller erasers use — the razor was where
+/// it was first got right, not where it belongs.
+pub fn clear_lane(doc: &mut ExpressionDoc, area: RazorArea, dimension: Dimension) -> bool {
     let ids = peek(doc, area);
-    let default = lane.default_value();
+    let default = dimension.default_value();
     let mut ok = false;
     for id in ids {
         let Some(n) = doc.note_mut(id) else { continue };
@@ -275,10 +279,10 @@ pub fn clear_lane(doc: &mut ExpressionDoc, area: RazorArea, lane: Lane) -> bool 
         if t1 <= t0 {
             continue;
         }
-        let curve = n.lane_mut(lane);
-        curve.remove_range(t0, t1);
-        curve.set(t0, default);
-        curve.set(t1, default);
+        // `ok` tracks that a note was *in* the area, not that its curve
+        // had anything to clear — an already-empty dimension inside a razor
+        // is still a successful clear.
+        n.curve_mut(dimension).clear_range(t0, t1, default);
         ok = true;
     }
     ok

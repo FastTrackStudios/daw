@@ -169,4 +169,31 @@ pub trait AuthService {
     /// The new address starts unverified — it has not been proven to
     /// belong to anyone yet.
     async fn change_email(&self, input: ChangeEmailRequest) -> Result<AuthUser, AuthFlowError>;
+
+    /// Set your OWN display profile — the name and avatar other people
+    /// see. Self-service like the two above: the session names the
+    /// account, so there is no target parameter.
+    ///
+    /// `None` leaves a field alone; `Some("")` clears it. That
+    /// distinction matters for a federated fan-out, where "the home
+    /// didn't mention the avatar" and "the home cleared the avatar"
+    /// must not collapse into the same write.
+    ///
+    /// Username is deliberately NOT here — it is an identifier with a
+    /// uniqueness constraint, not display text, and it has its own
+    /// flow.
+    async fn update_profile(&self, input: UpdateProfileRequest) -> Result<AuthUser, AuthFlowError>;
+}
+
+/// Wire form of a self-service profile change.
+#[derive(Clone, Debug, PartialEq, Eq, ::facet::Facet)]
+#[repr(C)]
+pub struct UpdateProfileRequest {
+    /// Identifies the account; the change always applies to the
+    /// session's own user.
+    pub session_token: String,
+    /// Display name. `None` = leave unchanged, `Some("")` = clear.
+    pub name: Option<String>,
+    /// Avatar URL. `None` = leave unchanged, `Some("")` = clear.
+    pub image: Option<String>,
 }
