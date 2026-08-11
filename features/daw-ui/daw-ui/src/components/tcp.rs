@@ -291,7 +291,7 @@ pub fn TrackRow(
             // ── Row two: envelope, the FX slot, the input combo ──
             // 29, measured: the envelope's block runs 29..48 of the row.
             div { style: "position:absolute; left:29px; top:{ROW_TWO}px;",
-                EnvelopeButton { width: 22, height: 20 }
+                EnvelopeButton { width: 22, height: 20, panel: Panel::Track }
             }
             div {
                 style: "position:absolute; left:56px; top:{ROW_TWO}px; \

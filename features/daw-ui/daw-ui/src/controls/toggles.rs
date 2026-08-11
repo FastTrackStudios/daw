@@ -369,6 +369,9 @@ fn box_style(w: u32, h: u32) -> String {
 pub fn EnvelopeButton(
     #[props(default = 21)] width: u32,
     #[props(default = 30)] height: u32,
+    /// The track panel draws it on a scrim; the mixer draws it bare.
+    #[props(default)]
+    panel: Panel,
 ) -> Element {
     let mut at = use_signal(art::Interaction::default);
     let (enter, leave) = pointer!(at);
@@ -379,6 +382,7 @@ pub fn EnvelopeButton(
             onmouseleave: leave,
             art::EnvelopeButton {
                 mode: art::EnvelopeMode::Off,
+                scrim: panel.is_track(),
                 cell: (width as f32, height as f32),
                 width: Some(width),
                 height: Some(height),

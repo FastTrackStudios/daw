@@ -195,6 +195,12 @@ const FX_PILL_TOP: f32 = 9.0;
 const METER_W: u32 = 26;
 /// `mcp.recinput` and `mcp.recmode` are both 16 rows.
 const INPUT_FIELD_H: f32 = 16.0;
+/// `mcp_pan`'s cell.
+const PAN_KNOB_W: f32 = 24.0;
+/// `mcp.recmode`'s field. Wide enough for the word and the caret with a
+/// gap between them — at 42 with a 12-column right pad the two were
+/// almost touching.
+const IN_FIELD_W: f32 = 38.0;
 const BOTTOM_SECTION: f32 = 47.0;
 /// The axis the right-hand column centres on: `mcp.recmon` and everything
 /// anchored to it. The record arm's ring sits at 0.486 of its own 36-wide
@@ -484,11 +490,11 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 // `mcp.recmode` and both it and the record arm sit inside
                 // the band, pan at its left and the arm at its right, which
                 // is where the source has them.
-                // Top of the section, not two rows into it: the knob is 25
-                // rows and the label 7, which is exactly the 33 the section
-                // has — two rows of slack and the label runs under the
-                // record-input field.
-                div { style: "position:absolute; left:9px; top:0;",
+                // Centred on the strip, and at the top of the section: the
+                // knob is 25 rows and the label 7, which is exactly the 33
+                // the section has — two rows of slack and the label runs
+                // under the record-input field below it.
+                div { style: "position:absolute; left:{(STRIP_W - PAN_KNOB_W) / 2.0}px; top:0;",
                     PanKnob { track: track.guid.clone() }
                     if shape.show_pan_labels {
                         // Inline, like everything else that decides layout
@@ -500,7 +506,7 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                         // and a label on its own line ran past the edge.
                         div {
                             class: "text-[8px] text-zinc-400 leading-none text-center",
-                            style: "position:absolute; left:0; top:26px; width:24px; \
+                            style: "position:absolute; left:0; top:26px; width:{PAN_KNOB_W}px; \
                                     font-size:7px; line-height:7px; text-align:center; \
                                     color:#a1a1aa; \
                                     font-family:Fira Sans, DejaVu Sans, sans-serif;",
@@ -556,14 +562,15 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                     div {
                         style: "position:absolute; left:6px; \
                                 top:{pan_h + INPUT_FIELD_H + 5.0}px; \
-                                width:42px; height:{INPUT_FIELD_H}px; background:{field};",
+                                width:{IN_FIELD_W}px; height:{INPUT_FIELD_H}px; \
+                                background:{field};",
                         div {
-                            style: "padding:0 12px 0 4px; line-height:{INPUT_FIELD_H}px; \
+                            style: "padding:0 0 0 6px; line-height:{INPUT_FIELD_H}px; \
                                     font-size:9px; color:{ink}; \
                                     font-family:Fira Sans, DejaVu Sans, sans-serif;",
                             "IN"
                         }
-                        Caret { x: 42.0 - 10.0, y: INPUT_FIELD_H / 2.0 - 2.0, ink: caret.clone() }
+                        Caret { x: IN_FIELD_W - 12.0, y: INPUT_FIELD_H / 2.0 - 2.0, ink: caret.clone() }
                     }
                 }
             }

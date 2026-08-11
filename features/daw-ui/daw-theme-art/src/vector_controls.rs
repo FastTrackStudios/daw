@@ -2234,6 +2234,10 @@ impl EnvelopeMode {
 
 #[derive(Props, Clone, PartialEq)]
 pub struct EnvelopeProps {
+    /// Draw the plate behind the mark. The track panel's controls sit on a
+    /// scrim; the mixer's sit on the strip.
+    #[props(default = true)]
+    pub scrim: bool,
     #[props(default)]
     pub mode: EnvelopeMode,
     #[props(default = (20.0, 20.0))]
@@ -2273,7 +2277,17 @@ pub fn EnvelopeButton(props: EnvelopeProps) -> Element {
     // The plate is the track panel's usual scrim — flat black at a low
     // opacity — not a wash of the mode colour. Tinting it made every lit
     // mode glow, and turned the alpha-weighted mean from #08 into #3e.
-    let plate = if lit { 0.35 } else { 0.25 };
+    //
+    // The mixer does not want it at all. A scrim reads as a plate over a
+    // track panel's colour; over the mixer strip's own #262626 it is just
+    // a darker box sitting on the grey, which is what made the button look
+    // like a hole in the column. Same split the FX pill makes between the
+    // two families, for the same reason.
+    let plate = if props.scrim {
+        if lit { 0.35 } else { 0.25 }
+    } else {
+        0.0
+    };
     let glyph = if lit { 1.0 } else { 0.73 };
     // Down half a pixel when there is no letter to make room for.
     let dy = if lit { 0.0 } else { 0.6 };
