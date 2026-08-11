@@ -5117,6 +5117,16 @@ pub struct VolumeKnobProps {
     pub at: Interaction,
 }
 
+/// Where the value ring starts, clockwise from twelve o'clock, and how far
+/// it runs.
+///
+/// A 320° track with a 40° gap at the bottom — measured off REAPER's,
+/// whose ring closes much further round than the 300° first drawn here.
+/// Public because the test that checks unity lands where the fader puts it
+/// has to ask the same two numbers.
+pub const VOLUME_KNOB_START: f32 = -160.0;
+pub const VOLUME_KNOB_SWEEP: f32 = 320.0;
+
 /// REAPER's track-panel volume knob: a dark body inside a value ring.
 ///
 /// It is drawn rather than traced. REAPER's own is `tcp_vol_knob_stack`, a
@@ -5146,10 +5156,16 @@ pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
     // near-black column at 158 and only then the blue. Without it the ring
     // runs to the cell's edge and the knob reads a size larger than the
     // one beside it even when the two measure the same.
-    let rim = vw * 0.5;
-    let r = vw * 0.386;
-    let stroke = vw * 0.18;
-    let body = vw * 0.34;
+    // Absolute, not fractions of the cell. REAPER's knob is 22 across
+    // inside a 24-tall field, so the cell is the field's height and the
+    // drawing keeps its own measurements: an 11 rim, a 7.5 body and a 3.5
+    // ring between them. Scaled to the cell instead, the ring came out
+    // heavy and the body small — the knob read as a thick washer rather
+    // than a cap with a track round it.
+    let rim = 11.0f32;
+    let r = 9.0f32;
+    let stroke = 3.5f32;
+    let body = 7.5f32;
 
     /// A point on the ring, by angle clockwise from twelve o'clock.
     fn on(cx: f32, cy: f32, r: f32, deg: f32) -> (f32, f32) {
@@ -5157,9 +5173,7 @@ pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
         (cx + r * a.sin(), cy - r * a.cos())
     }
 
-    // The track: seven o'clock to five o'clock, the long way round.
-    const START: f32 = -150.0;
-    const SWEEP: f32 = 300.0;
+    let (start, sweep) = (VOLUME_KNOB_START, VOLUME_KNOB_SWEEP);
     let arc = |from: f32, to: f32| {
         let (x0, y0) = on(cx, cy, r, from);
         let (x1, y1) = on(cx, cy, r, to);
@@ -5168,7 +5182,7 @@ pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
     };
 
     let value = props.value.clamp(0.0, 1.0);
-    let lit_to = START + SWEEP * value;
+    let lit_to = start + sweep * value;
     let ink = ink(None, props.at, true, 0.35);
 
     rsx! {
@@ -5198,9 +5212,27 @@ pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
             }
             // The black outline, and the rim the ring is inset into.
             circle { cx: "{cx}", cy: "{cy}", r: "{rim}", fill: "#0d0d0d" }
+            defs {
+                // The ring is not one flat blue. Sampled round REAPER's,
+                // it runs #5EC3FF where the value starts at the lower left
+                // and #4B7994 by the time it reaches the top — lit from
+                // below, like the rest of this theme's hardware.
+                linearGradient { id: "volring", x1: "0", y1: "1", x2: "0", y2: "0",
+                    stop { offset: "0", stop_color: "#5ec3ff" }
+                    stop { offset: "1", stop_color: "#4b7994" }
+                }
+                // And the body is not flat either: #303030 at the top to
+                // #2D2D2D at the bottom. Three units, which sounds like
+                // nothing and is the difference between a moulded cap and
+                // a filled circle.
+                linearGradient { id: "volbody", x1: "0", y1: "0", x2: "0", y2: "1",
+                    stop { offset: "0", stop_color: "#303030" }
+                    stop { offset: "1", stop_color: "#2d2d2d" }
+                }
+            }
             // The unlit track, all the way round.
             path {
-                d: "{arc(START, START + SWEEP)}",
+                d: "{arc(start, start + sweep)}",
                 fill: "none",
                 // #3E4A51, measured off the unlit side of REAPER's ring —
                 // a slate that stays legible against the body. Derived from
@@ -5211,7 +5243,7 @@ pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
                 stroke_linecap: "butt",
             }
             // The body, inside it.
-            circle { cx: "{cx}", cy: "{cy}", r: "{body}", fill: "{ink.face.shade(-0.22).css()}" }
+            circle { cx: "{cx}", cy: "{cy}", r: "{body}", fill: "url(#volbody)" }
             circle {
                 cx: "{cx}", cy: "{cy}", r: "{body}",
                 fill: "none",
@@ -5222,9 +5254,9 @@ pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
             // of the unlit stroke rather than under it.
             if value > 0.0 {
                 path {
-                    d: "{arc(START, lit_to)}",
+                    d: "{arc(start, lit_to)}",
                     fill: "none",
-                    stroke: "{t.chrome.accent.css()}",
+                    stroke: "url(#volring)",
                     stroke_width: "{stroke}",
                     stroke_linecap: "butt",
                 }
@@ -5280,7 +5312,7 @@ mod volume_knob_tests {
 
         // Clockwise from twelve, which is how the component measures.
         let deg = (x - c).atan2(c - y).to_degrees();
-        let wanted = -150.0 + 300.0 * 0.708;
+        let wanted = VOLUME_KNOB_START + VOLUME_KNOB_SWEEP * 0.708;
         assert!(
             (deg - wanted).abs() < 1.0,
             "unity is at {deg:.1}°, not {wanted:.1}° — the sweep and the taper disagree"

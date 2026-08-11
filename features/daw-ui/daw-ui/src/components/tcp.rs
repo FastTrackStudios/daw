@@ -81,7 +81,7 @@ const NAME_FIELD_H: f32 = 24.0;
 const VOLUME_KNOB_X: f32 = 157.0;
 /// Centred at 195, between the field's end and the routing widget —
 /// measured, its chord runs 191..200 at a row above the knobs' centres.
-const PAN_KNOB_X: f32 = 183.0;
+const PAN_KNOB_X: f32 = 184.0;
 /// The rule between the left column and the row, at 20.
 const COLUMN_RULE_X: f32 = 20.0;
 const ROUTING_X: f32 = 214.0;
@@ -234,7 +234,7 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
             // Pan sits *outside* the field, not on it — at 186 it landed
             // under the volume knob, because that was the sheet's number for
             // a row whose field stopped at 180.
-            div { style: "position:absolute; left:{PAN_KNOB_X}px; top:4px;",
+            div { style: "position:absolute; left:{PAN_KNOB_X}px; top:5px;",
                 PanKnob { track: track.guid.clone() }
             }
             // The routing widget, and then the FX pill — both measured,
