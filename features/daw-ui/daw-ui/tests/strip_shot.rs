@@ -256,11 +256,19 @@ fn paint_the_panels() {
                         width:900px; height:800px;",
                 // The track panel, stacked.
                 div { style: "position:absolute; left:0; top:0;",
+                    // The last row is tall, because two of REAPER's
+                    // controls — phase and the fixed-lanes button — only
+                    // exist above a height and a picture of the panel
+                    // without them is a picture of half of it.
                     for (i, track) in demo().into_iter().enumerate() {
                         div {
                             key: "{track.guid}",
                             style: "position:absolute; left:0; top:{i as f32 * 71.0}px;",
-                            daw_ui::components::tcp::TrackRow { track, index: i as u32 }
+                            daw_ui::components::tcp::TrackRow {
+                                track,
+                                index: i as u32,
+                                height: if i == 5 { 120.0 } else { 70.0 },
+                            }
                         }
                     }
                 }

@@ -5426,3 +5426,59 @@ pub fn TrackFolder(props: GlyphProps) -> Element {
         }
     }
 }
+
+/// The fixed-lanes button — `custom_fixed_lanes_*`, this theme's own
+/// addition rather than one of REAPER's.
+///
+/// Three stacked bars in a rounded plate: the lanes a fixed-lane track
+/// shows, with the active one lit. `custom_fixed_lanes_on` is 60x24 in
+/// three cells, so 20 wide a cell, which is the box `rtconfig` gives it.
+#[derive(Props, Clone, PartialEq)]
+pub struct FixedLanesProps {
+    /// Whether the track is in fixed-lane mode.
+    #[props(default)]
+    pub on: bool,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+#[component]
+pub fn FixedLanesButton(props: FixedLanesProps) -> Element {
+    let (vw, vh) = (20.0f32, 24.0f32);
+    let k = ink(None, props.at, true, 0.35);
+    let t = Theme::default();
+    let lane = |i: f32| vh * 0.22 + i * vh * 0.24;
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            style: "display:block;",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+            rect {
+                x: "0.5", y: "0.5", width: "{vw - 1.0}", height: "{vh - 1.0}",
+                rx: "{vw * 0.18}",
+                fill: "{k.face.css()}",
+                stroke: "{k.border.css()}", stroke_width: "1",
+            }
+            for i in 0..3 {
+                rect {
+                    key: "l{i}",
+                    x: "{vw * 0.22}", y: "{lane(i as f32)}",
+                    width: "{vw * 0.56}", height: "{vh * 0.14}",
+                    rx: "{vh * 0.07}",
+                    fill: if props.on && i == 0 {
+                        t.chrome.accent.css()
+                    } else {
+                        t.chrome.hardware_mark.shade(-0.1).css()
+                    },
+                }
+            }
+        }
+    }
+}

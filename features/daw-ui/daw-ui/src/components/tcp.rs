@@ -27,7 +27,7 @@ use daw_theme_art::dress::Panel;
 use daw_theme_art::vector_controls as art;
 
 use crate::controls::{
-    FxButton, IoButton, MuteButton, PanKnob, RecordArmButton, SoloButton, TrackMeter,
+    FxButton, IoButton, MuteButton, PanKnob, PhaseButton, RecordArmButton, SoloButton, TrackMeter,
     use_track_store,
 };
 use crate::prelude::*;
@@ -51,10 +51,30 @@ const ROW_W: f32 = TINT_W + GUTTER_W;
 /// Mute and solo, 21 into the section — measured at 318 against a section
 /// starting at 297.
 const GUTTER_BUTTON_X: f32 = 21.0;
+/// Solo's top, measured at 25 of the row — mute is 21 above it.
+const SOLO_TOP: f32 = 25.0;
 /// The meter: a vertical strip at the *start* of the section, before mute
 /// and solo rather than after them. Measured at 297..316 against a section
 /// starting at 297 — grey at rest, which is why it is easy to mistake for
 /// the section's own background.
+/// Where phase and the fixed-lanes button sit, and the heights below
+/// which each goes. From the theme:
+///
+///     phaseHide_h            = 12 + element_h + tcp.solo{1} + tcp.solo{3}
+///     phaseHide_h           += 17 when the lanes button is shown
+///     fixed_lanes_hide_h     = phaseHide_h - 17
+///     tcp.phase              = [tcp.solo meter_sec{3}] + [3 -24 16 20]
+///     tcp.custom.fixed_lanes = [tcp.solo meter_sec{3}] + [1 -47 20 24]
+///
+/// Both hang off the *bottom* of the meter section, which is why they end
+/// up in the row's bottom-right corner with the lanes button above phase.
+/// A 70-row row is below both thresholds and shows neither — REAPER's own
+/// rows at that height do not have them either.
+const PHASE_HIDE_H: f32 = 12.0 + 20.0 + 25.0 + 20.0 + 17.0;
+const LANES_HIDE_H: f32 = PHASE_HIDE_H - 17.0;
+const PHASE_FROM_FLOOR: f32 = 24.0;
+const LANES_FROM_FLOOR: f32 = 47.0;
+
 const TCP_METER_X: f32 = 1.0;
 const TCP_METER_W: u32 = 19;
 /// Row one's field, which the record arm and the volume knob sit on.
@@ -102,11 +122,21 @@ const FIELD_H: f32 = 20.0;
 /// without a backend behind it — the same reason `ChannelStripPreview`
 /// exists on the mixer side.
 #[component]
-pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
+pub fn TrackRow(
+    track: Track,
+    #[props(default)] index: u32,
+    /// The row's height. REAPER's track panel grows with the track, and
+    /// two of its controls only exist above a height — phase and the
+    /// fixed-lanes button — so a row that could not grow could not show
+    /// them at all.
+    #[props(default = ROW_H)]
+    height: f32,
+) -> Element {
     // The store first, the prop as the seed — a rename or a recolour in
     // REAPER reaches the row on the track stream rather than on a poll.
     // The mixer strip read its colour off the prop and sat a poll behind
     // every button beside it.
+    let row_h = height;
     let store = use_track_store();
     let guid = track.guid.clone();
     let live = use_memo(use_reactive!(|guid| store.track(&guid)));
@@ -140,21 +170,29 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
     let caret = theme.chrome.hardware_mark.shade(0.2).css();
     let fx_ink = theme.chrome.hardware_mark.shade(-0.1).css();
 
+    // Where the lanes button lands: above phase in the corner when the row
+    // has room for both, tucked under solo when it only has room for one.
+    let lanes_top = if row_h >= PHASE_HIDE_H {
+        row_h - LANES_FROM_FLOOR
+    } else {
+        SOLO_TOP + 20.0 + 2.0
+    };
+
     rsx! {
         div {
             class: "relative shrink-0",
-            style: "position:relative; width:{ROW_W}px; height:{ROW_H + 1.0}px; \
+            style: "position:relative; width:{ROW_W}px; height:{row_h + 1.0}px; \
                     border-bottom:1px solid {rule};",
 
             // The track colour is the row: REAPER tints the whole panel,
             // not a stripe on it. It stops at the gutter.
             div {
                 style: "position:absolute; left:0; top:0; \
-                        width:{TINT_W}px; height:{ROW_H}px; background:{tint.css()};",
+                        width:{TINT_W}px; height:{row_h}px; background:{tint.css()};",
             }
             div {
                 style: "position:absolute; left:{TINT_W}px; top:0; \
-                        width:{GUTTER_W}px; height:{ROW_H}px; background:{gutter};",
+                        width:{GUTTER_W}px; height:{row_h}px; background:{gutter};",
             }
 
             // ── The left column ──
@@ -165,17 +203,17 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
             // darkening the input combo gets — so they read as pressed
             // into the panel rather than printed on it.
             div {
-                style: "position:absolute; left:0; top:0; width:3px; height:{ROW_H}px; \
+                style: "position:absolute; left:0; top:0; width:3px; height:{row_h}px; \
                         background:#323232;",
             }
             div {
                 style: "position:absolute; left:{COLUMN_RULE_X}px; top:0; \
-                        width:1px; height:{ROW_H}px; background:{combo};",
+                        width:1px; height:{row_h}px; background:{combo};",
             }
             div { style: "position:absolute; left:8px; top:6px;",
                 art::TrackPin { colour: combo.clone() }
             }
-            div { style: "position:absolute; left:7px; top:{ROW_H - 10.0}px;",
+            div { style: "position:absolute; left:7px; top:{row_h - 10.0}px;",
                 art::TrackFolder { colour: combo.clone() }
             }
 
@@ -184,13 +222,13 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
             // view, and the last thing missing from the row's silhouette.
             div {
                 style: "position:absolute; left:{ROW_W - 2.0}px; top:0; \
-                        width:1px; height:{ROW_H}px; background:{rule};",
+                        width:1px; height:{row_h}px; background:{rule};",
             }
 
             // The track number, between them.
             div {
                 class: "absolute font-mono",
-                style: "position:absolute; left:9px; top:{ROW_H / 2.0 - 8.0}px; \
+                style: "position:absolute; left:9px; top:{row_h / 2.0 - 8.0}px; \
                         font-size:11px; line-height:16px; color:{index_ink};",
                 "{index + 1}"
             }
@@ -298,9 +336,28 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
                 MuteButton { track: track.guid.clone(), panel: Panel::Track }
             }
             div {
-                style: "position:absolute; left:{TINT_W + GUTTER_BUTTON_X}px; top:25px;",
+                style: "position:absolute; left:{TINT_W + GUTTER_BUTTON_X}px; top:{SOLO_TOP}px;",
                 SoloButton { track: track.guid.clone(), panel: Panel::Track }
             }
+            // Phase in the corner, the lanes button above it — or, when
+            // the row is too short for phase but not for lanes, the lanes
+            // button tucked under solo instead.
+            if row_h >= PHASE_HIDE_H {
+                div {
+                    style: "position:absolute; \
+                            left:{TINT_W + GUTTER_BUTTON_X + 3.0}px; \
+                            top:{row_h - PHASE_FROM_FLOOR}px;",
+                    PhaseButton { track: track.guid.clone() }
+                }
+            }
+            if row_h >= LANES_HIDE_H {
+                div {
+                    style: "position:absolute; \
+                            left:{TINT_W + GUTTER_BUTTON_X + 1.0}px; top:{lanes_top}px;",
+                    FixedLanes { on: false }
+                }
+            }
+
             // No scale: there is no column for numbers out here, and REAPER
             // prints them only in the mixer.
             div {
@@ -308,7 +365,7 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
                 TrackMeter {
                     track: track.guid.clone(),
                     width: TCP_METER_W,
-                    height: (ROW_H - 4.0) as u32,
+                    height: (row_h - 4.0) as u32,
                     scale: false,
                     // The section's own colour: REAPER's meter here shows
                     // nothing at rest, and a trough put two black bars in a
@@ -385,6 +442,24 @@ fn VolumeKnob(track: String) -> Element {
                 height: Some(24),
                 at: at(),
             }
+        }
+    }
+}
+
+/// The fixed-lanes button, bound to nothing yet.
+///
+/// `trackfixedlanes` is not something the DAW facade reports, so this
+/// draws the off state rather than inventing one — the same stance the
+/// envelope button takes.
+#[component]
+fn FixedLanes(on: bool) -> Element {
+    let mut at = use_signal(art::Interaction::default);
+    rsx! {
+        div {
+            style: "display:inline-block; line-height:0; cursor:pointer;",
+            onmouseenter: move |_| at.set(art::Interaction::Hover),
+            onmouseleave: move |_| at.set(art::Interaction::Normal),
+            art::FixedLanesButton { on, width: Some(20), height: Some(24), at: at() }
         }
     }
 }

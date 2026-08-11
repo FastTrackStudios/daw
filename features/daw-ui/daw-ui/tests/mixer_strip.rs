@@ -520,3 +520,58 @@ fn the_column_spreads_as_the_strip_grows() {
         "phase stayed put as the strip grew: {short} then {tall}"
     );
 }
+
+/// The track panel's corner controls appear only when the row has room.
+///
+/// `rtconfig` hides phase below `phaseHide_h` and the fixed-lanes button
+/// below 17 less than that, and anchors both to the bottom of the meter
+/// section — which is why they sit in the row's corner and why REAPER's
+/// default-height rows do not have them at all.
+#[test]
+fn the_rows_corner_controls_need_the_height() {
+    use daw_proto::Track;
+    use daw_ui::components::tcp::TrackRow;
+    use daw_ui::controls::TrackStore;
+
+    fn row(height: f32) -> String {
+        let mut dom = VirtualDom::new_with_props(
+            |height: f32| {
+                let mut store = use_hook(TrackStore::new);
+                use_hook(|| {
+                    store.seed([Track { guid: "T".into(), ..Default::default() }]);
+                    provide_context(store);
+                });
+                rsx! {
+                    TrackRow {
+                        track: Track { guid: "T".into(), ..Default::default() },
+                        height,
+                    }
+                }
+            },
+            height,
+        );
+        dom.rebuild_in_place();
+        dioxus_ssr::render(&dom)
+    }
+
+    // A default row has neither — REAPER's does not either.
+    let short = row(70.0);
+    assert_eq!(short.matches("lanes").count(), 0);
+
+    // A tall one has both. They are the only things the extra height
+    // adds, so the markup simply gets longer.
+    let tall = row(120.0);
+    assert!(tall.len() > short.len(), "the tall row gained nothing");
+
+    // And phase sits below the lanes button — both measured from the
+    // row's floor, 24 and 47 above it.
+    let tops: Vec<f32> = tall
+        .match_indices("px; top:")
+        .filter_map(|(i, m)| tall[i + m.len()..].split("px").next()?.parse().ok())
+        .filter(|t: &f32| *t > 60.0)
+        .collect();
+    assert!(
+        tops.contains(&96.0) && tops.contains(&73.0),
+        "phase and lanes are not on the row's floor: {tops:?}"
+    );
+}
