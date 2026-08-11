@@ -15,10 +15,11 @@ bindings (
      mnemonic "G for Glue",
      why "Ctrl+Shift+G glues the selection's items into one within the time selection."}
 
-    // MIDI editor toggle — `e`/`E` open the selected item in the MIDI editor;
-    // inside the editor, `e`/`E` close it (bound in midi.styx). One key in,
-    // same key out.
-    {keys e,       action 40153, desc "Open selected item in MIDI editor"}
+    // Expression editor — `e` loads the selected item (audio or MIDI)
+    // into the FTS Expression Editor and shows the panel. `E` keeps the
+    // stock MIDI editor reachable; inside it, `e`/`E` close it (bound in
+    // midi.styx).
+    {keys e,       action "FTS_EXPRESSION_EDITOR_OPEN", desc "Open selected item in Expression Editor"}
     {keys "<S-e>", action 40153, desc "Open selected item in MIDI editor"}
     {keys "<delete>",     action 40697, desc "Delete"}
     {keys "<backspace>",  action 40697, desc "Delete"}

@@ -75,6 +75,21 @@ fn session() -> &'static Mutex<Option<Loaded>> {
     SESSION.get_or_init(|| Mutex::new(None))
 }
 
+/// What the header calls the loaded take — the item's label when it has
+/// one, else the kind of take. Kept beside the session rather than in it
+/// because the label belongs to the *item*, which the sessions
+/// deliberately don't model.
+static LABEL: OnceLock<Mutex<String>> = OnceLock::new();
+
+fn label() -> &'static Mutex<String> {
+    LABEL.get_or_init(|| Mutex::new(String::new()))
+}
+
+/// The header label for the loaded take, empty when nothing is loaded.
+pub fn loaded_label() -> String {
+    label().lock().unwrap().clone()
+}
+
 /// Load the selected item into the panel.
 ///
 /// Audio is tried first, then MIDI. The order matters only because a
@@ -86,8 +101,18 @@ fn session() -> &'static Mutex<Option<Loaded>> {
 /// the caller should report — an editor opened on nothing looks like a
 /// failed load.
 pub fn load_selected() -> bool {
+    use daw::service::Items;
+
     let reaper = daw::reaper::Reaper;
     let viewport = Viewport::new(1100.0, 520.0);
+
+    // The item's own label, resolved up front so both session kinds
+    // share it. Falls back to the kind of take below.
+    let item_label = reaper
+        .get_selected_items(ProjectContext::Current)
+        .into_iter()
+        .next()
+        .and_then(|i| i.label.filter(|l| !l.is_empty()));
 
     if let Some(s) = AudioSession::load_selected(
         &reaper,
@@ -100,6 +125,7 @@ pub fn load_selected() -> bool {
             rate = s.sample_rate(),
             "analysed audio take into editor"
         );
+        *label().lock().unwrap() = item_label.unwrap_or_else(|| "Audio take".into());
         *session().lock().unwrap() = Some(Loaded::Audio(Box::new(s)));
         return true;
     }
@@ -112,6 +138,7 @@ pub fn load_selected() -> bool {
     ) {
         Some(s) => {
             tracing::info!(notes = s.editor.doc.notes.len(), "loaded MIDI take into editor");
+            *label().lock().unwrap() = item_label.unwrap_or_else(|| "MIDI take".into());
             *session().lock().unwrap() = Some(Loaded::Midi(Box::new(s)));
             true
         }
@@ -239,8 +266,17 @@ impl DawModule for ExpressionEditorModule {
                 "FTS_EXPRESSION_EDITOR_OPEN",
                 "FTS: Open Expression Editor on selected item",
                 || {
-                    if load_selected() {
-                        daw::reaper_ui::dock::show_panel(PANEL_ID);
+                    let was_visible = daw::reaper_ui::dock::is_panel_visible(PANEL_ID);
+                    let loaded = load_selected();
+                    // Show even when nothing loaded: the panel's empty
+                    // state says what to do next, which is more help
+                    // than a key that silently does nothing.
+                    daw::reaper_ui::dock::show_panel(PANEL_ID);
+                    // `show_panel` remounts only on the hidden→visible
+                    // transition; a panel that was already open would
+                    // otherwise keep rendering the previous take.
+                    if was_visible && loaded {
+                        daw::reaper_ui::dock::remount_panel(PANEL_ID);
                     }
                 },
             )
@@ -309,12 +345,21 @@ impl DawModule for ExpressionEditorModule {
     }
 }
 
+/// What kind of take is loaded, for the header. `None` when empty.
+fn loaded_kind() -> Option<&'static str> {
+    session().lock().unwrap().as_ref().map(|s| match s {
+        Loaded::Midi(_) => "MIDI",
+        Loaded::Audio(_) => "audio",
+    })
+}
+
 #[component]
 pub fn EditorPanel() -> Element {
-    // The panel mirrors the global session into a signal each frame.
-    // The actions mutate the global from outside any component, so the
-    // component cannot be the owner — but it does need to re-render
-    // when a load happens.
+    // The component mirrors the global session at mount. The actions
+    // that load a take run outside any component and cannot reach a
+    // hook's state; instead they remount this panel (see the OPEN
+    // action), which re-runs these initializers against the fresh
+    // global.
     let mut editor = use_signal(|| {
         session()
             .lock()
@@ -323,9 +368,11 @@ pub fn EditorPanel() -> Element {
             .map(|s| s.editor().clone())
             .unwrap_or_else(empty_editor)
     });
+    let mut loaded = use_signal(|| session().lock().unwrap().is_some());
+    let mut take_label = use_signal(loaded_label);
+    let mut take_kind = use_signal(|| loaded_kind().unwrap_or(""));
 
-    // Pull in a newly loaded take, and push edits back to the session
-    // so a write action sees them.
+    // Push edits back to the session so a write action sees them.
     use_effect(move || {
         let mut guard = session().lock().unwrap();
         if let Some(s) = guard.as_mut() {
@@ -335,20 +382,33 @@ pub fn EditorPanel() -> Element {
         }
     });
 
+    // Shared by the header button and (via remount) the OPEN action.
+    let mut sync_from_session = move || {
+        if let Some(s) = session().lock().unwrap().as_ref() {
+            editor.set(s.editor().clone());
+            loaded.set(true);
+        } else {
+            loaded.set(false);
+        }
+        take_label.set(loaded_label());
+        take_kind.set(loaded_kind().unwrap_or(""));
+    };
+
+    let note_count = editor.read().doc.notes.len();
+
     rsx! {
         div {
-            style: "width: 100%; height: 100%;",
+            style: "width: 100%; height: 100%; display: flex; flex-direction: column; \
+                    background: #101016;",
             div {
                 style: "display: flex; align-items: center; gap: 6px; padding: 4px 8px; \
-                        background: #15151c; border-bottom: 1px solid #2b2b38; \
+                        flex: 0 0 auto; background: #15151c; border-bottom: 1px solid #2b2b38; \
                         color: #c8cede; font-size: 11px; font-family: system-ui, sans-serif;",
                 button {
                     style: BUTTON,
                     onclick: move |_| {
                         if load_selected() {
-                            if let Some(s) = session().lock().unwrap().as_ref() {
-                                editor.set(s.editor().clone());
-                            }
+                            sync_from_session();
                         }
                     },
                     "Load selected item"
@@ -369,12 +429,21 @@ pub fn EditorPanel() -> Element {
                     style: BUTTON,
                     onclick: move |_| {
                         if reload() {
-                            if let Some(s) = session().lock().unwrap().as_ref() {
-                                editor.set(s.editor().clone());
-                            }
+                            sync_from_session();
                         }
                     },
                     "Reload"
+                }
+                if loaded() {
+                    span {
+                        style: "margin-left: 10px; color: #e8ecf6; font-weight: 600; \
+                                overflow: hidden; text-overflow: ellipsis; white-space: nowrap;",
+                        "{take_label}"
+                    }
+                    span {
+                        style: "color: #7b8397;",
+                        "{take_kind} · {note_count} notes"
+                    }
                 }
                 span {
                     style: "margin-left: auto; color: #7b8397;",
@@ -382,8 +451,23 @@ pub fn EditorPanel() -> Element {
                 }
             }
             div {
-                style: "height: calc(100% - 30px);",
-                ExpressionEditor { editor }
+                style: "flex: 1 1 0; min-height: 0;",
+                if loaded() {
+                    ExpressionEditor { editor }
+                } else {
+                    div {
+                        style: "height: 100%; display: flex; flex-direction: column; \
+                                align-items: center; justify-content: center; gap: 8px; \
+                                color: #7b8397; font-size: 13px; \
+                                font-family: system-ui, sans-serif;",
+                        span {
+                            style: "font-size: 15px; color: #c8cede;",
+                            "Nothing loaded"
+                        }
+                        span { "Select an audio or MIDI item in REAPER and press E," }
+                        span { "or click \"Load selected item\" above." }
+                    }
+                }
             }
         }
     }

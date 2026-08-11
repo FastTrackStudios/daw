@@ -667,6 +667,29 @@ pub fn show_panel(id: PanelId) {
     });
 }
 
+/// Remount a panel's component tree so its root component re-reads
+/// whatever external state it captures at mount.
+///
+/// `show_panel` remounts only on the hidden→visible transition; an
+/// action that loads new state into an *already open* panel needs this
+/// to make the panel pick it up (e.g. the expression editor's
+/// open-on-selected-item action, fired while the editor is docked and
+/// showing a previous item).
+pub fn remount_panel(id: PanelId) {
+    #[cfg(debug_assertions)]
+    assert_main_thread();
+    if !is_initialized() {
+        tracing::warn!(panel = id, "Ignoring remount_panel before dock::init");
+        return;
+    }
+    with_panel_removed(id, |panel| {
+        if let Some(view) = &mut panel.view {
+            view.remount();
+            view.mark_dirty();
+        }
+    });
+}
+
 pub fn hide_panel(id: PanelId) {
     #[cfg(debug_assertions)]
     assert_main_thread();

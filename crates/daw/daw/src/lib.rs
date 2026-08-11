@@ -470,8 +470,8 @@ pub mod reaper_ui {
     pub mod dock {
         pub use daw_reaper_dioxus::dock::{
             DockablePanelConfig, hide_panel, init as init_dock, is_panel_visible, prewarm_panel,
-            register_panel, register_panel_from_service, restore_dock_state, save_dock_state,
-            show_panel, toggle_panel, unregister_all_panels, update_panels,
+            register_panel, register_panel_from_service, remount_panel, restore_dock_state,
+            save_dock_state, show_panel, toggle_panel, unregister_all_panels, update_panels,
         };
         pub use daw_reaper_dioxus::service::{init as init_service, register_panel_from_def};
     }
