@@ -5444,9 +5444,15 @@ pub fn TrackFolder(props: GlyphProps) -> Element {
 /// The fixed-lanes button — `custom_fixed_lanes_*`, this theme's own
 /// addition rather than one of REAPER's.
 ///
-/// Three stacked bars in a rounded plate: the lanes a fixed-lane track
-/// shows, with the active one lit. `custom_fixed_lanes_on` is 60x24 in
-/// three cells, so 20 wide a cell, which is the box `rtconfig` gives it.
+/// **Two stacked dots**, not a stack of bars. Traced off the image: a
+/// 20x24 cell with dots of radius 2.5 centred on x9.5 at y9 and y17,
+/// #818181 with the lower one at 0.40 alpha when off, and both a solid
+/// #CBA336 when the track is in fixed-lane mode.
+///
+/// Drawn as bars first, it was indistinguishable from the routing button
+/// two rows above it — which is a worse failure than being ugly, because
+/// the two do entirely different things and the panel had them looking
+/// the same.
 #[derive(Props, Clone, PartialEq)]
 pub struct FixedLanesProps {
     /// Whether the track is in fixed-lane mode.
@@ -5463,9 +5469,21 @@ pub struct FixedLanesProps {
 #[component]
 pub fn FixedLanesButton(props: FixedLanesProps) -> Element {
     let (vw, vh) = (20.0f32, 24.0f32);
-    let k = ink(None, props.at, true, 0.35);
+    let (cx, r) = (vw * 0.475, 2.5f32);
     let t = Theme::default();
-    let lane = |i: f32| vh * 0.22 + i * vh * 0.24;
+    // Hover and press lift the marks, as everything else here does.
+    let lift = match props.at {
+        Interaction::Normal => 0.0,
+        Interaction::Hover => 0.12,
+        Interaction::Pressed => -0.10,
+    };
+    let (upper, lower, lower_alpha) = if props.on {
+        let lit = t.signal.solo.shade(lift).css();
+        (lit.clone(), lit, 1.0f32)
+    } else {
+        let ink = Color::rgb(0x81, 0x81, 0x81).shade(lift).css();
+        (ink.clone(), ink, 0.40)
+    };
 
     rsx! {
         svg {
@@ -5474,25 +5492,40 @@ pub fn FixedLanesButton(props: FixedLanesProps) -> Element {
             style: "display:block;",
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
-            rect {
-                x: "0.5", y: "0.5", width: "{vw - 1.0}", height: "{vh - 1.0}",
-                rx: "{vw * 0.18}",
-                fill: "{k.face.css()}",
-                stroke: "{k.border.css()}", stroke_width: "1",
-            }
-            for i in 0..3 {
-                rect {
-                    key: "l{i}",
-                    x: "{vw * 0.22}", y: "{lane(i as f32)}",
-                    width: "{vw * 0.56}", height: "{vh * 0.14}",
-                    rx: "{vh * 0.07}",
-                    fill: if props.on && i == 0 {
-                        t.chrome.accent.css()
-                    } else {
-                        t.chrome.hardware_mark.shade(-0.1).css()
-                    },
-                }
-            }
+            circle { cx: "{cx}", cy: "9", r: "{r}", fill: "{upper}" }
+            circle { cx: "{cx}", cy: "17", r: "{r}", fill: "{lower}", fill_opacity: "{lower_alpha}" }
         }
+    }
+}
+
+#[cfg(test)]
+mod fixed_lanes_tests {
+    use super::*;
+
+    fn render(on: bool) -> String {
+        let mut dom = dioxus::prelude::VirtualDom::new_with_props(
+            FixedLanesButton,
+            FixedLanesProps { on, width: Some(20), height: Some(24), at: Interaction::Normal },
+        );
+        dom.rebuild_in_place();
+        dioxus_ssr::render(&dom)
+    }
+
+    /// Two dots, and nothing that could be mistaken for the routing
+    /// button's lanes — which is what it was drawn as first, two rows
+    /// below the routing button itself.
+    #[test]
+    fn it_is_two_dots_and_not_a_stack_of_bars() {
+        let off = render(false);
+        assert_eq!(off.matches("<circle").count(), 2, "not two dots:\n{off}");
+        assert_eq!(off.matches("<rect").count(), 0, "it has bars:\n{off}");
+    }
+
+    /// Lit, both dots take the theme's mark colour at full strength; unlit,
+    /// the lower one is a shadow of the upper.
+    #[test]
+    fn the_lower_dot_is_faint_until_the_mode_is_on() {
+        assert!(render(false).contains(r#"fill-opacity="0.4""#), "the dots read as equals");
+        assert!(render(true).contains(r#"fill-opacity="1""#), "the lit dots are not solid");
     }
 }
