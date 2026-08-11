@@ -45,7 +45,16 @@ The TCP colour here is `#9D3C55` painted from a raw track colour of
   would let the loop verify those numbers; the one attempt captured a
   blank screen (the mixer window did not open in time).
 - The two references disagree about the pan section because REAPER has
-  `narrowMode` — see issue #245.
+  `narrowMode` — `rtconfig` branches `mcp.pan`, `mcp.width` and
+  `mcp.recinput` on it, and the squeezed mixer at the bottom of
+  `tcp-ref.png` is in it. **Decided (#245): width variants are not
+  modelled until the wide strip has converged in REAPER itself (#212).**
+  The strip follows the tall, 86-wide reference; `Collapse` models height
+  only. When a measurement from one reference contradicts the other about
+  the pan area, that is the mode, not an error in either image — do not
+  "fix" the strip toward the squeezed shot. The seam a future width model
+  goes through is `Collapse` growing a width input beside its height, not
+  a second strip component.
 
 ## Reproducing
 

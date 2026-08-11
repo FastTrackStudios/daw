@@ -23,6 +23,13 @@
 //! [`crate::collapse`]; this module is position, not shape.
 
 /// The mixer strip (`mcp_*`), at scale 1 in wide mode.
+///
+/// **Wide mode only, by decision (#245).** REAPER also has `narrowMode` —
+/// a 54-wide strip where `rtconfig` re-anchors pan, width and the record
+/// input — and the two reference screenshots disagree about the pan
+/// section because one of them is in it. Width variants are deferred
+/// until the wide strip has converged in REAPER itself (#212); until
+/// then a disagreement between the references is a mode, not an error.
 pub mod mcp {
     /// Stated: `set mcp_w + * scale ?narrowMode 54 86 …` — the wide
     /// strip is 86; narrow mode's 54 is not modelled (#245).
