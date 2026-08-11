@@ -10,6 +10,9 @@ use daw_proto::{Track, TrackEvent};
 use daw_ui::controls::{Meters, TrackMeter, TrackStore};
 use dioxus::prelude::*;
 
+mod support;
+use support::{svg_rects, svg_text_anchors};
+
 fn track(guid: &str, index: u32) -> Track {
     Track {
         guid: guid.to_string(),
@@ -132,14 +135,9 @@ fn the_scale_is_printed_inside_the_block() {
 
     // Both bars span the block between them: two of them, and the last
     // one reaches its right edge.
-    let widths: Vec<f32> = html
-        .match_indices(r#"<rect x=""#)
-        .filter_map(|(i, m)| {
-            let rest = &html[i + m.len()..];
-            let x: f32 = rest.split('"').next()?.parse().ok()?;
-            let w: f32 = rest.split(r#"width=""#).nth(1)?.split('"').next()?.parse().ok()?;
-            Some(x + w)
-        })
+    let widths: Vec<f32> = svg_rects(&html)
+        .into_iter()
+        .filter_map(|r| Some(r.x? + r.width?))
         .collect();
     assert!(
         widths.iter().any(|edge| (*edge - 26.0).abs() < 0.6),
@@ -147,10 +145,7 @@ fn the_scale_is_printed_inside_the_block() {
     );
 
     // And the marks are anchored inside it, not off its left.
-    let anchors: Vec<f32> = html
-        .match_indices(r#"<text x=""#)
-        .filter_map(|(i, m)| html[i + m.len()..].split('"').next()?.parse().ok())
-        .collect();
+    let anchors = svg_text_anchors(&html);
     assert!(!anchors.is_empty(), "the scale is missing:\n{html}");
     assert!(
         anchors.iter().all(|x| *x > 1.0 && *x <= 26.0),

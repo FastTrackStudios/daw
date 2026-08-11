@@ -8,6 +8,9 @@ use daw_proto::{Track, TrackEvent};
 use daw_ui::controls::{TrackStore, VolumeFader};
 use dioxus::prelude::*;
 
+mod support;
+use support::svg_rects;
+
 fn track(guid: &str, volume: f64) -> Track {
     Track {
         guid: guid.to_string(),
@@ -65,14 +68,12 @@ fn the_rail_is_a_stack_of_bands_and_only_the_middle_grows() {
 
     // And the slices reassemble the traced groove: 2 rows in the top cap,
     // 23 in the run, 2 in the bottom — the 27 rows `mcp_volbg` traces.
-    let rows: u32 = html
-        .match_indices(r#"width="1.4" height=""#)
-        .filter_map(|(i, m)| {
-            let rest = &html[i + m.len()..];
-            rest.split('"').next()?.parse::<u32>().ok()
-        })
+    let rows: f32 = svg_rects(&html)
+        .into_iter()
+        .filter(|r| r.width == Some(1.4))
+        .filter_map(|r| r.height)
         .sum();
-    assert_eq!(rows, 27, "the groove's slices do not add up:\n{html}");
+    assert_eq!(rows, 27.0, "the groove's slices do not add up:\n{html}");
     assert!(html.contains("flex:1"), "nothing takes the slack:\n{html}");
     // A stretched band must not letterbox — the rail is meant to lengthen.
     assert!(

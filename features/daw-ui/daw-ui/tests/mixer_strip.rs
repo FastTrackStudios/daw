@@ -12,6 +12,9 @@ use daw_proto::Track;
 use daw_ui::controls::TrackStore;
 use dioxus::prelude::*;
 
+mod support;
+use support::{abs_boxes, tops_at};
+
 fn track(guid: &str, index: u32, name: &str) -> Track {
     Track {
         guid: guid.to_string(),
@@ -261,21 +264,11 @@ fn the_residual_collapses_fire_on_the_stretch_section() {
 /// out of the offsets themselves.
 #[test]
 fn padding_steps_down_in_three_stages() {
-    /// The tops of the boxes on the column's own left edge, in order.
-    fn column_tops(html: &str) -> Vec<f32> {
-        let mut out: Vec<f32> = html
-            .split("position:absolute; left:55px; top:")
-            .skip(1)
-            .filter_map(|rest| rest.split("px").next()?.parse().ok())
-            .collect();
-        out.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        out
-    }
-
     let steps: std::collections::BTreeSet<String> = (120..=800)
         .step_by(4)
         .filter_map(|h| {
-            let tops = column_tops(&strip_at(h as f32));
+            // The boxes on the column's own left edge, in order.
+            let tops = tops_at(&strip_at(h as f32), 55.0);
             // Monitor → mute → solo: the first two steps are always drawn,
             // and each carries one padding.
             (tops.len() >= 3).then(|| format!("{:.0}", tops[2] - tops[1]))
@@ -345,12 +338,10 @@ fn the_strip_states_the_height_it_collapsed_by() {
 fn the_meter_and_the_fader_share_the_stretch_band() {
     for h in [371.0_f32, 640.0] {
         let html = strip_at(h);
-        let heights: Vec<&str> = html
-            .match_indices("top:4px; height:")
-            .map(|(i, m)| {
-                let rest = &html[i + m.len()..];
-                &rest[..rest.find("px").expect("a px height")]
-            })
+        let heights: Vec<f32> = abs_boxes(&html)
+            .into_iter()
+            .filter(|b| b.top == Some(4.0))
+            .filter_map(|b| b.height)
             .collect();
         assert_eq!(heights.len(), 2, "meter and fader do not both state a height at {h}:\n{html}");
         assert_eq!(heights[0], heights[1], "the fader is not as tall as the meter at {h}");
@@ -396,9 +387,13 @@ fn the_record_arm_and_the_button_column_share_an_axis() {
     // one that deliberately overhangs them.
     assert!(html.contains("width:21px"), "the button column shrink-wraps:\n{html}");
 
-    // And the arm is placed from the same axis rather than by eye: the
-    // ring sits at 0.486 of a 36-wide cell, so 65.5 - 17.496.
-    assert!(html.contains("left:48.00"), "the arm is not on the column's axis");
+    // And the arm is placed from the same axis rather than by eye — the
+    // geometry constant itself, not a pasted rendering of it.
+    let arm = daw_theme_art::geometry::mcp::ARM_LEFT;
+    assert!(
+        abs_boxes(&html).iter().any(|b| b.left.is_some_and(|l| (l - arm).abs() < 0.01)),
+        "the arm is not on the column's axis ({arm}):\n{html}"
+    );
 }
 
 /// A panel is painted at REAPER's tint, not at the track's raw colour.
@@ -507,12 +502,9 @@ fn the_band_is_fixed_and_the_stretch_takes_the_height() {
 /// the strip grows rather than staying a cluster at the top.
 #[test]
 fn the_column_spreads_as_the_strip_grows() {
+    // Phase is the one control on its own half-column axis at 57.5.
     fn phase_top(html: &str) -> f32 {
-        html.split("position:absolute; left:57.5px; top:")
-            .nth(1)
-            .and_then(|rest| rest.split("px").next())
-            .and_then(|v| v.parse().ok())
-            .expect("a phase button")
+        *tops_at(html, 57.5).first().expect("a phase button")
     }
 
     let short = phase_top(&strip_at(500.0));
@@ -567,10 +559,10 @@ fn the_rows_corner_controls_need_the_height() {
 
     // And phase sits below the lanes button — both measured from the
     // row's floor, 24 and 47 above it.
-    let tops: Vec<f32> = tall
-        .match_indices("px; top:")
-        .filter_map(|(i, m)| tall[i + m.len()..].split("px").next()?.parse().ok())
-        .filter(|t: &f32| *t > 60.0)
+    let tops: Vec<f32> = abs_boxes(&tall)
+        .into_iter()
+        .filter_map(|b| b.top)
+        .filter(|t| *t > 60.0)
         .collect();
     assert!(
         tops.contains(&96.0) && tops.contains(&73.0),
@@ -591,10 +583,7 @@ fn the_envelope_is_the_foot_of_the_column() {
     let html = strip_at(600.0);
     let shape = Collapse::at(600.0);
 
-    let tops: Vec<f32> = html
-        .match_indices("left:55px; top:")
-        .filter_map(|(i, m)| html[i + m.len()..].split("px").next()?.parse().ok())
-        .collect();
+    let tops = tops_at(&html, 55.0);
 
     // The envelope is on the column proper and is the lowest thing on it.
     let floor = shape.stretch - 30.0;
