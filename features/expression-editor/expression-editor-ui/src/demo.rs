@@ -695,11 +695,10 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             ed.set_mode(expression_editor_core::Mode::Drums);
             // Both hands of the snare showing, since that is what a
             // flam needs you to see.
-            if let expression_editor_core::RowSpace::Drums(m) = ed.row_space.clone() {
-                if let Some(r) = m.lanes.iter().position(|l| l.name == "T1 R") {
+            if let expression_editor_core::RowSpace::Drums(m) = ed.row_space.clone()
+                && let Some(r) = m.lanes.iter().position(|l| l.name == "T1 R") {
                     ed.toggle_piece_split(r);
                 }
-            }
             // A flammed tom, so the Hand and Flam controls have
             // something to act on.
             ed.selection.set_single(NoteId(13));

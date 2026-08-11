@@ -294,11 +294,10 @@ pub fn pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16) ->
 
     let context = context_at(ed, x, y);
     let action = ed.mouse.resolve(context, gesture, mods);
-    if action != Action::None {
-        if let Some(drag) = run_action(ed, action, context, x, y, mods) {
+    if action != Action::None
+        && let Some(drag) = run_action(ed, action, context, x, y, mods) {
             return drag;
         }
-    }
     legacy_pointer_down(ed, x, y, mods, button)
 }
 
@@ -889,8 +888,8 @@ fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16)
         return Drag::SplitDrag { note: id, from: t };
     }
 
-    if let Hit::NoteEdge { id, start_edge } = hit {
-        if ed.tool == Tool::NoteDraw || ed.tool == Tool::Select {
+    if let Hit::NoteEdge { id, start_edge } = hit
+        && (ed.tool == Tool::NoteDraw || ed.tool == Tool::Select) {
             let n = ed.doc.note(id).expect("hit test returned a live note");
             let original = (n.start, n.end);
             ed.begin_gesture();
@@ -900,7 +899,6 @@ fn legacy_pointer_down(ed: &mut Editor, x: f64, y: f64, mods: Mods, button: u16)
                 original,
             };
         }
-    }
 
     let under = match hit {
         Hit::Note { id, zone } => {
@@ -1232,8 +1230,8 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
             }) {
                 // Track where it actually landed — the edit clamps
                 // against the neighbouring boundaries.
-                if let Some(n) = ed.doc.note(*note) {
-                    if let Some(&s) = n.splits.iter().min_by(|a, b| {
+                if let Some(n) = ed.doc.note(*note)
+                    && let Some(&s) = n.splits.iter().min_by(|a, b| {
                         (*a - to)
                             .abs()
                             .partial_cmp(&(*b - to).abs())
@@ -1241,7 +1239,6 @@ pub fn pointer_move(ed: &mut Editor, drag: &mut Drag, x: f64, y: f64, mods: Mods
                     }) {
                         *from = s;
                     }
-                }
             }
         }
         Drag::NoteErase => {

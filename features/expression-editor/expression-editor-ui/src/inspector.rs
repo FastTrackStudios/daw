@@ -258,11 +258,11 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                             // controlled input ate the space, so
                             // multi-word text could not be typed.
                             onkeydown: move |e| {
-                                if let Some(id) = selected_id {
-                                    if e.key() == Key::Enter {
-                                        let text = draft_lyric.read().clone();
-                                        editor.write().set_lyric(id, &text);
-                                    }
+                                if e.key() == Key::Enter
+                                    && let Some(id) = selected_id
+                                {
+                                    let text = draft_lyric.read().clone();
+                                    editor.write().set_lyric(id, &text);
                                 }
                             },
                             oninput: move |e| draft_lyric.set(e.value()),

@@ -510,11 +510,10 @@ fn Canvas(
                         // view for nothing, and `try_write` keeps a
                         // contended frame from panicking rather than
                         // relying on dispatch order.
-                        if let Ok(mut ed) = editor.try_write() {
-                            if ed.viewport != want {
+                        if let Ok(mut ed) = editor.try_write()
+                            && ed.viewport != want {
                                 ed.resize(want);
                             }
-                        }
                     }
                 },
                 // (the old onmounted measurement lived here)
