@@ -75,7 +75,9 @@ const NAME_FIELD_H: f32 = 24.0;
 /// one row and exactly like a longer box from another. So the field runs
 /// 33..169, ending at the knob's centre, and the knob is a plain circle
 /// sitting half on it and half on the tint.
-const VOLUME_KNOB_X: f32 = 158.0;
+/// Centred on the field's right edge at 169, so the knob is 24 wide from
+/// 157 — the same 24 the field is tall, and sharing its top and bottom.
+const VOLUME_KNOB_X: f32 = 157.0;
 const PAN_KNOB_X: f32 = 205.0;
 const FX_IN_X: f32 = 248.0;
 /// The panel's own grey — the same one the mixer strip's body and name
@@ -188,7 +190,7 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
                 "{track.name}"
             }
             // The volume knob, on the field's right end.
-            div { style: "position:absolute; left:{VOLUME_KNOB_X}px; top:6px;",
+            div { style: "position:absolute; left:{VOLUME_KNOB_X}px; top:{ROW_ONE}px;",
                 VolumeKnob { track: track.guid.clone() }
             }
             // Pan sits *outside* the field, not on it — at 186 it landed
@@ -343,8 +345,8 @@ fn VolumeKnob(track: String) -> Element {
             onmouseleave: move |_| at.set(art::Interaction::Normal),
             art::VolumeKnob {
                 value: crate::controls::fader_position(gain()) as f32,
-                width: Some(22),
-                height: Some(22),
+                width: Some(24),
+                height: Some(24),
                 at: at(),
             }
         }

@@ -5120,7 +5120,10 @@ pub struct VolumeKnobProps {
 #[component]
 pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
     let t = Theme::default();
-    let (vw, vh) = (22.0f32, 22.0f32);
+    // 24, the height of the field it straddles. REAPER's knob fills that
+    // band exactly — a knob two rows shorter than the box it sits on reads
+    // as sunk into it rather than seated on its edge.
+    let (vw, vh) = (24.0f32, 24.0f32);
     let (cx, cy) = (vw * 0.5, vh * 0.5);
     // Measured off REAPER pixel by pixel across the knob's centre row and
     // down its centre column: a 22-wide cell, the ring's outer edge at 11
@@ -5245,20 +5248,31 @@ mod volume_knob_tests {
     /// Unity lands a little past two o'clock, which is what says the 300°
     /// sweep and the fader's taper agree about where 0 dB is.
     ///
-    /// Computed rather than pasted: the arc's end is a function of the
-    /// cell, and a literal here turns a resize of the knob into a failing
-    /// test about nothing.
+    /// Read back out of the drawing rather than compared with a literal:
+    /// the cell's size is taken from the rendered `viewBox`, so resizing
+    /// the knob cannot turn this into a failing test about nothing.
     #[test]
     fn unity_lands_past_two_oclock() {
-        let (vw, r) = (22.0f32, 22.0f32 * 0.386);
-        let deg: f32 = -150.0 + 300.0 * 0.708;
-        assert!((60.0..70.0).contains(&deg), "unity is not past two o'clock: {deg}");
-
-        let x = vw * 0.5 + r * deg.to_radians().sin();
         let html = render(0.708);
+
+        // The cell, from the drawing itself.
+        let vb = html.split("viewBox=\"0 0 ").nth(1).expect("a viewBox");
+        let vw: f32 = vb.split_whitespace().next().unwrap().parse().unwrap();
+        let c = vw * 0.5;
+
+        // The value arc is the last path; its `A` ends at the value's angle.
+        let last = html.rsplit("<path").next().expect("a value arc");
+        let end = last.split(" A ").nth(1).expect("an arc").split('"').next().unwrap();
+        let n: Vec<f32> = end.split_whitespace().filter_map(|w| w.parse().ok()).collect();
+        let (x, y) = (n[n.len() - 2], n[n.len() - 1]);
+
+        // Clockwise from twelve, which is how the component measures.
+        let deg = (x - c).atan2(c - y).to_degrees();
+        let wanted = -150.0 + 300.0 * 0.708;
         assert!(
-            html.contains(&format!("{x}")),
-            "the value arc does not end at {x}:\n{html}"
+            (deg - wanted).abs() < 1.0,
+            "unity is at {deg:.1}°, not {wanted:.1}° — the sweep and the taper disagree"
         );
+        assert!((60.0..70.0).contains(&deg), "that is not past two o'clock");
     }
 }
