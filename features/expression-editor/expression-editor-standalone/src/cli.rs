@@ -53,6 +53,7 @@ SOURCE:
     <scene>          a demo scene name (default: phrase; --list to see them all)
     <path>.rpp       a REAPER project — its first editable item, or --track/--item
     <path>.mid       a standard MIDI file
+    <path>.gp        a Guitar Pro transcription (gp3/4/5, gpx, gp)
 
 OPTIONS:
     --track <name|N> pick a track by name (substring) or 1-based index

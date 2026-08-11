@@ -76,6 +76,14 @@ pub enum Source {
     Rpp(PathBuf),
     /// A standard MIDI file, read through the facade's own reader.
     Midi(PathBuf),
+    /// A Guitar Pro transcription — gp3/4/5, gpx or gp.
+    ///
+    /// Scenario 4 of #149 is "a Guitar Pro file imported and displayed
+    /// as a six-string roll with bend flow", and until this variant the
+    /// only way to see one was a test. The runner is the demo
+    /// application, so it has to be able to open the material the
+    /// scenarios are written about.
+    GuitarPro(PathBuf),
 }
 
 impl Source {
@@ -93,6 +101,9 @@ impl Source {
         match extension(&path).as_deref() {
             Some("rpp") => Ok(Source::Rpp(path)),
             Some("mid") | Some("midi") => Ok(Source::Midi(path)),
+            Some("gp") | Some("gpx") | Some("gp3") | Some("gp4") | Some("gp5") => {
+                Ok(Source::GuitarPro(path))
+            }
             // An audio file on its own is deliberately not accepted:
             // analysing a take needs its length, and a bare file gives
             // no item to read one from. Reading past the end of a
@@ -299,11 +310,39 @@ impl Runner {
             },
             Source::Rpp(path) => Self::open_rpp(path, target, viewport)?,
             Source::Midi(path) => Self::open_midi(path, viewport)?,
+            Source::GuitarPro(path) => Self::open_guitar_pro(path, viewport)?,
         };
         if let Some(mode) = mode {
             runner.loaded.editor_mut().set_mode(mode);
         }
         Ok(runner)
+    }
+
+    /// A transcription, straight onto a document.
+    ///
+    /// No DAW: a `.gp` carries its own notes, tempo and tuning, and
+    /// there is no audio to analyse or item to read a length from.
+    fn open_guitar_pro(path: &Path, viewport: Viewport) -> Result<Self, LoadError> {
+        let imported = expression_editor_guitarpro::import_file(&path.to_string_lossy())
+            .map_err(|e| LoadError::Read(path.to_path_buf(), e))?;
+        let mut editor = Editor::new(imported.doc, viewport);
+        // The importer's tuning wins over the mode preset: a drop-D or
+        // seven-string file must not be forced onto standard six.
+        editor.set_mode(Mode::Guitar);
+        let space = expression_editor_core::RowSpace::Strings(imported.tuning);
+        editor.row_space = space.clone();
+        editor.doc.row_space = space;
+        editor.reset_view();
+        let notes = editor.doc.notes.len();
+        Ok(Runner {
+            daw: None,
+            loaded: Loaded::Scene(Box::new(editor)),
+            label: format!(
+                "{}: {} notes",
+                path.file_name().unwrap_or_default().to_string_lossy(),
+                notes,
+            ),
+        })
     }
 
     fn open_midi(path: &Path, viewport: Viewport) -> Result<Self, LoadError> {

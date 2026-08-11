@@ -14,6 +14,7 @@ expression-editor-daw = { workspace = true }
 # REAPER module already has.
 expression-editor-audio = { workspace = true, features = ["daw", "render"] }
 expression-editor-ui = { workspace = true }
+expression-editor-guitarpro = { workspace = true }
 # `standalone-rpp` = the standalone backend + the `.rpp` loader + source
 # decoding, which is what makes an audio take analysable with no DAW.
 daw = { workspace = true, features = ["standalone-rpp"] }
