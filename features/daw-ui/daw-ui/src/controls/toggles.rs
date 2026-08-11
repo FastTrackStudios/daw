@@ -357,3 +357,33 @@ fn box_style(w: u32, h: u32) -> String {
         "display:inline-block; line-height:0; width:{w}px; height:{h}px; cursor:pointer;"
     )
 }
+
+/// The envelope button — `mcp.env` and `tcp.env`.
+///
+/// Its mode is not something the DAW facade reports yet, so it draws the
+/// off state rather than inventing one. It is drawn regardless, because
+/// REAPER reserves its box in both panels and the phase button's position
+/// is measured *from* it: leaving the slot empty moves phase to where
+/// REAPER never puts it.
+#[component]
+pub fn EnvelopeButton(
+    #[props(default = 21)] width: u32,
+    #[props(default = 30)] height: u32,
+) -> Element {
+    let mut at = use_signal(art::Interaction::default);
+    let (enter, leave) = pointer!(at);
+    rsx! {
+        div {
+            style: "display:inline-block; line-height:0; cursor:pointer;",
+            onmouseenter: enter,
+            onmouseleave: leave,
+            art::EnvelopeButton {
+                mode: art::EnvelopeMode::Off,
+                cell: (width as f32, height as f32),
+                width: Some(width),
+                height: Some(height),
+                at: at(),
+            }
+        }
+    }
+}

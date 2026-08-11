@@ -27,8 +27,8 @@ use daw_theme_art::dress::Panel;
 use daw_theme_art::vector_controls as art;
 
 use crate::controls::{
-    FxButton, IoButton, MuteButton, PanKnob, PhaseButton, RecordArmButton, SoloButton, TrackMeter,
-    use_track_store,
+    EnvelopeButton, FxButton, IoButton, MuteButton, PanKnob, PhaseButton, RecordArmButton,
+    SoloButton, TrackMeter, use_track_store,
 };
 use crate::prelude::*;
 
@@ -291,7 +291,7 @@ pub fn TrackRow(
             // ── Row two: envelope, the FX slot, the input combo ──
             // 29, measured: the envelope's block runs 29..48 of the row.
             div { style: "position:absolute; left:29px; top:{ROW_TWO}px;",
-                EnvelopeButton {}
+                EnvelopeButton { width: 22, height: 20 }
             }
             div {
                 style: "position:absolute; left:56px; top:{ROW_TWO}px; \
@@ -394,27 +394,6 @@ fn input_label(track: &Track) -> String {
             (None, None) => "MIDI".to_string(),
         },
         RecordInput::Raw(v) => format!("Input #{v}"),
-    }
-}
-
-/// The envelope button. Its mode is not track state the DAW reports yet,
-/// so it draws the off state rather than inventing one.
-#[component]
-fn EnvelopeButton() -> Element {
-    let mut at = use_signal(art::Interaction::default);
-    rsx! {
-        div {
-            style: "display:inline-block; line-height:0; cursor:pointer;",
-            onmouseenter: move |_| at.set(art::Interaction::Hover),
-            onmouseleave: move |_| at.set(art::Interaction::Normal),
-            art::EnvelopeButton {
-                mode: art::EnvelopeMode::Off,
-                cell: (22.0, 20.0),
-                width: Some(22),
-                height: Some(20),
-                at: at(),
-            }
-        }
     }
 }
 

@@ -577,3 +577,30 @@ fn the_rows_corner_controls_need_the_height() {
         "phase and lanes are not on the row's floor: {tops:?}"
     );
 }
+
+/// Envelope and phase sit on the stretch section's floor, envelope below.
+///
+/// `mcp.env` is 30 above the floor and `mcp.phase` a padding plus 18 above
+/// *that* — so the two are the bottom of the column and phase is the upper
+/// of the pair. Drawing phase without the envelope left its position
+/// inferred from a slot nothing occupied.
+#[test]
+fn the_envelope_is_the_foot_of_the_column() {
+    use daw_ui::controls::Collapse;
+
+    let html = strip_at(600.0);
+    let shape = Collapse::at(600.0);
+
+    let tops: Vec<f32> = html
+        .match_indices("left:55px; top:")
+        .filter_map(|(i, m)| html[i + m.len()..].split("px").next()?.parse().ok())
+        .collect();
+
+    // The envelope is on the column proper and is the lowest thing on it.
+    let floor = shape.stretch - 30.0;
+    assert!(tops.contains(&floor), "no envelope on the floor: {tops:?}");
+    assert!(
+        tops.iter().all(|t| *t <= floor),
+        "something sits below the envelope: {tops:?}"
+    );
+}

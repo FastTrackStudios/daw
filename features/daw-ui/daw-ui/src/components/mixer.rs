@@ -9,7 +9,7 @@
 //! - Track name + number
 
 use crate::controls::{
-    Collapse, ControlSync, FxButton, IoButton, MeterFeed, MonitorButton, MuteButton, PanAnchor,
+    Collapse, EnvelopeButton, ControlSync, FxButton, IoButton, MeterFeed, MonitorButton, MuteButton, PanAnchor,
     PanKnob, PhaseButton, RecordArmButton, RecordInputLabel, SoloButton, TrackMeter, TrackName,
     VolumeFader, VolumeWidget, use_daw_tracks, use_track_store,
 };
@@ -233,6 +233,7 @@ enum Stacked {
     Solo,
     Io,
     Phase,
+    Envelope,
 }
 
 impl Stacked {
@@ -247,6 +248,9 @@ impl Stacked {
             // 16 wide against the column's 21, so it centres rather than
             // hanging off the left.
             Self::Phase => column + (BUTTON_W - 16.0) / 2.0,
+            // `mcp.env` is written `+ [1 ...]` off the IO button, which is
+            // itself a column left — so it lands back on the column.
+            Self::Envelope => column,
             _ => column,
         }
     }
@@ -381,21 +385,21 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 out.push((at, control));
             }
         }
-        // Phase hangs off the *bottom* of the stretch section, not off the
-        // chain above it — which is why REAPER's column spreads as a strip
-        // grows instead of staying a cluster at the top:
+        // Envelope and phase hang off the *bottom* of the stretch section,
+        // not off the chain above them — which is why REAPER's column
+        // spreads as a strip grows instead of staying a cluster at the top:
         //
         //     mcp.env   = mcp.io + [0 stretch_sec{3}] + [1 -30 21 30]
         //     mcp.phase = mcp.env - [0 padding] + [3 -18 16 18]
         //
         // `stretch_sec{3}` is the section's height, so env sits 30 above
-        // its floor and phase 18 above env. We do not draw an envelope
-        // button yet; its slot is still reserved, because phase's position
-        // is measured from it and closing the gap would move phase to
-        // where REAPER never puts it.
+        // its floor and phase 18 above env.
+        let floor = shape.stretch - ENV_FROM_FLOOR;
         if shape.show_phase {
-            let floor = shape.stretch - ENV_FROM_FLOOR;
             out.push((floor - shape.padding - PHASE_FROM_ENV, Stacked::Phase));
+        }
+        if shape.show_envelope {
+            out.push((floor, Stacked::Envelope));
         }
         out
     };
@@ -642,6 +646,7 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                             Stacked::Solo => rsx! { SoloButton { track: track.guid.clone() } },
                             Stacked::Io => rsx! { IoButton { track: track.guid.clone() } },
                             Stacked::Phase => rsx! { PhaseButton { track: track.guid.clone() } },
+                            Stacked::Envelope => rsx! { EnvelopeButton {} },
                         }
                     }
                 }
