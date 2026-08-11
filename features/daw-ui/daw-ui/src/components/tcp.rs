@@ -27,8 +27,7 @@ use daw_theme_art::dress::Panel;
 use daw_theme_art::vector_controls as art;
 
 use crate::controls::{
-    MonitorButton, MuteButton, PanKnob, RecordArmButton, SoloButton, TrackMeter, TrackName,
-    use_track_store,
+    MuteButton, PanKnob, RecordArmButton, SoloButton, TrackMeter, use_track_store,
 };
 use crate::prelude::*;
 
@@ -57,8 +56,26 @@ const GUTTER_BUTTON_X: f32 = 21.0;
 /// the section's own background.
 const TCP_METER_X: f32 = 1.0;
 const TCP_METER_W: u32 = 19;
+/// Row one's field, which the record arm and the volume knob sit on.
+/// Measured: it runs 26..230 and is 24 tall, not the 17 the other fields
+/// are.
+/// Measured across one of REAPER's rows at a scanline above the text:
+/// the field runs 33..161, the volume knob follows it at 159..180, pan at
+/// 183..207, the routing widget 214..239 and the FX pill 248..283, with
+/// the tint ending at 296.
+const NAME_FIELD_X: f32 = 33.0;
+const NAME_FIELD_W: f32 = 129.0;
+const NAME_FIELD_H: f32 = 24.0;
+/// The knob sits *after* the field, not on it — the field stops at 161 and
+/// the knob's 21 columns start at 159, overlapping it by two.
+const VOLUME_KNOB_X: f32 = 159.0;
+const PAN_KNOB_X: f32 = 183.0;
+const FX_IN_X: f32 = 248.0;
+/// The panel's own grey — the same one the mixer strip's body and name
+/// plate use.
+const BODY_GREY: &str = "#262626";
 /// Both rows of fields are 17 tall, at these tops.
-const ROW_ONE: f32 = 7.0;
+const ROW_ONE: f32 = 6.0;
 const ROW_TWO: f32 = 34.0;
 const FIELD_H: f32 = 17.0;
 
@@ -88,7 +105,16 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
             c as u8,
         )))
         .unwrap_or(theme.chrome.surface_raised);
-    let field = theme.chrome.hardware.shade(-0.40).css();
+    // The fields are the track colour, darkened — not a flat grey. Measured
+    // against the tint in REAPER's own render: the input combo is 0.75 of
+    // it (#752D3F against #9D3C55) and the FX slot 0.64 (#652637). The
+    // effect is of a translucent panel over the colour, which is what makes
+    // a REAPER row read as one surface rather than grey boxes on a tint.
+    let combo = tint.shade(-0.25).css();
+    let slot = tint.shade(-0.36).css();
+    // The name field is the exception: REAPER paints it the panel's own
+    // #262626, flat, whatever the track's colour.
+    let field = BODY_GREY;
     let gutter = theme.chrome.hardware.shade(-0.40).css();
     let rule = theme.chrome.hardware.shade(-0.72).css();
     let index_ink = theme.chrome.hardware_mark.shade(0.1).css();
@@ -122,29 +148,49 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
                 "{index + 1}"
             }
 
-            // ── Row one: arm, name, pan, meter, FX-in, monitor ──
-            div { style: "position:absolute; left:26px; top:6px;",
+            // ── Row one ──
+            //
+            // No separate monitor indicator: REAPER shows monitoring *on*
+            // the record arm in the track panel — `track_recarm_*` has the
+            // variants — rather than as a control of its own, and drawing
+            // both put a glyph in the row REAPER does not have.
+            //
+            // The name field is one long box and the record arm and the
+            // volume knob sit *on* it, at its two ends — REAPER's field
+            // runs from behind the arm at 26 to behind the knob at 230,
+            // and the name is set between them. Drawn as three boxes in a
+            // line instead, the arm and the knob had grey gutters either
+            // side of them that REAPER does not have.
+            div {
+                style: "position:absolute; left:{NAME_FIELD_X}px; top:{ROW_ONE}px; \
+                        width:{NAME_FIELD_W}px; height:{NAME_FIELD_H}px; \
+                        background:{field}; border-radius:{NAME_FIELD_H / 2.0}px;",
+            }
+            div { style: "position:absolute; left:{NAME_FIELD_X + 2.0}px; top:7px;",
                 RecordArmButton { track: track.guid.clone(), panel: Panel::Track }
             }
             div {
-                style: "position:absolute; left:50px; top:{ROW_ONE}px; \
-                        width:130px; height:{FIELD_H}px; background:{field};",
-                div {
-                    style: "padding:0 6px; line-height:{FIELD_H}px; font-size:11.5px; \
-                            color:{name_ink}; white-space:nowrap; overflow:hidden; \
-                            text-overflow:ellipsis; \
-                            font-family:Fira Sans, DejaVu Sans, sans-serif;",
-                    "{track.name}"
-                }
+                style: "position:absolute; left:58px; top:{ROW_ONE}px; \
+                        width:{NAME_FIELD_X + NAME_FIELD_W - 58.0}px; \
+                        height:{NAME_FIELD_H}px; \
+                        line-height:{NAME_FIELD_H}px; font-size:11.5px; \
+                        color:{name_ink}; white-space:nowrap; overflow:hidden; \
+                        text-overflow:ellipsis; \
+                        font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                "{track.name}"
             }
-            div { style: "position:absolute; left:186px; top:3px;",
+            // The volume knob, on the field's right end.
+            div { style: "position:absolute; left:{VOLUME_KNOB_X}px; top:6px;",
+                VolumeKnob { track: track.guid.clone() }
+            }
+            // Pan sits *outside* the field, not on it — at 186 it landed
+            // under the volume knob, because that was the sheet's number for
+            // a row whose field stopped at 180.
+            div { style: "position:absolute; left:{PAN_KNOB_X}px; top:4px;",
                 PanKnob { track: track.guid.clone() }
             }
-            div { style: "position:absolute; left:242px; top:6px;",
+            div { style: "position:absolute; left:{FX_IN_X}px; top:6px;",
                 FxInButton { has_input_fx: track.input_fx_count > 0 }
-            }
-            div { style: "position:absolute; left:274px; top:6px;",
-                MonitorButton { track: track.guid.clone(), panel: Panel::Track }
             }
 
             // ── Row two: envelope, the FX slot, the input combo ──
@@ -153,14 +199,14 @@ pub fn TrackRow(track: Track, #[props(default)] index: u32) -> Element {
             }
             div {
                 style: "position:absolute; left:56px; top:{ROW_TWO}px; \
-                        width:34px; height:{FIELD_H}px; background:{field}; \
+                        width:34px; height:{FIELD_H}px; background:{slot}; \
                         line-height:{FIELD_H}px; text-align:center; font-size:10px; \
                         color:{fx_ink}; font-family:Fira Sans, DejaVu Sans, sans-serif;",
                 "FX"
             }
             div {
                 style: "position:absolute; left:94px; top:{ROW_TWO}px; \
-                        width:186px; height:{FIELD_H}px; background:{field};",
+                        width:186px; height:{FIELD_H}px; background:{combo};",
                 div {
                     style: "padding:0 6px; line-height:{FIELD_H}px; font-size:11px; \
                             color:{combo_ink}; white-space:nowrap; overflow:hidden; \
@@ -263,6 +309,34 @@ fn EnvelopeButton() -> Element {
                 cell: (22.0, 20.0),
                 width: Some(22),
                 height: Some(20),
+                at: at(),
+            }
+        }
+    }
+}
+
+/// The volume knob, on the name field's right end.
+///
+/// The art is `vector_controls::VolumeKnob`; this is the wrapper that binds
+/// it to the track. The ring swings on the *taper*, not the gain, for the
+/// same reason the fader's cap does — unity is a little under
+/// three-quarters round, not hard against the stop.
+#[component]
+fn VolumeKnob(track: String) -> Element {
+    let mut at = use_signal(art::Interaction::default);
+    let store = use_track_store();
+    let guid = track.clone();
+    let gain = use_memo(use_reactive!(|guid| store.volume(&guid)));
+
+    rsx! {
+        div {
+            style: "display:inline-block; line-height:0; cursor:ns-resize;",
+            onmouseenter: move |_| at.set(art::Interaction::Hover),
+            onmouseleave: move |_| at.set(art::Interaction::Normal),
+            art::VolumeKnob {
+                value: crate::controls::fader_position(gain()) as f32,
+                width: Some(21),
+                height: Some(21),
                 at: at(),
             }
         }

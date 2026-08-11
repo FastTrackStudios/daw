@@ -5087,3 +5087,137 @@ mod rail_band_tests {
         assert!(asked.contains("height=\"55\""), "an asked-for height was ignored:\n{asked}");
     }
 }
+
+// ── track panel: the volume knob ────────────────────────────────────────
+
+#[derive(Props, Clone, PartialEq)]
+pub struct VolumeKnobProps {
+    /// Where the value sits on its travel, 0 at the bottom of the sweep and
+    /// 1 at the top. The *taper's* position, not the gain — see
+    /// `daw_ui::controls::fader_position`.
+    #[props(default)]
+    pub value: f32,
+    #[props(default)]
+    pub width: Option<u32>,
+    #[props(default)]
+    pub height: Option<u32>,
+    #[props(default)]
+    pub at: Interaction,
+}
+
+/// REAPER's track-panel volume knob: a dark body inside a value ring.
+///
+/// It is drawn rather than traced. REAPER's own is `tcp_vol_knob_stack`, a
+/// 939-row sprite holding every position of the ring — there is no single
+/// image to measure, and a strip of 40-odd frames is exactly the thing this
+/// crate exists to stop shipping.
+///
+/// The geometry is read off a screenshot instead: a 21-wide knob whose ring
+/// is open at the bottom, running from seven o'clock clockwise through
+/// twelve to five — a 300° track with a 60° gap. Unity lands a little past
+/// two o'clock, which is the same 0.708 of travel the fader puts it at, and
+/// is the check that the sweep is right.
+#[component]
+pub fn VolumeKnob(props: VolumeKnobProps) -> Element {
+    let t = Theme::default();
+    let (vw, vh) = (21.0f32, 21.0f32);
+    let (cx, cy) = (vw * 0.5, vh * 0.5);
+    // The ring sits just inside the cell, and the body just inside it.
+    let r = vw * 0.40;
+    let stroke = vw * 0.14;
+    let body = r - stroke * 0.9;
+
+    /// A point on the ring, by angle clockwise from twelve o'clock.
+    fn on(cx: f32, cy: f32, r: f32, deg: f32) -> (f32, f32) {
+        let a = deg.to_radians();
+        (cx + r * a.sin(), cy - r * a.cos())
+    }
+
+    // The track: seven o'clock to five o'clock, the long way round.
+    const START: f32 = -150.0;
+    const SWEEP: f32 = 300.0;
+    let arc = |from: f32, to: f32| {
+        let (x0, y0) = on(cx, cy, r, from);
+        let (x1, y1) = on(cx, cy, r, to);
+        let large = if (to - from).abs() > 180.0 { 1 } else { 0 };
+        format!("M {x0} {y0} A {r} {r} 0 {large} 1 {x1} {y1}")
+    };
+
+    let value = props.value.clamp(0.0, 1.0);
+    let lit_to = START + SWEEP * value;
+    let ink = ink(None, props.at, true, 0.35);
+
+    rsx! {
+        svg {
+            width: "{props.width.unwrap_or(vw as u32)}",
+            height: "{props.height.unwrap_or(vh as u32)}",
+            style: "display:block; width:{props.width.unwrap_or(vw as u32)}px; \
+                    height:{props.height.unwrap_or(vh as u32)}px;",
+            view_box: "0 0 {vw} {vh}",
+            xmlns: "http://www.w3.org/2000/svg",
+
+            // The unlit track, all the way round.
+            path {
+                d: "{arc(START, START + SWEEP)}",
+                fill: "none",
+                stroke: "{t.chrome.accent.shade(-0.62).css()}",
+                stroke_width: "{stroke}",
+                stroke_linecap: "butt",
+            }
+            // The body, inside it.
+            circle { cx: "{cx}", cy: "{cy}", r: "{body}", fill: "{ink.face.shade(-0.22).css()}" }
+            circle {
+                cx: "{cx}", cy: "{cy}", r: "{body}",
+                fill: "none",
+                stroke: "{ink.border.css()}",
+                stroke_width: "0.8",
+            }
+            // The value, over the track. Drawn last so its cap sits on top
+            // of the unlit stroke rather than under it.
+            if value > 0.0 {
+                path {
+                    d: "{arc(START, lit_to)}",
+                    fill: "none",
+                    stroke: "{t.chrome.accent.css()}",
+                    stroke_width: "{stroke}",
+                    stroke_linecap: "butt",
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod volume_knob_tests {
+    use super::*;
+
+    fn render(value: f32) -> String {
+        let mut dom = dioxus::prelude::VirtualDom::new_with_props(
+            VolumeKnob,
+            VolumeKnobProps { value, width: Some(21), height: Some(21), at: Interaction::Normal },
+        );
+        dom.rebuild_in_place();
+        dioxus_ssr::render(&dom)
+    }
+
+    /// The ring is a track plus a value arc, and at rest there is no value
+    /// arc at all — a knob at silence must not show a lit sliver.
+    #[test]
+    fn the_ring_lights_only_as_far_as_the_value() {
+        let silent = render(0.0);
+        assert_eq!(silent.matches("<path").count(), 1, "a lit arc at zero:\n{silent}");
+
+        let unity = render(0.708);
+        assert_eq!(unity.matches("<path").count(), 2, "no value arc:\n{unity}");
+    }
+
+    /// Unity lands a little past two o'clock, which is what says the 300°
+    /// sweep and the fader's taper agree about where 0 dB is.
+    #[test]
+    fn unity_lands_past_two_oclock() {
+        // -150 + 300 * 0.708 = 62.4 degrees clockwise from twelve, and at
+        // r = 8.4 that is x = cx + 8.4*sin(62.4) = 17.9, y = cy - 8.4*cos(62.4) = 6.6.
+        let html = render(0.708);
+        assert!(html.contains("17.9"), "the value arc does not end past two:\n{html}");
+    }
+}

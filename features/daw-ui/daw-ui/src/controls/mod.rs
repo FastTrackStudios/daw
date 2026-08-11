@@ -50,7 +50,7 @@ pub use collapse::{
     REAPER_BANDS,
 };
 pub use drafts::{Drafts, Held};
-pub use fader::VolumeFader;
+pub use fader::{VolumeFader, fader_position};
 pub use fx::FxButton;
 pub use meters::{MeterFeed, Meters, TrackMeter, use_meters};
 pub use mute::MuteButton;

@@ -161,6 +161,14 @@ mod taper {
 }
 
 /// Gain to cap position, 0 at the bottom of the rail and 1 at the top.
+///
+/// Public as `fader_position`: the track panel's volume knob has to swing
+/// on the same taper the fader rides, or the two controls disagree about
+/// where unity is.
+pub fn fader_position(gain: f64) -> f64 {
+    position(gain)
+}
+
 fn position(gain: f64) -> f64 {
     (gain.max(0.0) / taper::TOP).powf(1.0 / taper::CURVE).clamp(0.0, 1.0)
 }
