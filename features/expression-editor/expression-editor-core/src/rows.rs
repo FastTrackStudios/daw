@@ -588,6 +588,23 @@ pub const STRING_COLORS: [&str; 8] = [
 /// Kit-section colour, so a groove reads at a glance.
 fn drum_color(name: &str) -> &'static str {
     let n = name.to_ascii_lowercase();
+
+    // The FTS map abbreviates: `K`, `S`, `T1`..`T4`, `H-`, `C-`, `R-`.
+    // Matched first and exactly, because a substring test on one letter
+    // would colour half the kit by accident — and without this every
+    // FTS row falls through to the same purple, which is how the whole
+    // kit came out one colour the first time it was drawn.
+    let head = n.split(|c: char| c == ' ' || c == '-').next().unwrap_or("");
+    match head {
+        "k" | "kl" => return "#ef4444",
+        "s" | "sr" => return "#f59e0b",
+        "t1" | "t2" | "t3" | "t4" => return "#a3e635",
+        "h" => return "#22d3ee",
+        "r" => return "#60a5fa",
+        "c" => return "#f472b6",
+        _ => {}
+    }
+
     if n.contains("kick") {
         "#ef4444"
     } else if n.contains("snare") || n.contains("stick") || n.contains("clap") {

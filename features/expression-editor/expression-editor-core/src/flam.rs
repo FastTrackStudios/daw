@@ -86,33 +86,20 @@ pub enum FlamError {
 
 /// The grace note attached to a hit, and which side it is on.
 ///
-/// Found by looking, not remembered: a flam is just a note on the other
-/// hand's row near the hit, so anything that made one — this key, a
-/// paste, an import, a hand-drawn note — reads the same way.
-pub fn existing_grace(
-    doc: &ExpressionDoc,
-    map: &DrumMap,
-    id: NoteId,
-    offset: f64,
-) -> Option<(NoteId, FlamSide)> {
-    let note = doc.note(id)?;
-    let other = map.other_hand_row(note.row.max(0) as usize)? as i32;
-    // Generous window: a grace note dragged a little by hand is still
-    // that hit's flam, and treating it as a stranger would silently add
-    // a second one.
-    let window = offset * 1.75;
-    doc.notes
-        .iter()
-        .filter(|n| n.row == other && n.id != id)
-        .find(|n| (n.start - note.start).abs() <= window)
-        .map(|n| {
-            let side = if n.start < note.start {
-                FlamSide::Before
-            } else {
-                FlamSide::After
-            };
-            (n.id, side)
-        })
+/// Read from the stored relationship, not guessed at by proximity. A
+/// flam is a notated thing, so the document says which note ornaments
+/// which — and that survives dragging the grace note around, which a
+/// distance test would not. It also cannot mistake two ordinary hits
+/// that happen to land close together for a flam nobody wrote.
+pub fn existing_grace(doc: &ExpressionDoc, id: NoteId) -> Option<(NoteId, FlamSide)> {
+    let principal = doc.note(id)?;
+    let grace = doc.grace_notes_of(id).first().copied()?;
+    let side = if grace.start < principal.start {
+        FlamSide::Before
+    } else {
+        FlamSide::After
+    };
+    Some((grace.id, side))
 }
 
 /// What the next press should do to this hit.
@@ -128,7 +115,7 @@ pub fn next_step(
         .ok_or(FlamError::NotTwoHanded)?;
     let offset = offset_ticks(doc, offset_ms, bpm);
 
-    Ok(match existing_grace(doc, map, id, offset) {
+    Ok(match existing_grace(doc, id) {
         None => FlamStep::Add(FlamSide::Before),
         Some((grace, FlamSide::Before)) => FlamStep::Move {
             grace,
@@ -179,6 +166,10 @@ pub fn flam(
             );
             grace.velocity = (note.velocity * GRACE_VELOCITY).clamp(0.0, 1.0);
             grace.channel = note.channel;
+            // The link is the flam. Without it this is just a quiet note
+            // near another one, and an engraver has no way to know it
+            // should draw a grace note.
+            grace.grace_of = Some(id);
             Edit::AddNote(Box::new(grace))
         }
         FlamStep::Move { grace, delta } => Edit::MoveTime {

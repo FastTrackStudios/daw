@@ -13,6 +13,7 @@
 use dioxus::prelude::*;
 use expression_editor_core::cc::{standard_name, CC_COLORS};
 use expression_editor_core::doc::NoteId;
+use expression_editor_core::flam::FlamStep;
 use expression_editor_core::rows::Articulation;
 use expression_editor_core::{blob, chord, tuning, Edit, Editor, RowSpace};
 
@@ -72,6 +73,15 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
     let lanes = ed.doc.cc.lanes.clone();
     let cc_edit = ed.cc_edit;
     let is_strings = matches!(space, RowSpace::Strings(_));
+    let is_drums = matches!(space, RowSpace::Drums(_));
+    let color_by_string = ed.color_by_string;
+    // What `f` will do to the selected hit, so the button can say it
+    // rather than the user finding out by pressing.
+    let flam_step = ed
+        .selection
+        .notes
+        .first()
+        .and_then(|id| ed.flam_step(*id));
     drop(ed);
 
     let decomposition = note
@@ -177,6 +187,65 @@ pub fn Inspector(editor: Signal<Editor>, open: Signal<bool>) -> Element {
                             });
                         },
                         "Robot — flatten both"
+                    }
+                }
+
+                // ── guitar colour ────────────────────────────────────
+                if is_strings {
+                    {section("Colour")}
+                    div {
+                        style: "padding: 0 10px 8px;",
+                        button {
+                            style: format!(
+                                "height: 22px; width: 100%; font-size: 10px; \
+                                 border-radius: 4px; cursor: pointer; \
+                                 border: 1px solid {}; background: {}; color: {};",
+                                if color_by_string { theme::ACCENT } else { theme::PANEL_BORDER },
+                                if color_by_string { theme::CONTROL_ACTIVE } else { theme::SURFACE_INSET },
+                                theme::TEXT,
+                            ),
+                            title: "On: colour shows which string a run is on. \
+                                    Off: colour shows pitch class, so you read harmony.",
+                            onclick: move |_| {
+                                let now = editor.read().color_by_string;
+                                editor.write().color_by_string = !now;
+                            },
+                            if color_by_string { "By string" } else { "By pitch class" }
+                        }
+                    }
+                }
+
+                // ── flam ─────────────────────────────────────────────
+                if is_drums {
+                    {section("Flam")}
+                    div {
+                        style: "padding: 0 10px 8px;",
+                        button {
+                            style: format!(
+                                "height: 22px; width: 100%; font-size: 10px; \
+                                 border-radius: 4px; \
+                                 border: 1px solid {}; background: {}; color: {}; \
+                                 cursor: {};",
+                                if flam_step.is_some() { theme::PANEL_BORDER } else { theme::PANEL_BORDER },
+                                theme::SURFACE_INSET,
+                                if flam_step.is_some() { theme::TEXT } else { theme::TEXT_DIM },
+                                if flam_step.is_some() { "pointer" } else { "default" },
+                            ),
+                            disabled: flam_step.is_none(),
+                            title: "F — cycles none, before, after, none",
+                            onclick: move |_| {
+                                editor.write().flam_selection();
+                            },
+                            {match flam_step {
+                                Some(FlamStep::Add(_)) => "Add flam  ·  F",
+                                Some(FlamStep::Move { .. }) => "Move after  ·  F",
+                                Some(FlamStep::Remove(_)) => "Remove flam  ·  F",
+                                // A hi-hat has no other hand to flam
+                                // with, and saying so beats a dead
+                                // button with no explanation.
+                                None => "One-handed piece",
+                            }}
+                        }
                     }
                 }
 

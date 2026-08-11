@@ -473,6 +473,21 @@ pub struct Note {
     pub text: Option<String>,
     /// Playing technique (guitar/bass, and percussion dead notes).
     pub articulation: Option<Articulation>,
+    /// This note is the **grace note of a flam**, and the hit it
+    /// ornaments.
+    ///
+    /// Stored rather than inferred from two notes landing near each
+    /// other. A flam is a *notated* thing — engraving draws it as a
+    /// small slashed grace note slurred to its principal — so the
+    /// document has to carry the relationship, not a renderer's guess
+    /// at it. Proximity would also be fragile in both directions: a
+    /// grace note nudged by hand stops being one, and two ordinary hits
+    /// that happen to fall close together become a flam nobody wrote.
+    ///
+    /// Which side it falls on is not stored, because the note's own
+    /// start already says: before the principal is an ordinary flam,
+    /// after is a drag.
+    pub grace_of: Option<NoteId>,
     /// Joined to the following note on the same string. Riffer's rule:
     /// the legato is marked on the *first* note of the pair.
     pub legato: bool,
@@ -516,6 +531,7 @@ impl Note {
             muted: false,
             text: None,
             articulation: None,
+            grace_of: None,
             legato: false,
             fret: None,
             pitch: Curve::new(),
@@ -743,6 +759,26 @@ impl ExpressionDoc {
 
     pub fn note_mut(&mut self, id: NoteId) -> Option<&mut Note> {
         self.notes.iter_mut().find(|n| n.id == id)
+    }
+
+    /// The grace notes ornamenting a hit.
+    ///
+    /// What an engraver asks: this note is a principal, and these are
+    /// the small notes slurred to it. Returns them in time order, so a
+    /// renderer does not have to sort.
+    pub fn grace_notes_of(&self, id: NoteId) -> Vec<&Note> {
+        let mut out: Vec<&Note> = self
+            .notes
+            .iter()
+            .filter(|n| n.grace_of == Some(id))
+            .collect();
+        out.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(core::cmp::Ordering::Equal));
+        out
+    }
+
+    /// Whether a hit is a flam — it has at least one grace note.
+    pub fn is_flam(&self, id: NoteId) -> bool {
+        self.notes.iter().any(|n| n.grace_of == Some(id))
     }
 
     pub fn remove(&mut self, id: NoteId) -> Option<Note> {

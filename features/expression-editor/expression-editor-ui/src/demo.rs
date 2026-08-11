@@ -55,10 +55,13 @@ pub enum Scene {
     /// A riff as it arrives from a Guitar Pro import — the file's own
     /// tuning driving the rows, bends as per-note curves (#168).
     GuitarPro,
+    /// The FTS kit with flams: two-handed pieces opened, grace notes
+    /// drawn small and slashed, principals badged.
+    Flams,
 }
 
 impl Scene {
-    pub const ALL: [Scene; 17] = [
+    pub const ALL: [Scene; 18] = [
         Scene::Phrase,
         Scene::Zones,
         Scene::Microtonal,
@@ -76,6 +79,7 @@ impl Scene {
         Scene::Lyrics,
         Scene::Percussive,
         Scene::GuitarPro,
+        Scene::Flams,
     ];
 
     /// Stable file-name stem for screenshots.
@@ -98,6 +102,7 @@ impl Scene {
             Scene::Lyrics => "27-lyrics",
             Scene::Percussive => "28-percussive",
             Scene::GuitarPro => "29-guitar-pro",
+            Scene::Flams => "46-flams",
         }
     }
 
@@ -120,6 +125,7 @@ impl Scene {
             Scene::Lyrics => "Vocal lyrics",
             Scene::Percussive => "Unpitched audio",
             Scene::GuitarPro => "Guitar Pro import",
+            Scene::Flams => "Drum flams",
         }
     }
 
@@ -405,6 +411,51 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
             }
             doc.row_space = RowSpace::Bands(bands);
         }
+        Scene::Flams => {
+            use expression_editor_core::rows::{DrumMap, RowSpace};
+            let map = DrumMap::fts();
+            let row = |name: &str| {
+                map.lanes.iter().position(|l| l.name == name).unwrap_or(0) as i32
+            };
+            let mut id = 1u64;
+            fn hit(
+                doc: &mut ExpressionDoc,
+                id: &mut u64,
+                r: i32,
+                beat: f64,
+                vel: f64,
+            ) -> NoteId {
+                let t = PPQ * beat;
+                let mut n = Note::new(NoteId(*id), t, t + PPQ * 0.1, r);
+                n.velocity = vel;
+                doc.push(n);
+                *id += 1;
+                NoteId(*id - 1)
+            }
+            // A backbeat with flammed snares — the case the whole
+            // two-handed model exists for.
+            for bar in 0..2 {
+                let b = bar as f64 * 4.0;
+                for e in 0..8 {
+                    hit(&mut doc, &mut id, row("H-Clsd Tip"), b + e as f64 * 0.5, 0.5);
+                }
+                hit(&mut doc, &mut id, row("K"), b, 0.95);
+                hit(&mut doc, &mut id, row("K"), b + 2.5, 0.9);
+                let s1 = hit(&mut doc, &mut id, row("S"), b + 1.0, 1.0);
+                let s2 = hit(&mut doc, &mut id, row("S"), b + 3.0, 1.0);
+
+                // Grace notes on the other hand, stored as flams.
+                for (principal, at) in [(s1, b + 1.0), (s2, b + 3.0)] {
+                    let t = PPQ * at - PPQ * 0.06;
+                    let mut g = Note::new(NoteId(id), t, t + PPQ * 0.1, row("S R"));
+                    g.velocity = 0.55;
+                    g.grace_of = Some(principal);
+                    doc.push(g);
+                    id += 1;
+                }
+            }
+            doc.row_space = RowSpace::Drums(map);
+        }
         Scene::GuitarPro => {
             // What an import looks like on arrival: the file's own
             // tuning driving the rows, a bend as a per-note curve.
@@ -627,6 +678,17 @@ pub fn editor(scene: Scene, viewport: Viewport) -> Editor {
         }
         Scene::Percussive => {
             ed.set_mode(expression_editor_core::Mode::UnpitchedAudio);
+        }
+        Scene::Flams => {
+            ed.set_mode(expression_editor_core::Mode::Drums);
+            // Both hands of the snare showing, since that is what a
+            // flam needs you to see.
+            if let expression_editor_core::RowSpace::Drums(m) = ed.row_space.clone() {
+                if let Some(r) = m.lanes.iter().position(|l| l.name == "S") {
+                    ed.toggle_piece_split(r);
+                }
+            }
+            ed.selection.set_single(NoteId(11));
         }
         Scene::GuitarPro => {
             ed.set_mode(expression_editor_core::Mode::Guitar);
