@@ -64,12 +64,15 @@ const TCP_METER_W: u32 = 19;
 /// 183..207, the routing widget 214..239 and the FX pill 248..283, with
 /// the tint ending at 296.
 const NAME_FIELD_X: f32 = 33.0;
-const NAME_FIELD_W: f32 = 129.0;
+const NAME_FIELD_W: f32 = 152.0;
 const NAME_FIELD_H: f32 = 24.0;
-/// The knob sits *after* the field, not on it — the field stops at 161 and
-/// the knob's 21 columns start at 159, overlapping it by two.
+/// The knob sits *inside* the field, which wraps around it: scanned across
+/// the knob's own centre row the dark runs from the field straight through
+/// the knob and out the other side, where a row above it stops at 161. So
+/// the field is not a 129-wide box with a knob beside it — it is a
+/// 152-wide box whose rounded end encloses the knob.
 const VOLUME_KNOB_X: f32 = 159.0;
-const PAN_KNOB_X: f32 = 183.0;
+const PAN_KNOB_X: f32 = 205.0;
 const FX_IN_X: f32 = 248.0;
 /// The panel's own grey — the same one the mixer strip's body and name
 /// plate use.
