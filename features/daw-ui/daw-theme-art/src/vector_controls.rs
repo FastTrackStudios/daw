@@ -4322,6 +4322,10 @@ pub struct MeterProps {
     /// invisible at rest, which is what REAPER's is.
     #[props(default)]
     pub well: Option<String>,
+    /// Distinguishes this meter's ids from the next one's. SVG ids are
+    /// document-global and a mixer is a row of these.
+    #[props(default)]
+    pub tag: String,
     /// The scale's marks, top to bottom.
     #[props(default)]
     pub marks: Vec<String>,
@@ -4354,8 +4358,13 @@ pub fn Meter(props: MeterProps) -> Element {
     // and its fader cap starts at 30 — so the bars get the five columns
     // between them and the scale gets everything to their left. At 0.80 the
     // whole scale sat three columns left of REAPER's.
-    let bars_x = if props.scale { vw * 0.85 } else { 0.0 };
-    let bars_w = vw - bars_x;
+    // The bars are the *whole* block, scale included. REAPER's meter is one
+    // wide rectangle with the numbers printed inside it — the green fills
+    // the lot and the marks sit on top — not a pair of hairlines beside a
+    // column of type, which is what reserving most of the width for the
+    // scale produced.
+    let bars_x = 0.0f32;
+    let bars_w = vw;
     let n = props.levels.len().max(1) as f32;
     let gap = 1.0f32;
     let bar_w = ((bars_w - gap * (n - 1.0)) / n).max(1.0);
@@ -4385,8 +4394,31 @@ pub fn Meter(props: MeterProps) -> Element {
                     stop { offset: "1", stop_color: "{t.signal.meter_danger.css()}" }
                 }
             }
+            for (i, level) in props.levels.iter().enumerate() {
+                {
+                    let x = bars_x + i as f32 * (bar_w + gap);
+                    let lit = vh * level.clamp(0.0, 1.0);
+                    rsx! {
+                        g { key: "b{i}",
+                            rect {
+                                x: "{x}", y: "0", width: "{bar_w}", height: "{vh}",
+                                rx: "{bar_w * 0.25}",
+                                fill: "{well}",
+                            }
+                            rect {
+                                x: "{x}", y: "{vh - lit}", width: "{bar_w}", height: "{lit}",
+                                rx: "{bar_w * 0.25}",
+                                fill: "url(#mtr)",
+                            }
+                        }
+                    }
+                }
+            }
             if props.scale {
                 {
+                    // Printed *over* the bars: the meter is one block with
+                    // its numbers inside it.
+                    //
                     // The first mark is the peak *readout*, not a scale
                     // mark. REAPER prints it at the top of the meter and
                     // spaces the dB marks evenly through what is left —
@@ -4411,8 +4443,18 @@ pub fn Meter(props: MeterProps) -> Element {
                     // glyphs' own right side bearing is the gap, and the
                     // two columns this used to reserve were two columns
                     // REAPER spends on the scale.
-                    let x = bars_x;
-                    let ink = text.css();
+                    // The block's right edge, less a column. The marks were
+                    // anchored on `bars_x`, which was the bars' left edge
+                    // back when the scale had its own column beside them —
+                    // now that the bars *are* the block, that is 0 and the
+                    // whole scale hung off the left of the meter.
+                    let x = vw - 1.0;
+                    // White at 0.55 — REAPER's unlit scale colour, `[255
+                    // 255 255 140]`. It prints black over the lit part too
+                    // (`[0 0 0 170]`); that wants two clipped passes, and
+                    // the clip cut the glyphs rather than the bars in this
+                    // renderer. One legible pass beats two broken ones.
+                    let ink = "#ffffff";
                     rsx! {
                         for (i, mark) in props.marks.iter().enumerate() {
                             {
@@ -4430,29 +4472,10 @@ pub fn Meter(props: MeterProps) -> Element {
                                         font_family: "Fira Sans, DejaVu Sans, sans-serif",
                                         font_size: "{size}",
                                         fill: "{ink}",
+                                        fill_opacity: "0.55",
                                         "{mark}"
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-            }
-            for (i, level) in props.levels.iter().enumerate() {
-                {
-                    let x = bars_x + i as f32 * (bar_w + gap);
-                    let lit = vh * level.clamp(0.0, 1.0);
-                    rsx! {
-                        g { key: "b{i}",
-                            rect {
-                                x: "{x}", y: "0", width: "{bar_w}", height: "{vh}",
-                                rx: "{bar_w * 0.25}",
-                                fill: "{well}",
-                            }
-                            rect {
-                                x: "{x}", y: "{vh - lit}", width: "{bar_w}", height: "{lit}",
-                                rx: "{bar_w * 0.25}",
-                                fill: "url(#mtr)",
                             }
                         }
                     }

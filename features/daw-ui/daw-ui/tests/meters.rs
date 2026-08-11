@@ -114,3 +114,43 @@ fn a_meter_with_no_frames_yet_draws_silence() {
     let html = dioxus_ssr::render(&dom);
     assert_eq!(html.matches("<svg").count(), 1);
 }
+
+/// The scale is printed inside the meter, over the bars.
+///
+/// REAPER's meter is one wide rectangle with its numbers on it — the green
+/// fills the whole block as it climbs past them. Reserving a column for
+/// the scale beside the bars left two hairlines and a strip of type, which
+/// is a different control.
+#[test]
+fn the_scale_is_printed_inside_the_block() {
+    let mut dom = VirtualDom::new(|| rsx! { TrackMeter { track: "T1", width: 26, height: 120 } });
+    dom.rebuild_in_place();
+    let html = dioxus_ssr::render(&dom);
+
+    // Both bars span the block between them: two of them, and the last
+    // one reaches its right edge.
+    let widths: Vec<f32> = html
+        .match_indices(r#"<rect x=""#)
+        .filter_map(|(i, m)| {
+            let rest = &html[i + m.len()..];
+            let x: f32 = rest.split('"').next()?.parse().ok()?;
+            let w: f32 = rest.split(r#"width=""#).nth(1)?.split('"').next()?.parse().ok()?;
+            Some(x + w)
+        })
+        .collect();
+    assert!(
+        widths.iter().any(|edge| (*edge - 26.0).abs() < 0.6),
+        "no bar reaches the block's right edge:\n{html}"
+    );
+
+    // And the marks are anchored inside it, not off its left.
+    let anchors: Vec<f32> = html
+        .match_indices(r#"<text x=""#)
+        .filter_map(|(i, m)| html[i + m.len()..].split('"').next()?.parse().ok())
+        .collect();
+    assert!(!anchors.is_empty(), "the scale is missing:\n{html}");
+    assert!(
+        anchors.iter().all(|x| *x > 1.0 && *x <= 26.0),
+        "the scale is anchored outside the block: {anchors:?}"
+    );
+}

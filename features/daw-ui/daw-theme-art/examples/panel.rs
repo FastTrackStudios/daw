@@ -158,6 +158,7 @@ fn meter(x: f32, y: f32, w: f32, h: f32, levels: Vec<f32>, marks: &[&str]) -> St
             v::Meter,
             v::MeterProps {
                 well: None,
+                tag: String::new(),
                 levels,
                 cell: (w, h),
                 scale: !marks.is_empty(),
