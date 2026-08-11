@@ -215,3 +215,75 @@ fn paint_the_track_row() {
     crop_to_strip_sized(&path, 343, 71);
     println!("wrote {}", path.display());
 }
+
+/// Both panels, several tracks, one picture.
+///
+/// The strips and the rows share every control, so the thing worth
+/// looking at is whether they still read as one instrument when a handful
+/// of tracks in different states are put side by side — a soloed track
+/// next to a muted one next to an armed one.
+#[test]
+fn paint_the_panels() {
+    fn demo() -> Vec<Track> {
+        let t = |guid: &str, name: &str, colour: u32, index: u32| Track {
+            guid: guid.into(),
+            name: name.into(),
+            color: Some(colour),
+            index,
+            volume: 1.0,
+            record_input: daw_proto::track::RecordInput::Audio { channel: index },
+            ..Default::default()
+        };
+        vec![
+            Track { armed: true, ..t("kick", "Kick", 0xe0_56_7a, 0) },
+            Track { armed: true, soloed: true, ..t("snare", "Snare", 0xe0_56_7a, 1) },
+            t("oh", "OH", 0xe0_56_7a, 2),
+            Track { muted: true, ..t("bass", "Bass", 0x55_88_e0, 3) },
+            t("gtr", "Gtr", 0x42_c8_e0, 4),
+            Track { fx_count: 2, ..t("keys", "Keys", 0xe0_a8_42, 5) },
+        ]
+    }
+
+    fn app() -> Element {
+        let mut store = use_hook(TrackStore::new);
+        use_hook(|| {
+            store.seed(demo());
+            provide_context(store);
+        });
+        rsx! {
+            div {
+                style: "position:absolute; left:0; top:0; background:#1e1e1e; \
+                        width:900px; height:800px;",
+                // The track panel, stacked.
+                div { style: "position:absolute; left:0; top:0;",
+                    for (i, track) in demo().into_iter().enumerate() {
+                        div {
+                            key: "{track.guid}",
+                            style: "position:absolute; left:0; top:{i as f32 * 71.0}px;",
+                            daw_ui::components::tcp::TrackRow { track, index: i as u32 }
+                        }
+                    }
+                }
+                // The mixer, beside it.
+                div { style: "position:absolute; left:360px; top:0; display:flex;",
+                    for (i, track) in demo().into_iter().enumerate() {
+                        div { key: "{track.guid}", style: "flex:0 0 auto;",
+                            daw_ui::components::mixer::ChannelStripPreview {
+                                track, index: i as u32, height: 430.0,
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../target/theme-shots");
+    let path = out.join("panels.png");
+    dioxus_test::render(app)
+        .with_window_size(900 + BODY_MARGIN * 2, 800 + BODY_MARGIN * 2)
+        .build()
+        .render_png(&path);
+    crop_to_strip_sized(&path, 900, 460);
+    println!("wrote {}", path.display());
+}
