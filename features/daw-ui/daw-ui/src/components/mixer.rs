@@ -193,6 +193,8 @@ const FX_PILL_TOP: f32 = 9.0;
 /// The meter's block, scale included. It starts at x=4 and REAPER's fader
 /// cap starts at 30, so 26 is the room there is.
 const METER_W: u32 = 26;
+/// `mcp.recinput` and `mcp.recmode` are both 16 rows.
+const INPUT_FIELD_H: f32 = 16.0;
 const BOTTOM_SECTION: f32 = 47.0;
 /// The axis the right-hand column centres on: `mcp.recmon` and everything
 /// anchored to it. The record arm's ring sits at 0.486 of its own 36-wide
@@ -348,6 +350,9 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
     // The fields the input section holds, darkened out of the tint the way
     // the track panel's are — measured there at 0.75 of it.
     let field = tint_colour.shade(-0.25).css();
+    let ink = theme.chrome.hardware_mark.shade(0.5).css();
+    let faint = theme.chrome.hardware_mark.shade(0.1).css();
+    let caret = theme.chrome.hardware_mark.shade(0.2).css();
     // One row of highlight along the band's top edge — `mcp.custom.bg_hl_t`.
     // Without it the band starts flat where the source starts lit.
     let tint_hl = tint_colour.shade(0.13).css();
@@ -475,16 +480,24 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                 // `mcp.recmode` and both it and the record arm sit inside
                 // the band, pan at its left and the arm at its right, which
                 // is where the source has them.
-                div { style: "position:absolute; left:9px; top:2px;",
+                // Top of the section, not two rows into it: the knob is 25
+                // rows and the label 7, which is exactly the 33 the section
+                // has — two rows of slack and the label runs under the
+                // record-input field.
+                div { style: "position:absolute; left:9px; top:0;",
                     PanKnob { track: track.guid.clone() }
                     if shape.show_pan_labels {
                         // Inline, like everything else that decides layout
                         // here: a Tailwind-only `text-[8px]` falls back to
                         // the UA's 16px in any window that renders before
                         // the sheet, and a 16px "pan" is half the band.
+                        // Inside the pan section, not over the input field
+                        // below it: the knob is 25 rows of a 33-row section
+                        // and a label on its own line ran past the edge.
                         div {
                             class: "text-[8px] text-zinc-400 leading-none text-center",
-                            style: "font-size:8px; line-height:8px; text-align:center; \
+                            style: "position:absolute; left:0; top:26px; width:24px; \
+                                    font-size:7px; line-height:7px; text-align:center; \
                                     color:#a1a1aa; \
                                     font-family:Fira Sans, DejaVu Sans, sans-serif;",
                             "pan"
@@ -506,32 +519,47 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                             bottom:-{ARM_OVERHANG}px; z-index:2;",
                     RecordArmButton { track: track.guid.clone() }
                 }
-                // The input section, which `rtconfig` fills with two
-                // 16-row fields rather than leaving as colour:
+                // The input section — `mcp.recinput` over `mcp.recmode`,
+                // with the input-FX mark between them:
                 //
                 //     mcp.recinput = in_sec + [6 0 75 16]
                 //     mcp.recmode  = in_sec + [6 4 42 16] + [0 16]
                 //
-                // Drawn as one small label and otherwise empty, its 54
-                // rows read as a slab of colour that had grown too tall —
-                // the section was the right height and had nothing in it.
+                // Both are dropdowns, so both carry a caret; REAPER prints
+                // the input's name in the first and the mode in the second.
                 if shape.show_record_input {
                     div {
                         style: "position:absolute; left:6px; top:{pan_h}px; \
-                                width:{STRIP_W - 12.0}px; height:16px; background:{field};",
-                        RecordInputLabel { track: track.guid.clone() }
+                                width:{STRIP_W - 12.0}px; height:{INPUT_FIELD_H}px; \
+                                background:{field};",
+                        div {
+                            style: "padding:0 12px 0 4px; line-height:{INPUT_FIELD_H}px; \
+                                    font-size:9px; color:{ink}; white-space:nowrap; \
+                                    overflow:hidden; text-overflow:ellipsis; \
+                                    font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                            "{input_name(track)}"
+                        }
+                        Caret { x: STRIP_W - 12.0 - 10.0, y: INPUT_FIELD_H / 2.0 - 2.0, ink: caret.clone() }
+                    }
+                    // `IN FX` — the input chain's own mark, which REAPER
+                    // sets small and hard against the section's right.
+                    div {
+                        style: "position:absolute; right:6px; top:{pan_h + INPUT_FIELD_H}px; \
+                                font-size:7px; line-height:8px; color:{faint}; \
+                                font-family:Fira Sans, DejaVu Sans, sans-serif;",
+                        "IN FX"
                     }
                     div {
-                        style: "position:absolute; left:6px; top:{pan_h + 20.0}px; \
-                                width:42px; height:16px; background:{field};",
-                        // "IN" — `mcp.recmode`. A label rather than a
-                        // control until the DAW reports the mode.
+                        style: "position:absolute; left:6px; \
+                                top:{pan_h + INPUT_FIELD_H + 5.0}px; \
+                                width:42px; height:{INPUT_FIELD_H}px; background:{field};",
                         div {
-                            style: "line-height:16px; font-size:9px; text-align:center; \
-                                    color:{theme.chrome.hardware_mark.shade(0.2).css()}; \
+                            style: "padding:0 12px 0 4px; line-height:{INPUT_FIELD_H}px; \
+                                    font-size:9px; color:{ink}; \
                                     font-family:Fira Sans, DejaVu Sans, sans-serif;",
                             "IN"
                         }
+                        Caret { x: 42.0 - 10.0, y: INPUT_FIELD_H / 2.0 - 2.0, ink: caret.clone() }
                     }
                 }
             }
@@ -638,6 +666,36 @@ fn ChannelStrip(props: ChannelStripProps) -> Element {
                     "{track.index + 1}"
                 }
             }
+        }
+    }
+}
+
+/// What the record-input field reads.
+fn input_name(track: &Track) -> String {
+    use daw_proto::track::RecordInput;
+    match track.record_input {
+        RecordInput::None => "No input".to_string(),
+        RecordInput::Audio { channel } => format!("Input {}", channel + 1),
+        RecordInput::Midi { device_id, channel } => match (device_id, channel) {
+            (Some(d), Some(c)) => format!("MIDI {d} ch {}", c + 1),
+            (Some(d), None) => format!("MIDI {d}"),
+            (None, Some(c)) => format!("MIDI all ch {}", c + 1),
+            (None, None) => "MIDI".to_string(),
+        },
+        RecordInput::Raw(v) => format!("Input #{v}"),
+    }
+}
+
+/// A dropdown's caret. A triangle rather than a glyph, so it does not
+/// depend on a font having one.
+#[component]
+fn Caret(x: f32, y: f32, ink: String) -> Element {
+    rsx! {
+        svg {
+            style: "position:absolute; left:{x}px; top:{y}px;",
+            width: "7", height: "4", view_box: "0 0 7 4",
+            xmlns: "http://www.w3.org/2000/svg",
+            path { d: "M 0 0 h 7 l -3.5 4 z", fill: "{ink}" }
         }
     }
 }

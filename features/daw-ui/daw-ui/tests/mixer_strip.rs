@@ -100,7 +100,9 @@ fn the_strip_carries_its_sections_in_reapers_order() {
     // order REAPER stacks them: the FX pill, the record input inside the
     // tinted band, the mute button in the stretch's button column, and the
     // name plate at the bottom.
-    let order = ["FX", "in ", ">M<", "Kick"];
+    // "IN FX" rather than the old bare "in " label: the input section is
+    // two dropdowns and a mark now, not one line of text.
+    let order = ["FX", "IN FX", ">M<", "Kick"];
     let mut at = 0usize;
     for needle in order {
         let found = html[at..]
@@ -174,7 +176,7 @@ fn the_container_thresholds_hide_their_elements() {
     use daw_ui::controls::REAPER_THRESHOLDS as T;
 
     // The record-input readout is the clearest marker: it prints "in".
-    sweeps(T.record_input, |h| h.contains(">in "), "record input");
+    sweeps(T.record_input, |h| h.contains("IN FX"), "record input");
     // The dB readout under the fader.
     sweeps(T.volume_label, |h| h.contains("font-mono"), "volume label");
     // The pan label under the knob.
