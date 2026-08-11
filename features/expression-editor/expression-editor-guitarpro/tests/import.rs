@@ -197,7 +197,9 @@ fn the_extension_picks_the_reader() {
     assert_eq!(Format::of_path("song.gp3"), Some(Format::Gp3));
     assert_eq!(Format::of_path("song.gp4"), Some(Format::Gp4));
     assert_eq!(Format::of_path("song.gp5"), Some(Format::Gp5));
-    assert_eq!(Format::of_path("song.gpx"), Some(Format::Gpif));
+    // Different containers for the same payload: BCFZ/BCFS versus ZIP.
+    // Routing both to the ZIP reader made every GP6 file fail.
+    assert_eq!(Format::of_path("song.gpx"), Some(Format::Gpx));
     assert_eq!(Format::of_path("song.gp"), Some(Format::Gpif));
     assert_eq!(Format::of_path("SONG.GP5"), Some(Format::Gp5), "case");
     assert_eq!(Format::of_path("song.mid"), None);
@@ -207,6 +209,7 @@ fn the_extension_picks_the_reader() {
 fn only_the_binary_formats_keep_bend_shape() {
     assert!(Format::Gp5.keeps_bend_shape());
     assert!(!Format::Gpif.keeps_bend_shape(), "GPIF loses the middles");
+    assert!(!Format::Gpx.keeps_bend_shape(), "and so does the GP6 container");
 }
 
 // ── The document ─────────────────────────────────────────────────────
