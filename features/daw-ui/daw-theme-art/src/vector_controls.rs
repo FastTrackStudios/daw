@@ -17,12 +17,49 @@
 //! is a fraction of that — no pixel constants. That is what "infinitely
 //! zoomable" actually requires: a 1px border baked in at 20px tall becomes
 //! a 10px slab at 400px tall.
+//!
+//! # The SVG id rule
+//!
+//! SVG ids are **document-global**, and a mixer is a row of strips: every
+//! inline `<svg>` in a page shares one id namespace, and a `url(#…)`
+//! reference resolves to the *first* element carrying that id, whichever
+//! strip it came from. The meter learned this the hard way — its clip
+//! regions varied per strip, and every strip's scale clipped to the first
+//! strip's level.
+//!
+//! So the rule is: **ids need distinguishing exactly when their content
+//! varies per instance.** A gradient built only from `Theme::default()`
+//! renders identically on every strip, so resolving to the first copy
+//! changes nothing and a plain id is fine. The moment a def's content
+//! depends on a prop — a state, a colour, a cell size, a hover — two
+//! instances can disagree, and the first one wins silently.
+//!
+//! The mechanism here is [`vary`]: derive the id *from the varying
+//! content*, so equal content shares an id harmlessly and different
+//! content cannot collide. No tag prop to thread, no call site to update,
+//! and forgetting a new dependency shows up as a wrong id the moment two
+//! states differ.
 
 use daw_theme::{Color, Theme};
 use dioxus::prelude::*;
 
 pub use crate::mixer_controls::{FxChain, Interaction, Monitoring, RecordArm, Solo};
 pub use crate::slice::NamedArt;
+
+/// An id for a def whose content varies per instance — see the SVG id rule
+/// in the module docs.
+///
+/// The id is the base followed by the varying inputs, stripped to the
+/// characters an id may carry. Pass *every* input the def's content is
+/// built from; one that is missed is the meter bug waiting for the first
+/// pair of instances that differ only in it.
+fn vary(base: &str, parts: &[&str]) -> String {
+    let mut id = String::from(base);
+    for part in parts {
+        id.extend(part.chars().filter(|c| c.is_ascii_alphanumeric()));
+    }
+    id
+}
 
 /// Which way a control is laid out.
 ///
@@ -235,7 +272,6 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
     let k = ink(props.lit, props.at, props.sinks, props.hover);
     let (vw, vh) = props.art.source;
     let (body_y, body_h) = (vh * props.body.0, vh * props.body.1);
-    let id = format!("lb{}", props.label.replace(' ', ""));
     // The radius was never the problem — the stroke was.
     //
     // With a stroked border the corner looked far too round, and shrinking
@@ -257,6 +293,9 @@ pub fn LabelButton(props: LabelButtonProps) -> Element {
         deepen(k.face, props.depth)
     }
     .css();
+    // The label alone is not enough: two Mute buttons in one document, one
+    // lit, have the same label and different faces.
+    let id = vary("lb", &[&props.label, &k.face.css(), &floor]);
 
     rsx! {
         svg {
@@ -861,10 +900,15 @@ pub fn FxControl(props: FxControlProps) -> Element {
     let plate_top = lift(k.face.shade(0.07), dull - 1.0).css();
     let plate_bot = lift(k.face.shade(-0.10), dull - 1.0).css();
 
+    // The plate varies with state and the outline with family and widen —
+    // a hovered pill next to a resting one, or a track-panel pill in the
+    // same document as a mixer's, must not share defs.
+    let face_id = vary("fxface", &[&plate_top, &plate_bot]);
+    let clip_id = vary("fxpill", &[&format!("{}x{}x{}", p.w, p.h, widen)]);
     let (fill, alpha) = if p.scrim {
         ("#000000".to_string(), 0.35)
     } else {
-        ("url(#fxface)".to_string(), 1.0)
+        (format!("url(#{face_id})"), 1.0)
     };
 
     // Neutral, like everything else printed on a hardware control. The
@@ -943,11 +987,11 @@ pub fn FxControl(props: FxControlProps) -> Element {
             view_box: "{win_x} 0 {win_w} {p.h}",
             xmlns: "http://www.w3.org/2000/svg",
             defs {
-                linearGradient { id: "fxface", x1: "0", y1: "0", x2: "0", y2: "1",
+                linearGradient { id: "{face_id}", x1: "0", y1: "0", x2: "0", y2: "1",
                     stop { offset: "0", stop_color: "{plate_top}" }
                     stop { offset: "1", stop_color: "{plate_bot}" }
                 }
-                clipPath { id: "fxpill",
+                clipPath { id: "{clip_id}",
                     path { d: "{outline}" }
                 }
             }
@@ -972,7 +1016,7 @@ pub fn FxControl(props: FxControlProps) -> Element {
                 x: "{rhs}", y: "{body_y}",
                 width: "{p.w - rhs}", height: "{body_h}",
                 fill: "#000000", fill_opacity: "0.16",
-                clip_path: "url(#fxpill)",
+                clip_path: "url(#{clip_id})",
             }
             path {
                 d: "{frame}",
@@ -1214,11 +1258,6 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     // pixels of exactly #a6a6a6, no gradient anywhere. Only the armed reds
     // and the moulded mixer ring are lit from above.
     let flat = !props.housing && !armed;
-    let ring_paint = if flat {
-        ring.css()
-    } else {
-        "url(#recring)".to_string()
-    };
     // The hole is not a window onto the surface behind — it is the housing
     // showing through, and in the source both are the same #262626. Filling
     // it from `surface` punched a blue-black hole through the middle.
@@ -1236,6 +1275,15 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
         ring.shade(0.18)
     };
     let hole_fill = t.chrome.hardware.shade(-0.40);
+    // The ring's colours vary with state and the masks' geometry with the
+    // cell, so all three ids are derived from what they draw.
+    let ring_id = vary("recring", &[&ring_hi.css(), &ring.css()]);
+    let ring_paint = if flat {
+        ring.css()
+    } else {
+        format!("url(#{ring_id})")
+    };
+    let auto_id = vary("recauto", &[&format!("{vw}x{vh}")]);
     // With a housing, the hole is that housing showing through — #262626
     // in the source, the same colour as the surround, so it is painted
     // *behind* the ring. Without one there is nothing behind: the
@@ -1244,7 +1292,7 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
     //
     // Cuts then need something to cut *with*, and over nothing that has
     // to be a mask, since "paint transparent" does not erase.
-    let notch_id = "recnotch";
+    let notch_id = vary("recnotch", &[&format!("{vw}x{vh}")]);
 
     rsx! {
         svg {
@@ -1257,7 +1305,7 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                 // part here: the source carries #fa4e5e and #e23b53 in
                 // equal measure and this drew only the darker of the two,
                 // which is why it read flat and dull beside the original.
-                linearGradient { id: "recring", x1: "0", y1: "0", x2: "0", y2: "1",
+                linearGradient { id: "{ring_id}", x1: "0", y1: "0", x2: "0", y2: "1",
                     stop { offset: "0", stop_color: "{ring_hi.css()}" }
                     stop { offset: "1", stop_color: "{ring.css()}" }
                 }
@@ -1328,7 +1376,7 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                     // opens at y10.7 and reaches 2.15, which leaves the
                     // two-pixel legs the source has.
                     defs {
-                        mask { id: "recauto",
+                        mask { id: "{auto_id}",
                             rect {
                                 x: "0", y: "0", width: "{vw}", height: "{vh}",
                                 fill: "#ffffff",
@@ -1351,7 +1399,7 @@ pub fn RecordArmButton(props: RecordArmProps) -> Element {
                     circle {
                         cx: "{cx}", cy: "{cy}", r: "{outer}",
                         fill: "{ring_paint}",
-                        mask: "url(#recauto)",
+                        mask: "url(#{auto_id})",
                     }
                 }
             } else {
@@ -1971,6 +2019,7 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
     // than a moulded thumb, because those three are most of what makes it
     // look like an object at all.
     let grip = props.accent.unwrap_or(t.chrome.hardware_mark);
+    let grip_id = vary("capgrip", &[&grip.css()]);
     let body = t.chrome.hardware;
     let edge = t.chrome.hardware_edge.shade(-0.35);
 
@@ -2044,7 +2093,9 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
             // every groove full width flattened the panel into a grille
             // and lost both the side rails and the seam.
             defs {
-                linearGradient { id: "capgrip", x1: "0", y1: "0", x2: "0", y2: "1",
+                // The grip takes the accent prop, so two caps with
+                // different accents in one document are two gradients.
+                linearGradient { id: "{grip_id}", x1: "0", y1: "0", x2: "0", y2: "1",
                     stop { offset: "0", stop_color: "{grip.shade(-0.03).css()}" }
                     stop { offset: "1", stop_color: "{grip.shade(0.34).css()}" }
                 }
@@ -2063,7 +2114,7 @@ pub fn VolumeFaderCap(props: FaderCapProps) -> Element {
                 x: "{gx0}", y: "{gy0}",
                 width: "{gw}", height: "{gy1 - gy0}",
                 rx: "{vw * 0.055}",
-                fill: "url(#capgrip)",
+                fill: "url(#{grip_id})",
             }
             // Five notches, the seam, five more: eleven rows on alternate
             // lines from y16 to y36, with y26 the full-width split. This
@@ -2579,6 +2630,8 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
     } else {
         [("0", "#e9e9e9", 0.149), ("0.55", "#4a4a4a", 0.043), ("1", "#0a0a0a", 0.008)]
     };
+    // Two washes, so a hovered button beside a resting one is two ids.
+    let wash_id = vary("fcompwash", &[wash[0].1]);
 
     // Traced: down-triangle, ramp, right-triangle, all in the same box.
     let glyph = match props.state {
@@ -2611,7 +2664,7 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             defs {
-                linearGradient { id: "fcompwash", x1: "0", y1: "0", x2: "0", y2: "1",
+                linearGradient { id: "{wash_id}", x1: "0", y1: "0", x2: "0", y2: "1",
                     for (i, (at, hex, a)) in wash.iter().enumerate() {
                         stop {
                             key: "w{i}", offset: "{at}",
@@ -2620,7 +2673,7 @@ pub fn FolderCompactButton(props: FolderCompactProps) -> Element {
                     }
                 }
             }
-            rect { x: "0", y: "0", width: "{vw}", height: "{vh - 3.0}", fill: "url(#fcompwash)" }
+            rect { x: "0", y: "0", width: "{vw}", height: "{vh - 3.0}", fill: "url(#{wash_id})" }
             // Pure black over pure white, both at low alpha — not the
             // mid-greys these were. `#9a9a9a` at 0.345 composites 53
             // levels light against the source's `#000000` at the same
@@ -2927,6 +2980,14 @@ pub fn TransportButton(props: TransportProps) -> Element {
         Interaction::Normal => 0.0,
     };
     let (face_top, face_bot) = (offset(face_top, shift), offset(face_bot, shift));
+    // A transport bar is a row of these in different states and colours,
+    // so every def whose content depends on the button is derived.
+    let face_id = vary("trface", &[&face_top.css(), &face_bot.css()]);
+    let lit_id = lit
+        .as_ref()
+        .map(|b| vary("trlit", &[&b.edge.css(), &b.centre.css()]))
+        .unwrap_or_default();
+    let litside_id = vary("trlitside", &[&format!("{vw}")]);
     let border = t.chrome.hardware_edge.shade(0.05);
     // Record is the last button of the transport cluster, and its lit art
     // caps the group: square on the left, rounded on the right, with the
@@ -3130,15 +3191,10 @@ pub fn TransportButton(props: TransportProps) -> Element {
             view_box: "0 0 {vw} {vh}",
             xmlns: "http://www.w3.org/2000/svg",
             defs {
-                if end_cap {
-                    clipPath { id: "trcap",
-                        path {
-                            d: "M 0 1 H {vw - 3.5} A 3.5 3.5 0 0 1 {vw} 4.5
-                                V {vh - 4.5} A 3.5 3.5 0 0 1 {vw - 3.5} {vh - 1.0}
-                                H 0 Z",
-                        }
-                    }
-                }
+                // No `trcap` clip here any more: a clip-path round the lit
+                // group was abandoned (resvg dropped the group) in favour
+                // of building the radius into each shape, and its def
+                // outlived every reference — found dead by the id audit.
                 linearGradient { id: "trcycleedge", x1: "0", y1: "0", x2: "1", y2: "0",
                     stop { offset: "0", stop_color: "#000000", stop_opacity: "0.15" }
                     stop { offset: "0.62", stop_color: "#000000", stop_opacity: "0" }
@@ -3151,12 +3207,12 @@ pub fn TransportButton(props: TransportProps) -> Element {
                     stop { offset: "0.83", stop_color: "{h.shade(-0.46).css()}" }
                     stop { offset: "1", stop_color: "{h.shade(-0.54).css()}" }
                 }
-                linearGradient { id: "trface", x1: "0", y1: "0", x2: "0", y2: "1",
+                linearGradient { id: "{face_id}", x1: "0", y1: "0", x2: "0", y2: "1",
                     stop { offset: "0", stop_color: "{face_top.css()}" }
                     stop { offset: "1", stop_color: "{face_bot.css()}" }
                 }
                 if let Some(b) = &lit {
-                    linearGradient { id: "trlit", x1: "0", y1: "0", x2: "0", y2: "1",
+                    linearGradient { id: "{lit_id}", x1: "0", y1: "0", x2: "0", y2: "1",
                         // Four stops, because the source holds its centre
                         // rather than passing through it: the plateau runs
                         // from y7 to y18 of twenty rows, and a gradient
@@ -3172,7 +3228,7 @@ pub fn TransportButton(props: TransportProps) -> Element {
                     // in, the same fall the vertical stops carry. Drawn
                     // with the vertical ramp alone the button read as a
                     // lit strip rather than a lit key.
-                    linearGradient { id: "trlitside", x1: "0", y1: "0", x2: "1", y2: "0",
+                    linearGradient { id: "{litside_id}", x1: "0", y1: "0", x2: "1", y2: "0",
                         stop { offset: "0", stop_color: "#000000", stop_opacity: "0.114" }
                         stop { offset: "{3.0 / vw}", stop_color: "#000000", stop_opacity: "0" }
                         stop { offset: "{1.0 - 3.0 / vw}", stop_color: "#000000", stop_opacity: "0" }
@@ -3225,8 +3281,8 @@ pub fn TransportButton(props: TransportProps) -> Element {
                 // sticker rather than a lit button.
                 path { d: "{plate_rim}", fill: "{b.rim.css()}" }
                 path { d: "{plate_rim_bot}", fill: "{b.rim_bot.css()}" }
-                path { d: "{plate_face}", fill: "url(#trlit)" }
-                path { d: "{plate_face}", fill: "url(#trlitside)" }
+                path { d: "{plate_face}", fill: "url(#{lit_id})" }
+                path { d: "{plate_face}", fill: "url(#{litside_id})" }
             } else {
                 // One lighter row under the top border, which every
                 // ReaperTips control has.
@@ -3236,7 +3292,7 @@ pub fn TransportButton(props: TransportProps) -> Element {
                 }
                 rect {
                     x: "1", y: "3", width: "{vw - 2.0}", height: "{vh - 5.0}",
-                    fill: "url(#trface)",
+                    fill: "url(#{face_id})",
                 }
             }
             // The bar's own separator, not the button's edge — it runs the
@@ -3884,6 +3940,14 @@ pub struct ListStripProps {
 pub fn ListStrip(props: ListStripProps) -> Element {
     let (vw, vh) = props.art.source;
     let (top, pitch) = props.rows;
+    // The pill colours come off the props, so two strips' gradients are
+    // two sets of ids — the index alone repeats on every strip.
+    let pill_ids: Vec<String> = props
+        .pills
+        .iter()
+        .enumerate()
+        .map(|(i, pill)| vary(&format!("pill{i}"), &[&pill.0.css(), &pill.1.css()]))
+        .collect();
     rsx! {
         svg {
             width: "{props.width.unwrap_or(vw as u32)}",
@@ -3892,7 +3956,7 @@ pub fn ListStrip(props: ListStripProps) -> Element {
             xmlns: "http://www.w3.org/2000/svg",
             defs {
                 for (i, pill) in props.pills.iter().enumerate() {
-                    linearGradient { key: "g{i}", id: "pill{i}",
+                    linearGradient { key: "g{i}", id: "{pill_ids[i]}",
                         x1: "0", y1: "0", x2: "0", y2: "1",
                         stop { offset: "0", stop_color: "{pill.0.css()}" }
                         stop { offset: "1", stop_color: "{pill.1.css()}" }
@@ -3905,7 +3969,7 @@ pub fn ListStrip(props: ListStripProps) -> Element {
                         x: "{props.inset}", y: "{top + pitch * i as f32}",
                         width: "{vw - props.inset * 2.0}", height: "{props.pill}",
                         rx: "5",
-                        fill: "url(#pill{i})",
+                        fill: "url(#{pill_ids[i]})",
                         fill_opacity: "{pill.2}",
                     }
                     if let Some(edge) = props.edge {
@@ -4223,7 +4287,10 @@ pub fn EnvcpArmButton(props: EnvcpArmProps) -> Element {
     let glow = offset(t.chrome.hardware_edge.shade(0.0603), bump);
     let body = offset(t.chrome.hardware_edge.shade(0.0345), bump);
     let sink = offset(t.chrome.hardware_edge.shade(0.0043), bump);
-    let body_fill = if props.armed { "url(#envarm)".to_string() } else { flat.css() };
+    // The glow moves with hover (`bump`), so a hovered armed button beside
+    // a resting one is two gradients.
+    let arm_id = vary("envarm", &[&glow.css(), &body.css(), &sink.css()]);
+    let body_fill = if props.armed { format!("url(#{arm_id})") } else { flat.css() };
 
     rsx! {
         svg {
@@ -4233,7 +4300,7 @@ pub fn EnvcpArmButton(props: EnvcpArmProps) -> Element {
             xmlns: "http://www.w3.org/2000/svg",
             defs {
                 radialGradient {
-                    id: "envarm",
+                    id: "{arm_id}",
                     cx: "{cx}", cy: "{vh * 0.10}", r: "{unit * 0.85}",
                     gradient_units: "userSpaceOnUse",
                     stop { offset: "0", stop_color: "{glow.css()}" }
@@ -4341,10 +4408,12 @@ pub struct MeterProps {
     /// invisible at rest, which is what REAPER's is.
     #[props(default)]
     pub well: Option<String>,
-    /// Distinguishes this meter's ids from the next one's. SVG ids are
-    /// document-global and a mixer is a row of these.
-    #[props(default)]
-    pub tag: String,
+    // No `tag` prop any more: it guarded per-instance clip regions that
+    // have since been refactored away, and the surviving `mtr` gradient is
+    // built only from the theme, so every instance's copy is identical.
+    // The rule it embodied — ids need distinguishing exactly when their
+    // content varies per instance — moved to the module docs, and the
+    // mechanism to [`vary`].
     /// The scale's marks, top to bottom.
     #[props(default)]
     pub marks: Vec<String>,
@@ -4692,6 +4761,37 @@ mod tests {
     fn valid(svg: &str) -> bool {
         let opts = resvg::usvg::Options::default();
         resvg::usvg::Tree::from_str(svg, &opts).is_ok()
+    }
+
+    /// The SVG id rule, pinned: a def whose content varies per instance
+    /// must carry a different id per content. Two FX pills in different
+    /// states are the canonical pair — before [`vary`], both said
+    /// `id="fxface"` and the first one in the document painted them both.
+    #[test]
+    fn defs_that_vary_per_instance_do_not_share_ids() {
+        let pill = |at| {
+            render_svg(FxButton, FxProps {
+                family: Default::default(),
+                state: FxChain::Active,
+                width: None,
+                height: None,
+                at,
+            })
+        };
+        // Hover is what moves the *plate* — chain state only moves the ink.
+        let resting = pill(Interaction::Normal);
+        let active = pill(Interaction::Hover);
+
+        let id_of = |svg: &str| {
+            let at = svg.find("id=\"fxface").expect("a derived fxface id");
+            svg[at..].split('"').nth(1).unwrap().to_string()
+        };
+        assert_ne!(
+            id_of(&resting),
+            id_of(&active),
+            "two states share one gradient id — the first in the document \
+             would paint both"
+        );
     }
 
     /// A control's own size, as declared by the SVG it renders.

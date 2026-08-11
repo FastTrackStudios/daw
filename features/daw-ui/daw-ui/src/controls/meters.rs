@@ -151,9 +151,6 @@ pub fn TrackMeter(
             levels: vec![l.peak_left, l.peak_right],
             holds: vec![l.hold_left, l.hold_right],
             cell: (width as f32, height as f32),
-            // The track's own guid, so one strip's clip regions cannot
-            // capture the next strip's scale.
-            tag: track.replace(|c: char| !c.is_alphanumeric(), ""),
             scale: scale,
             well: well,
             marks: if scale { marks_for(height) } else { Vec::new() },
