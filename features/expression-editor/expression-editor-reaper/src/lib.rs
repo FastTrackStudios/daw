@@ -228,6 +228,9 @@ pub fn write_back() -> bool {
 struct PollState {
     last_seen: Option<expression_editor_core::ExpressionDoc>,
     stable_ticks: u32,
+    /// Last measured canvas-cell size, and how long it has held.
+    cell: Option<(f64, f64)>,
+    cell_stable: u32,
 }
 
 static POLL: OnceLock<Mutex<PollState>> = OnceLock::new();
@@ -237,8 +240,61 @@ fn poll_state() -> &'static Mutex<PollState> {
         Mutex::new(PollState {
             last_seen: None,
             stable_ticks: 0,
+            cell: None,
+            cell_stable: 0,
         })
     })
+}
+
+/// How many ticks the measured cell size must hold before the editor is
+/// resized to it — one remount at the end of a dock drag, not thirty
+/// during it.
+const RESIZE_AFTER_STABLE_TICKS: u32 = 3;
+
+/// Match the editor's viewport to the canvas cell's real layout size.
+///
+/// dioxus-native never delivers element resize events, so the panel
+/// measures the cell from the host tick and pushes the size into the
+/// session, then remounts so the component re-reads it. The roll svg is
+/// sized 1:1 to the viewport, which keeps the mouse exact even while
+/// this is catching up; what this poll restores is the roll actually
+/// *filling* the panel after a resize.
+fn follow_cell_size() {
+    use expression_editor_ui::canvas::{GUTTER_W, RULER_H};
+
+    let Some((w, h)) =
+        daw::reaper_ui::dock::panel_element_size(PANEL_ID, "data-testid", "canvas-cell")
+    else {
+        return;
+    };
+    let mut st = poll_state().lock().unwrap();
+    let same = st
+        .cell
+        .is_some_and(|(cw, ch)| (cw - w).abs() < 0.5 && (ch - h).abs() < 0.5);
+    if !same {
+        st.cell = Some((w, h));
+        st.cell_stable = 0;
+        return;
+    }
+    st.cell_stable += 1;
+    if st.cell_stable != RESIZE_AFTER_STABLE_TICKS {
+        return;
+    }
+    drop(st);
+
+    let want = Viewport::new((w - GUTTER_W).max(50.0), (h - RULER_H).max(50.0));
+    let resized = with_editor(|ed| {
+        if (ed.viewport.w - want.w).abs() > 0.5 || (ed.viewport.h - want.h).abs() > 0.5 {
+            ed.resize(want);
+            true
+        } else {
+            false
+        }
+    })
+    .unwrap_or(false);
+    if resized {
+        daw::reaper_ui::dock::remount_panel(PANEL_ID);
+    }
 }
 
 /// How many ~30Hz ticks a document must sit unchanged before it is
@@ -265,6 +321,8 @@ pub fn poll() {
     if !daw::reaper_ui::dock::is_panel_visible(PANEL_ID) {
         return;
     }
+
+    follow_cell_size();
 
     // Follow the selection.
     if let Some(sel) = selected_item_guid() {
@@ -484,14 +542,17 @@ pub fn EditorPanel() -> Element {
     let take_label = use_signal(loaded_label);
     let take_kind = use_signal(|| loaded_kind().unwrap_or(""));
 
-    // Push edits down to the session. The live-sync poll ([`poll`])
-    // owns everything from there: it writes settled edits to the take
-    // and follows the REAPER selection, remounting this component when
-    // a different take comes in.
+    // Mirror the panel's whole editor — camera included — down to the
+    // session on every change. The live-sync poll ([`poll`]) owns
+    // everything from there: it writes settled edits to the take,
+    // follows the REAPER selection, and matches the viewport to the
+    // panel, remounting this component to surface what changed. The
+    // full mirror is what lets a remount restore the camera instead of
+    // resetting the user's zoom.
     use_effect(move || {
         let mut guard = session().lock().unwrap();
         if let Some(s) = guard.as_mut() {
-            if s.editor().doc != editor.read().doc {
+            if *s.editor() != *editor.read() {
                 *s.editor_mut() = editor.read().clone();
             }
         }

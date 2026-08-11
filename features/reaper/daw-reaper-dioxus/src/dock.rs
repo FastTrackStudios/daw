@@ -61,6 +61,48 @@ fn current_modifiers() -> keyboard_types::Modifiers {
     mods
 }
 
+/// The HiDPI scale of the panel living at `hwnd`, 1.0 before init.
+fn panel_scale(hwnd: raw::HWND) -> f32 {
+    PANELS.with(|panels| {
+        panels
+            .borrow()
+            .values()
+            .find(|p| p.hwnd == hwnd)
+            .and_then(|p| p.view.as_ref())
+            .map(|v| v.scale_factor())
+            .unwrap_or(1.0)
+    })
+}
+
+/// Client-area mouse coordinates from `lparam`, converted to the CSS
+/// pixels Blitz lays out in.
+///
+/// Blitz's hit testing compares event coordinates against Taffy's
+/// layout, which is in CSS px — physical px divided by the HiDPI
+/// scale. Forwarding raw client pixels meant that at any scale other
+/// than 1.0 every hit drifted by `(scale - 1) × position`: barely
+/// visible on the header buttons near the origin, badly wrong deep
+/// inside the editor's roll.
+fn client_css_coords(hwnd: raw::HWND, lparam: isize) -> (f32, f32) {
+    let x = (lparam & 0xFFFF) as i16 as f32;
+    let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+    let scale = panel_scale(hwnd);
+    (x / scale, y / scale)
+}
+
+/// Same, for `WM_MOUSEWHEEL`, whose `lparam` is in screen coordinates.
+fn wheel_css_coords(hwnd: raw::HWND, lparam: isize) -> (f32, f32) {
+    let mut pt = raw::POINT {
+        x: (lparam & 0xFFFF) as i16 as i32,
+        y: ((lparam >> 16) & 0xFFFF) as i16 as i32,
+    };
+    unsafe {
+        swell().ScreenToClient(hwnd, &mut pt);
+    }
+    let scale = panel_scale(hwnd);
+    (pt.x as f32 / scale, pt.y as f32 / scale)
+}
+
 /// Build a `BlitzPointerEvent` for a mouse pointer at window-local (x, y).
 /// All coord fields are filled with the same value because we don't track
 /// page/screen offsets inside REAPER's docker windows.
@@ -702,6 +744,22 @@ pub fn show_panel(id: PanelId) {
             focus_panel_inner(panel);
         }
     });
+}
+
+/// Layout size (CSS px) of the first element carrying `attr="value"`
+/// inside a panel's document. `None` when the panel has no live view or
+/// no such element. See [`EmbeddedView::element_size_by_attr`].
+pub fn panel_element_size(id: PanelId, attr: &str, value: &str) -> Option<(f64, f64)> {
+    #[cfg(debug_assertions)]
+    assert_main_thread();
+    PANELS.with(|panels| {
+        let panels = panels.borrow();
+        panels
+            .get(id)?
+            .view
+            .as_ref()?
+            .element_size_by_attr(attr, value)
+    })
 }
 
 /// Remount a panel's component tree so its root component re-reads
@@ -1737,8 +1795,7 @@ fn panel_wndproc_inner(
         }
         // ── Mouse events ────────────────────────────────────────────
         WM_MOUSEMOVE => {
-            let x = (lparam & 0xFFFF) as i16 as f32;
-            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            let (x, y) = client_css_coords(hwnd, lparam);
             forward_mouse_event(
                 hwnd,
                 blitz_traits::events::UiEvent::PointerMove(mouse_pointer_event(
@@ -1751,8 +1808,7 @@ fn panel_wndproc_inner(
             0
         }
         WM_LBUTTONDOWN | WM_MBUTTONDOWN => {
-            let x = (lparam & 0xFFFF) as i16 as f32;
-            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            let (x, y) = client_css_coords(hwnd, lparam);
             let button = match msg {
                 WM_LBUTTONDOWN => blitz_traits::events::MouseEventButton::Main,
                 WM_MBUTTONDOWN => blitz_traits::events::MouseEventButton::Auxiliary,
@@ -1801,8 +1857,7 @@ fn panel_wndproc_inner(
         // SWELL/REAPER can synthesise WM_CONTEXTMENU, which the docker uses
         // to open the dock/undock/options menu on tab right-click.
         WM_RBUTTONDOWN => {
-            let x = (lparam & 0xFFFF) as i16 as f32;
-            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            let (x, y) = client_css_coords(hwnd, lparam);
             forward_mouse_event(
                 hwnd,
                 blitz_traits::events::UiEvent::PointerDown(mouse_pointer_event(
@@ -1816,8 +1871,7 @@ fn panel_wndproc_inner(
             unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
         }
         WM_LBUTTONUP | WM_MBUTTONUP => {
-            let x = (lparam & 0xFFFF) as i16 as f32;
-            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            let (x, y) = client_css_coords(hwnd, lparam);
             let button = match msg {
                 WM_LBUTTONUP => blitz_traits::events::MouseEventButton::Main,
                 WM_MBUTTONUP => blitz_traits::events::MouseEventButton::Auxiliary,
@@ -1838,8 +1892,7 @@ fn panel_wndproc_inner(
             0
         }
         WM_RBUTTONUP => {
-            let x = (lparam & 0xFFFF) as i16 as f32;
-            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            let (x, y) = client_css_coords(hwnd, lparam);
             forward_mouse_event(
                 hwnd,
                 blitz_traits::events::UiEvent::PointerUp(mouse_pointer_event(
@@ -1854,8 +1907,9 @@ fn panel_wndproc_inner(
         }
         WM_MOUSEWHEEL => {
             let delta = ((wparam >> 16) & 0xFFFF) as i16 as f64 / 120.0;
-            let x = (lparam & 0xFFFF) as i16 as f32;
-            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            // Wheel messages carry SCREEN coordinates (Win32 semantics,
+            // which SWELL mirrors) — unlike every other mouse message.
+            let (x, y) = wheel_css_coords(hwnd, lparam);
             forward_mouse_event(
                 hwnd,
                 blitz_traits::events::UiEvent::Wheel(blitz_traits::events::BlitzWheelEvent {
